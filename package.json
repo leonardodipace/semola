@@ -23,7 +23,7 @@
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "bun run build",
-    "publish": "npm publish"
+    "publish": "bun publish --access public"
   },
   "keywords": [
     "typescript",
