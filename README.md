@@ -102,10 +102,7 @@ type User = {
 
 // Create cache instance
 const userCache = new Cache<User>({
-  redis: await Bun.connect({
-    hostname: "localhost",
-    port: 6379
-  }),
+  redis: new Bun.RedisClient("redis://localhost:6379"),
   ttl: 300000 // 5 minutes
 });
 
