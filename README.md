@@ -129,6 +129,18 @@ async function getUser(id: string) {
 }
 ```
 
+**Note on lifecycle management:** The `Cache` class does not manage the Redis client lifecycle. Since you provide the client when creating the cache, you're responsible for closing it when done:
+
+```typescript
+const redis = new Bun.RedisClient("redis://localhost:6379");
+const cache = new Cache({ redis });
+
+// Use the cache...
+
+// Clean up when done
+await redis.quit();
+```
+
 ### Error Utilities
 
 Result-based error handling inspired by functional programming patterns. Avoid throwing exceptions and handle errors explicitly with type-safe tuples.
