@@ -1,19 +1,16 @@
 {
   "name": "@leonardodipace/kit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A TypeScript utility kit",
   "type": "module",
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "exports": {
-    ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    },
     "./errors": {
       "import": "./dist/lib/errors/index.js",
       "types": "./dist/lib/errors/index.d.ts"
+    },
+    "./cache": {
+      "import": "./dist/lib/cache/index.js",
+      "types": "./dist/lib/cache/index.d.ts"
     }
   },
   "files": [
