@@ -1,9 +1,4 @@
-type CommonError =
-  | "NotFoundError"
-  | "UnauthorizedError"
-  | "InternalServerError"
-  | "ValidationError"
-  | (string & {});
+import type { CommonError } from "./types.js";
 
 export const ok = <T>(data: T) => {
   return [null, data] as const;

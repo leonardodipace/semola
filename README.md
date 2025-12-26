@@ -1,6 +1,6 @@
 # @leonardodipace/kit
 
-A TypeScript utility kit providing type-safe error handling and developer tools.
+A TypeScript utility kit providing type-safe error handling, caching, internationalization, and developer tools.
 
 ## Installation
 
@@ -13,6 +13,160 @@ bun add @leonardodipace/kit
 ```
 
 ## Features
+
+### Internationalization (i18n)
+
+A fully type-safe internationalization utility with compile-time validation of translation keys and parameters.
+
+#### Import
+
+```typescript
+import { I18n } from '@leonardodipace/kit/i18n';
+```
+
+#### API
+
+**`new I18n<TLocales, TDefaultLocale>(config)`**
+
+Creates a new i18n instance with type-safe locale management.
+
+```typescript
+const i18n = new I18n({
+  defaultLocale: 'en',
+  locales: {
+    en: {
+      common: {
+        hello: "Hello, world",
+        sayHi: "Hi, {name:string}",
+        age: "I am {age:number} years old",
+        active: "Status: {active:boolean}"
+      }
+    },
+    es: {
+      common: {
+        hello: "Hola, mundo",
+        sayHi: "Hola, {name:string}",
+        age: "Tengo {age:number} años",
+        active: "Estado: {active:boolean}"
+      }
+    }
+  } as const // Required for type inference
+});
+```
+
+**`i18n.translate(key, params?)`**
+
+Translates a key with optional parameters. Fully type-safe - invalid keys, missing parameters, or wrong parameter types cause compile-time errors.
+
+```typescript
+// Basic translation
+i18n.translate("common.hello")
+// "Hello, world"
+
+// With parameters
+i18n.translate("common.sayHi", { name: "Leonardo" })
+// "Hi, Leonardo"
+
+i18n.translate("common.age", { age: 25 })
+// "I am 25 years old"
+
+// Type errors (won't compile)
+i18n.translate("invalid.key")                    // ✗ Invalid key
+i18n.translate("common.sayHi")                   // ✗ Missing required params
+i18n.translate("common.sayHi", { name: 123 })    // ✗ Wrong param type
+i18n.translate("common.hello", { name: "x" })    // ✗ Unnecessary params
+```
+
+**`i18n.setLocale(locale)`**
+
+Switches to a different locale. Type-safe - only valid locale keys are accepted.
+
+```typescript
+i18n.setLocale("es")
+i18n.translate("common.hello")
+// "Hola, mundo"
+
+i18n.setLocale("invalid") // ✗ Type error
+```
+
+**`i18n.getLocale()`**
+
+Returns the current locale.
+
+```typescript
+const currentLocale = i18n.getLocale()
+// "es"
+```
+
+#### Parameter Syntax
+
+Translation strings support typed parameters with the syntax `{paramName:type}`:
+
+- `{name:string}` - String parameter
+- `{age:number}` - Number parameter  
+- `{active:boolean}` - Boolean parameter
+
+The type system extracts these at compile time and enforces them in the `translate()` method.
+
+#### Features
+
+- **Type-safe keys**: Only valid nested keys accepted (e.g., `"common.hello"`)
+- **Type-safe parameters**: Parameter types validated at compile time
+- **Type-safe locales**: Only defined locale keys can be set
+- **Nested translations**: Support for deeply nested translation objects
+- **Locale fallback**: Falls back to default locale if translation missing
+- **Zero runtime overhead**: No runtime type checking - pure TypeScript validation
+- **Const assertion required**: Use `as const` on locale objects for proper type inference
+
+#### Usage Example
+
+```typescript
+import { I18n } from '@leonardodipace/kit/i18n';
+
+const translations = {
+  en: {
+    auth: {
+      welcome: "Welcome back, {name:string}!",
+      loginSuccess: "Successfully logged in",
+      loginFailed: "Login failed"
+    },
+    profile: {
+      age: "Age: {age:number}",
+      verified: "Verified: {status:boolean}"
+    }
+  },
+  es: {
+    auth: {
+      welcome: "Bienvenido, {name:string}!",
+      loginSuccess: "Inicio de sesión exitoso",
+      loginFailed: "Inicio de sesión fallido"
+    },
+    profile: {
+      age: "Edad: {age:number}",
+      verified: "Verificado: {status:boolean}"
+    }
+  }
+} as const;
+
+const i18n = new I18n({
+  defaultLocale: 'en',
+  locales: translations
+});
+
+// Use in your app
+function greetUser(name: string) {
+  return i18n.translate("auth.welcome", { name });
+}
+
+function showProfile(age: number, verified: boolean) {
+  console.log(i18n.translate("profile.age", { age }));
+  console.log(i18n.translate("profile.verified", { status: verified }));
+}
+
+// Switch language
+i18n.setLocale("es");
+greetUser("Maria"); // "Bienvenido, Maria!"
+```
 
 ### Cache
 

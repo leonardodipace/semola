@@ -11,6 +11,10 @@
     "./cache": {
       "import": "./dist/lib/cache/index.js",
       "types": "./dist/lib/cache/index.d.ts"
+    },
+    "./i18n": {
+      "import": "./dist/lib/i18n/index.js",
+      "types": "./dist/lib/i18n/index.d.ts"
     }
   },
   "files": [
