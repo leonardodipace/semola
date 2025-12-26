@@ -418,6 +418,30 @@ if (error) {
 }
 ```
 
+## Publishing
+
+This package uses GitHub Actions to automatically publish to npm. To publish a new version:
+
+1. Update the version in `package.json`:
+   ```bash
+   bun version <major|minor|patch>
+   ```
+
+2. Create a new release on GitHub:
+   - Go to the [Releases page](https://github.com/leonardodipace/kit/releases)
+   - Click "Create a new release"
+   - Create a new tag (e.g., `v0.3.0`)
+   - Publish the release
+
+The GitHub Action will automatically:
+- Run checks and tests
+- Build the package
+- Publish to npm with provenance
+
+Alternatively, you can manually trigger the workflow from the Actions tab and optionally specify a version.
+
+**Note:** This package uses npm's Trusted Publishing feature, so no NPM_TOKEN is required. The workflow authenticates using GitHub's OIDC token with the `id-token: write` permission.
+
 ## Development
 
 ```bash
