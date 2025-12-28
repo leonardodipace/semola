@@ -1,15 +1,15 @@
-# @leonardodipace/kit
+# ts-kit
 
 A TypeScript utility kit providing type-safe error handling, caching, internationalization, and developer tools.
 
 ## Installation
 
 ```bash
-npm install @leonardodipace/kit
+npm install ts-kit
 ```
 
 ```bash
-bun add @leonardodipace/kit
+bun add ts-kit
 ```
 
 ## Features
@@ -21,7 +21,7 @@ A fully type-safe internationalization utility with compile-time validation of t
 #### Import
 
 ```typescript
-import { I18n } from '@leonardodipace/kit/i18n';
+import { I18n } from 'ts-kit/i18n';
 ```
 
 #### API
@@ -121,7 +121,7 @@ The type system extracts these at compile time and enforces them in the `transla
 #### Usage Example
 
 ```typescript
-import { I18n } from '@leonardodipace/kit/i18n';
+import { I18n } from 'ts-kit/i18n';
 
 const translations = {
   en: {
@@ -175,7 +175,7 @@ A type-safe Redis cache wrapper with TTL support and result-based error handling
 #### Import
 
 ```typescript
-import { Cache } from '@leonardodipace/kit/cache';
+import { Cache } from 'ts-kit/cache';
 ```
 
 #### API
@@ -246,7 +246,7 @@ if (error) {
 #### Usage Example
 
 ```typescript
-import { Cache } from '@leonardodipace/kit/cache';
+import { Cache } from 'ts-kit/cache';
 
 type User = {
   id: number;
@@ -302,7 +302,7 @@ Result-based error handling inspired by functional programming patterns. Avoid t
 #### Import
 
 ```typescript
-import { ok, err, mightThrow, mightThrowSync } from '@leonardodipace/kit/errors';
+import { ok, err, mightThrow, mightThrowSync } from 'ts-kit/errors';
 ```
 
 #### API
@@ -375,7 +375,7 @@ console.log("Parsed:", data);
 #### Usage Example
 
 ```typescript
-import { ok, err, mightThrow } from '@leonardodipace/kit/errors';
+import { ok, err, mightThrow } from 'ts-kit/errors';
 
 async function getUser(id: string) {
   if (!id) {

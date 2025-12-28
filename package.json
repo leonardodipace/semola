@@ -1,5 +1,5 @@
 {
-  "name": "@leonardodipace/kit",
+  "name": "ts-kit",
   "version": "0.2.0",
   "description": "A TypeScript utility kit",
   "type": "module",
