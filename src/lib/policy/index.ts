@@ -32,11 +32,11 @@ export class Policy {
   }
 
   public can<T>(action: Action, entity: Entity, object?: T): CanResult {
-    const filterdRules = this.rules
+    const filteredRules = this.rules
       .filter((rule) => rule.action === action)
       .filter((rule) => rule.entity === entity);
 
-    for (const rule of filterdRules) {
+    for (const rule of filteredRules) {
       if (!rule.conditions) {
         return {
           allowed: !rule.inverted,
