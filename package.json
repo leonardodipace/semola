@@ -15,6 +15,10 @@
     "./i18n": {
       "import": "./dist/lib/i18n/index.js",
       "types": "./dist/lib/i18n/index.d.ts"
+    },
+    "./policy": {
+      "import": "./dist/lib/policy/index.js",
+      "types": "./dist/lib/policy/index.d.ts"
     }
   },
   "files": [
@@ -24,6 +28,7 @@
   "scripts": {
     "build": "tsc",
     "check": "biome check --write . && tsc --noEmit",
+    "test": "bun test",
     "prepublishOnly": "bun run build",
     "publish": "bun publish --access public"
   },
