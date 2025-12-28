@@ -1,6 +1,7 @@
 import type {
   Action,
   AllowParams,
+  CanResult,
   Conditions,
   Entity,
   ForbidParams,
@@ -16,6 +17,7 @@ export class Policy {
       entity: params.entity,
       conditions: params.conditions,
       inverted: false,
+      reason: params.reason,
     });
   }
 
@@ -25,10 +27,11 @@ export class Policy {
       entity: params.entity,
       conditions: params.conditions,
       inverted: true,
+      reason: params.reason,
     });
   }
 
-  public can<T>(action: Action, entity: Entity, object?: T) {
+  public can<T>(action: Action, entity: Entity, object?: T): CanResult {
     for (const rule of this.rules) {
       const matchesAction = rule.action === action;
       const matchesEntity = rule.entity === entity;
@@ -38,15 +41,21 @@ export class Policy {
       }
 
       if (!rule.conditions) {
-        return !rule.inverted;
+        return {
+          allowed: !rule.inverted,
+          reason: rule.reason,
+        };
       }
 
       if (object && this.matchesConditions(object, rule.conditions)) {
-        return !rule.inverted;
+        return {
+          allowed: !rule.inverted,
+          reason: rule.reason,
+        };
       }
     }
 
-    return false;
+    return { allowed: false };
   }
 
   private matchesConditions<T>(object: T, conditions: Conditions<T>) {

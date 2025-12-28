@@ -8,16 +8,24 @@ export type Rule<T = any> = {
   entity: Entity;
   conditions?: Conditions<T>;
   inverted: boolean;
+  reason?: string;
 };
 
 export type AllowParams<T = any> = {
   action: Action;
   entity: Entity;
   conditions?: Conditions<T>;
+  reason?: string;
 };
 
 export type ForbidParams<T = any> = {
   action: Action;
   entity: Entity;
   conditions?: Conditions<T>;
+  reason?: string;
+};
+
+export type CanResult = {
+  allowed: boolean;
+  reason?: string;
 };
