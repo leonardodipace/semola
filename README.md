@@ -1,6 +1,6 @@
 # @leonardodipace/kit
 
-A TypeScript utility kit providing type-safe error handling, caching, internationalization, and developer tools.
+A TypeScript utility kit providing type-safe error handling, caching, internationalization, policy-based authorization, and developer tools.
 
 ## Installation
 
@@ -13,6 +13,176 @@ bun add @leonardodipace/kit
 ```
 
 ## Features
+
+### Policy
+
+A type-safe policy-based authorization system for defining and enforcing access control rules with conditional logic.
+
+#### Import
+
+```typescript
+import { Policy } from '@leonardodipace/kit/policy';
+```
+
+#### API
+
+**`new Policy()`**
+
+Creates a new policy instance for managing authorization rules.
+
+```typescript
+const policy = new Policy();
+```
+
+**`policy.allow<T>(params: AllowParams<T>)`**
+
+Defines a rule that grants permission for an action on an entity, optionally with conditions.
+
+```typescript
+type Post = {
+  id: number;
+  title: string;
+  authorId: number;
+  status: string;
+};
+
+// Allow reading all published posts
+policy.allow<Post>({
+  action: "read",
+  entity: "Post",
+  conditions: {
+    status: "published"
+  }
+});
+
+// Allow all read access without conditions
+policy.allow({
+  action: "read",
+  entity: "Comment"
+});
+```
+
+**`policy.forbid<T>(params: ForbidParams<T>)`**
+
+Defines a rule that denies permission for an action on an entity, optionally with conditions. Forbid rules take precedence when conditions match.
+
+```typescript
+// Forbid updating published posts
+policy.forbid<Post>({
+  action: "update",
+  entity: "Post",
+  conditions: {
+    status: "published"
+  }
+});
+```
+
+**`policy.can<T>(action: Action, entity: Entity, object?: T)`**
+
+Checks if an action is permitted on an entity, optionally validating against an object's conditions.
+
+```typescript
+const post: Post = {
+  id: 1,
+  title: "My Post",
+  authorId: 1,
+  status: "published"
+};
+
+policy.can<Post>("read", "Post", post);   // true (if allowed)
+policy.can<Post>("update", "Post", post); // false (if forbidden)
+policy.can("delete", "Post");             // false (no matching rule)
+```
+
+#### Types
+
+```typescript
+type Action = "read" | "create" | "update" | "delete" | (string & {});
+type Entity = string;
+type Conditions<T> = Partial<T>;
+```
+
+#### Features
+
+- **Type-safe conditions**: Conditions are validated against the object type
+- **Flexible actions**: Built-in CRUD actions plus custom string actions
+- **Multiple conditions**: Rules can match multiple object properties
+- **Allow/Forbid semantics**: Explicit permission and denial rules
+- **No match defaults to deny**: Conservative security model
+- **Zero dependencies**: Pure TypeScript implementation
+
+#### Usage Example
+
+```typescript
+import { Policy } from '@leonardodipace/kit/policy';
+
+type Post = {
+  id: number;
+  title: string;
+  authorId: number;
+  status: string;
+};
+
+// Create policy
+const policy = new Policy();
+
+// Define rules
+policy.allow<Post>({
+  action: "read",
+  entity: "Post",
+  conditions: {
+    status: "published"
+  }
+});
+
+policy.allow<Post>({
+  action: "update",
+  entity: "Post",
+  conditions: {
+    status: "draft"
+  }
+});
+
+policy.forbid<Post>({
+  action: "delete",
+  entity: "Post",
+  conditions: {
+    status: "published"
+  }
+});
+
+// Check permissions
+const publishedPost: Post = {
+  id: 1,
+  title: "Hello World",
+  authorId: 1,
+  status: "published"
+};
+
+const draftPost: Post = {
+  id: 2,
+  title: "Work in Progress",
+  authorId: 1,
+  status: "draft"
+};
+
+console.log(policy.can<Post>("read", "Post", publishedPost));   // true
+console.log(policy.can<Post>("read", "Post", draftPost));       // false
+console.log(policy.can<Post>("update", "Post", publishedPost)); // false
+console.log(policy.can<Post>("update", "Post", draftPost));     // true
+console.log(policy.can<Post>("delete", "Post", publishedPost)); // false
+
+// Use in authorization middleware
+function authorize<T>(action: Action, entity: Entity, object?: T) {
+  if (!policy.can(action, entity, object)) {
+    throw new Error("Unauthorized");
+  }
+}
+
+// Protect routes
+authorize<Post>("update", "Post", publishedPost); // throws Error
+authorize<Post>("read", "Post", publishedPost);   // passes
+```
 
 ### Internationalization (i18n)
 
