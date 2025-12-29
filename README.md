@@ -1,15 +1,15 @@
-# ts-kit
+# semola
 
 A TypeScript utility kit providing type-safe error handling, caching, internationalization, policy-based authorization, and developer tools.
 
 ## Installation
 
 ```bash
-npm install ts-kit
+npm install semola
 ```
 
 ```bash
-bun add ts-kit
+bun add semola
 ```
 
 ## Features
@@ -21,7 +21,7 @@ A type-safe policy-based authorization system for defining and enforcing access 
 #### Import
 
 ```typescript
-import { Policy } from "ts-kit/policy";
+import { Policy } from "semola/policy";
 ```
 
 #### API
@@ -135,7 +135,7 @@ type CanResult = {
 #### Usage Example
 
 ```typescript
-import { Policy } from "ts-kit/policy";
+import { Policy } from "semola/policy";
 
 type Post = {
   id: number;
@@ -226,7 +226,7 @@ A fully type-safe internationalization utility with compile-time validation of t
 #### Import
 
 ```typescript
-import { I18n } from "ts-kit/i18n";
+import { I18n } from "semola/i18n";
 ```
 
 #### API
@@ -326,7 +326,7 @@ The type system extracts these at compile time and enforces them in the `transla
 #### Usage Example
 
 ```typescript
-import { I18n } from "ts-kit/i18n";
+import { I18n } from "semola/i18n";
 
 const translations = {
   en: {
@@ -380,7 +380,7 @@ A type-safe Redis cache wrapper with TTL support and result-based error handling
 #### Import
 
 ```typescript
-import { Cache } from "ts-kit/cache";
+import { Cache } from "semola/cache";
 ```
 
 #### API
@@ -451,7 +451,7 @@ if (error) {
 #### Usage Example
 
 ```typescript
-import { Cache } from "ts-kit/cache";
+import { Cache } from "semola/cache";
 
 type User = {
   id: number;
@@ -507,7 +507,7 @@ Result-based error handling inspired by functional programming patterns. Avoid t
 #### Import
 
 ```typescript
-import { ok, err, mightThrow, mightThrowSync } from "ts-kit/errors";
+import { ok, err, mightThrow, mightThrowSync } from "semola/errors";
 ```
 
 #### API
@@ -580,7 +580,7 @@ console.log("Parsed:", data);
 #### Usage Example
 
 ```typescript
-import { ok, err, mightThrow } from "ts-kit/errors";
+import { ok, err, mightThrow } from "semola/errors";
 
 async function getUser(id: string) {
   if (!id) {
@@ -633,7 +633,7 @@ This package uses GitHub Actions to automatically publish to npm. To publish a n
    ```
 
 2. Create a new release on GitHub:
-   - Go to the [Releases page](https://github.com/leonardodipace/ts-kit/releases)
+   - Go to the [Releases page](https://github.com/leonardodipace/semola/releases)
    - Click "Create a new release"
    - Create a new tag (e.g., `v0.3.0`)
    - Publish the release
@@ -666,4 +666,4 @@ MIT © Leonardo Dipace
 
 ## Repository
 
-[https://github.com/leonardodipace/ts-kit](https://github.com/leonardodipace/ts-kit)
+[https://github.com/leonardodipace/semola](https://github.com/leonardodipace/semola)
