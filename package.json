@@ -41,7 +41,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/leonardodipace/semola"
+    "url": "git+https://github.com/leonardodipace/semola.git"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.10",
