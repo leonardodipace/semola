@@ -21,7 +21,7 @@ A type-safe policy-based authorization system for defining and enforcing access 
 #### Import
 
 ```typescript
-import { Policy } from '@leonardodipace/kit/policy';
+import { Policy } from "ts-kit/policy";
 ```
 
 #### API
@@ -135,7 +135,7 @@ type CanResult = {
 #### Usage Example
 
 ```typescript
-import { Policy } from '@leonardodipace/kit/policy';
+import { Policy } from "ts-kit/policy";
 
 type Post = {
   id: number;
@@ -226,7 +226,7 @@ A fully type-safe internationalization utility with compile-time validation of t
 #### Import
 
 ```typescript
-import { I18n } from 'ts-kit/i18n';
+import { I18n } from "ts-kit/i18n";
 ```
 
 #### API
@@ -237,7 +237,7 @@ Creates a new i18n instance with type-safe locale management.
 
 ```typescript
 const i18n = new I18n({
-  defaultLocale: 'en',
+  defaultLocale: "en",
   locales: {
     en: {
       common: {
@@ -326,7 +326,7 @@ The type system extracts these at compile time and enforces them in the `transla
 #### Usage Example
 
 ```typescript
-import { I18n } from 'ts-kit/i18n';
+import { I18n } from "ts-kit/i18n";
 
 const translations = {
   en: {
@@ -354,7 +354,7 @@ const translations = {
 } as const;
 
 const i18n = new I18n({
-  defaultLocale: 'en',
+  defaultLocale: "en",
   locales: translations
 });
 
@@ -380,7 +380,7 @@ A type-safe Redis cache wrapper with TTL support and result-based error handling
 #### Import
 
 ```typescript
-import { Cache } from 'ts-kit/cache';
+import { Cache } from "ts-kit/cache";
 ```
 
 #### API
@@ -406,7 +406,7 @@ const cache = new Cache<User>({
 Retrieves a value from the cache. Returns a result tuple with the parsed value or an error.
 
 ```typescript
-const [error, user] = await cache.get('user:123');
+const [error, user] = await cache.get("user:123");
 
 if (error) {
   switch (error.type) {
@@ -427,7 +427,7 @@ if (error) {
 Stores a value in the cache with automatic JSON serialization. Applies TTL if configured.
 
 ```typescript
-const [error, data] = await cache.set('user:123', { id: 123, name: "John" });
+const [error, data] = await cache.set("user:123", { id: 123, name: "John" });
 
 if (error) {
   console.error("Failed to cache:", error.message);
@@ -441,7 +441,7 @@ if (error) {
 Removes a key from the cache.
 
 ```typescript
-const [error] = await cache.delete('user:123');
+const [error] = await cache.delete("user:123");
 
 if (error) {
   console.error("Failed to delete:", error.message);
@@ -451,7 +451,7 @@ if (error) {
 #### Usage Example
 
 ```typescript
-import { Cache } from 'ts-kit/cache';
+import { Cache } from "ts-kit/cache";
 
 type User = {
   id: number;
@@ -507,7 +507,7 @@ Result-based error handling inspired by functional programming patterns. Avoid t
 #### Import
 
 ```typescript
-import { ok, err, mightThrow, mightThrowSync } from 'ts-kit/errors';
+import { ok, err, mightThrow, mightThrowSync } from "ts-kit/errors";
 ```
 
 #### API
@@ -580,7 +580,7 @@ console.log("Parsed:", data);
 #### Usage Example
 
 ```typescript
-import { ok, err, mightThrow } from 'ts-kit/errors';
+import { ok, err, mightThrow } from "ts-kit/errors";
 
 async function getUser(id: string) {
   if (!id) {
