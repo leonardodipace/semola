@@ -96,6 +96,22 @@ describe("I18n", () => {
       expect(i18n.translate("app.header.title")).toBe("My Application");
       expect(i18n.translate("app.header.subtitle")).toBe("Welcome to our app");
     });
+
+    test("should handle lists", () => {
+      const i18n = new I18n({
+        defaultLocale: "en",
+        locales: {
+          en: {
+            greeting: "Hello",
+            sports: ["football", "tennis"],
+          },
+        },
+      });
+
+      expect(i18n.translate("greeting")).toBe("Hello");
+      expect(i18n.translate("sports.0")).toBe("football");
+      expect(i18n.translate("sports.1")).toBe("tennis");
+    });
   });
 
   describe("Fallback behavior", () => {
@@ -192,6 +208,23 @@ describe("I18n", () => {
         "Hello Bob, you have 5 messages",
       );
     });
+
+    test("should handle substitutions inside lists", () => {
+      const i18n = new I18n({
+        defaultLocale: "en",
+        locales: {
+          en: {
+            greeting: "Hello",
+            sports: ["{first:string}", "{second:string}"],
+          },
+        },
+      });
+
+      expect(i18n.translate("greeting")).toBe("Hello");
+      expect(i18n.translate("sports.0", { first: "football" })).toBe("football");
+      expect(i18n.translate("sports.1", { second: "tennis" })).toBe("tennis");
+    });
+
 
     test("should work with different parameter types", () => {
       const i18n = new I18n({
