@@ -8,6 +8,7 @@ import {
   parseQueryString,
 } from "./router.js";
 import type {
+  ApiError,
   ApiOptions,
   InternalRoute,
   RequestSchema,
@@ -23,6 +24,41 @@ export class Api {
 
   constructor(options: ApiOptions = {}) {
     this.options = options;
+  }
+
+  private defaultErrorHandler(error: ApiError): Response {
+    return Response.json(
+      { message: error.message },
+      { status: error.context?.statusCode || 500 },
+    );
+  }
+
+  private async handleError(req: Request, error: ApiError): Promise<Response> {
+    const handler = this.options.onError;
+
+    if (!handler) {
+      return this.defaultErrorHandler(error);
+    }
+
+    try {
+      const response = await Promise.resolve(handler(error, req));
+
+      if (!response || !(response instanceof Response)) {
+        return this.defaultErrorHandler({
+          type: "InternalServerError",
+          message: "Internal server error",
+          context: { statusCode: 500 },
+        });
+      }
+
+      return response;
+    } catch (_handlerError) {
+      return this.defaultErrorHandler({
+        type: "InternalServerError",
+        message: "Internal server error",
+        context: { statusCode: 500 },
+      });
+    }
   }
 
   public defineRoute<
@@ -49,10 +85,11 @@ export class Api {
         if (contentType.includes("application/json")) {
           const [parseError, parsedBody] = await mightThrow(req.json());
           if (parseError) {
-            return Response.json(
-              { error: "Invalid JSON body" },
-              { status: 400 },
-            );
+            return this.handleError(req, {
+              type: "ValidationError",
+              message: "Invalid JSON body",
+              context: { statusCode: 400 },
+            });
           }
           body = parsedBody;
         }
@@ -70,7 +107,11 @@ export class Api {
         body,
       );
       if (bodyError) {
-        return Response.json({ error: bodyError.message }, { status: 400 });
+        return this.handleError(req, {
+          type: "ValidationError",
+          message: bodyError.message,
+          context: { validationField: "body", statusCode: 400 },
+        });
       }
 
       const [paramsError, validatedParams] = await validateSchema(
@@ -78,7 +119,11 @@ export class Api {
         params,
       );
       if (paramsError) {
-        return Response.json({ error: paramsError.message }, { status: 400 });
+        return this.handleError(req, {
+          type: "ValidationError",
+          message: paramsError.message,
+          context: { validationField: "params", statusCode: 400 },
+        });
       }
 
       const [queryError, validatedQuery] = await validateSchema(
@@ -86,7 +131,11 @@ export class Api {
         query,
       );
       if (queryError) {
-        return Response.json({ error: queryError.message }, { status: 400 });
+        return this.handleError(req, {
+          type: "ValidationError",
+          message: queryError.message,
+          context: { validationField: "query", statusCode: 400 },
+        });
       }
 
       const [headersError, validatedHeaders] = await validateSchema(
@@ -94,7 +143,11 @@ export class Api {
         headers,
       );
       if (headersError) {
-        return Response.json({ error: headersError.message }, { status: 400 });
+        return this.handleError(req, {
+          type: "ValidationError",
+          message: headersError.message,
+          context: { validationField: "headers", statusCode: 400 },
+        });
       }
 
       const [cookiesError, validatedCookies] = await validateSchema(
@@ -102,7 +155,11 @@ export class Api {
         cookies,
       );
       if (cookiesError) {
-        return Response.json({ error: cookiesError.message }, { status: 400 });
+        return this.handleError(req, {
+          type: "ValidationError",
+          message: cookiesError.message,
+          context: { validationField: "cookies", statusCode: 400 },
+        });
       }
 
       const validateResponseFn = async (status: number, data: unknown) => {
@@ -120,6 +177,7 @@ export class Api {
           cookies: validatedCookies,
         },
         validateResponseFn,
+        (err) => this.handleError(req, err),
       );
 
       const handlerResult = definition.handler(context);
@@ -128,17 +186,19 @@ export class Api {
       );
 
       if (handlerError) {
-        return Response.json(
-          { error: "Internal server error" },
-          { status: 500 },
-        );
+        return this.handleError(req, {
+          type: "InternalServerError",
+          message: "Internal server error",
+          context: { statusCode: 500 },
+        });
       }
 
       if (!response) {
-        return Response.json(
-          { error: "Internal server error" },
-          { status: 500 },
-        );
+        return this.handleError(req, {
+          type: "InternalServerError",
+          message: "Internal server error",
+          context: { statusCode: 500 },
+        });
       }
 
       return response;
@@ -196,7 +256,9 @@ export class Api {
 }
 
 export type {
+  ApiError,
   ApiOptions,
+  ErrorHandler,
   HandlerContext,
   HttpMethod,
   RequestSchema,

@@ -1,4 +1,5 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import type { CommonError } from "../errors/types.js";
 
 export type HttpMethod =
   | "GET"
@@ -11,6 +12,20 @@ export type HttpMethod =
 
 export type StatusCode = 200 | 201 | 204 | 400 | 401 | 403 | 404 | 500 | number;
 
+export type ApiError = {
+  type: CommonError;
+  message: string;
+  context?: {
+    validationField?: string;
+    statusCode: number;
+  };
+};
+
+export type ErrorHandler = (
+  error: ApiError,
+  request: Request,
+) => Response | Promise<Response>;
+
 export type ApiOptions = {
   prefix?: string;
   openapi?: {
@@ -18,6 +33,7 @@ export type ApiOptions = {
     description?: string;
     version: string;
   };
+  onError?: ErrorHandler;
 };
 
 export type RequestSchema = {

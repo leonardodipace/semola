@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { Api } from "./index.js";
+import { Api, type ApiError } from "./index.js";
 
 describe("Api", () => {
   test("should create api instance with default options", () => {
@@ -384,10 +384,10 @@ describe("Api", () => {
     const server = api.listen(3010);
 
     const response = await fetch("http://localhost:3010/error");
-    const data = (await response.json()) as { error: string };
+    const data = (await response.json()) as { message: string };
 
     expect(response.status).toBe(500);
-    expect(data.error).toBe("Internal server error");
+    expect(data.message).toBe("Internal server error");
 
     server.stop();
   });
@@ -522,10 +522,10 @@ describe("Api", () => {
     const server = api.listen(3014);
 
     const response = await fetch("http://localhost:3014/invalid-response");
-    const data = (await response.json()) as { error: string };
+    const data = (await response.json()) as { message: string };
 
     expect(response.status).toBe(500);
-    expect(data.error).toBe("Internal server error: invalid response data");
+    expect(data.message).toBe("Invalid response data");
 
     server.stop();
   });
@@ -558,6 +558,213 @@ describe("Api", () => {
     expect(response.status).toBe(200);
     expect(data.id).toBe("550e8400-e29b-41d4-a716-446655440000");
     expect(data.name).toBe("Test");
+
+    server.stop();
+  });
+
+  test("should use custom onError handler", async () => {
+    const api = new Api({
+      onError: (err) => {
+        return Response.json(
+          {
+            custom: true,
+            errorType: err.type,
+            errorMessage: err.message,
+          },
+          { status: err.context?.statusCode || 500 },
+        );
+      },
+    });
+
+    api.defineRoute({
+      path: "/error",
+      method: "GET",
+      response: { 200: z.object({ message: z.string() }) },
+      handler: async (_c) => {
+        throw new Error("Test error");
+      },
+    });
+
+    const server = api.listen(3020);
+    const response = await fetch("http://localhost:3020/error");
+    const data = (await response.json()) as {
+      custom: boolean;
+      errorType: string;
+      errorMessage: string;
+    };
+
+    expect(response.status).toBe(500);
+    expect(data.custom).toBe(true);
+    expect(data.errorType).toBe("InternalServerError");
+    expect(data.errorMessage).toBe("Internal server error");
+
+    server.stop();
+  });
+
+  test("should handle validation errors with custom onError", async () => {
+    const api = new Api({
+      onError: (err) => {
+        if (err.type === "ValidationError") {
+          return Response.json(
+            {
+              status: "validation_failed",
+              details: err.message,
+            },
+            { status: 400 },
+          );
+        }
+        return Response.json({ status: "error" }, { status: 500 });
+      },
+    });
+
+    api.defineRoute({
+      path: "/users",
+      method: "POST",
+      request: {
+        body: z.object({ email: z.string().email() }),
+      },
+      response: { 200: z.object({ id: z.number() }) },
+      handler: async (c) => c.json(200, { id: 1 }),
+    });
+
+    const server = api.listen(3021);
+    const response = await fetch("http://localhost:3021/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "invalid" }),
+    });
+    const data = (await response.json()) as {
+      status: string;
+      details: string;
+    };
+
+    expect(response.status).toBe(400);
+    expect(data.status).toBe("validation_failed");
+
+    server.stop();
+  });
+
+  test("should fall back to default when onError throws", async () => {
+    const api = new Api({
+      onError: () => {
+        throw new Error("onError failed");
+      },
+    });
+
+    api.defineRoute({
+      path: "/error",
+      method: "GET",
+      response: { 200: z.object({ message: z.string() }) },
+      handler: async (_c) => {
+        throw new Error("Handler error");
+      },
+    });
+
+    const server = api.listen(3022);
+    const response = await fetch("http://localhost:3022/error");
+    const data = (await response.json()) as { message: string };
+
+    expect(response.status).toBe(500);
+    expect(data.message).toBe("Internal server error");
+
+    server.stop();
+  });
+
+  test("should fall back to default when onError returns invalid response", async () => {
+    const api = new Api({
+      onError: () => {
+        return null as unknown as Response;
+      },
+    });
+
+    api.defineRoute({
+      path: "/error",
+      method: "GET",
+      response: { 200: z.object({ message: z.string() }) },
+      handler: async (_c) => {
+        throw new Error("Handler error");
+      },
+    });
+
+    const server = api.listen(3023);
+    const response = await fetch("http://localhost:3023/error");
+    const data = (await response.json()) as { message: string };
+
+    expect(response.status).toBe(500);
+    expect(data.message).toBe("Internal server error");
+
+    server.stop();
+  });
+
+  test("should provide error context with validation field", async () => {
+    let capturedError: ApiError | null = null;
+
+    const api = new Api({
+      onError: (err) => {
+        capturedError = err;
+        return Response.json(
+          { message: err.message },
+          { status: err.context?.statusCode || 500 },
+        );
+      },
+    });
+
+    api.defineRoute({
+      path: "/users",
+      method: "POST",
+      request: {
+        body: z.object({ name: z.string() }),
+      },
+      response: { 200: z.object({ id: z.number() }) },
+      handler: async (c) => c.json(200, { id: 1 }),
+    });
+
+    const server = api.listen(3024);
+    await fetch("http://localhost:3024/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: 123 }),
+    });
+
+    expect(capturedError).not.toBeNull();
+    const error = capturedError as unknown as ApiError;
+    expect(error.type).toBe("ValidationError");
+    expect(error.context?.validationField).toBe("body");
+    expect(error.context?.statusCode).toBe(400);
+
+    server.stop();
+  });
+
+  test("should handle async onError handlers", async () => {
+    const api = new Api({
+      onError: async (err) => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return Response.json(
+          {
+            async: true,
+            message: err.message,
+          },
+          { status: err.context?.statusCode || 500 },
+        );
+      },
+    });
+
+    api.defineRoute({
+      path: "/error",
+      method: "GET",
+      response: { 200: z.object({ message: z.string() }) },
+      handler: async (_c) => {
+        throw new Error("Test error");
+      },
+    });
+
+    const server = api.listen(3025);
+    const response = await fetch("http://localhost:3025/error");
+    const data = (await response.json()) as { async: boolean; message: string };
+
+    expect(response.status).toBe(500);
+    expect(data.async).toBe(true);
+    expect(data.message).toBe("Internal server error");
 
     server.stop();
   });

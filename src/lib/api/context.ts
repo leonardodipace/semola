@@ -1,5 +1,25 @@
-import type { HandlerContext, RequestSchema, ResponseSchema } from "./types.js";
+import type {
+  ApiError,
+  HandlerContext,
+  RequestSchema,
+  ResponseSchema,
+} from "./types.js";
 import type { ValidationResult } from "./validator.js";
+
+type ValidatedData = {
+  body?: unknown;
+  params?: unknown;
+  query?: unknown;
+  headers?: unknown;
+  cookies?: unknown;
+};
+
+type ValidateResponseFn = (
+  status: number,
+  data: unknown,
+) => Promise<ValidationResult<unknown>>;
+
+type HandleErrorFn = (error: ApiError) => Promise<Response>;
 
 export class RequestContext<
   TRequest extends RequestSchema = RequestSchema,
@@ -12,24 +32,14 @@ export class RequestContext<
   public headers: HandlerContext<TRequest, TResponse>["headers"];
   public cookies: HandlerContext<TRequest, TResponse>["cookies"];
   public raw: Request;
-  private validateResponse: (
-    status: number,
-    data: unknown,
-  ) => Promise<ValidationResult<unknown>>;
+  private validateResponse: ValidateResponseFn;
+  private handleError: HandleErrorFn;
 
   constructor(
     request: Request,
-    validatedData: {
-      body?: unknown;
-      params?: unknown;
-      query?: unknown;
-      headers?: unknown;
-      cookies?: unknown;
-    },
-    validateResponse: (
-      status: number,
-      data: unknown,
-    ) => Promise<ValidationResult<unknown>>,
+    validatedData: ValidatedData,
+    validateResponse: ValidateResponseFn,
+    handleError: HandleErrorFn,
   ) {
     this.raw = request;
     this.body = validatedData.body as HandlerContext<
@@ -53,16 +63,18 @@ export class RequestContext<
       TResponse
     >["cookies"];
     this.validateResponse = validateResponse;
+    this.handleError = handleError;
   }
 
   public async json(status: number, data: unknown): Promise<Response> {
     const [error, validatedData] = await this.validateResponse(status, data);
 
     if (error) {
-      return Response.json(
-        { error: "Internal server error: invalid response data" },
-        { status: 500 },
-      );
+      return this.handleError({
+        type: "InternalServerError",
+        message: "Invalid response data",
+        context: { statusCode: 500 },
+      });
     }
 
     return Response.json(validatedData, { status });
