@@ -19,6 +19,10 @@
     "./policy": {
       "import": "./dist/lib/policy/index.js",
       "types": "./dist/lib/policy/index.d.ts"
+    },
+    "./api": {
+      "import": "./dist/lib/api/index.js",
+      "types": "./dist/lib/api/index.d.ts"
     }
   },
   "files": [
@@ -44,6 +48,8 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.10",
+    "@standard-community/standard-openapi": "^0.2.8",
+    "@standard-schema/spec": "^1.1.0",
     "@types/bun": "latest"
   },
   "peerDependencies": {
