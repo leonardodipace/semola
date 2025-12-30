@@ -1,17 +1,16 @@
 import { Formatter } from "./formatter.js";
-import { FileLoggingOptions, LogDataType, type LoggingOptions, LogLevel, LogLevelType } from "./types.js";
-
-
+import { LogDataType, type LoggingOptions, LogLevel, LogLevelType } from "./types.js";
+import { appendFileSync } from "node:fs";
 
 
 export class FileLogger {
-  protected options: FileLoggingOptions;
+  protected options: LoggingOptions;
   protected formatter!: Formatter;
-  protected file: Bun.FileSink;
+  protected file: string;
 
-  constructor(path: string, options: FileLoggingOptions) {
+  constructor(file: string, options: LoggingOptions) {
     this.options = options;
-    this.file = Bun.file(path).writer({ highWaterMark: this.options.highWaterMark });
+    this.file = file;
   }
 
   protected getLogLevel() {
@@ -33,79 +32,74 @@ export class FileLogger {
   }
 
 
-  public debug(msg: string) {
+  public async debug(msg: string) {
     const level = this.getLogLevel();
     if (level > LogLevel.DEBUG) return;
 
     if (this.formatter) {
       const data = this.createLogData("DEBUG", msg);
-      this.file.write(this.formatter.format(data));
+      appendFileSync(this.file, this.formatter.format(data));
     } else {
-      this.file.write(msg);
+      appendFileSync(this.file, msg);
     }
 
-    this.file.write("\n")
+    appendFileSync(this.file, "\n");
   }
 
-  public info(msg: string) {
+  public async info(msg: string) {
     const level = this.getLogLevel();
     if (level > LogLevel.INFO) return;
 
     if (this.formatter) {
       const data = this.createLogData("INFO", msg);
-      this.file.write(this.formatter.format(data));
+      appendFileSync(this.file, this.formatter.format(data));
     } else {
-      this.file.write(msg);
+      appendFileSync(this.file, msg);
     }
 
-    this.file.write("\n")
+    appendFileSync(this.file, "\n");
   }
 
-  public warning(msg: string) {
+  public async warning(msg: string) {
     const level = this.getLogLevel();
     if (level > LogLevel.WARNING) return;
 
     if (this.formatter) {
       const data = this.createLogData("WARNING", msg);
-      this.file.write(this.formatter.format(data));
+      appendFileSync(this.file, this.formatter.format(data));
     } else {
-      this.file.write(msg);
+      appendFileSync(this.file, msg);
     }
 
-    this.file.write("\n")
+    appendFileSync(this.file, "\n");
   }
 
-  public error(msg: string) {
+  public async error(msg: string) {
     const level = this.getLogLevel();
     if (level > LogLevel.ERROR) return;
 
     if (this.formatter) {
       const data = this.createLogData("ERROR", msg);
-      this.file.write(this.formatter.format(data));
+      appendFileSync(this.file, this.formatter.format(data));
     } else {
-      this.file.write(msg);
+      appendFileSync(this.file, msg);
     }
 
-    this.file.write("\n")
+    appendFileSync(this.file, "\n");
   }
 
-  public critical(msg: string) {
+  public async critical(msg: string) {
     const level = this.getLogLevel();
     if (level > LogLevel.CRITICAL) return;
 
     if (this.formatter) {
       const data = this.createLogData("CRITICAL", msg);
-      this.file.write(this.formatter.format(data));
+      appendFileSync(this.file, this.formatter.format(data));
     } else {
-      this.file.write(msg);
+      appendFileSync(this.file, msg);
     }
 
-    this.file.write("\n")
-  }
-
-  public async close() {
-    const writtenBytes = await this.file.end();
-    return writtenBytes;
+    appendFileSync(this.file, "\n");
   }
 }
 

@@ -19,4 +19,3 @@ export type LoggingOptions = {
   level?: LogLevel;
 };
 
-export type FileLoggingOptions = LoggingOptions & { highWaterMark?: number };
