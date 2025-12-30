@@ -1,6 +1,31 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import type { Server } from "bun";
 import { z } from "zod";
 import { Api, type ApiError } from "./index.js";
+
+let testServer: Server<unknown> | null = null;
+let currentPort = 3000;
+
+const getNextPort = () => {
+  currentPort += 1;
+  return currentPort;
+};
+
+const createTestServer = (api: Api) => {
+  const port = getNextPort();
+  testServer = api.listen(port);
+  return { port, baseUrl: `http://localhost:${port}` };
+};
+
+const fetchJson = async <T = unknown>(url: string, options?: RequestInit) => {
+  const response = await fetch(url, options);
+  return response.json() as Promise<T>;
+};
+
+afterEach(() => {
+  testServer?.stop();
+  testServer = null;
+});
 
 describe("Api", () => {
   test("should create api instance with default options", () => {
@@ -36,15 +61,13 @@ describe("Api", () => {
       },
     });
 
-    const server = api.listen(3001);
+    const { baseUrl } = createTestServer(api);
 
-    const response = await fetch("http://localhost:3001/hello");
-    const data = await response.json();
+    const response = await fetch(`${baseUrl}/hello`);
+    const data = await fetchJson<{ message: string }>(`${baseUrl}/hello`);
 
     expect(response.status).toBe(200);
     expect(data).toEqual({ message: "Hello, world" });
-
-    server.stop();
   });
 
   test("should validate request body", async () => {
@@ -131,7 +154,9 @@ describe("Api", () => {
 
     const validId = "550e8400-e29b-41d4-a716-446655440000";
     const response = await fetch(`http://localhost:3003/users/${validId}`);
-    const data = (await response.json()) as { id: string; name: string };
+    const data = await fetchJson<{ id: string; name: string }>(
+      `http://localhost:3003/users/${validId}`,
+    );
 
     expect(response.status).toBe(200);
     expect(data.id).toBe(validId);
@@ -196,8 +221,8 @@ describe("Api", () => {
       },
       handler: async (c) => {
         return c.json(200, {
-          query: c.query.q as string,
-          limit: c.query.limit as unknown as number,
+          query: String(c.query.q),
+          limit: Number(c.query.limit),
         });
       },
     });
@@ -284,7 +309,10 @@ describe("Api", () => {
     expect(spec.paths["/users"]).toBeDefined();
     expect(spec.paths["/users"]?.post).toBeDefined();
 
-    const postOperation = spec.paths["/users"]?.post as Record<string, unknown>;
+    const postOperation = (spec.paths["/users"]?.post ?? {}) as Record<
+      string,
+      unknown
+    >;
     expect(postOperation.operationId).toBe("createUser");
     expect(postOperation.tags).toEqual(["users", "admin"]);
     expect(postOperation.summary).toBe("Create user");
@@ -384,7 +412,9 @@ describe("Api", () => {
     const server = api.listen(3010);
 
     const response = await fetch("http://localhost:3010/error");
-    const data = (await response.json()) as { message: string };
+    const data = await fetchJson<{ message: string }>(
+      "http://localhost:3010/error",
+    );
 
     expect(response.status).toBe(500);
     expect(data.message).toBe("Internal server error");
@@ -419,13 +449,20 @@ describe("Api", () => {
 
     const server = api.listen(3011);
 
-    const getResponse = await fetch("http://localhost:3011/resource");
-    const getData = (await getResponse.json()) as { method: string };
+    await fetch("http://localhost:3011/resource");
+    const getData = await fetchJson<{ method: string }>(
+      "http://localhost:3011/resource",
+    );
 
-    const postResponse = await fetch("http://localhost:3011/resource", {
+    await fetch("http://localhost:3011/resource", {
       method: "POST",
     });
-    const postData = (await postResponse.json()) as { method: string };
+    const postData = await fetchJson<{ method: string }>(
+      "http://localhost:3011/resource",
+      {
+        method: "POST",
+      },
+    );
 
     expect(getData.method).toBe("GET");
     expect(postData.method).toBe("POST");
@@ -491,7 +528,12 @@ describe("Api", () => {
     const response = await fetch("http://localhost:3013/session", {
       headers: { cookie: "sessionId=abc123" },
     });
-    const data = (await response.json()) as { sessionId: string };
+    const data = await fetchJson<{ sessionId: string }>(
+      "http://localhost:3013/session",
+      {
+        headers: { cookie: "sessionId=abc123" },
+      },
+    );
 
     expect(response.status).toBe(200);
     expect(data.sessionId).toBe("abc123");
@@ -522,7 +564,9 @@ describe("Api", () => {
     const server = api.listen(3014);
 
     const response = await fetch("http://localhost:3014/invalid-response");
-    const data = (await response.json()) as { message: string };
+    const data = await fetchJson<{ message: string }>(
+      "http://localhost:3014/invalid-response",
+    );
 
     expect(response.status).toBe(500);
     expect(data.message).toBe("Invalid response data");
@@ -553,7 +597,9 @@ describe("Api", () => {
     const server = api.listen(3015);
 
     const response = await fetch("http://localhost:3015/valid-response");
-    const data = (await response.json()) as { id: string; name: string };
+    const data = await fetchJson<{ id: string; name: string }>(
+      "http://localhost:3015/valid-response",
+    );
 
     expect(response.status).toBe(200);
     expect(data.id).toBe("550e8400-e29b-41d4-a716-446655440000");
@@ -587,11 +633,11 @@ describe("Api", () => {
 
     const server = api.listen(3020);
     const response = await fetch("http://localhost:3020/error");
-    const data = (await response.json()) as {
+    const data = await fetchJson<{
       custom: boolean;
       errorType: string;
       errorMessage: string;
-    };
+    }>("http://localhost:3020/error");
 
     expect(response.status).toBe(500);
     expect(data.custom).toBe(true);
@@ -633,10 +679,14 @@ describe("Api", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "invalid" }),
     });
-    const data = (await response.json()) as {
-      status: string;
-      details: string;
-    };
+    const data = await fetchJson<{ status: string; details: string }>(
+      "http://localhost:3021/users",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "invalid" }),
+      },
+    );
 
     expect(response.status).toBe(400);
     expect(data.status).toBe("validation_failed");
@@ -662,7 +712,9 @@ describe("Api", () => {
 
     const server = api.listen(3022);
     const response = await fetch("http://localhost:3022/error");
-    const data = (await response.json()) as { message: string };
+    const data = await fetchJson<{ message: string }>(
+      "http://localhost:3022/error",
+    );
 
     expect(response.status).toBe(500);
     expect(data.message).toBe("Internal server error");
@@ -688,7 +740,9 @@ describe("Api", () => {
 
     const server = api.listen(3023);
     const response = await fetch("http://localhost:3023/error");
-    const data = (await response.json()) as { message: string };
+    const data = await fetchJson<{ message: string }>(
+      "http://localhost:3023/error",
+    );
 
     expect(response.status).toBe(500);
     expect(data.message).toBe("Internal server error");
@@ -727,7 +781,8 @@ describe("Api", () => {
     });
 
     expect(capturedError).not.toBeNull();
-    const error = capturedError as unknown as ApiError;
+    const error = capturedError ?? ({} as ApiError);
+
     expect(error.type).toBe("ValidationError");
     expect(error.context?.validationField).toBe("body");
     expect(error.context?.statusCode).toBe(400);
@@ -760,7 +815,9 @@ describe("Api", () => {
 
     const server = api.listen(3025);
     const response = await fetch("http://localhost:3025/error");
-    const data = (await response.json()) as { async: boolean; message: string };
+    const data = await fetchJson<{ async: boolean; message: string }>(
+      "http://localhost:3025/error",
+    );
 
     expect(response.status).toBe(500);
     expect(data.async).toBe(true);

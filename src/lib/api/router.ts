@@ -28,12 +28,17 @@ export const parseCookies = (cookieHeader: string | null) => {
   const cookies: Record<string, string> = {};
 
   for (const pair of cookieHeader.split(";")) {
-    const [key, value] = pair.split("=");
-    const trimmedKey = key?.trim();
-    const trimmedValue = value?.trim();
+    const equalsIndex = pair.indexOf("=");
 
-    if (trimmedKey && trimmedValue) {
-      cookies[trimmedKey] = trimmedValue;
+    if (equalsIndex === -1) {
+      continue;
+    }
+
+    const key = pair.slice(0, equalsIndex).trim();
+    const value = pair.slice(equalsIndex + 1).trim();
+
+    if (key && value) {
+      cookies[key] = value;
     }
   }
 
