@@ -36,7 +36,7 @@ export class Api {
   private defaultErrorHandler(error: ApiError) {
     return Response.json(
       { message: error.message },
-      { status: error.context?.statusCode || 500 },
+      { status: error.context?.statusCode ?? 500 },
     );
   }
 
@@ -94,12 +94,12 @@ export class Api {
       const query = parseQueryString(url);
       const cookies = parseCookies(req.headers.get("cookie"));
 
-      const params = (req as { params?: Record<string, string> }).params || {};
+      const params = (req as { params?: Record<string, string> }).params ?? {};
 
       let body: unknown;
 
       if (definition.request?.body) {
-        const contentType = req.headers.get("content-type") || "";
+        const contentType = req.headers.get("content-type") ?? "";
 
         if (contentType.includes("application/json")) {
           const [parseError, parsedBody] = await mightThrow(req.json());

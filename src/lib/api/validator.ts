@@ -23,7 +23,7 @@ export const validateSchema = async <T>(
         const path = Array.isArray(issue.path)
           ? issue.path.map(String).join(".")
           : "unknown";
-        return `${path}: ${issue.message || "validation failed"}`;
+        return `${path}: ${issue.message ?? "validation failed"}`;
       })
       .join(", ");
 

@@ -26,13 +26,14 @@ const addSchemaParameters = async (
 
   for (const [name, propSchema] of Object.entries(openApiSchema.properties)) {
     const required =
-      Array.isArray(openApiSchema.required) &&
-      openApiSchema.required.includes(name);
+      location === "path" ||
+      (Array.isArray(openApiSchema.required) &&
+        openApiSchema.required.includes(name));
 
     parameters.push({
       name,
       in: location,
-      required: location === "path" ? true : required,
+      required,
       schema: propSchema,
     });
   }
@@ -45,9 +46,9 @@ export const generateOpenApiSpec = async (
   const spec: OpenApiSpec = {
     openapi: "3.0.3",
     info: {
-      title: options.openapi?.title || "API",
+      title: options.openapi?.title ?? "API",
       description: options.openapi?.description,
-      version: options.openapi?.version || "1.0.0",
+      version: options.openapi?.version ?? "1.0.0",
     },
     paths: {},
   };
