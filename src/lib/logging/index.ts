@@ -1,15 +1,17 @@
 import { Formatter } from "./formatter.js";
-import { LogDataType, type LoggingOptions, LogLevel, LogLevelType } from "./types.js";
+import { FileLoggingOptions, LogDataType, type LoggingOptions, LogLevel, LogLevelType } from "./types.js";
+
+
 
 
 export class FileLogger {
-  protected options: LoggingOptions;
+  protected options: FileLoggingOptions;
   protected formatter!: Formatter;
   protected file: Bun.FileSink;
 
-  constructor(path: string, options: LoggingOptions) {
+  constructor(path: string, options: FileLoggingOptions) {
     this.options = options;
-    this.file = Bun.file(path).writer();
+    this.file = Bun.file(path).writer({ highWaterMark: this.options.highWaterMark });
   }
 
   protected getLogLevel() {

@@ -18,3 +18,5 @@ export type LoggingOptions = {
   prefix: string;
   level?: LogLevel;
 };
+
+export type FileLoggingOptions = LoggingOptions & { highWaterMark?: number };
