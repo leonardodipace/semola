@@ -32,6 +32,7 @@ export class RequestContext<
   public query: HandlerContext<TRequest, TResponse>["query"];
   public headers: HandlerContext<TRequest, TResponse>["headers"];
   public cookies: HandlerContext<TRequest, TResponse>["cookies"];
+  public request: HandlerContext<TRequest, TResponse>["request"];
   public raw: Request;
   private validateResponse: ValidateResponseFn;
   private handleError: HandleErrorFn;
@@ -48,6 +49,13 @@ export class RequestContext<
     this.query = validatedData.query;
     this.headers = validatedData.headers;
     this.cookies = validatedData.cookies;
+    this.request = {
+      body: validatedData.body,
+      params: validatedData.params,
+      query: validatedData.query,
+      headers: validatedData.headers,
+      cookies: validatedData.cookies,
+    };
     this.validateResponse = validateResponse;
     this.handleError = handleError;
   }

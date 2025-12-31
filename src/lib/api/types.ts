@@ -61,6 +61,13 @@ export type HandlerContext<
   query: InferInput<TRequest["query"]>;
   headers: InferInput<TRequest["headers"]>;
   cookies: InferInput<TRequest["cookies"]>;
+  request: {
+    body: InferInput<TRequest["body"]>;
+    params: InferInput<TRequest["params"]>;
+    query: InferInput<TRequest["query"]>;
+    headers: InferInput<TRequest["headers"]>;
+    cookies: InferInput<TRequest["cookies"]>;
+  };
   json: <S extends ExtractStatusCodes<TResponse>>(
     status: S,
     data: InferOutput<TResponse[S]>,
