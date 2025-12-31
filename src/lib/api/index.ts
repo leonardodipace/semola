@@ -33,33 +33,14 @@ export class Api {
     this.options = options;
   }
 
-  private defaultErrorHandler(error: ApiError) {
+  private async handleError(error: ApiError) {
     return Response.json(
       { message: error.message },
       { status: error.context?.statusCode ?? 500 },
     );
   }
 
-  private async handleError(req: Request, error: ApiError) {
-    const handler = this.options.onError;
-
-    if (!handler) {
-      return this.defaultErrorHandler(error);
-    }
-
-    const [handlerError, response] = await mightThrow(
-      Promise.resolve().then(() => handler(error, req)),
-    );
-
-    if (handlerError || !response || !(response instanceof Response)) {
-      return this.defaultErrorHandler(Api.INTERNAL_SERVER_ERROR);
-    }
-
-    return response;
-  }
-
   private async validateRequestField(
-    req: Request,
     schema: RequestSchema[keyof RequestSchema],
     data: unknown,
     fieldName: string,
@@ -67,7 +48,7 @@ export class Api {
     const [error, validated] = await validateSchema(schema, data);
 
     if (error) {
-      const response = await this.handleError(req, {
+      const response = this.handleError({
         type: "ValidationError",
         message: error.message,
         context: { validationField: fieldName, statusCode: 400 },
@@ -105,7 +86,7 @@ export class Api {
           const [parseError, parsedBody] = await mightThrow(req.json());
 
           if (parseError) {
-            return this.handleError(req, {
+            return this.handleError({
               type: "ValidationError",
               message: "Invalid JSON body",
               context: { statusCode: 400 },
@@ -125,7 +106,6 @@ export class Api {
       }
 
       const [bodyError, validatedBody] = await this.validateRequestField(
-        req,
         definition.request?.body,
         body,
         "body",
@@ -134,7 +114,6 @@ export class Api {
       if (bodyError) return bodyError;
 
       const [paramsError, validatedParams] = await this.validateRequestField(
-        req,
         definition.request?.params,
         params,
         "params",
@@ -143,7 +122,6 @@ export class Api {
       if (paramsError) return paramsError;
 
       const [queryError, validatedQuery] = await this.validateRequestField(
-        req,
         definition.request?.query,
         query,
         "query",
@@ -152,7 +130,6 @@ export class Api {
       if (queryError) return queryError;
 
       const [headersError, validatedHeaders] = await this.validateRequestField(
-        req,
         definition.request?.headers,
         headers,
         "headers",
@@ -161,7 +138,6 @@ export class Api {
       if (headersError) return headersError;
 
       const [cookiesError, validatedCookies] = await this.validateRequestField(
-        req,
         definition.request?.cookies,
         cookies,
         "cookies",
@@ -185,7 +161,7 @@ export class Api {
           cookies: validatedCookies as InferInput<TRequest["cookies"]>,
         },
         validateResponseFn,
-        (err) => this.handleError(req, err),
+        (err) => this.handleError(err),
       );
 
       const handlerResult = definition.handler(context);
@@ -195,7 +171,7 @@ export class Api {
       );
 
       if (handlerError || !response) {
-        return this.handleError(req, Api.INTERNAL_SERVER_ERROR);
+        return this.handleError(Api.INTERNAL_SERVER_ERROR);
       }
 
       return response;
@@ -255,11 +231,9 @@ export class Api {
 export type {
   ApiError,
   ApiOptions,
-  ErrorHandler,
   HandlerContext,
   HttpMethod,
   RequestSchema,
   ResponseSchema,
   RouteDefinition,
-  StatusCode,
 } from "./types.js";

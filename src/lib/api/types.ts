@@ -10,8 +10,6 @@ export type HttpMethod =
   | "OPTIONS"
   | "HEAD";
 
-export type StatusCode = 200 | 201 | 204 | 400 | 401 | 403 | 404 | 500 | number;
-
 export type ApiError = {
   type: CommonError;
   message: string;
@@ -21,11 +19,6 @@ export type ApiError = {
   };
 };
 
-export type ErrorHandler = (
-  error: ApiError,
-  request: Request,
-) => Response | Promise<Response>;
-
 export type ApiOptions = {
   prefix?: string;
   openapi?: {
@@ -33,7 +26,6 @@ export type ApiOptions = {
     description?: string;
     version: string;
   };
-  onError?: ErrorHandler;
 };
 
 export type RequestSchema = {
