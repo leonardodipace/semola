@@ -119,7 +119,8 @@ export const generateOpenApiSpec = async (
       const responseResult = await toOpenAPISchema(schema);
 
       (operation.responses as Record<string, unknown>)[status] = {
-        description: `Response for status ${status}`,
+        description:
+          responseResult.schema.description ?? `Response for status ${status}`,
         content: {
           "application/json": {
             schema: responseResult.schema,
