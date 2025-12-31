@@ -340,7 +340,6 @@ The handler receives a context object with type-safe request data and response m
 - **Automatic validation**: Request validation (400 on error), response validation (500 on error)
 - **OpenAPI generation**: Automatic OpenAPI 3.0.3 spec from route definitions
 - **Bun-native routing**: Leverages Bun.serve's SIMD-accelerated routing
-- **Minimal overhead**: ~580 lines of clean implementation code
 - **Result pattern**: Uses `[error, data]` tuples internally for error handling
 
 #### Usage Example
