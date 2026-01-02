@@ -37,17 +37,17 @@ api.defineRoute({
   method: "GET",
   summary: "Get user by ID",
   operationId: "getUserById",
-  tags: ["users"],
+  tags: ["Users"],
   request: {
     params: z.object({
-      id: z.string().uuid(),
+      id: z.uuid(),
     }),
   },
   response: {
     200: z.object({
       id: z.string(),
       name: z.string(),
-      email: z.string(),
+      email: z.email(),
     }),
     404: z.object({
       message: z.string(),
@@ -134,9 +134,9 @@ const CreateUserSchema = z.object({
 });
 
 const UserSchema = z.object({
-  id: z.string().uuid(),
+  id: z.uuid(),
   name: z.string(),
-  email: z.string(),
+  email: z.email(),
 });
 
 const ErrorSchema = z.object({
@@ -158,7 +158,7 @@ api.defineRoute({
   path: "/users",
   method: "POST",
   summary: "Create a new user",
-  tags: ["users"],
+  tags: ["Users"],
   request: {
     body: CreateUserSchema,
   },
@@ -178,10 +178,10 @@ api.defineRoute({
   path: "/users/{id}",
   method: "GET",
   summary: "Get user by ID",
-  tags: ["users"],
+  tags: ["Users"],
   request: {
     params: z.object({
-      id: z.string().uuid(),
+      id: z.uuid(),
     }),
   },
   response: {
@@ -203,7 +203,7 @@ api.defineRoute({
   path: "/users",
   method: "GET",
   summary: "List users with pagination",
-  tags: ["users"],
+  tags: ["Users"],
   request: {
     query: z.object({
       page: z.string().transform((val) => parseInt(val, 10)).optional(),
