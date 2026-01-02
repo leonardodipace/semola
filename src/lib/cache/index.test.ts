@@ -253,7 +253,7 @@ describe("Cache", () => {
 
     test("should return InvalidTTLError on non integer TTL", async () => {
       const redis = createMockRedis();
-      const nonIntegerTTL = 0.1 + 0.2
+      const nonIntegerTTL = 0.1 + 0.2;
       const cache = new Cache<{ name: string }>({ redis, ttl: nonIntegerTTL });
 
       const [error, data] = await cache.set("user:1", { name: "John" });
@@ -289,7 +289,6 @@ describe("Cache", () => {
       });
       expect(data).toBeNull();
     });
-
   });
 
   describe("delete", () => {

@@ -116,7 +116,8 @@ export const generateOpenApiSpec = async (
     }
 
     for (const [status, schema] of Object.entries(definition.response)) {
-      const responseResult = await toOpenAPISchema(schema);
+      if (!schema) continue;
+      const responseResult = await toOpenAPISchema(schema as StandardSchemaV1);
 
       (operation.responses as Record<string, unknown>)[status] = {
         description:

@@ -1,7 +1,13 @@
 import type { Server } from "bun";
 import { mightThrow } from "../errors/index.js";
 import { RequestContext } from "./context.js";
+import { Middleware } from "./middleware.js";
 import { generateOpenApiSpec } from "./openapi.js";
+import {
+  extractMiddlewareSchemas,
+  mergeRequestSchemas,
+  mergeResponseSchemas,
+} from "./schema-merger.js";
 import type {
   ApiError,
   ApiOptions,
@@ -23,20 +29,45 @@ export class Api {
   private options: ApiOptions;
   private routes: InternalRoute[] = [];
   private server: Server<unknown> | null = null;
+  private globalMiddlewares: Middleware[] = [];
 
   constructor(options: ApiOptions = {}) {
     this.options = options;
   }
 
+  public use(middleware: Middleware): void {
+    this.globalMiddlewares.push(middleware);
+  }
+
   public defineRoute<
     TRequest extends RequestSchema = RequestSchema,
     TResponse extends ResponseSchema = ResponseSchema,
-  >(definition: RouteDefinition<TRequest, TResponse>) {
+    TMiddlewares extends readonly Middleware[] = readonly [],
+  >(definition: RouteDefinition<TRequest, TResponse, TMiddlewares>) {
     const fullPath = this.options.prefix
       ? `${this.options.prefix}${definition.path}`
       : definition.path;
 
     const bunPath = fullPath.replace(/\{(\w+)\}/g, ":$1");
+
+    // Combine global and route-specific middlewares
+    const allMiddlewares = [
+      ...this.globalMiddlewares,
+      ...(definition.middlewares ?? []),
+    ];
+
+    // Extract and merge middleware schemas
+    const middlewareSchemas = extractMiddlewareSchemas(allMiddlewares);
+
+    const mergedRequest = mergeRequestSchemas(
+      middlewareSchemas.requestSchema,
+      definition.request,
+    );
+
+    const mergedResponse = mergeResponseSchemas(
+      middlewareSchemas.responseSchema,
+      definition.response,
+    );
 
     const wrappedHandler = async (req: Request) => {
       const url = new URL(req.url);
@@ -73,7 +104,7 @@ export class Api {
 
       let body: unknown;
 
-      if (definition.request?.body) {
+      if (mergedRequest.body) {
         const contentType = req.headers.get("content-type") ?? "";
 
         if (contentType.includes("application/json")) {
@@ -92,21 +123,21 @@ export class Api {
 
       const headers: Record<string, string> = {};
 
-      if (definition.request?.headers) {
+      if (mergedRequest.headers) {
         req.headers.forEach((value, key) => {
           headers[key] = value;
         });
       }
 
-      // Validate all request fields
+      // Validate all request fields using merged schemas
       const fieldsToValidate: Array<
         [string, unknown, RequestSchema[keyof RequestSchema]]
       > = [
-        ["body", body, definition.request?.body],
-        ["params", params, definition.request?.params],
-        ["query", query, definition.request?.query],
-        ["headers", headers, definition.request?.headers],
-        ["cookies", cookies, definition.request?.cookies],
+        ["body", body, mergedRequest.body],
+        ["params", params, mergedRequest.params],
+        ["query", query, mergedRequest.query],
+        ["headers", headers, mergedRequest.headers],
+        ["cookies", cookies, mergedRequest.cookies],
       ];
 
       const validated: Record<string, unknown> = {};
@@ -127,19 +158,28 @@ export class Api {
       }
 
       const validateResponseFn = async (status: number, data: unknown) => {
-        const responseSchema = definition.response[status];
+        const responseSchema = mergedResponse[status];
 
         return validateSchema(responseSchema, data);
       };
 
-      const context = new RequestContext<TRequest, TResponse>(
+      const baseContext = new RequestContext<
+        typeof mergedRequest,
+        typeof mergedResponse
+      >(
         req,
         {
-          body: validated.body as InferInput<TRequest["body"]>,
-          params: validated.params as InferInput<TRequest["params"]>,
-          query: validated.query as InferInput<TRequest["query"]>,
-          headers: validated.headers as InferInput<TRequest["headers"]>,
-          cookies: validated.cookies as InferInput<TRequest["cookies"]>,
+          body: validated.body as InferInput<(typeof mergedRequest)["body"]>,
+          params: validated.params as InferInput<
+            (typeof mergedRequest)["params"]
+          >,
+          query: validated.query as InferInput<(typeof mergedRequest)["query"]>,
+          headers: validated.headers as InferInput<
+            (typeof mergedRequest)["headers"]
+          >,
+          cookies: validated.cookies as InferInput<
+            (typeof mergedRequest)["cookies"]
+          >,
         },
         validateResponseFn,
         async (err) =>
@@ -149,7 +189,37 @@ export class Api {
           ),
       );
 
-      const handlerResult = definition.handler(context);
+      // Execute middlewares in order
+      const middlewareData: Record<string, unknown> = {};
+
+      for (const middleware of allMiddlewares) {
+        const [middlewareError, result] = await mightThrow(
+          middleware.execute(baseContext),
+        );
+
+        if (middlewareError) {
+          return Response.json(
+            { message: Api.INTERNAL_SERVER_ERROR.message },
+            { status: 500 },
+          );
+        }
+
+        // Check if middleware returned early (Response)
+        if (Middleware.isResponse(result)) {
+          return result;
+        }
+
+        // Collect context data
+        Object.assign(middlewareData, result);
+      }
+
+      // Create extended context with middleware data
+      const extendedContext = Object.assign(baseContext, {
+        get: <K extends string>(key: K) => middlewareData[key],
+      });
+
+      // @ts-expect-error - Runtime context extension; middleware data is validated at runtime
+      const handlerResult = definition.handler(extendedContext);
 
       const [handlerError, response] = await mightThrow(
         Promise.resolve(handlerResult),
@@ -169,7 +239,11 @@ export class Api {
       path: bunPath,
       method: definition.method,
       handler: wrappedHandler,
-      definition,
+      definition: {
+        ...definition,
+        request: mergedRequest,
+        response: mergedResponse,
+      },
     });
   }
 
@@ -216,6 +290,13 @@ export class Api {
   }
 }
 
+export type {
+  MiddlewareData,
+  MiddlewareDefinition,
+  MiddlewareHandler,
+  MiddlewareResult,
+} from "./middleware.js";
+export { Middleware } from "./middleware.js";
 export type {
   ApiError,
   ApiOptions,

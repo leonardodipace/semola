@@ -44,8 +44,8 @@ export class Cache<T> {
     if (!this.isTTLValid()) {
       return err(
         "InvalidTTLError",
-        `Unable to save records with ttl equal to ${this.options.ttl}`
-      )
+        `Unable to save records with ttl equal to ${this.options.ttl}`,
+      );
     }
 
     const [setError] = await mightThrow(
