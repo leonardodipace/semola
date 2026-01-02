@@ -1,24 +1,69 @@
-import type { LogDataType, LogMessageType } from "./types.js";
+import type { LogDataType } from "./types.js";
 
-export interface Formatter<Input = LogDataType, Output = string> {
-  format(logData: Input): Output;
+export abstract class Formatter<Input = LogDataType, Output = string> {
+  protected dateFmt: () => string;
+
+  constructor(dateFmt: () => string) {
+    this.dateFmt = dateFmt;
+  }
+
+  abstract format(logData: Input): Output;
 }
 
-export class BaseFormatter implements Formatter {
+export class BaseFormatter extends Formatter {
+  constructor(dateFmt: () => string = isoDateTimeFormat) {
+    super(dateFmt);
+  }
+
   public format(logData: LogDataType): string {
     const { prefix, level, msg } = logData;
-    const timestamp = new Date().toISOString();
+    const timestamp = this.dateFmt();
 
     return `${timestamp}  [${level}]\t[${prefix}] : ${msg}`;
   }
 }
 
-export class JSONFormatter implements Formatter {
+export class JSONFormatter extends Formatter {
+  constructor(dateFmt: () => string = isoDateTimeFormat) {
+    super(dateFmt);
+  }
+
   public format(logData: LogDataType): string {
     const data = {
-      timestamp: new Date().toISOString(),
+      timestamp: this.dateFmt(),
       ...logData,
     };
     return JSON.stringify(data);
   }
+}
+
+export function isoDateTimeFormat() {
+  return new Date().toISOString();
+}
+
+export function isoDateFormat() {
+  const date = new Date();
+  const day = date.getUTCDate();
+  const month = date.getUTCMonth() + 1;
+  const year = date.getUTCFullYear();
+
+  return `${year}-${month}-${day}`;
+}
+
+export function dmyFormat() {
+  const date = new Date();
+  const day = date.getUTCDate();
+  const month = date.getUTCMonth() + 1;
+  const year = date.getUTCFullYear();
+
+  return `${day}-${month}-${year}`;
+}
+
+export function mdyFormat() {
+  const date = new Date();
+  const day = date.getUTCDate();
+  const month = date.getUTCMonth() + 1;
+  const year = date.getUTCFullYear();
+
+  return `${month}-${day}-${year}`;
 }
