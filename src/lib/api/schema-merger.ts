@@ -1,9 +1,9 @@
 import type { Middleware } from "./middleware.js";
 import type { RequestSchema, ResponseSchema } from "./types.js";
 
-export function mergeRequestSchemas(
+export const mergeRequestSchemas = (
   ...schemas: (RequestSchema | undefined)[]
-): RequestSchema {
+) => {
   const merged: RequestSchema = {};
 
   for (const schema of schemas) {
@@ -23,11 +23,11 @@ export function mergeRequestSchemas(
   }
 
   return merged;
-}
+};
 
-export function mergeResponseSchemas(
+export const mergeResponseSchemas = (
   ...schemas: (ResponseSchema | undefined)[]
-): ResponseSchema {
+) => {
   const merged: ResponseSchema = {};
 
   for (const schema of schemas) {
@@ -39,12 +39,11 @@ export function mergeResponseSchemas(
   }
 
   return merged;
-}
+};
 
-export function extractMiddlewareSchemas(middlewares: readonly Middleware[]): {
-  requestSchema: RequestSchema;
-  responseSchema: ResponseSchema;
-} {
+export const extractMiddlewareSchemas = (
+  middlewares: readonly Middleware[],
+) => {
   const requestSchemas = middlewares.map((m) => m.getRequestSchema());
   const responseSchemas = middlewares.map((m) => m.getResponseSchema());
 
@@ -52,4 +51,4 @@ export function extractMiddlewareSchemas(middlewares: readonly Middleware[]): {
     requestSchema: mergeRequestSchemas(...requestSchemas),
     responseSchema: mergeResponseSchemas(...responseSchemas),
   };
-}
+};

@@ -37,17 +37,15 @@ export class Middleware<
     this.definition = definition;
   }
 
-  public getRequestSchema(): TRequest | undefined {
+  public getRequestSchema() {
     return this.definition.request;
   }
 
-  public getResponseSchema(): TResponse | undefined {
+  public getResponseSchema() {
     return this.definition.response;
   }
 
-  public async execute(
-    context: HandlerContext<TRequest, TResponse>,
-  ): Promise<MiddlewareResult<TData>> {
+  public async execute(context: HandlerContext<TRequest, TResponse>) {
     return this.definition.handler(context);
   }
 

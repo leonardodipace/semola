@@ -35,7 +35,7 @@ export class Api {
     this.options = options;
   }
 
-  public use(middleware: Middleware): void {
+  public use(middleware: Middleware) {
     this.globalMiddlewares.push(middleware);
   }
 
