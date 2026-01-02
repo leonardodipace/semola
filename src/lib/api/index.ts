@@ -31,7 +31,7 @@ export class Api {
   private server: Server<unknown> | null = null;
   private globalMiddlewares: Middleware[] = [];
 
-  constructor(options: ApiOptions = {}) {
+  public constructor(options: ApiOptions = {}) {
     this.options = options;
   }
 

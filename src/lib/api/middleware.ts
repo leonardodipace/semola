@@ -31,7 +31,9 @@ export class Middleware<
 > {
   private definition: MiddlewareDefinition<TRequest, TResponse, TData>;
 
-  constructor(definition: MiddlewareDefinition<TRequest, TResponse, TData>) {
+  public constructor(
+    definition: MiddlewareDefinition<TRequest, TResponse, TData>,
+  ) {
     this.definition = definition;
   }
 
