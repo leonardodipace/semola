@@ -6,11 +6,11 @@ class MockRedisClient {
   private store = new Map<string, string>();
   private shouldFail = false;
 
-  setShouldFail(value: boolean) {
+  public setShouldFail(value: boolean) {
     this.shouldFail = value;
   }
 
-  async get(key: string) {
+  public async get(key: string) {
     if (this.shouldFail) {
       throw new Error("Redis connection error");
     }
@@ -18,7 +18,7 @@ class MockRedisClient {
     return this.store.get(key);
   }
 
-  async set(key: string, value: string) {
+  public async set(key: string, value: string) {
     if (this.shouldFail) {
       throw new Error("Redis connection error");
     }
@@ -28,7 +28,7 @@ class MockRedisClient {
     return "OK";
   }
 
-  async del(key: string) {
+  public async del(key: string) {
     if (this.shouldFail) {
       throw new Error("Redis connection error");
     }
@@ -44,11 +44,11 @@ class MockRedisClient {
     return 1;
   }
 
-  clear() {
+  public clear() {
     this.store.clear();
   }
 
-  getStore() {
+  public getStore() {
     return this.store;
   }
 }
@@ -253,7 +253,7 @@ describe("Cache", () => {
 
     test("should return InvalidTTLError on non integer TTL", async () => {
       const redis = createMockRedis();
-      const nonIntegerTTL = 0.1 + 0.2
+      const nonIntegerTTL = 0.1 + 0.2;
       const cache = new Cache<{ name: string }>({ redis, ttl: nonIntegerTTL });
 
       const [error, data] = await cache.set("user:1", { name: "John" });
@@ -289,7 +289,6 @@ describe("Cache", () => {
       });
       expect(data).toBeNull();
     });
-
   });
 
   describe("delete", () => {

@@ -221,10 +221,11 @@ describe("I18n", () => {
       });
 
       expect(i18n.translate("greeting")).toBe("Hello");
-      expect(i18n.translate("sports.0", { first: "football" })).toBe("football");
+      expect(i18n.translate("sports.0", { first: "football" })).toBe(
+        "football",
+      );
       expect(i18n.translate("sports.1", { second: "tennis" })).toBe("tennis");
     });
-
 
     test("should work with different parameter types", () => {
       const i18n = new I18n({
