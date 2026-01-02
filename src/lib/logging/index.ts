@@ -1,19 +1,19 @@
 import { appendFileSync } from "node:fs";
-import { type Formatter } from "./formatter.js";
+import type { Formatter } from "./formatter.js";
 import {
   type LogDataType,
   LogLevel,
   type LogLevelType,
-  LogMessageType,
+  type LogMessageType,
   type ProviderOptions,
 } from "./types.js";
 
 export abstract class AbstractLogger {
-  abstract debug(msg: LogMessageType): void;
-  abstract info(msg: LogMessageType): void;
-  abstract warning(msg: LogMessageType): void;
-  abstract error(msg: LogMessageType): void;
-  abstract critical(msg: LogMessageType): void;
+  public abstract debug(msg: LogMessageType): void;
+  public abstract info(msg: LogMessageType): void;
+  public abstract warning(msg: LogMessageType): void;
+  public abstract error(msg: LogMessageType): void;
+  public abstract critical(msg: LogMessageType): void;
 
   protected createLogData(
     level: LogLevelType,
@@ -32,34 +32,34 @@ export class Logger extends AbstractLogger {
   private providers: LoggerProvider[];
   private prefix: string;
 
-  constructor(prefix: string, providers: LoggerProvider[]) {
+  public constructor(prefix: string, providers: LoggerProvider[]) {
     super();
     this.prefix = prefix;
     this.providers = providers;
   }
 
   public debug(msg: LogMessageType) {
-    const data = this.createLogData("DEBUG", msg, this.prefix);
+    const data = this.createLogData("Debug", msg, this.prefix);
     this.run(data);
   }
 
   public info(msg: LogMessageType) {
-    const data = this.createLogData("INFO", msg, this.prefix);
+    const data = this.createLogData("Info", msg, this.prefix);
     this.run(data);
   }
 
   public warning(msg: LogMessageType) {
-    const data = this.createLogData("WARNING", msg, this.prefix);
+    const data = this.createLogData("Warning", msg, this.prefix);
     this.run(data);
   }
 
   public error(msg: LogMessageType) {
-    const data = this.createLogData("ERROR", msg, this.prefix);
+    const data = this.createLogData("Error", msg, this.prefix);
     this.run(data);
   }
 
   public critical(msg: LogMessageType) {
-    const data = this.createLogData("CRITICAL", msg, this.prefix);
+    const data = this.createLogData("Critical", msg, this.prefix);
     this.run(data);
   }
 
@@ -74,15 +74,15 @@ export class Logger extends AbstractLogger {
 export abstract class LoggerProvider {
   protected options: ProviderOptions;
 
-  constructor(options: ProviderOptions) {
+  public constructor(options: ProviderOptions) {
     this.options = options;
   }
 
-  abstract execute(data: LogDataType): void;
+  public abstract execute(data: LogDataType): void;
 
   public getLogLevel() {
     if (!this.options.level) {
-      return LogLevel.DEBUG;
+      return LogLevel.Debug;
     }
 
     return this.options.level;
@@ -96,7 +96,7 @@ export abstract class LoggerProvider {
 export class FileProvider extends LoggerProvider {
   private file: string;
 
-  constructor(file: string, options: ProviderOptions) {
+  public constructor(file: string, options: ProviderOptions) {
     super(options);
     this.file = file;
   }
@@ -109,8 +109,8 @@ export class FileProvider extends LoggerProvider {
     let { msg } = data;
     if (this.options.formatter) {
       msg = this.options.formatter.format(data);
-    } else if (typeof msg === 'number' || typeof msg === 'object') {
-      msg = msg.toString();
+    } else if (typeof msg === "number" || typeof msg === "object") {
+      msg = JSON.stringify(msg);
     }
 
     appendFileSync(this.file, msg);
@@ -119,10 +119,6 @@ export class FileProvider extends LoggerProvider {
 }
 
 export class ConsoleProvider extends LoggerProvider {
-  constructor(options: ProviderOptions) {
-    super(options);
-  }
-
   public execute(data: LogDataType): void {
     const level = this.getLogLevel();
     const userLevel = LogLevel[data.level];
@@ -133,25 +129,29 @@ export class ConsoleProvider extends LoggerProvider {
       msg = this.options.formatter.format(data);
     }
 
+    // biome-ignore-start lint/suspicious/noConsole: function used for the correct
+    // functionality of the logger
     switch (userLevel) {
-      case LogLevel.DEBUG:
+      case LogLevel.Debug:
         console.debug(msg);
         break;
-      case LogLevel.INFO:
+      case LogLevel.Info:
         console.info(msg);
         break;
-      case LogLevel.WARNING:
+      case LogLevel.Warning:
         console.warn(msg);
         break;
-      case LogLevel.ERROR:
+      case LogLevel.Error:
         console.error(msg);
         break;
-      case LogLevel.CRITICAL:
+      case LogLevel.Critical:
         console.error(msg);
         break;
       default:
         console.debug(msg);
         break;
+      // biome-ignore-end lint/suspicious/noConsole: function used for the correct
+      // functionality of the logger
     }
   }
 }

@@ -137,7 +137,7 @@ describe("Cache", () => {
       });
       await redis.set(
         "nested",
-        JSON.stringify({ user: { name: "Alice", age: 30 } })
+        JSON.stringify({ user: { name: "Alice", age: 30 } }),
       );
       const [, obj] = await objCache.get("nested");
       expect(obj).toEqual({ user: { name: "Alice", age: 30 } });
