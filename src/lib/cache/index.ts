@@ -41,6 +41,13 @@ export class Cache<T> {
       return err("CacheError", `Unable to stringify value for key ${key}`);
     }
 
+    if (!this.isTTLValid()) {
+      return err(
+        "InvalidTTLError",
+        `Unable to save records with ttl equal to ${this.options.ttl}`
+      )
+    }
+
     const [setError] = await mightThrow(
       this.options.ttl
         ? this.options.redis.set(key, stringified, "PX", this.options.ttl)
@@ -62,5 +69,22 @@ export class Cache<T> {
     }
 
     return ok(data);
+  }
+
+  private isTTLValid() {
+    const { ttl } = this.options;
+
+    if (ttl === undefined || ttl === null) return true;
+
+    // ttl is now set to a numeric value insted of not being provided
+    // inside the options.
+
+    if (!Number.isFinite(ttl)) return false;
+
+    if (!Number.isInteger(ttl)) return false;
+
+    if (ttl < 0) return false;
+
+    return true;
   }
 }
