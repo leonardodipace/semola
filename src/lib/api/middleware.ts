@@ -29,20 +29,12 @@ export class Middleware<
   TResponse extends ResponseSchema = ResponseSchema,
   TData extends MiddlewareData = MiddlewareData,
 > {
-  private definition: MiddlewareDefinition<TRequest, TResponse, TData>;
+  public readonly definition: MiddlewareDefinition<TRequest, TResponse, TData>;
 
   public constructor(
     definition: MiddlewareDefinition<TRequest, TResponse, TData>,
   ) {
     this.definition = definition;
-  }
-
-  public getRequestSchema() {
-    return this.definition.request;
-  }
-
-  public getResponseSchema() {
-    return this.definition.response;
   }
 
   public async execute(context: HandlerContext<TRequest, TResponse>) {

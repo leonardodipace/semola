@@ -3,11 +3,6 @@ import { mightThrow } from "../errors/index.js";
 import { RequestContext } from "./context.js";
 import { Middleware } from "./middleware.js";
 import { generateOpenApiSpec } from "./openapi.js";
-import {
-  extractMiddlewareSchemas,
-  mergeRequestSchemas,
-  mergeResponseSchemas,
-} from "./schema-merger.js";
 import type {
   ApiError,
   ApiOptions,
@@ -35,6 +30,42 @@ export class Api {
     this.options = options;
   }
 
+  private mergeRequestSchemas(...schemas: (RequestSchema | undefined)[]) {
+    const merged: RequestSchema = {};
+
+    for (const schema of schemas) {
+      if (!schema) continue;
+
+      for (const key of [
+        "body",
+        "params",
+        "query",
+        "headers",
+        "cookies",
+      ] as const) {
+        if (schema[key]) {
+          merged[key] = schema[key];
+        }
+      }
+    }
+
+    return merged;
+  }
+
+  private mergeResponseSchemas(...schemas: (ResponseSchema | undefined)[]) {
+    const merged: ResponseSchema = {};
+
+    for (const schema of schemas) {
+      if (!schema) continue;
+
+      for (const [status, value] of Object.entries(schema)) {
+        merged[Number(status)] = value;
+      }
+    }
+
+    return merged;
+  }
+
   public use(middleware: Middleware) {
     this.globalMiddlewares.push(middleware);
   }
@@ -57,15 +88,16 @@ export class Api {
     ];
 
     // Extract and merge middleware schemas
-    const middlewareSchemas = extractMiddlewareSchemas(allMiddlewares);
+    const requestSchemas = allMiddlewares.map((m) => m.definition.request);
+    const responseSchemas = allMiddlewares.map((m) => m.definition.response);
 
-    const mergedRequest = mergeRequestSchemas(
-      middlewareSchemas.requestSchema,
+    const mergedRequest = this.mergeRequestSchemas(
+      ...requestSchemas,
       definition.request,
     );
 
-    const mergedResponse = mergeResponseSchemas(
-      middlewareSchemas.responseSchema,
+    const mergedResponse = this.mergeResponseSchemas(
+      ...responseSchemas,
       definition.response,
     );
 
