@@ -36,14 +36,6 @@ export class Middleware<
   ) {
     this.definition = definition;
   }
-
-  public async execute(context: HandlerContext<TRequest, TResponse>) {
-    return this.definition.handler(context);
-  }
-
-  public static isResponse(result: MiddlewareResult<any>): result is Response {
-    return result instanceof Response;
-  }
 }
 
 // Type inference helpers

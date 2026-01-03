@@ -1,7 +1,7 @@
 import type { Server } from "bun";
 import { mightThrow } from "../errors/index.js";
 import { RequestContext } from "./context.js";
-import { Middleware } from "./middleware.js";
+import type { Middleware } from "./middleware.js";
 import { generateOpenApiSpec } from "./openapi.js";
 import type {
   ApiError,
@@ -226,7 +226,7 @@ export class Api {
 
       for (const middleware of allMiddlewares) {
         const [middlewareError, result] = await mightThrow(
-          middleware.execute(baseContext),
+          Promise.resolve(middleware.definition.handler(baseContext)),
         );
 
         if (middlewareError) {
@@ -237,7 +237,7 @@ export class Api {
         }
 
         // Check if middleware returned early (Response)
-        if (Middleware.isResponse(result)) {
+        if (result instanceof Response) {
           return result;
         }
 
