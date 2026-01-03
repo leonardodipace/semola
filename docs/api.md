@@ -633,10 +633,10 @@ api.defineRoute({
     200: z.object({ ok: z.boolean() }),
   },
   handler: async (c) => {
-    // TypeScript knows these types:
-    const userId: string = c.get("userId");
-    const isAdmin: boolean = c.get("isAdmin");
-    const permissions: string[] = c.get("permissions");
+    // TypeScript infers these types automatically:
+    const userId = c.get("userId");       // string
+    const isAdmin = c.get("isAdmin");     // boolean
+    const permissions = c.get("permissions"); // string[]
     
     return c.json(200, { ok: true });
   },
