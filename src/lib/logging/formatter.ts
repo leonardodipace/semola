@@ -1,9 +1,9 @@
-import type { LogDataType } from "./types.js";
+import type { DateFmtFnType, LogDataType } from "./types.js";
 
 export abstract class Formatter<Input = LogDataType, Output = string> {
-  protected dateFmt: () => string;
+  protected dateFmt: DateFmtFnType;
 
-  public constructor(dateFmt: () => string) {
+  public constructor(dateFmt: DateFmtFnType) {
     this.dateFmt = dateFmt;
   }
 
@@ -11,7 +11,7 @@ export abstract class Formatter<Input = LogDataType, Output = string> {
 }
 
 export class BaseFormatter extends Formatter {
-  public constructor(dateFmt: () => string = isoDateTimeFormat) {
+  public constructor(dateFmt: DateFmtFnType = isoDateTimeFormat) {
     super(dateFmt);
   }
 
@@ -28,7 +28,7 @@ export class BaseFormatter extends Formatter {
 }
 
 export class JSONFormatter extends Formatter {
-  public constructor(dateFmt: () => string = isoDateTimeFormat) {
+  public constructor(dateFmt: DateFmtFnType = isoDateTimeFormat) {
     super(dateFmt);
   }
 

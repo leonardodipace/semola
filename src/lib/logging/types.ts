@@ -10,7 +10,9 @@ export enum LogLevel {
 
 export type LogLevelType = keyof typeof LogLevel;
 
-export type LogMessageType = string | object | number;
+export type LogMessageType = string | object | number | boolean;
+
+export type DateFmtFnType = () => string;
 
 export type LogDataType = {
   prefix: string;
