@@ -18,6 +18,10 @@ export type LogDataType = {
   prefix: string;
   level: LogLevelType;
   msg: LogMessageType;
+  fileName: string;
+  row: string;
+  column: string;
+  method?: string
 };
 
 export type ProviderOptions = {

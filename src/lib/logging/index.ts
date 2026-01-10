@@ -1,5 +1,7 @@
 import { appendFileSync } from "node:fs";
 import type { Formatter } from "./formatter.js";
+import { basename } from "node:path"
+
 import {
   type LogDataType,
   LogLevel,
@@ -7,6 +9,18 @@ import {
   type LogMessageType,
   type ProviderOptions,
 } from "./types.js";
+
+class StackData {
+  private stack: string = "";
+
+  constructor() {
+    Error.captureStackTrace(this)
+  }
+
+  public getStack() {
+    return this.stack;
+  }
+}
 
 export abstract class AbstractLogger {
   public abstract debug(msg: LogMessageType): void;
@@ -20,10 +34,31 @@ export abstract class AbstractLogger {
     msg: LogMessageType,
     prefix: string,
   ): LogDataType {
+    const stack = new StackData().getStack().split("\n")
+    const logCall = stack[4] || "";
+
+    const [path, row, column] = logCall?.trim()
+      .replace("(", "")
+      .replace(")", "")
+      .split(":")
+
+    const fileName = basename(path || "")
+
+    let methodCall = undefined;
+    const pathData = path?.split(" ") || []
+
+    if (pathData.length === 3) {
+      methodCall = pathData[1]
+    }
+
     return {
       level,
       msg,
       prefix,
+      fileName,
+      row: row ?? "",
+      column: column ?? "",
+      method: methodCall
     };
   }
 }
@@ -152,8 +187,8 @@ export class ConsoleProvider extends LoggerProvider {
       default:
         console.debug(msg);
         break;
-      // biome-ignore-end lint/suspicious/noConsole: function used for the correct
-      // functionality of the logger
     }
+    // biome-ignore-end lint/suspicious/noConsole: function used for the correct
+    // functionality of the logger
   }
 }

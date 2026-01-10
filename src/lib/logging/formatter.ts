@@ -16,14 +16,24 @@ export class BaseFormatter extends Formatter {
   }
 
   public format(logData: LogDataType): string {
-    let { prefix, level, msg } = logData;
+    let { prefix, level, msg, fileName, row, column, method } = logData;
     const timestamp = this.dateFmt();
     const levelType = level.toUpperCase();
     if (typeof msg === "object") {
       msg = JSON.stringify(msg);
     }
 
-    return `${timestamp}  [${levelType}]\t[${prefix}] : ${msg}`;
+
+    const fileData = `${prefix}/${fileName}:${row}:${column}`
+    let header = `[${levelType}]`
+
+    if (method) {
+      header = `${header}\t[${method}]\t[${fileData}]`
+    } else {
+      header = `${header}\t[${fileData}]`
+    }
+
+    return `${timestamp}  ${header} : ${msg}`;
   }
 }
 
@@ -33,14 +43,23 @@ export class JSONFormatter extends Formatter {
   }
 
   public format(logData: LogDataType): string {
-    let { prefix, level, msg } = logData;
+    let { prefix, level, msg, fileName, row, column, method } = logData;
     const timestamp = this.dateFmt();
     const levelType = level.toUpperCase();
+
+    let position: Record<string, string | undefined> = {}
+
+    if (method) {
+      position = { method };
+    }
+
+    position = { ...position, fileName, row, column }
 
     const data = {
       timestamp,
       level: levelType,
       prefix,
+      position,
       msg
     };
     return JSON.stringify(data);
