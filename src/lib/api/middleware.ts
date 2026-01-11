@@ -4,7 +4,8 @@ export type MiddlewareData = Record<string, unknown>;
 
 export type MiddlewareResult<TData extends MiddlewareData = MiddlewareData> =
   | Response
-  | TData;
+  | TData
+  | undefined;
 
 export type MiddlewareHandler<
   TRequest extends RequestSchema,
