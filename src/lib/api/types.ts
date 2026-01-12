@@ -1,5 +1,16 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type { CommonError } from "../errors/types.js";
+import type { MergeMiddlewareData, Middleware } from "./middleware.js";
+
+export type {
+  InferMiddlewareData,
+  MergeMiddlewareData,
+  Middleware,
+  MiddlewareData,
+  MiddlewareDefinition,
+  MiddlewareHandler,
+  MiddlewareResult,
+} from "./middleware.js";
 
 export type HttpMethod =
   | "GET"
@@ -76,13 +87,19 @@ export type HandlerContext<
 export type RouteHandler<
   TRequest extends RequestSchema = RequestSchema,
   TResponse extends ResponseSchema = ResponseSchema,
+  TMiddlewares extends readonly any[] = readonly [],
 > = (
-  context: HandlerContext<TRequest, TResponse>,
+  context: HandlerContext<TRequest, TResponse> & {
+    get<K extends keyof MergeMiddlewareData<TMiddlewares>>(
+      key: K,
+    ): MergeMiddlewareData<TMiddlewares>[K];
+  },
 ) => Promise<Response> | Response;
 
 export type RouteDefinition<
   TRequest extends RequestSchema = RequestSchema,
   TResponse extends ResponseSchema = ResponseSchema,
+  TMiddlewares extends readonly Middleware[] = readonly [],
 > = {
   path: string;
   method: HttpMethod;
@@ -92,12 +109,13 @@ export type RouteDefinition<
   tags?: string[];
   request?: TRequest;
   response: TResponse;
-  handler: RouteHandler<TRequest, TResponse>;
+  middlewares?: TMiddlewares;
+  handler: RouteHandler<TRequest, TResponse, TMiddlewares>;
 };
 
 export type InternalRoute = {
   path: string;
   method: HttpMethod;
   handler: (req: Request) => Promise<Response>;
-  definition: RouteDefinition;
+  definition: RouteDefinition<any, any, any>;
 };

@@ -53,16 +53,16 @@ api.defineRoute({
       message: z.string(),
     }),
   },
-  handler: async (ctx) => {
-    // ctx.request.params.id is typed as string (validated UUID)
-    const user = await getUser(ctx.request.params.id);
+  handler: async (c) => {
+    // c.request.params.id is typed as string (validated UUID)
+    const user = await getUser(c.request.params.id);
     
     if (!user) {
-      return ctx.json(404, { message: "User not found" });
+      return c.json(404, { message: "User not found" });
     }
     
     // Response is validated against schema before being sent
-    return ctx.json(200, user);
+    return c.json(200, user);
   },
 });
 ```
@@ -99,18 +99,18 @@ api.close();
 The handler receives a context object with type-safe request data and response methods:
 
 ### Request Data
-- `ctx.request.body` - Validated request body
-- `ctx.request.params` - Validated path parameters
-- `ctx.request.query` - Validated query parameters
-- `ctx.request.headers` - Validated headers
-- `ctx.request.cookies` - Validated cookies
-- `ctx.raw` - Underlying Request object
+- `c.request.body` - Validated request body
+- `c.request.params` - Validated path parameters
+- `c.request.query` - Validated query parameters
+- `c.request.headers` - Validated headers
+- `c.request.cookies` - Validated cookies
+- `c.raw` - Underlying Request object
 
 ### Response Methods
-- `ctx.json(status, data)` - JSON response with validation
-- `ctx.text(status, text)` - Plain text response
-- `ctx.html(status, html)` - HTML response
-- `ctx.redirect(status, url)` - HTTP redirect
+- `c.json(status, data)` - JSON response with validation
+- `c.text(status, text)` - Plain text response
+- `c.html(status, html)` - HTML response
+- `c.redirect(status, url)` - HTTP redirect
 
 ## Features
 
@@ -166,11 +166,11 @@ api.defineRoute({
     201: UserSchema,
     400: ErrorSchema,
   },
-  handler: async (ctx) => {
-    // ctx.request.body is typed as { name: string; email: string }
-    const user = await createUser(ctx.request.body);
+  handler: async (c) => {
+    // c.request.body is typed as { name: string; email: string }
+    const user = await createUser(c.request.body);
     
-    return ctx.json(201, user);
+    return c.json(201, user);
   },
 });
 
@@ -188,14 +188,14 @@ api.defineRoute({
     200: UserSchema,
     404: ErrorSchema,
   },
-  handler: async (ctx) => {
-    const user = await findUser(ctx.request.params.id);
+  handler: async (c) => {
+    const user = await findUser(c.request.params.id);
     
     if (!user) {
-      return ctx.json(404, { message: "User not found" });
+      return c.json(404, { message: "User not found" });
     }
     
-    return ctx.json(200, user);
+    return c.json(200, user);
   },
 });
 
@@ -216,13 +216,13 @@ api.defineRoute({
       total: z.number(),
     }),
   },
-  handler: async (ctx) => {
-    const page = ctx.request.query.page ?? 1;
-    const limit = ctx.request.query.limit ?? 10;
+  handler: async (c) => {
+    const page = c.request.query.page ?? 1;
+    const limit = c.request.query.limit ?? 10;
     
     const { users, total } = await listUsers(page, limit);
     
-    return ctx.json(200, { users, total });
+    return c.json(200, { users, total });
   },
 });
 
@@ -253,3 +253,392 @@ Invalid requests receive **400 Bad Request** with detailed error messages.
 All responses are validated before being sent. This prevents accidentally sending malformed data that doesn't match your API contract.
 
 Invalid responses trigger **500 Internal Server Error**, signaling a server-side bug that needs fixing.
+
+## Middlewares
+
+Middlewares allow you to run code before your route handler executes. They're perfect for authentication, logging, rate limiting, and extending the request context with shared data.
+
+### Defining a Middleware
+
+```typescript
+import { Middleware } from "semola/api";
+import { z } from "zod";
+
+const authMiddleware = new Middleware({
+  request: {
+    headers: z.object({
+      authorization: z.string(),
+    }),
+  },
+  response: {
+    401: z.object({ error: z.string() }),
+  },
+  handler: async (c) => {
+    const token = c.request.headers.authorization;
+    
+    if (!token || !token.startsWith("Bearer ")) {
+      return c.json(401, { error: "Unauthorized" });
+    }
+    
+    const user = await validateToken(token.slice(7));
+    
+    if (!user) {
+      return c.json(401, { error: "Invalid token" });
+    }
+    
+    // Return data to extend the context
+    return { user };
+  },
+});
+```
+
+### Using Middlewares
+
+#### Route-Specific Middlewares
+
+Apply middlewares to individual routes:
+
+```typescript
+api.defineRoute({
+  path: "/profile",
+  method: "GET",
+  middlewares: [authMiddleware] as const,
+  response: {
+    200: z.object({
+      id: z.string(),
+      name: z.string(),
+    }),
+  },
+  handler: async (c) => {
+    // Access middleware data via c.get()
+    const user = c.get("user");
+    
+    return c.json(200, {
+      id: user.id,
+      name: user.name,
+    });
+  },
+});
+```
+
+#### Global Middlewares
+
+Apply middlewares to all routes:
+
+```typescript
+// Logging middleware
+const loggingMiddleware = new Middleware({
+  handler: async (c) => {
+    const start = Date.now();
+    console.log(`${c.raw.method} ${c.raw.url}`);
+    
+    return {
+      requestStartTime: start,
+    };
+  },
+});
+
+// Apply globally
+api.use(loggingMiddleware);
+
+// Now all routes will have logging
+api.defineRoute({
+  path: "/users",
+  method: "GET",
+  response: {
+    200: z.array(UserSchema),
+  },
+  handler: async (c) => {
+    const startTime = c.get("requestStartTime");
+    const users = await getUsers();
+    
+    console.log(`Request took ${Date.now() - startTime}ms`);
+    return c.json(200, users);
+  },
+});
+```
+
+### Middleware Behavior
+
+#### Early Return
+
+Middlewares can return a `Response` to short-circuit the request:
+
+```typescript
+const rateLimitMiddleware = new Middleware({
+  response: {
+    429: z.object({ error: z.string() }),
+  },
+  handler: async (c) => {
+    const ip = c.raw.headers.get("x-forwarded-for");
+    
+    if (await isRateLimited(ip)) {
+      // Return Response - handler won't execute
+      return c.json(429, { error: "Too many requests" });
+    }
+    
+    // Return data - continue to next middleware/handler
+    return { ip };
+  },
+});
+```
+
+#### Multiple Middlewares
+
+Middlewares execute in order, accumulating context data:
+
+```typescript
+const requestIdMiddleware = new Middleware({
+  handler: async () => ({
+    requestId: crypto.randomUUID(),
+  }),
+});
+
+const authMiddleware = new Middleware({
+  handler: async () => ({
+    user: { id: "123", role: "admin" },
+  }),
+});
+
+api.defineRoute({
+  path: "/admin",
+  method: "POST",
+  middlewares: [requestIdMiddleware, authMiddleware] as const,
+  response: {
+    200: z.object({ message: z.string() }),
+  },
+  handler: async (c) => {
+    // Access data from both middlewares
+    const requestId = c.get("requestId");
+    const user = c.get("user");
+    
+    console.log(`Request ${requestId} by user ${user.id}`);
+    return c.json(200, { message: "Success" });
+  },
+});
+```
+
+### Combining Global and Route Middlewares
+
+Global middlewares run first, then route-specific middlewares:
+
+```typescript
+// Global: runs on all routes
+api.use(loggingMiddleware);
+
+// Route-specific: runs only on this route (after logging)
+api.defineRoute({
+  path: "/admin",
+  method: "GET",
+  middlewares: [authMiddleware, adminRoleMiddleware] as const,
+  response: {
+    200: z.object({ data: z.string() }),
+  },
+  handler: async (c) => {
+    // Has access to data from all three middlewares
+    const startTime = c.get("requestStartTime");
+    const user = c.get("user");
+    
+    return c.json(200, { data: "Admin data" });
+  },
+});
+```
+
+### Middleware Schemas
+
+Middlewares can define request and response schemas that merge with route schemas:
+
+```typescript
+const apiKeyMiddleware = new Middleware({
+  request: {
+    headers: z.object({
+      "x-api-key": z.string(),
+    }),
+  },
+  response: {
+    403: z.object({ error: z.string() }),
+  },
+  handler: async (c) => {
+    const apiKey = c.request.headers["x-api-key"];
+    
+    if (!isValidApiKey(apiKey)) {
+      return c.json(403, { error: "Invalid API key" });
+    }
+    
+    return { apiKeyValid: true };
+  },
+});
+
+// Route with additional headers
+api.defineRoute({
+  path: "/data",
+  method: "GET",
+  middlewares: [apiKeyMiddleware] as const,
+  request: {
+    headers: z.object({
+      "accept-language": z.string().optional(),
+    }),
+  },
+  response: {
+    200: z.object({ data: z.array(z.string()) }),
+  },
+  handler: async (c) => {
+    // Both x-api-key (from middleware) and accept-language (from route) are validated
+    const lang = c.request.headers["accept-language"];
+    
+    return c.json(200, { data: ["item1", "item2"] });
+  },
+});
+```
+
+### Parameterized Middlewares
+
+Create reusable middleware factories:
+
+```typescript
+const createRoleMiddleware = (requiredRole: string) => {
+  return new Middleware({
+    response: {
+      403: z.object({ error: z.string() }),
+    },
+    handler: async (c) => {
+      const user = c.get("user"); // From authMiddleware
+      
+      if (user.role !== requiredRole) {
+        return c.json(403, { error: "Forbidden" });
+      }
+      
+      return {};
+    },
+  });
+};
+
+// Use different roles for different routes
+api.defineRoute({
+  path: "/admin",
+  method: "GET",
+  middlewares: [authMiddleware, createRoleMiddleware("admin")] as const,
+  response: {
+    200: z.object({ message: z.string() }),
+  },
+  handler: async (c) => {
+    return c.json(200, { message: "Admin area" });
+  },
+});
+
+api.defineRoute({
+  path: "/moderator",
+  method: "GET",
+  middlewares: [authMiddleware, createRoleMiddleware("moderator")] as const,
+  response: {
+    200: z.object({ message: z.string() }),
+  },
+  handler: async (c) => {
+    return c.json(200, { message: "Moderator area" });
+  },
+});
+```
+
+### Common Middleware Patterns
+
+#### CORS Middleware
+
+```typescript
+const corsMiddleware = new Middleware({
+  handler: async (c) => {
+    // CORS would typically be handled at response time,
+    // but you can add headers here if needed
+    return { corsEnabled: true };
+  },
+});
+```
+
+#### Database Transaction Middleware
+
+```typescript
+const transactionMiddleware = new Middleware({
+  handler: async (c) => {
+    const tx = await db.beginTransaction();
+    
+    return { transaction: tx };
+  },
+});
+
+api.defineRoute({
+  path: "/transfer",
+  method: "POST",
+  middlewares: [transactionMiddleware] as const,
+  request: {
+    body: z.object({
+      from: z.string(),
+      to: z.string(),
+      amount: z.number(),
+    }),
+  },
+  response: {
+    200: z.object({ success: z.boolean() }),
+  },
+  handler: async (c) => {
+    const tx = c.get("transaction");
+    
+    try {
+      await debit(tx, c.request.body.from, c.request.body.amount);
+      await credit(tx, c.request.body.to, c.request.body.amount);
+      await tx.commit();
+      
+      return c.json(200, { success: true });
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
+  },
+});
+```
+
+#### Request Context Middleware
+
+```typescript
+const contextMiddleware = new Middleware({
+  handler: async (c) => {
+    return {
+      requestId: crypto.randomUUID(),
+      timestamp: Date.now(),
+      ip: c.raw.headers.get("x-forwarded-for") || "unknown",
+      userAgent: c.raw.headers.get("user-agent") || "unknown",
+    };
+  },
+});
+```
+
+### Type Safety
+
+Middleware data is fully typed. TypeScript infers the types from the data you return:
+
+```typescript
+const typedMiddleware = new Middleware({
+  handler: async (c) => {
+    return {
+      userId: "123",
+      isAdmin: true,
+      permissions: ["read", "write"],
+    };
+  },
+});
+
+api.defineRoute({
+  path: "/test",
+  method: "GET",
+  middlewares: [typedMiddleware] as const,
+  response: {
+    200: z.object({ ok: z.boolean() }),
+  },
+  handler: async (c) => {
+    // TypeScript infers these types automatically:
+    const userId = c.get("userId");       // string
+    const isAdmin = c.get("isAdmin");     // boolean
+    const permissions = c.get("permissions"); // string[]
+    
+    return c.json(200, { ok: true });
+  },
+});
+```

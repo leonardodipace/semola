@@ -50,7 +50,8 @@
     "@biomejs/biome": "2.3.10",
     "@standard-community/standard-openapi": "^0.2.8",
     "@standard-schema/spec": "^1.1.0",
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "zod": "^4.3.4"
   },
   "peerDependencies": {
     "typescript": "^5"

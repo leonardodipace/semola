@@ -32,7 +32,7 @@ export class RequestContext<
   private validateResponse: ValidateResponseFn;
   private handleError: HandleErrorFn;
 
-  constructor(
+  public constructor(
     request: Request,
     validatedData: ValidatedData<TRequest>,
     validateResponse: ValidateResponseFn,
