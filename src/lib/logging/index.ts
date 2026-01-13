@@ -1,14 +1,25 @@
-import { appendFileSync } from "node:fs";
+import { appendFileSync, statSync, existsSync } from "node:fs";
 import type { Formatter } from "./formatter.js";
-import { basename } from "node:path"
+import { basename, dirname, join } from "node:path"
 
 import {
+  FileProviderOptions,
   type LogDataType,
   LogLevel,
   type LogLevelType,
   type LogMessageType,
   type ProviderOptions,
 } from "./types.js";
+
+
+const PROVIDER_OPTION_DEFAULT: ProviderOptions = {
+  formatter: undefined,
+  level: LogLevel.Debug
+} as const
+
+const DEFAULT_MAX_SIZE: number = 4 * 1024 // 4KB
+
+
 
 class StackData {
   private stack: string = "";
@@ -109,7 +120,7 @@ export class Logger extends AbstractLogger {
 export abstract class LoggerProvider {
   protected options: ProviderOptions;
 
-  public constructor(options: ProviderOptions) {
+  public constructor(options: ProviderOptions = PROVIDER_OPTION_DEFAULT) {
     this.options = options;
   }
 
@@ -129,11 +140,18 @@ export abstract class LoggerProvider {
 }
 
 export class FileProvider extends LoggerProvider {
+  private readonly filePath: string;
+
+  private maxSize: number = DEFAULT_MAX_SIZE;
+  private counter: number;
   private file: string;
 
-  public constructor(file: string, options: ProviderOptions) {
-    super(options);
-    this.file = file;
+  public constructor(file: string, options?: FileProviderOptions) {
+    super({ formatter: options?.formatter, level: options?.level });
+
+    this.filePath = file;
+    this.counter = 0;
+    this.file = this.createNewFileName();
   }
 
   public execute(data: LogDataType): void {
@@ -144,12 +162,42 @@ export class FileProvider extends LoggerProvider {
     let { msg } = data;
     if (this.options.formatter) {
       msg = this.options.formatter.format(data);
-    } else if (typeof msg === "object") {
-      msg = JSON.stringify(msg);
+    } else if (this.isJSONFile()) {
+      msg = JSON.stringify({ message: msg });
     }
 
-    appendFileSync(this.file, `${msg}`);
-    appendFileSync(this.file, "\n");
+    if (this.getFileSize() <= this.maxSize) {
+      appendFileSync(this.file, `${msg}\n`);
+    } else {
+      this.counter += 1;
+      this.file = this.createNewFileName();
+    }
+  }
+
+  private getFileSize() {
+    if (!existsSync(this.file)) {
+      return 0;
+    }
+
+    const { size } = statSync(this.file);
+    return size;
+  }
+
+  private isJSONFile() {
+    const fileName = basename(this.filePath);
+    const fileObj = Bun.file(fileName);
+    const { type } = fileObj
+
+    return type.includes("application/json")
+  }
+
+  private createNewFileName() {
+    const fileName = basename(this.filePath);
+    const directory = dirname(this.filePath);
+    const fileInfo = fileName.split('.');
+    const newFileName = `${fileInfo[0]}.${this.counter}.${fileInfo[1]}`
+
+    return join(directory, newFileName);
   }
 }
 

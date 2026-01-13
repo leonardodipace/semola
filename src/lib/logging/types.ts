@@ -28,3 +28,16 @@ export type ProviderOptions = {
   level?: LogLevel;
   formatter?: Formatter;
 };
+
+export type SizeBasedPolicyType = {
+  maxSize?: number;
+}
+
+export type TimeBasedPolicyType = {
+  type: "hour" | "day" | "week" | "month";
+  instant: number;
+}
+
+export type FileProviderOptions = ProviderOptions & {
+  policy?: SizeBasedPolicyType | TimeBasedPolicyType
+}
