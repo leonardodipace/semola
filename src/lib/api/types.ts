@@ -24,7 +24,7 @@ export type InferInput<T extends StandardSchemaV1 | undefined> =
 
 export type ExtractStatusCodes<T extends ResponseSchema> = keyof T & number;
 
-export type Api2Options = {
+export type ApiOptions = {
   prefix?: string;
   openapi?: OpenApiOptions;
 };

@@ -1,5 +1,5 @@
 import type {
-  Api2Options,
+  ApiOptions,
   Context,
   InferInput,
   MethodRoutes,
@@ -9,11 +9,11 @@ import type {
 } from "./types.js";
 import { parseBody } from "./validator.js";
 
-export class Api2 {
-  private options: Api2Options;
+export class Api {
+  private options: ApiOptions;
   private routes: RouteConfig[] = [];
 
-  public constructor(options: Api2Options) {
+  public constructor(options: ApiOptions) {
     this.options = options;
   }
 
@@ -67,10 +67,7 @@ export class Api2 {
         const [error, validatedBody] = await parseBody(req, request?.body);
 
         if (error) {
-          return Response.json(
-            { message: error.message },
-            { status: 400 },
-          );
+          return Response.json({ message: error.message }, { status: 400 });
         }
 
         const ctx = this.createContext(req, validatedBody);
