@@ -16,9 +16,15 @@ export class Api2 {
 
   private getFullPath(path: string) {
     if (!this.options.prefix) return path;
-    if (path === "/") return this.options.prefix;
 
-    return this.options.prefix + path;
+    const fullPath = this.options.prefix + path;
+
+    // Remove trailing slash
+    if (fullPath.endsWith("/")) {
+      return fullPath.slice(0, -1);
+    }
+
+    return fullPath;
   }
 
   private createContext(request: Request) {
