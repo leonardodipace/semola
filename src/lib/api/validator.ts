@@ -66,3 +66,42 @@ export const validateQuery = async (
 
   return validateSchema(querySchema, queryParams);
 };
+
+export const validateHeaders = async (
+  req: Request,
+  headersSchema?: StandardSchemaV1,
+) => {
+  if (!headersSchema) {
+    return ok(undefined);
+  }
+
+  const headers: Record<string, string> = {};
+
+  req.headers.forEach((value, key) => {
+    headers[key.toLowerCase()] = value;
+  });
+
+  return validateSchema(headersSchema, headers);
+};
+
+export const validateCookies = async (
+  req: Request,
+  cookiesSchema?: StandardSchemaV1,
+) => {
+  if (!cookiesSchema) {
+    return ok(undefined);
+  }
+
+  const cookieHeader = req.headers.get("cookie") ?? "";
+  const cookies: Record<string, string> = {};
+
+  cookieHeader.split(";").forEach((cookie) => {
+    const [key, value] = cookie.trim().split("=");
+
+    if (key && value) {
+      cookies[key] = decodeURIComponent(value);
+    }
+  });
+
+  return validateSchema(cookiesSchema, cookies);
+};

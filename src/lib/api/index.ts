@@ -7,7 +7,12 @@ import type {
   ResponseSchema,
   RouteConfig,
 } from "./types.js";
-import { validateBody, validateQuery } from "./validator.js";
+import {
+  validateBody,
+  validateCookies,
+  validateHeaders,
+  validateQuery,
+} from "./validator.js";
 
 export class Api {
   private options: ApiOptions;
@@ -37,12 +42,16 @@ export class Api {
     request: Request;
     validatedBody: InferInput<TReq["body"]>;
     validatedQuery: InferInput<TReq["query"]>;
+    validatedHeaders: InferInput<TReq["headers"]>;
+    validatedCookies: InferInput<TReq["cookies"]>;
   }) {
     const ctx: Context<TReq, TRes> = {
       raw: params.request,
       req: {
         body: params.validatedBody,
         query: params.validatedQuery,
+        headers: params.validatedHeaders,
+        cookies: params.validatedCookies,
       },
       json: (status, data) => {
         return Response.json(data, { status });
@@ -83,10 +92,36 @@ export class Api {
           return Response.json({ message: queryErr.message }, { status: 400 });
         }
 
+        const [headersErr, validatedHeaders] = await validateHeaders(
+          req,
+          request?.headers,
+        );
+
+        if (headersErr) {
+          return Response.json(
+            { message: headersErr.message },
+            { status: 400 },
+          );
+        }
+
+        const [cookiesErr, validatedCookies] = await validateCookies(
+          req,
+          request?.cookies,
+        );
+
+        if (cookiesErr) {
+          return Response.json(
+            { message: cookiesErr.message },
+            { status: 400 },
+          );
+        }
+
         const ctx = this.createContext({
           request: req,
           validatedBody,
           validatedQuery,
+          validatedHeaders,
+          validatedCookies,
         });
 
         return handler(ctx);

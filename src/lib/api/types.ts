@@ -11,6 +11,8 @@ export type ResponseSchema = {
 export type RequestSchema = {
   body?: StandardSchemaV1;
   query?: StandardSchemaV1;
+  headers?: StandardSchemaV1;
+  cookies?: StandardSchemaV1;
 };
 
 export type InferOutput<T extends StandardSchemaV1 | undefined> =
@@ -44,6 +46,8 @@ export type Context<
   req: {
     body: InferInput<TRequest["body"]>;
     query: InferInput<TRequest["query"]>;
+    headers: InferInput<TRequest["headers"]>;
+    cookies: InferInput<TRequest["cookies"]>;
   };
   json: <S extends ExtractStatusCodes<TResponse>>(
     status: S,
