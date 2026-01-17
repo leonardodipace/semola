@@ -10,16 +10,24 @@ export type OpenApiOptions = {
 };
 
 type HTTPMethod = Bun.Serve.HTTPMethod;
-type Handler = Bun.Serve.Handler<Request, Bun.Server<unknown>, Response>;
+type BunHandler = Bun.Serve.Handler<Request, Bun.Server<unknown>, Response>;
 
-export type MethodRoutes = Record<string, Partial<Record<HTTPMethod, Handler>>>;
+export type Context = {
+  raw: Request;
+  json: (status: number, data: unknown) => Response;
+  text: (status: number, text: string) => Response;
+};
+
+export type RouteHandler = (c: Context) => Response | Promise<Response>;
+
+export type MethodRoutes = Record<string, Partial<Record<HTTPMethod, BunHandler>>>;
 
 export type RouteConfig = {
   path: string;
   method: Bun.Serve.HTTPMethod;
   request: unknown;
   response: unknown;
-  handler: Handler;
+  handler: RouteHandler;
   summary?: string;
   description?: string;
   operationId?: string;

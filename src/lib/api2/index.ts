@@ -1,4 +1,9 @@
-import type { Api2Options, MethodRoutes, RouteConfig } from "./types.js";
+import type {
+  Api2Options,
+  Context,
+  MethodRoutes,
+  RouteConfig,
+} from "./types.js";
 
 export class Api2 {
   private options: Api2Options;
@@ -14,6 +19,16 @@ export class Api2 {
     return this.options.prefix + path;
   }
 
+  private createContext(request: Request) {
+    const c: Context = {
+      raw: request,
+      json: (status, data) => Response.json(data, { status }),
+      text: (status, text) => new Response(text, { status }),
+    };
+
+    return c;
+  }
+
   private buildBunRoutes() {
     const bunRoutes: MethodRoutes = {};
 
@@ -26,7 +41,10 @@ export class Api2 {
         bunRoutes[fullPath] = {};
       }
 
-      bunRoutes[fullPath][method] = handler;
+      bunRoutes[fullPath][method] = (request) => {
+        const c = this.createContext(request);
+        return handler(c);
+      };
     }
 
     return bunRoutes;
