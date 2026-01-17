@@ -1,6 +1,4 @@
-import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { validateSchema } from "../api/validator.js";
-import { mightThrow, ok } from "../errors/index.js";
 import type {
   Api2Options,
   Context,
@@ -10,6 +8,7 @@ import type {
   ResponseSchema,
   RouteConfig,
 } from "./types.js";
+import { parseBody } from "./validator.js";
 
 export class Api2 {
   private options: Api2Options;
@@ -52,29 +51,6 @@ export class Api2 {
     return ctx;
   }
 
-  private async parseBody(req: Request, bodySchema?: StandardSchemaV1) {
-    if (!bodySchema) {
-      return ok(undefined);
-    }
-
-    const contentType = req.headers.get("content-type") ?? "";
-
-    if (!contentType.includes("application/json")) {
-      return ok(undefined);
-    }
-
-    const [parseError, parsedBody] = await mightThrow(req.json());
-
-    if (parseError) {
-      return [
-        Response.json({ message: "Invalid JSON body" }, { status: 400 }),
-        null,
-      ] as const;
-    }
-
-    return ok(parsedBody);
-  }
-
   private buildBunRoutes() {
     const bunRoutes: MethodRoutes = {};
 
@@ -89,9 +65,14 @@ export class Api2 {
 
       bunRoutes[fullPath][method] = async (req) => {
         // Parse body if schema is defined
-        const [bodyError, body] = await this.parseBody(req, request?.body);
+        const [parseError, body] = await parseBody(req, request?.body);
 
-        if (bodyError) return bodyError;
+        if (parseError) {
+          return Response.json(
+            { message: parseError.message },
+            { status: 400 },
+          );
+        }
 
         if (!request?.body) {
           const ctx = this.createContext(req, undefined);
