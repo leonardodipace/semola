@@ -63,6 +63,7 @@ export class Api2 {
     return Bun.serve({
       port,
       routes: bunRoutes,
+      fetch: () => new Response("Not found", { status: 404 }),
     });
   }
 }
