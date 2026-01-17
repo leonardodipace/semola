@@ -23,10 +23,6 @@
     "./api": {
       "import": "./dist/lib/api/index.js",
       "types": "./dist/lib/api/index.d.ts"
-    },
-    "./api2": {
-      "import": "./dist/lib/api2/index.js",
-      "types": "./dist/lib/api2/index.d.ts"
     }
   },
   "files": [
