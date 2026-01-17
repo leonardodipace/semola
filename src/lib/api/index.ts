@@ -7,7 +7,7 @@ import type {
   ResponseSchema,
   RouteConfig,
 } from "./types.js";
-import { parseBody } from "./validator.js";
+import { validateBody } from "./validator.js";
 
 export class Api {
   private options: ApiOptions;
@@ -63,11 +63,10 @@ export class Api {
       }
 
       bunRoutes[fullPath][method] = async (req) => {
-        // Parse and validate body if schema is defined
-        const [error, validatedBody] = await parseBody(req, request?.body);
+        const [bodyErr, validatedBody] = await validateBody(req, request?.body);
 
-        if (error) {
-          return Response.json({ message: error.message }, { status: 400 });
+        if (bodyErr) {
+          return Response.json({ message: bodyErr.message }, { status: 400 });
         }
 
         const ctx = this.createContext(req, validatedBody);

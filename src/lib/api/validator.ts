@@ -26,7 +26,7 @@ export const validateSchema = async <T>(
   return err("ValidationError", message);
 };
 
-export const parseBody = async (
+export const validateBody = async (
   req: Request,
   bodySchema?: StandardSchemaV1,
 ) => {
