@@ -93,27 +93,28 @@ export class Api2 {
 
         if (bodyError) return bodyError;
 
-        // Validate body if schema is defined
-        if (request?.body) {
-          const [validationError, validatedBody] = await validateSchema(
-            request.body,
-            body,
-          );
+        if (!request?.body) {
+          const ctx = this.createContext(req, undefined);
 
-          if (validationError) {
-            return Response.json(
-              { message: validationError.message },
-              { status: 400 },
-            );
-          }
-
-          const c = this.createContext(req, validatedBody);
-          return handler(c);
+          return handler(ctx);
         }
 
-        // No body schema - pass undefined
-        const c = this.createContext(req, undefined);
-        return handler(c);
+        // Validate body if schema is defined
+        const [validationError, validatedBody] = await validateSchema(
+          request.body,
+          body,
+        );
+
+        if (validationError) {
+          return Response.json(
+            { message: validationError.message },
+            { status: 400 },
+          );
+        }
+
+        const ctx = this.createContext(req, validatedBody);
+
+        return handler(ctx);
       };
     }
 
