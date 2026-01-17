@@ -7,7 +7,7 @@ import type {
   ResponseSchema,
   RouteConfig,
 } from "./types.js";
-import { validateBody } from "./validator.js";
+import { validateBody, validateQuery } from "./validator.js";
 
 export class Api {
   private options: ApiOptions;
@@ -33,11 +33,16 @@ export class Api {
   private createContext<
     TReq extends RequestSchema,
     TRes extends ResponseSchema,
-  >(request: Request, validatedBody: InferInput<TReq["body"]>) {
+  >(params: {
+    request: Request;
+    validatedBody: InferInput<TReq["body"]>;
+    validatedQuery: InferInput<TReq["query"]>;
+  }) {
     const ctx: Context<TReq, TRes> = {
-      raw: request,
+      raw: params.request,
       req: {
-        body: validatedBody,
+        body: params.validatedBody,
+        query: params.validatedQuery,
       },
       json: (status, data) => {
         return Response.json(data, { status });
@@ -69,7 +74,20 @@ export class Api {
           return Response.json({ message: bodyErr.message }, { status: 400 });
         }
 
-        const ctx = this.createContext(req, validatedBody);
+        const [queryErr, validatedQuery] = await validateQuery(
+          req,
+          request?.query,
+        );
+
+        if (queryErr) {
+          return Response.json({ message: queryErr.message }, { status: 400 });
+        }
+
+        const ctx = this.createContext({
+          request: req,
+          validatedBody,
+          validatedQuery,
+        });
 
         return handler(ctx);
       };

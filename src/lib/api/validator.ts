@@ -49,3 +49,21 @@ export const validateBody = async (
   // Validate the parsed body
   return validateSchema(bodySchema, parsedBody);
 };
+
+export const validateQuery = async (
+  req: Request,
+  querySchema?: StandardSchemaV1,
+) => {
+  if (!querySchema) {
+    return ok(undefined);
+  }
+
+  const url = new URL(req.url);
+  const queryParams: Record<string, string[]> = {};
+
+  for (const key of url.searchParams.keys()) {
+    queryParams[key] = url.searchParams.getAll(key);
+  }
+
+  return validateSchema(querySchema, queryParams);
+};

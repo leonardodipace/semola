@@ -10,6 +10,7 @@ export type ResponseSchema = {
 
 export type RequestSchema = {
   body?: StandardSchemaV1;
+  query?: StandardSchemaV1;
 };
 
 export type InferOutput<T extends StandardSchemaV1 | undefined> =
@@ -42,6 +43,7 @@ export type Context<
   raw: Request;
   req: {
     body: InferInput<TRequest["body"]>;
+    query: InferInput<TRequest["query"]>;
   };
   json: <S extends ExtractStatusCodes<TResponse>>(
     status: S,
