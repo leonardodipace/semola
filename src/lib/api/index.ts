@@ -77,25 +77,27 @@ export class Api {
       }
 
       bunRoutes[fullPath][method] = async (req) => {
-        const [bodyErr, validatedBody] = await validateBody(req, request?.body);
+        // Run all validations in parallel
+        const [
+          [bodyErr, validatedBody],
+          [queryErr, validatedQuery],
+          [headersErr, validatedHeaders],
+          [cookiesErr, validatedCookies],
+        ] = await Promise.all([
+          validateBody(req, request?.body),
+          validateQuery(req, request?.query),
+          validateHeaders(req, request?.headers),
+          validateCookies(req, request?.cookies),
+        ]);
 
+        // Check for errors in order
         if (bodyErr) {
           return Response.json({ message: bodyErr.message }, { status: 400 });
         }
 
-        const [queryErr, validatedQuery] = await validateQuery(
-          req,
-          request?.query,
-        );
-
         if (queryErr) {
           return Response.json({ message: queryErr.message }, { status: 400 });
         }
-
-        const [headersErr, validatedHeaders] = await validateHeaders(
-          req,
-          request?.headers,
-        );
 
         if (headersErr) {
           return Response.json(
@@ -103,11 +105,6 @@ export class Api {
             { status: 400 },
           );
         }
-
-        const [cookiesErr, validatedCookies] = await validateCookies(
-          req,
-          request?.cookies,
-        );
 
         if (cookiesErr) {
           return Response.json(

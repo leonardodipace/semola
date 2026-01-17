@@ -93,15 +93,12 @@ export const validateCookies = async (
   }
 
   const cookieHeader = req.headers.get("cookie") ?? "";
+  const cookieMap = new Bun.CookieMap(cookieHeader);
+
   const cookies: Record<string, string> = {};
-
-  cookieHeader.split(";").forEach((cookie) => {
-    const [key, value] = cookie.trim().split("=");
-
-    if (key && value) {
-      cookies[key] = decodeURIComponent(value);
-    }
-  });
+  for (const [name, value] of cookieMap) {
+    cookies[name] = value;
+  }
 
   return validateSchema(cookiesSchema, cookies);
 };
