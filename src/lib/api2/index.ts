@@ -2,6 +2,7 @@ import type {
   Api2Options,
   Context,
   MethodRoutes,
+  ResponseSchema,
   RouteConfig,
 } from "./types.js";
 
@@ -50,7 +51,9 @@ export class Api2 {
     return bunRoutes;
   }
 
-  public defineRoute(config: RouteConfig) {
+  public defineRoute<TResponse extends ResponseSchema>(
+    config: RouteConfig<TResponse>,
+  ) {
     this.routes.push(config);
   }
 
