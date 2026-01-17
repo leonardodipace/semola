@@ -44,6 +44,7 @@ export class Api2 {
 
       bunRoutes[fullPath][method] = (request) => {
         const c = this.createContext(request);
+
         return handler(c);
       };
     }
@@ -51,9 +52,7 @@ export class Api2 {
     return bunRoutes;
   }
 
-  public defineRoute<TResponse extends ResponseSchema>(
-    config: RouteConfig<TResponse>,
-  ) {
+  public defineRoute<T extends ResponseSchema>(config: RouteConfig<T>) {
     this.routes.push(config);
   }
 
