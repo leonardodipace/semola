@@ -46,7 +46,6 @@ export const validateBody = async (
     return err("ParseError", "Invalid JSON body");
   }
 
-  // Validate the parsed body
   return validateSchema(bodySchema, parsedBody);
 };
 
