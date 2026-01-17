@@ -94,11 +94,7 @@ export const validateCookies = async (
 
   const cookieHeader = req.headers.get("cookie") ?? "";
   const cookieMap = new Bun.CookieMap(cookieHeader);
-
-  const cookies: Record<string, string> = {};
-  for (const [name, value] of cookieMap) {
-    cookies[name] = value;
-  }
+  const cookies = Object.fromEntries(cookieMap);
 
   return validateSchema(cookiesSchema, cookies);
 };
