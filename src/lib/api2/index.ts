@@ -16,6 +16,7 @@ export class Api2 {
 
   private getFullPath(path: string) {
     if (!this.options.prefix) return path;
+    if (path === "/") return this.options.prefix;
 
     return this.options.prefix + path;
   }
