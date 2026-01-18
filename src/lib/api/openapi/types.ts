@@ -1,3 +1,7 @@
+// OpenAPI v3.1 compatible types
+// We define our own types because the standard openapi-types package
+// has strict type checking that's incompatible with dynamic schema generation
+
 export type OpenApiSpec = {
   openapi: string;
   info: {
@@ -32,7 +36,7 @@ export type OpenApiParameter = {
   name: string;
   in: "path" | "query" | "header" | "cookie";
   required?: boolean;
-  schema: unknown;
+  schema: unknown; // Flexible to accept any schema from converters
   description?: string;
 };
 
@@ -40,7 +44,7 @@ export type OpenApiRequestBody = {
   required?: boolean;
   content: {
     [mediaType: string]: {
-      schema: unknown;
+      schema: unknown; // Flexible to accept any schema from converters
     };
   };
 };
@@ -49,7 +53,7 @@ export type OpenApiResponse = {
   description: string;
   content?: {
     [mediaType: string]: {
-      schema: unknown;
+      schema: unknown; // Flexible to accept any schema from converters
     };
   };
 };

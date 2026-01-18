@@ -109,11 +109,7 @@ const extractParametersFromSchema = async (
   schema: StandardSchemaV1,
   location: "query" | "header" | "cookie",
 ) => {
-  const jsonSchema = (await convertSchemaToOpenApi(schema)) as {
-    type?: string;
-    properties?: Record<string, unknown>;
-    required?: string[];
-  };
+  const { schema: jsonSchema } = await convertSchemaToOpenApi(schema);
 
   if (jsonSchema.type !== "object") {
     return [];
@@ -139,6 +135,11 @@ const extractParametersFromSchema = async (
   }
 
   return parameters;
+};
+
+const normalizePathForOpenAPI = (path: string) => {
+  // Convert Bun-style path parameters (:param) to OpenAPI syntax ({param})
+  return path.replace(/:([a-zA-Z_][a-zA-Z0-9_]*)/g, "{$1}");
 };
 
 const extractPathParameters = (path: string) => {
@@ -185,10 +186,7 @@ const createParameters = async (request: RequestSchema, path: string) => {
       return parameters;
     }
 
-    const jsonSchema = (await convertSchemaToOpenApi(request.params)) as {
-      type?: string;
-      properties?: Record<string, unknown>;
-    };
+    const { schema: jsonSchema } = await convertSchemaToOpenApi(request.params);
 
     if (jsonSchema.type === "object" && jsonSchema.properties) {
       for (const name of pathParamNames) {
@@ -210,7 +208,7 @@ const createParameters = async (request: RequestSchema, path: string) => {
 };
 
 const createRequestBody = async (bodySchema: StandardSchemaV1) => {
-  const schema = await convertSchemaToOpenApi(bodySchema);
+  const { schema } = await convertSchemaToOpenApi(bodySchema);
 
   return {
     required: true,
@@ -234,12 +232,14 @@ const createResponses = async (response: ResponseSchema) => {
     }
 
     const description = getSchemaDescription(schema);
-    const jsonSchema = await convertSchemaToOpenApi(schema);
+    const { schema: jsonSchema } = await convertSchemaToOpenApi(schema);
 
     responses[statusCode] = {
       description: description || `Response with status ${statusCode}`,
       content: {
-        "application/json": jsonSchema,
+        "application/json": {
+          schema: jsonSchema,
+        },
       },
     };
   }
@@ -332,10 +332,11 @@ export const generateOpenApiSpec = async (options: OpenApiGeneratorOptions) => {
 
   for (const route of options.routes) {
     const fullPath = options.prefix ? options.prefix + route.path : route.path;
+    const openApiPath = normalizePathForOpenAPI(fullPath);
     const method = route.method.toLowerCase();
 
-    if (!spec.paths[fullPath]) {
-      spec.paths[fullPath] = {};
+    if (!spec.paths[openApiPath]) {
+      spec.paths[openApiPath] = {};
     }
 
     const operation = await createOperation(
@@ -344,7 +345,7 @@ export const generateOpenApiSpec = async (options: OpenApiGeneratorOptions) => {
       options.prefix,
     );
 
-    spec.paths[fullPath][method] = operation;
+    spec.paths[openApiPath][method] = operation;
   }
 
   return spec;

@@ -2,6 +2,15 @@
 
 A lightweight, type-safe REST API framework built on Bun's native routing with automatic validation and OpenAPI spec generation.
 
+## Requirements
+
+**Bun Runtime Required:** This API framework is built specifically for the Bun runtime and uses Bun-native APIs including `Bun.serve()`, `Bun.CookieMap`, and optimized routing. You must have Bun installed to use this framework.
+
+Install Bun:
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
 ## Import
 
 ```typescript
@@ -446,7 +455,13 @@ api.defineRoute({
 
 ### Middleware Schemas
 
-Middlewares can define request and response schemas that merge with route schemas:
+Middlewares can define request and response schemas that merge with route schemas.
+
+**Schema Merging Behavior:**
+- Middleware schemas and route schemas are merged using a "last-write-wins" strategy
+- When both a middleware and a route define schemas for the same property (e.g., `body`, `query`, `headers`), the route's schema takes precedence and completely replaces the middleware's schema for that property
+- This design allows routes to have the final say over validation while still benefiting from middleware schema definitions
+- Different properties (body vs. query vs. headers) from different middlewares and routes are combined independently
 
 ```typescript
 const apiKeyMiddleware = new Middleware({

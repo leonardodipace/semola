@@ -32,12 +32,27 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
   }
 
   private getFullPath(path: string) {
-    if (!this.options.prefix) return path;
+    // Normalize path by removing trailing slashes
+    const isRoot = path === "/";
+    const isTrailingSlash = path.endsWith("/");
 
-    const fullPath = this.options.prefix + path;
+    const normalizedPath =
+      isTrailingSlash && !isRoot
+        ? path.slice(0, -1) // Remove trailing slash
+        : path;
 
-    // Remove trailing slash
-    if (fullPath.endsWith("/")) {
+    if (!this.options.prefix) {
+      return normalizedPath;
+    }
+
+    const normalizedPrefix = this.options.prefix.endsWith("/")
+      ? this.options.prefix.slice(0, -1) // Remove trailing slash
+      : this.options.prefix;
+
+    const fullPath = normalizedPrefix + normalizedPath;
+
+    // Remove trailing slash from final path
+    if (fullPath.endsWith("/") && fullPath !== "/") {
       return fullPath.slice(0, -1);
     }
 
@@ -116,6 +131,10 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
       }
 
       bunRoutes[fullPath][method] = async (req: Bun.BunRequest) => {
+        // Clone the request once for validation
+        // This allows body to be read multiple times without consuming the original
+        const clonedReq = req.clone();
+
         // Run middlewares
         const extensions: Record<string, unknown> = {};
         const allMiddlewares = [
@@ -126,7 +145,10 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
         for (const mw of allMiddlewares) {
           const { request: reqSchema, handler: mwHandler } = mw.options;
 
-          const [error, validated] = await this.validateRequest(req, reqSchema);
+          const [error, validated] = await this.validateRequest(
+            clonedReq,
+            reqSchema,
+          );
 
           if (error) {
             return Response.json({ message: error.message }, { status: 400 });
@@ -142,7 +164,9 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
             text: (status: number, text: string) =>
               new Response(text, { status }),
             get: () => {
-              throw new Error("get() not available in middleware");
+              // Return undefined in middleware - extensions aren't available yet
+              // Middleware should return data directly to extend the context
+              return undefined;
             },
           });
 
@@ -156,7 +180,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
         }
 
         const [routeError, routeValidated] = await this.validateRequest(
-          req,
+          clonedReq,
           request,
         );
 

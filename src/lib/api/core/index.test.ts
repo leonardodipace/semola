@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import { describe, expect, test } from "bun:test";
 import { Middleware } from "../middleware/index.js";
 import { Api } from "./index.js";
 
@@ -223,12 +223,12 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3001, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
       const response = await fetch(
-        "http://localhost:3001/users?page=1&limit=10",
+        `http://localhost:${server.port}/users?page=1&limit=10`,
       );
       const data = await response.json();
 
@@ -258,11 +258,11 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3002, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3002/users", {
+      const response = await fetch(`http://localhost:${server.port}/users`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: "John", email: "john@example.com" }),
@@ -292,11 +292,11 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3003, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3003/users", {
+      const response = await fetch(`http://localhost:${server.port}/users`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
@@ -321,11 +321,13 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3004, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3004/api/v1/users");
+      const response = await fetch(
+        `http://localhost:${server.port}/api/v1/users`,
+      );
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -346,11 +348,13 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3005, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3005/api/v1/users");
+      const response = await fetch(
+        `http://localhost:${server.port}/api/v1/users`,
+      );
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -371,11 +375,11 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3006, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3006/health");
+      const response = await fetch(`http://localhost:${server.port}/health`);
       const text = await response.text();
 
       expect(response.status).toBe(200);
@@ -401,13 +405,16 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3007, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3007/protected", {
-        headers: { authorization: "Bearer token123" },
-      });
+      const response = await fetch(
+        `http://localhost:${server.port}/protected`,
+        {
+          headers: { authorization: "Bearer token123" },
+        },
+      );
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -431,11 +438,11 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3008, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3008/profile", {
+      const response = await fetch(`http://localhost:${server.port}/profile`, {
         headers: { cookie: "session=abc123" },
       });
       const data = await response.json();
@@ -458,11 +465,11 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3009, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3009/posts");
+      const response = await fetch(`http://localhost:${server.port}/posts`);
       const text = await response.text();
 
       expect(response.status).toBe(404);
@@ -494,11 +501,11 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3010, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3010/profile");
+      const response = await fetch(`http://localhost:${server.port}/profile`);
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -527,11 +534,11 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3011, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3011/admin");
+      const response = await fetch(`http://localhost:${server.port}/admin`);
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -570,11 +577,11 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3012, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3012/test");
+      const response = await fetch(`http://localhost:${server.port}/test`);
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -600,11 +607,11 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3013, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3013/protected");
+      const response = await fetch(`http://localhost:${server.port}/protected`);
       const data = await response.json();
 
       expect(response.status).toBe(401);
@@ -638,11 +645,11 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3014, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3014/protected");
+      const response = await fetch(`http://localhost:${server.port}/protected`);
       const data = await response.json();
 
       expect(response.status).toBe(400);
@@ -690,11 +697,11 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3015, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3015/test");
+      const response = await fetch(`http://localhost:${server.port}/test`);
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -730,13 +737,16 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3016, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3016/protected", {
-        headers: { authorization: "Bearer token" },
-      });
+      const response = await fetch(
+        `http://localhost:${server.port}/protected`,
+        {
+          headers: { authorization: "Bearer token" },
+        },
+      );
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -761,11 +771,11 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3017, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3017/raw");
+      const response = await fetch(`http://localhost:${server.port}/raw`);
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -794,11 +804,11 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3018, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3018/users", {
+      const response = await fetch(`http://localhost:${server.port}/users`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: "John", age: 30 }),
@@ -838,17 +848,21 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3019, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response1 = await fetch("http://localhost:3019/users/success");
+      const response1 = await fetch(
+        `http://localhost:${server.port}/users/success`,
+      );
       const data1 = await response1.json();
 
       expect(response1.status).toBe(200);
       expect(data1).toEqual({ id: "1", name: "John" });
 
-      const response2 = await fetch("http://localhost:3019/users/notfound");
+      const response2 = await fetch(
+        `http://localhost:${server.port}/users/notfound`,
+      );
       const data2 = await response2.json();
 
       expect(response2.status).toBe(404);
@@ -871,11 +885,11 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3020, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3020/simple");
+      const response = await fetch(`http://localhost:${server.port}/simple`);
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -896,11 +910,11 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3021, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3021/users");
+      const response = await fetch(`http://localhost:${server.port}/users`);
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -926,11 +940,11 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3022, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3022/test");
+      const response = await fetch(`http://localhost:${server.port}/test`);
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -956,11 +970,11 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3023, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3023/users/123");
+      const response = await fetch(`http://localhost:${server.port}/users/123`);
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -986,11 +1000,13 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3024, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
-      const response = await fetch("http://localhost:3024/users/invalid");
+      const response = await fetch(
+        `http://localhost:${server.port}/users/invalid`,
+      );
       const data: unknown = await response.json();
 
       expect(response.status).toBe(400);
@@ -1027,12 +1043,12 @@ describe("Api Core", () => {
 
       let server: any = null;
 
-      api.serve(3025, (s) => {
+      api.serve(0, (s) => {
         server = s;
       });
 
       const response = await fetch(
-        "http://localhost:3025/users/user1/posts/post1",
+        `http://localhost:${server.port}/users/user1/posts/post1`,
       );
       const data = await response.json();
 
