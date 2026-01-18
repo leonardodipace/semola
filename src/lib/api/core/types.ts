@@ -4,7 +4,11 @@ import type { MergeMiddlewareExtensions } from "../middleware/types.js";
 
 type HTTPMethod = Bun.Serve.HTTPMethod;
 
-type BunHandler = Bun.Serve.Handler<Request, Bun.Server<unknown>, Response>;
+type BunHandler = Bun.Serve.Handler<
+  Bun.BunRequest,
+  Bun.Server<unknown>,
+  Response
+>;
 
 export type ResponseSchema = {
   [status: number]: StandardSchemaV1;
@@ -101,6 +105,7 @@ export type Context<
     query: InferInput<TReq["query"]>;
     headers: InferInput<TReq["headers"]>;
     cookies: InferInput<TReq["cookies"]>;
+    params: InferInput<TReq["params"]>;
   };
   json: <S extends ExtractStatusCodes<TRes>>(
     status: S,

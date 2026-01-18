@@ -105,3 +105,14 @@ export const validateCookies = async (
 
   return validateSchema(cookiesSchema, cookies);
 };
+
+export const validateParams = async (
+  req: Bun.BunRequest,
+  paramsSchema?: StandardSchemaV1,
+) => {
+  if (!paramsSchema) {
+    return ok(undefined);
+  }
+
+  return validateSchema(paramsSchema, req.params);
+};

@@ -5,6 +5,7 @@ import {
   validateBody,
   validateCookies,
   validateHeaders,
+  validateParams,
   validateQuery,
 } from "../validation/index.js";
 import type {
@@ -43,26 +44,28 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     return fullPath;
   }
 
-  private async validateRequest(req: Request, schema?: RequestSchema) {
+  private async validateRequest(req: Bun.BunRequest, schema?: RequestSchema) {
     const [
       [bodyErr, body],
       [queryErr, query],
       [headersErr, headers],
       [cookiesErr, cookies],
+      [paramsErr, params],
     ] = await Promise.all([
       validateBody(req, schema?.body),
       validateQuery(req, schema?.query),
       validateHeaders(req, schema?.headers),
       validateCookies(req, schema?.cookies),
+      validateParams(req, schema?.params),
     ]);
 
-    const error = bodyErr || queryErr || headersErr || cookiesErr;
+    const error = bodyErr || queryErr || headersErr || cookiesErr || paramsErr;
 
     if (error) {
       return err(error.type, error.message);
     }
 
-    return ok({ body, query, headers, cookies });
+    return ok({ body, query, headers, cookies, params });
   }
 
   private createContext<
@@ -75,6 +78,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     validatedQuery: InferInput<TReq["query"]>;
     validatedHeaders: InferInput<TReq["headers"]>;
     validatedCookies: InferInput<TReq["cookies"]>;
+    validatedParams: InferInput<TReq["params"]>;
     extensions: Record<string, unknown>;
   }) {
     const ctx: Context<TReq, TRes, TExt> = {
@@ -84,6 +88,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
         query: params.validatedQuery,
         headers: params.validatedHeaders,
         cookies: params.validatedCookies,
+        params: params.validatedParams,
       },
       json: (status, data) => {
         return Response.json(data, { status });
@@ -110,7 +115,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
         bunRoutes[fullPath] = {};
       }
 
-      bunRoutes[fullPath][method] = async (req) => {
+      bunRoutes[fullPath][method] = async (req: Bun.BunRequest) => {
         // Run middlewares
         const extensions: Record<string, unknown> = {};
         const allMiddlewares = [
@@ -127,11 +132,11 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
             return Response.json({ message: error.message }, { status: 400 });
           }
 
-          const { body, query, headers, cookies } = validated;
+          const { body, query, headers, cookies, params } = validated;
 
           const result = await mwHandler({
             raw: req,
-            req: { body, query, headers, cookies },
+            req: { body, query, headers, cookies, params },
             json: (status: number, data: unknown) =>
               Response.json(data, { status }),
             text: (status: number, text: string) =>
@@ -167,6 +172,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
           query: validatedQuery,
           headers: validatedHeaders,
           cookies: validatedCookies,
+          params: validatedParams,
         } = routeValidated;
 
         const ctx = this.createContext({
@@ -175,6 +181,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
           validatedQuery,
           validatedHeaders,
           validatedCookies,
+          validatedParams,
           extensions,
         }) as Parameters<typeof handler>[0];
 

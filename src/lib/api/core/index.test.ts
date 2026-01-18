@@ -1,16 +1,38 @@
-import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { describe, expect, test } from "bun:test";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { Middleware } from "../middleware/index.js";
 import { Api } from "./index.js";
 
 // Helper to create a mock schema that succeeds
-const createSuccessSchema = <T>(value: T): StandardSchemaV1 => ({
+const createSuccessSchema = <T>(
+  value: T,
+): StandardSchemaV1 & {
   "~standard": {
-    version: 1,
-    vendor: "mock",
-    validate: async () => ({ value }),
-  },
-});
+    types: {
+      input: T;
+      output: T;
+    };
+  };
+} => {
+  return {
+    "~standard": {
+      version: 1,
+      vendor: "mock",
+      validate: async () => ({ value }),
+      types: {
+        input: value as T,
+        output: value as T,
+      },
+    },
+  } satisfies StandardSchemaV1 & {
+    "~standard": {
+      types: {
+        input: T;
+        output: T;
+      };
+    };
+  };
+};
 
 // Helper to create a mock schema that fails
 const createFailSchema = (
@@ -913,6 +935,109 @@ describe("Api Core", () => {
 
       expect(response.status).toBe(200);
       expect(data).toEqual({ message: "ok" });
+
+      server?.stop();
+    });
+
+    test("should handle path parameters", async () => {
+      const api = new Api({});
+
+      api.defineRoute({
+        path: "/users/:userId",
+        method: "GET",
+        request: {
+          params: createSuccessSchema({ userId: "123" }),
+        },
+        response: { 200: createSuccessSchema({ id: "123", name: "John" }) },
+        handler: (c) => {
+          return c.json(200, { id: c.req.params.userId, name: "John" });
+        },
+      });
+
+      let server: any = null;
+
+      api.serve(3023, (s) => {
+        server = s;
+      });
+
+      const response = await fetch("http://localhost:3023/users/123");
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data).toEqual({ id: "123", name: "John" });
+
+      server?.stop();
+    });
+
+    test("should validate path parameters", async () => {
+      const api = new Api({});
+
+      api.defineRoute({
+        path: "/users/:userId",
+        method: "GET",
+        request: {
+          params: createFailSchema([
+            { path: ["userId"], message: "must be a valid UUID" },
+          ]),
+        },
+        response: { 200: createSuccessSchema({ id: "123" }) },
+        handler: (c) => c.json(200, { id: "123" }),
+      });
+
+      let server: any = null;
+
+      api.serve(3024, (s) => {
+        server = s;
+      });
+
+      const response = await fetch("http://localhost:3024/users/invalid");
+      const data: unknown = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(
+        typeof data === "object" &&
+          data !== null &&
+          "message" in data &&
+          typeof data.message === "string" &&
+          data.message,
+      ).toContain("must be a valid UUID");
+
+      server?.stop();
+    });
+
+    test("should handle multiple path parameters", async () => {
+      const api = new Api({});
+
+      api.defineRoute({
+        path: "/users/:userId/posts/:postId",
+        method: "GET",
+        request: {
+          params: createSuccessSchema({ userId: "user1", postId: "post1" }),
+        },
+        response: {
+          200: createSuccessSchema({ userId: "user1", postId: "post1" }),
+        },
+        handler: (c) => {
+          return c.json(200, {
+            userId: c.req.params.userId,
+            postId: c.req.params.postId,
+          });
+        },
+      });
+
+      let server: any = null;
+
+      api.serve(3025, (s) => {
+        server = s;
+      });
+
+      const response = await fetch(
+        "http://localhost:3025/users/user1/posts/post1",
+      );
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data).toEqual({ userId: "user1", postId: "post1" });
 
       server?.stop();
     });

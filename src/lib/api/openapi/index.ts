@@ -142,13 +142,13 @@ const extractParametersFromSchema = async (
 };
 
 const extractPathParameters = (path: string) => {
-  const matches = path.match(/\{([^}]+)\}/g);
+  const matches = path.match(/:([a-zA-Z_][a-zA-Z0-9_]*)/g);
 
   if (!matches) {
     return [];
   }
 
-  return matches.map((match) => match.slice(1, -1));
+  return matches.map((match) => match.slice(1));
 };
 
 const createParameters = async (request: RequestSchema, path: string) => {
