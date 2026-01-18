@@ -49,8 +49,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.3.10",
     "@standard-schema/spec": "^1.1.0",
-    "@types/bun": "latest",
-    "zod": "^4.3.4"
+    "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^5"
