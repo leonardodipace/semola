@@ -58,10 +58,17 @@ export const validateQuery = async (
   }
 
   const url = new URL(req.url);
-  const queryParams: Record<string, string[]> = {};
+  const queryParams: Record<string, string | string[]> = {};
 
   for (const key of url.searchParams.keys()) {
-    queryParams[key] = url.searchParams.getAll(key);
+    const values = url.searchParams.getAll(key);
+    const [firstValue] = values;
+
+    if (values.length === 1) {
+      queryParams[key] = firstValue as string;
+    } else {
+      queryParams[key] = values;
+    }
   }
 
   return validateSchema(querySchema, queryParams);

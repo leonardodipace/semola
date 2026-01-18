@@ -29,10 +29,12 @@ export type InferInput<T extends StandardSchemaV1 | undefined> =
 
 export type ExtractStatusCodes<T extends ResponseSchema> = keyof T & number;
 
-export type ApiOptions = {
+export type ApiOptions<
+  TMiddlewares extends readonly Middleware[] = readonly [],
+> = {
   prefix?: string;
   openapi?: OpenApiOptions;
-  middlewares?: Middleware[];
+  middlewares?: TMiddlewares;
 };
 
 export type OpenApiOptions = {
@@ -75,14 +77,20 @@ export type MethodRoutes = Record<
 export type RouteConfig<
   TReq extends RequestSchema = RequestSchema,
   TRes extends ResponseSchema = ResponseSchema,
-  TMiddlewares extends readonly Middleware[] = readonly [],
+  TGlobalMiddlewares extends readonly Middleware[] = readonly [],
+  TRouteMiddlewares extends readonly Middleware[] = readonly [],
 > = {
   path: string;
   method: Bun.Serve.HTTPMethod;
   request?: TReq;
   response: TRes;
-  middlewares?: TMiddlewares;
-  handler: RouteHandler<TReq, TRes, MergeMiddlewareExtensions<TMiddlewares>>;
+  middlewares?: TRouteMiddlewares;
+  handler: RouteHandler<
+    TReq,
+    TRes,
+    MergeMiddlewareExtensions<TGlobalMiddlewares> &
+      MergeMiddlewareExtensions<TRouteMiddlewares>
+  >;
   summary?: string;
   description?: string;
   operationId?: string;

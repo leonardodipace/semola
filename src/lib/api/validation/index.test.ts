@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import { describe, expect, test } from "bun:test";
 import {
   validateBody,
   validateCookies,
@@ -254,8 +254,8 @@ describe("Validation Module", () => {
       expect(data).toBeUndefined();
     });
 
-    test("should validate single query parameters", async () => {
-      const schema = createSuccessSchema({ name: ["John"], age: ["30"] });
+    test("should validate single query parameters as strings", async () => {
+      const schema = createSuccessSchema({ name: "John", age: "30" });
       const req = createTestRequest({
         url: "http://localhost:3000/test?name=John&age=30",
       });
@@ -263,7 +263,7 @@ describe("Validation Module", () => {
       const [error, data] = await validateQuery(req, schema);
 
       expect(error).toBeNull();
-      expect(data).toEqual({ name: ["John"], age: ["30"] });
+      expect(data).toEqual({ name: "John", age: "30" });
     });
 
     test("should handle multiple values for same key", async () => {
@@ -292,8 +292,8 @@ describe("Validation Module", () => {
 
     test("should handle special characters in query params", async () => {
       const schema = createSuccessSchema({
-        search: ["hello world"],
-        email: ["test@example.com"],
+        search: "hello world",
+        email: "test@example.com",
       });
       const req = createTestRequest({
         url: "http://localhost:3000/test?search=hello%20world&email=test%40example.com",
@@ -303,8 +303,8 @@ describe("Validation Module", () => {
 
       expect(error).toBeNull();
       expect(data).toEqual({
-        search: ["hello world"],
-        email: ["test@example.com"],
+        search: "hello world",
+        email: "test@example.com",
       });
     });
 
@@ -326,7 +326,7 @@ describe("Validation Module", () => {
     });
 
     test("should handle query params with empty values", async () => {
-      const schema = createSuccessSchema({ name: [""] });
+      const schema = createSuccessSchema({ name: "" });
       const req = createTestRequest({
         url: "http://localhost:3000/test?name=",
       });
@@ -334,7 +334,25 @@ describe("Validation Module", () => {
       const [error, data] = await validateQuery(req, schema);
 
       expect(error).toBeNull();
-      expect(data).toEqual({ name: [""] });
+      expect(data).toEqual({ name: "" });
+    });
+
+    test("should return string for single value and array for multiple values", async () => {
+      const schema = createSuccessSchema({
+        single: "value",
+        multiple: ["a", "b"],
+      });
+      const req = createTestRequest({
+        url: "http://localhost:3000/test?single=value&multiple=a&multiple=b",
+      });
+
+      const [error, data] = await validateQuery(req, schema);
+
+      expect(error).toBeNull();
+      expect(data).toEqual({
+        single: "value",
+        multiple: ["a", "b"],
+      });
     });
   });
 

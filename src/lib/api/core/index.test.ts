@@ -456,7 +456,7 @@ describe("Api Core", () => {
         handler: () => ({ user: { id: "1", name: "John" } }),
       });
 
-      const api = new Api({ middlewares: [authMiddleware] });
+      const api = new Api({ middlewares: [authMiddleware] as const });
 
       api.defineRoute({
         path: "/profile",
@@ -464,7 +464,6 @@ describe("Api Core", () => {
         response: {
           200: createSuccessSchema({ user: { id: "1", name: "John" } }),
         },
-        middlewares: [authMiddleware] as const,
         handler: (c) => {
           const user = c.get("user");
           return c.json(200, { user });

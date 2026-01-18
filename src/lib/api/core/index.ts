@@ -16,15 +16,16 @@ import type {
   RouteConfig,
 } from "./types.js";
 
-export class Api {
-  private options: ApiOptions;
+export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
+  private options: ApiOptions<TMiddlewares>;
   private routes: RouteConfig<
     RequestSchema,
     ResponseSchema,
+    TMiddlewares,
     readonly Middleware[]
   >[] = [];
 
-  public constructor(options: ApiOptions) {
+  public constructor(options: ApiOptions<TMiddlewares>) {
     this.options = options;
   }
 
@@ -66,6 +67,7 @@ export class Api {
   private createContext<
     TReq extends RequestSchema,
     TRes extends ResponseSchema,
+    TExt extends Record<string, unknown> = Record<string, unknown>,
   >(params: {
     request: Request;
     validatedBody: InferInput<TReq["body"]>;
@@ -74,7 +76,7 @@ export class Api {
     validatedCookies: InferInput<TReq["cookies"]>;
     extensions: Record<string, unknown>;
   }) {
-    const ctx: Context<TReq, TRes> = {
+    const ctx: Context<TReq, TRes, TExt> = {
       raw: params.request,
       req: {
         body: params.validatedBody,
@@ -88,7 +90,8 @@ export class Api {
       text: (status, text) => {
         return new Response(text, { status });
       },
-      get: <T>(key: string) => params.extensions[key] as T,
+      get: <K extends keyof TExt>(key: K) =>
+        params.extensions[key as string] as TExt[K],
     };
 
     return ctx;
@@ -172,7 +175,7 @@ export class Api {
           validatedHeaders,
           validatedCookies,
           extensions,
-        });
+        }) as Parameters<typeof handler>[0];
 
         return handler(ctx);
       };
@@ -184,9 +187,16 @@ export class Api {
   public defineRoute<
     TReq extends RequestSchema = RequestSchema,
     TRes extends ResponseSchema = ResponseSchema,
-    TMiddlewares extends readonly Middleware[] = readonly [],
-  >(config: RouteConfig<TReq, TRes, TMiddlewares>) {
-    this.routes.push(config);
+    TRouteMiddlewares extends readonly Middleware[] = readonly [],
+  >(config: RouteConfig<TReq, TRes, TMiddlewares, TRouteMiddlewares>) {
+    this.routes.push(
+      config as RouteConfig<
+        RequestSchema,
+        ResponseSchema,
+        TMiddlewares,
+        readonly Middleware[]
+      >,
+    );
   }
 
   public serve(port: number, callback?: (server: Bun.Server<unknown>) => void) {
