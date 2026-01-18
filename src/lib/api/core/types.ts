@@ -85,7 +85,7 @@ export type SecurityScheme =
 export type OpenApiOptions = {
   version: string;
   title: string;
-  description: string;
+  description?: string;
   servers?: Array<{ url: string; description?: string }>;
   securitySchemes?: Record<string, SecurityScheme>;
 };
