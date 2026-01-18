@@ -1,3 +1,9 @@
+import {
+  validateBody,
+  validateCookies,
+  validateHeaders,
+  validateQuery,
+} from "../validation/index.js";
 import type {
   ApiOptions,
   Context,
@@ -7,12 +13,6 @@ import type {
   ResponseSchema,
   RouteConfig,
 } from "./types.js";
-import {
-  validateBody,
-  validateCookies,
-  validateHeaders,
-  validateQuery,
-} from "./validator.js";
 
 export class Api {
   private options: ApiOptions;
