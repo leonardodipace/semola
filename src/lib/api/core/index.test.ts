@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import { describe, expect, test } from "bun:test";
 import { Middleware } from "../middleware/index.js";
 import { Api } from "./index.js";
 
@@ -527,7 +527,7 @@ describe("Api Core", () => {
         handler: () => ({ routeData: "route" }),
       });
 
-      const api = new Api({ middlewares: [globalMiddleware] });
+      const api = new Api({ middlewares: [globalMiddleware] as const });
 
       api.defineRoute({
         path: "/test",
@@ -538,7 +538,7 @@ describe("Api Core", () => {
             routeData: "route",
           }),
         },
-        middlewares: [globalMiddleware, routeMiddleware] as const,
+        middlewares: [routeMiddleware] as const,
         handler: (c) => {
           const globalData = c.get("globalData");
           const routeData = c.get("routeData");
