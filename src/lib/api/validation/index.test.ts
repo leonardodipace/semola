@@ -8,12 +8,12 @@ import {
   validateSchema,
 } from "./index.js";
 
-// Helper to create a mock schema that succeeds
-const createSuccessSchema = <T>(value: T): StandardSchemaV1 => ({
+// Helper to create a mock schema that succeeds by echoing input data
+const createSuccessSchema = (): StandardSchemaV1 => ({
   "~standard": {
     version: 1,
     vendor: "mock",
-    validate: async () => ({ value }),
+    validate: async (data) => ({ value: data }),
   },
 });
 
@@ -49,7 +49,7 @@ const createTestRequest = (options: {
 describe("Validation Module", () => {
   describe("validateSchema", () => {
     test("should return ok tuple when validation succeeds", async () => {
-      const schema = createSuccessSchema({ name: "John", age: 30 });
+      const schema = createSuccessSchema();
       const [error, data] = await validateSchema(schema, {
         name: "John",
         age: 30,
@@ -144,7 +144,7 @@ describe("Validation Module", () => {
     });
 
     test("should return undefined when content-type is not JSON", async () => {
-      const schema = createSuccessSchema({ name: "John" });
+      const schema = createSuccessSchema();
       const req = createTestRequest({
         headers: { "content-type": "text/plain" },
         body: JSON.stringify({ name: "John" }),
@@ -157,7 +157,7 @@ describe("Validation Module", () => {
     });
 
     test("should return undefined when content-type header is missing", async () => {
-      const schema = createSuccessSchema({ name: "John" });
+      const schema = createSuccessSchema();
       const req = createTestRequest({
         body: JSON.stringify({ name: "John" }),
       });
@@ -169,7 +169,7 @@ describe("Validation Module", () => {
     });
 
     test("should validate JSON body successfully", async () => {
-      const schema = createSuccessSchema({ name: "John", age: 30 });
+      const schema = createSuccessSchema();
       const req = createTestRequest({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name: "John", age: 30 }),
@@ -182,7 +182,7 @@ describe("Validation Module", () => {
     });
 
     test("should handle content-type with charset", async () => {
-      const schema = createSuccessSchema({ name: "John" });
+      const schema = createSuccessSchema();
       const req = createTestRequest({
         headers: { "content-type": "application/json; charset=utf-8" },
         body: JSON.stringify({ name: "John" }),
@@ -195,7 +195,7 @@ describe("Validation Module", () => {
     });
 
     test("should return ParseError for invalid JSON", async () => {
-      const schema = createSuccessSchema({ name: "John" });
+      const schema = createSuccessSchema();
       const req = createTestRequest({
         headers: { "content-type": "application/json" },
         body: "invalid json {",
@@ -229,7 +229,7 @@ describe("Validation Module", () => {
     });
 
     test("should handle empty JSON body", async () => {
-      const schema = createSuccessSchema({});
+      const schema = createSuccessSchema();
       const req = createTestRequest({
         headers: { "content-type": "application/json" },
         body: "{}",
@@ -255,7 +255,7 @@ describe("Validation Module", () => {
     });
 
     test("should validate single query parameters as strings", async () => {
-      const schema = createSuccessSchema({ name: "John", age: "30" });
+      const schema = createSuccessSchema();
       const req = createTestRequest({
         url: "http://localhost:3000/test?name=John&age=30",
       });
@@ -267,7 +267,7 @@ describe("Validation Module", () => {
     });
 
     test("should handle multiple values for same key", async () => {
-      const schema = createSuccessSchema({ tags: ["a", "b", "c"] });
+      const schema = createSuccessSchema();
       const req = createTestRequest({
         url: "http://localhost:3000/test?tags=a&tags=b&tags=c",
       });
@@ -279,7 +279,7 @@ describe("Validation Module", () => {
     });
 
     test("should handle empty query string", async () => {
-      const schema = createSuccessSchema({});
+      const schema = createSuccessSchema();
       const req = createTestRequest({
         url: "http://localhost:3000/test",
       });
@@ -291,10 +291,7 @@ describe("Validation Module", () => {
     });
 
     test("should handle special characters in query params", async () => {
-      const schema = createSuccessSchema({
-        search: "hello world",
-        email: "test@example.com",
-      });
+      const schema = createSuccessSchema();
       const req = createTestRequest({
         url: "http://localhost:3000/test?search=hello%20world&email=test%40example.com",
       });
@@ -326,7 +323,7 @@ describe("Validation Module", () => {
     });
 
     test("should handle query params with empty values", async () => {
-      const schema = createSuccessSchema({ name: "" });
+      const schema = createSuccessSchema();
       const req = createTestRequest({
         url: "http://localhost:3000/test?name=",
       });
@@ -338,10 +335,7 @@ describe("Validation Module", () => {
     });
 
     test("should return string for single value and array for multiple values", async () => {
-      const schema = createSuccessSchema({
-        single: "value",
-        multiple: ["a", "b"],
-      });
+      const schema = createSuccessSchema();
       const req = createTestRequest({
         url: "http://localhost:3000/test?single=value&multiple=a&multiple=b",
       });
@@ -369,10 +363,7 @@ describe("Validation Module", () => {
     });
 
     test("should validate headers with lowercase keys", async () => {
-      const schema = createSuccessSchema({
-        "content-type": "application/json",
-        authorization: "Bearer token",
-      });
+      const schema = createSuccessSchema();
       const req = createTestRequest({
         headers: {
           "Content-Type": "application/json",
@@ -390,9 +381,7 @@ describe("Validation Module", () => {
     });
 
     test("should normalize header keys to lowercase", async () => {
-      const schema = createSuccessSchema({
-        "x-custom-header": "value",
-      });
+      const schema = createSuccessSchema();
       const req = createTestRequest({
         headers: { "X-Custom-Header": "value" },
       });
@@ -404,7 +393,7 @@ describe("Validation Module", () => {
     });
 
     test("should handle empty headers", async () => {
-      const schema = createSuccessSchema({});
+      const schema = createSuccessSchema();
       const req = createTestRequest({});
 
       const [error, data] = await validateHeaders(req, schema);
@@ -429,11 +418,7 @@ describe("Validation Module", () => {
     });
 
     test("should handle multiple headers", async () => {
-      const schema = createSuccessSchema({
-        "content-type": "application/json",
-        accept: "application/json",
-        "user-agent": "test-client",
-      });
+      const schema = createSuccessSchema();
       const req = createTestRequest({
         headers: {
           "Content-Type": "application/json",
@@ -466,7 +451,7 @@ describe("Validation Module", () => {
     });
 
     test("should validate single cookie", async () => {
-      const schema = createSuccessSchema({ session: "abc123" });
+      const schema = createSuccessSchema();
       const req = createTestRequest({
         headers: { cookie: "session=abc123" },
       });
@@ -478,11 +463,7 @@ describe("Validation Module", () => {
     });
 
     test("should validate multiple cookies", async () => {
-      const schema = createSuccessSchema({
-        session: "abc123",
-        user: "john",
-        theme: "dark",
-      });
+      const schema = createSuccessSchema();
       const req = createTestRequest({
         headers: { cookie: "session=abc123; user=john; theme=dark" },
       });
@@ -498,7 +479,7 @@ describe("Validation Module", () => {
     });
 
     test("should handle empty cookie header", async () => {
-      const schema = createSuccessSchema({});
+      const schema = createSuccessSchema();
       const req = createTestRequest({});
 
       const [error, data] = await validateCookies(req, schema);
@@ -508,7 +489,7 @@ describe("Validation Module", () => {
     });
 
     test("should handle missing cookie header", async () => {
-      const schema = createSuccessSchema({});
+      const schema = createSuccessSchema();
       const req = createTestRequest({});
 
       const [error, data] = await validateCookies(req, schema);
@@ -533,9 +514,7 @@ describe("Validation Module", () => {
     });
 
     test("should handle cookies with special characters", async () => {
-      const schema = createSuccessSchema({
-        data: "value%20with%20spaces",
-      });
+      const schema = createSuccessSchema();
       const req = createTestRequest({
         headers: { cookie: "data=value%20with%20spaces" },
       });
@@ -543,7 +522,8 @@ describe("Validation Module", () => {
       const [error, data] = await validateCookies(req, schema);
 
       expect(error).toBeNull();
-      expect(data).toEqual({ data: "value%20with%20spaces" });
+      // Bun.CookieMap decodes URL-encoded values
+      expect(data).toEqual({ data: "value with spaces" });
     });
   });
 });

@@ -1,5 +1,6 @@
 import { toOpenAPISchema } from "@standard-community/standard-openapi";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import type { OpenAPIV3_1 } from "openapi-types";
 import type { RequestSchema, ResponseSchema } from "../core/types.js";
 import type { Middleware } from "../middleware/index.js";
 import type {
@@ -208,13 +209,16 @@ const createParameters = async (request: RequestSchema, path: string) => {
 };
 
 const createRequestBody = async (bodySchema: StandardSchemaV1) => {
-  const { schema } = await convertSchemaToOpenApi(bodySchema);
+  const { schema, components } = await convertSchemaToOpenApi(bodySchema);
 
   return {
-    required: true,
-    content: {
-      "application/json": {
-        schema,
+    components,
+    requestBody: {
+      required: true,
+      content: {
+        "application/json": {
+          schema,
+        },
       },
     },
   };
@@ -222,6 +226,7 @@ const createRequestBody = async (bodySchema: StandardSchemaV1) => {
 
 const createResponses = async (response: ResponseSchema) => {
   const responses: Record<string, OpenApiResponse> = {};
+  const allComponents: Array<OpenAPIV3_1.ComponentsObject | undefined> = [];
 
   for (const status in response) {
     const statusCode = String(status);
@@ -232,7 +237,12 @@ const createResponses = async (response: ResponseSchema) => {
     }
 
     const description = getSchemaDescription(schema);
-    const { schema: jsonSchema } = await convertSchemaToOpenApi(schema);
+    const { schema: jsonSchema, components } =
+      await convertSchemaToOpenApi(schema);
+
+    if (components) {
+      allComponents.push(components);
+    }
 
     responses[statusCode] = {
       description: description || `Response with status ${statusCode}`,
@@ -244,7 +254,7 @@ const createResponses = async (response: ResponseSchema) => {
     };
   }
 
-  return responses;
+  return { responses, components: allComponents };
 };
 
 const createOperation = async (
@@ -273,11 +283,15 @@ const createOperation = async (
 
   const fullPath = prefix ? prefix + route.path : route.path;
   const parameters = await createParameters(mergedRequest, fullPath);
-  const responses = await createResponses(mergedResponse);
+  const { responses, components: responseComponents } =
+    await createResponses(mergedResponse);
 
   const operation: OpenApiOperation = {
     responses,
   };
+
+  const allComponents: Array<OpenAPIV3_1.ComponentsObject | undefined> = [];
+  allComponents.push(...responseComponents);
 
   if (route.summary) {
     operation.summary = route.summary;
@@ -302,11 +316,62 @@ const createOperation = async (
   const bodySchema = mergedRequest.body;
 
   if (bodySchema) {
-    const requestBody = await createRequestBody(bodySchema);
+    const { requestBody, components: bodyComponents } =
+      await createRequestBody(bodySchema);
     operation.requestBody = requestBody;
+    if (bodyComponents) {
+      allComponents.push(bodyComponents);
+    }
   }
 
-  return operation;
+  return { operation, components: allComponents };
+};
+
+// Merges multiple ComponentsObject into a single object
+// Handles deduplication by merging schemas with the same name
+const mergeComponents = (
+  componentsArray: Array<OpenAPIV3_1.ComponentsObject | undefined>,
+): OpenAPIV3_1.ComponentsObject => {
+  const merged: OpenAPIV3_1.ComponentsObject = {};
+
+  for (const components of componentsArray) {
+    if (!components) {
+      continue;
+    }
+
+    if (components.schemas) {
+      if (!merged.schemas) {
+        merged.schemas = {};
+      }
+      merged.schemas = { ...merged.schemas, ...components.schemas };
+    }
+
+    if (components.responses) {
+      if (!merged.responses) {
+        merged.responses = {};
+      }
+      merged.responses = { ...merged.responses, ...components.responses };
+    }
+
+    if (components.parameters) {
+      if (!merged.parameters) {
+        merged.parameters = {};
+      }
+      merged.parameters = { ...merged.parameters, ...components.parameters };
+    }
+
+    if (components.requestBodies) {
+      if (!merged.requestBodies) {
+        merged.requestBodies = {};
+      }
+      merged.requestBodies = {
+        ...merged.requestBodies,
+        ...components.requestBodies,
+      };
+    }
+  }
+
+  return merged;
 };
 
 export const generateOpenApiSpec = async (options: OpenApiGeneratorOptions) => {
@@ -330,6 +395,9 @@ export const generateOpenApiSpec = async (options: OpenApiGeneratorOptions) => {
     };
   }
 
+  const allRouteComponents: Array<OpenAPIV3_1.ComponentsObject | undefined> =
+    [];
+
   for (const route of options.routes) {
     const fullPath = options.prefix ? options.prefix + route.path : route.path;
     const openApiPath = normalizePathForOpenAPI(fullPath);
@@ -339,13 +407,56 @@ export const generateOpenApiSpec = async (options: OpenApiGeneratorOptions) => {
       spec.paths[openApiPath] = {};
     }
 
-    const operation = await createOperation(
+    const { operation, components } = await createOperation(
       route,
       options.globalMiddlewares ?? [],
       options.prefix,
     );
 
     spec.paths[openApiPath][method] = operation;
+    allRouteComponents.push(...components);
+  }
+
+  // Merge all components into spec
+  const mergedComponents = mergeComponents(allRouteComponents);
+
+  if (!spec.components) {
+    spec.components = {};
+  }
+
+  // Merge with existing security schemes
+  if (options.securitySchemes) {
+    spec.components.securitySchemes = options.securitySchemes;
+  }
+
+  // Add schemas if any were collected
+  if (
+    mergedComponents.schemas &&
+    Object.keys(mergedComponents.schemas).length > 0
+  ) {
+    spec.components.schemas = mergedComponents.schemas;
+  }
+
+  // Add other component types if present
+  if (
+    mergedComponents.responses &&
+    Object.keys(mergedComponents.responses).length > 0
+  ) {
+    spec.components.responses = mergedComponents.responses;
+  }
+
+  if (
+    mergedComponents.parameters &&
+    Object.keys(mergedComponents.parameters).length > 0
+  ) {
+    spec.components.parameters = mergedComponents.parameters;
+  }
+
+  if (
+    mergedComponents.requestBodies &&
+    Object.keys(mergedComponents.requestBodies).length > 0
+  ) {
+    spec.components.requestBodies = mergedComponents.requestBodies;
   }
 
   return spec;
