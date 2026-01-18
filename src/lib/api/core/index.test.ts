@@ -1,5 +1,5 @@
-import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { describe, expect, test } from "bun:test";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { Middleware } from "../middleware/index.js";
 import { Api } from "./index.js";
 
