@@ -11,6 +11,7 @@ export type ResponseSchema = {
 };
 
 export type RequestSchema = {
+  params?: StandardSchemaV1;
   body?: StandardSchemaV1;
   query?: StandardSchemaV1;
   headers?: StandardSchemaV1;
@@ -37,10 +38,56 @@ export type ApiOptions<
   middlewares?: TMiddlewares;
 };
 
+export type SecuritySchemeApiKey = {
+  type: "apiKey";
+  name: string;
+  in: "query" | "header" | "cookie";
+  description?: string;
+};
+
+export type SecuritySchemeHttp = {
+  type: "http";
+  scheme: string;
+  bearerFormat?: string;
+  description?: string;
+};
+
+export type SecuritySchemeOAuth2Flow = {
+  authorizationUrl?: string;
+  tokenUrl?: string;
+  refreshUrl?: string;
+  scopes: Record<string, string>;
+};
+
+export type SecuritySchemeOAuth2 = {
+  type: "oauth2";
+  flows: {
+    implicit?: SecuritySchemeOAuth2Flow;
+    password?: SecuritySchemeOAuth2Flow;
+    clientCredentials?: SecuritySchemeOAuth2Flow;
+    authorizationCode?: SecuritySchemeOAuth2Flow;
+  };
+  description?: string;
+};
+
+export type SecuritySchemeOpenIdConnect = {
+  type: "openIdConnect";
+  openIdConnectUrl: string;
+  description?: string;
+};
+
+export type SecurityScheme =
+  | SecuritySchemeApiKey
+  | SecuritySchemeHttp
+  | SecuritySchemeOAuth2
+  | SecuritySchemeOpenIdConnect;
+
 export type OpenApiOptions = {
   version: string;
   title: string;
   description: string;
+  servers?: Array<{ url: string; description?: string }>;
+  securitySchemes?: Record<string, SecurityScheme>;
 };
 
 export type Context<

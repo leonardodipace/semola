@@ -1,5 +1,6 @@
 import { err, ok } from "../../errors/index.js";
 import type { Middleware } from "../middleware/index.js";
+import { generateOpenApiSpec } from "../openapi/index.js";
 import {
   validateBody,
   validateCookies,
@@ -197,6 +198,19 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
         readonly Middleware[]
       >,
     );
+  }
+
+  public getOpenApiSpec() {
+    return generateOpenApiSpec({
+      title: this.options.openapi?.title ?? "API",
+      description: this.options.openapi?.description,
+      version: this.options.openapi?.version ?? "1.0.0",
+      prefix: this.options.prefix,
+      servers: this.options.openapi?.servers,
+      securitySchemes: this.options.openapi?.securitySchemes,
+      routes: this.routes,
+      globalMiddlewares: this.options.middlewares,
+    });
   }
 
   public serve(port: number, callback?: (server: Bun.Server<unknown>) => void) {
