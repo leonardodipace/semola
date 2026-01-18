@@ -1,4 +1,6 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import type { Middleware } from "../middleware/index.js";
+import type { MergeMiddlewareExtensions } from "../middleware/types.js";
 
 type HTTPMethod = Bun.Serve.HTTPMethod;
 
@@ -30,6 +32,7 @@ export type ExtractStatusCodes<T extends ResponseSchema> = keyof T & number;
 export type ApiOptions = {
   prefix?: string;
   openapi?: OpenApiOptions;
+  middlewares?: Middleware[];
 };
 
 export type OpenApiOptions = {
@@ -39,27 +42,30 @@ export type OpenApiOptions = {
 };
 
 export type Context<
-  TRequest extends RequestSchema = RequestSchema,
-  TResponse extends ResponseSchema = ResponseSchema,
+  TReq extends RequestSchema = RequestSchema,
+  TRes extends ResponseSchema = ResponseSchema,
+  TExt extends Record<string, unknown> = Record<string, unknown>,
 > = {
   raw: Request;
   req: {
-    body: InferInput<TRequest["body"]>;
-    query: InferInput<TRequest["query"]>;
-    headers: InferInput<TRequest["headers"]>;
-    cookies: InferInput<TRequest["cookies"]>;
+    body: InferInput<TReq["body"]>;
+    query: InferInput<TReq["query"]>;
+    headers: InferInput<TReq["headers"]>;
+    cookies: InferInput<TReq["cookies"]>;
   };
-  json: <S extends ExtractStatusCodes<TResponse>>(
+  json: <S extends ExtractStatusCodes<TRes>>(
     status: S,
-    data: InferOutput<TResponse[S]>,
+    data: InferOutput<TRes[S]>,
   ) => Response;
   text: (status: number, text: string) => Response;
+  get: <K extends keyof TExt>(key: K) => TExt[K];
 };
 
 export type RouteHandler<
-  TRequest extends RequestSchema = RequestSchema,
-  TResponse extends ResponseSchema = ResponseSchema,
-> = (c: Context<TRequest, TResponse>) => Response | Promise<Response>;
+  TReq extends RequestSchema = RequestSchema,
+  TRes extends ResponseSchema = ResponseSchema,
+  TExt extends Record<string, unknown> = Record<string, unknown>,
+> = (c: Context<TReq, TRes, TExt>) => Response | Promise<Response>;
 
 export type MethodRoutes = Record<
   string,
@@ -67,14 +73,16 @@ export type MethodRoutes = Record<
 >;
 
 export type RouteConfig<
-  TRequest extends RequestSchema = RequestSchema,
-  TResponse extends ResponseSchema = ResponseSchema,
+  TReq extends RequestSchema = RequestSchema,
+  TRes extends ResponseSchema = ResponseSchema,
+  TMiddlewares extends readonly Middleware[] = readonly [],
 > = {
   path: string;
   method: Bun.Serve.HTTPMethod;
-  request?: TRequest;
-  response: TResponse;
-  handler: RouteHandler<TRequest, TResponse>;
+  request?: TReq;
+  response: TRes;
+  middlewares?: TMiddlewares;
+  handler: RouteHandler<TReq, TRes, MergeMiddlewareExtensions<TMiddlewares>>;
   summary?: string;
   description?: string;
   operationId?: string;
