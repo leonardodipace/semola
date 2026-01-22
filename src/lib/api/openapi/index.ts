@@ -110,14 +110,15 @@ const extractParametersFromSchema = async (
   schema: StandardSchemaV1,
   location: "query" | "header" | "cookie",
 ) => {
-  const { schema: jsonSchema } = await convertSchemaToOpenApi(schema);
+  const { schema: jsonSchema, components } =
+    await convertSchemaToOpenApi(schema);
 
   if (jsonSchema.type !== "object") {
-    return [];
+    return { parameters: [], components };
   }
 
   if (!jsonSchema.properties) {
-    return [];
+    return { parameters: [], components };
   }
 
   const parameters: OpenApiParameter[] = [];
@@ -135,7 +136,7 @@ const extractParametersFromSchema = async (
     });
   }
 
-  return parameters;
+  return { parameters, components };
 };
 
 const normalizePathForOpenAPI = (path: string) => {
@@ -155,39 +156,49 @@ const extractPathParameters = (path: string) => {
 
 const createParameters = async (request: RequestSchema, path: string) => {
   const parameters: OpenApiParameter[] = [];
+  const allComponents: Array<OpenAPIV3_1.ComponentsObject | undefined> = [];
 
   if (request.query) {
-    const queryParams = await extractParametersFromSchema(
-      request.query,
-      "query",
-    );
+    const { parameters: queryParams, components } =
+      await extractParametersFromSchema(request.query, "query");
     parameters.push(...queryParams);
+    if (components) {
+      allComponents.push(components);
+    }
   }
 
   if (request.headers) {
-    const headerParams = await extractParametersFromSchema(
-      request.headers,
-      "header",
-    );
+    const { parameters: headerParams, components } =
+      await extractParametersFromSchema(request.headers, "header");
     parameters.push(...headerParams);
+    if (components) {
+      allComponents.push(components);
+    }
   }
 
   if (request.cookies) {
-    const cookieParams = await extractParametersFromSchema(
-      request.cookies,
-      "cookie",
-    );
+    const { parameters: cookieParams, components } =
+      await extractParametersFromSchema(request.cookies, "cookie");
     parameters.push(...cookieParams);
+    if (components) {
+      allComponents.push(components);
+    }
   }
 
   const pathParamNames = extractPathParameters(path);
 
   if (pathParamNames.length > 0) {
     if (!request.params) {
-      return parameters;
+      return { parameters, components: allComponents };
     }
 
-    const { schema: jsonSchema } = await convertSchemaToOpenApi(request.params);
+    const { schema: jsonSchema, components } = await convertSchemaToOpenApi(
+      request.params,
+    );
+
+    if (components) {
+      allComponents.push(components);
+    }
 
     if (jsonSchema.type === "object" && jsonSchema.properties) {
       for (const name of pathParamNames) {
@@ -205,7 +216,7 @@ const createParameters = async (request: RequestSchema, path: string) => {
     }
   }
 
-  return parameters;
+  return { parameters, components: allComponents };
 };
 
 const createRequestBody = async (bodySchema: StandardSchemaV1) => {
@@ -282,7 +293,8 @@ const createOperation = async (
   const mergedResponse = mergeResponseSchemas(responseSchemas);
 
   const fullPath = prefix ? prefix + route.path : route.path;
-  const parameters = await createParameters(mergedRequest, fullPath);
+  const { parameters, components: parameterComponents } =
+    await createParameters(mergedRequest, fullPath);
   const { responses, components: responseComponents } =
     await createResponses(mergedResponse);
 
@@ -292,6 +304,7 @@ const createOperation = async (
 
   const allComponents: Array<OpenAPIV3_1.ComponentsObject | undefined> = [];
   allComponents.push(...responseComponents);
+  allComponents.push(...parameterComponents);
 
   if (route.summary) {
     operation.summary = route.summary;
