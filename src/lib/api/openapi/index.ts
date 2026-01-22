@@ -376,7 +376,7 @@ const mergeComponents = (
 
 export const generateOpenApiSpec = async (options: OpenApiGeneratorOptions) => {
   const spec: OpenApiSpec = {
-    openapi: "3.0.3",
+    openapi: "3.1.0",
     info: {
       title: options.title,
       description: options.description,
