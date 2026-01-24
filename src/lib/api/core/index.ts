@@ -27,7 +27,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     readonly Middleware[]
   >[] = [];
 
-  public constructor(options: ApiOptions<TMiddlewares>) {
+  public constructor(options: ApiOptions<TMiddlewares> = {}) {
     this.options = options;
   }
 
