@@ -1,6 +1,6 @@
 import { appendFileSync, statSync, existsSync } from "node:fs";
 import type { Formatter } from "./formatter.js";
-import { basename, dirname, join } from "node:path"
+import { basename, dirname, join } from "node:path";
 
 import {
   FileProviderOptions,
@@ -13,25 +13,30 @@ import {
   TimeBasedPolicyType,
 } from "./types.js";
 
-
 const PROVIDER_OPTION_DEFAULT: ProviderOptions = {
   formatter: undefined,
-  level: LogLevel.Debug
-} as const
+  level: LogLevel.Debug,
+} as const;
 
 const FILE_PROVIDER_OPTION_DEFAULT: FileProviderOptions = {
   ...PROVIDER_OPTION_DEFAULT,
   policy: undefined,
+};
+
+const DEFAULT_MAX_SIZE = 4 * 1024; // 4KB
+
+enum DurationUnit {
+  Hour = 1000 * 60 * 60,
+  Day = 1000 * 60 * 60 * 24,
+  Week = 1000 * 60 * 60 * 24 * 7,
+  Month = 1000 * 60 * 60 * 24 * 7 * 4,
 }
-
-const DEFAULT_MAX_SIZE = 4 * 1024 // 4KB
-
 
 class StackData {
   private stack: string = "";
 
   constructor() {
-    Error.captureStackTrace(this)
+    Error.captureStackTrace(this);
   }
 
   public getStack() {
@@ -46,27 +51,28 @@ export abstract class AbstractLogger {
   public abstract error(msg: LogMessageType): void;
   public abstract critical(msg: LogMessageType): void;
 
-  NON_ERROR_CALL_STACK_IDX = 4 as const;
+  private NON_ERROR_CALL_STACK_IDX = 4 as const;
 
   protected createLogData(
     level: LogLevelType,
     msg: LogMessageType,
     prefix: string,
   ): LogDataType {
-    const stack = new StackData().getStack().split("\n")
+    const stack = new StackData().getStack().split("\n");
     const logCall = stack[this.NON_ERROR_CALL_STACK_IDX] || "";
 
-    const [path, row, column] = logCall?.trim()
+    const [path, row, column] = logCall
+      ?.trim()
       .replace("(", "")
       .replace(")", "")
-      .split(":")
+      .split(":");
 
-    const fileName = basename(path || "")
+    const fileName = basename(path || "");
     let methodCall = undefined;
-    const pathData = path?.split(" ") || []
+    const pathData = path?.split(" ") || [];
 
     if (pathData.length === 3) {
-      methodCall = pathData[1]
+      methodCall = pathData[1];
     }
 
     return {
@@ -76,7 +82,7 @@ export abstract class AbstractLogger {
       fileName,
       row: row ?? "",
       column: column ?? "",
-      method: methodCall
+      method: methodCall,
     };
   }
 }
@@ -153,7 +159,10 @@ export class FileProvider extends LoggerProvider {
   private file: string;
   private policy?: SizeBasedPolicyType | TimeBasedPolicyType;
 
-  public constructor(file: string, options: FileProviderOptions = FILE_PROVIDER_OPTION_DEFAULT) {
+  public constructor(
+    file: string,
+    options: FileProviderOptions = FILE_PROVIDER_OPTION_DEFAULT,
+  ) {
     super({ formatter: options.formatter, level: options.level });
     this.policy = options.policy;
     this.filePath = file;
@@ -176,25 +185,39 @@ export class FileProvider extends LoggerProvider {
     if (this.canRollFile()) {
       this.counter += 1;
       this.file = this.createNewFileName();
-    } else {
-      appendFileSync(this.file, `${msg}\n`);
     }
-  }
 
+    appendFileSync(this.file, `${msg}\n`);
+  }
 
   private canRollFile() {
     if (!this.policy) return false;
 
     switch (this.policy.type) {
-      case 'size': {
+      case "size": {
         if (this.policy.maxSize) {
           return this.getFileSize() >= this.policy.maxSize;
         }
 
         return this.getFileSize() >= DEFAULT_MAX_SIZE;
       }
-      case 'time': {
-        return false;
+      case "time": {
+        const { duration, instant } = this.policy;
+        const { birthtime } = statSync(this.file);
+        const creationTimeMs = birthtime.getTime();
+        const currenTimeMs = new Date().getTime();
+        const diffMs = currenTimeMs - creationTimeMs;
+
+        switch (instant) {
+          case "hour":
+            return Math.floor(diffMs / DurationUnit.Hour) >= duration;
+          case "day":
+            return Math.floor(diffMs / DurationUnit.Day) >= duration;
+          case "week":
+            return Math.floor(diffMs / DurationUnit.Week) >= duration;
+          case "month":
+            return Math.floor(diffMs / DurationUnit.Month) >= duration;
+        }
       }
     }
   }
@@ -211,16 +234,16 @@ export class FileProvider extends LoggerProvider {
   private isJSONFile() {
     const fileName = basename(this.filePath);
     const fileObj = Bun.file(fileName);
-    const { type } = fileObj
+    const { type } = fileObj;
 
-    return type.includes("application/json")
+    return type === "application/json;charset=utf-8";
   }
 
   private createNewFileName() {
     const fileName = basename(this.filePath);
     const directory = dirname(this.filePath);
-    const fileInfo = fileName.split('.');
-    const newFileName = `${fileInfo[0]}.${this.counter}.${fileInfo[1]}`
+    const fileInfo = fileName.split(".");
+    const newFileName = `${fileInfo[0]}.${this.counter}.${fileInfo[1]}`;
 
     return join(directory, newFileName);
   }
