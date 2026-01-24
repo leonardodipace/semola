@@ -147,8 +147,10 @@ export class Queue<T> {
 
     const timeout = this.options.timeout ?? DEFAULT_TIMEOUT;
 
+    let timerId: NodeJS.Timeout | undefined;
+
     const timeoutPromise = new Promise<Error>((resolve) => {
-      setTimeout(() => {
+      timerId = setTimeout(() => {
         resolve(new Error(`Job timeout after ${timeout}ms`));
       }, timeout);
     });
@@ -161,6 +163,10 @@ export class Queue<T> {
         }),
       ]),
     );
+
+    if (timerId) {
+      clearTimeout(timerId);
+    }
 
     if (!handlerError) {
       if (this.options.onSuccess) {
