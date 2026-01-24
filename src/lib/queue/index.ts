@@ -213,7 +213,7 @@ export class Queue<T> {
     });
 
     // Check if we should retry. Attempt starts at 1, so we retry while attempts <= maxRetries
-    if (job.attempts <= (this.options.retries ?? DEFAULT_RETRIES)) {
+    if (job.attempts <= (job.maxRetries ?? DEFAULT_RETRIES)) {
       if (this.options.onRetry) {
         const delay = Math.min(
           BASE_BACKOFF_DELAY * BACKOFF_MULTIPLIER ** (job.attempts - 1),
@@ -226,7 +226,7 @@ export class Queue<T> {
               error: errorMsg,
               nextRetryDelayMs: delay,
               retriesRemaining:
-                (this.options.retries ?? DEFAULT_RETRIES) - job.attempts,
+                (job.maxRetries ?? DEFAULT_RETRIES) - job.attempts,
               backoffMultiplier: BACKOFF_MULTIPLIER,
             }),
           ),
