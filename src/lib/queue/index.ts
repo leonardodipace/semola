@@ -22,9 +22,17 @@ export class Queue<T> {
   private options: QueueOptions<T>;
   private running = true;
   private activeWorkers = 0;
+  private retries: number;
+  private timeout: number;
+  private concurrency: number;
+  private pollInterval: number;
 
   public constructor(options: QueueOptions<T>) {
     this.options = options;
+    this.retries = options.retries ?? DEFAULT_RETRIES;
+    this.timeout = options.timeout ?? DEFAULT_TIMEOUT;
+    this.concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
+    this.pollInterval = options.pollInterval ?? DEFAULT_POLL_INTERVAL;
     this.startWorkers();
   }
 
@@ -33,29 +41,17 @@ export class Queue<T> {
       id: crypto.randomUUID(),
       data,
       attempts: 0,
-      maxRetries: this.options.retries ?? DEFAULT_RETRIES,
+      maxRetries: this.retries,
       createdAt: Date.now(),
     };
 
-    const [stringifyError, serialized] = mightThrowSync(() =>
-      JSON.stringify(job),
-    );
-
-    if (stringifyError) {
+    const [serializeError, serialized] = this.serializeJob(job);
+    if (serializeError || !serialized) {
       return err("QueueError", "Unable to serialize job data");
     }
 
-    if (!serialized) {
-      return err("QueueError", "Unable to serialize job data");
-    }
-
-    const queueKey = `queue:${this.options.name}:jobs`;
-
-    const [pushError] = await mightThrow(
-      this.options.redis.lpush(queueKey, serialized),
-    );
-
-    if (pushError) {
+    const [enqueueError] = await this.enqueueJobData(serialized);
+    if (enqueueError) {
       return err("QueueError", "Unable to enqueue job");
     }
 
@@ -73,12 +69,25 @@ export class Queue<T> {
     }
   }
 
+  private waitForPollInterval() {
+    return new Promise((resolve) => setTimeout(resolve, this.pollInterval));
+  }
+
+  private serializeJob(job: JobState<T>) {
+    return mightThrowSync(() => JSON.stringify(job));
+  }
+
+  private async enqueueJobData(serialized: string) {
+    const queueKey = `queue:${this.options.name}:jobs`;
+    return mightThrow(this.options.redis.lpush(queueKey, serialized));
+  }
+
+  private formatErrorMessage(error: unknown) {
+    return error instanceof Error ? error.message : String(error);
+  }
+
   private startWorkers() {
-    for (
-      let i = 0;
-      i < (this.options.concurrency ?? DEFAULT_CONCURRENCY);
-      i++
-    ) {
+    for (let i = 0; i < this.concurrency; i++) {
       this.processJobs();
     }
   }
@@ -92,22 +101,12 @@ export class Queue<T> {
       );
 
       if (popError) {
-        await new Promise((resolve) =>
-          setTimeout(
-            resolve,
-            this.options.pollInterval ?? DEFAULT_POLL_INTERVAL,
-          ),
-        );
+        await this.waitForPollInterval();
         continue;
       }
 
       if (!jobData) {
-        await new Promise((resolve) =>
-          setTimeout(
-            resolve,
-            this.options.pollInterval ?? DEFAULT_POLL_INTERVAL,
-          ),
-        );
+        await this.waitForPollInterval();
         continue;
       }
 
@@ -116,21 +115,14 @@ export class Queue<T> {
       );
 
       if (parseError || !job) {
-        await new Promise((resolve) =>
-          setTimeout(
-            resolve,
-            this.options.pollInterval ?? DEFAULT_POLL_INTERVAL,
-          ),
-        );
+        await this.waitForPollInterval();
         continue;
       }
 
       // Skip processing if we've been stopped
       if (!this.running) {
         // Re-enqueue the job so it's not lost
-        const [stringifyError, serialized] = mightThrowSync(() =>
-          JSON.stringify(job),
-        );
+        const [stringifyError, serialized] = this.serializeJob(job);
 
         if (!stringifyError && serialized) {
           await mightThrow(this.options.redis.lpush(queueKey, serialized));
@@ -156,14 +148,12 @@ export class Queue<T> {
       this.options.handler(job.data, controller.signal),
     );
 
-    const timeout = this.options.timeout ?? DEFAULT_TIMEOUT;
-
     let timerId: NodeJS.Timeout | undefined;
 
     const timeoutPromise = new Promise<Error>((resolve) => {
       timerId = setTimeout(() => {
-        resolve(new Error(`Job timeout after ${timeout}ms`));
-      }, timeout);
+        resolve(new Error(`Job timeout after ${this.timeout}ms`));
+      }, this.timeout);
     });
 
     const [handlerError] = await mightThrow(
@@ -196,11 +186,7 @@ export class Queue<T> {
 
     job.attempts++;
 
-    const errorMsg =
-      handlerError instanceof Error
-        ? handlerError.message
-        : String(handlerError);
-
+    const errorMsg = this.formatErrorMessage(handlerError);
     job.error = errorMsg;
 
     if (!job.errorHistory) {
@@ -213,7 +199,7 @@ export class Queue<T> {
     });
 
     // Check if we should retry. Attempt starts at 1, so we retry while attempts <= maxRetries
-    if (job.attempts <= (job.maxRetries ?? DEFAULT_RETRIES)) {
+    if (job.attempts <= job.maxRetries) {
       if (this.options.onRetry) {
         const delay = Math.min(
           BASE_BACKOFF_DELAY * BACKOFF_MULTIPLIER ** (job.attempts - 1),
@@ -225,8 +211,7 @@ export class Queue<T> {
               job: toMinimalJob(job),
               error: errorMsg,
               nextRetryDelayMs: delay,
-              retriesRemaining:
-                (job.maxRetries ?? DEFAULT_RETRIES) - job.attempts,
+              retriesRemaining: job.maxRetries - job.attempts,
               backoffMultiplier: BACKOFF_MULTIPLIER,
             }),
           ),
@@ -234,20 +219,26 @@ export class Queue<T> {
       }
       await this.retryJob(job);
     } else {
-      if (this.options.onError) {
-        await mightThrow(
-          Promise.resolve(
-            this.options.onError({
-              job: toMinimalJob(job),
-              lastError: job.error ?? "",
-              totalDurationMs: Date.now() - job.createdAt,
-              totalAttempts: job.attempts,
-              errorHistory: job.errorHistory ?? [],
-            }),
-          ),
-        );
-      }
+      await this.callOnError(job);
     }
+  }
+
+  private async callOnError(job: JobState<T>) {
+    if (!this.options.onError) {
+      return;
+    }
+
+    await mightThrow(
+      Promise.resolve(
+        this.options.onError({
+          job: toMinimalJob(job),
+          lastError: job.error ?? "",
+          totalDurationMs: Date.now() - job.createdAt,
+          totalAttempts: job.attempts,
+          errorHistory: job.errorHistory ?? [],
+        }),
+      ),
+    );
   }
 
   private async retryJob(job: JobState<T>) {
@@ -259,73 +250,22 @@ export class Queue<T> {
 
     await new Promise((resolve) => setTimeout(resolve, delay));
 
-    const [stringifyError, serialized] = mightThrowSync(() =>
-      JSON.stringify(job),
-    );
+    const [stringifyError, serialized] = this.serializeJob(job);
 
-    if (stringifyError) {
-      job.error = `Failed to serialize job for retry: ${
-        stringifyError instanceof Error
-          ? stringifyError.message
-          : String(stringifyError)
-      }`;
-      if (this.options.onError) {
-        await mightThrow(
-          Promise.resolve(
-            this.options.onError({
-              job: toMinimalJob(job),
-              lastError: job.error,
-              totalDurationMs: Date.now() - job.createdAt,
-              totalAttempts: job.attempts,
-              errorHistory: job.errorHistory ?? [],
-            }),
-          ),
-        );
-      }
-      return;
-    }
-
-    if (!serialized) {
-      job.error = "Failed to serialize job for retry";
-      if (this.options.onError) {
-        await mightThrow(
-          Promise.resolve(
-            this.options.onError({
-              job: toMinimalJob(job),
-              lastError: job.error,
-              totalDurationMs: Date.now() - job.createdAt,
-              totalAttempts: job.attempts,
-              errorHistory: job.errorHistory ?? [],
-            }),
-          ),
-        );
-      }
+    if (stringifyError || !serialized) {
+      job.error = `Failed to serialize job for retry: ${this.formatErrorMessage(stringifyError)}`;
+      await this.callOnError(job);
       return;
     }
 
     const queueKey = `queue:${this.options.name}:jobs`;
-
     const [pushError] = await mightThrow(
       this.options.redis.lpush(queueKey, serialized),
     );
 
     if (pushError) {
-      job.error = `Failed to re-enqueue job for retry: ${
-        pushError instanceof Error ? pushError.message : String(pushError)
-      }`;
-      if (this.options.onError) {
-        await mightThrow(
-          Promise.resolve(
-            this.options.onError({
-              job: toMinimalJob(job),
-              lastError: job.error,
-              totalDurationMs: Date.now() - job.createdAt,
-              totalAttempts: job.attempts,
-              errorHistory: job.errorHistory ?? [],
-            }),
-          ),
-        );
-      }
+      job.error = `Failed to re-enqueue job for retry: ${this.formatErrorMessage(pushError)}`;
+      await this.callOnError(job);
     }
   }
 }
