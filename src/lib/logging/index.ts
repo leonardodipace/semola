@@ -9,6 +9,8 @@ import {
   type LogLevelType,
   type LogMessageType,
   type ProviderOptions,
+  SizeBasedPolicyType,
+  TimeBasedPolicyType,
 } from "./types.js";
 
 
@@ -17,8 +19,12 @@ const PROVIDER_OPTION_DEFAULT: ProviderOptions = {
   level: LogLevel.Debug
 } as const
 
-const DEFAULT_MAX_SIZE: number = 4 * 1024 // 4KB
+const FILE_PROVIDER_OPTION_DEFAULT: FileProviderOptions = {
+  ...PROVIDER_OPTION_DEFAULT,
+  policy: undefined,
+}
 
+const DEFAULT_MAX_SIZE = 4 * 1024 // 4KB
 
 
 class StackData {
@@ -56,7 +62,6 @@ export abstract class AbstractLogger {
       .split(":")
 
     const fileName = basename(path || "")
-
     let methodCall = undefined;
     const pathData = path?.split(" ") || []
 
@@ -144,13 +149,13 @@ export abstract class LoggerProvider {
 export class FileProvider extends LoggerProvider {
   private readonly filePath: string;
 
-  private maxSize: number = DEFAULT_MAX_SIZE;
   private counter: number;
   private file: string;
+  private policy?: SizeBasedPolicyType | TimeBasedPolicyType;
 
-  public constructor(file: string, options?: FileProviderOptions) {
-    super({ formatter: options?.formatter, level: options?.level });
-
+  public constructor(file: string, options: FileProviderOptions = FILE_PROVIDER_OPTION_DEFAULT) {
+    super({ formatter: options.formatter, level: options.level });
+    this.policy = options.policy;
     this.filePath = file;
     this.counter = 0;
     this.file = this.createNewFileName();
@@ -168,11 +173,29 @@ export class FileProvider extends LoggerProvider {
       msg = JSON.stringify({ message: msg });
     }
 
-    if (this.getFileSize() <= this.maxSize) {
-      appendFileSync(this.file, `${msg}\n`);
-    } else {
+    if (this.canRollFile()) {
       this.counter += 1;
       this.file = this.createNewFileName();
+    } else {
+      appendFileSync(this.file, `${msg}\n`);
+    }
+  }
+
+
+  private canRollFile() {
+    if (!this.policy) return false;
+
+    switch (this.policy.type) {
+      case 'size': {
+        if (this.policy.maxSize) {
+          return this.getFileSize() >= this.policy.maxSize;
+        }
+
+        return this.getFileSize() >= DEFAULT_MAX_SIZE;
+      }
+      case 'time': {
+        return false;
+      }
     }
   }
 
