@@ -141,8 +141,10 @@ export class Queue<T> {
   }
 
   private async handleJob(job: Job<T>) {
+    const controller = new AbortController();
+
     const handlerPromise = Promise.resolve().then(() =>
-      this.options.handler(job.data),
+      this.options.handler(job.data, controller.signal),
     );
 
     const timeout = this.options.timeout ?? DEFAULT_TIMEOUT;
@@ -166,6 +168,11 @@ export class Queue<T> {
 
     if (timerId) {
       clearTimeout(timerId);
+    }
+
+    // Abort handler if timeout occurred
+    if (handlerError && !controller.signal.aborted) {
+      controller.abort();
     }
 
     if (!handlerError) {

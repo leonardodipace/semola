@@ -2,7 +2,7 @@ export type QueueOptions<T> = {
   name: string;
   redis: Bun.RedisClient;
   retries: number;
-  handler: (data: T) => void | Promise<void>;
+  handler: (data: T, signal?: AbortSignal) => void | Promise<void>;
   onSuccess?: (job: Job<T>) => void | Promise<void>;
   onError?: (job: Job<T>) => void | Promise<void>;
   timeout?: number;
