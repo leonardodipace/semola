@@ -110,6 +110,7 @@ describe("Api Core", () => {
     const res = await fetch(`http://localhost:${server?.port}/me`);
     const body = await res.json();
 
+    expect(res.status).toBe(200);
     expect(body).toEqual({ role: "admin" });
   });
 
