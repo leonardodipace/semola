@@ -36,8 +36,8 @@ export interface SizeBasedPolicyType {
 
 export interface TimeBasedPolicyType {
   type: 'time';
-  timestamp: "hour" | "day" | "week" | "month";
-  instant: number;
+  timestamp?: "hour" | "day" | "week" | "month";
+  instant?: number;
 }
 
 export type FileProviderOptions = ProviderOptions & {
