@@ -34,6 +34,9 @@ export type InferInput<T extends StandardSchemaV1 | undefined> =
 
 export type ExtractStatusCodes<T extends ResponseSchema> = keyof T & number;
 
+export type ExtractStatusCodesOrAny<T extends ResponseSchema | undefined> =
+  T extends ResponseSchema ? ExtractStatusCodes<T> : number;
+
 export type ApiOptions<
   TMiddlewares extends readonly Middleware[] = readonly [],
 > = {
@@ -96,7 +99,7 @@ export type OpenApiOptions = {
 
 export type Context<
   TReq extends RequestSchema = RequestSchema,
-  TRes extends ResponseSchema = ResponseSchema,
+  TRes extends ResponseSchema | undefined = undefined,
   TExt extends Record<string, unknown> = Record<string, unknown>,
 > = {
   raw: Request;
@@ -107,9 +110,9 @@ export type Context<
     cookies: InferInput<TReq["cookies"]>;
     params: InferInput<TReq["params"]>;
   };
-  json: <S extends ExtractStatusCodes<TRes>>(
+  json: <S extends ExtractStatusCodesOrAny<TRes>>(
     status: S,
-    data: InferOutput<TRes[S]>,
+    data: TRes extends ResponseSchema ? InferOutput<TRes[S]> : unknown,
   ) => Response;
   text: (status: number, text: string) => Response;
   get: <K extends keyof TExt>(key: K) => TExt[K];
@@ -117,7 +120,7 @@ export type Context<
 
 export type RouteHandler<
   TReq extends RequestSchema = RequestSchema,
-  TRes extends ResponseSchema = ResponseSchema,
+  TRes extends ResponseSchema | undefined = undefined,
   TExt extends Record<string, unknown> = Record<string, unknown>,
 > = (c: Context<TReq, TRes, TExt>) => Response | Promise<Response>;
 
@@ -128,14 +131,14 @@ export type MethodRoutes = Record<
 
 export type RouteConfig<
   TReq extends RequestSchema = RequestSchema,
-  TRes extends ResponseSchema = ResponseSchema,
+  TRes extends ResponseSchema | undefined = undefined,
   TGlobalMiddlewares extends readonly Middleware[] = readonly [],
   TRouteMiddlewares extends readonly Middleware[] = readonly [],
 > = {
   path: string;
   method: Bun.Serve.HTTPMethod;
   request?: TReq;
-  response: TRes;
+  response?: TRes;
   middlewares?: TRouteMiddlewares;
   handler: RouteHandler<
     TReq,

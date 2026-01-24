@@ -2,7 +2,7 @@ import type { Context, RequestSchema, ResponseSchema } from "../core/types.js";
 
 export type MiddlewareHandler<
   TReq extends RequestSchema = RequestSchema,
-  TRes extends ResponseSchema = ResponseSchema,
+  TRes extends ResponseSchema | undefined = undefined,
   TExt extends Record<string, unknown> = Record<string, unknown>,
 > = (
   c: Context<TReq, TRes>,
@@ -10,7 +10,7 @@ export type MiddlewareHandler<
 
 export type MiddlewareOptions<
   TReq extends RequestSchema = RequestSchema,
-  TRes extends ResponseSchema = ResponseSchema,
+  TRes extends ResponseSchema | undefined = undefined,
   TExt extends Record<string, unknown> = Record<string, unknown>,
 > = {
   request?: TReq;

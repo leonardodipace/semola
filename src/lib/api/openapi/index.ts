@@ -14,7 +14,7 @@ type RouteConfigInternal = {
   path: string;
   method: string;
   request?: RequestSchema;
-  response: ResponseSchema;
+  response?: ResponseSchema;
   middlewares?: readonly Middleware[];
   handler: unknown;
   summary?: string;
@@ -98,7 +98,7 @@ const mergeResponseSchemas = (schemas: Array<ResponseSchema | undefined>) => {
     }
   }
 
-  return merged;
+  return Object.keys(merged).length > 0 ? merged : undefined;
 };
 
 const convertSchemaToOpenApi = async (schema: StandardSchemaV1) => {
@@ -235,9 +235,13 @@ const createRequestBody = async (bodySchema: StandardSchemaV1) => {
   };
 };
 
-const createResponses = async (response: ResponseSchema) => {
+const createResponses = async (response?: ResponseSchema) => {
   const responses: Record<string, OpenApiResponse> = {};
   const allComponents: Array<OpenAPIV3_1.ComponentsObject | undefined> = [];
+
+  if (!response) {
+    return { responses, components: allComponents };
+  }
 
   for (const status in response) {
     const statusCode = String(status);

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { Middleware } from "./index.js";
-import type { MiddlewareOptions } from "./types.js";
 
 // Helper to create a simple mock schema
 const createMockSchema = (): StandardSchemaV1 => ({
@@ -79,7 +78,7 @@ describe("Middleware", () => {
     });
 
     test("should store options correctly", () => {
-      const options: MiddlewareOptions = {
+      const options = {
         request: { body: createMockSchema() },
         response: { 200: createMockSchema() },
         handler: () => ({ data: "test" }),
