@@ -199,18 +199,27 @@ describe("Queue", () => {
         }
       };
 
-      const retryJobs: Array<{ id: string; attempts: number; error?: string }> =
-        [];
-
-      const onRetry = (job: {
+      const retryContexts: Array<{
         id: string;
         attempts: number;
-        error?: string;
+        error: string;
+        nextRetryDelayMs: number;
+        retriesRemaining: number;
+      }> = [];
+
+      const onRetry = (context: {
+        job: { id: string; attempts: number };
+        error: string;
+        nextRetryDelayMs: number;
+        retriesRemaining: number;
+        backoffMultiplier: number;
       }) => {
-        retryJobs.push({
-          id: job.id,
-          attempts: job.attempts,
-          error: job.error,
+        retryContexts.push({
+          id: context.job.id,
+          attempts: context.job.attempts,
+          error: context.error,
+          nextRetryDelayMs: context.nextRetryDelayMs,
+          retriesRemaining: context.retriesRemaining,
         });
       };
 
@@ -227,12 +236,14 @@ describe("Queue", () => {
       await sleep(2500);
 
       expect(jobId).not.toBeNull();
-      expect(retryJobs.length).toBe(1);
+      expect(retryContexts.length).toBe(1);
 
       if (jobId) {
-        expect(retryJobs[0]?.id).toBe(jobId);
-        expect(retryJobs[0]?.error).toBe("First attempt fails");
-        expect(retryJobs[0]?.attempts).toBe(1);
+        expect(retryContexts[0]?.id).toBe(jobId);
+        expect(retryContexts[0]?.error).toBe("First attempt fails");
+        expect(retryContexts[0]?.attempts).toBe(1);
+        expect(retryContexts[0]?.nextRetryDelayMs).toBe(1000);
+        expect(retryContexts[0]?.retriesRemaining).toBe(1);
       }
 
       await queue.stop();
@@ -247,10 +258,22 @@ describe("Queue", () => {
         throw new Error(`Attempt ${attempts} failed`);
       };
 
-      const retryJobs: Array<{ attempts: number; error?: string }> = [];
+      const retryContexts: Array<{
+        attempts: number;
+        error: string;
+        nextRetryDelayMs: number;
+      }> = [];
 
-      const onRetry = (job: { attempts: number; error?: string }) => {
-        retryJobs.push({ attempts: job.attempts, error: job.error });
+      const onRetry = (context: {
+        job: { attempts: number };
+        error: string;
+        nextRetryDelayMs: number;
+      }) => {
+        retryContexts.push({
+          attempts: context.job.attempts,
+          error: context.error,
+          nextRetryDelayMs: context.nextRetryDelayMs,
+        });
       };
 
       const queue = new Queue({
@@ -266,9 +289,11 @@ describe("Queue", () => {
       await sleep(4000);
 
       // Should have called onRetry 2 times (attempts 1, 2)
-      expect(retryJobs.length).toBe(2);
-      expect(retryJobs[0]?.attempts).toBe(1);
-      expect(retryJobs[1]?.attempts).toBe(2);
+      expect(retryContexts.length).toBe(2);
+      expect(retryContexts[0]?.attempts).toBe(1);
+      expect(retryContexts[0]?.nextRetryDelayMs).toBe(1000);
+      expect(retryContexts[1]?.attempts).toBe(2);
+      expect(retryContexts[1]?.nextRetryDelayMs).toBe(2000);
 
       await queue.stop();
     });
@@ -280,8 +305,8 @@ describe("Queue", () => {
 
       const retryJobs: string[] = [];
 
-      const onRetry = (job: { id: string }) => {
-        retryJobs.push(job.id);
+      const onRetry = (context: { job: { id: string } }) => {
+        retryJobs.push(context.job.id);
       };
 
       const successJobs: string[] = [];
@@ -323,12 +348,12 @@ describe("Queue", () => {
       const retryJobs: string[] = [];
       const errorJobs: string[] = [];
 
-      const onRetry = (job: { id: string }) => {
-        retryJobs.push(job.id);
+      const onRetry = (context: { job: { id: string } }) => {
+        retryJobs.push(context.job.id);
       };
 
-      const onError = (job: { id: string }) => {
-        errorJobs.push(job.id);
+      const onError = (context: { job: { id: string } }) => {
+        errorJobs.push(context.job.id);
       };
 
       const queue = new Queue({
@@ -393,8 +418,8 @@ describe("Queue", () => {
 
       const errorJobs: string[] = [];
 
-      const onError = (job: { id: string }) => {
-        errorJobs.push(job.id);
+      const onError = (context: { job: { id: string } }) => {
+        errorJobs.push(context.job.id);
       };
 
       const queue = new Queue({
@@ -427,10 +452,25 @@ describe("Queue", () => {
         throw new Error("Processing failed");
       };
 
-      const errorJobs: Array<{ id: string; error?: string }> = [];
+      const errorContexts: Array<{
+        id: string;
+        totalDurationMs: number;
+        totalAttempts: number;
+        errorHistory: Array<{ attempt: number; error: string }>;
+      }> = [];
 
-      const onError = (job: { id: string; error?: string }) => {
-        errorJobs.push(job);
+      const onError = (context: {
+        job: { id: string };
+        totalDurationMs: number;
+        totalAttempts: number;
+        errorHistory: Array<{ attempt: number; error: string }>;
+      }) => {
+        errorContexts.push({
+          id: context.job.id,
+          totalDurationMs: context.totalDurationMs,
+          totalAttempts: context.totalAttempts,
+          errorHistory: context.errorHistory,
+        });
       };
 
       const queue = new Queue({
@@ -445,12 +485,15 @@ describe("Queue", () => {
 
       await sleep(3000);
 
-      expect(errorJobs.length).toBe(1);
+      expect(errorContexts.length).toBe(1);
       expect(jobId).not.toBeNull();
 
       if (jobId) {
-        expect(errorJobs[0]?.id).toBe(jobId);
-        expect(errorJobs[0]?.error).toBeDefined();
+        expect(errorContexts[0]?.id).toBe(jobId);
+        expect(errorContexts[0]?.totalAttempts).toBe(2);
+        expect(errorContexts[0]?.totalDurationMs).toBeGreaterThan(0);
+        expect(errorContexts[0]?.errorHistory).toBeDefined();
+        expect(errorContexts[0]?.errorHistory.length).toBeGreaterThan(0);
       }
 
       await queue.stop();
@@ -465,8 +508,8 @@ describe("Queue", () => {
 
       const errorJobs: string[] = [];
 
-      const onError = (job: { id: string }) => {
-        errorJobs.push(job.id);
+      const onError = (context: { job: { id: string } }) => {
+        errorJobs.push(context.job.id);
       };
 
       const queue = new Queue({
@@ -665,8 +708,8 @@ describe("Queue", () => {
 
       const errorJobs: string[] = [];
 
-      const onError = (job: { id: string; error?: string }) => {
-        errorJobs.push(job.id);
+      const onError = (context: { job: { id: string } }) => {
+        errorJobs.push(context.job.id);
       };
 
       const queue = new Queue({

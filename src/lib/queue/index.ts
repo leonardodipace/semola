@@ -1,5 +1,13 @@
 import { err, mightThrow, mightThrowSync, ok } from "../errors/index.js";
-import type { Job, QueueOptions } from "./types.js";
+import type { Job, JobState, QueueOptions } from "./types.js";
+
+const toMinimalJob = <T>(jobState: JobState<T>): Job<T> => ({
+  id: jobState.id,
+  data: jobState.data,
+  attempts: jobState.attempts,
+  maxRetries: jobState.maxRetries,
+  createdAt: jobState.createdAt,
+});
 
 const DEFAULT_RETRIES = 3;
 const DEFAULT_TIMEOUT = 30000;
@@ -21,7 +29,7 @@ export class Queue<T> {
   }
 
   public async enqueue(data: T) {
-    const job: Job<T> = {
+    const job: JobState<T> = {
       id: crypto.randomUUID(),
       data,
       attempts: 0,
@@ -104,7 +112,7 @@ export class Queue<T> {
       }
 
       const [parseError, job] = mightThrowSync(
-        () => JSON.parse(jobData) as Job<T>,
+        () => JSON.parse(jobData) as JobState<T>,
       );
 
       if (parseError || !job) {
@@ -141,7 +149,7 @@ export class Queue<T> {
     }
   }
 
-  private async handleJob(job: Job<T>) {
+  private async handleJob(job: JobState<T>) {
     const controller = new AbortController();
 
     const handlerPromise = Promise.resolve().then(() =>
@@ -178,7 +186,9 @@ export class Queue<T> {
 
     if (!handlerError) {
       if (this.options.onSuccess) {
-        await mightThrow(Promise.resolve(this.options.onSuccess(job)));
+        await mightThrow(
+          Promise.resolve(this.options.onSuccess(toMinimalJob(job))),
+        );
       }
 
       return;
@@ -186,25 +196,60 @@ export class Queue<T> {
 
     job.attempts++;
 
-    job.error =
+    const errorMsg =
       handlerError instanceof Error
         ? handlerError.message
         : String(handlerError);
 
+    job.error = errorMsg;
+
+    if (!job.errorHistory) {
+      job.errorHistory = [];
+    }
+    job.errorHistory.push({
+      attempt: job.attempts,
+      error: errorMsg,
+      timestamp: Date.now(),
+    });
+
     // Check if we should retry. Attempt starts at 1, so we retry while attempts <= maxRetries
     if (job.attempts <= (this.options.retries ?? DEFAULT_RETRIES)) {
       if (this.options.onRetry) {
-        await mightThrow(Promise.resolve(this.options.onRetry(job)));
+        const delay = Math.min(
+          BASE_BACKOFF_DELAY * BACKOFF_MULTIPLIER ** (job.attempts - 1),
+          MAX_BACKOFF_DELAY,
+        );
+        await mightThrow(
+          Promise.resolve(
+            this.options.onRetry({
+              job: toMinimalJob(job),
+              error: errorMsg,
+              nextRetryDelayMs: delay,
+              retriesRemaining:
+                (this.options.retries ?? DEFAULT_RETRIES) - job.attempts,
+              backoffMultiplier: BACKOFF_MULTIPLIER,
+            }),
+          ),
+        );
       }
       await this.retryJob(job);
     } else {
       if (this.options.onError) {
-        await mightThrow(Promise.resolve(this.options.onError(job)));
+        await mightThrow(
+          Promise.resolve(
+            this.options.onError({
+              job: toMinimalJob(job),
+              totalDurationMs: Date.now() - job.createdAt,
+              totalAttempts: job.attempts,
+              errorHistory: job.errorHistory ?? [],
+            }),
+          ),
+        );
       }
     }
   }
 
-  private async retryJob(job: Job<T>) {
+  private async retryJob(job: JobState<T>) {
     // Exponential backoff: 1st retry (attempts=1) -> 1000ms, 2nd (attempts=2) -> 2000ms, etc.
     const delay = Math.min(
       BASE_BACKOFF_DELAY * BACKOFF_MULTIPLIER ** (job.attempts - 1),
@@ -224,7 +269,16 @@ export class Queue<T> {
           : String(stringifyError)
       }`;
       if (this.options.onError) {
-        await mightThrow(Promise.resolve(this.options.onError(job)));
+        await mightThrow(
+          Promise.resolve(
+            this.options.onError({
+              job: toMinimalJob(job),
+              totalDurationMs: Date.now() - job.createdAt,
+              totalAttempts: job.attempts,
+              errorHistory: job.errorHistory ?? [],
+            }),
+          ),
+        );
       }
       return;
     }
@@ -232,7 +286,16 @@ export class Queue<T> {
     if (!serialized) {
       job.error = "Failed to serialize job for retry";
       if (this.options.onError) {
-        await mightThrow(Promise.resolve(this.options.onError(job)));
+        await mightThrow(
+          Promise.resolve(
+            this.options.onError({
+              job: toMinimalJob(job),
+              totalDurationMs: Date.now() - job.createdAt,
+              totalAttempts: job.attempts,
+              errorHistory: job.errorHistory ?? [],
+            }),
+          ),
+        );
       }
       return;
     }
@@ -248,7 +311,16 @@ export class Queue<T> {
         pushError instanceof Error ? pushError.message : String(pushError)
       }`;
       if (this.options.onError) {
-        await mightThrow(Promise.resolve(this.options.onError(job)));
+        await mightThrow(
+          Promise.resolve(
+            this.options.onError({
+              job: toMinimalJob(job),
+              totalDurationMs: Date.now() - job.createdAt,
+              totalAttempts: job.attempts,
+              errorHistory: job.errorHistory ?? [],
+            }),
+          ),
+        );
       }
     }
   }
