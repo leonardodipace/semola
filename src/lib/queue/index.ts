@@ -82,6 +82,17 @@ export class Queue<T> {
     return mightThrow(this.options.redis.lpush(queueKey, serialized));
   }
 
+  private async moveToDeadLetterQueue(jobData: string, parseError: unknown) {
+    const deadLetterKey = `queue:${this.options.name}:dead-letter`;
+    const deadLetterEntry = JSON.stringify({
+      jobData,
+      parseError: this.formatErrorMessage(parseError),
+      timestamp: Date.now(),
+    });
+
+    return mightThrow(this.options.redis.lpush(deadLetterKey, deadLetterEntry));
+  }
+
   private formatErrorMessage(error: unknown) {
     return error instanceof Error ? error.message : String(error);
   }
@@ -115,6 +126,10 @@ export class Queue<T> {
       );
 
       if (parseError || !job) {
+        // Handle malformed payload: preserve to dead-letter queue and notify
+        await this.callOnErrorForParseFailure(jobData, parseError);
+        await this.moveToDeadLetterQueue(jobData, parseError);
+
         await this.waitForPollInterval();
         continue;
       }
@@ -236,6 +251,41 @@ export class Queue<T> {
           totalDurationMs: Date.now() - job.createdAt,
           totalAttempts: job.attempts,
           errorHistory: job.errorHistory ?? [],
+        }),
+      ),
+    );
+  }
+
+  private async callOnErrorForParseFailure(
+    jobData: string,
+    parseError: unknown,
+  ) {
+    if (!this.options.onError) {
+      return;
+    }
+
+    const errorMsg = `Failed to parse job data: ${this.formatErrorMessage(parseError)}`;
+
+    await mightThrow(
+      Promise.resolve(
+        this.options.onError({
+          job: {
+            id: "unknown",
+            data: jobData as unknown as T,
+            attempts: 0,
+            maxRetries: 0,
+            createdAt: Date.now(),
+          },
+          lastError: errorMsg,
+          totalDurationMs: 0,
+          totalAttempts: 0,
+          errorHistory: [
+            {
+              attempt: 0,
+              error: errorMsg,
+              timestamp: Date.now(),
+            },
+          ],
         }),
       ),
     );
