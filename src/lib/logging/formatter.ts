@@ -70,28 +70,24 @@ export function isoDateTimeFormat() {
 }
 
 export function isoDateFormat() {
-  const date = new Date();
-  const day = date.getUTCDate();
-  const month = date.getUTCMonth() + 1;
-  const year = date.getUTCFullYear();
-
-  return `${year}-${month}-${day}`;
+  return isoDateTimeFormat().split("T")[0];
 }
 
 export function dmyFormat() {
-  const date = new Date();
-  const day = date.getUTCDate();
-  const month = date.getUTCMonth() + 1;
-  const year = date.getUTCFullYear();
+  const isoDate = isoDateFormat();
+  if (!isoDate) return undefined;
 
-  return `${day}-${month}-${year}`;
+  const info = isoDate.split("-");
+
+  return `${info[2]}-${info[1]}-${info[0]}`;
 }
 
 export function mdyFormat() {
   const date = new Date();
-  const day = date.getUTCDate();
-  const month = date.getUTCMonth() + 1;
-  const year = date.getUTCFullYear();
+  const isoDate = isoDateFormat();
+  if (!isoDate) return undefined;
 
-  return `${month}-${day}-${year}`;
+  const info = isoDate.split("-");
+
+  return `${info[1]}-${info[2]}-${info[0]}`;
 }
