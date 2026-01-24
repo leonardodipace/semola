@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Queue } from "./index.js";
+import type { ErrorContext, RetryContext } from "./types.js";
 
 class MockRedisClient {
   private lists = new Map<string, string[]>();
@@ -207,13 +208,7 @@ describe("Queue", () => {
         retriesRemaining: number;
       }> = [];
 
-      const onRetry = (context: {
-        job: { id: string; attempts: number };
-        error: string;
-        nextRetryDelayMs: number;
-        retriesRemaining: number;
-        backoffMultiplier: number;
-      }) => {
+      const onRetry = (context: RetryContext<{ message: string }>) => {
         retryContexts.push({
           id: context.job.id,
           attempts: context.job.attempts,
@@ -264,11 +259,7 @@ describe("Queue", () => {
         nextRetryDelayMs: number;
       }> = [];
 
-      const onRetry = (context: {
-        job: { attempts: number };
-        error: string;
-        nextRetryDelayMs: number;
-      }) => {
+      const onRetry = (context: RetryContext<{ message: string }>) => {
         retryContexts.push({
           attempts: context.job.attempts,
           error: context.error,
@@ -305,7 +296,7 @@ describe("Queue", () => {
 
       const retryJobs: string[] = [];
 
-      const onRetry = (context: { job: { id: string } }) => {
+      const onRetry = (context: RetryContext<{ message: string }>) => {
         retryJobs.push(context.job.id);
       };
 
@@ -348,11 +339,11 @@ describe("Queue", () => {
       const retryJobs: string[] = [];
       const errorJobs: string[] = [];
 
-      const onRetry = (context: { job: { id: string } }) => {
+      const onRetry = (context: RetryContext<{ message: string }>) => {
         retryJobs.push(context.job.id);
       };
 
-      const onError = (context: { job: { id: string } }) => {
+      const onError = (context: ErrorContext<{ message: string }>) => {
         errorJobs.push(context.job.id);
       };
 
@@ -418,7 +409,7 @@ describe("Queue", () => {
 
       const errorJobs: string[] = [];
 
-      const onError = (context: { job: { id: string } }) => {
+      const onError = (context: ErrorContext<{ message: string }>) => {
         errorJobs.push(context.job.id);
       };
 
@@ -460,13 +451,7 @@ describe("Queue", () => {
         errorHistory: Array<{ attempt: number; error: string }>;
       }> = [];
 
-      const onError = (context: {
-        job: { id: string };
-        lastError: string;
-        totalDurationMs: number;
-        totalAttempts: number;
-        errorHistory: Array<{ attempt: number; error: string }>;
-      }) => {
+      const onError = (context: ErrorContext<{ message: string }>) => {
         errorContexts.push({
           id: context.job.id,
           lastError: context.lastError,
@@ -512,7 +497,7 @@ describe("Queue", () => {
 
       const errorJobs: string[] = [];
 
-      const onError = (context: { job: { id: string } }) => {
+      const onError = (context: ErrorContext<{ message: string }>) => {
         errorJobs.push(context.job.id);
       };
 
@@ -712,7 +697,7 @@ describe("Queue", () => {
 
       const errorJobs: string[] = [];
 
-      const onError = (context: { job: { id: string } }) => {
+      const onError = (context: ErrorContext<{ message: string }>) => {
         errorJobs.push(context.job.id);
       };
 
