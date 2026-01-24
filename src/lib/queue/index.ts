@@ -1,13 +1,22 @@
 import { err, mightThrow, mightThrowSync, ok } from "../errors/index.js";
 import type { Job, QueueOptions } from "./types.js";
 
+const DEFAULT_TIMEOUT = 30000;
+const DEFAULT_CONCURRENCY = 1;
+const DEFAULT_POLL_INTERVAL = 100;
+const MAX_BACKOFF_DELAY = 60000;
+const BASE_BACKOFF_DELAY = 1000;
+const BACKOFF_MULTIPLIER = 2;
+const SHUTDOWN_POLL_INTERVAL = 10;
+
 export class Queue<T> {
   private options: QueueOptions<T>;
   private running = true;
+  private activeWorkers = 0;
 
   public constructor(options: QueueOptions<T>) {
     this.options = options;
-    this.processJobs();
+    this.startWorkers();
   }
 
   public async enqueue(data: T) {
@@ -44,8 +53,25 @@ export class Queue<T> {
     return ok(job.id);
   }
 
-  public stop() {
+  public async stop() {
     this.running = false;
+
+    // Wait for all active workers to finish processing
+    while (this.activeWorkers > 0) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, SHUTDOWN_POLL_INTERVAL),
+      );
+    }
+  }
+
+  private startWorkers() {
+    for (
+      let i = 0;
+      i < (this.options.concurrency ?? DEFAULT_CONCURRENCY);
+      i++
+    ) {
+      this.processJobs();
+    }
   }
 
   private async processJobs() {
@@ -57,12 +83,22 @@ export class Queue<T> {
       );
 
       if (popError) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        await new Promise((resolve) =>
+          setTimeout(
+            resolve,
+            this.options.pollInterval ?? DEFAULT_POLL_INTERVAL,
+          ),
+        );
         continue;
       }
 
       if (!jobData) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        await new Promise((resolve) =>
+          setTimeout(
+            resolve,
+            this.options.pollInterval ?? DEFAULT_POLL_INTERVAL,
+          ),
+        );
         continue;
       }
 
@@ -71,17 +107,50 @@ export class Queue<T> {
       );
 
       if (parseError || !job) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        await new Promise((resolve) =>
+          setTimeout(
+            resolve,
+            this.options.pollInterval ?? DEFAULT_POLL_INTERVAL,
+          ),
+        );
         continue;
       }
 
-      await this.handleJob(job);
+      // Skip processing if we've been stopped
+      if (!this.running) {
+        break;
+      }
+
+      this.activeWorkers++;
+
+      try {
+        await this.handleJob(job);
+      } finally {
+        this.activeWorkers--;
+      }
     }
   }
 
   private async handleJob(job: Job<T>) {
+    const handlerPromise = Promise.resolve().then(() =>
+      this.options.handler(job.data),
+    );
+
+    const timeout = this.options.timeout ?? DEFAULT_TIMEOUT;
+
+    const timeoutPromise = new Promise<Error>((resolve) => {
+      setTimeout(() => {
+        resolve(new Error(`Job timeout after ${timeout}ms`));
+      }, timeout);
+    });
+
     const [handlerError] = await mightThrow(
-      Promise.resolve().then(() => this.options.handler(job.data)),
+      Promise.race([
+        handlerPromise.then(() => undefined),
+        timeoutPromise.then((err) => {
+          throw err;
+        }),
+      ]),
     );
 
     if (!handlerError) {
@@ -99,7 +168,8 @@ export class Queue<T> {
         ? handlerError.message
         : String(handlerError);
 
-    if (job.attempts < job.maxRetries) {
+    // Check if we should retry. Attempt starts at 1, so we retry while attempts <= maxRetries
+    if (job.attempts <= this.options.retries) {
       await this.retryJob(job);
     } else {
       if (this.options.onError) {
@@ -109,7 +179,11 @@ export class Queue<T> {
   }
 
   private async retryJob(job: Job<T>) {
-    const delay = Math.min(1000 * 2 ** job.attempts, 60000);
+    // Exponential backoff: 1st retry (attempts=1) -> 1000ms, 2nd (attempts=2) -> 2000ms, etc.
+    const delay = Math.min(
+      BASE_BACKOFF_DELAY * BACKOFF_MULTIPLIER ** (job.attempts - 1),
+      MAX_BACKOFF_DELAY,
+    );
 
     await new Promise((resolve) => setTimeout(resolve, delay));
 
@@ -117,12 +191,39 @@ export class Queue<T> {
       JSON.stringify(job),
     );
 
-    if (stringifyError || !serialized) {
+    if (stringifyError) {
+      job.error = `Failed to serialize job for retry: ${
+        stringifyError instanceof Error
+          ? stringifyError.message
+          : String(stringifyError)
+      }`;
+      if (this.options.onError) {
+        await mightThrow(Promise.resolve(this.options.onError(job)));
+      }
+      return;
+    }
+
+    if (!serialized) {
+      job.error = "Failed to serialize job for retry";
+      if (this.options.onError) {
+        await mightThrow(Promise.resolve(this.options.onError(job)));
+      }
       return;
     }
 
     const queueKey = `queue:${this.options.name}:jobs`;
 
-    await mightThrow(this.options.redis.lpush(queueKey, serialized));
+    const [pushError] = await mightThrow(
+      this.options.redis.lpush(queueKey, serialized),
+    );
+
+    if (pushError) {
+      job.error = `Failed to re-enqueue job for retry: ${
+        pushError instanceof Error ? pushError.message : String(pushError)
+      }`;
+      if (this.options.onError) {
+        await mightThrow(Promise.resolve(this.options.onError(job)));
+      }
+    }
   }
 }
