@@ -18,10 +18,11 @@ Creates a new queue instance that automatically starts processing jobs.
 type QueueOptions<T> = {
   name: string;
   redis: Bun.RedisClient;
-  retries: number;
-  handler: (data: T) => void | Promise<void>;
+  handler: (data: T, signal?: AbortSignal) => void | Promise<void>;
   onSuccess?: (job: Job<T>) => void | Promise<void>;
-  onError?: (job: Job<T>) => void | Promise<void>;
+  onRetry?: (context: { job: Job<T>; error: string; nextRetryDelayMs: number; retriesRemaining: number; backoffMultiplier: number }) => void | Promise<void>;
+  onError?: (context: { job: Job<T>; lastError: string; totalDurationMs: number; totalAttempts: number; errorHistory: Array<{ attempt: number; error: string; timestamp: number }> }) => void | Promise<void>;
+  retries?: number;
   timeout?: number;
   concurrency?: number;
   pollInterval?: number;
@@ -33,22 +34,24 @@ type Job<T> = {
   attempts: number;
   maxRetries: number;
   createdAt: number;
-  error?: string;
 };
 
 const queue = new Queue<{ message: string }>({
   name: "my-queue",
   redis: redisClient,
-  retries: 3,
-  handler: async (data) => {
+  handler: async (data, signal) => {
     console.log(`Processing: ${data.message}`);
   },
   onSuccess: (job) => {
     console.log(`Job ${job.id} succeeded`);
   },
-  onError: (job) => {
-    console.error(`Job ${job.id} failed after retries:`, job.error);
+  onRetry: (context) => {
+    console.log(`Retrying job ${context.job.id}: ${context.error} (${context.retriesRemaining} retries left)`);
   },
+  onError: (context) => {
+    console.error(`Job ${context.job.id} failed after ${context.totalAttempts} attempts:`, context.lastError);
+  },
+  retries: 3,
   timeout: 30000,
   concurrency: 1,
   pollInterval: 100,
@@ -120,17 +123,18 @@ All methods return result tuples `[error, data]` for consistent error handling:
 
 ### Callbacks
 
-- **`handler`**: Required. Called when a job is ready for processing. Errors thrown here trigger retries.
+- **`handler`**: Required. Called when a job is ready for processing. Receives job data and an `AbortSignal` for timeout handling. Errors thrown here trigger retries.
 - **`onSuccess`**: Optional. Called when a job succeeds after handler completion.
-- **`onError`**: Optional. Called when a job has exhausted all retries.
+- **`onRetry`**: Optional. Called before a failed job is retried. Provides retry context including error details, next retry delay, and remaining retries.
+- **`onError`**: Optional. Called when a job has exhausted all retries. Provides error context including complete error history.
 
 ## Configuration Options
 
 ### `retries`
 
-Type: `number` (required)
+Type: `number` (optional, default: `3`)
 
-Number of times to retry a failed job. Total attempts = `retries + 1`.
+Number of times to retry a failed job. Total attempts = `retries + 1`. This value is captured per-job at enqueue time as `job.maxRetries`.
 
 ### `timeout`
 
@@ -163,10 +167,7 @@ type TaskData = {
 const taskQueue = new Queue<TaskData>({
   name: "tasks",
   redis: new Bun.RedisClient("redis://localhost:6379"),
-  retries: 3,
-  timeout: 60000,
-  concurrency: 5,
-  handler: async (data) => {
+  handler: async (data, signal) => {
     // Process the task with timeout protection
     const result = await processTask(data.taskId, data.userId);
     console.log("Task processed:", result);
@@ -174,11 +175,17 @@ const taskQueue = new Queue<TaskData>({
   onSuccess: (job) => {
     console.log(`✓ Task completed: ${job.id}`);
   },
-  onError: (job) => {
-    console.log(`✗ Task failed: ${job.id}`);
-    // Send notification, log to monitoring, etc.
-    notifyFailure(job.data, job.error);
+  onRetry: (context) => {
+    console.log(`⟳ Retrying ${context.job.id} in ${context.nextRetryDelayMs}ms (${context.retriesRemaining} left)`);
   },
+  onError: (context) => {
+    console.log(`✗ Task failed: ${context.job.id}`);
+    // Send notification, log to monitoring, etc.
+    notifyFailure(context.job.data, context.lastError);
+  },
+  retries: 3,
+  timeout: 60000,
+  concurrency: 5,
 });
 
 // Enqueue a job
@@ -204,17 +211,20 @@ process.on("SIGTERM", async () => {
 const importQueue = new Queue<{ fileId: string; url: string }>({
   name: "imports",
   redis,
-  retries: 2,
-  timeout: 120000, // 2 minute timeout for downloads
-  concurrency: 3, // Process 3 imports in parallel
-  handler: async (data) => {
+  handler: async (data, signal) => {
     // Download and process file
     const file = await downloadFile(data.url);
     await importFileData(data.fileId, file);
   },
-  onError: (job) => {
-    logger.error(`Import failed for ${job.data.fileId}: ${job.error}`);
+  onRetry: (context) => {
+    logger.warn(`Import retry for ${context.job.data.fileId}: ${context.error}`);
   },
+  onError: (context) => {
+    logger.error(`Import failed for ${context.job.data.fileId}: ${context.lastError} (${context.totalAttempts} attempts)`);
+  },
+  retries: 2,
+  timeout: 120000, // 2 minute timeout for downloads
+  concurrency: 3, // Process 3 imports in parallel
 });
 ```
 
