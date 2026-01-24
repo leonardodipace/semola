@@ -118,6 +118,15 @@ export class Queue<T> {
 
       // Skip processing if we've been stopped
       if (!this.running) {
+        // Re-enqueue the job so it's not lost
+        const [stringifyError, serialized] = mightThrowSync(() =>
+          JSON.stringify(job),
+        );
+
+        if (!stringifyError && serialized) {
+          await mightThrow(this.options.redis.lpush(queueKey, serialized));
+        }
+
         break;
       }
 
