@@ -1,6 +1,6 @@
 # Queue
 
-A Redis-backed job queue with automatic retry logic, exponential backoff, job timeouts, and concurrent processing. Built on Bun's native Redis client.
+A Redis-backed job queue with automatic retry logic, exponential backoff, and concurrent processing.
 
 ## Import
 
@@ -8,169 +8,46 @@ A Redis-backed job queue with automatic retry logic, exponential backoff, job ti
 import { Queue } from "semola/queue";
 ```
 
-## API
-
-**`new Queue<T>(options: QueueOptions<T>)`**
-
-Creates a new queue instance that automatically starts processing jobs.
+## Basic Usage
 
 ```typescript
-type QueueOptions<T> = {
-  name: string;
-  redis: Bun.RedisClient;
-  handler: (data: T, signal?: AbortSignal) => void | Promise<void>;
-  onSuccess?: (job: Job<T>) => void | Promise<void>;
-  onRetry?: (context: { job: Job<T>; error: string; nextRetryDelayMs: number; retriesRemaining: number; backoffMultiplier: number }) => void | Promise<void>;
-  onError?: (context: { job: Job<T>; lastError: string; totalDurationMs: number; totalAttempts: number; errorHistory: Array<{ attempt: number; error: string; timestamp: number }> }) => void | Promise<void>;
-  retries?: number;
-  timeout?: number;
-  concurrency?: number;
-  pollInterval?: number;
-};
-
-type Job<T> = {
-  id: string;
-  data: T;
-  attempts: number;
-  maxRetries: number;
-  createdAt: number;
-};
-
-const queue = new Queue<{ message: string }>({
+const queue = new Queue({
   name: "my-queue",
   redis: redisClient,
-  handler: async (data, signal) => {
+  handler: async (data) => {
     console.log(`Processing: ${data.message}`);
   },
-  onSuccess: (job) => {
-    console.log(`Job ${job.id} succeeded`);
-  },
-  onRetry: (context) => {
-    console.log(`Retrying job ${context.job.id}: ${context.error} (${context.retriesRemaining} retries left)`);
-  },
-  onError: (context) => {
-    console.error(`Job ${context.job.id} failed after ${context.totalAttempts} attempts:`, context.lastError);
-  },
-  retries: 3,
-  timeout: 30000,
-  concurrency: 1,
-  pollInterval: 100,
 });
-```
 
-**`queue.enqueue(data: T)`**
+// Add a job
+const [error, jobId] = await queue.enqueue({ message: "Hello!" });
 
-Enqueues a new job for processing. Returns a result tuple with the job ID or an error.
-
-```typescript
-const [error, jobId] = await queue.enqueue({ message: "Hello, world!" });
-
-if (error) {
-  console.error("Failed to enqueue:", error.message);
-} else {
-  console.log("Job enqueued:", jobId);
-}
-```
-
-**`await queue.stop()`**
-
-Gracefully stops the queue processor. Waits for all in-flight jobs to complete before fully stopping. No new jobs will be processed after this call.
-
-```typescript
+// Graceful shutdown
 await queue.stop();
 ```
 
-## Features
+## Options
 
-### Automatic Processing
+- **`name`** (required) - Queue name for Redis keys
+- **`redis`** (required) - Bun Redis client instance
+- **`handler`** (required) - Function to process each job
+- **`retries`** - Number of retry attempts (default: 3)
+- **`timeout`** - Job timeout in milliseconds (default: 30000)
+- **`concurrency`** - Number of parallel workers (default: 1)
+- **`onSuccess`** - Called when a job succeeds
+- **`onRetry`** - Called when a job is retried
+- **`onError`** - Called when a job fails permanently
 
-Jobs are automatically processed as soon as they're enqueued. Multiple concurrent workers can process jobs in parallel based on the `concurrency` setting.
+## Examples
 
-### Exponential Backoff
-
-Failed jobs are automatically retried with exponential backoff. The delay follows the formula: `Math.min(1000 * 2^(attempt-1), 60000)` milliseconds, where attempt is 1-indexed.
-
-- 1st attempt: immediate
-- 1st retry (attempts=1): 1000ms
-- 2nd retry (attempts=2): 2000ms
-- 3rd retry (attempts=3): 4000ms
-- Max delay: 60000ms (1 minute)
-
-Jobs get exactly `retries + 1` total attempts (initial + retries).
-
-### Job Timeout
-
-Jobs that exceed the `timeout` duration are treated as failures and will be retried. Default timeout is 30 seconds. Set to a higher value for long-running operations.
-
-### Concurrent Processing
-
-Multiple jobs can be processed simultaneously using the `concurrency` option. Default is 1 (sequential). Increase concurrency for higher throughput on I/O-bound operations.
-
-### Graceful Shutdown
-
-Calling `await queue.stop()` gracefully shuts down the queue:
-
-- No new jobs will be accepted from the queue
-- In-flight jobs are allowed to complete
-- The promise resolves once all workers have finished
-
-### Error Handling
-
-All methods return result tuples `[error, data]` for consistent error handling:
-
-- `error` is `null` on success, containing `{ type, message }` on failure
-- `data` contains the result on success, `null` on failure
-
-### Callbacks
-
-- **`handler`**: Required. Called when a job is ready for processing. Receives job data and an `AbortSignal` for timeout handling. Errors thrown here trigger retries.
-- **`onSuccess`**: Optional. Called when a job succeeds after handler completion.
-- **`onRetry`**: Optional. Called before a failed job is retried. Provides retry context including error details, next retry delay, and remaining retries.
-- **`onError`**: Optional. Called when a job has exhausted all retries. Provides error context including complete error history.
-
-## Configuration Options
-
-### `retries`
-
-Type: `number` (optional, default: `3`)
-
-Number of times to retry a failed job. Total attempts = `retries + 1`. This value is captured per-job at enqueue time as `job.maxRetries`.
-
-### `timeout`
-
-Type: `number` (optional, default: `30000`)
-
-Maximum time in milliseconds for a job handler to complete. Jobs exceeding this timeout are treated as failures and retried.
-
-### `concurrency`
-
-Type: `number` (optional, default: `1`)
-
-Number of jobs to process concurrently. Set higher for parallel processing, but be mindful of Redis connections and handler resource usage.
-
-### `pollInterval`
-
-Type: `number` (optional, default: `100`)
-
-Time in milliseconds between polling Redis for new jobs. Lower values reduce latency but increase Redis load.
-
-## Example
+### With Error Handling
 
 ```typescript
-import { Queue } from "semola/queue";
-
-type TaskData = {
-  taskId: string;
-  userId: string;
-};
-
-const taskQueue = new Queue<TaskData>({
+const taskQueue = new Queue({
   name: "tasks",
   redis: new Bun.RedisClient("redis://localhost:6379"),
-  handler: async (data, signal) => {
-    // Process the task with timeout protection
-    const result = await processTask(data.taskId, data.userId);
-    console.log("Task processed:", result);
+  handler: async (data) => {
+    await processTask(data.taskId, data.userId);
   },
   onSuccess: (job) => {
     console.log(`✓ Task completed: ${job.id}`);
@@ -179,8 +56,7 @@ const taskQueue = new Queue<TaskData>({
     console.log(`⟳ Retrying ${context.job.id} in ${context.nextRetryDelayMs}ms (${context.retriesRemaining} left)`);
   },
   onError: (context) => {
-    console.log(`✗ Task failed: ${context.job.id}`);
-    // Send notification, log to monitoring, etc.
+    console.error(`✗ Task failed: ${context.job.id} after ${context.totalAttempts} attempts`);
     notifyFailure(context.job.data, context.lastError);
   },
   retries: 3,
@@ -188,54 +64,57 @@ const taskQueue = new Queue<TaskData>({
   concurrency: 5,
 });
 
-// Enqueue a job
+// Add a job
 const [error, jobId] = await taskQueue.enqueue({
   taskId: "task-123",
   userId: "user-456",
 });
 
-if (!error) {
-  console.log("Task queued:", jobId);
+if (error) {
+  console.error("Failed to enqueue:", error.message);
 }
 
-// Gracefully stop when shutting down
+// Graceful shutdown
 process.on("SIGTERM", async () => {
-  console.log("Shutting down queue...");
   await taskQueue.stop();
 });
 ```
 
-## Advanced Example: Concurrent Processing with Timeout
+### Email Queue
 
 ```typescript
-const importQueue = new Queue<{ fileId: string; url: string }>({
-  name: "imports",
-  redis,
-  handler: async (data, signal) => {
-    // Download and process file
-    const file = await downloadFile(data.url);
-    await importFileData(data.fileId, file);
+const emailQueue = new Queue({
+  name: "emails",
+  redis: redisClient,
+  handler: async (data) => {
+    await sendEmail(data.to, data.subject, data.body);
   },
-  onRetry: (context) => {
-    logger.warn(`Import retry for ${context.job.data.fileId}: ${context.error}`);
-  },
-  onError: (context) => {
-    logger.error(`Import failed for ${context.job.data.fileId}: ${context.lastError} (${context.totalAttempts} attempts)`);
-  },
-  retries: 2,
-  timeout: 120000, // 2 minute timeout for downloads
-  concurrency: 3, // Process 3 imports in parallel
+  retries: 5,
+  timeout: 30000,
+});
+
+await emailQueue.enqueue({
+  to: "user@example.com",
+  subject: "Welcome!",
+  body: "Thanks for signing up.",
 });
 ```
 
-## Error Types
+### File Processing with Concurrency
 
-The queue returns `QueueError` type errors:
-
-- **`QueueError`** - Failed to enqueue job (Redis or serialization issues).
-
-## Implementation Notes
-
-- Job data is serialized to JSON for Redis storage. Ensure your data is JSON-serializable.
-- Jobs in Redis survive process restarts, but in-flight jobs are lost if the process crashes mid-handler.
-- The queue is designed for fire-and-forget task processing. For request-response patterns, use direct function calls.
+```typescript
+const importQueue = new Queue({
+  name: "imports",
+  redis: redisClient,
+  handler: async (data) => {
+    const file = await downloadFile(data.url);
+    await importFileData(data.fileId, file);
+  },
+  onError: (context) => {
+    logger.error(`Import failed: ${context.job.data.fileId}`);
+  },
+  retries: 2,
+  timeout: 120000,
+  concurrency: 3, // Process 3 files in parallel
+});
+```
