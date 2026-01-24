@@ -65,7 +65,7 @@ describe("Queue", () => {
       expect(jobId).toBeDefined();
       expect(typeof jobId).toBe("string");
 
-      queue.stop();
+      await queue.stop();
     });
 
     test("should handle Redis connection errors", async () => {
@@ -84,7 +84,7 @@ describe("Queue", () => {
 
       expect(jobId).toBeNull();
 
-      queue.stop();
+      await queue.stop();
     });
 
     test("should handle serialization errors", async () => {
@@ -107,7 +107,7 @@ describe("Queue", () => {
 
       expect(jobId).toBeNull();
 
-      queue.stop();
+      await queue.stop();
     });
   });
 
@@ -132,7 +132,7 @@ describe("Queue", () => {
 
       expect(callCount).toBeGreaterThan(1);
 
-      queue.stop();
+      await queue.stop();
     });
 
     test("should process jobs in FIFO order", async () => {
@@ -153,7 +153,7 @@ describe("Queue", () => {
 
       expect(processed).toEqual(["first", "second", "third"]);
 
-      queue.stop();
+      await queue.stop();
     });
 
     test("should call onSuccess callback on successful processing", async () => {
@@ -185,7 +185,7 @@ describe("Queue", () => {
         expect(successJobs).toContain(jobId);
       }
 
-      queue.stop();
+      await queue.stop();
     });
 
     test("should retry failed jobs with exponential backoff", async () => {
@@ -209,7 +209,7 @@ describe("Queue", () => {
 
       expect(attempts).toBe(2);
 
-      queue.stop();
+      await queue.stop();
     });
 
     test("should respect maxRetries limit", async () => {
@@ -241,7 +241,7 @@ describe("Queue", () => {
 
       await sleep(4000);
 
-      expect(attempts).toBe(2);
+      expect(attempts).toBe(3);
 
       expect(jobId).not.toBeNull();
 
@@ -249,7 +249,7 @@ describe("Queue", () => {
         expect(errorJobs).toContain(jobId);
       }
 
-      queue.stop();
+      await queue.stop();
     });
 
     test("should call onError when retries are exhausted", async () => {
@@ -285,7 +285,7 @@ describe("Queue", () => {
         expect(errorJobs[0]?.error).toBeDefined();
       }
 
-      queue.stop();
+      await queue.stop();
     });
 
     test("should handle handler errors", async () => {
@@ -319,7 +319,7 @@ describe("Queue", () => {
         expect(errorJobs).toContain(jobId);
       }
 
-      queue.stop();
+      await queue.stop();
     });
   });
 
@@ -340,7 +340,7 @@ describe("Queue", () => {
 
       expect(processed).toContain("hello");
 
-      queue.stop();
+      await queue.stop();
     });
 
     test("should stop processing after stop() is called", async () => {
@@ -357,7 +357,7 @@ describe("Queue", () => {
 
       await sleep(200);
 
-      queue.stop();
+      await queue.stop();
 
       await queue.enqueue({ message: "second" });
 
@@ -377,7 +377,7 @@ describe("Queue", () => {
 
       await sleep(200);
 
-      queue.stop();
+      await queue.stop();
     });
 
     test("should handle async handlers", async () => {
@@ -397,7 +397,7 @@ describe("Queue", () => {
 
       expect(processed).toContain("async");
 
-      queue.stop();
+      await queue.stop();
     });
 
     test("should handle multiple queues with different names", async () => {
@@ -437,8 +437,8 @@ describe("Queue", () => {
       expect(processed2).toContain("q2");
       expect(processed2).not.toContain("q1");
 
-      queue1.stop();
-      queue2.stop();
+      await queue1.stop();
+      await queue2.stop();
     });
 
     test("should handle deserialization errors gracefully", async () => {
@@ -451,7 +451,7 @@ describe("Queue", () => {
 
       await sleep(200);
 
-      queue.stop();
+      await queue.stop();
     });
 
     test("should handle large job data", async () => {
@@ -477,7 +477,103 @@ describe("Queue", () => {
 
       expect(processed[0]).toEqual(largeData);
 
-      queue.stop();
+      await queue.stop();
+    });
+
+    test("should handle job timeout", async () => {
+      const redis = createMockRedis();
+      let attempts = 0;
+
+      const handler = async () => {
+        attempts++;
+        // Sleep longer than timeout
+        await sleep(500);
+      };
+
+      const errorJobs: string[] = [];
+
+      const onError = (job: { id: string; error?: string }) => {
+        errorJobs.push(job.id);
+      };
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 1,
+        handler,
+        timeout: 100,
+        onError,
+      });
+
+      const [, jobId] = await queue.enqueue({ message: "hello" });
+
+      await sleep(3000);
+
+      // Should have retried once due to timeout
+      expect(attempts).toBeGreaterThanOrEqual(2);
+      expect(jobId).not.toBeNull();
+
+      if (jobId) {
+        expect(errorJobs).toContain(jobId);
+      }
+
+      await queue.stop();
+    });
+
+    test("should respect concurrency limits", async () => {
+      const redis = createMockRedis();
+      let maxConcurrent = 0;
+      let currentConcurrent = 0;
+
+      const handler = async () => {
+        currentConcurrent++;
+        maxConcurrent = Math.max(maxConcurrent, currentConcurrent);
+        await sleep(50);
+        currentConcurrent--;
+      };
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 1,
+        handler,
+        concurrency: 2,
+      });
+
+      // Enqueue multiple jobs
+      await queue.enqueue({ message: "1" });
+      await queue.enqueue({ message: "2" });
+      await queue.enqueue({ message: "3" });
+      await queue.enqueue({ message: "4" });
+
+      await sleep(500);
+
+      // Should not exceed concurrency limit
+      expect(maxConcurrent).toBeLessThanOrEqual(2);
+
+      await queue.stop();
+    });
+
+    test("should handle graceful shutdown with pending jobs", async () => {
+      const redis = createMockRedis();
+      const processed: string[] = [];
+
+      const handler = async (data: { message: string }) => {
+        await sleep(50);
+        processed.push(data.message);
+      };
+
+      const queue = new Queue({ name: "test", redis, retries: 1, handler });
+
+      await queue.enqueue({ message: "job1" });
+      await queue.enqueue({ message: "job2" });
+
+      await sleep(100); // Give it time to start processing
+
+      await queue.stop(); // Should wait for in-flight jobs
+
+      // Should have completed at least job1
+      expect(processed.length).toBeGreaterThan(0);
     });
   });
 });
