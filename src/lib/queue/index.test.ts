@@ -483,11 +483,16 @@ describe("Queue", () => {
     test("should handle job timeout", async () => {
       const redis = createMockRedis();
       let attempts = 0;
+      const signalStates: boolean[] = [];
 
-      const handler = async () => {
+      const handler = async (_data: unknown, signal?: AbortSignal) => {
         attempts++;
+        // Capture initial signal state
+        signalStates.push(signal?.aborted ?? false);
         // Sleep longer than timeout
         await sleep(500);
+        // Capture signal state after timeout should have fired
+        signalStates.push(signal?.aborted ?? false);
       };
 
       const errorJobs: string[] = [];
@@ -516,6 +521,12 @@ describe("Queue", () => {
       if (jobId) {
         expect(errorJobs).toContain(jobId);
       }
+
+      // Verify signal was received and got aborted after timeout
+      expect(signalStates.length).toBeGreaterThan(0);
+      expect(signalStates[0]).toBe(false); // Signal not aborted initially
+      // At least one signal should be aborted after timeout fires
+      expect(signalStates.some((state) => state === true)).toBe(true);
 
       await queue.stop();
     });
