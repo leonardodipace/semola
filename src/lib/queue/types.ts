@@ -5,6 +5,9 @@ export type QueueOptions<T> = {
   handler: (data: T) => void | Promise<void>;
   onSuccess?: (job: Job<T>) => void | Promise<void>;
   onError?: (job: Job<T>) => void | Promise<void>;
+  timeout?: number;
+  concurrency?: number;
+  pollInterval?: number;
 };
 
 export type Job<T> = {
