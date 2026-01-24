@@ -86,12 +86,23 @@ const spec = await api.getOpenApiSpec();
 // Returns OpenAPI spec object ready for Swagger UI, Redoc, etc.
 ```
 
-### `api.listen(port, callback?)`
+#### OpenAPI 3.1.0 Benefits
+
+This framework generates OpenAPI 3.1.0 specifications, which provide several advantages over 3.0:
+
+- **Full JSON Schema Compatibility**: Uses standard JSON Schema Draft 2020-12, removing the need for OpenAPI-specific schema extensions
+- **Better Null Handling**: Uses standard JSON Schema type unions instead of the custom `nullable` keyword
+- **Modern Features**: Support for tuple validation, conditional schemas (if/then/else), and `$ref` with sibling keywords
+- **Improved Type Safety**: More precise `exclusiveMinimum`/`exclusiveMaximum` as numbers rather than booleans
+
+The generated spec is compatible with modern OpenAPI tooling including Swagger UI, Redoc, and OpenAPI Generator.
+
+### `api.serve(port, callback?)`
 
 Starts the server on the specified port.
 
 ```typescript
-api.listen(3000, () => {
+api.serve(3000, () => {
   console.log("Server running on http://localhost:3000");
 });
 ```
@@ -249,7 +260,7 @@ const spec = await api.getOpenApiSpec();
 console.log(JSON.stringify(spec, null, 2));
 
 // Start server
-api.listen(3000, () => {
+api.serve(3000, () => {
   console.log("Server running on http://localhost:3000");
 });
 ```
@@ -341,7 +352,7 @@ api.defineRoute({
 
 #### Global Middlewares
 
-Apply middlewares to all routes:
+Apply middlewares to all routes by passing them to the API constructor:
 
 ```typescript
 // Logging middleware
@@ -356,8 +367,10 @@ const loggingMiddleware = new Middleware({
   },
 });
 
-// Apply globally
-api.use(loggingMiddleware);
+// Apply globally via constructor
+const api = new Api({
+  middlewares: [loggingMiddleware] as const,
+});
 
 // Now all routes will have logging
 api.defineRoute({
@@ -441,8 +454,10 @@ api.defineRoute({
 Global middlewares run first, then route-specific middlewares:
 
 ```typescript
-// Global: runs on all routes
-api.use(loggingMiddleware);
+// Global: runs on all routes (defined in constructor)
+const api = new Api({
+  middlewares: [loggingMiddleware] as const,
+});
 
 // Route-specific: runs only on this route (after logging)
 api.defineRoute({
