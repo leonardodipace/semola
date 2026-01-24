@@ -29,12 +29,14 @@ export type ProviderOptions = {
   formatter?: Formatter;
 };
 
-export type SizeBasedPolicyType = {
+export interface SizeBasedPolicyType {
+  type: 'size';
   maxSize?: number;
 }
 
-export type TimeBasedPolicyType = {
-  type: "hour" | "day" | "week" | "month";
+export interface TimeBasedPolicyType {
+  type: 'time';
+  timestamp: "hour" | "day" | "week" | "month";
   instant: number;
 }
 
