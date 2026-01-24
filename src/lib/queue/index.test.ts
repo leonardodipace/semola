@@ -1,0 +1,483 @@
+import { describe, expect, test } from "bun:test";
+import { Queue } from "./index.js";
+
+class MockRedisClient {
+  private lists = new Map<string, string[]>();
+  private shouldFail = false;
+
+  public setShouldFail(value: boolean) {
+    this.shouldFail = value;
+  }
+
+  public async lpush(key: string, value: string) {
+    if (this.shouldFail) {
+      throw new Error("Redis connection error");
+    }
+
+    if (!this.lists.has(key)) {
+      this.lists.set(key, []);
+    }
+
+    this.lists.get(key)?.unshift(value);
+
+    return this.lists.get(key)?.length ?? 0;
+  }
+
+  public async rpop(key: string) {
+    if (this.shouldFail) {
+      throw new Error("Redis connection error");
+    }
+
+    const list = this.lists.get(key);
+
+    if (!list || list.length === 0) {
+      return null;
+    }
+
+    return list.pop();
+  }
+
+  public clear() {
+    this.lists.clear();
+  }
+
+  public getList(key: string) {
+    return this.lists.get(key) ?? [];
+  }
+}
+
+const createMockRedis = () => {
+  return new MockRedisClient() as MockRedisClient & Bun.RedisClient;
+};
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+describe("Queue", () => {
+  describe("enqueue", () => {
+    test("should enqueue a job successfully", async () => {
+      const redis = createMockRedis();
+      const handler = () => {};
+      const queue = new Queue({ name: "test", redis, retries: 3, handler });
+
+      const [error, jobId] = await queue.enqueue({ message: "hello" });
+
+      expect(error).toBeNull();
+      expect(jobId).toBeDefined();
+      expect(typeof jobId).toBe("string");
+
+      queue.stop();
+    });
+
+    test("should handle Redis connection errors", async () => {
+      const redis = createMockRedis();
+      const handler = () => {};
+      const queue = new Queue({ name: "test", redis, retries: 3, handler });
+
+      redis.setShouldFail(true);
+
+      const [error, jobId] = await queue.enqueue({ message: "hello" });
+
+      expect(error).toEqual({
+        type: "QueueError",
+        message: "Unable to enqueue job",
+      });
+
+      expect(jobId).toBeNull();
+
+      queue.stop();
+    });
+
+    test("should handle serialization errors", async () => {
+      const redis = createMockRedis();
+      const handler = () => {};
+      const queue = new Queue({ name: "test", redis, retries: 3, handler });
+
+      type CircularType = { a: number; self?: CircularType };
+
+      const circular: CircularType = { a: 1 };
+
+      circular.self = circular;
+
+      const [error, jobId] = await queue.enqueue(circular);
+
+      expect(error).toEqual({
+        type: "QueueError",
+        message: "Unable to serialize job data",
+      });
+
+      expect(jobId).toBeNull();
+
+      queue.stop();
+    });
+  });
+
+  describe("processing", () => {
+    test("should verify job is re-enqueued on failure", async () => {
+      const redis = createMockRedis();
+      let callCount = 0;
+
+      const handler = () => {
+        callCount++;
+
+        if (callCount === 1) {
+          throw new Error("First attempt fails");
+        }
+      };
+
+      const queue = new Queue({ name: "test", redis, retries: 3, handler });
+
+      await queue.enqueue({ message: "test" });
+
+      await sleep(2500);
+
+      expect(callCount).toBeGreaterThan(1);
+
+      queue.stop();
+    });
+
+    test("should process jobs in FIFO order", async () => {
+      const redis = createMockRedis();
+      const processed: string[] = [];
+
+      const handler = (data: { message: string }) => {
+        processed.push(data.message);
+      };
+
+      const queue = new Queue({ name: "test", redis, retries: 3, handler });
+
+      await queue.enqueue({ message: "first" });
+      await queue.enqueue({ message: "second" });
+      await queue.enqueue({ message: "third" });
+
+      await sleep(500);
+
+      expect(processed).toEqual(["first", "second", "third"]);
+
+      queue.stop();
+    });
+
+    test("should call onSuccess callback on successful processing", async () => {
+      const redis = createMockRedis();
+
+      const handler = () => {};
+
+      const successJobs: string[] = [];
+
+      const onSuccess = (job: { id: string }) => {
+        successJobs.push(job.id);
+      };
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 3,
+        handler,
+        onSuccess,
+      });
+
+      const [, jobId] = await queue.enqueue({ message: "hello" });
+
+      await sleep(200);
+
+      expect(jobId).not.toBeNull();
+
+      if (jobId) {
+        expect(successJobs).toContain(jobId);
+      }
+
+      queue.stop();
+    });
+
+    test("should retry failed jobs with exponential backoff", async () => {
+      const redis = createMockRedis();
+
+      let attempts = 0;
+
+      const handler = () => {
+        attempts++;
+
+        if (attempts < 2) {
+          throw new Error("Processing failed");
+        }
+      };
+
+      const queue = new Queue({ name: "test", redis, retries: 2, handler });
+
+      await queue.enqueue({ message: "hello" });
+
+      await sleep(3000);
+
+      expect(attempts).toBe(2);
+
+      queue.stop();
+    });
+
+    test("should respect maxRetries limit", async () => {
+      const redis = createMockRedis();
+
+      let attempts = 0;
+
+      const handler = () => {
+        attempts++;
+
+        throw new Error("Always fails");
+      };
+
+      const errorJobs: string[] = [];
+
+      const onError = (job: { id: string }) => {
+        errorJobs.push(job.id);
+      };
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 2,
+        handler,
+        onError,
+      });
+
+      const [, jobId] = await queue.enqueue({ message: "hello" });
+
+      await sleep(4000);
+
+      expect(attempts).toBe(2);
+
+      expect(jobId).not.toBeNull();
+
+      if (jobId) {
+        expect(errorJobs).toContain(jobId);
+      }
+
+      queue.stop();
+    });
+
+    test("should call onError when retries are exhausted", async () => {
+      const redis = createMockRedis();
+
+      const handler = () => {
+        throw new Error("Processing failed");
+      };
+
+      const errorJobs: Array<{ id: string; error?: string }> = [];
+
+      const onError = (job: { id: string; error?: string }) => {
+        errorJobs.push(job);
+      };
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 1,
+        handler,
+        onError,
+      });
+
+      const [, jobId] = await queue.enqueue({ message: "hello" });
+
+      await sleep(3000);
+
+      expect(errorJobs.length).toBe(1);
+      expect(jobId).not.toBeNull();
+
+      if (jobId) {
+        expect(errorJobs[0]?.id).toBe(jobId);
+        expect(errorJobs[0]?.error).toBeDefined();
+      }
+
+      queue.stop();
+    });
+
+    test("should handle handler errors", async () => {
+      const redis = createMockRedis();
+
+      const handler = () => {
+        throw new Error("Handler error");
+      };
+
+      const errorJobs: string[] = [];
+
+      const onError = (job: { id: string }) => {
+        errorJobs.push(job.id);
+      };
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 1,
+        handler,
+        onError,
+      });
+
+      const [, jobId] = await queue.enqueue({ message: "hello" });
+
+      await sleep(3000);
+
+      expect(jobId).not.toBeNull();
+
+      if (jobId) {
+        expect(errorJobs).toContain(jobId);
+      }
+
+      queue.stop();
+    });
+  });
+
+  describe("lifecycle", () => {
+    test("should auto-start processing in constructor", async () => {
+      const redis = createMockRedis();
+      const processed: string[] = [];
+
+      const handler = (data: { message: string }) => {
+        processed.push(data.message);
+      };
+
+      const queue = new Queue({ name: "test", redis, retries: 3, handler });
+
+      await queue.enqueue({ message: "hello" });
+
+      await sleep(200);
+
+      expect(processed).toContain("hello");
+
+      queue.stop();
+    });
+
+    test("should stop processing after stop() is called", async () => {
+      const redis = createMockRedis();
+      const processed: string[] = [];
+
+      const handler = (data: { message: string }) => {
+        processed.push(data.message);
+      };
+
+      const queue = new Queue({ name: "test", redis, retries: 3, handler });
+
+      await queue.enqueue({ message: "first" });
+
+      await sleep(200);
+
+      queue.stop();
+
+      await queue.enqueue({ message: "second" });
+
+      await sleep(200);
+
+      expect(processed).toContain("first");
+      expect(processed).not.toContain("second");
+    });
+  });
+
+  describe("edge cases", () => {
+    test("should handle empty queue gracefully", async () => {
+      const redis = createMockRedis();
+      const handler = () => {};
+
+      const queue = new Queue({ name: "test", redis, retries: 3, handler });
+
+      await sleep(200);
+
+      queue.stop();
+    });
+
+    test("should handle async handlers", async () => {
+      const redis = createMockRedis();
+      const processed: string[] = [];
+
+      const handler = async (data: { message: string }) => {
+        await sleep(10);
+        processed.push(data.message);
+      };
+
+      const queue = new Queue({ name: "test", redis, retries: 3, handler });
+
+      await queue.enqueue({ message: "async" });
+
+      await sleep(200);
+
+      expect(processed).toContain("async");
+
+      queue.stop();
+    });
+
+    test("should handle multiple queues with different names", async () => {
+      const redis = createMockRedis();
+      const processed1: string[] = [];
+      const processed2: string[] = [];
+
+      const handler1 = (data: { message: string }) => {
+        processed1.push(data.message);
+      };
+
+      const handler2 = (data: { message: string }) => {
+        processed2.push(data.message);
+      };
+
+      const queue1 = new Queue({
+        name: "queue1",
+        redis,
+        retries: 3,
+        handler: handler1,
+      });
+
+      const queue2 = new Queue({
+        name: "queue2",
+        redis,
+        retries: 3,
+        handler: handler2,
+      });
+
+      await queue1.enqueue({ message: "q1" });
+      await queue2.enqueue({ message: "q2" });
+
+      await sleep(200);
+
+      expect(processed1).toContain("q1");
+      expect(processed1).not.toContain("q2");
+      expect(processed2).toContain("q2");
+      expect(processed2).not.toContain("q1");
+
+      queue1.stop();
+      queue2.stop();
+    });
+
+    test("should handle deserialization errors gracefully", async () => {
+      const redis = createMockRedis();
+      const handler = () => {};
+
+      const queue = new Queue({ name: "test", redis, retries: 3, handler });
+
+      await redis.lpush("queue:test:jobs", "invalid json {");
+
+      await sleep(200);
+
+      queue.stop();
+    });
+
+    test("should handle large job data", async () => {
+      const redis = createMockRedis();
+      const processed: any[] = [];
+
+      const handler = (data: any) => {
+        processed.push(data);
+      };
+
+      const queue = new Queue({ name: "test", redis, retries: 3, handler });
+
+      const largeData = {
+        items: Array.from({ length: 1000 }, (_, i) => ({
+          id: i,
+          name: `Item ${i}`,
+        })),
+      };
+
+      await queue.enqueue(largeData);
+
+      await sleep(200);
+
+      expect(processed[0]).toEqual(largeData);
+
+      queue.stop();
+    });
+  });
+});
