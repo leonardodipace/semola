@@ -25,6 +25,7 @@ export type RetryContext<T> = {
 
 export type ErrorContext<T> = {
   job: Job<T>;
+  lastError: string;
   totalDurationMs: number;
   totalAttempts: number;
   errorHistory: Array<{
