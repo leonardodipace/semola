@@ -61,6 +61,7 @@ describe("Api Core", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "Alice" }),
     });
+    expect(goodRes.status).toBe(200);
     const body = await goodRes.json();
     expect(body).toEqual({ name: "Alice" });
   });
@@ -82,6 +83,7 @@ describe("Api Core", () => {
     const res = await fetch(`http://localhost:${server?.port}/users/abc`);
     const body = await res.json();
 
+    expect(res.status).toBe(200);
     expect(body).toEqual({ userId: "abc" });
   });
 
