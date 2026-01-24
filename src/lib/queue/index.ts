@@ -1,6 +1,7 @@
 import { err, mightThrow, mightThrowSync, ok } from "../errors/index.js";
 import type { Job, QueueOptions } from "./types.js";
 
+const DEFAULT_RETRIES = 3;
 const DEFAULT_TIMEOUT = 30000;
 const DEFAULT_CONCURRENCY = 1;
 const DEFAULT_POLL_INTERVAL = 100;
@@ -24,7 +25,7 @@ export class Queue<T> {
       id: crypto.randomUUID(),
       data,
       attempts: 0,
-      maxRetries: this.options.retries,
+      maxRetries: this.options.retries ?? DEFAULT_RETRIES,
       createdAt: Date.now(),
     };
 
@@ -191,7 +192,7 @@ export class Queue<T> {
         : String(handlerError);
 
     // Check if we should retry. Attempt starts at 1, so we retry while attempts <= maxRetries
-    if (job.attempts <= this.options.retries) {
+    if (job.attempts <= (this.options.retries ?? DEFAULT_RETRIES)) {
       await this.retryJob(job);
     } else {
       if (this.options.onError) {
