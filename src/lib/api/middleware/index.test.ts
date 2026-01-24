@@ -1,158 +1,81 @@
 import { describe, expect, test } from "bun:test";
-import type { StandardSchemaV1 } from "@standard-schema/spec";
+import { z } from "zod";
 import { Middleware } from "./index.js";
 
-// Helper to create a simple mock schema
-const createMockSchema = (): StandardSchemaV1 => ({
-  "~standard": {
-    version: 1,
-    vendor: "mock",
-    validate: async (data: unknown) => ({ value: data }),
-  },
-});
-
 describe("Middleware", () => {
-  describe("constructor", () => {
-    test("should create middleware with handler only", () => {
-      const handler = () => ({ user: "test" });
-      const middleware = new Middleware({ handler });
+  test("should initialize with a basic handler", () => {
+    const handler = () => ({ user: "test" });
+    const mw = new Middleware({ handler });
 
-      expect(middleware.options).toMatchObject({ handler });
-      expect(middleware.options.request).toBeUndefined();
-      expect(middleware.options.response).toBeUndefined();
+    expect(mw.options.handler).toBe(handler);
+    expect(mw.options.request).toBeUndefined();
+  });
+
+  test("should store request and response schemas", () => {
+    const requestSchema = { body: z.object({ name: z.string() }) };
+    const responseSchema = { 200: z.object({ id: z.number() }) };
+
+    const mw = new Middleware({
+      request: requestSchema,
+      response: responseSchema,
+      handler: () => ({ ok: true }),
     });
 
-    test("should create middleware with request schema", () => {
-      const schema = createMockSchema();
-      const handler = () => ({ user: "test" });
-      const middleware = new Middleware({
-        request: { body: schema },
-        handler,
-      });
+    expect(mw.options.request).toBe(requestSchema);
+    expect(mw.options.response).toBe(responseSchema);
+  });
 
-      expect(middleware.options.handler).toBe(handler);
-      expect(middleware.options.request).toEqual({ body: schema });
+  test("should support async handlers", async () => {
+    const handler = async () => {
+      return { data: "async-result" };
+    };
+    const mw = new Middleware({ handler });
+
+    const result = await mw.options.handler({} as any);
+    expect(result).toEqual({ data: "async-result" });
+  });
+
+  test("should support handlers returning a Response (for guards)", () => {
+    const handler = () => new Response("Unauthorized", { status: 401 });
+    const mw = new Middleware({ handler });
+
+    const result = mw.options.handler({} as any);
+    expect(result).toBeInstanceOf(Response);
+  });
+
+  test("should handle multiple request validation zones", () => {
+    const schemas = {
+      body: z.object({ id: z.string() }),
+      query: z.object({ search: z.string() }),
+      headers: z.object({ "x-api-key": z.string() }),
+      cookies: z.object({ session: z.string() }),
+    };
+
+    const mw = new Middleware({
+      request: schemas,
+      handler: () => ({}),
     });
 
-    test("should create middleware with response schema", () => {
-      const schema = createMockSchema();
-      const handler = () => ({ user: "test" });
-      const middleware = new Middleware({
-        response: { 200: schema },
-        handler,
-      });
+    expect(mw.options.request?.body).toBe(schemas.body);
+    expect(mw.options.request?.query).toBe(schemas.query);
+    expect(mw.options.request?.headers).toBe(schemas.headers);
+    expect(mw.options.request?.cookies).toBe(schemas.cookies);
+  });
 
-      expect(middleware.options.handler).toBe(handler);
-      expect(middleware.options.response).toEqual({ 200: schema });
+  test("should handle multiple response status codes", () => {
+    const responseSchemas = {
+      200: z.string(),
+      404: z.object({ error: z.string() }),
+      500: z.object({ message: z.string() }),
+    };
+
+    const mw = new Middleware({
+      response: responseSchemas,
+      handler: () => ({}),
     });
 
-    test("should create middleware with both request and response schemas", () => {
-      const requestSchema = createMockSchema();
-      const responseSchema = createMockSchema();
-      const handler = () => ({ user: "test" });
-
-      const middleware = new Middleware({
-        request: { body: requestSchema },
-        response: { 200: responseSchema },
-        handler,
-      });
-
-      expect(middleware.options.handler).toBe(handler);
-      expect(middleware.options.request).toEqual({ body: requestSchema });
-      expect(middleware.options.response).toEqual({ 200: responseSchema });
-    });
-
-    test("should create middleware with extension type", () => {
-      type Extension = { user: string; role: string };
-      const handler = (): Extension => ({ user: "test", role: "admin" });
-
-      const middleware = new Middleware<
-        { body?: StandardSchemaV1 },
-        { 200: StandardSchemaV1 },
-        Extension
-      >({
-        handler,
-      });
-
-      expect(middleware.options.handler).toBe(handler);
-    });
-
-    test("should store options correctly", () => {
-      const options = {
-        request: { body: createMockSchema() },
-        response: { 200: createMockSchema() },
-        handler: () => ({ data: "test" }),
-      };
-
-      const middleware = new Middleware(options);
-
-      expect(middleware.options).toEqual(options);
-    });
-
-    test("should handle async handler", () => {
-      const handler = async () => {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        return { user: "test" };
-      };
-
-      const middleware = new Middleware({ handler });
-
-      expect(middleware.options.handler).toBe(handler);
-    });
-
-    test("should handle handler returning Response", () => {
-      const handler = () => new Response("Unauthorized", { status: 401 });
-      const middleware = new Middleware({ handler });
-
-      expect(middleware.options.handler).toBe(handler);
-    });
-
-    test("should handle handler returning void", () => {
-      const handler = () => undefined as any;
-      const middleware = new Middleware({ handler });
-
-      expect(middleware.options.handler).toBe(handler);
-    });
-
-    test("should preserve all request schema properties", () => {
-      const bodySchema = createMockSchema();
-      const querySchema = createMockSchema();
-      const headersSchema = createMockSchema();
-      const cookiesSchema = createMockSchema();
-
-      const middleware = new Middleware({
-        request: {
-          body: bodySchema,
-          query: querySchema,
-          headers: headersSchema,
-          cookies: cookiesSchema,
-        },
-        handler: () => ({}),
-      });
-
-      expect(middleware.options.request?.body).toBe(bodySchema);
-      expect(middleware.options.request?.query).toBe(querySchema);
-      expect(middleware.options.request?.headers).toBe(headersSchema);
-      expect(middleware.options.request?.cookies).toBe(cookiesSchema);
-    });
-
-    test("should preserve all response schema status codes", () => {
-      const schema200 = createMockSchema();
-      const schema400 = createMockSchema();
-      const schema500 = createMockSchema();
-
-      const middleware = new Middleware({
-        response: {
-          200: schema200,
-          400: schema400,
-          500: schema500,
-        },
-        handler: () => ({}),
-      });
-
-      expect(middleware.options.response?.[200]).toBe(schema200);
-      expect(middleware.options.response?.[400]).toBe(schema400);
-      expect(middleware.options.response?.[500]).toBe(schema500);
-    });
+    expect(mw.options.response?.[200]).toBe(responseSchemas[200]);
+    expect(mw.options.response?.[404]).toBe(responseSchemas[404]);
+    expect(mw.options.response?.[500]).toBe(responseSchemas[500]);
   });
 });
