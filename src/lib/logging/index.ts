@@ -242,7 +242,8 @@ export class FileProvider extends LoggerProvider {
     const fileName = basename(this.filePath);
     const directory = dirname(this.filePath);
     const fileInfo = fileName.split(".");
-    const newFileName = `${fileInfo[0]}.${this.counter}.${fileInfo[1]}`;
+    const extension = fileInfo.pop();
+    const newFileName = [...fileInfo, this.counter, extension].join(".");
 
     return join(directory, newFileName);
   }
