@@ -40,13 +40,15 @@ export abstract class AbstractLogger {
   public abstract error(msg: LogMessageType): void;
   public abstract critical(msg: LogMessageType): void;
 
+  NON_ERROR_CALL_STACK_IDX = 4 as const;
+
   protected createLogData(
     level: LogLevelType,
     msg: LogMessageType,
     prefix: string,
   ): LogDataType {
     const stack = new StackData().getStack().split("\n")
-    const logCall = stack[4] || "";
+    const logCall = stack[this.NON_ERROR_CALL_STACK_IDX] || "";
 
     const [path, row, column] = logCall?.trim()
       .replace("(", "")
