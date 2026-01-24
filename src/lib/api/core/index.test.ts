@@ -50,6 +50,7 @@ describe("Api Core", () => {
     // Invalid request
     const badRes = await fetch(`http://localhost:${server?.port}/user`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: 123 }), // Should be string
     });
     expect(badRes.status).toBe(400);
@@ -57,6 +58,7 @@ describe("Api Core", () => {
     // Valid request
     const goodRes = await fetch(`http://localhost:${server?.port}/user`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "Alice" }),
     });
     const body = await goodRes.json();

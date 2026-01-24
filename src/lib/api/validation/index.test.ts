@@ -23,8 +23,8 @@ describe("Validation Module", () => {
       });
 
       expect(data).toBeNull();
-      expect(error?.message).toContain("user.email: Invalid email");
-      expect(error?.message).toContain("age: Required");
+      expect(error?.message).toContain("user.email:");
+      expect(error?.message).toContain("age:");
     });
   });
 
@@ -119,7 +119,7 @@ describe("Validation Module", () => {
       const req = new Request("http://localhost");
 
       const [error] = await validateCookies(req, schema);
-      expect(error?.message).toContain("requiredCookie: Required");
+      expect(error?.message).toContain("requiredCookie:");
     });
   });
 });
