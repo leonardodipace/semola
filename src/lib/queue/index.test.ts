@@ -654,6 +654,221 @@ describe("Queue", () => {
       await queue.stop();
     });
 
+    test("should move malformed job to dead-letter queue on parse error", async () => {
+      const redis = createMockRedis();
+      const errors: ErrorContext<any>[] = [];
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 3,
+        handler: () => {
+          throw new Error("Handler should not be called");
+        },
+        onError: async (context) => {
+          errors.push(context);
+        },
+        pollInterval: 10,
+      });
+
+      const malformedData = '{"id":"test","incomplete';
+      await redis.lpush("queue:test:jobs", malformedData);
+
+      await sleep(100);
+      await queue.stop();
+
+      const deadLetterQueue = redis.getList("queue:test:dead-letter");
+      expect(deadLetterQueue.length).toBe(1);
+
+      const firstEntry = deadLetterQueue[0];
+      expect(firstEntry).toBeDefined();
+      if (firstEntry) {
+        const deadLetterEntry = JSON.parse(firstEntry);
+        expect(deadLetterEntry.jobData).toBe(malformedData);
+        expect(deadLetterEntry.parseError).toBeDefined();
+        expect(deadLetterEntry.timestamp).toBeGreaterThan(0);
+      }
+
+      expect(errors.length).toBe(1);
+      const firstError = errors[0];
+      expect(firstError).toBeDefined();
+      if (firstError) {
+        expect(firstError.job.id).toBe("unknown");
+        expect(firstError.lastError).toContain("Failed to parse job data");
+      }
+    });
+
+    test("should preserve multiple malformed jobs in dead-letter queue", async () => {
+      const redis = createMockRedis();
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 3,
+        handler: () => {},
+        pollInterval: 10,
+      });
+
+      const malformedPayloads = [
+        "invalid json",
+        '{"incomplete": "object"',
+        '["unclosed", "array"',
+      ];
+
+      for (const payload of malformedPayloads) {
+        await redis.lpush("queue:test:jobs", payload);
+      }
+
+      await sleep(150);
+      await queue.stop();
+
+      const deadLetterQueue = redis.getList("queue:test:dead-letter");
+      expect(deadLetterQueue.length).toBe(malformedPayloads.length);
+
+      deadLetterQueue.forEach((entry) => {
+        const parsed = JSON.parse(entry);
+        expect(parsed.jobData).toBeDefined();
+        expect(parsed.parseError).toBeDefined();
+        expect(parsed.timestamp).toBeGreaterThan(0);
+      });
+    });
+
+    test("should call onError with parse error details and raw jobData", async () => {
+      const redis = createMockRedis();
+      const errors: ErrorContext<any>[] = [];
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 3,
+        handler: () => {},
+        onError: async (context) => {
+          errors.push(context);
+        },
+        pollInterval: 10,
+      });
+
+      const malformedData = '{"bad": json}';
+      await redis.lpush("queue:test:jobs", malformedData);
+
+      await sleep(100);
+      await queue.stop();
+
+      expect(errors.length).toBe(1);
+      const firstError = errors[0];
+      expect(firstError).toBeDefined();
+      if (firstError) {
+        expect(firstError.job.id).toBe("unknown");
+        expect(firstError.job.data).toBe(malformedData);
+        expect(firstError.lastError).toContain("Failed to parse job data");
+        expect(firstError.totalAttempts).toBe(0);
+        expect(firstError.errorHistory.length).toBe(1);
+        const firstHistoryEntry = firstError.errorHistory[0];
+        expect(firstHistoryEntry).toBeDefined();
+        if (firstHistoryEntry) {
+          expect(firstHistoryEntry.attempt).toBe(0);
+        }
+      }
+    });
+
+    test("should continue processing valid jobs after malformed jobs", async () => {
+      const redis = createMockRedis();
+      const processed: any[] = [];
+      const errors: ErrorContext<any>[] = [];
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 3,
+        handler: async (data) => {
+          processed.push(data);
+        },
+        onError: async (context) => {
+          errors.push(context);
+        },
+        pollInterval: 10,
+      });
+
+      await redis.lpush("queue:test:jobs", '{"bad": json}');
+      await queue.enqueue({ message: "valid-1" });
+      await redis.lpush("queue:test:jobs", "invalid json");
+      await queue.enqueue({ message: "valid-2" });
+
+      await sleep(200);
+      await queue.stop();
+
+      expect(processed.length).toBe(2);
+      expect(processed.some((p) => p.message === "valid-1")).toBe(true);
+      expect(processed.some((p) => p.message === "valid-2")).toBe(true);
+
+      expect(errors.length).toBe(2);
+
+      const deadLetterQueue = redis.getList("queue:test:dead-letter");
+      expect(deadLetterQueue.length).toBe(2);
+    });
+
+    test("should handle parse errors even without onError callback", async () => {
+      const redis = createMockRedis();
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 3,
+        handler: () => {},
+        pollInterval: 10,
+      });
+
+      const malformedData = '{"invalid": json}';
+      await redis.lpush("queue:test:jobs", malformedData);
+
+      await sleep(100);
+      await queue.stop();
+
+      const deadLetterQueue = redis.getList("queue:test:dead-letter");
+      expect(deadLetterQueue.length).toBe(1);
+
+      const firstEntry = deadLetterQueue[0];
+      expect(firstEntry).toBeDefined();
+      if (firstEntry) {
+        const deadLetterEntry = JSON.parse(firstEntry);
+        expect(deadLetterEntry.jobData).toBe(malformedData);
+      }
+    });
+
+    test("should handle completely invalid JSON syntax", async () => {
+      const redis = createMockRedis();
+      const errors: ErrorContext<any>[] = [];
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 3,
+        handler: () => {},
+        onError: async (context) => {
+          errors.push(context);
+        },
+        pollInterval: 10,
+      });
+
+      const invalidJson = "not valid json at all";
+      await redis.lpush("queue:test:jobs", invalidJson);
+
+      await sleep(100);
+      await queue.stop();
+
+      const deadLetterQueue = redis.getList("queue:test:dead-letter");
+      expect(deadLetterQueue.length).toBe(1);
+
+      const firstEntry = deadLetterQueue[0];
+      expect(firstEntry).toBeDefined();
+      if (firstEntry) {
+        const deadLetterEntry = JSON.parse(firstEntry);
+        expect(deadLetterEntry.jobData).toBe(invalidJson);
+      }
+
+      expect(errors.length).toBe(1);
+    });
+
     test("should handle large job data", async () => {
       const redis = createMockRedis();
       const processed: any[] = [];
