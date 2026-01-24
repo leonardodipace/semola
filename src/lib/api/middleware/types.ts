@@ -19,7 +19,7 @@ export type MiddlewareOptions<
 };
 
 export type InferMiddlewareExtension<T> = T extends {
-  options: MiddlewareOptions<RequestSchema, ResponseSchema, infer E>;
+  options: MiddlewareOptions<infer _TReq, infer _TRes, infer E>;
 }
   ? E
   : never;
