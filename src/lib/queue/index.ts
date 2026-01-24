@@ -193,6 +193,9 @@ export class Queue<T> {
 
     // Check if we should retry. Attempt starts at 1, so we retry while attempts <= maxRetries
     if (job.attempts <= (this.options.retries ?? DEFAULT_RETRIES)) {
+      if (this.options.onRetry) {
+        await mightThrow(Promise.resolve(this.options.onRetry(job)));
+      }
       await this.retryJob(job);
     } else {
       if (this.options.onError) {
