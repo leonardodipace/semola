@@ -15,6 +15,7 @@ bun add semola
 ## Modules
 
 - [API Framework](./docs/api.md) - Type-safe REST API framework with OpenAPI support
+- [Queue](./docs/queue.md) - Redis-backed job queue with timeouts, concurrency, and graceful shutdown
 - [Policy](./docs/policy.md) - Type-safe policy-based authorization system
 - [Internationalization (i18n)](./docs/i18n.md) - Type-safe i18n with compile-time validation
 - [Cache](./docs/cache.md) - Redis cache wrapper with TTL support
@@ -25,6 +26,7 @@ bun add semola
 This package uses GitHub Actions to automatically publish to npm. To publish a new version:
 
 1. Update the version in `package.json`:
+
    ```bash
    bun version <major|minor|patch>
    ```
@@ -36,6 +38,7 @@ This package uses GitHub Actions to automatically publish to npm. To publish a n
    - Publish the release
 
 The GitHub Action will automatically:
+
 - Run checks and tests
 - Build the package
 - Publish to npm with provenance
