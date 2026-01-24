@@ -188,6 +188,174 @@ describe("Queue", () => {
       await queue.stop();
     });
 
+    test("should call onRetry callback when job fails but will be retried", async () => {
+      const redis = createMockRedis();
+      let attempts = 0;
+
+      const handler = () => {
+        attempts++;
+        if (attempts < 2) {
+          throw new Error("First attempt fails");
+        }
+      };
+
+      const retryJobs: Array<{ id: string; attempts: number; error?: string }> =
+        [];
+
+      const onRetry = (job: {
+        id: string;
+        attempts: number;
+        error?: string;
+      }) => {
+        retryJobs.push({
+          id: job.id,
+          attempts: job.attempts,
+          error: job.error,
+        });
+      };
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 2,
+        handler,
+        onRetry,
+      });
+
+      const [, jobId] = await queue.enqueue({ message: "hello" });
+
+      await sleep(2500);
+
+      expect(jobId).not.toBeNull();
+      expect(retryJobs.length).toBe(1);
+
+      if (jobId) {
+        expect(retryJobs[0]?.id).toBe(jobId);
+        expect(retryJobs[0]?.error).toBe("First attempt fails");
+        expect(retryJobs[0]?.attempts).toBe(1);
+      }
+
+      await queue.stop();
+    });
+
+    test("should call onRetry multiple times for multiple failures", async () => {
+      const redis = createMockRedis();
+      let attempts = 0;
+
+      const handler = () => {
+        attempts++;
+        throw new Error(`Attempt ${attempts} failed`);
+      };
+
+      const retryJobs: Array<{ attempts: number; error?: string }> = [];
+
+      const onRetry = (job: { attempts: number; error?: string }) => {
+        retryJobs.push({ attempts: job.attempts, error: job.error });
+      };
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 2,
+        handler,
+        onRetry,
+      });
+
+      await queue.enqueue({ message: "hello" });
+
+      await sleep(4000);
+
+      // Should have called onRetry 2 times (attempts 1, 2)
+      expect(retryJobs.length).toBe(2);
+      expect(retryJobs[0]?.attempts).toBe(1);
+      expect(retryJobs[1]?.attempts).toBe(2);
+
+      await queue.stop();
+    });
+
+    test("should not call onRetry when job succeeds on first try", async () => {
+      const redis = createMockRedis();
+
+      const handler = () => {};
+
+      const retryJobs: string[] = [];
+
+      const onRetry = (job: { id: string }) => {
+        retryJobs.push(job.id);
+      };
+
+      const successJobs: string[] = [];
+
+      const onSuccess = (job: { id: string }) => {
+        successJobs.push(job.id);
+      };
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 3,
+        handler,
+        onRetry,
+        onSuccess,
+      });
+
+      const [, jobId] = await queue.enqueue({ message: "hello" });
+
+      await sleep(200);
+
+      expect(jobId).not.toBeNull();
+      expect(retryJobs.length).toBe(0);
+
+      if (jobId) {
+        expect(successJobs).toContain(jobId);
+      }
+
+      await queue.stop();
+    });
+
+    test("should call onRetry then onError when retries exhausted", async () => {
+      const redis = createMockRedis();
+
+      const handler = () => {
+        throw new Error("Always fails");
+      };
+
+      const retryJobs: string[] = [];
+      const errorJobs: string[] = [];
+
+      const onRetry = (job: { id: string }) => {
+        retryJobs.push(job.id);
+      };
+
+      const onError = (job: { id: string }) => {
+        errorJobs.push(job.id);
+      };
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 2,
+        handler,
+        onRetry,
+        onError,
+      });
+
+      const [, jobId] = await queue.enqueue({ message: "hello" });
+
+      await sleep(4000);
+
+      expect(jobId).not.toBeNull();
+      expect(retryJobs.length).toBe(2);
+      expect(errorJobs.length).toBe(1);
+
+      if (jobId) {
+        expect(retryJobs).toContain(jobId);
+        expect(errorJobs).toContain(jobId);
+      }
+
+      await queue.stop();
+    });
+
     test("should retry failed jobs with exponential backoff", async () => {
       const redis = createMockRedis();
 
