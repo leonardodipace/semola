@@ -1,6 +1,6 @@
 # Semola
 
-TypeScript utility kit providing modular packages for API framework, error handling, caching, i18n, and policy-based authorization.
+TypeScript utility kit providing modular packages for common development needs.
 
 ## Tech Stack
 
@@ -46,17 +46,11 @@ bun run build    # Build package
 
 ## Project Structure
 
-Modular exports:
-- `semola/errors` - Result-based error handling
-- `semola/cache` - Redis cache wrapper
-- `semola/i18n` - Type-safe internationalization
-- `semola/policy` - Policy-based authorization
-- `semola/api` - Type-safe REST API with OpenAPI
-
-Tests are colocated with source files (`*.test.ts`).
+- Modular exports via `semola/<package-name>` (e.g., `semola/errors`, `semola/cache`)
+- Each module is self-contained in its own directory under `/src/lib`
+- Tests are colocated with source files (`*.test.ts`)
 
 ## Important Notes
 
 - Don't create new docs in `/docs` unless necessary
-- Each module is self-contained in its own directory
 - Keep plans concise, sacrificing grammar for brevity
