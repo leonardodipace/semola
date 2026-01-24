@@ -79,7 +79,7 @@ Jobs are automatically processed as soon as they're enqueued. The queue runs a b
 
 ### Exponential Backoff
 
-Failed jobs are automatically retried with exponential backoff. The delay follows the formula: `Math.min(1000 * 2^attempts, 60000)` milliseconds.
+Failed jobs are automatically retried with exponential backoff. The delay follows the formula: `Math.min(1000 * 2^(attempt-1), 60000)` milliseconds, where attempt is 1-indexed.
 
 - 1st retry: 1000ms
 - 2nd retry: 2000ms
@@ -97,7 +97,7 @@ All methods return result tuples `[error, data]` for consistent error handling:
 
 - **`handler`**: Required. Called when a job is ready for processing. Errors thrown here trigger retries.
 - **`onSuccess`**: Optional. Called when a job succeeds after handler completion.
-- **`onError`**: Optional. Called when a job is exhausted all retries.
+- **`onError`**: Optional. Called when a job has exhausted all retries.
 
 ## Example
 
@@ -148,4 +148,4 @@ process.on("SIGTERM", () => {
 
 The queue returns `QueueError` type errors:
 
-- `QueueError` - Failed to enqueue job (Redis or serialization issues)
+- **`QueueError`** - Failed to enqueue job (Redis or serialization issues).
