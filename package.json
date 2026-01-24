@@ -23,6 +23,10 @@
     "./api": {
       "import": "./dist/lib/api/index.js",
       "types": "./dist/lib/api/index.d.ts"
+    },
+    "./queue": {
+      "import": "./dist/lib/queue/index.js",
+      "types": "./dist/lib/queue/index.d.ts"
     }
   },
   "files": [
