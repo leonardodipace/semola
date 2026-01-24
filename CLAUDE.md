@@ -12,7 +12,8 @@ TypeScript utility kit providing modular packages for common development needs.
 
 ## Code Style
 
-**Simplicity First**
+### Simplicity First
+
 - Write minimal code, no over-engineering
 - Explicit if-statements over ternaries for complex logic
 - No type assertions (`as`, `!`)
@@ -20,17 +21,20 @@ TypeScript utility kit providing modular packages for common development needs.
 - Infer types, avoid explicit return types
 - Use generics extensively
 
-**Error Handling**
+### Error Handling
+
 - Result tuple pattern: `[error, data]` instead of throwing
 - Use `ok(data)` and `err(type, message)` helpers
 - Avoid try-catch blocks, use result tuples instead
 
-**TypeScript**
+### TypeScript
+
 - Prefer inferred types over explicit return types
 - Heavy use of generics with constraints
 - Const type parameters for literal types
 
-**Testing**
+### Testing
+
 - Readable, maintainable tests
 - Tests colocated with source (`*.test.ts`)
 - Clear test names describing behavior
