@@ -454,6 +454,7 @@ describe("Queue", () => {
 
       const errorContexts: Array<{
         id: string;
+        lastError: string;
         totalDurationMs: number;
         totalAttempts: number;
         errorHistory: Array<{ attempt: number; error: string }>;
@@ -461,12 +462,14 @@ describe("Queue", () => {
 
       const onError = (context: {
         job: { id: string };
+        lastError: string;
         totalDurationMs: number;
         totalAttempts: number;
         errorHistory: Array<{ attempt: number; error: string }>;
       }) => {
         errorContexts.push({
           id: context.job.id,
+          lastError: context.lastError,
           totalDurationMs: context.totalDurationMs,
           totalAttempts: context.totalAttempts,
           errorHistory: context.errorHistory,
@@ -490,6 +493,7 @@ describe("Queue", () => {
 
       if (jobId) {
         expect(errorContexts[0]?.id).toBe(jobId);
+        expect(errorContexts[0]?.lastError).toBe("Processing failed");
         expect(errorContexts[0]?.totalAttempts).toBe(2);
         expect(errorContexts[0]?.totalDurationMs).toBeGreaterThan(0);
         expect(errorContexts[0]?.errorHistory).toBeDefined();

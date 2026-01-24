@@ -239,6 +239,7 @@ export class Queue<T> {
           Promise.resolve(
             this.options.onError({
               job: toMinimalJob(job),
+              lastError: job.error ?? "",
               totalDurationMs: Date.now() - job.createdAt,
               totalAttempts: job.attempts,
               errorHistory: job.errorHistory ?? [],
@@ -273,6 +274,7 @@ export class Queue<T> {
           Promise.resolve(
             this.options.onError({
               job: toMinimalJob(job),
+              lastError: job.error,
               totalDurationMs: Date.now() - job.createdAt,
               totalAttempts: job.attempts,
               errorHistory: job.errorHistory ?? [],
@@ -290,6 +292,7 @@ export class Queue<T> {
           Promise.resolve(
             this.options.onError({
               job: toMinimalJob(job),
+              lastError: job.error,
               totalDurationMs: Date.now() - job.createdAt,
               totalAttempts: job.attempts,
               errorHistory: job.errorHistory ?? [],
@@ -315,6 +318,7 @@ export class Queue<T> {
           Promise.resolve(
             this.options.onError({
               job: toMinimalJob(job),
+              lastError: job.error,
               totalDurationMs: Date.now() - job.createdAt,
               totalAttempts: job.attempts,
               errorHistory: job.errorHistory ?? [],
