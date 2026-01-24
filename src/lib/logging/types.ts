@@ -21,7 +21,7 @@ export type LogDataType = {
   fileName: string;
   row: string;
   column: string;
-  method?: string
+  method?: string;
 };
 
 export type ProviderOptions = {
@@ -30,16 +30,16 @@ export type ProviderOptions = {
 };
 
 export interface SizeBasedPolicyType {
-  type: 'size';
+  type: "size";
   maxSize?: number;
 }
 
 export interface TimeBasedPolicyType {
-  type: 'time';
+  type: "time";
   instant: "hour" | "day" | "week" | "month";
   duration: number;
 }
 
 export type FileProviderOptions = ProviderOptions & {
-  policy?: SizeBasedPolicyType | TimeBasedPolicyType
-}
+  policy?: SizeBasedPolicyType | TimeBasedPolicyType;
+};

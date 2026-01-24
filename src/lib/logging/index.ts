@@ -1,16 +1,16 @@
-import { appendFileSync, statSync, existsSync } from "node:fs";
-import type { Formatter } from "./formatter.js";
+import { appendFileSync, existsSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import type { Formatter } from "./formatter.js";
 
 import {
-  FileProviderOptions,
+  type FileProviderOptions,
   type LogDataType,
   LogLevel,
   type LogLevelType,
   type LogMessageType,
   type ProviderOptions,
-  SizeBasedPolicyType,
-  TimeBasedPolicyType,
+  type SizeBasedPolicyType,
+  type TimeBasedPolicyType,
 } from "./types.js";
 
 const PROVIDER_OPTION_DEFAULT: ProviderOptions = {
@@ -24,6 +24,7 @@ const FILE_PROVIDER_OPTION_DEFAULT: FileProviderOptions = {
 };
 
 const DEFAULT_MAX_SIZE = 4 * 1024; // 4KB
+const NON_ERROR_CALL_STACK_IDX = 4;
 
 enum DurationUnit {
   Hour = 1000 * 60 * 60,
@@ -33,9 +34,9 @@ enum DurationUnit {
 }
 
 class StackData {
-  private stack: string = "";
+  private stack = "";
 
-  constructor() {
+  public constructor() {
     Error.captureStackTrace(this);
   }
 
@@ -51,25 +52,23 @@ export abstract class AbstractLogger {
   public abstract error(msg: LogMessageType): void;
   public abstract critical(msg: LogMessageType): void;
 
-  private NON_ERROR_CALL_STACK_IDX = 4 as const;
-
   protected createLogData(
     level: LogLevelType,
     msg: LogMessageType,
     prefix: string,
   ): LogDataType {
     const stack = new StackData().getStack().split("\n");
-    const logCall = stack[this.NON_ERROR_CALL_STACK_IDX] || "";
+    const logCall = stack[NON_ERROR_CALL_STACK_IDX] || "";
 
     const [path, row, column] = logCall
-      ?.trim()
+      .trim()
       .replace("(", "")
       .replace(")", "")
       .split(":");
 
     const fileName = basename(path || "");
-    let methodCall = undefined;
     const pathData = path?.split(" ") || [];
+    let methodCall: string | undefined;
 
     if (pathData.length === 3) {
       methodCall = pathData[1];
@@ -205,7 +204,7 @@ export class FileProvider extends LoggerProvider {
         const { duration, instant } = this.policy;
         const { birthtime } = statSync(this.file);
         const creationTimeMs = birthtime.getTime();
-        const currenTimeMs = new Date().getTime();
+        const currenTimeMs = Date.now();
         const diffMs = currenTimeMs - creationTimeMs;
 
         switch (instant) {
