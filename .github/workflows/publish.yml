@@ -43,7 +43,7 @@ jobs:
       - name: Update version (if specified)
         if: github.event.inputs.version != ''
         run: |
-          bun version ${{ github.event.inputs.version }} --no-git-tag-version
+          bun pm version ${{ github.event.inputs.version }} --no-git-tag-version
 
       - name: Publish to npm
         run: npm publish --access public --provenance
