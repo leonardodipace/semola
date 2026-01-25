@@ -74,6 +74,8 @@ export class PubSub<T> {
       return err("UnsubscribeError", "Not subscribed");
     }
 
+    this.isSubscribed = false;
+
     const [unsubscribeError] = await mightThrow(
       this.options.subscriber.unsubscribe(this.options.channel),
     );
@@ -84,8 +86,6 @@ export class PubSub<T> {
         `Unable to unsubscribe from ${this.options.channel}`,
       );
     }
-
-    this.isSubscribed = false;
 
     return ok(undefined);
   }
