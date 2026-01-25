@@ -25,6 +25,7 @@ bun add semola
 This package uses GitHub Actions to automatically publish to npm. To publish a new version:
 
 1. Update the version in `package.json`:
+
    ```bash
    bun version <major|minor|patch>
    ```
@@ -36,6 +37,7 @@ This package uses GitHub Actions to automatically publish to npm. To publish a n
    - Publish the release
 
 The GitHub Action will automatically:
+
 - Run checks and tests
 - Build the package
 - Publish to npm with provenance
@@ -50,11 +52,11 @@ Alternatively, you can manually trigger the workflow from the Actions tab and op
 # Install dependencies
 bun install
 
+# Run type checks
+bun run check
+
 # Build package
 bun run build
-
-# Build types
-bun run build:types
 ```
 
 ## License
