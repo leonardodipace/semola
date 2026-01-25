@@ -1,6 +1,10 @@
-# Semola
+# CLAUDE.md
 
-TypeScript utility kit providing modular packages for common development needs.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Overview
+
+Semola is a TypeScript utility kit providing modular packages for common development needs.
 
 ## Tech Stack
 
@@ -43,9 +47,12 @@ TypeScript utility kit providing modular packages for common development needs.
 ## Common Commands
 
 ```bash
-bun check        # CRITICAL: lint + format + typecheck (always run before finishing)
-bun test         # Run tests
-bun run build    # Build package
+bun check                        # CRITICAL: lint + format + typecheck (always run before finishing)
+bun test                         # Run all tests
+bun test src/lib/api             # Run tests for a specific module
+bun test --watch                 # Run tests in watch mode
+bun run build                    # Build package
+bun pm version <major|minor|patch>   # Bump version for publishing
 ```
 
 ## Project Structure
