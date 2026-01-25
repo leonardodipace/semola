@@ -37,12 +37,14 @@ export class PubSub<T> {
       return err("SubscribeError", "Already subscribed");
     }
 
+    this.isSubscribed = true;
+
     const wrappedHandler = async (message: string, channel: string) => {
       const [parseError, parsed] = mightThrowSync(() => JSON.parse(message));
 
       if (parseError) return;
 
-      await mightThrow(Promise.resolve(handler(parsed as T, channel)));
+      await mightThrow(Promise.resolve(handler(parsed, channel)));
     };
 
     const [subscribeError] = await mightThrow(
@@ -50,13 +52,13 @@ export class PubSub<T> {
     );
 
     if (subscribeError) {
+      this.isSubscribed = false;
+
       return err(
         "SubscribeError",
         `Unable to subscribe to ${this.options.channel}`,
       );
     }
-
-    this.isSubscribed = true;
 
     return ok(undefined);
   }
