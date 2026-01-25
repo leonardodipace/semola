@@ -140,8 +140,7 @@ const pubsub = new PubSub<string>({
 
 // Subscribe with error handling
 const [subscribeError] = await pubsub.subscribe(async (message) => {
-  // Handler errors are caught and logged automatically
-  // Subscription remains active even if handler throws
+  // Handler errors are caught automatically; subscription remains active even if handler throws
   await processNotification(message);
 });
 
@@ -210,7 +209,7 @@ await alerts.publish({ level: "warning", text: "High CPU usage" });
 
 **Message Ordering:** Messages on a single channel are delivered in order. Pattern subscriptions matching multiple channels have no cross-channel ordering guarantees.
 
-**Handler Errors:** If your message handler throws an error, it will be caught and logged to `console.error`. The subscription remains active and continues processing subsequent messages.
+**Handler Errors:** If your message handler throws an error, it will be caught. The subscription remains active and continues processing subsequent messages.
 
 **Lifecycle Management:** The `PubSub` class does not manage the Redis client lifecycle. You provide the clients when creating the instance and are responsible for closing them when done:
 
