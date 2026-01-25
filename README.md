@@ -53,11 +53,11 @@ Alternatively, you can manually trigger the workflow from the Actions tab and op
 # Install dependencies
 bun install
 
+# Run type checks
+bun run check
+
 # Build package
 bun run build
-
-# Build types
-bun run build:types
 ```
 
 ## License
