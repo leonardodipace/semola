@@ -640,5 +640,35 @@ describe("PubSub", () => {
 
       expect(callCount).toBe(11); // Old handler not called, new one adds 10
     });
+
+    test("should prevent concurrent unsubscribe calls", async () => {
+      const redis = createMockRedis();
+      const pubsub = new PubSub<string>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
+
+      await pubsub.subscribe(async () => {});
+
+      expect(pubsub.isActive()).toBe(true);
+
+      // Attempt two concurrent unsubscribe calls using Promise.all
+      const results = await Promise.all([
+        pubsub.unsubscribe(),
+        pubsub.unsubscribe(),
+      ]);
+
+      const [error1] = results[0];
+      const [error2] = results[1];
+
+      // Only one should succeed (null error), the other should fail
+      const successCount = [error1, error2].filter((e) => e === null).length;
+      const failureCount = [error1, error2].filter((e) => e !== null).length;
+
+      expect(successCount).toBe(1);
+      expect(failureCount).toBe(1);
+      expect(pubsub.isActive()).toBe(false);
+    });
   });
 });
