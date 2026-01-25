@@ -63,7 +63,8 @@ describe("PubSub", () => {
     test("should publish and receive messages", async () => {
       const redis = createMockRedis();
       const pubsub = new PubSub<{ userId: string; action: string }>({
-        redis,
+        subscriber: redis,
+        publisher: redis,
         channel: "user-events",
       });
 
@@ -94,7 +95,8 @@ describe("PubSub", () => {
     test("should receive channel name in handler", async () => {
       const redis = createMockRedis();
       const pubsub = new PubSub<string>({
-        redis,
+        subscriber: redis,
+        publisher: redis,
         channel: "test-channel",
       });
 
@@ -113,7 +115,11 @@ describe("PubSub", () => {
 
     test("should unsubscribe cleanly", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({ redis, channel: "test" });
+      const pubsub = new PubSub<string>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
 
       await pubsub.subscribe(async () => {});
 
@@ -128,7 +134,11 @@ describe("PubSub", () => {
 
     test("should return error when subscribing twice", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({ redis, channel: "test" });
+      const pubsub = new PubSub<string>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
 
       const [error1] = await pubsub.subscribe(async () => {});
 
@@ -144,7 +154,11 @@ describe("PubSub", () => {
 
     test("should return error when unsubscribing without subscription", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({ redis, channel: "test" });
+      const pubsub = new PubSub<string>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
 
       const [error] = await pubsub.unsubscribe();
 
@@ -156,7 +170,11 @@ describe("PubSub", () => {
 
     test("should handle multiple publish/subscribe cycles", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<number>({ redis, channel: "numbers" });
+      const pubsub = new PubSub<number>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "numbers",
+      });
 
       // First cycle
       let count1 = 0;
@@ -192,7 +210,8 @@ describe("PubSub", () => {
       const redis = createMockRedis();
 
       const pubsub1 = new PubSub<string>({
-        redis,
+        subscriber: redis,
+        publisher: redis,
         channel: "channel1",
       });
 
@@ -203,7 +222,8 @@ describe("PubSub", () => {
       });
 
       const pubsub2 = new PubSub<string>({
-        redis,
+        subscriber: redis,
+        publisher: redis,
         channel: "channel2",
       });
 
@@ -220,7 +240,8 @@ describe("PubSub", () => {
       const redis = createMockRedis();
 
       const pubsub = new PubSub<{ name: string; age: number }>({
-        redis,
+        subscriber: redis,
+        publisher: redis,
         channel: "users",
       });
 
@@ -240,7 +261,11 @@ describe("PubSub", () => {
     test("should work with arrays", async () => {
       const redis = createMockRedis();
 
-      const pubsub = new PubSub<number[]>({ redis, channel: "numbers" });
+      const pubsub = new PubSub<number[]>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "numbers",
+      });
 
       let received: unknown = null;
 
@@ -258,9 +283,21 @@ describe("PubSub", () => {
     test("should work with primitives", async () => {
       const redis = createMockRedis();
 
-      const stringPubSub = new PubSub<string>({ redis, channel: "strings" });
-      const numberPubSub = new PubSub<number>({ redis, channel: "numbers" });
-      const boolPubSub = new PubSub<boolean>({ redis, channel: "bools" });
+      const stringPubSub = new PubSub<string>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "strings",
+      });
+      const numberPubSub = new PubSub<number>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "numbers",
+      });
+      const boolPubSub = new PubSub<boolean>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "bools",
+      });
 
       let str = "";
       let num = 0;
@@ -294,7 +331,7 @@ describe("PubSub", () => {
 
       const pubsub = new PubSub<{
         user: { name: string; profile: { age: number } };
-      }>({ redis, channel: "complex" });
+      }>({ subscriber: redis, publisher: redis, channel: "complex" });
 
       let received: unknown = null;
 
@@ -320,7 +357,11 @@ describe("PubSub", () => {
 
       type CircularType = { a: number; self?: CircularType };
 
-      const pubsub = new PubSub<CircularType>({ redis, channel: "test" });
+      const pubsub = new PubSub<CircularType>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
 
       const circular: CircularType = { a: 1 };
 
@@ -338,7 +379,11 @@ describe("PubSub", () => {
 
     test("should handle publish errors", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({ redis, channel: "test" });
+      const pubsub = new PubSub<string>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
 
       redis.setShouldFail(true);
 
@@ -354,7 +399,11 @@ describe("PubSub", () => {
 
     test("should handle subscribe errors", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({ redis, channel: "test" });
+      const pubsub = new PubSub<string>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
 
       redis.setShouldFail(true);
 
@@ -371,7 +420,11 @@ describe("PubSub", () => {
 
     test("should handle unsubscribe errors", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({ redis, channel: "test" });
+      const pubsub = new PubSub<string>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
 
       await pubsub.subscribe(async () => {});
 
@@ -391,7 +444,8 @@ describe("PubSub", () => {
       const redis = createMockRedis();
 
       const pubsub = new PubSub<{ name: string }>({
-        redis,
+        subscriber: redis,
+        publisher: redis,
         channel: "test",
       });
 
@@ -418,7 +472,11 @@ describe("PubSub", () => {
     test("should handle handler errors gracefully", async () => {
       const redis = createMockRedis();
 
-      const pubsub = new PubSub<string>({ redis, channel: "test" });
+      const pubsub = new PubSub<string>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
 
       let errorThrown = false;
 
@@ -443,8 +501,16 @@ describe("PubSub", () => {
     test("should support multiple PubSub instances on different channels", async () => {
       const redis = createMockRedis();
 
-      const pubsub1 = new PubSub<string>({ redis, channel: "channel1" });
-      const pubsub2 = new PubSub<string>({ redis, channel: "channel2" });
+      const pubsub1 = new PubSub<string>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "channel1",
+      });
+      const pubsub2 = new PubSub<string>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "channel2",
+      });
 
       const messages1: string[] = [];
       const messages2: string[] = [];
@@ -470,12 +536,14 @@ describe("PubSub", () => {
       const redis = createMockRedis();
 
       const subscriber = new PubSub<{ event: string }>({
-        redis,
+        subscriber: redis,
+        publisher: redis,
         channel: "events",
       });
 
       const publisher = new PubSub<{ event: string }>({
-        redis,
+        subscriber: redis,
+        publisher: redis,
         channel: "events",
       });
 
@@ -497,7 +565,11 @@ describe("PubSub", () => {
   describe("Lifecycle", () => {
     test("should track subscription state correctly", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({ redis, channel: "test" });
+      const pubsub = new PubSub<string>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
 
       expect(pubsub.isActive()).toBe(false);
 
@@ -512,7 +584,11 @@ describe("PubSub", () => {
 
     test("should clean up handler on unsubscribe", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({ redis, channel: "test" });
+      const pubsub = new PubSub<string>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
 
       let callCount = 0;
 

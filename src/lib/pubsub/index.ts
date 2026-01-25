@@ -19,7 +19,7 @@ export class PubSub<T> {
     }
 
     const [publishError, count] = await mightThrow(
-      this.options.redis.publish(this.options.channel, stringified),
+      this.options.publisher.publish(this.options.channel, stringified),
     );
 
     if (publishError) {
@@ -46,7 +46,7 @@ export class PubSub<T> {
     };
 
     const [subscribeError] = await mightThrow(
-      this.options.redis.subscribe(this.options.channel, wrappedHandler),
+      this.options.subscriber.subscribe(this.options.channel, wrappedHandler),
     );
 
     if (subscribeError) {
@@ -67,7 +67,7 @@ export class PubSub<T> {
     }
 
     const [unsubscribeError] = await mightThrow(
-      this.options.redis.unsubscribe(this.options.channel),
+      this.options.subscriber.unsubscribe(this.options.channel),
     );
 
     if (unsubscribeError) {

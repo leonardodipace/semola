@@ -16,15 +16,19 @@ Creates a new PubSub instance for channel-based subscriptions.
 
 ```typescript
 type PubSubOptions = {
-  redis: Bun.RedisClient;
+  subscriber: Bun.RedisClient;  // for subscribe/unsubscribe
+  publisher: Bun.RedisClient;  // for publish
   channel: string;
 };
 
 const pubsub = new PubSub<Message>({
-  redis: redisClient,
+  subscriber: subscriberClient,
+  publisher: publisherClient,
   channel: "user-events"
 });
 ```
+
+Use two separate `Bun.RedisClient` instances when you both subscribe and publish on the same PubSub: a connection in subscriber mode cannot publish. Pass the same client for both when only subscribing or only publishing.
 
 **`pubsub.publish(message: T)`**
 
@@ -96,8 +100,13 @@ type UserEvent = {
   timestamp: number;
 };
 
+// Two connections: subscriber mode cannot publish
+const subscriber = new Bun.RedisClient("redis://localhost:6379");
+const publisher = new Bun.RedisClient("redis://localhost:6379");
+
 const events = new PubSub<UserEvent>({
-  redis: new Bun.RedisClient("redis://localhost:6379"),
+  subscriber,
+  publisher,
   channel: "user-events"
 });
 
@@ -120,8 +129,12 @@ await events.publish({
 ```typescript
 import { PubSub } from "semola/pubsub";
 
+const subscriber = new Bun.RedisClient("redis://localhost:6379");
+const publisher = new Bun.RedisClient("redis://localhost:6379");
+
 const pubsub = new PubSub<string>({
-  redis: new Bun.RedisClient("redis://localhost:6379"),
+  subscriber,
+  publisher,
   channel: "notifications"
 });
 
@@ -162,16 +175,19 @@ await pubsub.unsubscribe();
 ```typescript
 import { PubSub } from "semola/pubsub";
 
-const redis = new Bun.RedisClient("redis://localhost:6379");
+const subscriber = new Bun.RedisClient("redis://localhost:6379");
+const publisher = new Bun.RedisClient("redis://localhost:6379");
 
 // Separate instances for different channels
 const notifications = new PubSub<{ message: string }>({
-  redis,
+  subscriber,
+  publisher,
   channel: "notifications"
 });
 
 const alerts = new PubSub<{ level: string; text: string }>({
-  redis,
+  subscriber,
+  publisher,
   channel: "alerts"
 });
 
@@ -196,18 +212,22 @@ await alerts.publish({ level: "warning", text: "High CPU usage" });
 
 **Handler Errors:** If your message handler throws an error, it will be caught and logged to `console.error`. The subscription remains active and continues processing subsequent messages.
 
-**Lifecycle Management:** The `PubSub` class does not manage the Redis client lifecycle. You provide the client when creating the instance and are responsible for closing it when done:
+**Lifecycle Management:** The `PubSub` class does not manage the Redis client lifecycle. You provide the clients when creating the instance and are responsible for closing them when done:
 
 ```typescript
-const redis = new Bun.RedisClient("redis://localhost:6379");
-const pubsub = new PubSub({ redis, channel: "events" });
+const subscriber = new Bun.RedisClient("redis://localhost:6379");
+const publisher = new Bun.RedisClient("redis://localhost:6379");
+const pubsub = new PubSub({ subscriber, publisher, channel: "events" });
 
 // Use pubsub...
 
 // Clean up
 await pubsub.unsubscribe();
-await redis.quit();
+await subscriber.quit();
+await publisher.quit();
 ```
+
+**Subscriber Mode and Publish:** A Redis connection in subscriber mode (after `SUBSCRIBE`) cannot run `PUBLISH`. Use two connections (`subscriber` for subscribe/unsubscribe, `publisher` for publish) when the same PubSub instance both subscribes and publishes. The same client can be passed for both when only subscribing or only publishing.
 
 **JSON Serialization:** Messages are automatically serialized to JSON when published and deserialized when received. This ensures type safety but means only JSON-serializable values can be sent. Attempting to publish circular references or other non-serializable values will return a `SerializationError`.
 
