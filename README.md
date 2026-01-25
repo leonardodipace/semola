@@ -23,29 +23,21 @@ bun add semola
 
 ## Publishing
 
-This package uses GitHub Actions to automatically publish to npm. To publish a new version:
+This package uses GitHub Actions to automatically publish to npm and create GitHub Releases. To release a new version:
 
-1. Update the version in `package.json`:
+1. Bump the version, commit, and push to `main`:
 
    ```bash
    bun pm version <major|minor|patch>
+   git push
    ```
 
-2. Create a new release on GitHub:
-   - Go to the [Releases page](https://github.com/leonardodipace/semola/releases)
-   - Click "Create a new release"
-   - Create a new tag (e.g., `v0.3.0`)
-   - Publish the release
+2. The workflow on `main` will:
+   - Run `check`, `test`, and `build`
+   - Publish to npm when the version in `package.json` differs from the latest on the registry
+   - Create a GitHub Release and tag (e.g. `v0.4.1`) when a publish actually occurs
 
-The GitHub Action will automatically:
-
-- Run checks and tests
-- Build the package
-- Publish to npm with provenance
-
-Alternatively, you can manually trigger the workflow from the Actions tab and optionally specify a version.
-
-**Note:** This package uses npm's Trusted Publishing feature, so no NPM_TOKEN is required. The workflow authenticates using GitHub's OIDC token with the `id-token: write` permission.
+Authentication uses [npm Trusted Publishers](https://docs.npmjs.com/generating-provenance-statements) (OIDC); no `NPM_TOKEN` is required.
 
 ## Development
 
