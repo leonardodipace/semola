@@ -58,11 +58,3 @@ bun run check
 # Build package
 bun run build
 ```
-
-## License
-
-MIT © Leonardo Dipace
-
-## Repository
-
-[https://github.com/leonardodipace/semola](https://github.com/leonardodipace/semola)
