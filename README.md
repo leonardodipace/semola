@@ -28,7 +28,7 @@ This package uses GitHub Actions to automatically publish to npm. To publish a n
 1. Update the version in `package.json`:
 
    ```bash
-   bun version <major|minor|patch>
+   bun pm version <major|minor|patch>
    ```
 
 2. Create a new release on GitHub:
