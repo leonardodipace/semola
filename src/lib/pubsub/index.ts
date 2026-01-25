@@ -44,7 +44,13 @@ export class PubSub<T> {
 
       if (parseError) return;
 
-      await mightThrow(Promise.resolve(handler(parsed, channel)));
+      const [handlerError, handlerResult] = mightThrowSync(() =>
+        handler(parsed, channel),
+      );
+
+      if (handlerError) return;
+
+      await mightThrow(Promise.resolve(handlerResult));
     };
 
     const [subscribeError] = await mightThrow(
