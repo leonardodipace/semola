@@ -495,6 +495,33 @@ describe("PubSub", () => {
       // Subscription should still be active despite handler error
       expect(pubsub.isActive()).toBe(true);
     });
+
+    test("should handle synchronous handler errors gracefully", async () => {
+      const redis = createMockRedis();
+
+      const pubsub = new PubSub<string>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
+
+      let errorThrown = false;
+
+      await pubsub.subscribe(() => {
+        errorThrown = true;
+        throw new Error("Synchronous handler error");
+      });
+
+      await pubsub.publish("test");
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Handler was called and threw error
+      expect(errorThrown).toBe(true);
+
+      // Subscription should still be active despite handler error
+      expect(pubsub.isActive()).toBe(true);
+    });
   });
 
   describe("Multiple instances", () => {
