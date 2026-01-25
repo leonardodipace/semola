@@ -201,6 +201,8 @@ export class FileProvider extends LoggerProvider {
         return this.getFileSize() >= DEFAULT_MAX_SIZE;
       }
       case "time": {
+        if (!existsSync(this.file)) return false;
+
         const { duration, instant } = this.policy;
         const { birthtime } = statSync(this.file);
         const creationTimeMs = birthtime.getTime();
