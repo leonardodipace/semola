@@ -48,7 +48,7 @@ export class PubSub<T> {
       await mightThrow(Promise.resolve(handler(parsed, channel)));
     };
 
-    const [subscribeError] = await mightThrow(
+    const [subscribeError, count] = await mightThrow(
       this.options.subscriber.subscribe(this.options.channel, wrappedHandler),
     );
 
@@ -61,7 +61,7 @@ export class PubSub<T> {
       );
     }
 
-    return ok(undefined);
+    return ok(count);
   }
 
   public async unsubscribe() {
@@ -82,7 +82,7 @@ export class PubSub<T> {
       );
     }
 
-    return ok(undefined);
+    return ok(true);
   }
 
   public isActive() {
