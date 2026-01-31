@@ -33,7 +33,7 @@ export class PubSub<T> {
   }
 
   public async subscribe(handler: MessageHandler<T>) {
-    if (this.isSubscribed) {
+    if (this.isActive()) {
       return err("SubscribeError", "Already subscribed");
     }
 
@@ -65,7 +65,7 @@ export class PubSub<T> {
   }
 
   public async unsubscribe() {
-    if (!this.isSubscribed) {
+    if (!this.isActive()) {
       return err("UnsubscribeError", "Not subscribed");
     }
 
