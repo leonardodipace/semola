@@ -1,7 +1,7 @@
 import { err, mightThrow, mightThrowSync, ok } from "../errors/index.js";
 import type { MessageHandler, PubSubOptions } from "./types.js";
 
-export class PubSub<T> {
+export class PubSub<T extends Record<string, unknown>> {
   private options: PubSubOptions;
   private isSubscribed = false;
 
