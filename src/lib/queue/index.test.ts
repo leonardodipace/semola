@@ -767,10 +767,10 @@ describe("Queue", () => {
 
     test.concurrent("should continue processing valid jobs after malformed jobs", async () => {
       const redis = createMockRedis();
-      const processed: any[] = [];
+      const processed: Array<{ message: string }> = [];
       const parseErrors: ParseErrorContext[] = [];
 
-      const queue = new Queue({
+      const queue = new Queue<{ message: string }>({
         name: "test",
         redis,
         retries: 3,
@@ -872,13 +872,19 @@ describe("Queue", () => {
 
     test.concurrent("should handle large job data", async () => {
       const redis = createMockRedis();
-      const processed: any[] = [];
+      type LargePayload = { items: Array<{ id: number; name: string }> };
+      const processed: LargePayload[] = [];
 
-      const handler = (data: any) => {
+      const handler = (data: LargePayload) => {
         processed.push(data);
       };
 
-      const queue = new Queue({ name: "test", redis, retries: 3, handler });
+      const queue = new Queue<LargePayload>({
+        name: "test",
+        redis,
+        retries: 3,
+        handler,
+      });
 
       const largeData = {
         items: Array.from({ length: 1000 }, (_, i) => ({
