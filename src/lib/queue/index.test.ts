@@ -55,7 +55,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("Queue", () => {
   describe("enqueue", () => {
-    test("should enqueue a job successfully", async () => {
+    test.concurrent("should enqueue a job successfully", async () => {
       const redis = createMockRedis();
       const handler = () => {};
       const queue = new Queue({ name: "test", redis, retries: 3, handler });
@@ -69,7 +69,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should handle Redis connection errors", async () => {
+    test.concurrent("should handle Redis connection errors", async () => {
       const redis = createMockRedis();
       const handler = () => {};
       const queue = new Queue({ name: "test", redis, retries: 3, handler });
@@ -88,7 +88,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should handle serialization errors", async () => {
+    test.concurrent("should handle serialization errors", async () => {
       const redis = createMockRedis();
       const handler = () => {};
       const queue = new Queue({ name: "test", redis, retries: 3, handler });
@@ -113,7 +113,7 @@ describe("Queue", () => {
   });
 
   describe("processing", () => {
-    test("should verify job is re-enqueued on failure", async () => {
+    test.concurrent("should verify job is re-enqueued on failure", async () => {
       const redis = createMockRedis();
       let callCount = 0;
 
@@ -136,7 +136,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should process jobs in FIFO order", async () => {
+    test.concurrent("should process jobs in FIFO order", async () => {
       const redis = createMockRedis();
       const processed: string[] = [];
 
@@ -157,7 +157,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should call onSuccess callback on successful processing", async () => {
+    test.concurrent("should call onSuccess callback on successful processing", async () => {
       const redis = createMockRedis();
 
       const handler = () => {};
@@ -189,7 +189,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should call onRetry callback when job fails but will be retried", async () => {
+    test.concurrent("should call onRetry callback when job fails but will be retried", async () => {
       const redis = createMockRedis();
       let attempts = 0;
 
@@ -244,7 +244,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should call onRetry multiple times for multiple failures", async () => {
+    test.concurrent("should call onRetry multiple times for multiple failures", async () => {
       const redis = createMockRedis();
       let attempts = 0;
 
@@ -289,7 +289,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should not call onRetry when job succeeds on first try", async () => {
+    test.concurrent("should not call onRetry when job succeeds on first try", async () => {
       const redis = createMockRedis();
 
       const handler = () => {};
@@ -329,7 +329,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should call onRetry then onError when retries exhausted", async () => {
+    test.concurrent("should call onRetry then onError when retries exhausted", async () => {
       const redis = createMockRedis();
 
       const handler = () => {
@@ -372,7 +372,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should retry failed jobs with exponential backoff", async () => {
+    test.concurrent("should retry failed jobs with exponential backoff", async () => {
       const redis = createMockRedis();
 
       let attempts = 0;
@@ -396,7 +396,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should respect maxRetries limit", async () => {
+    test.concurrent("should respect maxRetries limit", async () => {
       const redis = createMockRedis();
 
       let attempts = 0;
@@ -436,7 +436,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should call onError when retries are exhausted", async () => {
+    test.concurrent("should call onError when retries are exhausted", async () => {
       const redis = createMockRedis();
 
       const handler = () => {
@@ -488,7 +488,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should handle handler errors", async () => {
+    test.concurrent("should handle handler errors", async () => {
       const redis = createMockRedis();
 
       const handler = () => {
@@ -524,7 +524,7 @@ describe("Queue", () => {
   });
 
   describe("lifecycle", () => {
-    test("should auto-start processing in constructor", async () => {
+    test.concurrent("should auto-start processing in constructor", async () => {
       const redis = createMockRedis();
       const processed: string[] = [];
 
@@ -543,7 +543,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should stop processing after stop() is called", async () => {
+    test.concurrent("should stop processing after stop() is called", async () => {
       const redis = createMockRedis();
       const processed: string[] = [];
 
@@ -569,7 +569,7 @@ describe("Queue", () => {
   });
 
   describe("edge cases", () => {
-    test("should handle empty queue gracefully", async () => {
+    test.concurrent("should handle empty queue gracefully", async () => {
       const redis = createMockRedis();
       const handler = () => {};
 
@@ -580,7 +580,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should handle async handlers", async () => {
+    test.concurrent("should handle async handlers", async () => {
       const redis = createMockRedis();
       const processed: string[] = [];
 
@@ -600,7 +600,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should handle multiple queues with different names", async () => {
+    test.concurrent("should handle multiple queues with different names", async () => {
       const redis = createMockRedis();
       const processed1: string[] = [];
       const processed2: string[] = [];
@@ -641,7 +641,7 @@ describe("Queue", () => {
       await queue2.stop();
     });
 
-    test("should handle deserialization errors gracefully", async () => {
+    test.concurrent("should handle deserialization errors gracefully", async () => {
       const redis = createMockRedis();
       const handler = () => {};
 
@@ -654,7 +654,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should move malformed job to dead-letter queue on parse error", async () => {
+    test.concurrent("should move malformed job to dead-letter queue on parse error", async () => {
       const redis = createMockRedis();
       const parseErrors: ParseErrorContext[] = [];
 
@@ -699,7 +699,7 @@ describe("Queue", () => {
       }
     });
 
-    test("should preserve multiple malformed jobs in dead-letter queue", async () => {
+    test.concurrent("should preserve multiple malformed jobs in dead-letter queue", async () => {
       const redis = createMockRedis();
 
       const queue = new Queue({
@@ -734,7 +734,7 @@ describe("Queue", () => {
       });
     });
 
-    test("should call onParseError with parse error details and raw jobData", async () => {
+    test.concurrent("should call onParseError with parse error details and raw jobData", async () => {
       const redis = createMockRedis();
       const parseErrors: ParseErrorContext[] = [];
 
@@ -765,7 +765,7 @@ describe("Queue", () => {
       }
     });
 
-    test("should continue processing valid jobs after malformed jobs", async () => {
+    test.concurrent("should continue processing valid jobs after malformed jobs", async () => {
       const redis = createMockRedis();
       const processed: any[] = [];
       const parseErrors: ParseErrorContext[] = [];
@@ -801,7 +801,7 @@ describe("Queue", () => {
       expect(deadLetterQueue.length).toBe(2);
     });
 
-    test("should handle parse errors even without onError callback", async () => {
+    test.concurrent("should handle parse errors even without onError callback", async () => {
       const redis = createMockRedis();
 
       const queue = new Queue({
@@ -829,7 +829,7 @@ describe("Queue", () => {
       }
     });
 
-    test("should handle completely invalid JSON syntax", async () => {
+    test.concurrent("should handle completely invalid JSON syntax", async () => {
       const redis = createMockRedis();
       const parseErrors: ParseErrorContext[] = [];
 
@@ -870,7 +870,7 @@ describe("Queue", () => {
       }
     });
 
-    test("should handle large job data", async () => {
+    test.concurrent("should handle large job data", async () => {
       const redis = createMockRedis();
       const processed: any[] = [];
 
@@ -896,7 +896,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should handle job timeout", async () => {
+    test.concurrent("should handle job timeout", async () => {
       const redis = createMockRedis();
       let attempts = 0;
       const signalStates: boolean[] = [];
@@ -947,7 +947,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should respect concurrency limits", async () => {
+    test.concurrent("should respect concurrency limits", async () => {
       const redis = createMockRedis();
       let maxConcurrent = 0;
       let currentConcurrent = 0;
@@ -981,7 +981,7 @@ describe("Queue", () => {
       await queue.stop();
     });
 
-    test("should handle graceful shutdown with pending jobs", async () => {
+    test.concurrent("should handle graceful shutdown with pending jobs", async () => {
       const redis = createMockRedis();
       const processed: string[] = [];
 
