@@ -19,20 +19,16 @@ bun add semola
 - [Policy](./docs/policy.md) - Type-safe policy-based authorization system
 - [Internationalization (i18n)](./docs/i18n.md) - Type-safe i18n with compile-time validation
 - [Cache](./docs/cache.md) - Redis cache wrapper with TTL support
-- [PubSub](./docs/pubsub.md) - Redis pub/sub for real-time messaging
 - [Error Utilities](./docs/errors.md) - Result-based error handling
 
 ## Publishing
 
-This package uses GitHub Actions to automatically publish to npm and create GitHub Releases. To release a new version:
-
-1. Bump the version, commit, and push to `main`:
+This package uses GitHub Actions to automatically publish to npm. To publish a new version:
 
 1. Update the version in `package.json`:
 
    ```bash
-   bun pm version <major|minor|patch>
-   git push
+   bun version <major|minor|patch>
    ```
 
 2. Create a new release on GitHub:
@@ -49,7 +45,7 @@ The GitHub Action will automatically:
 
 Alternatively, you can manually trigger the workflow from the Actions tab and optionally specify a version.
 
-Authentication uses [npm Trusted Publishers](https://docs.npmjs.com/generating-provenance-statements) (OIDC); no `NPM_TOKEN` is required.
+**Note:** This package uses npm's Trusted Publishing feature, so no NPM_TOKEN is required. The workflow authenticates using GitHub's OIDC token with the `id-token: write` permission.
 
 ## Development
 
@@ -57,9 +53,17 @@ Authentication uses [npm Trusted Publishers](https://docs.npmjs.com/generating-p
 # Install dependencies
 bun install
 
-# Run type checks
-bun run check
-
 # Build package
 bun run build
+
+# Build types
+bun run build:types
 ```
+
+## License
+
+MIT © Leonardo Dipace
+
+## Repository
+
+[https://github.com/leonardodipace/semola](https://github.com/leonardodipace/semola)
