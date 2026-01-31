@@ -22,15 +22,26 @@ export type RequestSchema = {
   cookies?: StandardSchemaV1;
 };
 
-export type InferOutput<T extends StandardSchemaV1 | undefined> =
-  T extends StandardSchemaV1
-    ? NonNullable<T["~standard"]["types"]>["output"]
-    : undefined;
+// Helper to safely extract type information from Standard Schema
+// Uses [K] access to defer evaluation and avoid deep instantiation
+type SafeTypeAccess<
+  T,
+  K extends "input" | "output",
+> = T extends StandardSchemaV1
+  ? T["~standard"] extends { types?: infer U }
+    ? U extends Record<K, infer V>
+      ? V
+      : never
+    : never
+  : undefined;
 
-export type InferInput<T extends StandardSchemaV1 | undefined> =
-  T extends StandardSchemaV1
-    ? NonNullable<T["~standard"]["types"]>["input"]
-    : undefined;
+export type InferOutput<T extends StandardSchemaV1 | undefined> =
+  SafeTypeAccess<T, "output">;
+
+export type InferInput<T extends StandardSchemaV1 | undefined> = SafeTypeAccess<
+  T,
+  "input"
+>;
 
 export type ExtractStatusCodes<T extends ResponseSchema> = keyof T & number;
 
