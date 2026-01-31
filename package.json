@@ -23,6 +23,10 @@
     "./api": {
       "import": "./dist/lib/api/index.js",
       "types": "./dist/lib/api/index.d.ts"
+    },
+    "./pubsub": {
+      "import": "./dist/lib/pubsub/index.js",
+      "types": "./dist/lib/pubsub/index.d.ts"
     }
   },
   "files": [

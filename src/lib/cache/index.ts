@@ -19,13 +19,13 @@ export class Cache<T> {
       return err("NotFoundError", `Key ${key} not found`);
     }
 
-    const [parseError, parsed] = mightThrowSync(() => JSON.parse(value));
+    const [parseError, parsed] = mightThrowSync<T>(() => JSON.parse(value));
 
     if (parseError) {
       return err("CacheError", `Unable to parse value for key ${key}`);
     }
 
-    return ok(parsed as T);
+    return ok(parsed);
   }
 
   public async set(key: string, value: T) {
