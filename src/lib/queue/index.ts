@@ -148,11 +148,8 @@ export class Queue<T> {
 
       this.activeWorkers++;
 
-      try {
-        await this.handleJob(job);
-      } finally {
-        this.activeWorkers--;
-      }
+      await mightThrow(this.handleJob(job));
+      this.activeWorkers--;
     }
   }
 
