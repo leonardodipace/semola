@@ -76,6 +76,8 @@ export class PubSub<T> {
     );
 
     if (unsubscribeError) {
+      this.isSubscribed = true;
+
       return err(
         "UnsubscribeError",
         `Unable to unsubscribe from ${this.options.channel}`,
