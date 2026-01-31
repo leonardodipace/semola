@@ -1,7 +1,7 @@
 {
   "name": "semola",
   "version": "0.4.1",
-  "description": "A TypeScript utility kit",
+  "description": "Zero-dependency TypeScript utilities for Bun. Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable imports.",
   "type": "module",
   "exports": {
     "./errors": {
@@ -44,9 +44,26 @@
     "prepublishOnly": "bun run build"
   },
   "keywords": [
+    "bun",
     "typescript",
+    "api-framework",
+    "rest-api",
+    "type-safe",
+    "zero-dependency",
     "utilities",
-    "kit"
+    "queue",
+    "redis",
+    "pubsub",
+    "caching",
+    "i18n",
+    "internationalization",
+    "authorization",
+    "policy",
+    "backend",
+    "framework",
+    "middleware",
+    "openapi",
+    "validation"
   ],
   "author": "Leonardo Dipace",
   "license": "MIT",
