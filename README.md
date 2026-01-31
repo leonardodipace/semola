@@ -16,6 +16,7 @@ bun add semola
 
 - [API Framework](./docs/api.md) - Type-safe REST API framework with OpenAPI support
 - [Queue](./docs/queue.md) - Redis-backed job queue with timeouts, concurrency, and graceful shutdown
+- [PubSub](./docs/pubsub.md) - Type-safe Redis pub/sub for real-time messaging
 - [Policy](./docs/policy.md) - Type-safe policy-based authorization system
 - [Internationalization (i18n)](./docs/i18n.md) - Type-safe i18n with compile-time validation
 - [Cache](./docs/cache.md) - Redis cache wrapper with TTL support
