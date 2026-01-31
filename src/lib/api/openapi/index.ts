@@ -1,5 +1,7 @@
-import { toOpenAPISchema } from "@standard-community/standard-openapi";
-import type { StandardSchemaV1 } from "@standard-schema/spec";
+import type {
+  StandardJSONSchemaV1,
+  StandardSchemaV1,
+} from "@standard-schema/spec";
 import type { OpenAPIV3_1 } from "openapi-types";
 import type { RequestSchema, ResponseSchema } from "../core/types.js";
 import type { Middleware } from "../middleware/index.js";
@@ -33,6 +35,15 @@ type OpenApiGeneratorOptions = {
   routes: RouteConfigInternal[];
   globalMiddlewares?: readonly Middleware[];
 };
+
+const toOpenAPISchema = (
+  schema: StandardSchemaV1,
+  io: "input" | "output" = "input",
+) => ({
+  schema: (schema as unknown as StandardJSONSchemaV1)["~standard"].jsonSchema[
+    io
+  ]({ target: "draft-2020-12" }),
+});
 
 const getSchemaDescription = (schema: StandardSchemaV1) => {
   const metadata = schema["~standard"];
@@ -101,9 +112,22 @@ const mergeResponseSchemas = (schemas: Array<ResponseSchema | undefined>) => {
   return Object.keys(merged).length > 0 ? merged : undefined;
 };
 
-const convertSchemaToOpenApi = async (schema: StandardSchemaV1) => {
-  const result = await toOpenAPISchema(schema);
-  return result;
+type JsonSchema = {
+  type?: string;
+  properties?: Record<string, unknown>;
+  required?: string[];
+  [key: string]: unknown;
+};
+
+const convertSchemaToOpenApi = async (
+  schema: StandardSchemaV1,
+  io: "input" | "output" = "input",
+) => {
+  const result = toOpenAPISchema(schema, io);
+  return result as {
+    schema: JsonSchema;
+    components?: OpenAPIV3_1.ComponentsObject;
+  };
 };
 
 const extractParametersFromSchema = async (
@@ -252,8 +276,10 @@ const createResponses = async (response?: ResponseSchema) => {
     }
 
     const description = getSchemaDescription(schema);
-    const { schema: jsonSchema, components } =
-      await convertSchemaToOpenApi(schema);
+    const { schema: jsonSchema, components } = await convertSchemaToOpenApi(
+      schema,
+      "output",
+    );
 
     if (components) {
       allComponents.push(components);
