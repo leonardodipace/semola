@@ -103,7 +103,7 @@ describe("PubSub", () => {
 
     test("should receive channel name in handler", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({
+      const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "test-channel",
@@ -115,7 +115,7 @@ describe("PubSub", () => {
         receivedChannel = channel;
       });
 
-      await pubsub.publish("test message");
+      await pubsub.publish({ message: "test message" });
 
       await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -124,7 +124,7 @@ describe("PubSub", () => {
 
     test("should unsubscribe cleanly", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({
+      const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "test",
@@ -143,7 +143,7 @@ describe("PubSub", () => {
 
     test("should return error when subscribing twice", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({
+      const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "test",
@@ -165,7 +165,7 @@ describe("PubSub", () => {
 
     test("should return subscriber count on successful subscribe", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({
+      const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "test",
@@ -178,7 +178,7 @@ describe("PubSub", () => {
 
     test("should return null count on subscribe error", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({
+      const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "test",
@@ -194,19 +194,19 @@ describe("PubSub", () => {
     test("should increment subscriber count with multiple subscribers", async () => {
       const redis = createMockRedis();
 
-      const pubsub1 = new PubSub<string>({
+      const pubsub1 = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "shared-channel",
       });
 
-      const pubsub2 = new PubSub<string>({
+      const pubsub2 = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "shared-channel",
       });
 
-      const pubsub3 = new PubSub<string>({
+      const pubsub3 = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "shared-channel",
@@ -223,7 +223,7 @@ describe("PubSub", () => {
 
     test("should return error when unsubscribing without subscription", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({
+      const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "test",
@@ -239,7 +239,7 @@ describe("PubSub", () => {
 
     test("should handle multiple publish/subscribe cycles", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<number>({
+      const pubsub = new PubSub<{ value: number }>({
         subscriber: redis,
         publisher: redis,
         channel: "numbers",
@@ -252,7 +252,7 @@ describe("PubSub", () => {
         count1++;
       });
 
-      await pubsub.publish(1);
+      await pubsub.publish({ value: 1 });
       await new Promise((resolve) => setTimeout(resolve, 10));
       await pubsub.unsubscribe();
 
@@ -265,7 +265,7 @@ describe("PubSub", () => {
         count2++;
       });
 
-      await pubsub.publish(2);
+      await pubsub.publish({ value: 2 });
       await new Promise((resolve) => setTimeout(resolve, 10));
       await pubsub.unsubscribe();
 
@@ -278,7 +278,7 @@ describe("PubSub", () => {
     test("should not receive messages from different channels", async () => {
       const redis = createMockRedis();
 
-      const pubsub1 = new PubSub<string>({
+      const pubsub1 = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "channel1",
@@ -287,16 +287,16 @@ describe("PubSub", () => {
       const messages: string[] = [];
 
       await pubsub1.subscribe(async (message) => {
-        messages.push(message);
+        messages.push(message.message);
       });
 
-      const pubsub2 = new PubSub<string>({
+      const pubsub2 = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "channel2",
       });
 
-      await pubsub2.publish("should not receive");
+      await pubsub2.publish({ message: "should not receive" });
 
       await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -330,7 +330,7 @@ describe("PubSub", () => {
     test("should work with arrays", async () => {
       const redis = createMockRedis();
 
-      const pubsub = new PubSub<number[]>({
+      const pubsub = new PubSub<{ values: number[] }>({
         subscriber: redis,
         publisher: redis,
         channel: "numbers",
@@ -342,27 +342,27 @@ describe("PubSub", () => {
         received = message;
       });
 
-      await pubsub.publish([1, 2, 3]);
+      await pubsub.publish({ values: [1, 2, 3] });
 
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      expect(received).toEqual([1, 2, 3]);
+      expect(received).toEqual({ values: [1, 2, 3] });
     });
 
     test("should work with primitives", async () => {
       const redis = createMockRedis();
 
-      const stringPubSub = new PubSub<string>({
+      const stringPubSub = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "strings",
       });
-      const numberPubSub = new PubSub<number>({
+      const numberPubSub = new PubSub<{ value: number }>({
         subscriber: redis,
         publisher: redis,
         channel: "numbers",
       });
-      const boolPubSub = new PubSub<boolean>({
+      const boolPubSub = new PubSub<{ value: boolean }>({
         subscriber: redis,
         publisher: redis,
         channel: "bools",
@@ -373,20 +373,20 @@ describe("PubSub", () => {
       let bool = false;
 
       await stringPubSub.subscribe(async (message) => {
-        str = message;
+        str = message.message;
       });
 
       await numberPubSub.subscribe(async (message) => {
-        num = message;
+        num = message.value;
       });
 
       await boolPubSub.subscribe(async (message) => {
-        bool = message;
+        bool = message.value;
       });
 
-      await stringPubSub.publish("hello");
-      await numberPubSub.publish(42);
-      await boolPubSub.publish(true);
+      await stringPubSub.publish({ message: "hello" });
+      await numberPubSub.publish({ value: 42 });
+      await boolPubSub.publish({ value: true });
 
       await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -448,7 +448,7 @@ describe("PubSub", () => {
 
     test("should handle publish errors", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({
+      const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "test",
@@ -456,7 +456,7 @@ describe("PubSub", () => {
 
       redis.setShouldFail(true);
 
-      const [error, data] = await pubsub.publish("message");
+      const [error, data] = await pubsub.publish({ message: "message" });
 
       expect(error).toEqual({
         type: "PublishError",
@@ -468,7 +468,7 @@ describe("PubSub", () => {
 
     test("should handle subscribe errors", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({
+      const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "test",
@@ -489,7 +489,7 @@ describe("PubSub", () => {
 
     test("should handle unsubscribe errors", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({
+      const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "test",
@@ -542,7 +542,7 @@ describe("PubSub", () => {
     test("should handle handler errors gracefully", async () => {
       const redis = createMockRedis();
 
-      const pubsub = new PubSub<string>({
+      const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "test",
@@ -555,7 +555,7 @@ describe("PubSub", () => {
         throw new Error("Handler error");
       });
 
-      await pubsub.publish("test");
+      await pubsub.publish({ message: "test" });
 
       await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -569,7 +569,7 @@ describe("PubSub", () => {
     test("should handle synchronous handler errors gracefully", async () => {
       const redis = createMockRedis();
 
-      const pubsub = new PubSub<string>({
+      const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "test",
@@ -582,7 +582,7 @@ describe("PubSub", () => {
         throw new Error("Synchronous handler error");
       });
 
-      await pubsub.publish("test");
+      await pubsub.publish({ message: "test" });
 
       await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -598,12 +598,12 @@ describe("PubSub", () => {
     test("should support multiple PubSub instances on different channels", async () => {
       const redis = createMockRedis();
 
-      const pubsub1 = new PubSub<string>({
+      const pubsub1 = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "channel1",
       });
-      const pubsub2 = new PubSub<string>({
+      const pubsub2 = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "channel2",
@@ -613,15 +613,15 @@ describe("PubSub", () => {
       const messages2: string[] = [];
 
       await pubsub1.subscribe(async (message) => {
-        messages1.push(message);
+        messages1.push(message.message);
       });
 
       await pubsub2.subscribe(async (message) => {
-        messages2.push(message);
+        messages2.push(message.message);
       });
 
-      await pubsub1.publish("message1");
-      await pubsub2.publish("message2");
+      await pubsub1.publish({ message: "message1" });
+      await pubsub2.publish({ message: "message2" });
 
       await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -662,7 +662,7 @@ describe("PubSub", () => {
   describe("Lifecycle", () => {
     test("should track subscription state correctly", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({
+      const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "test",
@@ -681,7 +681,7 @@ describe("PubSub", () => {
 
     test("should clean up handler on unsubscribe", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({
+      const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "test",
@@ -693,7 +693,7 @@ describe("PubSub", () => {
         callCount++;
       });
 
-      await pubsub.publish("message1");
+      await pubsub.publish({ message: "message1" });
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       expect(callCount).toBe(1);
@@ -705,7 +705,7 @@ describe("PubSub", () => {
         callCount += 10;
       });
 
-      await pubsub.publish("message2");
+      await pubsub.publish({ message: "message2" });
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       expect(callCount).toBe(11); // Old handler not called, new one adds 10
@@ -713,7 +713,7 @@ describe("PubSub", () => {
 
     test("should prevent concurrent unsubscribe calls", async () => {
       const redis = createMockRedis();
-      const pubsub = new PubSub<string>({
+      const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
         publisher: redis,
         channel: "test",
