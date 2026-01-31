@@ -121,8 +121,8 @@ export class Queue<T> {
         continue;
       }
 
-      const [parseError, job] = mightThrowSync(
-        () => JSON.parse(jobData) as JobState<T>,
+      const [parseError, job] = mightThrowSync<JobState<T>>(() =>
+        JSON.parse(jobData),
       );
 
       if (parseError || !job) {
@@ -162,19 +162,14 @@ export class Queue<T> {
 
     let timerId: NodeJS.Timeout | undefined;
 
-    const timeoutPromise = new Promise<Error>((resolve) => {
+    const timeoutPromise = new Promise<never>((_, reject) => {
       timerId = setTimeout(() => {
-        resolve(new Error(`Job timeout after ${this.timeout}ms`));
+        reject(new Error(`Job timeout after ${this.timeout}ms`));
       }, this.timeout);
     });
 
     const [handlerError] = await mightThrow(
-      Promise.race([
-        handlerPromise.then(() => undefined),
-        timeoutPromise.then((err) => {
-          throw err;
-        }),
-      ]),
+      Promise.race([handlerPromise.then(() => undefined), timeoutPromise]),
     );
 
     if (timerId) {
