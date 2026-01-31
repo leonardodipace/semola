@@ -43,7 +43,7 @@ Defines a route with type-safe request/response validation using Standard Schema
 import { z } from "zod";
 
 api.defineRoute({
-  path: "/users/{id}",
+  path: "/users/:id",
   method: "GET",
   summary: "Get user by ID",
   operationId: "getUserById",
@@ -198,7 +198,7 @@ api.defineRoute({
 });
 
 api.defineRoute({
-  path: "/users/{id}",
+  path: "/users/:id",
   method: "GET",
   summary: "Get user by ID",
   tags: ["Users"],
@@ -270,7 +270,7 @@ api.serve(3000, () => {
 All request fields are validated before reaching your handler:
 
 - **Body**: JSON request body (validates Content-Type)
-- **Params**: Path parameters (e.g., `/users/{id}`)
+- **Params**: Path parameters (e.g., `/users/:id`)
 - **Query**: Query string (supports arrays like `?tags=a&tags=b`)
 - **Headers**: HTTP headers
 - **Cookies**: Parsed from Cookie header

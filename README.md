@@ -49,7 +49,7 @@ import { z } from "zod";
 const api = new Api();
 
 api.defineRoute({
-  path: "/hello/{name}",
+  path: "/hello/:name",
   method: "GET",
   request: {
     params: z.object({ name: z.string() }),
