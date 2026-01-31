@@ -16,15 +16,15 @@ Creates a new PubSub instance for channel-based subscriptions.
 
 ```typescript
 type PubSubOptions = {
-  subscriber: Bun.RedisClient;  // for subscribe/unsubscribe
-  publisher: Bun.RedisClient;  // for publish
+  subscriber: Bun.RedisClient; // for subscribe/unsubscribe
+  publisher: Bun.RedisClient; // for publish
   channel: string;
 };
 
 const pubsub = new PubSub<Message>({
   subscriber: subscriberClient,
   publisher: publisherClient,
-  channel: "user-events"
+  channel: "user-events",
 });
 ```
 
@@ -38,7 +38,7 @@ Publishes a message to the channel or pattern. Returns a result tuple with the n
 const [error, count] = await pubsub.publish({
   userId: "123",
   action: "login",
-  timestamp: Date.now()
+  timestamp: Date.now(),
 });
 
 if (error) {
@@ -107,7 +107,7 @@ const publisher = new Bun.RedisClient("redis://localhost:6379");
 const events = new PubSub<UserEvent>({
   subscriber,
   publisher,
-  channel: "user-events"
+  channel: "user-events",
 });
 
 // Subscribe to events
@@ -120,7 +120,7 @@ await events.subscribe(async (event) => {
 await events.publish({
   userId: "123",
   action: "login",
-  timestamp: Date.now()
+  timestamp: Date.now(),
 });
 ```
 
@@ -132,16 +132,16 @@ import { PubSub } from "semola/pubsub";
 const subscriber = new Bun.RedisClient("redis://localhost:6379");
 const publisher = new Bun.RedisClient("redis://localhost:6379");
 
-const pubsub = new PubSub<string>({
+const pubsub = new PubSub<{ notification: string }>({
   subscriber,
   publisher,
-  channel: "notifications"
+  channel: "notifications",
 });
 
 // Subscribe with error handling
 const [subscribeError] = await pubsub.subscribe(async (message) => {
   // Handler errors are caught automatically; subscription remains active even if handler throws
-  await processNotification(message);
+  await processNotification(message.notification);
 });
 
 if (subscribeError) {
@@ -150,7 +150,7 @@ if (subscribeError) {
 }
 
 // Publish with error handling
-const [publishError, count] = await pubsub.publish("Hello!");
+const [publishError, count] = await pubsub.publish({ notification: "Hello!" });
 
 if (publishError) {
   switch (publishError.type) {
@@ -181,13 +181,13 @@ const publisher = new Bun.RedisClient("redis://localhost:6379");
 const notifications = new PubSub<{ message: string }>({
   subscriber,
   publisher,
-  channel: "notifications"
+  channel: "notifications",
 });
 
 const alerts = new PubSub<{ level: string; text: string }>({
   subscriber,
   publisher,
-  channel: "alerts"
+  channel: "alerts",
 });
 
 await notifications.subscribe(async (msg) => {
