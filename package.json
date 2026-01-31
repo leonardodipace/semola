@@ -24,9 +24,9 @@
       "import": "./dist/lib/api/index.js",
       "types": "./dist/lib/api/index.d.ts"
     },
-    "./pubsub": {
-      "import": "./dist/lib/pubsub/index.js",
-      "types": "./dist/lib/pubsub/index.d.ts"
+    "./queue": {
+      "import": "./dist/lib/queue/index.js",
+      "types": "./dist/lib/queue/index.d.ts"
     }
   },
   "files": [
