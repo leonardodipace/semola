@@ -40,9 +40,10 @@ export class PubSub<T> {
     this.isSubscribed = true;
 
     const wrappedHandler = async (message: string, channel: string) => {
-      const [parseError, parsed] = mightThrowSync(() => JSON.parse(message));
+      const [parseError, parsed] = mightThrowSync<T>(() => JSON.parse(message));
 
       if (parseError) return;
+      if (!parsed) return;
 
       await mightThrow(Promise.resolve(handler(parsed, channel)));
     };
