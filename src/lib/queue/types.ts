@@ -35,6 +35,12 @@ export type ErrorContext<T> = {
   }>;
 };
 
+export type ParseErrorContext = {
+  rawJobData: string;
+  parseError: string;
+  timestamp: number;
+};
+
 export type QueueOptions<T> = {
   name: string;
   redis: Bun.RedisClient;
@@ -42,6 +48,7 @@ export type QueueOptions<T> = {
   onSuccess?: (job: Job<T>) => void | Promise<void>;
   onRetry?: (context: RetryContext<T>) => void | Promise<void>;
   onError?: (context: ErrorContext<T>) => void | Promise<void>;
+  onParseError?: (context: ParseErrorContext) => void | Promise<void>;
   retries?: number;
   timeout?: number;
   concurrency?: number;

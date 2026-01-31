@@ -252,32 +252,16 @@ export class Queue<T> {
     jobData: string,
     parseError: unknown,
   ) {
-    if (!this.options.onError) {
+    if (!this.options.onParseError) {
       return;
     }
 
-    const errorMsg = `Failed to parse job data: ${this.formatErrorMessage(parseError)}`;
-
     await mightThrow(
       Promise.resolve(
-        this.options.onError({
-          job: {
-            id: "unknown",
-            data: jobData as unknown as T,
-            attempts: 0,
-            maxRetries: 0,
-            createdAt: Date.now(),
-          },
-          lastError: errorMsg,
-          totalDurationMs: 0,
-          totalAttempts: 0,
-          errorHistory: [
-            {
-              attempt: 0,
-              error: errorMsg,
-              timestamp: Date.now(),
-            },
-          ],
+        this.options.onParseError({
+          rawJobData: jobData,
+          parseError: this.formatErrorMessage(parseError),
+          timestamp: Date.now(),
         }),
       ),
     );
