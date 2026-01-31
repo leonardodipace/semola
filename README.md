@@ -36,7 +36,7 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 # With Bun (recommended)
 bun add semola
 
-# With npm/npm
+# With npm
 npm install semola
 ```
 
