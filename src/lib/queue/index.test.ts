@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Queue } from "./index.js";
-import type { ErrorContext, RetryContext } from "./types.js";
+import type { ErrorContext, ParseErrorContext, RetryContext } from "./types.js";
 
 class MockRedisClient {
   private lists = new Map<string, string[]>();
@@ -656,7 +656,7 @@ describe("Queue", () => {
 
     test("should move malformed job to dead-letter queue on parse error", async () => {
       const redis = createMockRedis();
-      const errors: ErrorContext<any>[] = [];
+      const parseErrors: ParseErrorContext[] = [];
 
       const queue = new Queue({
         name: "test",
@@ -665,8 +665,8 @@ describe("Queue", () => {
         handler: () => {
           throw new Error("Handler should not be called");
         },
-        onError: async (context) => {
-          errors.push(context);
+        onParseError: async (context) => {
+          parseErrors.push(context);
         },
         pollInterval: 10,
       });
@@ -689,12 +689,13 @@ describe("Queue", () => {
         expect(deadLetterEntry.timestamp).toBeGreaterThan(0);
       }
 
-      expect(errors.length).toBe(1);
-      const firstError = errors[0];
+      expect(parseErrors.length).toBe(1);
+      const firstError = parseErrors[0];
       expect(firstError).toBeDefined();
       if (firstError) {
-        expect(firstError.job.id).toBe("unknown");
-        expect(firstError.lastError).toContain("Failed to parse job data");
+        expect(firstError.rawJobData).toBe(malformedData);
+        expect(firstError.parseError).toBeDefined();
+        expect(firstError.timestamp).toBeGreaterThan(0);
       }
     });
 
@@ -733,17 +734,17 @@ describe("Queue", () => {
       });
     });
 
-    test("should call onError with parse error details and raw jobData", async () => {
+    test("should call onParseError with parse error details and raw jobData", async () => {
       const redis = createMockRedis();
-      const errors: ErrorContext<any>[] = [];
+      const parseErrors: ParseErrorContext[] = [];
 
       const queue = new Queue({
         name: "test",
         redis,
         retries: 3,
         handler: () => {},
-        onError: async (context) => {
-          errors.push(context);
+        onParseError: async (context) => {
+          parseErrors.push(context);
         },
         pollInterval: 10,
       });
@@ -754,27 +755,20 @@ describe("Queue", () => {
       await sleep(100);
       await queue.stop();
 
-      expect(errors.length).toBe(1);
-      const firstError = errors[0];
+      expect(parseErrors.length).toBe(1);
+      const firstError = parseErrors[0];
       expect(firstError).toBeDefined();
       if (firstError) {
-        expect(firstError.job.id).toBe("unknown");
-        expect(firstError.job.data).toBe(malformedData);
-        expect(firstError.lastError).toContain("Failed to parse job data");
-        expect(firstError.totalAttempts).toBe(0);
-        expect(firstError.errorHistory.length).toBe(1);
-        const firstHistoryEntry = firstError.errorHistory[0];
-        expect(firstHistoryEntry).toBeDefined();
-        if (firstHistoryEntry) {
-          expect(firstHistoryEntry.attempt).toBe(0);
-        }
+        expect(firstError.rawJobData).toBe(malformedData);
+        expect(firstError.parseError).toBeDefined();
+        expect(firstError.timestamp).toBeGreaterThan(0);
       }
     });
 
     test("should continue processing valid jobs after malformed jobs", async () => {
       const redis = createMockRedis();
       const processed: any[] = [];
-      const errors: ErrorContext<any>[] = [];
+      const parseErrors: ParseErrorContext[] = [];
 
       const queue = new Queue({
         name: "test",
@@ -783,8 +777,8 @@ describe("Queue", () => {
         handler: async (data) => {
           processed.push(data);
         },
-        onError: async (context) => {
-          errors.push(context);
+        onParseError: async (context) => {
+          parseErrors.push(context);
         },
         pollInterval: 10,
       });
@@ -801,7 +795,7 @@ describe("Queue", () => {
       expect(processed.some((p) => p.message === "valid-1")).toBe(true);
       expect(processed.some((p) => p.message === "valid-2")).toBe(true);
 
-      expect(errors.length).toBe(2);
+      expect(parseErrors.length).toBe(2);
 
       const deadLetterQueue = redis.getList("queue:test:dead-letter");
       expect(deadLetterQueue.length).toBe(2);
@@ -837,15 +831,15 @@ describe("Queue", () => {
 
     test("should handle completely invalid JSON syntax", async () => {
       const redis = createMockRedis();
-      const errors: ErrorContext<any>[] = [];
+      const parseErrors: ParseErrorContext[] = [];
 
       const queue = new Queue({
         name: "test",
         redis,
         retries: 3,
         handler: () => {},
-        onError: async (context) => {
-          errors.push(context);
+        onParseError: async (context) => {
+          parseErrors.push(context);
         },
         pollInterval: 10,
       });
@@ -866,7 +860,14 @@ describe("Queue", () => {
         expect(deadLetterEntry.jobData).toBe(invalidJson);
       }
 
-      expect(errors.length).toBe(1);
+      expect(parseErrors.length).toBe(1);
+      const firstParseError = parseErrors[0];
+      expect(firstParseError).toBeDefined();
+      if (firstParseError) {
+        expect(firstParseError.rawJobData).toBe(invalidJson);
+        expect(firstParseError.parseError).toBeDefined();
+        expect(firstParseError.timestamp).toBeGreaterThan(0);
+      }
     });
 
     test("should handle large job data", async () => {
