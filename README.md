@@ -187,7 +187,7 @@ bun add zod
 
 ## 🔥 Why Semola?
 
-Semola is the batteries-included toolkit TypeScript developers have been waiting for.
+**Semola** (pronounced "seh-MOH-lah") is the batteries-included toolkit TypeScript developers have been waiting for.
 
 Stop piecing together half-baked solutions from npm. Stop wrestling with type definitions that lie to you. Semola gives you everything you need to build production-ready Bun applications with confidence: type-safe APIs, background job queues, real-time messaging, caching, authorization, and error handling. All working together seamlessly out of the box.
 
