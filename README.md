@@ -1,3 +1,7 @@
+<div align="center">
+
+<img src="./logo.png" alt="Semola" width="150">
+
 # Semola
 
 ⚡ **Zero-dependency TypeScript utilities for modern Bun apps**
@@ -10,7 +14,7 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0%2B-blue?style=flat-square&logo=typescript)](https://www.typescriptlang.org)
 [![License](https://img.shields.io/npm/l/semola.svg?style=flat-square)](LICENSE)
 
----
+</div>
 
 ## ✨ Features
 
