@@ -26,6 +26,7 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 | **🔐 Policy**        | Policy-based authorization with type-safe guards       | `semola/policy` |
 | **🌍 i18n**          | Compile-time validated internationalization            | `semola/i18n`   |
 | **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`  |
+| **⏰ Cron**          | In-memory cron scheduler for periodic task execution  | `semola/cron`   |
 | **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors` |
 
 ---
@@ -135,6 +136,23 @@ const [error, user] = await cache.get("user:123");
 if (!error) console.log(user);
 ```
 
+### Schedule Recurring Tasks
+
+```typescript
+import { Cron } from "semola/cron";
+
+const cleanup = new Cron({
+  name: "daily-cleanup",
+  schedule: "0 0 * * *", // Daily at midnight
+  handler: async () => {
+    await deleteOldLogs();
+    await archiveInactiveUsers();
+  },
+});
+
+cleanup.start();
+```
+
 ### Check Permissions
 
 ```typescript
@@ -219,6 +237,7 @@ Stop piecing together half-baked solutions from npm. Stop wrestling with type de
 - [API Framework](./docs/api.md) - Type-safe REST API framework with OpenAPI
 - [Queue](./docs/queue.md) - Redis-backed job queue with timeouts & concurrency
 - [PubSub](./docs/pubsub.md) - Type-safe Redis pub/sub
+- [Cron](./docs/cron.md) - In-memory cron scheduler for periodic task execution
 - [Policy](./docs/policy.md) - Policy-based authorization
 - [i18n](./docs/i18n.md) - Type-safe internationalization
 - [Cache](./docs/cache.md) - Redis cache wrapper with TTL
