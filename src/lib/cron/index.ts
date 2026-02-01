@@ -24,6 +24,7 @@ export class Cron {
   private dayOfWeek = Array(7).fill(0);
   private hasSeconds = false;
 
+  // Fill all values from min to max with 1
   private fillRange(values: number[], min: number, max: number) {
     for (let i = min; i <= max; i++) {
       values[i] = 1;
@@ -31,22 +32,57 @@ export class Cron {
   }
 
   private handleList(part: string, values: number[], min: number, max: number) {
+    // Split comma-separated list into individual items
     const items = part.split(",");
 
     for (const item of items) {
-      const n = Number(item);
+      // Check for optional step suffix (e.g., "1-5/2")
+      const [rangePart, stepStr] = item.split("/");
+      const step = stepStr ? Number(stepStr) : 1;
 
-      if (!Number.isInteger(n)) return false;
-      if (n < min) return false;
-      if (n > max) return false;
+      if (stepStr) {
+        // Validate step is a positive integer
+        if (!Number.isInteger(step)) return false;
+        if (step <= 0) return false;
+      }
 
-      values[n] = 1;
+      if (rangePart?.includes("-")) {
+        // Handle range format: "start-end" or "start-end/step"
+        const [startStr, endStr] = rangePart.split("-");
+
+        if (!startStr || !endStr) return false;
+
+        const start = Number(startStr);
+        const end = Number(endStr);
+
+        // Validate range boundaries are integers within bounds
+        if (!Number.isInteger(start)) return false;
+        if (!Number.isInteger(end)) return false;
+        if (start < min) return false;
+        if (end > max) return false;
+        if (start > end) return false;
+
+        // Mark all values in range with step increment
+        for (let i = start; i <= end; i += step) {
+          values[i] = 1;
+        }
+      } else {
+        // Handle single value format
+        const n = Number(rangePart);
+
+        if (!Number.isInteger(n)) return false;
+        if (n < min) return false;
+        if (n > max) return false;
+
+        values[n] = 1;
+      }
     }
 
     return true;
   }
 
   private handleStep(part: string, values: number[], min: number, max: number) {
+    // Split step format into range and step components
     const [rangePart, stepStr] = part.split("/");
 
     if (!rangePart) return false;
@@ -54,10 +90,12 @@ export class Cron {
 
     const step = Number(stepStr);
 
+    // Validate step is a positive integer
     if (!Number.isInteger(step)) return false;
     if (step <= 0) return false;
 
     if (rangePart === "*") {
+      // Wildcard with step: apply step across entire range
       for (let i = min; i <= max; i += step) {
         values[i] = 1;
       }
@@ -66,9 +104,11 @@ export class Cron {
     }
 
     if (rangePart.includes("-")) {
+      // Range with step: delegate to specialized handler
       return this.handleStepRange(rangePart, step, values, min, max);
     }
 
+    // Single value with step: delegate to specialized handler
     return this.handleStepSingle(rangePart, step, values, min, max);
   }
 
@@ -79,6 +119,7 @@ export class Cron {
     min: number,
     max: number,
   ) {
+    // Split range into start and end values
     const [startStr, endStr] = range.split("-");
 
     if (!startStr) return false;
@@ -87,9 +128,11 @@ export class Cron {
     const start = Number(startStr);
     const end = Number(endStr);
 
+    // Validate range boundaries are integers
     if (!Number.isInteger(start)) return false;
     if (!Number.isInteger(end)) return false;
 
+    // Apply step through range, respecting bounds
     for (let i = start; i <= end; i += step) {
       if (i >= min && i <= max) {
         values[i] = 1;
@@ -108,10 +151,12 @@ export class Cron {
   ) {
     const start = Number(value);
 
+    // Validate starting value is an integer within bounds
     if (!Number.isInteger(start)) return false;
     if (start < min) return false;
     if (start > max) return false;
 
+    // Apply step from start to end of range
     for (let i = start; i <= max; i += step) {
       values[i] = 1;
     }
@@ -125,6 +170,7 @@ export class Cron {
     min: number,
     max: number,
   ) {
+    // Split range into start and end values
     const [startStr, endStr] = part.split("-");
 
     if (!startStr) return false;
@@ -133,12 +179,14 @@ export class Cron {
     const start = Number(startStr);
     const end = Number(endStr);
 
+    // Validate range boundaries are integers within bounds
     if (!Number.isInteger(start)) return false;
     if (!Number.isInteger(end)) return false;
     if (start < min) return false;
     if (end > max) return false;
     if (start > end) return false;
 
+    // Mark all values in the range
     for (let i = start; i <= end; i++) {
       values[i] = 1;
     }
@@ -154,6 +202,7 @@ export class Cron {
   ) {
     const n = Number(value);
 
+    // Validate value is an integer within bounds
     if (!Number.isInteger(n)) return false;
     if (n < min) return false;
     if (n > max) return false;
@@ -166,18 +215,22 @@ export class Cron {
   public constructor(options: CronOptions) {
     this.options = options;
 
+    // Resolve alias or use raw expression
     const expr = this.resolveAlias(options.schedule);
 
+    // Parse and validate the cron expression
     if (!this.parse(expr)) {
       throw new Error("Invalid cron expression");
     }
   }
 
+  // Map alias to standard cron expression if present
   private resolveAlias(schedule: string) {
     return ALIASES[schedule] || schedule;
   }
 
   private parse(expr: string) {
+    // Split expression into space-separated parts
     const parts = expr.trim().split(/\s+/);
 
     if (parts.length !== 5 && parts.length !== 6) return false;
@@ -229,6 +282,7 @@ export class Cron {
     const fields = this.hasSeconds ? sixFieldSchema : fiveFieldSchema;
     const bounds = this.hasSeconds ? sixFieldBounds : fiveFieldBounds;
 
+    // Process each field of the cron expression
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i];
 
@@ -247,29 +301,34 @@ export class Cron {
       const max = bound[1];
 
       if (part === "*") {
+        // Wildcard: enable all values in range
         this.fillRange(values, min, max);
 
         continue;
       }
 
       if (part.includes(",")) {
+        // List: handle comma-separated values
         if (!this.handleList(part, values, min, max)) return false;
 
         continue;
       }
 
       if (part.includes("/")) {
+        // Step: handle step notation
         if (!this.handleStep(part, values, min, max)) return false;
 
         continue;
       }
 
       if (part.includes("-")) {
+        // Range: handle range notation
         if (!this.handleRange(part, values, min, max)) return false;
 
         continue;
       }
 
+      // Single number: handle plain integer
       if (!this.handleNumber(part, values, min, max)) return false;
     }
 
@@ -277,6 +336,7 @@ export class Cron {
   }
 
   private matches(date: Date) {
+    // Extract date/time components
     const s = date.getSeconds();
     const m = date.getMinutes();
     const h = date.getHours();
@@ -284,6 +344,7 @@ export class Cron {
     const mon = date.getMonth();
     const dow = date.getDay();
 
+    // Check each component against configured values
     const isSecondMatch = this.hasSeconds ? this.second[s] === 1 : true;
     const isMinuteMatch = this.minute[m] === 1;
     const isHourMatch = this.hour[h] === 1;
@@ -291,6 +352,7 @@ export class Cron {
     const isMonthMatch = this.month[mon] === 1;
     const isDayOfWeekMatch = this.dayOfWeek[dow] === 1;
 
+    // All conditions must match
     return (
       isSecondMatch &&
       isMinuteMatch &&
@@ -321,6 +383,7 @@ export class Cron {
       if (this.matches(date)) {
         const freshNow = new Date();
 
+        // Ensure match is still in the future
         if (date > freshNow) {
           return new Date(date);
         }
