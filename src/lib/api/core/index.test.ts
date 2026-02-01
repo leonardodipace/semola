@@ -32,6 +32,28 @@ describe("Api Core", () => {
     expect(body).toEqual({ message: "world" });
   });
 
+  test("should normalize prefix", async () => {
+    const api = new Api({
+      prefix: "/api/",
+    });
+
+    api.defineRoute({
+      path: "/hello",
+      method: "GET",
+      handler: (c) => c.json(200, { message: "world" }),
+    });
+
+    api.serve(0, (s) => {
+      server = s;
+    });
+
+    const res = await fetch(`http://localhost:${server?.port}/api/hello`);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ message: "world" });
+  });
+
   test("should validate request body and return 400 on failure", async () => {
     const api = new Api();
     const schema = z.object({ name: z.string() });
