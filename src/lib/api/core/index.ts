@@ -111,6 +111,15 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
       text: (status, text) => {
         return new Response(text, { status });
       },
+      html: (status, html) => {
+        return new Response(html, {
+          status,
+          headers: { "Content-Type": "text/html" },
+        });
+      },
+      redirect: (status, url) => {
+        return Response.redirect(url, status);
+      },
       get: <K extends keyof TExt>(key: K) =>
         params.extensions[key as string] as TExt[K],
     };
@@ -163,6 +172,13 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
               Response.json(data, { status }),
             text: (status: number, text: string) =>
               new Response(text, { status }),
+            html: (status: number, html: string) =>
+              new Response(html, {
+                status,
+                headers: { "Content-Type": "text/html" },
+              }),
+            redirect: (status: number, url: string) =>
+              Response.redirect(url, status),
             get: () => {
               // Return undefined in middleware - extensions aren't available yet
               // Middleware should return data directly to extend the context

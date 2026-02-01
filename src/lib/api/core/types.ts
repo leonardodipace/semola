@@ -126,6 +126,8 @@ export type Context<
     data: TRes extends ResponseSchema ? InferOutput<TRes[S]> : unknown,
   ) => Response;
   text: (status: number, text: string) => Response;
+  html: (status: number, html: string) => Response;
+  redirect: (status: number, url: string) => Response;
   get: <K extends keyof TExt>(key: K) => TExt[K];
 };
 
