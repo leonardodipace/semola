@@ -64,14 +64,13 @@ api.defineRoute({
     }),
   },
   handler: async (c) => {
-    // c.request.params.id is typed as string (validated UUID)
-    const user = await getUser(c.request.params.id);
+    // c.req.params.id is typed as string (validated UUID)
+    const user = await getUser(c.req.params.id);
 
     if (!user) {
       return c.json(404, { message: "User not found" });
     }
 
-    // Response is validated against schema before being sent
     return c.json(200, user);
   },
 });
@@ -107,25 +106,17 @@ api.serve(3000, () => {
 });
 ```
 
-### `api.close()`
-
-Stops the server.
-
-```typescript
-api.close();
-```
-
 ## Handler Context
 
 The handler receives a context object with type-safe request data and response methods:
 
 ### Request Data
 
-- `c.request.body` - Validated request body
-- `c.request.params` - Validated path parameters
-- `c.request.query` - Validated query parameters
-- `c.request.headers` - Validated headers
-- `c.request.cookies` - Validated cookies
+- `c.req.body` - Validated request body
+- `c.req.params` - Validated path parameters
+- `c.req.query` - Validated query parameters
+- `c.req.headers` - Validated headers
+- `c.req.cookies` - Validated cookies
 - `c.raw` - Underlying Request object
 
 ### Response Methods
@@ -139,7 +130,7 @@ The handler receives a context object with type-safe request data and response m
 
 - **Full type safety**: Request/response types inferred from schemas
 - **Standard Schema support**: Works with Zod, Valibot, ArkType, and other Standard Schema libraries
-- **Automatic validation**: Request validation (400 on error), response validation (500 on error)
+- **Automatic validation**: Request validation (400 on error)
 - **OpenAPI generation**: Automatic OpenAPI 3.1.0 spec from route definitions
 - **Bun-native routing**: Leverages Bun.serve's SIMD-accelerated routing
 - **Result pattern**: Uses `[error, data]` tuples internally for error handling
@@ -190,8 +181,8 @@ api.defineRoute({
     400: ErrorSchema,
   },
   handler: async (c) => {
-    // c.request.body is typed as { name: string; email: string }
-    const user = await createUser(c.request.body);
+    // c.req.body is typed as { name: string; email: string }
+    const user = await createUser(c.req.body);
 
     return c.json(201, user);
   },
@@ -212,7 +203,7 @@ api.defineRoute({
     404: ErrorSchema,
   },
   handler: async (c) => {
-    const user = await findUser(c.request.params.id);
+    const user = await findUser(c.req.params.id);
 
     if (!user) {
       return c.json(404, { message: "User not found" });
@@ -246,8 +237,8 @@ api.defineRoute({
     }),
   },
   handler: async (c) => {
-    const page = c.request.query.page ?? 1;
-    const limit = c.request.query.limit ?? 10;
+    const page = c.req.query.page ?? 1;
+    const limit = c.req.query.limit ?? 10;
 
     const { users, total } = await listUsers(page, limit);
 
@@ -277,12 +268,6 @@ All request fields are validated before reaching your handler:
 
 Invalid requests receive **400 Bad Request** with detailed error messages.
 
-## Response Validation
-
-All responses are validated before being sent. This prevents accidentally sending malformed data that doesn't match your API contract.
-
-Invalid responses trigger **500 Internal Server Error**, signaling a server-side bug that needs fixing.
-
 ## Middlewares
 
 Middlewares allow you to run code before your route handler executes. They're perfect for authentication, logging, rate limiting, and extending the request context with shared data.
@@ -303,7 +288,7 @@ const authMiddleware = new Middleware({
     401: z.object({ error: z.string() }),
   },
   handler: async (c) => {
-    const token = c.request.headers.authorization;
+    const token = c.req.headers.authorization;
 
     if (!token || !token.startsWith("Bearer ")) {
       return c.json(401, { error: "Unauthorized" });
@@ -479,14 +464,14 @@ api.defineRoute({
 
 ### Middleware Schemas
 
-Middlewares can define request and response schemas that merge with route schemas.
+Middlewares can define request and response schemas that are validated independently.
 
-**Schema Merging Behavior:**
+**Schema Validation Behavior:**
 
-- Middleware schemas and route schemas are merged using a "last-write-wins" strategy
-- When both a middleware and a route define schemas for the same property (e.g., `body`, `query`, `headers`), the route's schema takes precedence and completely replaces the middleware's schema for that property
-- This design allows routes to have the final say over validation while still benefiting from middleware schema definitions
-- Different properties (body vs. query vs. headers) from different middlewares and routes are combined independently
+- Each middleware validates its request data against its own schema before executing
+- Route validates its request data against its own schema after all middlewares complete
+- All schemas must pass validation—there is no merging or replacement, each validates independently
+- Different properties (body vs. query vs. headers) from different middlewares and routes are all validated
 
 ```typescript
 const apiKeyMiddleware = new Middleware({
@@ -499,7 +484,7 @@ const apiKeyMiddleware = new Middleware({
     403: z.object({ error: z.string() }),
   },
   handler: async (c) => {
-    const apiKey = c.request.headers["x-api-key"];
+    const apiKey = c.req.headers["x-api-key"];
 
     if (!isValidApiKey(apiKey)) {
       return c.json(403, { error: "Invalid API key" });
@@ -524,7 +509,7 @@ api.defineRoute({
   },
   handler: async (c) => {
     // Both x-api-key (from middleware) and accept-language (from route) are validated
-    const lang = c.request.headers["accept-language"];
+    const lang = c.req.headers["accept-language"];
 
     return c.json(200, { data: ["item1", "item2"] });
   },
@@ -622,8 +607,8 @@ api.defineRoute({
     const tx = c.get("transaction");
 
     try {
-      await debit(tx, c.request.body.from, c.request.body.amount);
-      await credit(tx, c.request.body.to, c.request.body.amount);
+      await debit(tx, c.req.body.from, c.req.body.amount);
+      await credit(tx, c.req.body.to, c.req.body.amount);
       await tx.commit();
 
       return c.json(200, { success: true });
