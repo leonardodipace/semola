@@ -108,7 +108,7 @@ const reports = new Cron({
   schedule: "0 6 * * *",
   handler: async () => {
     const data = await fetchDailyMetrics();
-    await generateReport(data);
+    const report = await generateReport(data);
     await sendEmail("admin@company.com", "Daily Report", report);
   },
 });
