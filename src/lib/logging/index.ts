@@ -1,198 +1,292 @@
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, statSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import type { Formatter } from "./formatter.js";
+
 import {
+  type FileProviderOptions,
   type LogDataType,
-  type LoggingOptions,
   LogLevel,
   type LogLevelType,
+  type LogMessageType,
+  type ProviderOptions,
+  type SizeBasedPolicyType,
+  type TimeBasedPolicyType,
 } from "./types.js";
 
-export class FileLogger {
-  protected options: LoggingOptions;
-  protected formatter!: Formatter;
-  protected file: string;
+const PROVIDER_OPTION_DEFAULT: ProviderOptions = {
+  formatter: undefined,
+  level: LogLevel.Debug,
+} as const;
 
-  constructor(file: string, options: LoggingOptions) {
-    this.options = options;
-    this.file = file;
+const FILE_PROVIDER_OPTION_DEFAULT: FileProviderOptions = {
+  ...PROVIDER_OPTION_DEFAULT,
+  policy: undefined,
+};
+
+const DEFAULT_MAX_SIZE = 4 * 1024; // 4KB
+const NON_ERROR_CALL_STACK_IDX = 4;
+
+enum DurationUnit {
+  Hour = 1000 * 60 * 60,
+  Day = 1000 * 60 * 60 * 24,
+  Week = 1000 * 60 * 60 * 24 * 7,
+  Month = 1000 * 60 * 60 * 24 * 7 * 4,
+}
+
+class StackData {
+  private stack = "";
+
+  public constructor() {
+    Error.captureStackTrace(this);
   }
 
-  protected getLogLevel() {
-    if (!this.options.level) {
-      return LogLevel.DEBUG;
-    }
-
-    return this.options.level;
-  }
-
-  public setFormatter(formatter: Formatter) {
-    this.formatter = formatter;
-  }
-
-  protected createLogData(level: LogLevelType, msg: string): LogDataType {
-    return {
-      level,
-      msg,
-      prefix: this.options.prefix,
-    };
-  }
-
-  public async debug(msg: string) {
-    const level = this.getLogLevel();
-    if (level > LogLevel.DEBUG) return;
-
-    if (this.formatter) {
-      const data = this.createLogData("DEBUG", msg);
-      appendFileSync(this.file, this.formatter.format(data));
-    } else {
-      appendFileSync(this.file, msg);
-    }
-
-    appendFileSync(this.file, "\n");
-  }
-
-  public async info(msg: string) {
-    const level = this.getLogLevel();
-    if (level > LogLevel.INFO) return;
-
-    if (this.formatter) {
-      const data = this.createLogData("INFO", msg);
-      appendFileSync(this.file, this.formatter.format(data));
-    } else {
-      appendFileSync(this.file, msg);
-    }
-
-    appendFileSync(this.file, "\n");
-  }
-
-  public async warning(msg: string) {
-    const level = this.getLogLevel();
-    if (level > LogLevel.WARNING) return;
-
-    if (this.formatter) {
-      const data = this.createLogData("WARNING", msg);
-      appendFileSync(this.file, this.formatter.format(data));
-    } else {
-      appendFileSync(this.file, msg);
-    }
-
-    appendFileSync(this.file, "\n");
-  }
-
-  public async error(msg: string) {
-    const level = this.getLogLevel();
-    if (level > LogLevel.ERROR) return;
-
-    if (this.formatter) {
-      const data = this.createLogData("ERROR", msg);
-      appendFileSync(this.file, this.formatter.format(data));
-    } else {
-      appendFileSync(this.file, msg);
-    }
-
-    appendFileSync(this.file, "\n");
-  }
-
-  public async critical(msg: string) {
-    const level = this.getLogLevel();
-    if (level > LogLevel.CRITICAL) return;
-
-    if (this.formatter) {
-      const data = this.createLogData("CRITICAL", msg);
-      appendFileSync(this.file, this.formatter.format(data));
-    } else {
-      appendFileSync(this.file, msg);
-    }
-
-    appendFileSync(this.file, "\n");
+  public getStack() {
+    return this.stack;
   }
 }
 
-export class ConsoleLogger {
-  protected options: LoggingOptions;
-  protected formatter!: Formatter;
+export abstract class AbstractLogger {
+  public abstract debug(msg: LogMessageType): void;
+  public abstract info(msg: LogMessageType): void;
+  public abstract warning(msg: LogMessageType): void;
+  public abstract error(msg: LogMessageType): void;
+  public abstract critical(msg: LogMessageType): void;
 
-  constructor(options: LoggingOptions) {
+  protected createLogData(
+    level: LogLevelType,
+    msg: LogMessageType,
+    prefix: string,
+  ): LogDataType {
+    const stack = new StackData().getStack().split("\n");
+    const logCall = stack[NON_ERROR_CALL_STACK_IDX] || "";
+
+    const [path, row, column] = logCall
+      .trim()
+      .replace("(", "")
+      .replace(")", "")
+      .split(":");
+
+    const fileName = basename(path || "");
+    const pathData = path?.split(" ") || [];
+    let methodCall: string | undefined;
+
+    if (pathData.length === 3) {
+      methodCall = pathData[1];
+    }
+
+    return {
+      level,
+      msg,
+      prefix,
+      fileName,
+      row: row ?? "",
+      column: column ?? "",
+      method: methodCall,
+    };
+  }
+}
+
+export class Logger extends AbstractLogger {
+  private providers: LoggerProvider[];
+  private prefix: string;
+
+  public constructor(prefix: string, providers: LoggerProvider[]) {
+    super();
+    this.prefix = prefix;
+    this.providers = providers;
+  }
+
+  public debug(msg: LogMessageType) {
+    const data = this.createLogData("Debug", msg, this.prefix);
+    this.run(data);
+  }
+
+  public info(msg: LogMessageType) {
+    const data = this.createLogData("Info", msg, this.prefix);
+    this.run(data);
+  }
+
+  public warning(msg: LogMessageType) {
+    const data = this.createLogData("Warning", msg, this.prefix);
+    this.run(data);
+  }
+
+  public error(msg: LogMessageType) {
+    const data = this.createLogData("Error", msg, this.prefix);
+    this.run(data);
+  }
+
+  public critical(msg: LogMessageType) {
+    const data = this.createLogData("Critical", msg, this.prefix);
+    this.run(data);
+  }
+
+  private run(data: LogDataType) {
+    for (let i = 0; i < this.providers.length; i++) {
+      const provider = this.providers[i];
+      provider?.execute(data);
+    }
+  }
+}
+
+export abstract class LoggerProvider {
+  protected options: ProviderOptions;
+
+  public constructor(options: ProviderOptions = PROVIDER_OPTION_DEFAULT) {
     this.options = options;
   }
 
-  protected getLogLevel() {
+  public abstract execute(data: LogDataType): void;
+
+  public getLogLevel() {
     if (!this.options.level) {
-      return LogLevel.DEBUG;
+      return LogLevel.Debug;
     }
 
     return this.options.level;
   }
 
   public setFormatter(formatter: Formatter) {
-    this.formatter = formatter;
+    this.options.formatter = formatter;
+  }
+}
+
+export class FileProvider extends LoggerProvider {
+  private readonly filePath: string;
+
+  private counter: number;
+  private file: string;
+  private policy?: SizeBasedPolicyType | TimeBasedPolicyType;
+
+  public constructor(
+    file: string,
+    options: FileProviderOptions = FILE_PROVIDER_OPTION_DEFAULT,
+  ) {
+    super({ formatter: options.formatter, level: options.level });
+    this.policy = options.policy;
+    this.filePath = file;
+    this.counter = 0;
+    this.file = this.createNewFileName();
   }
 
-  protected createLogData(level: LogLevelType, msg: string): LogDataType {
-    return {
-      level,
-      msg,
-      prefix: this.options.prefix,
-    };
-  }
-
-  public debug(msg: string) {
+  public execute(data: LogDataType): void {
     const level = this.getLogLevel();
-    if (level > LogLevel.DEBUG) return;
+    const userLevel = LogLevel[data.level];
+    if (level > userLevel) return;
 
-    if (this.formatter) {
-      const data = this.createLogData("DEBUG", msg);
-      console.debug(this.formatter.format(data));
-    } else {
-      console.debug(msg);
+    let { msg } = data;
+    if (this.options.formatter) {
+      msg = this.options.formatter.format(data);
+    } else if (this.isJSONFile()) {
+      msg = JSON.stringify({ message: msg });
+    }
+
+    if (this.canRollFile()) {
+      this.counter += 1;
+      this.file = this.createNewFileName();
+    }
+
+    appendFileSync(this.file, `${msg}\n`);
+  }
+
+  private canRollFile() {
+    if (!this.policy) return false;
+
+    switch (this.policy.type) {
+      case "size": {
+        if (this.policy.maxSize) {
+          return this.getFileSize() >= this.policy.maxSize;
+        }
+
+        return this.getFileSize() >= DEFAULT_MAX_SIZE;
+      }
+      case "time": {
+        if (!existsSync(this.file)) return false;
+
+        const { duration, instant } = this.policy;
+        const { birthtime } = statSync(this.file);
+        const creationTimeMs = birthtime.getTime();
+        const currenTimeMs = Date.now();
+        const diffMs = currenTimeMs - creationTimeMs;
+
+        switch (instant) {
+          case "hour":
+            return Math.floor(diffMs / DurationUnit.Hour) >= duration;
+          case "day":
+            return Math.floor(diffMs / DurationUnit.Day) >= duration;
+          case "week":
+            return Math.floor(diffMs / DurationUnit.Week) >= duration;
+          case "month":
+            return Math.floor(diffMs / DurationUnit.Month) >= duration;
+        }
+      }
     }
   }
 
-  public info(msg: string) {
-    const level = this.getLogLevel();
-    if (level > LogLevel.INFO) return;
-
-    if (this.formatter) {
-      const data = this.createLogData("INFO", msg);
-      console.info(this.formatter.format(data));
-    } else {
-      console.info(msg);
+  private getFileSize() {
+    if (!existsSync(this.file)) {
+      return 0;
     }
+
+    const { size } = statSync(this.file);
+    return size;
   }
 
-  public warning(msg: string) {
-    const level = this.getLogLevel();
-    if (level > LogLevel.WARNING) return;
+  private isJSONFile() {
+    const fileName = basename(this.filePath);
+    const fileObj = Bun.file(fileName);
+    const { type } = fileObj;
 
-    if (this.formatter) {
-      const data = this.createLogData("WARNING", msg);
-      console.warn(this.formatter.format(data));
-    } else {
-      console.warn(msg);
-    }
+    return type === "application/json;charset=utf-8";
   }
 
-  public error(msg: string) {
-    const level = this.getLogLevel();
-    if (level > LogLevel.ERROR) return;
+  private createNewFileName() {
+    const fileName = basename(this.filePath);
+    const directory = dirname(this.filePath);
+    const fileInfo = fileName.split(".");
+    const extension = fileInfo.pop();
+    const newFileName = [...fileInfo, this.counter, extension].join(".");
 
-    if (this.formatter) {
-      const data = this.createLogData("ERROR", msg);
-      console.error(this.formatter.format(data));
-    } else {
-      console.error(msg);
-    }
+    return join(directory, newFileName);
   }
+}
 
-  public critical(msg: string) {
+export class ConsoleProvider extends LoggerProvider {
+  public execute(data: LogDataType): void {
     const level = this.getLogLevel();
-    if (level > LogLevel.CRITICAL) return;
+    const userLevel = LogLevel[data.level];
+    if (level > userLevel) return;
 
-    if (this.formatter) {
-      const data = this.createLogData("CRITICAL", msg);
-      console.error(this.formatter.format(data));
-    } else {
-      console.error(msg);
+    let { msg } = data;
+    if (this.options.formatter) {
+      msg = this.options.formatter.format(data);
+    } else if (typeof msg === "object") {
+      msg = JSON.stringify(msg);
     }
+
+    // biome-ignore-start lint/suspicious/noConsole: function used for the correct
+    // functionality of the logger
+    switch (userLevel) {
+      case LogLevel.Debug:
+        console.debug(msg);
+        break;
+      case LogLevel.Info:
+        console.info(msg);
+        break;
+      case LogLevel.Warning:
+        console.warn(msg);
+        break;
+      case LogLevel.Error:
+        console.error(msg);
+        break;
+      case LogLevel.Critical:
+        console.error(msg);
+        break;
+      default:
+        console.debug(msg);
+        break;
+    }
+    // biome-ignore-end lint/suspicious/noConsole: function used for the correct
+    // functionality of the logger
   }
 }
