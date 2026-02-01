@@ -144,7 +144,7 @@ import { Api } from "semola/api";
 // Define schemas
 const CreateUserSchema = z.object({
   name: z.string().min(1),
-  email: z.string().email(),
+  email: z.email(),
 });
 
 const UserSchema = z.object({
