@@ -1,4 +1,4 @@
-import { mightThrowSync } from "../errors/index.js";
+import { mightThrow } from "../errors/index.js";
 import type { CronOptions, CronStatus } from "./types.js";
 
 const ALIASES: Record<string, string> = {
@@ -22,6 +22,7 @@ export class Cron {
   private day = Array(31).fill(0);
   private month = Array(12).fill(0);
   private dayOfWeek = Array(7).fill(0);
+  private hasSeconds = false;
 
   private fillRange(values: number[], min: number, max: number) {
     for (let i = min; i <= max; i++) {
@@ -223,8 +224,10 @@ export class Cron {
       [0, 6],
     ];
 
-    const fields = parts.length === 6 ? sixFieldSchema : fiveFieldSchema;
-    const bounds = parts.length === 6 ? sixFieldBounds : fiveFieldBounds;
+    this.hasSeconds = parts.length === 6;
+
+    const fields = this.hasSeconds ? sixFieldSchema : fiveFieldSchema;
+    const bounds = this.hasSeconds ? sixFieldBounds : fiveFieldBounds;
 
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i];
@@ -281,7 +284,7 @@ export class Cron {
     const mon = date.getMonth();
     const dow = date.getDay();
 
-    const isSecondMatch = this.second[s] === 1;
+    const isSecondMatch = this.hasSeconds ? this.second[s] === 1 : true;
     const isMinuteMatch = this.minute[m] === 1;
     const isHourMatch = this.hour[h] === 1;
     const isDayMatch = this.day[d - 1] === 1;
@@ -303,7 +306,7 @@ export class Cron {
     const date = new Date(now);
 
     // Start from next minute/second
-    if (this.second.length === 60) {
+    if (this.hasSeconds) {
       date.setMilliseconds(0);
       date.setSeconds(date.getSeconds() + 1);
     } else {
@@ -312,7 +315,7 @@ export class Cron {
     }
 
     // Search for next 24 hours max
-    const maxIterations = this.second.length === 60 ? 86400 : 1440;
+    const maxIterations = this.hasSeconds ? 86400 : 1440;
 
     for (let i = 0; i < maxIterations; i++) {
       if (this.matches(date)) {
@@ -324,7 +327,7 @@ export class Cron {
       }
 
       // Increment time
-      if (this.second.length === 60) {
+      if (this.hasSeconds) {
         date.setSeconds(date.getSeconds() + 1);
       } else {
         date.setMinutes(date.getMinutes() + 1);
@@ -391,7 +394,8 @@ export class Cron {
   private async run() {
     if (this.status !== "running") return;
 
-    mightThrowSync(() => this.options.handler());
+    const handlerResult = this.options.handler();
+    await mightThrow(Promise.resolve(handlerResult));
 
     if (this.status === "running") {
       this.next();
