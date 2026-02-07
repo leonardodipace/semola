@@ -2,6 +2,7 @@ import { err, ok } from "../../errors/index.js";
 import type { Middleware } from "../middleware/index.js";
 import { generateOpenApiSpec } from "../openapi/index.js";
 import {
+  type BodyCache,
   validateBody,
   validateCookies,
   validateHeaders,
@@ -59,7 +60,11 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     return fullPath;
   }
 
-  private async validateRequest(req: Bun.BunRequest, schema?: RequestSchema) {
+  private async validateRequest(
+    req: Bun.BunRequest,
+    bodyCache: BodyCache,
+    schema?: RequestSchema,
+  ) {
     const [
       [bodyErr, body],
       [queryErr, query],
@@ -67,7 +72,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
       [cookiesErr, cookies],
       [paramsErr, params],
     ] = await Promise.all([
-      validateBody(req, schema?.body),
+      validateBody(req, schema?.body, bodyCache),
       validateQuery(req, schema?.query),
       validateHeaders(req, schema?.headers),
       validateCookies(req, schema?.cookies),
@@ -140,9 +145,8 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
       }
 
       bunRoutes[fullPath][method] = async (req: Bun.BunRequest) => {
-        // Clone the request once for validation
-        // This allows body to be read multiple times without consuming the original
-        const clonedReq = req.clone();
+        // Cache parsed body to avoid consuming the stream multiple times
+        const bodyCache: BodyCache = { parsed: false, value: undefined };
 
         // Run middlewares
         const extensions: Record<string, unknown> = {};
@@ -155,7 +159,8 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
           const { request: reqSchema, handler: mwHandler } = mw.options;
 
           const [error, validated] = await this.validateRequest(
-            clonedReq,
+            req,
+            bodyCache,
             reqSchema,
           );
 
@@ -196,7 +201,8 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
         }
 
         const [routeError, routeValidated] = await this.validateRequest(
-          clonedReq,
+          req,
+          bodyCache,
           request,
         );
 

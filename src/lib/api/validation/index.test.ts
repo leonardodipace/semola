@@ -65,6 +65,52 @@ describe("Validation Module", () => {
       expect(error).toBeNull();
       expect(data).toBeUndefined();
     });
+
+    test("should cache parsed body and reuse on subsequent calls", async () => {
+      const schema = z.object({ name: z.string() });
+      const req = new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "test" }),
+      });
+
+      const bodyCache = { parsed: false, value: undefined as unknown };
+
+      const [err1, data1] = await validateBody(req, schema, bodyCache);
+
+      expect(err1).toBeNull();
+      expect(data1).toEqual({ name: "test" });
+      expect(bodyCache.parsed).toBe(true);
+      expect(bodyCache.value).toEqual({ name: "test" });
+
+      // Second call should use cached value (would fail without cache since body is consumed)
+      const [err2, data2] = await validateBody(req, schema, bodyCache);
+
+      expect(err2).toBeNull();
+      expect(data2).toEqual({ name: "test" });
+    });
+
+    test("should validate cached body against different schemas", async () => {
+      const partialSchema = z.object({ name: z.string() });
+      const fullSchema = z.object({ name: z.string(), age: z.number() });
+      const req = new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "test", age: 25 }),
+      });
+
+      const bodyCache = { parsed: false, value: undefined as unknown };
+
+      // First validation with partial schema
+      const [err1, data1] = await validateBody(req, partialSchema, bodyCache);
+      expect(err1).toBeNull();
+      expect(data1).toEqual({ name: "test" });
+
+      // Second validation with full schema using cached body
+      const [err2, data2] = await validateBody(req, fullSchema, bodyCache);
+      expect(err2).toBeNull();
+      expect(data2).toEqual({ name: "test", age: 25 });
+    });
   });
 
   describe("validateQuery", () => {

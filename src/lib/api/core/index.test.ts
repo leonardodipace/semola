@@ -186,4 +186,86 @@ describe("Api Core", () => {
     const res = await fetch(`http://localhost:${server?.port}/nowhere`);
     expect(res.status).toBe(404);
   });
+
+  test("should validate body in both middleware and route handler", async () => {
+    const bodySchema = z.object({ name: z.string(), age: z.number() });
+
+    const validateBodyMiddleware = new Middleware({
+      request: { body: z.object({ name: z.string() }) },
+      handler: (c) => ({ validatedName: c.req.body.name }),
+    });
+
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/user",
+      method: "POST",
+      middlewares: [validateBodyMiddleware] as const,
+      request: { body: bodySchema },
+      handler: (c) => {
+        const validatedName = c.get("validatedName");
+        return c.json(200, {
+          fromMiddleware: validatedName,
+          fromRoute: c.req.body,
+        });
+      },
+    });
+
+    api.serve(0, (s) => {
+      server = s;
+    });
+
+    const res = await fetch(`http://localhost:${server?.port}/user`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Alice", age: 30 }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({
+      fromMiddleware: "Alice",
+      fromRoute: { name: "Alice", age: 30 },
+    });
+  });
+
+  test("should validate body across multiple middlewares", async () => {
+    const mw1 = new Middleware({
+      request: { body: z.object({ a: z.string() }) },
+      handler: (c) => ({ fieldA: c.req.body.a }),
+    });
+
+    const mw2 = new Middleware({
+      request: { body: z.object({ b: z.number() }) },
+      handler: (c) => ({ fieldB: c.req.body.b }),
+    });
+
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/multi",
+      method: "POST",
+      middlewares: [mw1, mw2] as const,
+      handler: (c) => {
+        return c.json(200, {
+          a: c.get("fieldA"),
+          b: c.get("fieldB"),
+        });
+      },
+    });
+
+    api.serve(0, (s) => {
+      server = s;
+    });
+
+    const res = await fetch(`http://localhost:${server?.port}/multi`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ a: "hello", b: 42 }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ a: "hello", b: 42 });
+  });
 });

@@ -26,9 +26,12 @@ export const validateSchema = async <T>(
   return err("ValidationError", message);
 };
 
+export type BodyCache = { parsed: boolean; value: unknown };
+
 export const validateBody = async (
   req: Request,
   bodySchema?: StandardSchemaV1,
+  bodyCache?: BodyCache,
 ) => {
   if (!bodySchema) {
     return ok(undefined);
@@ -40,10 +43,19 @@ export const validateBody = async (
     return ok(undefined);
   }
 
+  if (bodyCache?.parsed) {
+    return validateSchema(bodySchema, bodyCache.value);
+  }
+
   const [parseError, parsedBody] = await mightThrow(req.json());
 
   if (parseError) {
     return err("ParseError", "Invalid JSON body");
+  }
+
+  if (bodyCache) {
+    bodyCache.parsed = true;
+    bodyCache.value = parsedBody;
   }
 
   return validateSchema(bodySchema, parsedBody);
