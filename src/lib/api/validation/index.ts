@@ -34,13 +34,13 @@ export const validateBody = async (
   bodyCache?: BodyCache,
 ) => {
   if (!bodySchema) {
-    return ok(undefined);
+    return ok(true);
   }
 
   const contentType = req.headers.get("content-type") ?? "";
 
   if (!contentType.includes("application/json")) {
-    return ok(undefined);
+    return ok(true);
   }
 
   if (bodyCache?.parsed) {
@@ -66,7 +66,7 @@ export const validateQuery = async (
   querySchema?: StandardSchemaV1,
 ) => {
   if (!querySchema) {
-    return ok(undefined);
+    return ok(true);
   }
 
   const url = new URL(req.url);
@@ -91,7 +91,7 @@ export const validateHeaders = async (
   headersSchema?: StandardSchemaV1,
 ) => {
   if (!headersSchema) {
-    return ok(undefined);
+    return ok(true);
   }
 
   const headers: Record<string, string> = {};
@@ -108,7 +108,7 @@ export const validateCookies = async (
   cookiesSchema?: StandardSchemaV1,
 ) => {
   if (!cookiesSchema) {
-    return ok(undefined);
+    return ok(true);
   }
 
   const cookieHeader = req.headers.get("cookie") ?? "";
@@ -123,7 +123,7 @@ export const validateParams = async (
   paramsSchema?: StandardSchemaV1,
 ) => {
   if (!paramsSchema) {
-    return ok(undefined);
+    return ok(true);
   }
 
   return validateSchema(paramsSchema, req.params);
