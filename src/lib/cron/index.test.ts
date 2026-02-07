@@ -340,6 +340,86 @@ describe("Cron", () => {
     });
   });
 
+  describe("matches", () => {
+    test("should match correct day and month for a specific date", () => {
+      // Schedule: minute 0, hour 0, day 15, month 6 (June), any weekday
+      const cron = new Cron({
+        name: "match-test",
+        schedule: "0 0 15 6 *",
+        handler: () => Promise.resolve(),
+      });
+
+      // Access private matches via bracket notation for testing
+      const matches = (cron as unknown as { matches(d: Date): boolean })
+        .matches;
+
+      // June 15, 2025, 00:00:00 — should match
+      expect(matches.call(cron, new Date(2025, 5, 15, 0, 0, 0))).toBe(true);
+
+      // June 14, 2025, 00:00:00 — wrong day
+      expect(matches.call(cron, new Date(2025, 5, 14, 0, 0, 0))).toBe(false);
+
+      // July 15, 2025, 00:00:00 — wrong month
+      expect(matches.call(cron, new Date(2025, 6, 15, 0, 0, 0))).toBe(false);
+
+      // June 15, 2025, 01:00:00 — wrong hour
+      expect(matches.call(cron, new Date(2025, 5, 15, 1, 0, 0))).toBe(false);
+    });
+
+    test("should match day 31 correctly", () => {
+      // Schedule: minute 0, hour 12, day 31, any month, any weekday
+      const cron = new Cron({
+        name: "day31-test",
+        schedule: "0 12 31 * *",
+        handler: () => Promise.resolve(),
+      });
+
+      const matches = (cron as unknown as { matches(d: Date): boolean })
+        .matches;
+
+      // January 31, 2025, 12:00:00 — should match
+      expect(matches.call(cron, new Date(2025, 0, 31, 12, 0, 0))).toBe(true);
+
+      // January 30, 2025, 12:00:00 — wrong day
+      expect(matches.call(cron, new Date(2025, 0, 30, 12, 0, 0))).toBe(false);
+    });
+
+    test("should match month 12 (December) correctly", () => {
+      // Schedule: minute 0, hour 0, day 1, month 12, any weekday
+      const cron = new Cron({
+        name: "dec-test",
+        schedule: "0 0 1 12 *",
+        handler: () => Promise.resolve(),
+      });
+
+      const matches = (cron as unknown as { matches(d: Date): boolean })
+        .matches;
+
+      // December 1, 2025, 00:00:00 — should match
+      expect(matches.call(cron, new Date(2025, 11, 1, 0, 0, 0))).toBe(true);
+
+      // November 1, 2025, 00:00:00 — wrong month
+      expect(matches.call(cron, new Date(2025, 10, 1, 0, 0, 0))).toBe(false);
+    });
+
+    test("should match month 1 (January) correctly", () => {
+      const cron = new Cron({
+        name: "jan-test",
+        schedule: "0 0 1 1 *",
+        handler: () => Promise.resolve(),
+      });
+
+      const matches = (cron as unknown as { matches(d: Date): boolean })
+        .matches;
+
+      // January 1, 2025, 00:00:00 — should match
+      expect(matches.call(cron, new Date(2025, 0, 1, 0, 0, 0))).toBe(true);
+
+      // February 1, 2025, 00:00:00 — wrong month
+      expect(matches.call(cron, new Date(2025, 1, 1, 0, 0, 0))).toBe(false);
+    });
+  });
+
   describe("state transitions", () => {
     test("should maintain status correctly through transitions", () => {
       const cron = new Cron({

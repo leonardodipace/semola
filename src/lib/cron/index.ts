@@ -15,13 +15,13 @@ export class Cron {
   private status: CronStatus = "idle";
   private timeoutId: NodeJS.Timeout | null = null;
 
-  // Array-based storage (0 = don't run, 1 = run)
-  private second = Array(60).fill(0);
-  private minute = Array(60).fill(0);
-  private hour = Array(24).fill(0);
-  private day = Array(31).fill(0);
-  private month = Array(12).fill(0);
-  private dayOfWeek = Array(7).fill(0);
+  // Array-based storage using 1-indexed slots (0 = don't run, 1 = run)
+  private second = Array(60).fill(0); // 0-59
+  private minute = Array(60).fill(0); // 0-59
+  private hour = Array(24).fill(0); // 0-23
+  private day = Array(32).fill(0); // indices 1-31 (0 unused)
+  private month = Array(13).fill(0); // indices 1-12 (0 unused)
+  private dayOfWeek = Array(7).fill(0); // 0-6
   private hasSeconds = false;
 
   // Fill all values from min to max with 1
@@ -348,8 +348,8 @@ export class Cron {
     const isSecondMatch = this.hasSeconds ? this.second[s] === 1 : true;
     const isMinuteMatch = this.minute[m] === 1;
     const isHourMatch = this.hour[h] === 1;
-    const isDayMatch = this.day[d - 1] === 1;
-    const isMonthMatch = this.month[mon] === 1;
+    const isDayMatch = this.day[d] === 1;
+    const isMonthMatch = this.month[mon + 1] === 1;
     const isDayOfWeekMatch = this.dayOfWeek[dow] === 1;
 
     // All conditions must match
