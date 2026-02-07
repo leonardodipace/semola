@@ -48,6 +48,15 @@ export class Cron {
         if (step <= 0) return false;
       }
 
+      if (rangePart === "*") {
+        // Wildcard with step: expand across full range
+        for (let i = min; i <= max; i += step) {
+          values[i] = 1;
+        }
+
+        continue;
+      }
+
       if (rangePart?.includes("-")) {
         // Handle range format: "start-end" or "start-end/step"
         const [startStr, endStr] = rangePart.split("-");
