@@ -367,6 +367,49 @@ describe("Cron", () => {
       }).not.toThrow();
     });
 
+    test("should parse wildcard with step in comma list", () => {
+      // */10 inside a comma list - should not throw
+      const cron = new Cron({
+        name: "list-wildcard-step",
+        schedule: "*/10,30 * * * *",
+        handler: () => Promise.resolve(),
+      });
+
+      // */10 expands to 0,10,20,30,40,50 and 30 is also listed
+      expect(cron.matches(new Date(2025, 0, 1, 0, 0, 0))).toBe(true); // minute 0
+      expect(cron.matches(new Date(2025, 0, 1, 0, 10, 0))).toBe(true); // minute 10
+      expect(cron.matches(new Date(2025, 0, 1, 0, 20, 0))).toBe(true); // minute 20
+      expect(cron.matches(new Date(2025, 0, 1, 0, 30, 0))).toBe(true); // minute 30
+      expect(cron.matches(new Date(2025, 0, 1, 0, 40, 0))).toBe(true); // minute 40
+      expect(cron.matches(new Date(2025, 0, 1, 0, 50, 0))).toBe(true); // minute 50
+      expect(cron.matches(new Date(2025, 0, 1, 0, 5, 0))).toBe(false); // minute 5
+      expect(cron.matches(new Date(2025, 0, 1, 0, 15, 0))).toBe(false); // minute 15
+    });
+
+    test("should parse standalone wildcard with step in comma list (*/15)", () => {
+      const cron = new Cron({
+        name: "list-wildcard-step-only",
+        schedule: "0 */6 * * *",
+        handler: () => Promise.resolve(),
+      });
+
+      expect(cron.matches(new Date(2025, 0, 1, 0, 0, 0))).toBe(true); // hour 0
+      expect(cron.matches(new Date(2025, 0, 1, 6, 0, 0))).toBe(true); // hour 6
+      expect(cron.matches(new Date(2025, 0, 1, 12, 0, 0))).toBe(true); // hour 12
+      expect(cron.matches(new Date(2025, 0, 1, 18, 0, 0))).toBe(true); // hour 18
+      expect(cron.matches(new Date(2025, 0, 1, 3, 0, 0))).toBe(false); // hour 3
+    });
+
+    test("should reject wildcard with invalid step in comma list", () => {
+      expect(() => {
+        new Cron({
+          name: "list-wildcard-bad-step",
+          schedule: "*/0,30 * * * *",
+          handler: () => Promise.resolve(),
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
     test("should reject 7-field expression", () => {
       expect(() => {
         new Cron({
@@ -449,16 +492,16 @@ describe("Cron", () => {
         handler: () => Promise.resolve(),
       });
 
-      // June 15, 2025, 00:00:00 — should match
+      // June 15, 2025, 00:00:00 - should match
       expect(cron.matches(new Date(2025, 5, 15, 0, 0, 0))).toBe(true);
 
-      // June 14, 2025, 00:00:00 — wrong day
+      // June 14, 2025, 00:00:00 - wrong day
       expect(cron.matches(new Date(2025, 5, 14, 0, 0, 0))).toBe(false);
 
-      // July 15, 2025, 00:00:00 — wrong month
+      // July 15, 2025, 00:00:00 - wrong month
       expect(cron.matches(new Date(2025, 6, 15, 0, 0, 0))).toBe(false);
 
-      // June 15, 2025, 01:00:00 — wrong hour
+      // June 15, 2025, 01:00:00 - wrong hour
       expect(cron.matches(new Date(2025, 5, 15, 1, 0, 0))).toBe(false);
     });
 
@@ -470,10 +513,10 @@ describe("Cron", () => {
         handler: () => Promise.resolve(),
       });
 
-      // January 31, 2025, 12:00:00 — should match
+      // January 31, 2025, 12:00:00 - should match
       expect(cron.matches(new Date(2025, 0, 31, 12, 0, 0))).toBe(true);
 
-      // January 30, 2025, 12:00:00 — wrong day
+      // January 30, 2025, 12:00:00 - wrong day
       expect(cron.matches(new Date(2025, 0, 30, 12, 0, 0))).toBe(false);
     });
 
@@ -485,10 +528,10 @@ describe("Cron", () => {
         handler: () => Promise.resolve(),
       });
 
-      // December 1, 2025, 00:00:00 — should match
+      // December 1, 2025, 00:00:00 - should match
       expect(cron.matches(new Date(2025, 11, 1, 0, 0, 0))).toBe(true);
 
-      // November 1, 2025, 00:00:00 — wrong month
+      // November 1, 2025, 00:00:00 - wrong month
       expect(cron.matches(new Date(2025, 10, 1, 0, 0, 0))).toBe(false);
     });
 
@@ -499,10 +542,10 @@ describe("Cron", () => {
         handler: () => Promise.resolve(),
       });
 
-      // January 1, 2025, 00:00:00 — should match
+      // January 1, 2025, 00:00:00 - should match
       expect(cron.matches(new Date(2025, 0, 1, 0, 0, 0))).toBe(true);
 
-      // February 1, 2025, 00:00:00 — wrong month
+      // February 1, 2025, 00:00:00 - wrong month
       expect(cron.matches(new Date(2025, 1, 1, 0, 0, 0))).toBe(false);
     });
   });
@@ -525,25 +568,25 @@ describe("Cron", () => {
       expect(next.getMinutes()).toBe(0);
     });
 
-    test("should find next run for infrequent schedule (Feb 29)", () => {
-      // Feb 29 only occurs on leap years
+    test("should match Feb 29 on a leap year", () => {
       const cron = new Cron({
         name: "feb29",
         schedule: "0 0 29 2 *",
         handler: () => Promise.resolve(),
       });
 
-      const next = cron.getNextRun();
+      // 2028 is a leap year - Feb 29 exists
+      expect(cron.matches(new Date(2028, 1, 29, 0, 0, 0))).toBe(true);
 
-      // May or may not be within 366 days depending on current date
-      if (next) {
-        expect(next.getMonth()).toBe(1);
-        expect(next.getDate()).toBe(29);
-      }
+      // Feb 28 should not match
+      expect(cron.matches(new Date(2028, 1, 28, 0, 0, 0))).toBe(false);
+
+      // Non-leap year: 2027-03-01 should not match
+      expect(cron.matches(new Date(2027, 2, 1, 0, 0, 0))).toBe(false);
     });
 
     test("should find next run for specific month and day", () => {
-      // Dec 25 — always within 366 days
+      // Dec 25 - always within 366 days
       const cron = new Cron({
         name: "dec25",
         schedule: "0 12 25 12 *",
