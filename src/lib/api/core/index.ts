@@ -1,0 +1,282 @@
+import { err, ok } from "../../errors/index.js";
+import type { Middleware } from "../middleware/index.js";
+import { generateOpenApiSpec } from "../openapi/index.js";
+import {
+  type BodyCache,
+  validateBody,
+  validateCookies,
+  validateHeaders,
+  validateParams,
+  validateQuery,
+} from "../validation/index.js";
+import type {
+  ApiOptions,
+  Context,
+  InferInput,
+  MethodRoutes,
+  RequestSchema,
+  ResponseSchema,
+  RouteConfig,
+} from "./types.js";
+
+export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
+  private options: ApiOptions<TMiddlewares>;
+  private routes: RouteConfig<
+    RequestSchema,
+    ResponseSchema,
+    TMiddlewares,
+    readonly Middleware[]
+  >[] = [];
+
+  public constructor(options: ApiOptions<TMiddlewares> = {}) {
+    this.options = options;
+  }
+
+  private getFullPath(path: string) {
+    // Normalize path by removing trailing slashes
+    const isRoot = path === "/";
+    const isTrailingSlash = path.endsWith("/");
+
+    const normalizedPath =
+      isTrailingSlash && !isRoot
+        ? path.slice(0, -1) // Remove trailing slash
+        : path;
+
+    if (!this.options.prefix) {
+      return normalizedPath;
+    }
+
+    const normalizedPrefix = this.options.prefix.endsWith("/")
+      ? this.options.prefix.slice(0, -1) // Remove trailing slash
+      : this.options.prefix;
+
+    const fullPath = normalizedPrefix + normalizedPath;
+
+    // Remove trailing slash from final path
+    if (fullPath.endsWith("/") && fullPath !== "/") {
+      return fullPath.slice(0, -1);
+    }
+
+    return fullPath;
+  }
+
+  private async validateRequest(
+    req: Bun.BunRequest,
+    bodyCache: BodyCache,
+    schema?: RequestSchema,
+  ) {
+    const [
+      [bodyErr, body],
+      [queryErr, query],
+      [headersErr, headers],
+      [cookiesErr, cookies],
+      [paramsErr, params],
+    ] = await Promise.all([
+      validateBody(req, schema?.body, bodyCache),
+      validateQuery(req, schema?.query),
+      validateHeaders(req, schema?.headers),
+      validateCookies(req, schema?.cookies),
+      validateParams(req, schema?.params),
+    ]);
+
+    const error = bodyErr || queryErr || headersErr || cookiesErr || paramsErr;
+
+    if (error) {
+      return err(error.type, error.message);
+    }
+
+    return ok({ body, query, headers, cookies, params });
+  }
+
+  private createContext<
+    TReq extends RequestSchema,
+    TRes extends ResponseSchema,
+    TExt extends Record<string, unknown> = Record<string, unknown>,
+  >(params: {
+    request: Request;
+    validatedBody: InferInput<TReq["body"]>;
+    validatedQuery: InferInput<TReq["query"]>;
+    validatedHeaders: InferInput<TReq["headers"]>;
+    validatedCookies: InferInput<TReq["cookies"]>;
+    validatedParams: InferInput<TReq["params"]>;
+    extensions: Record<string, unknown>;
+  }) {
+    const ctx: Context<TReq, TRes, TExt> = {
+      raw: params.request,
+      req: {
+        body: params.validatedBody,
+        query: params.validatedQuery,
+        headers: params.validatedHeaders,
+        cookies: params.validatedCookies,
+        params: params.validatedParams,
+      },
+      json: (status, data) => {
+        return Response.json(data, { status });
+      },
+      text: (status, text) => {
+        return new Response(text, { status });
+      },
+      html: (status, html) => {
+        return new Response(html, {
+          status,
+          headers: { "Content-Type": "text/html" },
+        });
+      },
+      redirect: (status, url) => {
+        return Response.redirect(url, status);
+      },
+      get: <K extends keyof TExt>(key: K) =>
+        params.extensions[key as string] as TExt[K],
+    };
+
+    return ctx;
+  }
+
+  private buildBunRoutes() {
+    const bunRoutes: MethodRoutes = {};
+
+    for (const route of this.routes) {
+      const { path, method, handler, request, middlewares } = route;
+
+      const fullPath = this.getFullPath(path);
+
+      if (!bunRoutes[fullPath]) {
+        bunRoutes[fullPath] = {};
+      }
+
+      bunRoutes[fullPath][method] = async (req: Bun.BunRequest) => {
+        // Cache parsed body to avoid consuming the stream multiple times
+        const bodyCache: BodyCache = { parsed: false, value: undefined };
+
+        // Run middlewares
+        const extensions: Record<string, unknown> = {};
+        const allMiddlewares = [
+          ...(this.options.middlewares ?? []),
+          ...(middlewares ?? []),
+        ];
+
+        for (const mw of allMiddlewares) {
+          const { request: reqSchema, handler: mwHandler } = mw.options;
+
+          const [error, validated] = await this.validateRequest(
+            req,
+            bodyCache,
+            reqSchema,
+          );
+
+          if (error) {
+            return Response.json({ message: error.message }, { status: 400 });
+          }
+
+          const { body, query, headers, cookies, params } = validated;
+
+          const result = await mwHandler({
+            raw: req,
+            req: { body, query, headers, cookies, params },
+            json: (status: number, data: unknown) =>
+              Response.json(data, { status }),
+            text: (status: number, text: string) =>
+              new Response(text, { status }),
+            html: (status: number, html: string) =>
+              new Response(html, {
+                status,
+                headers: { "Content-Type": "text/html" },
+              }),
+            redirect: (status: number, url: string) =>
+              Response.redirect(url, status),
+            get: () => {
+              // Return undefined in middleware - extensions aren't available yet
+              // Middleware should return data directly to extend the context
+              return undefined;
+            },
+          });
+
+          if (result instanceof Response) {
+            return result;
+          }
+
+          if (result) {
+            Object.assign(extensions, result);
+          }
+        }
+
+        const [routeError, routeValidated] = await this.validateRequest(
+          req,
+          bodyCache,
+          request,
+        );
+
+        if (routeError) {
+          return Response.json(
+            { message: routeError.message },
+            { status: 400 },
+          );
+        }
+
+        const {
+          body: validatedBody,
+          query: validatedQuery,
+          headers: validatedHeaders,
+          cookies: validatedCookies,
+          params: validatedParams,
+        } = routeValidated;
+
+        const ctx = this.createContext({
+          request: req,
+          validatedBody,
+          validatedQuery,
+          validatedHeaders,
+          validatedCookies,
+          validatedParams,
+          extensions,
+        }) as Parameters<typeof handler>[0];
+
+        return handler(ctx);
+      };
+    }
+
+    return bunRoutes;
+  }
+
+  public defineRoute<
+    TReq extends RequestSchema = RequestSchema,
+    TRes extends ResponseSchema = ResponseSchema,
+    TRouteMiddlewares extends readonly Middleware[] = readonly [],
+  >(config: RouteConfig<TReq, TRes, TMiddlewares, TRouteMiddlewares>) {
+    this.routes.push(
+      config as RouteConfig<
+        RequestSchema,
+        ResponseSchema,
+        TMiddlewares,
+        readonly Middleware[]
+      >,
+    );
+  }
+
+  public getOpenApiSpec() {
+    return generateOpenApiSpec({
+      title: this.options.openapi?.title ?? "API",
+      description: this.options.openapi?.description,
+      version: this.options.openapi?.version ?? "1.0.0",
+      prefix: this.options.prefix,
+      servers: this.options.openapi?.servers,
+      securitySchemes: this.options.openapi?.securitySchemes,
+      routes: this.routes,
+      globalMiddlewares: this.options.middlewares,
+    });
+  }
+
+  public serve(port: number, callback?: (server: Bun.Server<unknown>) => void) {
+    const bunRoutes = this.buildBunRoutes();
+
+    const server = Bun.serve({
+      port,
+      routes: bunRoutes,
+      fetch: () => new Response("Not found", { status: 404 }),
+    });
+
+    if (callback) {
+      callback(server);
+    }
+  }
+}
