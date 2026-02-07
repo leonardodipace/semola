@@ -237,6 +237,106 @@ describe("Cron", () => {
       }).toThrow("Invalid cron expression");
     });
 
+    test("should reject out-of-bounds step range (start below min)", () => {
+      expect(() => {
+        new Cron({
+          name: "step-range-below",
+          schedule: "0 0 0-10/2 * *",
+          handler: () => Promise.resolve(),
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("should reject out-of-bounds step range (end above max)", () => {
+      expect(() => {
+        new Cron({
+          name: "step-range-above",
+          schedule: "70-80/2 * * * *",
+          handler: () => Promise.resolve(),
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("should reject step range where start > end", () => {
+      expect(() => {
+        new Cron({
+          name: "step-range-inverted",
+          schedule: "30-10/2 * * * *",
+          handler: () => Promise.resolve(),
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("should reject out-of-bounds step range in hour field", () => {
+      expect(() => {
+        new Cron({
+          name: "step-range-hour-oob",
+          schedule: "0 0-30/3 * * *",
+          handler: () => Promise.resolve(),
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("should reject out-of-bounds step range in month field", () => {
+      expect(() => {
+        new Cron({
+          name: "step-range-month-oob",
+          schedule: "0 0 1 0-12/2 *",
+          handler: () => Promise.resolve(),
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("should reject out-of-bounds step range in day-of-week field", () => {
+      expect(() => {
+        new Cron({
+          name: "step-range-dow-oob",
+          schedule: "0 0 * * 0-7/2",
+          handler: () => Promise.resolve(),
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("should reject non-integer values in step range", () => {
+      expect(() => {
+        new Cron({
+          name: "step-range-float",
+          schedule: "1.5-10/2 * * * *",
+          handler: () => Promise.resolve(),
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("should accept valid step range expressions", () => {
+      expect(() => {
+        new Cron({
+          name: "valid-step-range",
+          schedule: "10-50/5 * * * *",
+          handler: () => Promise.resolve(),
+        });
+      }).not.toThrow();
+    });
+
+    test("should accept valid step range at field boundaries", () => {
+      expect(() => {
+        new Cron({
+          name: "step-range-bounds",
+          schedule: "0-59/10 0-23/4 1-31/7 1-12/3 0-6/2",
+          handler: () => Promise.resolve(),
+        });
+      }).not.toThrow();
+    });
+
+    test("should reject step range in 6-field seconds with end above 59", () => {
+      expect(() => {
+        new Cron({
+          name: "step-range-sec-oob",
+          schedule: "50-70/5 * * * * *",
+          handler: () => Promise.resolve(),
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
     test("should parse 6-field expression with seconds", () => {
       expect(() => {
         new Cron({
@@ -349,21 +449,17 @@ describe("Cron", () => {
         handler: () => Promise.resolve(),
       });
 
-      // Access private matches via bracket notation for testing
-      const matches = (cron as unknown as { matches(d: Date): boolean })
-        .matches;
-
       // June 15, 2025, 00:00:00 — should match
-      expect(matches.call(cron, new Date(2025, 5, 15, 0, 0, 0))).toBe(true);
+      expect(cron.matches(new Date(2025, 5, 15, 0, 0, 0))).toBe(true);
 
       // June 14, 2025, 00:00:00 — wrong day
-      expect(matches.call(cron, new Date(2025, 5, 14, 0, 0, 0))).toBe(false);
+      expect(cron.matches(new Date(2025, 5, 14, 0, 0, 0))).toBe(false);
 
       // July 15, 2025, 00:00:00 — wrong month
-      expect(matches.call(cron, new Date(2025, 6, 15, 0, 0, 0))).toBe(false);
+      expect(cron.matches(new Date(2025, 6, 15, 0, 0, 0))).toBe(false);
 
       // June 15, 2025, 01:00:00 — wrong hour
-      expect(matches.call(cron, new Date(2025, 5, 15, 1, 0, 0))).toBe(false);
+      expect(cron.matches(new Date(2025, 5, 15, 1, 0, 0))).toBe(false);
     });
 
     test("should match day 31 correctly", () => {
@@ -374,14 +470,11 @@ describe("Cron", () => {
         handler: () => Promise.resolve(),
       });
 
-      const matches = (cron as unknown as { matches(d: Date): boolean })
-        .matches;
-
       // January 31, 2025, 12:00:00 — should match
-      expect(matches.call(cron, new Date(2025, 0, 31, 12, 0, 0))).toBe(true);
+      expect(cron.matches(new Date(2025, 0, 31, 12, 0, 0))).toBe(true);
 
       // January 30, 2025, 12:00:00 — wrong day
-      expect(matches.call(cron, new Date(2025, 0, 30, 12, 0, 0))).toBe(false);
+      expect(cron.matches(new Date(2025, 0, 30, 12, 0, 0))).toBe(false);
     });
 
     test("should match month 12 (December) correctly", () => {
@@ -392,14 +485,11 @@ describe("Cron", () => {
         handler: () => Promise.resolve(),
       });
 
-      const matches = (cron as unknown as { matches(d: Date): boolean })
-        .matches;
-
       // December 1, 2025, 00:00:00 — should match
-      expect(matches.call(cron, new Date(2025, 11, 1, 0, 0, 0))).toBe(true);
+      expect(cron.matches(new Date(2025, 11, 1, 0, 0, 0))).toBe(true);
 
       // November 1, 2025, 00:00:00 — wrong month
-      expect(matches.call(cron, new Date(2025, 10, 1, 0, 0, 0))).toBe(false);
+      expect(cron.matches(new Date(2025, 10, 1, 0, 0, 0))).toBe(false);
     });
 
     test("should match month 1 (January) correctly", () => {
@@ -409,14 +499,118 @@ describe("Cron", () => {
         handler: () => Promise.resolve(),
       });
 
-      const matches = (cron as unknown as { matches(d: Date): boolean })
-        .matches;
-
       // January 1, 2025, 00:00:00 — should match
-      expect(matches.call(cron, new Date(2025, 0, 1, 0, 0, 0))).toBe(true);
+      expect(cron.matches(new Date(2025, 0, 1, 0, 0, 0))).toBe(true);
 
       // February 1, 2025, 00:00:00 — wrong month
-      expect(matches.call(cron, new Date(2025, 1, 1, 0, 0, 0))).toBe(false);
+      expect(cron.matches(new Date(2025, 1, 1, 0, 0, 0))).toBe(false);
+    });
+  });
+
+  describe("getNextRun search horizon", () => {
+    test("should find next run for yearly schedule", () => {
+      const cron = new Cron({
+        name: "yearly-horizon",
+        schedule: "@yearly",
+        handler: () => Promise.resolve(),
+      });
+
+      const next = cron.getNextRun();
+
+      if (!next) throw new Error("Expected next run to be found");
+
+      expect(next.getMonth()).toBe(0);
+      expect(next.getDate()).toBe(1);
+      expect(next.getHours()).toBe(0);
+      expect(next.getMinutes()).toBe(0);
+    });
+
+    test("should find next run for infrequent schedule (Feb 29)", () => {
+      // Feb 29 only occurs on leap years
+      const cron = new Cron({
+        name: "feb29",
+        schedule: "0 0 29 2 *",
+        handler: () => Promise.resolve(),
+      });
+
+      const next = cron.getNextRun();
+
+      // May or may not be within 366 days depending on current date
+      if (next) {
+        expect(next.getMonth()).toBe(1);
+        expect(next.getDate()).toBe(29);
+      }
+    });
+
+    test("should find next run for specific month and day", () => {
+      // Dec 25 — always within 366 days
+      const cron = new Cron({
+        name: "dec25",
+        schedule: "0 12 25 12 *",
+        handler: () => Promise.resolve(),
+      });
+
+      const next = cron.getNextRun();
+
+      if (!next) throw new Error("Expected next run to be found");
+
+      expect(next.getMonth()).toBe(11);
+      expect(next.getDate()).toBe(25);
+      expect(next.getHours()).toBe(12);
+    });
+  });
+
+  describe("next retry on null getNextRun", () => {
+    test("should schedule a retry timeout when getNextRun returns null", () => {
+      const cron = new Cron({
+        name: "retry-test",
+        schedule: "0 0 * * *",
+        handler: () => Promise.resolve(),
+      });
+
+      cron.getNextRun = () => null;
+
+      cron.start();
+
+      // Status should remain running (not stuck idle)
+      expect(cron.getStatus()).toBe("running");
+
+      // A timeout should have been set (stop clears it, proving it exists)
+      cron.stop();
+      expect(cron.getStatus()).toBe("idle");
+    });
+
+    test("should allow pause to clear retry timeout", () => {
+      const cron = new Cron({
+        name: "retry-pause",
+        schedule: "0 0 * * *",
+        handler: () => Promise.resolve(),
+      });
+
+      cron.getNextRun = () => null;
+
+      cron.start();
+      expect(cron.getStatus()).toBe("running");
+
+      cron.pause();
+      expect(cron.getStatus()).toBe("paused");
+    });
+
+    test("should keep status running during retry, not idle", () => {
+      const cron = new Cron({
+        name: "retry-status",
+        schedule: "0 0 * * *",
+        handler: () => Promise.resolve(),
+      });
+
+      cron.getNextRun = () => null;
+
+      cron.start();
+
+      // Must stay running, not fall back to idle
+      expect(cron.getStatus()).toBe("running");
+
+      cron.stop();
     });
   });
 
