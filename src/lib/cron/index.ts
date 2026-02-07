@@ -1,6 +1,8 @@
 import { mightThrow } from "../errors/index.js";
 import type { CronOptions, CronStatus } from "./types.js";
 
+const RETRY_DELAY_MS = 60 * 60 * 1000; // 1 hour
+
 const ALIASES: Record<string, string> = {
   "@yearly": "0 0 1 1 *",
   "@monthly": "0 0 1 * *",
@@ -128,15 +130,16 @@ export class Cron {
     const start = Number(startStr);
     const end = Number(endStr);
 
-    // Validate range boundaries are integers
+    // Validate range boundaries are integers within bounds
     if (!Number.isInteger(start)) return false;
     if (!Number.isInteger(end)) return false;
+    if (start < min) return false;
+    if (end > max) return false;
+    if (start > end) return false;
 
-    // Apply step through range, respecting bounds
+    // Apply step through range
     for (let i = start; i <= end; i += step) {
-      if (i >= min && i <= max) {
-        values[i] = 1;
-      }
+      values[i] = 1;
     }
 
     return true;
@@ -335,7 +338,7 @@ export class Cron {
     return true;
   }
 
-  private matches(date: Date) {
+  public matches(date: Date) {
     // Extract date/time components
     const s = date.getSeconds();
     const m = date.getMinutes();
@@ -363,7 +366,7 @@ export class Cron {
     );
   }
 
-  private getNextRun() {
+  public getNextRun() {
     const now = new Date();
     const date = new Date(now);
 
@@ -376,8 +379,8 @@ export class Cron {
       date.setMinutes(date.getMinutes() + 1);
     }
 
-    // Search for next 24 hours max
-    const maxIterations = this.hasSeconds ? 86400 : 1440;
+    // Search up to 366 days to cover yearly/leap-year schedules
+    const maxIterations = this.hasSeconds ? 366 * 24 * 3600 : 366 * 24 * 60;
 
     for (let i = 0; i < maxIterations; i++) {
       if (this.matches(date)) {
@@ -443,7 +446,10 @@ export class Cron {
 
     const nextRun = this.getNextRun();
 
-    if (!nextRun) return;
+    if (!nextRun) {
+      this.timeoutId = setTimeout(() => this.next(), RETRY_DELAY_MS);
+      return;
+    }
 
     const delay = nextRun.getTime() - Date.now();
 
