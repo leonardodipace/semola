@@ -220,14 +220,8 @@ api.defineRoute({
   tags: ["Users"],
   request: {
     query: z.object({
-      page: z
-        .string()
-        .transform((val) => parseInt(val, 10))
-        .optional(),
-      limit: z
-        .string()
-        .transform((val) => parseInt(val, 10))
-        .optional(),
+      page: z.coerce.number().optional(),
+      limit: z.coerce.number().optional(),
     }),
   },
   response: {
