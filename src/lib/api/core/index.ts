@@ -19,6 +19,32 @@ import type {
   RouteConfig,
 } from "./types.js";
 
+// Shared defaults reused across requests to avoid per-request allocations
+const defaultValidated: {
+  body: unknown;
+  query: unknown;
+  headers: unknown;
+  cookies: unknown;
+  params: unknown;
+} = { body: true, query: true, headers: true, cookies: true, params: true };
+
+const jsonResponse = (status: number, data: unknown) =>
+  Response.json(data, { status });
+
+const textResponse = (status: number, text: string) =>
+  new Response(text, { status });
+
+const htmlResponse = (status: number, html: string) =>
+  new Response(html, {
+    status,
+    headers: { "Content-Type": "text/html" },
+  });
+
+const redirectResponse = (status: number, url: string) =>
+  Response.redirect(url, status);
+
+const noopGet = () => undefined;
+
 export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
   private options: ApiOptions<TMiddlewares>;
   private routes: RouteConfig<
@@ -60,29 +86,65 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     return fullPath;
   }
 
+  private hasSchemas(schema?: RequestSchema) {
+    return (
+      schema &&
+      (schema.body ||
+        schema.query ||
+        schema.headers ||
+        schema.cookies ||
+        schema.params)
+    );
+  }
+
   private async validateRequest(
     req: Bun.BunRequest,
     bodyCache: BodyCache,
     schema?: RequestSchema,
   ) {
-    const [
-      [bodyErr, body],
-      [queryErr, query],
-      [headersErr, headers],
-      [cookiesErr, cookies],
-      [paramsErr, params],
-    ] = await Promise.all([
-      validateBody(req, schema?.body, bodyCache),
-      validateQuery(req, schema?.query),
-      validateHeaders(req, schema?.headers),
-      validateCookies(req, schema?.cookies),
-      validateParams(req, schema?.params),
-    ]);
+    let body: unknown = true;
+    if (schema?.body) {
+      const [bodyErr, bodyVal] = await validateBody(
+        req,
+        schema.body,
+        bodyCache,
+      );
+      if (bodyErr) return err(bodyErr.type, bodyErr.message);
+      body = bodyVal;
+    }
 
-    const error = bodyErr || queryErr || headersErr || cookiesErr || paramsErr;
+    let query: unknown = true;
+    if (schema?.query) {
+      const [queryErr, queryVal] = await validateQuery(req, schema.query);
+      if (queryErr) return err(queryErr.type, queryErr.message);
+      query = queryVal;
+    }
 
-    if (error) {
-      return err(error.type, error.message);
+    let headers: unknown = true;
+    if (schema?.headers) {
+      const [headersErr, headersVal] = await validateHeaders(
+        req,
+        schema.headers,
+      );
+      if (headersErr) return err(headersErr.type, headersErr.message);
+      headers = headersVal;
+    }
+
+    let cookies: unknown = true;
+    if (schema?.cookies) {
+      const [cookiesErr, cookiesVal] = await validateCookies(
+        req,
+        schema.cookies,
+      );
+      if (cookiesErr) return err(cookiesErr.type, cookiesErr.message);
+      cookies = cookiesVal;
+    }
+
+    let params: unknown = true;
+    if (schema?.params) {
+      const [paramsErr, paramsVal] = await validateParams(req, schema.params);
+      if (paramsErr) return err(paramsErr.type, paramsErr.message);
+      params = paramsVal;
     }
 
     return ok({ body, query, headers, cookies, params });
@@ -110,21 +172,10 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
         cookies: params.validatedCookies,
         params: params.validatedParams,
       },
-      json: (status, data) => {
-        return Response.json(data, { status });
-      },
-      text: (status, text) => {
-        return new Response(text, { status });
-      },
-      html: (status, html) => {
-        return new Response(html, {
-          status,
-          headers: { "Content-Type": "text/html" },
-        });
-      },
-      redirect: (status, url) => {
-        return Response.redirect(url, status);
-      },
+      json: jsonResponse as Context<TReq, TRes, TExt>["json"],
+      text: textResponse,
+      html: htmlResponse,
+      redirect: redirectResponse,
       get: <K extends keyof TExt>(key: K) =>
         params.extensions[key as string] as TExt[K],
     };
@@ -144,95 +195,114 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
         bunRoutes[fullPath] = {};
       }
 
-      bunRoutes[fullPath][method] = async (req: Bun.BunRequest) => {
-        // Cache parsed body to avoid consuming the stream multiple times
-        const bodyCache: BodyCache = { parsed: false, value: undefined };
+      const allMiddlewares = [
+        ...(this.options.middlewares ?? []),
+        ...(middlewares ?? []),
+      ];
 
-        // Run middlewares
-        const extensions: Record<string, unknown> = {};
-        const allMiddlewares = [
-          ...(this.options.middlewares ?? []),
-          ...(middlewares ?? []),
-        ];
+      const hasMiddlewares = allMiddlewares.length > 0;
+      const hasRouteSchemas = this.hasSchemas(request);
 
-        for (const mw of allMiddlewares) {
-          const { request: reqSchema, handler: mwHandler } = mw.options;
-
-          const [error, validated] = await this.validateRequest(
-            req,
-            bodyCache,
-            reqSchema,
-          );
-
-          if (error) {
-            return Response.json({ message: error.message }, { status: 400 });
-          }
-
-          const { body, query, headers, cookies, params } = validated;
-
-          const result = await mwHandler({
+      if (!hasMiddlewares && !hasRouteSchemas) {
+        bunRoutes[fullPath][method] = (req: Bun.BunRequest) => {
+          return handler({
             raw: req,
-            req: { body, query, headers, cookies, params },
-            json: (status: number, data: unknown) =>
-              Response.json(data, { status }),
-            text: (status: number, text: string) =>
-              new Response(text, { status }),
-            html: (status: number, html: string) =>
-              new Response(html, {
-                status,
-                headers: { "Content-Type": "text/html" },
-              }),
-            redirect: (status: number, url: string) =>
-              Response.redirect(url, status),
-            get: () => {
-              // Return undefined in middleware - extensions aren't available yet
-              // Middleware should return data directly to extend the context
-              return undefined;
-            },
-          });
+            req: defaultValidated,
+            json: jsonResponse,
+            text: textResponse,
+            html: htmlResponse,
+            redirect: redirectResponse,
+            get: noopGet,
+          } as Parameters<typeof handler>[0]);
+        };
+      } else {
+        bunRoutes[fullPath][method] = async (req: Bun.BunRequest) => {
+          const bodyCache: BodyCache = { parsed: false, value: undefined };
+          const extensions: Record<string, unknown> = {};
 
-          if (result instanceof Response) {
-            return result;
+          for (const mw of allMiddlewares) {
+            const { request: reqSchema, handler: mwHandler } = mw.options;
+
+            let validated = defaultValidated;
+
+            if (this.hasSchemas(reqSchema)) {
+              const [error, v] = await this.validateRequest(
+                req,
+                bodyCache,
+                reqSchema,
+              );
+
+              if (error) {
+                return Response.json(
+                  { message: error.message },
+                  { status: 400 },
+                );
+              }
+
+              validated = v;
+            }
+
+            const { body, query, headers, cookies, params } = validated;
+
+            const result = await mwHandler({
+              raw: req,
+              req: { body, query, headers, cookies, params },
+              json: jsonResponse,
+              text: textResponse,
+              html: htmlResponse,
+              redirect: redirectResponse,
+              get: noopGet,
+            });
+
+            if (result instanceof Response) {
+              return result;
+            }
+
+            if (result) {
+              Object.assign(extensions, result);
+            }
           }
 
-          if (result) {
-            Object.assign(extensions, result);
+          let routeValidated = defaultValidated;
+
+          if (hasRouteSchemas) {
+            const [routeError, v] = await this.validateRequest(
+              req,
+              bodyCache,
+              request,
+            );
+
+            if (routeError) {
+              return Response.json(
+                { message: routeError.message },
+                { status: 400 },
+              );
+            }
+
+            routeValidated = v;
           }
-        }
 
-        const [routeError, routeValidated] = await this.validateRequest(
-          req,
-          bodyCache,
-          request,
-        );
+          const {
+            body: validatedBody,
+            query: validatedQuery,
+            headers: validatedHeaders,
+            cookies: validatedCookies,
+            params: validatedParams,
+          } = routeValidated;
 
-        if (routeError) {
-          return Response.json(
-            { message: routeError.message },
-            { status: 400 },
-          );
-        }
+          const ctx = this.createContext({
+            request: req,
+            validatedBody,
+            validatedQuery,
+            validatedHeaders,
+            validatedCookies,
+            validatedParams,
+            extensions,
+          }) as Parameters<typeof handler>[0];
 
-        const {
-          body: validatedBody,
-          query: validatedQuery,
-          headers: validatedHeaders,
-          cookies: validatedCookies,
-          params: validatedParams,
-        } = routeValidated;
-
-        const ctx = this.createContext({
-          request: req,
-          validatedBody,
-          validatedQuery,
-          validatedHeaders,
-          validatedCookies,
-          validatedParams,
-          extensions,
-        }) as Parameters<typeof handler>[0];
-
-        return handler(ctx);
-      };
+          return handler(ctx);
+        };
+      }
     }
 
     return bunRoutes;
