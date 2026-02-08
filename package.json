@@ -1,6 +1,6 @@
 {
   "name": "semola",
-  "version": "0.5.0",
+  "version": "0.4.1",
   "description": "Zero-dependency TypeScript utilities for Bun. Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable imports.",
   "type": "module",
   "exports": {
