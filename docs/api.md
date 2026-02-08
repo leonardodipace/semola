@@ -464,7 +464,7 @@ Middlewares can define request and response schemas that are validated independe
 
 - Each middleware validates its request data against its own schema before executing
 - Route validates its request data against its own schema after all middlewares complete
-- All schemas must pass validation—there is no merging or replacement, each validates independently
+- All schemas must pass validation - there is no merging or replacement, each validates independently
 - Different properties (body vs. query vs. headers) from different middlewares and routes are all validated
 
 ```typescript
@@ -661,3 +661,103 @@ api.defineRoute({
   },
 });
 ```
+
+## Performance Benchmarks
+
+Semola API is built on Bun's native `Bun.serve()` router and consistently ranks among the fastest API frameworks for Bun.
+
+### Summary
+
+Average requests per second across all endpoints:
+
+| Framework  | Avg Req/Sec | Latency Avg (ms) |   vs Semola   |
+| :--------- | ----------: | ---------------: | :-----------: |
+| **Semola** |  **39,871** |         **2.13** | **baseline**  |
+| Elysia     |      36,841 |             2.39 |  1.1x slower  |
+| Hono       |      33,802 |             2.66 |  1.2x slower  |
+| Fastify    |      25,718 |             3.89 |  1.5x slower  |
+| Express    |      19,665 |             5.09 | **2x slower** |
+| NestJS     |      14,209 |             7.10 |  2.8x slower  |
+
+_Higher is better for req/sec, lower is better for latency._
+
+### Per-Endpoint Results
+
+#### GET /text
+
+| Framework  |   Req/Sec | Latency Avg (ms) | Latency P99 (ms) | Throughput (MB/s) |
+| :--------- | --------: | ---------------: | ---------------: | ----------------: |
+| **Semola** | 48,480.00 |             1.49 |             6.00 |              5.92 |
+| Elysia     | 47,203.20 |             1.55 |             6.00 |              5.76 |
+| Hono       | 42,812.80 |             1.74 |             6.00 |              5.23 |
+| Fastify    | 29,614.40 |             2.91 |             8.00 |              3.64 |
+| Express    | 23,080.40 |             3.84 |            10.00 |              4.23 |
+| NestJS     | 16,830.80 |             5.45 |            13.00 |              3.08 |
+
+#### GET /json
+
+| Framework  |   Req/Sec | Latency Avg (ms) | Latency P99 (ms) | Throughput (MB/s) |
+| :--------- | --------: | ---------------: | ---------------: | ----------------: |
+| **Semola** | 48,310.40 |             1.46 |             5.00 |              6.82 |
+| Elysia     | 40,339.20 |             1.88 |             6.00 |              5.16 |
+| Hono       | 34,928.00 |             2.45 |             7.00 |              4.46 |
+| Fastify    | 30,561.60 |             2.81 |             8.00 |              4.34 |
+| Express    | 23,632.00 |             3.74 |            10.00 |              4.82 |
+| NestJS     | 15,972.80 |             5.77 |            14.00 |              3.26 |
+
+#### GET /params/:id
+
+| Framework  |   Req/Sec | Latency Avg (ms) | Latency P99 (ms) | Throughput (MB/s) |
+| :--------- | --------: | ---------------: | ---------------: | ----------------: |
+| **Semola** | 37,181.60 |             2.13 |             7.00 |              4.72 |
+| Elysia     | 37,420.81 |             2.15 |             6.00 |              4.25 |
+| Hono       | 34,884.81 |             2.45 |             7.00 |              3.96 |
+| Fastify    | 29,182.40 |             2.89 |             8.00 |              3.73 |
+| Express    | 20,732.80 |             4.35 |            10.00 |              3.91 |
+| NestJS     | 15,422.00 |             6.01 |            12.00 |              2.91 |
+
+#### POST /users
+
+| Framework  |   Req/Sec | Latency Avg (ms) | Latency P99 (ms) | Throughput (MB/s) |
+| :--------- | --------: | ---------------: | ---------------: | ----------------: |
+| **Semola** | 25,512.00 |             3.42 |             8.00 |              4.87 |
+| Elysia     | 22,400.00 |             3.99 |             9.00 |              7.50 |
+| Hono       | 22,584.00 |             4.00 |             9.00 |              7.56 |
+| Fastify    | 13,512.00 |             6.93 |            14.00 |              4.72 |
+| Express    | 11,212.80 |             8.44 |            17.00 |              4.61 |
+| NestJS     |  8,611.60 |            11.15 |            21.00 |              3.65 |
+
+### Environment
+
+- **CPU**: Intel i9-11900H @ 2.50GHz (8 cores, 16 threads)
+- **RAM**: 32 GB
+- **OS**: Linux (WSL2)
+- **Runtime**: Bun 1.3.6
+
+#### Framework Versions
+
+| Framework | Version |
+| :-------- | :------ |
+| Semola    | 0.5.0   |
+| Elysia    | 1.4.22  |
+| Hono      | 4.11.8  |
+| Fastify   | 5.7.4   |
+| Express   | 5.2.1   |
+| NestJS    | 11.1.13 |
+
+### Methodology
+
+- **Tool**: [autocannon](https://github.com/mcollina/autocannon) v8.0.0
+- **Connections**: 100 concurrent
+- **Duration**: 10 seconds per endpoint
+- **Endpoints tested**:
+  - `GET /text` - plain text serialization
+  - `GET /json` - JSON serialization
+  - `GET /params/:id` (id=42) - path parameter parsing and validation
+  - `POST /users` (JSON body) - body parsing and validation
+- **Validation**: all frameworks use the same Zod schemas for request validation
+- **Execution**: all servers start in parallel on separate ports (3000-3006), each endpoint is benchmarked sequentially
+- **Summary calculation**: arithmetic mean of `requests.average` across all 4 endpoints
+- **Latency**: reported from autocannon's `latency.average` and `latency.p99`
+
+Results may vary depending on hardware, OS, background processes, and thermal conditions.
