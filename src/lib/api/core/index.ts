@@ -20,13 +20,13 @@ import type {
 } from "./types.js";
 
 // Shared defaults reused across requests to avoid per-request allocations
-const defaultValidated: ValidatedRequest = {
+const defaultValidated: ValidatedRequest = Object.freeze({
   body: undefined,
   query: undefined,
   headers: undefined,
   cookies: undefined,
   params: undefined,
-};
+});
 
 const jsonResponse = (status: number, data: unknown) =>
   Response.json(data, { status });
