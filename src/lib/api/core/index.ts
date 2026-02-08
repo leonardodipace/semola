@@ -12,7 +12,6 @@ import {
 import type {
   ApiOptions,
   Context,
-  InferInput,
   MethodRoutes,
   RequestSchema,
   ResponseSchema,
@@ -46,6 +45,14 @@ const redirectResponse = (status: number, url: string) =>
 
 const noopGet = () => undefined;
 
+const stripTrailingSlash = (path: string) => {
+  if (path !== "/" && path.endsWith("/")) {
+    return path.slice(0, -1);
+  }
+
+  return path;
+};
+
 export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
   private options: ApiOptions<TMiddlewares>;
   private routes: RouteConfig<
@@ -60,31 +67,10 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
   }
 
   private getFullPath(path: string) {
-    // Normalize path by removing trailing slashes
-    const isRoot = path === "/";
-    const isTrailingSlash = path.endsWith("/");
+    const prefix = this.options.prefix ?? "";
+    const fullPath = stripTrailingSlash(prefix) + stripTrailingSlash(path);
 
-    const normalizedPath =
-      isTrailingSlash && !isRoot
-        ? path.slice(0, -1) // Remove trailing slash
-        : path;
-
-    if (!this.options.prefix) {
-      return normalizedPath;
-    }
-
-    const normalizedPrefix = this.options.prefix.endsWith("/")
-      ? this.options.prefix.slice(0, -1) // Remove trailing slash
-      : this.options.prefix;
-
-    const fullPath = normalizedPrefix + normalizedPath;
-
-    // Remove trailing slash from final path
-    if (fullPath.endsWith("/") && fullPath !== "/") {
-      return fullPath.slice(0, -1);
-    }
-
-    return fullPath;
+    return fullPath || "/";
   }
 
   private hasSchemas(schema?: RequestSchema) {
@@ -176,30 +162,20 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     TReq extends RequestSchema,
     TRes extends ResponseSchema,
     TExt extends Record<string, unknown> = Record<string, unknown>,
-  >(params: {
-    request: Request;
-    validatedBody: InferInput<TReq["body"]>;
-    validatedQuery: InferInput<TReq["query"]>;
-    validatedHeaders: InferInput<TReq["headers"]>;
-    validatedCookies: InferInput<TReq["cookies"]>;
-    validatedParams: InferInput<TReq["params"]>;
-    extensions: Record<string, unknown>;
-  }) {
+  >(
+    request: Request,
+    validated: ValidatedRequest,
+    extensions: Record<string, unknown>,
+  ) {
     const ctx: Context<TReq, TRes, TExt> = {
-      raw: params.request,
-      req: {
-        body: params.validatedBody,
-        query: params.validatedQuery,
-        headers: params.validatedHeaders,
-        cookies: params.validatedCookies,
-        params: params.validatedParams,
-      },
+      raw: request,
+      req: validated as Context<TReq, TRes, TExt>["req"],
       json: jsonResponse as Context<TReq, TRes, TExt>["json"],
       text: textResponse,
       html: htmlResponse,
       redirect: redirectResponse,
       get: <K extends keyof TExt>(key: K) =>
-        params.extensions[key as string] as TExt[K],
+        extensions[key as string] as TExt[K],
     };
 
     return ctx;
@@ -264,11 +240,9 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
               validated = v;
             }
 
-            const { body, query, headers, cookies, params } = validated;
-
             const result = await mwHandler({
               raw: req,
-              req: { body, query, headers, cookies, params },
+              req: validated,
               json: jsonResponse,
               text: textResponse,
               html: htmlResponse,
@@ -304,23 +278,11 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
             routeValidated = v;
           }
 
-          const {
-            body: validatedBody,
-            query: validatedQuery,
-            headers: validatedHeaders,
-            cookies: validatedCookies,
-            params: validatedParams,
-          } = routeValidated;
-
-          const ctx = this.createContext({
-            request: req,
-            validatedBody,
-            validatedQuery,
-            validatedHeaders,
-            validatedCookies,
-            validatedParams,
+          const ctx = this.createContext(
+            req,
+            routeValidated,
             extensions,
-          }) as Parameters<typeof handler>[0];
+          ) as Parameters<typeof handler>[0];
 
           return handler(ctx);
         };
