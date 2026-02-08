@@ -59,6 +59,14 @@ const getSchemaDescription = (schema: StandardSchemaV1) => {
   return "";
 };
 
+const requestFields = [
+  "body",
+  "query",
+  "headers",
+  "cookies",
+  "params",
+] as const;
+
 const mergeRequestSchemas = (schemas: Array<RequestSchema | undefined>) => {
   const merged: RequestSchema = {};
 
@@ -67,24 +75,10 @@ const mergeRequestSchemas = (schemas: Array<RequestSchema | undefined>) => {
       continue;
     }
 
-    if (schema.body) {
-      merged.body = schema.body;
-    }
-
-    if (schema.query) {
-      merged.query = schema.query;
-    }
-
-    if (schema.headers) {
-      merged.headers = schema.headers;
-    }
-
-    if (schema.cookies) {
-      merged.cookies = schema.cookies;
-    }
-
-    if (schema.params) {
-      merged.params = schema.params;
+    for (const field of requestFields) {
+      if (schema[field]) {
+        merged[field] = schema[field];
+      }
     }
   }
 
@@ -178,44 +172,30 @@ const extractPathParameters = (path: string) => {
   return matches.map((match) => match.slice(1));
 };
 
+const paramSources = [
+  ["query", "query"],
+  ["headers", "header"],
+  ["cookies", "cookie"],
+] as const;
+
 const createParameters = async (request: RequestSchema, path: string) => {
   const parameters: OpenApiParameter[] = [];
   const allComponents: Array<OpenAPIV3_1.ComponentsObject | undefined> = [];
 
-  if (request.query) {
-    const { parameters: queryParams, components } =
-      await extractParametersFromSchema(request.query, "query");
-    parameters.push(...queryParams);
-    if (components) {
-      allComponents.push(components);
-    }
-  }
-
-  if (request.headers) {
-    const { parameters: headerParams, components } =
-      await extractParametersFromSchema(request.headers, "header");
-    parameters.push(...headerParams);
-    if (components) {
-      allComponents.push(components);
-    }
-  }
-
-  if (request.cookies) {
-    const { parameters: cookieParams, components } =
-      await extractParametersFromSchema(request.cookies, "cookie");
-    parameters.push(...cookieParams);
-    if (components) {
-      allComponents.push(components);
+  for (const [field, location] of paramSources) {
+    if (request[field]) {
+      const { parameters: params, components } =
+        await extractParametersFromSchema(request[field], location);
+      parameters.push(...params);
+      if (components) {
+        allComponents.push(components);
+      }
     }
   }
 
   const pathParamNames = extractPathParameters(path);
 
-  if (pathParamNames.length > 0) {
-    if (!request.params) {
-      return { parameters, components: allComponents };
-    }
-
+  if (pathParamNames.length > 0 && request.params) {
     const { schema: jsonSchema, components } = await convertSchemaToOpenApi(
       request.params,
     );
@@ -336,16 +316,10 @@ const createOperation = async (
   allComponents.push(...responseComponents);
   allComponents.push(...parameterComponents);
 
-  if (route.summary) {
-    operation.summary = route.summary;
-  }
-
-  if (route.description) {
-    operation.description = route.description;
-  }
-
-  if (route.operationId) {
-    operation.operationId = route.operationId;
+  for (const field of ["summary", "description", "operationId"] as const) {
+    if (route[field]) {
+      operation[field] = route[field];
+    }
   }
 
   if (route.tags && route.tags.length > 0) {
@@ -370,47 +344,29 @@ const createOperation = async (
   return { operation, components: allComponents };
 };
 
+const componentKeys = [
+  "schemas",
+  "responses",
+  "parameters",
+  "requestBodies",
+] as const;
+
 // Merges multiple ComponentsObject into a single object
 // Handles deduplication by merging schemas with the same name
 const mergeComponents = (
   componentsArray: Array<OpenAPIV3_1.ComponentsObject | undefined>,
 ): OpenAPIV3_1.ComponentsObject => {
-  const merged: OpenAPIV3_1.ComponentsObject = {};
+  const merged: Record<string, Record<string, unknown>> = {};
 
   for (const components of componentsArray) {
     if (!components) {
       continue;
     }
 
-    if (components.schemas) {
-      if (!merged.schemas) {
-        merged.schemas = {};
+    for (const key of componentKeys) {
+      if (components[key]) {
+        merged[key] = { ...merged[key], ...components[key] };
       }
-      merged.schemas = { ...merged.schemas, ...components.schemas };
-    }
-
-    if (components.responses) {
-      if (!merged.responses) {
-        merged.responses = {};
-      }
-      merged.responses = { ...merged.responses, ...components.responses };
-    }
-
-    if (components.parameters) {
-      if (!merged.parameters) {
-        merged.parameters = {};
-      }
-      merged.parameters = { ...merged.parameters, ...components.parameters };
-    }
-
-    if (components.requestBodies) {
-      if (!merged.requestBodies) {
-        merged.requestBodies = {};
-      }
-      merged.requestBodies = {
-        ...merged.requestBodies,
-        ...components.requestBodies,
-      };
     }
   }
 
@@ -472,34 +428,13 @@ export const generateOpenApiSpec = async (options: OpenApiGeneratorOptions) => {
     spec.components.securitySchemes = options.securitySchemes;
   }
 
-  // Add schemas if any were collected
-  if (
-    mergedComponents.schemas &&
-    Object.keys(mergedComponents.schemas).length > 0
-  ) {
-    spec.components.schemas = mergedComponents.schemas;
-  }
+  // Add collected component types if present
+  for (const key of componentKeys) {
+    const value = mergedComponents[key];
 
-  // Add other component types if present
-  if (
-    mergedComponents.responses &&
-    Object.keys(mergedComponents.responses).length > 0
-  ) {
-    spec.components.responses = mergedComponents.responses;
-  }
-
-  if (
-    mergedComponents.parameters &&
-    Object.keys(mergedComponents.parameters).length > 0
-  ) {
-    spec.components.parameters = mergedComponents.parameters;
-  }
-
-  if (
-    mergedComponents.requestBodies &&
-    Object.keys(mergedComponents.requestBodies).length > 0
-  ) {
-    spec.components.requestBodies = mergedComponents.requestBodies;
+    if (value && Object.keys(value).length > 0) {
+      spec.components[key] = value;
+    }
   }
 
   return spec;

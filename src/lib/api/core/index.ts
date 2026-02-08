@@ -11,7 +11,6 @@ import {
 } from "../validation/index.js";
 import type {
   ApiOptions,
-  Context,
   MethodRoutes,
   RequestSchema,
   ResponseSchema,
@@ -28,20 +27,13 @@ const defaultValidated: ValidatedRequest = Object.freeze({
   params: undefined,
 });
 
-const jsonResponse = (status: number, data: unknown) =>
-  Response.json(data, { status });
-
-const textResponse = (status: number, text: string) =>
-  new Response(text, { status });
-
-const htmlResponse = (status: number, html: string) =>
-  new Response(html, {
-    status,
-    headers: { "Content-Type": "text/html" },
-  });
-
-const redirectResponse = (status: number, url: string) =>
-  Response.redirect(url, status);
+const responseHelpers = {
+  json: (status: number, data: unknown) => Response.json(data, { status }),
+  text: (status: number, text: string) => new Response(text, { status }),
+  html: (status: number, html: string) =>
+    new Response(html, { status, headers: { "Content-Type": "text/html" } }),
+  redirect: (status: number, url: string) => Response.redirect(url, status),
+} as const;
 
 const noopGet = () => undefined;
 
@@ -98,96 +90,31 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     bodyCache: BodyCache,
     schema?: RequestSchema,
   ) {
-    let body: unknown;
-    let query: unknown;
-    let headers: unknown;
-    let cookies: unknown;
-    let params: unknown;
+    const validated: Record<string, unknown> = {};
 
-    if (schema?.body) {
-      const [bodyErr, bodyVal] = await validateBody(
-        req,
-        schema.body,
-        bodyCache,
-      );
-
-      if (bodyErr) {
-        return err(bodyErr.type, bodyErr.message);
-      }
-
-      body = bodyVal;
-    }
-
-    if (schema?.query) {
-      const [queryErr, queryVal] = await validateQuery(req, schema.query);
-
-      if (queryErr) {
-        return err(queryErr.type, queryErr.message);
-      }
-
-      query = queryVal;
-    }
-
-    if (schema?.headers) {
-      const [headersErr, headersVal] = await validateHeaders(
-        req,
-        schema.headers,
-      );
-
-      if (headersErr) {
-        return err(headersErr.type, headersErr.message);
-      }
-
-      headers = headersVal;
-    }
-
-    if (schema?.cookies) {
-      const [cookiesErr, cookiesVal] = await validateCookies(
-        req,
-        schema.cookies,
-      );
-
-      if (cookiesErr) {
-        return err(cookiesErr.type, cookiesErr.message);
-      }
-
-      cookies = cookiesVal;
-    }
-
-    if (schema?.params) {
-      const [paramsErr, paramsVal] = await validateParams(req, schema.params);
-
-      if (paramsErr) {
-        return err(paramsErr.type, paramsErr.message);
-      }
-
-      params = paramsVal;
-    }
-
-    return ok({ body, query, headers, cookies, params });
-  }
-
-  private createContext<
-    TReq extends RequestSchema,
-    TRes extends ResponseSchema,
-    TExt extends Record<string, unknown> = Record<string, unknown>,
-  >(
-    request: Request,
-    validated: ValidatedRequest,
-    extensions: Record<string, unknown>,
-  ) {
-    const ctx: Context<TReq, TRes, TExt> = {
-      raw: request,
-      req: validated as Context<TReq, TRes, TExt>["req"],
-      json: jsonResponse as Context<TReq, TRes, TExt>["json"],
-      text: textResponse,
-      html: htmlResponse,
-      redirect: redirectResponse,
-      get: <K extends keyof TExt>(key: K) =>
-        extensions[key as string] as TExt[K],
+    const validators = {
+      body: (s: typeof schema) => validateBody(req, s?.body, bodyCache),
+      query: (s: typeof schema) => validateQuery(req, s?.query),
+      headers: (s: typeof schema) => validateHeaders(req, s?.headers),
+      cookies: (s: typeof schema) => validateCookies(req, s?.cookies),
+      params: (s: typeof schema) => validateParams(req, s?.params),
     };
 
-    return ctx;
+    const fields = ["body", "query", "headers", "cookies", "params"] as const;
+
+    for (const field of fields) {
+      if (schema?.[field]) {
+        const [fieldErr, fieldVal] = await validators[field](schema);
+
+        if (fieldErr) {
+          return err(fieldErr.type, fieldErr.message);
+        }
+
+        validated[field] = fieldVal;
+      }
+    }
+
+    return ok(validated as ValidatedRequest);
   }
 
   private buildBunRoutes() {
@@ -215,10 +142,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
           return handler({
             raw: req,
             req: defaultValidated,
-            json: jsonResponse,
-            text: textResponse,
-            html: htmlResponse,
-            redirect: redirectResponse,
+            ...responseHelpers,
             get: noopGet,
           } as Parameters<typeof handler>[0]);
         };
@@ -252,10 +176,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
             const result = await mwHandler({
               raw: req,
               req: validated,
-              json: jsonResponse,
-              text: textResponse,
-              html: htmlResponse,
-              redirect: redirectResponse,
+              ...responseHelpers,
               get: (key: string) => extensions[key],
             });
 
@@ -287,13 +208,12 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
             routeValidated = v;
           }
 
-          const ctx = this.createContext(
-            req,
-            routeValidated,
-            extensions,
-          ) as Parameters<typeof handler>[0];
-
-          return handler(ctx);
+          return handler({
+            raw: req,
+            req: routeValidated,
+            ...responseHelpers,
+            get: <K extends string>(key: K) => extensions[key],
+          } as Parameters<typeof handler>[0]);
         };
       }
     }
