@@ -17,16 +17,17 @@ import type {
   RequestSchema,
   ResponseSchema,
   RouteConfig,
+  ValidatedRequest,
 } from "./types.js";
 
 // Shared defaults reused across requests to avoid per-request allocations
-const defaultValidated: {
-  body: unknown;
-  query: unknown;
-  headers: unknown;
-  cookies: unknown;
-  params: unknown;
-} = { body: true, query: true, headers: true, cookies: true, params: true };
+const defaultValidated: ValidatedRequest = {
+  body: true,
+  query: true,
+  headers: true,
+  cookies: true,
+  params: true,
+};
 
 const jsonResponse = (status: number, data: unknown) =>
   Response.json(data, { status });
@@ -103,47 +104,68 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     schema?: RequestSchema,
   ) {
     let body: unknown = true;
+    let query: unknown = true;
+    let headers: unknown = true;
+    let cookies: unknown = true;
+    let params: unknown = true;
+
     if (schema?.body) {
       const [bodyErr, bodyVal] = await validateBody(
         req,
         schema.body,
         bodyCache,
       );
-      if (bodyErr) return err(bodyErr.type, bodyErr.message);
+
+      if (bodyErr) {
+        return err(bodyErr.type, bodyErr.message);
+      }
+
       body = bodyVal;
     }
 
-    let query: unknown = true;
     if (schema?.query) {
       const [queryErr, queryVal] = await validateQuery(req, schema.query);
-      if (queryErr) return err(queryErr.type, queryErr.message);
+
+      if (queryErr) {
+        return err(queryErr.type, queryErr.message);
+      }
+
       query = queryVal;
     }
 
-    let headers: unknown = true;
     if (schema?.headers) {
       const [headersErr, headersVal] = await validateHeaders(
         req,
         schema.headers,
       );
-      if (headersErr) return err(headersErr.type, headersErr.message);
+
+      if (headersErr) {
+        return err(headersErr.type, headersErr.message);
+      }
+
       headers = headersVal;
     }
 
-    let cookies: unknown = true;
     if (schema?.cookies) {
       const [cookiesErr, cookiesVal] = await validateCookies(
         req,
         schema.cookies,
       );
-      if (cookiesErr) return err(cookiesErr.type, cookiesErr.message);
+
+      if (cookiesErr) {
+        return err(cookiesErr.type, cookiesErr.message);
+      }
+
       cookies = cookiesVal;
     }
 
-    let params: unknown = true;
     if (schema?.params) {
       const [paramsErr, paramsVal] = await validateParams(req, schema.params);
-      if (paramsErr) return err(paramsErr.type, paramsErr.message);
+
+      if (paramsErr) {
+        return err(paramsErr.type, paramsErr.message);
+      }
+
       params = paramsVal;
     }
 
