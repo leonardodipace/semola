@@ -681,6 +681,20 @@ Average requests per second across all endpoints:
 
 _Higher is better for req/sec, lower is better for latency._
 
+### Overhead vs Raw Bun.serve()
+
+Semola adds type-safe routing, request validation, and OpenAPI generation on top of `Bun.serve()` with minimal overhead:
+
+| Endpoint        | Raw Bun (req/s) | Semola (req/s) | Overhead |
+| :-------------- | --------------: | -------------: | -------: |
+| GET /text       |       48,252.80 |      48,480.00 |      ~0% |
+| GET /json       |       43,776.00 |      48,310.40 |      ~0% |
+| GET /params/:id |       46,438.40 |      37,181.60 |     ~20% |
+| POST /users     |       26,852.80 |      25,512.00 |      ~5% |
+| **Average**     |   **41,330.00** |  **39,871.00** |  **~4%** |
+
+Routes without schema validation (text, JSON) run at near-native speed. The overhead on validated routes (params, POST) comes from Zod schema validation, which applies equally to any framework using it.
+
 ### Per-Endpoint Results
 
 #### GET /text
