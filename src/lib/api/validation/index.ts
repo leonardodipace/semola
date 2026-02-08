@@ -69,11 +69,17 @@ export const validateQuery = async (
     return ok(true);
   }
 
-  const url = new URL(req.url);
+  const qIndex = req.url.indexOf("?");
+
+  if (qIndex === -1) {
+    return validateSchema(querySchema, {});
+  }
+
+  const searchParams = new URLSearchParams(req.url.slice(qIndex + 1));
   const queryParams: Record<string, string | string[]> = {};
 
-  for (const key of url.searchParams.keys()) {
-    const values = url.searchParams.getAll(key);
+  for (const key of searchParams.keys()) {
+    const values = searchParams.getAll(key);
     const [firstValue] = values;
 
     if (values.length === 1) {
@@ -97,7 +103,7 @@ export const validateHeaders = async (
   const headers: Record<string, string> = {};
 
   req.headers.forEach((value, key) => {
-    headers[key.toLowerCase()] = value;
+    headers[key] = value;
   });
 
   return validateSchema(headersSchema, headers);
