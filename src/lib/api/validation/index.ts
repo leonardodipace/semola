@@ -40,7 +40,7 @@ export const validateBody = async (
   const contentType = req.headers.get("content-type") ?? "";
 
   if (!contentType.includes("application/json")) {
-    return ok(true);
+    return ok(undefined);
   }
 
   if (bodyCache?.parsed) {
@@ -75,7 +75,13 @@ export const validateQuery = async (
     return validateSchema(querySchema, {});
   }
 
-  const searchParams = new URLSearchParams(req.url.slice(qIndex + 1));
+  const hashIndex = req.url.indexOf("#", qIndex + 1);
+  const queryString =
+    hashIndex === -1
+      ? req.url.slice(qIndex + 1)
+      : req.url.slice(qIndex + 1, hashIndex);
+
+  const searchParams = new URLSearchParams(queryString);
   const queryParams: Record<string, string | string[]> = {};
 
   for (const key of searchParams.keys()) {

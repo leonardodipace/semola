@@ -21,11 +21,11 @@ import type {
 
 // Shared defaults reused across requests to avoid per-request allocations
 const defaultValidated: ValidatedRequest = {
-  body: true,
-  query: true,
-  headers: true,
-  cookies: true,
-  params: true,
+  body: undefined,
+  query: undefined,
+  headers: undefined,
+  cookies: undefined,
+  params: undefined,
 };
 
 const jsonResponse = (status: number, data: unknown) =>
@@ -67,10 +67,19 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
   }
 
   private getFullPath(path: string) {
-    const prefix = this.options.prefix ?? "";
-    const fullPath = stripTrailingSlash(prefix) + stripTrailingSlash(path);
+    if (!this.options.prefix) {
+      return stripTrailingSlash(path) || "/";
+    }
 
-    return fullPath || "/";
+    const normalizedPrefix = stripTrailingSlash(this.options.prefix);
+    const normalizedPath = stripTrailingSlash(path);
+
+    // Avoid double slashes when prefix ends at root
+    if (normalizedPath.startsWith("/")) {
+      return normalizedPrefix + normalizedPath;
+    }
+
+    return `${normalizedPrefix}/${normalizedPath}`;
   }
 
   private hasSchemas(schema?: RequestSchema) {
@@ -89,11 +98,11 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     bodyCache: BodyCache,
     schema?: RequestSchema,
   ) {
-    let body: unknown = true;
-    let query: unknown = true;
-    let headers: unknown = true;
-    let cookies: unknown = true;
-    let params: unknown = true;
+    let body: unknown;
+    let query: unknown;
+    let headers: unknown;
+    let cookies: unknown;
+    let params: unknown;
 
     if (schema?.body) {
       const [bodyErr, bodyVal] = await validateBody(
@@ -247,7 +256,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
               text: textResponse,
               html: htmlResponse,
               redirect: redirectResponse,
-              get: noopGet,
+              get: (key: string) => extensions[key],
             });
 
             if (result instanceof Response) {

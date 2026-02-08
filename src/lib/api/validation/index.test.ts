@@ -63,7 +63,7 @@ describe("Validation Module", () => {
 
       const [error, data] = await validateBody(req, z.string());
       expect(error).toBeNull();
-      expect(data).toBeTrue();
+      expect(data).toBeUndefined();
     });
 
     test("should cache parsed body and reuse on subsequent calls", async () => {
