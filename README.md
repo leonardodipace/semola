@@ -215,7 +215,7 @@ Semola API is the **fastest API framework** for Bun.
 | Express    |      20,031 |             5.02 | **2x slower** |
 | NestJS     |      16,118 |             6.21 |  2.5x slower  |
 
-_Benchmarked across text, JSON, params, and POST endpoints. Higher is better for Req/Sec, lower is better for latency._
+_Higher is better for req/sec, lower is better for latency._
 
 ### What Makes Semola Different
 
