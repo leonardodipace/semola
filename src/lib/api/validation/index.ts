@@ -28,6 +28,7 @@ export const validateSchema = async <T>(
 
 export type BodyCache = { parsed: boolean; value: unknown };
 
+// Body cache prevents re-parsing JSON when multiple middlewares validate the same body
 export const validateBody = async (
   req: Request,
   bodySchema?: StandardSchemaV1,
@@ -75,6 +76,7 @@ export const validateQuery = async (
     return validateSchema(querySchema, {});
   }
 
+  // Handle both query strings and URL fragments
   const hashIndex = req.url.indexOf("#", qIndex + 1);
   const queryString =
     hashIndex === -1
@@ -123,6 +125,7 @@ export const validateCookies = async (
     return ok(true);
   }
 
+  // Use Bun's native CookieMap for efficient cookie parsing
   const cookieHeader = req.headers.get("cookie") ?? "";
   const cookieMap = new Bun.CookieMap(cookieHeader);
   const cookies = Object.fromEntries(cookieMap);
