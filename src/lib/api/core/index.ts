@@ -1,4 +1,3 @@
-import { err, ok } from "../../errors/index.js";
 import type { Middleware } from "../middleware/index.js";
 import { generateOpenApiSpec } from "../openapi/index.js";
 import {
@@ -37,12 +36,47 @@ const responseHelpers = {
 
 const noopGet = () => undefined;
 
+// Pre-create base context for simple routes to avoid per-request allocations
+// Use prototype chain to inherit response helpers instead of spreading
+const simpleContextBase: {
+  raw?: Bun.BunRequest;
+  req: ValidatedRequest;
+  get: () => undefined;
+} = Object.setPrototypeOf(
+  {
+    req: defaultValidated,
+    get: noopGet,
+  },
+  responseHelpers,
+);
+
 const stripTrailingSlash = (path: string) => {
   if (path !== "/" && path.endsWith("/")) {
     return path.slice(0, -1);
   }
 
   return path;
+};
+
+const hasSchemas = (schema?: RequestSchema) =>
+  schema &&
+  (schema.body ||
+    schema.query ||
+    schema.headers ||
+    schema.cookies ||
+    schema.params);
+
+const needsBodyCache = (schema?: RequestSchema) => schema?.body !== undefined;
+
+const shouldCreateBodyCache = (
+  hasMiddlewares: boolean,
+  allMiddlewares: Middleware[],
+  request?: RequestSchema,
+) => {
+  if (needsBodyCache(request)) return true;
+  if (!hasMiddlewares) return false;
+
+  return allMiddlewares.some((mw) => needsBodyCache(mw.options.request));
 };
 
 export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
@@ -74,47 +108,96 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     return `${normalizedPrefix}/${normalizedPath}`;
   }
 
-  private hasSchemas(schema?: RequestSchema) {
-    return (
-      schema &&
-      (schema.body ||
-        schema.query ||
-        schema.headers ||
-        schema.cookies ||
-        schema.params)
-    );
-  }
-
-  private async validateRequest(
+  private async validateRequestSchema(
     req: Bun.BunRequest,
-    bodyCache: BodyCache,
-    schema?: RequestSchema,
+    schema: RequestSchema | undefined,
+    bodyCache?: BodyCache,
   ) {
-    const validated: Record<string, unknown> = {};
-
-    const validators = {
-      body: (s: typeof schema) => validateBody(req, s?.body, bodyCache),
-      query: (s: typeof schema) => validateQuery(req, s?.query),
-      headers: (s: typeof schema) => validateHeaders(req, s?.headers),
-      cookies: (s: typeof schema) => validateCookies(req, s?.cookies),
-      params: (s: typeof schema) => validateParams(req, s?.params),
-    };
-
-    const fields = ["body", "query", "headers", "cookies", "params"] as const;
-
-    for (const field of fields) {
-      if (schema?.[field]) {
-        const [fieldErr, fieldVal] = await validators[field](schema);
-
-        if (fieldErr) {
-          return err(fieldErr.type, fieldErr.message);
-        }
-
-        validated[field] = fieldVal;
-      }
+    if (!schema) {
+      return { success: true, data: {} };
     }
 
-    return ok(validated as ValidatedRequest);
+    const v: Record<string, unknown> = {};
+
+    if (schema.body) {
+      const [err, val] = await validateBody(req, schema.body, bodyCache);
+
+      if (err) {
+        return {
+          success: false,
+          error: err,
+        };
+      }
+
+      v.body = val;
+    }
+
+    if (schema.query) {
+      const [err, val] = await validateQuery(req, schema.query);
+
+      if (err) {
+        return {
+          success: false,
+          error: err,
+        };
+      }
+
+      v.query = val;
+    }
+
+    if (schema.headers) {
+      const [err, val] = await validateHeaders(req, schema.headers);
+
+      if (err) {
+        return {
+          success: false,
+          error: err,
+        };
+      }
+
+      v.headers = val;
+    }
+
+    if (schema.cookies) {
+      const [err, val] = await validateCookies(req, schema.cookies);
+
+      if (err) {
+        return {
+          success: false,
+          error: err,
+        };
+      }
+
+      v.cookies = val;
+    }
+
+    if (schema.params) {
+      const [err, val] = await validateParams(req, schema.params);
+
+      if (err) {
+        return {
+          success: false,
+          error: err,
+        };
+      }
+
+      v.params = val;
+    }
+
+    return { success: true, data: v };
+  }
+
+  private createContext(
+    req: Bun.BunRequest,
+    validated: ValidatedRequest,
+    extensions: Record<string, unknown>,
+  ) {
+    return {
+      raw: req,
+      req: validated,
+      ...responseHelpers,
+      get: (key: string) => extensions[key],
+    };
   }
 
   private buildBunRoutes() {
@@ -135,85 +218,87 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
       ];
 
       const hasMiddlewares = allMiddlewares.length > 0;
-      const hasRouteSchemas = this.hasSchemas(request);
+      const hasRouteSchemas = hasSchemas(request);
 
       if (!hasMiddlewares && !hasRouteSchemas) {
+        // Zero-allocation path for simple routes using prototype chain
+        // Avoids object spread overhead by inheriting response helpers via prototype
         bunRoutes[fullPath][method] = (req: Bun.BunRequest) => {
-          return handler({
-            raw: req,
-            req: defaultValidated,
-            ...responseHelpers,
-            get: noopGet,
-          } as Parameters<typeof handler>[0]);
+          simpleContextBase.raw = req;
+
+          return handler(
+            simpleContextBase as unknown as Parameters<typeof handler>[0],
+          );
         };
       } else {
         bunRoutes[fullPath][method] = async (req: Bun.BunRequest) => {
-          const bodyCache: BodyCache = { parsed: false, value: undefined };
           const extensions: Record<string, unknown> = {};
+
+          // Only create bodyCache if any schema has body validation
+          const bodyCache: BodyCache | undefined = shouldCreateBodyCache(
+            hasMiddlewares,
+            allMiddlewares,
+            request,
+          )
+            ? { parsed: false, value: undefined }
+            : undefined;
 
           for (const mw of allMiddlewares) {
             const { request: reqSchema, handler: mwHandler } = mw.options;
 
             let validated = defaultValidated;
 
-            if (this.hasSchemas(reqSchema)) {
-              const [error, v] = await this.validateRequest(
+            if (hasSchemas(reqSchema)) {
+              const result = await this.validateRequestSchema(
                 req,
-                bodyCache,
                 reqSchema,
+                bodyCache,
               );
 
-              if (error) {
-                return Response.json(
-                  { message: error.message },
-                  { status: 400 },
-                );
+              if (!result.success) {
+                return responseHelpers.json(400, {
+                  message: result.error?.message,
+                });
               }
 
-              validated = v;
+              validated = result.data as ValidatedRequest;
             }
 
-            const result = await mwHandler({
-              raw: req,
-              req: validated,
-              ...responseHelpers,
-              get: (key: string) => extensions[key],
-            });
+            const context = this.createContext(req, validated, extensions);
+            const mwResult = await mwHandler(
+              context as Parameters<typeof mwHandler>[0],
+            );
 
-            if (result instanceof Response) {
-              return result;
+            if (mwResult instanceof Response) {
+              return mwResult;
             }
 
-            if (result) {
-              Object.assign(extensions, result);
+            if (mwResult) {
+              Object.assign(extensions, mwResult);
             }
           }
 
           let routeValidated = defaultValidated;
 
           if (hasRouteSchemas) {
-            const [routeError, v] = await this.validateRequest(
+            const result = await this.validateRequestSchema(
               req,
-              bodyCache,
               request,
+              bodyCache,
             );
 
-            if (routeError) {
-              return Response.json(
-                { message: routeError.message },
-                { status: 400 },
-              );
+            if (!result.success) {
+              return responseHelpers.json(400, {
+                message: result.error?.message,
+              });
             }
 
-            routeValidated = v;
+            routeValidated = result.data as ValidatedRequest;
           }
 
-          return handler({
-            raw: req,
-            req: routeValidated,
-            ...responseHelpers,
-            get: <K extends string>(key: K) => extensions[key],
-          } as Parameters<typeof handler>[0]);
+          const context = this.createContext(req, routeValidated, extensions);
+
+          return handler(context as Parameters<typeof handler>[0]);
         };
       }
     }
