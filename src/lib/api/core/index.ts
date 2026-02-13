@@ -36,20 +36,6 @@ const responseHelpers = {
 
 const noopGet = () => undefined;
 
-// Pre-create base context for simple routes to avoid per-request allocations
-// Use prototype chain to inherit response helpers instead of spreading
-const simpleContextBase: {
-  raw?: Bun.BunRequest;
-  req: ValidatedRequest;
-  get: () => undefined;
-} = Object.setPrototypeOf(
-  {
-    req: defaultValidated,
-    get: noopGet,
-  },
-  responseHelpers,
-);
-
 const stripTrailingSlash = (path: string) => {
   if (path !== "/" && path.endsWith("/")) {
     return path.slice(0, -1);
@@ -224,11 +210,13 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
         // Zero-allocation path for simple routes using prototype chain
         // Avoids object spread overhead by inheriting response helpers via prototype
         bunRoutes[fullPath][method] = (req: Bun.BunRequest) => {
-          simpleContextBase.raw = req;
+          // Create fresh per-request context to avoid cross-request contamination
+          const context = Object.create(responseHelpers);
+          context.raw = req;
+          context.req = defaultValidated;
+          context.get = noopGet;
 
-          return handler(
-            simpleContextBase as unknown as Parameters<typeof handler>[0],
-          );
+          return handler(context as unknown as Parameters<typeof handler>[0]);
         };
       } else {
         bunRoutes[fullPath][method] = async (req: Bun.BunRequest) => {
