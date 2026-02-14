@@ -86,7 +86,12 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     const normalizedPrefix = stripTrailingSlash(this.options.prefix);
     const normalizedPath = stripTrailingSlash(path);
 
-    // Avoid double slashes when prefix ends at root
+    // If prefix is root, return just the normalized path
+    if (normalizedPrefix === "/") {
+      return normalizedPath || "/";
+    }
+
+    // Avoid double slashes when path starts with /
     if (normalizedPath.startsWith("/")) {
       return normalizedPrefix + normalizedPath;
     }
