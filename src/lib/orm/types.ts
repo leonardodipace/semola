@@ -3,16 +3,21 @@ import type { Column, ManyRelation, OneRelation, Table } from "./index.js";
 // --- Column extractors ---
 
 type IsColumn<T> =
-  T extends Column<string, unknown, boolean, boolean> ? true : false;
+  T extends Column<string, unknown, boolean, boolean, boolean> ? true : false;
 
 type ColumnType<T> =
-  T extends Column<string, infer TType, boolean, boolean> ? TType : never;
+  T extends Column<string, infer TType, boolean, boolean, boolean>
+    ? TType
+    : never;
 
 type IsNullable<T> =
-  T extends Column<string, unknown, infer N, boolean> ? N : never;
+  T extends Column<string, unknown, infer N, boolean, boolean> ? N : never;
 
 type IsPrimaryKey<T> =
-  T extends Column<string, unknown, boolean, infer TPk> ? TPk : never;
+  T extends Column<string, unknown, boolean, infer TPk, boolean> ? TPk : never;
+
+type IsDefault<T> =
+  T extends Column<string, unknown, boolean, boolean, infer TDf> ? TDf : false;
 
 // --- Relation extractors ---
 
@@ -62,7 +67,9 @@ type RequiredInsertKeys<TColumns> = {
     ? IsPrimaryKey<TColumns[K]> extends true
       ? never
       : IsNullable<TColumns[K]> extends false
-        ? K
+        ? IsDefault<TColumns[K]> extends true
+          ? never
+          : K
         : never
     : never;
 }[keyof TColumns];
@@ -73,7 +80,9 @@ type OptionalInsertKeys<TColumns> = {
       ? K
       : IsNullable<TColumns[K]> extends true
         ? K
-        : never
+        : IsDefault<TColumns[K]> extends true
+          ? K
+          : never
     : never;
 }[keyof TColumns];
 

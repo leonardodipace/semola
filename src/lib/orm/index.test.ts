@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { boolean, many, number, ORM, one, string, Table } from "./index.js";
+import { boolean, many, number, one, ORM, string, Table } from "./index.js";
 
 const usersTable = new Table("users", {
   id: number("id").primaryKey(),
@@ -13,6 +13,8 @@ const postsTable = new Table("posts", {
   title: string("title").notNull(),
   content: string("content").notNull(),
   authorId: number("author_id").notNull(),
+  createdAt: number("created_at").default(0),
+  published: boolean("published").default(false),
 });
 
 const orm = new ORM({
@@ -33,7 +35,7 @@ const orm = new ORM({
 
 beforeAll(async () => {
   await orm.db`CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, active BOOLEAN)`;
-  await orm.db`CREATE TABLE posts (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, content TEXT NOT NULL, author_id INTEGER NOT NULL REFERENCES users(id))`;
+  await orm.db`CREATE TABLE posts (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, content TEXT NOT NULL, author_id INTEGER NOT NULL REFERENCES users(id), created_at INTEGER NOT NULL DEFAULT 0, published BOOLEAN NOT NULL DEFAULT 0)`;
 
   await orm.db`INSERT INTO users (name, email, active) VALUES ('Alice', 'alice@example.com', 1)`;
   await orm.db`INSERT INTO users (name, email, active) VALUES ('Bob', 'bob@example.com', 0)`;
@@ -179,6 +181,23 @@ describe("ORM", () => {
       });
       expect(error).toBeNull();
       expect(post!.title).toBe("Dave Post");
+    });
+
+    test("should create a post and return defaulted fields", async () => {
+      const [error, post] = await orm.posts.create({
+        data: {
+          title: "Defaulted Post",
+          content: "Has defaults",
+          authorId: 4,
+        },
+      });
+
+      expect(error).toBeNull();
+      expect(post).not.toBeNull();
+      const created = (post as any).createdAt ?? (post as any).created_at;
+      expect(created).toBeDefined();
+      const pub = (post as any).published ?? (post as any).published;
+      expect(pub === 0 || pub === false).toBeTruthy();
     });
   });
 

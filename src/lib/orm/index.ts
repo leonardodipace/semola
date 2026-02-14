@@ -5,11 +5,11 @@ import {
   buildInsert,
   buildSelect,
   buildUpdate,
-  type Dialect,
   detectDialect,
   loadRelations,
   mapRow,
   resolveTableMeta,
+  type Dialect,
   type TableMeta,
 } from "./query.js";
 import type {
@@ -28,6 +28,7 @@ export class Column<
   TType,
   TNullable extends boolean = true,
   TPrimaryKey extends boolean = false,
+  THasDefault extends boolean = false,
 > {
   public readonly sqlName: TName;
   public readonly isPrimaryKey: TPrimaryKey;
@@ -52,17 +53,20 @@ export class Column<
   }
 
   public notNull() {
-    return new Column<TName, TType, false, TPrimaryKey>(this.sqlName, {
-      nullable: false as const,
-      primaryKey: this.isPrimaryKey,
-      unique: this.isUnique,
-      defaultValue: this.defaultValue,
-    });
+    return new Column<TName, TType, false, TPrimaryKey, THasDefault>(
+      this.sqlName,
+      {
+        nullable: false as const,
+        primaryKey: this.isPrimaryKey,
+        unique: this.isUnique,
+        defaultValue: this.defaultValue,
+      },
+    );
   }
 
   public primaryKey() {
-    return new Column<TName, TType, TNullable, true>(this.sqlName, {
-      nullable: this.isNullable,
+    return new Column<TName, TType, false, true, THasDefault>(this.sqlName, {
+      nullable: false as const,
       primaryKey: true as const,
       unique: this.isUnique,
       defaultValue: this.defaultValue,
@@ -70,17 +74,20 @@ export class Column<
   }
 
   public unique() {
-    return new Column<TName, TType, TNullable, TPrimaryKey>(this.sqlName, {
-      nullable: this.isNullable,
-      primaryKey: this.isPrimaryKey,
-      unique: true,
-      defaultValue: this.defaultValue,
-    });
+    return new Column<TName, TType, TNullable, TPrimaryKey, THasDefault>(
+      this.sqlName,
+      {
+        nullable: this.isNullable,
+        primaryKey: this.isPrimaryKey,
+        unique: true,
+        defaultValue: this.defaultValue,
+      },
+    );
   }
 
   public default(value: TType) {
-    return new Column<TName, TType, TNullable, TPrimaryKey>(this.sqlName, {
-      nullable: this.isNullable,
+    return new Column<TName, TType, false, TPrimaryKey, true>(this.sqlName, {
+      nullable: false as const,
       primaryKey: this.isPrimaryKey,
       unique: this.isUnique,
       defaultValue: value,
