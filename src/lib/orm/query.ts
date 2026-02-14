@@ -29,6 +29,11 @@ export type TableMeta = {
   primaryKey: ColumnMeta | undefined;
 };
 
+// Type-guard: determines whether an object exposes a `kind` property.
+function isColumnWithKind(v: unknown): v is { kind?: string } {
+  return v !== null && typeof v === "object" && Object.hasOwn(v, "kind");
+}
+
 export const detectDialect = (url: string): Dialect => {
   if (url.startsWith("mysql://") || url.startsWith("mysql2://")) return "mysql";
   if (
@@ -54,7 +59,7 @@ export const resolveTableMeta = (
       const meta: ColumnMeta = {
         fieldName,
         sqlName: col.sqlName,
-        kind: (col as unknown as { kind?: string }).kind,
+        kind: isColumnWithKind(col) ? col.kind : undefined,
       };
       columns.push(meta);
       if (col.isPrimaryKey) {
@@ -221,12 +226,17 @@ export const mapRow = (
     if (col.sqlName in row) {
       const val = row[col.sqlName];
       if (col.kind === "boolean") {
-        if (val === 0 || val === 1) mapped[col.fieldName] = Boolean(val);
-        else if (val === "0" || val === "1")
+        if (val === null || val === undefined) {
+          mapped[col.fieldName] = null;
+        } else if (val === 0 || val === 1) {
+          mapped[col.fieldName] = Boolean(val);
+        } else if (val === "0" || val === "1") {
           mapped[col.fieldName] = Boolean(Number(val));
-        else if (val === "true" || val === "false")
+        } else if (val === "true" || val === "false") {
           mapped[col.fieldName] = val === "true";
-        else mapped[col.fieldName] = Boolean(val);
+        } else {
+          mapped[col.fieldName] = Boolean(val);
+        }
       } else {
         mapped[col.fieldName] = val;
       }
