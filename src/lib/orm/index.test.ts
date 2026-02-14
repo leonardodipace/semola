@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { boolean, many, number, one, ORM, string, Table } from "./index.js";
+import { boolean, many, number, ORM, one, string, Table } from "./index.js";
 
 const usersTable = new Table("users", {
   id: number("id").primaryKey(),
@@ -32,6 +32,8 @@ const orm = new ORM({
     },
   },
 });
+
+// ORM normalizes DB rows to the table's field names via `mapRow`.
 
 beforeAll(async () => {
   await orm.db`CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, active BOOLEAN)`;
@@ -194,10 +196,11 @@ describe("ORM", () => {
 
       expect(error).toBeNull();
       expect(post).not.toBeNull();
-      const created = (post as any).createdAt ?? (post as any).created_at;
-      expect(created).toBeDefined();
-      const pub = (post as any).published ?? (post as any).published;
-      expect(pub === 0 || pub === false).toBeTruthy();
+      // debug
+      // eslint-disable-next-line no-console
+      // console.log("DEBUG_POST_PUBLISHED:", JSON.stringify(post));
+      expect(post!.createdAt).toBeDefined();
+      expect(post!.published === false).toBeTruthy();
     });
   });
 

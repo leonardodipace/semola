@@ -11,6 +11,7 @@ export type Dialect = "postgres" | "mysql" | "sqlite";
 export type ColumnMeta = {
   fieldName: string;
   sqlName: string;
+  kind?: string;
 };
 
 export type RelationMeta = {
@@ -50,7 +51,11 @@ export const resolveTableMeta = (
 
   for (const [fieldName, col] of Object.entries(table.columns)) {
     if (col instanceof Column) {
-      const meta: ColumnMeta = { fieldName, sqlName: col.sqlName };
+      const meta: ColumnMeta = {
+        fieldName,
+        sqlName: col.sqlName,
+        kind: (col as unknown as { kind?: string }).kind,
+      };
       columns.push(meta);
       if (col.isPrimaryKey) {
         primaryKey = meta;
@@ -214,7 +219,17 @@ export const mapRow = (
   const mapped: Record<string, unknown> = {};
   for (const col of meta.columns) {
     if (col.sqlName in row) {
-      mapped[col.fieldName] = row[col.sqlName];
+      const val = row[col.sqlName];
+      if (col.kind === "boolean") {
+        if (val === 0 || val === 1) mapped[col.fieldName] = Boolean(val);
+        else if (val === "0" || val === "1")
+          mapped[col.fieldName] = Boolean(Number(val));
+        else if (val === "true" || val === "false")
+          mapped[col.fieldName] = val === "true";
+        else mapped[col.fieldName] = Boolean(val);
+      } else {
+        mapped[col.fieldName] = val;
+      }
     }
   }
   return mapped;

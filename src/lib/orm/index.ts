@@ -5,11 +5,11 @@ import {
   buildInsert,
   buildSelect,
   buildUpdate,
+  type Dialect,
   detectDialect,
   loadRelations,
   mapRow,
   resolveTableMeta,
-  type Dialect,
   type TableMeta,
 } from "./query.js";
 import type {
@@ -35,6 +35,7 @@ export class Column<
   public readonly isNullable: TNullable;
   public readonly isUnique: boolean;
   public readonly defaultValue: TType | undefined;
+  public readonly kind: string | undefined;
 
   public constructor(
     sqlName: TName,
@@ -43,6 +44,7 @@ export class Column<
       primaryKey?: TPrimaryKey;
       unique?: boolean;
       defaultValue?: TType;
+      kind?: string;
     },
   ) {
     this.sqlName = sqlName;
@@ -50,6 +52,7 @@ export class Column<
     this.isPrimaryKey = (options?.primaryKey ?? false) as TPrimaryKey;
     this.isUnique = options?.unique ?? false;
     this.defaultValue = options?.defaultValue;
+    this.kind = options?.kind;
   }
 
   public notNull() {
@@ -60,6 +63,7 @@ export class Column<
         primaryKey: this.isPrimaryKey,
         unique: this.isUnique,
         defaultValue: this.defaultValue,
+        kind: this.kind,
       },
     );
   }
@@ -70,6 +74,7 @@ export class Column<
       primaryKey: true as const,
       unique: this.isUnique,
       defaultValue: this.defaultValue,
+      kind: this.kind,
     });
   }
 
@@ -81,6 +86,7 @@ export class Column<
         primaryKey: this.isPrimaryKey,
         unique: true,
         defaultValue: this.defaultValue,
+        kind: this.kind,
       },
     );
   }
@@ -91,6 +97,7 @@ export class Column<
       primaryKey: this.isPrimaryKey,
       unique: this.isUnique,
       defaultValue: value,
+      kind: this.kind,
     });
   }
 }
@@ -98,28 +105,28 @@ export class Column<
 // --- Column factories ---
 
 export const string = <TName extends string>(sqlName: TName) =>
-  new Column<TName, string>(sqlName);
+  new Column<TName, string>(sqlName, { kind: "string" });
 
 export const number = <TName extends string>(sqlName: TName) =>
-  new Column<TName, number>(sqlName);
+  new Column<TName, number>(sqlName, { kind: "number" });
 
 export const float = <TName extends string>(sqlName: TName) =>
-  new Column<TName, number>(sqlName);
+  new Column<TName, number>(sqlName, { kind: "float" });
 
 export const boolean = <TName extends string>(sqlName: TName) =>
-  new Column<TName, boolean>(sqlName);
+  new Column<TName, boolean>(sqlName, { kind: "boolean" });
 
 export const date = <TName extends string>(sqlName: TName) =>
-  new Column<TName, Date>(sqlName);
+  new Column<TName, Date>(sqlName, { kind: "date" });
 
 export const json = <TType, TName extends string>(sqlName: TName) =>
-  new Column<TName, TType>(sqlName);
+  new Column<TName, TType>(sqlName, { kind: "json" });
 
 export const blob = <TName extends string>(sqlName: TName) =>
-  new Column<TName, Buffer>(sqlName);
+  new Column<TName, Buffer>(sqlName, { kind: "blob" });
 
 export const bigint = <TName extends string>(sqlName: TName) =>
-  new Column<TName, bigint>(sqlName);
+  new Column<TName, bigint>(sqlName, { kind: "bigint" });
 
 // --- Relations ---
 
@@ -285,7 +292,10 @@ class TableClient<TColumns extends Record<string, unknown>> {
     );
 
     if (error) return err("QueryError", String(error));
-    return ok(row as Select<TColumns>);
+    const mapped = row
+      ? mapRow(row as Record<string, unknown>, this.meta)
+      : null;
+    return ok(mapped as Select<TColumns>);
   }
 
   public async update(options: {
@@ -304,7 +314,10 @@ class TableClient<TColumns extends Record<string, unknown>> {
     );
 
     if (error) return err("QueryError", String(error));
-    return ok(row as Select<TColumns>);
+    const mapped = row
+      ? mapRow(row as Record<string, unknown>, this.meta)
+      : null;
+    return ok(mapped as Select<TColumns>);
   }
 
   public async delete(options: { where: Where<TColumns> }) {
@@ -319,7 +332,10 @@ class TableClient<TColumns extends Record<string, unknown>> {
     );
 
     if (error) return err("QueryError", String(error));
-    return ok(row as Select<TColumns>);
+    const mapped = row
+      ? mapRow(row as Record<string, unknown>, this.meta)
+      : null;
+    return ok(mapped as Select<TColumns>);
   }
 }
 
