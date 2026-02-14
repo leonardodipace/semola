@@ -431,6 +431,217 @@ describe("Cache", () => {
     });
   });
 
+  describe("serializer/deserializer", () => {
+    test("should use custom serializer on set", async () => {
+      const redis = createMockRedis();
+      const cache = new Cache<{ name: string }>({
+        redis,
+        serializer: (value) => `custom:${value.name}`,
+      });
+
+      const [error, data] = await cache.set("key", { name: "John" });
+      expect(error).toBeNull();
+      expect(data).toEqual({ name: "John" });
+      expect(redis.getStore().get("key")).toBe("custom:John");
+    });
+
+    test("should use custom deserializer on get", async () => {
+      const redis = createMockRedis();
+      const cache = new Cache<{ name: string }>({
+        redis,
+        deserializer: (raw) => ({ name: raw.replace("custom:", "") }),
+      });
+
+      await redis.set("key", "custom:John");
+
+      const [error, data] = await cache.get("key");
+      expect(error).toBeNull();
+      expect(data).toEqual({ name: "John" });
+    });
+
+    test("should return CacheError when serializer throws", async () => {
+      const redis = createMockRedis();
+      const cache = new Cache<string>({
+        redis,
+        serializer: () => {
+          throw new Error("serializer failed");
+        },
+      });
+
+      const [error, data] = await cache.set("key", "value");
+      expect(error).toEqual({
+        type: "CacheError",
+        message: "Unable to stringify value for key key",
+      });
+      expect(data).toBeNull();
+    });
+
+    test("should return CacheError when deserializer throws", async () => {
+      const redis = createMockRedis();
+      const cache = new Cache<string>({
+        redis,
+        deserializer: () => {
+          throw new Error("deserializer failed");
+        },
+      });
+
+      await redis.set("key", "value");
+
+      const [error, data] = await cache.get("key");
+      expect(error).toEqual({
+        type: "CacheError",
+        message: "Unable to parse value for key key",
+      });
+      expect(data).toBeNull();
+    });
+  });
+
+  describe("onError", () => {
+    test("should call onError on CacheError from get", async () => {
+      const redis = createMockRedis();
+      const errors: { type: string; message: string }[] = [];
+      const cache = new Cache<string>({
+        redis,
+        onError: (error) => errors.push(error),
+      });
+
+      redis.setShouldFail(true);
+      await cache.get("key");
+
+      expect(errors).toEqual([
+        { type: "CacheError", message: "Unable to get value for key key" },
+      ]);
+    });
+
+    test("should call onError on CacheError from set", async () => {
+      const redis = createMockRedis();
+      const errors: { type: string; message: string }[] = [];
+      const cache = new Cache<string>({
+        redis,
+        onError: (error) => errors.push(error),
+      });
+
+      redis.setShouldFail(true);
+      await cache.set("key", "value");
+
+      expect(errors).toEqual([
+        { type: "CacheError", message: "Unable to set value for key key" },
+      ]);
+    });
+
+    test("should call onError on CacheError from delete", async () => {
+      const redis = createMockRedis();
+      const errors: { type: string; message: string }[] = [];
+      const cache = new Cache<string>({
+        redis,
+        onError: (error) => errors.push(error),
+      });
+
+      redis.setShouldFail(true);
+      await cache.delete("key");
+
+      expect(errors).toEqual([
+        { type: "CacheError", message: "Unable to delete key key" },
+      ]);
+    });
+
+    test("should call onError on InvalidTTLError", async () => {
+      const redis = createMockRedis();
+      const errors: { type: string; message: string }[] = [];
+      const cache = new Cache<string>({
+        redis,
+        ttl: -1,
+        onError: (error) => errors.push(error),
+      });
+
+      await cache.set("key", "value");
+
+      expect(errors).toEqual([
+        {
+          type: "InvalidTTLError",
+          message: "Unable to save records with ttl equal to -1",
+        },
+      ]);
+    });
+
+    test("should not call onError on NotFoundError", async () => {
+      const redis = createMockRedis();
+      const errors: { type: string; message: string }[] = [];
+      const cache = new Cache<string>({
+        redis,
+        onError: (error) => errors.push(error),
+      });
+
+      await cache.get("nonexistent");
+
+      expect(errors).toEqual([]);
+    });
+
+    test("should not call onError when no errors occur", async () => {
+      const redis = createMockRedis();
+      const errors: { type: string; message: string }[] = [];
+      const cache = new Cache<string>({
+        redis,
+        onError: (error) => errors.push(error),
+      });
+
+      await cache.set("key", "value");
+      await cache.get("key");
+      await cache.delete("key");
+
+      expect(errors).toEqual([]);
+    });
+  });
+
+  describe("ttl as function", () => {
+    test("should use TTL returned by function", async () => {
+      const redis = createMockRedis();
+      const cache = new Cache<{ priority: string }>({
+        redis,
+        ttl: (_key, value) => (value.priority === "high" ? 60000 : 5000),
+      });
+
+      const [error, data] = await cache.set("item", { priority: "high" });
+      expect(error).toBeNull();
+      expect(data).toEqual({ priority: "high" });
+    });
+
+    test("should pass key and value to TTL function", async () => {
+      const redis = createMockRedis();
+      let receivedKey: string | undefined;
+      let receivedValue: string | undefined;
+
+      const cache = new Cache<string>({
+        redis,
+        ttl: (key, value) => {
+          receivedKey = key;
+          receivedValue = value;
+          return 1000;
+        },
+      });
+
+      await cache.set("myKey", "myValue");
+
+      expect(receivedKey).toBe("myKey");
+      expect(receivedValue).toBe("myValue");
+    });
+
+    test("should return InvalidTTLError when function returns invalid TTL", async () => {
+      const redis = createMockRedis();
+      const cache = new Cache<string>({
+        redis,
+        ttl: () => -1,
+      });
+
+      const [error, data] = await cache.set("key", "value");
+      expect(error).toEqual({
+        type: "InvalidTTLError",
+        message: "Unable to save records with ttl equal to -1",
+      });
+      expect(data).toBeNull();
+    });
+  });
+
   describe("Integration scenarios", () => {
     test("should handle complete set-get-delete flow", async () => {
       const redis = createMockRedis();
