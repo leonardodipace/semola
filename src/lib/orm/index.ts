@@ -351,31 +351,42 @@ class OrmImpl<
 
     const allTableMetas = new Map<string, TableMeta>();
 
-    // First pass: build table metas with columns only
-    for (const table of Object.values(options.tables)) {
-      const meta = resolveTableMeta(table as AnyTable, {});
+    // Build table metas with relations in single pass
+    for (const [key, table] of Object.entries(options.tables)) {
+      const rels =
+        options.relations?.[key as keyof typeof options.relations] ?? {};
+      const meta = resolveTableMeta(
+        table as AnyTable,
+        rels as Record<
+          string,
+          OneRelation<string, AnyTable, boolean> | ManyRelation<AnyTable>
+        >,
+      );
       allTableMetas.set(meta.sqlName, meta);
     }
 
-    // Second pass: add relations
-    if (options.relations) {
-      for (const [tableKey, rels] of Object.entries(options.relations)) {
-        const table = (options.tables as Record<string, AnyTable>)[tableKey];
-        if (!table || !rels) continue;
-        const meta = resolveTableMeta(
-          table,
-          rels as Record<
-            string,
-            OneRelation<string, AnyTable, boolean> | ManyRelation<AnyTable>
-          >,
-        );
-        allTableMetas.set(meta.sqlName, meta);
+    // Populate targetForeignKey for ManyRelations
+    for (const meta of allTableMetas.values()) {
+      for (const rel of meta.relations) {
+        if (rel.type === "many") {
+          const targetMeta = allTableMetas.get(rel.targetTable.sqlName);
+          if (targetMeta) {
+            const targetRel = targetMeta.relations.find(
+              (r) => r.type === "one" && r.targetTable.sqlName === meta.sqlName,
+            );
+            if (targetRel) {
+              rel.targetForeignKey = targetRel.foreignKey;
+            }
+          }
+        }
       }
     }
 
+    // Create table clients
     for (const [key, table] of Object.entries(options.tables)) {
       const meta = allTableMetas.get((table as AnyTable).sqlName);
-      if (!meta) continue;
+      if (!meta)
+        throw new Error(`Failed to resolve metadata for table: ${key}`);
       Object.defineProperty(this, key, {
         value: new TableClient(this.db, meta, allTableMetas, this.dialect),
         enumerable: true,

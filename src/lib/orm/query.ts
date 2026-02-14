@@ -13,6 +13,7 @@ export type RelationMeta = {
   fieldName: string;
   type: "one" | "many";
   foreignKey: string;
+  targetForeignKey?: string;
   targetTable: Table<string, Record<string, unknown>>;
   nullable: boolean;
 };
@@ -82,19 +83,6 @@ export const resolveTableMeta = (
 };
 
 type SqlFragment = SQL.Query<unknown>;
-
-const findForeignKeyToParent = (
-  targetMeta: TableMeta,
-  parentMeta: TableMeta,
-): string | undefined => {
-  for (const rel of targetMeta.relations) {
-    if (rel.type === "one" && rel.targetTable.sqlName === parentMeta.sqlName) {
-      return rel.foreignKey;
-    }
-  }
-  return undefined;
-};
-
 const buildWhereClause = (
   db: InstanceType<typeof SQL>,
   meta: TableMeta,
@@ -147,10 +135,7 @@ const buildWhereClause = (
         some?: Record<string, unknown>;
         none?: Record<string, unknown>;
       };
-      if (!meta.primaryKey) continue;
-
-      const targetFkCol = findForeignKeyToParent(targetMeta, meta);
-      if (!targetFkCol) continue;
+      if (!meta.primaryKey || !relMeta.targetForeignKey) continue;
 
       if (manyFilter.some) {
         const subWhere = buildWhereClause(
@@ -160,7 +145,7 @@ const buildWhereClause = (
           allTableMetas,
         );
         conditions.push(
-          db`EXISTS (SELECT 1 FROM ${db(targetMeta.sqlName)} WHERE ${db(targetFkCol)} = ${db(meta.sqlName)}.${db(meta.primaryKey.sqlName)} AND ${subWhere})`,
+          db`EXISTS (SELECT 1 FROM ${db(targetMeta.sqlName)} WHERE ${db(relMeta.targetForeignKey)} = ${db(meta.sqlName)}.${db(meta.primaryKey.sqlName)} AND ${subWhere})`,
         );
       }
 
@@ -172,7 +157,7 @@ const buildWhereClause = (
           allTableMetas,
         );
         conditions.push(
-          db`NOT EXISTS (SELECT 1 FROM ${db(targetMeta.sqlName)} WHERE ${db(targetFkCol)} = ${db(meta.sqlName)}.${db(meta.primaryKey.sqlName)} AND ${subWhere})`,
+          db`NOT EXISTS (SELECT 1 FROM ${db(targetMeta.sqlName)} WHERE ${db(relMeta.targetForeignKey)} = ${db(meta.sqlName)}.${db(meta.primaryKey.sqlName)} AND ${subWhere})`,
         );
       }
     }
@@ -366,16 +351,13 @@ export const loadRelations = async (
       const parentPkValues = rows
         .map((r) => r[parentPkField])
         .filter((v) => v != null);
-      if (parentPkValues.length === 0) continue;
-
-      const targetFkCol = findForeignKeyToParent(targetMeta, meta);
-      if (!targetFkCol) continue;
+      if (parentPkValues.length === 0 || !relMeta.targetForeignKey) continue;
 
       const related =
-        await db`SELECT * FROM ${db(targetMeta.sqlName)} WHERE ${db(targetFkCol)} IN ${db(parentPkValues)}`;
+        await db`SELECT * FROM ${db(targetMeta.sqlName)} WHERE ${db(relMeta.targetForeignKey)} IN ${db(parentPkValues)}`;
 
       const targetFkField = targetMeta.columns.find(
-        (c) => c.sqlName === targetFkCol,
+        (c) => c.sqlName === relMeta.targetForeignKey,
       )?.fieldName;
       if (!targetFkField) continue;
 
