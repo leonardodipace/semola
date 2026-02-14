@@ -104,7 +104,7 @@ export type Update<TColumns> = {
 
 // --- Where: filter conditions ---
 
-type RelationKeys<TColumns> = {
+export type RelationKeys<TColumns> = {
   [K in keyof TColumns]: IsOneRelation<TColumns[K]> extends true
     ? K
     : IsManyRelation<TColumns[K]> extends true
@@ -136,6 +136,14 @@ export type Where<TColumns> = {
 export type Include<TColumns> = {
   [K in RelationKeys<TColumns>]?: true;
 };
+
+// Helper to enforce exact keys (no excess properties)
+export type ExactKeys<T, TAllowed extends PropertyKey> = Exclude<
+  keyof T,
+  TAllowed
+> extends never
+  ? T
+  : never;
 
 // --- SelectWithInclude: base select + included relation data ---
 

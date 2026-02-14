@@ -211,7 +211,7 @@ class TableClient<TColumns extends Record<string, unknown>> {
 
   public async findMany<TInclude extends Include<TColumns> = {}>(options?: {
     where?: Where<TColumns>;
-    include?: TInclude;
+    include?: Include<TColumns> & TInclude;
     take?: number;
     skip?: number;
   }) {
@@ -241,7 +241,7 @@ class TableClient<TColumns extends Record<string, unknown>> {
 
   public async findOne<TInclude extends Include<TColumns> = {}>(options?: {
     where?: Where<TColumns>;
-    include?: TInclude;
+    include?: Include<TColumns> & TInclude;
   }) {
     const rows = (await buildSelect(
       this.db,
