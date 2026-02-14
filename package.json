@@ -31,6 +31,10 @@
     "./pubsub": {
       "import": "./dist/lib/pubsub/index.js",
       "types": "./dist/lib/pubsub/index.d.ts"
+    },
+    "./orm": {
+      "import": "./dist/lib/orm/index.js",
+      "types": "./dist/lib/orm/index.d.ts"
     }
   },
   "files": [
@@ -40,7 +44,7 @@
   "scripts": {
     "build": "tsc",
     "check": "biome check --write . && tsc --noEmit",
-    "test": "bun test",
+    "test": "bun test src",
     "prepublishOnly": "bun run build"
   },
   "keywords": [

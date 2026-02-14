@@ -26,6 +26,7 @@
       },
       "style": {
         "noInferrableTypes": "error",
+        "noNonNullAssertion": "off",
         "useConst": "error",
         "useImportType": "error",
         "useFilenamingConvention": "error",
