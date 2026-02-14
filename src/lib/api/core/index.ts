@@ -79,29 +79,16 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
   }
 
   private getFullPath(path: string) {
-    if (!this.options.prefix) {
-      return stripTrailingSlash(path) || "/";
-    }
+    const normalizedPath = stripTrailingSlash(path) || "/";
+
+    if (!this.options.prefix) return normalizedPath;
 
     const normalizedPrefix = stripTrailingSlash(this.options.prefix);
-    const normalizedPath = stripTrailingSlash(path);
 
-    // If prefix is root, return just the normalized path
-    if (normalizedPrefix === "/") {
-      return normalizedPath || "/";
-    }
+    if (normalizedPrefix === "/") return normalizedPath;
+    if (normalizedPath === "/") return normalizedPrefix;
 
-    // If path is root, return just the prefix
-    if (normalizedPath === "/") {
-      return normalizedPrefix;
-    }
-
-    // Avoid double slashes when path starts with /
-    if (normalizedPath.startsWith("/")) {
-      return normalizedPrefix + normalizedPath;
-    }
-
-    return `${normalizedPrefix}/${normalizedPath}`;
+    return normalizedPrefix + normalizedPath;
   }
 
   private async validateRequestSchema(
