@@ -9,7 +9,15 @@ export class Cache<T> {
   }
 
   public async get(key: string) {
-    const [error, value] = await mightThrow(this.options.redis.get(key));
+    if (!this.isEnabled) {
+      return err("NotFoundError", `Key ${key} not found`);
+    }
+
+    const resolvedKey = this.resolveKey(key);
+
+    const [error, value] = await mightThrow(
+      this.options.redis.get(resolvedKey),
+    );
 
     if (error) {
       return err("CacheError", `Unable to get value for key ${key}`);
@@ -29,6 +37,10 @@ export class Cache<T> {
   }
 
   public async set(key: string, value: T) {
+    if (!this.isEnabled) {
+      return ok(value);
+    }
+
     const [stringifyError, stringified] = mightThrowSync(() =>
       JSON.stringify(value),
     );
@@ -48,10 +60,17 @@ export class Cache<T> {
       );
     }
 
+    const resolvedKey = this.resolveKey(key);
+
     const [setError] = await mightThrow(
       this.options.ttl
-        ? this.options.redis.set(key, stringified, "PX", this.options.ttl)
-        : this.options.redis.set(key, stringified),
+        ? this.options.redis.set(
+            resolvedKey,
+            stringified,
+            "PX",
+            this.options.ttl,
+          )
+        : this.options.redis.set(resolvedKey, stringified),
     );
 
     if (setError) {
@@ -62,7 +81,13 @@ export class Cache<T> {
   }
 
   public async delete(key: string) {
-    const [error, data] = await mightThrow(this.options.redis.del(key));
+    if (!this.isEnabled) {
+      return ok(0);
+    }
+
+    const resolvedKey = this.resolveKey(key);
+
+    const [error, data] = await mightThrow(this.options.redis.del(resolvedKey));
 
     if (error) {
       return err("CacheError", `Unable to delete key ${key}`);
@@ -71,13 +96,22 @@ export class Cache<T> {
     return ok(data);
   }
 
+  private get isEnabled() {
+    return this.options.enabled !== false;
+  }
+
+  private resolveKey(key: string) {
+    if (this.options.prefix) {
+      return `${this.options.prefix}:${key}`;
+    }
+
+    return key;
+  }
+
   private isTTLValid() {
     const { ttl } = this.options;
 
     if (ttl === undefined || ttl === null) return true;
-
-    // ttl is now set to a numeric value insted of not being provided
-    // inside the options.
 
     if (!Number.isFinite(ttl)) return false;
 
