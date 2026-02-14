@@ -137,6 +137,14 @@ export type RouteHandler<
   TExt extends Record<string, unknown> = Record<string, unknown>,
 > = (c: Context<TReq, TRes, TExt>) => Response | Promise<Response>;
 
+export type ValidatedRequest = {
+  body: unknown;
+  query: unknown;
+  headers: unknown;
+  cookies: unknown;
+  params: unknown;
+};
+
 export type MethodRoutes = Record<
   string,
   Partial<Record<HTTPMethod, BunHandler>>

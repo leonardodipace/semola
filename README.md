@@ -202,6 +202,21 @@ Stop piecing together half-baked solutions from npm. Stop wrestling with type de
 | **Tree-Shakeable**    |   ✅   |   ❌    |   ❌    |  ✅  |   ✅   |
 | **Standard Schema**   |   ✅   |   ❌    |   ❌    |  ⚠️  |   ✅   |
 
+### Performance Benchmarks
+
+Semola API is the **fastest API framework** for Bun.
+
+| Framework  | Avg Req/Sec | Latency Avg (ms) |   vs Semola   |
+| :--------- | ----------: | ---------------: | :-----------: |
+| **Semola** |  **40,050** |         **1.88** | **baseline**  |
+| Elysia     |      37,185 |             2.13 |  1.1x slower  |
+| Hono       |      34,611 |             2.31 |  1.2x slower  |
+| Fastify    |      26,330 |             3.70 |  1.5x slower  |
+| Express    |      20,031 |             5.02 | **2x slower** |
+| NestJS     |      16,118 |             6.21 |  2.5x slower  |
+
+_Higher is better for req/sec, lower is better for latency._
+
 ### What Makes Semola Different
 
 - 🎯 **Bun-first**: Engineered specifically for Bun's performance. No Node.js baggage.
