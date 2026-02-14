@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { boolean, many, number, one, ORM, string, Table } from "./index.js";
+import { boolean, many, number, ORM, one, string, Table } from "./index.js";
 
 const usersTable = new Table("users", {
   id: number("id").primaryKey(),

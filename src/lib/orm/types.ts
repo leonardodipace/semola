@@ -137,14 +137,6 @@ export type Include<TColumns> = {
   [K in RelationKeys<TColumns>]?: true;
 };
 
-// Helper to enforce exact keys (no excess properties)
-export type ExactKeys<T, TAllowed extends PropertyKey> = Exclude<
-  keyof T,
-  TAllowed
-> extends never
-  ? T
-  : never;
-
 // --- SelectWithInclude: base select + included relation data ---
 
 type IncludedFields<TColumns, TInclude> = {

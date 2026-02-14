@@ -1,10 +1,5 @@
 import type { SQL } from "bun";
-import {
-  Column,
-  type ManyRelation,
-  type OneRelation,
-  type Table,
-} from "./index.js";
+import { Column, ManyRelation, OneRelation, type Table } from "./index.js";
 
 export type Dialect = "postgres" | "mysql" | "sqlite";
 
@@ -28,11 +23,6 @@ export type TableMeta = {
   relations: RelationMeta[];
   primaryKey: ColumnMeta | undefined;
 };
-
-// Type-guard: determines whether an object exposes a `kind` property.
-function isColumnWithKind(v: unknown): v is { kind?: string } {
-  return v !== null && typeof v === "object" && Object.hasOwn(v, "kind");
-}
 
 export const detectDialect = (url: string): Dialect => {
   if (url.startsWith("mysql://") || url.startsWith("mysql2://")) return "mysql";
@@ -59,7 +49,7 @@ export const resolveTableMeta = (
       const meta: ColumnMeta = {
         fieldName,
         sqlName: col.sqlName,
-        kind: isColumnWithKind(col) ? col.kind : undefined,
+        kind: col.kind,
       };
       columns.push(meta);
       if (col.isPrimaryKey) {
@@ -69,7 +59,7 @@ export const resolveTableMeta = (
   }
 
   for (const [fieldName, rel] of Object.entries(rels)) {
-    if (isOneRelation(rel)) {
+    if (rel instanceof OneRelation) {
       relations.push({
         fieldName,
         type: "one",
@@ -77,7 +67,7 @@ export const resolveTableMeta = (
         targetTable: rel.ref() as Table<string, Record<string, unknown>>,
         nullable: rel.isNullable,
       });
-    } else if (isManyRelation(rel)) {
+    } else if (rel instanceof ManyRelation) {
       relations.push({
         fieldName,
         type: "many",
@@ -91,27 +81,19 @@ export const resolveTableMeta = (
   return { sqlName: table.sqlName, columns, relations, primaryKey };
 };
 
-const isOneRelation = (
-  v: unknown,
-): v is OneRelation<string, unknown, boolean> => {
-  return (
-    v !== null &&
-    typeof v === "object" &&
-    "_type" in v &&
-    (v as Record<string, unknown>)._type === "one"
-  );
-};
-
-const isManyRelation = (v: unknown): v is ManyRelation<unknown> => {
-  return (
-    v !== null &&
-    typeof v === "object" &&
-    "_type" in v &&
-    (v as Record<string, unknown>)._type === "many"
-  );
-};
-
 type SqlFragment = SQL.Query<unknown>;
+
+const findForeignKeyToParent = (
+  targetMeta: TableMeta,
+  parentMeta: TableMeta,
+): string | undefined => {
+  for (const rel of targetMeta.relations) {
+    if (rel.type === "one" && rel.targetTable.sqlName === parentMeta.sqlName) {
+      return rel.foreignKey;
+    }
+  }
+  return undefined;
+};
 
 const buildWhereClause = (
   db: InstanceType<typeof SQL>,
@@ -203,18 +185,6 @@ const buildWhereClause = (
     result = db`${result} AND ${conditions[i]}`;
   }
   return result;
-};
-
-const findForeignKeyToParent = (
-  targetMeta: TableMeta,
-  parentMeta: TableMeta,
-): string | undefined => {
-  for (const rel of targetMeta.relations) {
-    if (rel.type === "one" && rel.targetTable.sqlName === parentMeta.sqlName) {
-      return rel.foreignKey;
-    }
-  }
-  return undefined;
 };
 
 export const mapRow = (
@@ -352,7 +322,6 @@ export const loadRelations = async (
   allTableMetas: Map<string, TableMeta>,
 ) => {
   if (!meta.primaryKey || rows.length === 0) return rows;
-  const parentPk = meta.primaryKey;
 
   for (const [relField, shouldInclude] of Object.entries(include)) {
     if (!shouldInclude) continue;
@@ -364,7 +333,6 @@ export const loadRelations = async (
     if (!targetMeta) continue;
 
     if (relMeta.type === "one") {
-      // Find the field name that corresponds to this foreign key SQL column
       const fkColMeta = meta.columns.find(
         (c) => c.sqlName === relMeta.foreignKey,
       );
@@ -372,7 +340,6 @@ export const loadRelations = async (
       const fkFieldName = fkColMeta.fieldName;
 
       const fkValues = rows.map((r) => r[fkFieldName]).filter((v) => v != null);
-
       if (fkValues.length === 0) continue;
 
       const targetPk = targetMeta.primaryKey;
@@ -394,6 +361,7 @@ export const loadRelations = async (
     }
 
     if (relMeta.type === "many") {
+      const parentPk = meta.primaryKey;
       const parentPkField = parentPk.fieldName;
       const parentPkValues = rows
         .map((r) => r[parentPkField])

@@ -338,18 +338,9 @@ type OrmOptions<
   };
 };
 
-interface OrmConstructor {
-  new <
-    TTables extends Record<string, AnyTable>,
-    TRelations extends Record<string, unknown> = {},
-  >(
-    options: OrmOptions<TTables, TRelations>,
-  ): OrmImpl<TTables, TRelations> & TableClients<TTables, TRelations>;
-}
-
 class OrmImpl<
   TTables extends Record<string, AnyTable>,
-  TRelations extends Record<string, unknown>,
+  TRelations extends Record<string, unknown> = {},
 > {
   public readonly db: InstanceType<typeof SQL>;
   public readonly dialect: Dialect;
@@ -397,11 +388,21 @@ class OrmImpl<
   }
 }
 
+interface OrmConstructor {
+  new <
+    TTables extends Record<string, AnyTable>,
+    TRelations extends Record<string, unknown> = {},
+  >(
+    options: OrmOptions<TTables, TRelations>,
+  ): OrmImpl<TTables, TRelations> & TableClients<TTables, TRelations>;
+}
+
 export const ORM = OrmImpl as unknown as OrmConstructor;
-export type Orm<
+
+export type OrmType<
   TTables extends Record<string, AnyTable>,
   TRelations extends Record<string, unknown> = {},
-> = OrmImpl<TTables, TRelations>;
+> = OrmImpl<TTables, TRelations> & TableClients<TTables, TRelations>;
 
 // Re-export types
 export type {
