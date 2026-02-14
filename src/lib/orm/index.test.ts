@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { boolean, many, number, ORM, one, string, Table } from "./index.js";
+import { boolean, many, number, one, ORM, string, Table } from "./index.js";
 
 const usersTable = new Table("users", {
   id: number("id").primaryKey(),
@@ -33,6 +33,8 @@ const orm = new ORM({
   },
 });
 
+let createdDaveId: number | undefined;
+
 // ORM normalizes DB rows to the table's field names via `mapRow`.
 
 beforeAll(async () => {
@@ -55,76 +57,56 @@ afterAll(async () => {
 describe("ORM", () => {
   describe("findMany", () => {
     test("should return all rows", async () => {
-      const [error, users] = await orm.users.findMany();
-      expect(error).toBeNull();
-      expect(users!.length).toBe(3);
-      expect(users![0]!.name).toBe("Alice");
+      const users = await orm.users.findMany();
+      expect(users.length).toBe(3);
+      expect(users[0]!.name).toBe("Alice");
     });
 
     test("should filter with where", async () => {
-      const [error, users] = await orm.users.findMany({
-        where: { name: "Alice" },
-      });
-      expect(error).toBeNull();
-      expect(users!.length).toBe(1);
-      expect(users![0]!.email).toBe("alice@example.com");
+      const users = await orm.users.findMany({ where: { name: "Alice" } });
+      expect(users.length).toBe(1);
+      expect(users[0]!.email).toBe("alice@example.com");
     });
 
     test("should paginate with take and skip", async () => {
-      const [error, users] = await orm.users.findMany({
-        take: 2,
-        skip: 1,
-      });
-      expect(error).toBeNull();
-      expect(users!.length).toBe(2);
-      expect(users![0]!.name).toBe("Bob");
+      const users = await orm.users.findMany({ take: 2, skip: 1 });
+      expect(users.length).toBe(2);
+      expect(users[0]!.name).toBe("Bob");
     });
 
     test("should include many relations", async () => {
-      const [error, users] = await orm.users.findMany({
+      const users = await orm.users.findMany({
         where: { name: "Alice" },
         include: { posts: true },
       });
-      expect(error).toBeNull();
-      expect(users!.length).toBe(1);
-      expect(users![0]!.posts.length).toBe(2);
-      expect(users![0]!.posts[0]!.title).toBe("Hello World");
+      expect(users.length).toBe(1);
+      expect(users[0]!.posts!.length).toBe(2);
+      expect(users[0]!.posts![0]!.title).toBe("Hello World");
     });
 
     test("should return empty array for many relation with no matches", async () => {
-      const [error, users] = await orm.users.findMany({
+      const users = await orm.users.findMany({
         where: { name: "Charlie" },
         include: { posts: true },
       });
-      expect(error).toBeNull();
-      expect(users!.length).toBe(1);
-      expect(users![0]!.posts.length).toBe(0);
+      expect(users.length).toBe(1);
+      expect(users[0]!.posts!.length).toBe(0);
     });
 
     test("should filter with many relation some", async () => {
-      const [error, users] = await orm.users.findMany({
-        where: {
-          posts: {
-            some: { title: "Hello World" },
-          },
-        },
+      const users = await orm.users.findMany({
+        where: { posts: { some: { title: "Hello World" } } },
       });
-      expect(error).toBeNull();
-      expect(users!.length).toBe(1);
-      expect(users![0]!.name).toBe("Alice");
+      expect(users.length).toBe(1);
+      expect(users[0]!.name).toBe("Alice");
     });
 
     test("should filter with many relation none", async () => {
-      const [error, users] = await orm.users.findMany({
-        where: {
-          posts: {
-            none: { title: "Hello World" },
-          },
-        },
+      const users = await orm.users.findMany({
+        where: { posts: { none: { title: "Hello World" } } },
       });
-      expect(error).toBeNull();
-      expect(users!.length).toBe(2);
-      const names = users!.map((u) => u.name);
+      expect(users.length).toBe(2);
+      const names = users.map((u) => u.name);
       expect(names).toContain("Bob");
       expect(names).toContain("Charlie");
     });
@@ -132,28 +114,25 @@ describe("ORM", () => {
 
   describe("findOne", () => {
     test("should return a single row", async () => {
-      const [error, user] = await orm.users.findOne({
+      const user = await orm.users.findOne({
         where: { email: "bob@example.com" },
       });
-      expect(error).toBeNull();
       expect(user).not.toBeNull();
       expect(user!.name).toBe("Bob");
     });
 
     test("should return null when not found", async () => {
-      const [error, user] = await orm.users.findOne({
+      const user = await orm.users.findOne({
         where: { email: "nobody@example.com" },
       });
-      expect(error).toBeNull();
       expect(user).toBeNull();
     });
 
     test("should include one relation", async () => {
-      const [error, post] = await orm.posts.findOne({
+      const post = await orm.posts.findOne({
         where: { title: "Hello World" },
         include: { author: true },
       });
-      expect(error).toBeNull();
       expect(post).not.toBeNull();
       expect(post!.author.name).toBe("Alice");
     });
@@ -161,71 +140,59 @@ describe("ORM", () => {
 
   describe("create", () => {
     test("should insert a new row and return it", async () => {
-      const [error, user] = await orm.users.create({
-        data: {
-          name: "Dave",
-          email: "dave@example.com",
-        },
+      const user = await orm.users.create({
+        data: { name: "Dave", email: "dave@example.com" },
       });
-      expect(error).toBeNull();
-      expect(user!.name).toBe("Dave");
-      expect(user!.email).toBe("dave@example.com");
-      expect(user!.id).toBeDefined();
+      expect(user.name).toBe("Dave");
+      expect(user.email).toBe("dave@example.com");
+      expect(user.id).toBeDefined();
+      createdDaveId = user.id as number;
     });
 
     test("should create a post with foreign key", async () => {
-      const [error, post] = await orm.posts.create({
+      expect(createdDaveId).toBeDefined();
+      const post = await orm.posts.create({
         data: {
           title: "Dave Post",
           content: "Dave writes",
-          authorId: 4,
+          authorId: createdDaveId!,
         },
       });
-      expect(error).toBeNull();
-      expect(post!.title).toBe("Dave Post");
+      expect(post.title).toBe("Dave Post");
     });
 
     test("should create a post and return defaulted fields", async () => {
-      const [error, post] = await orm.posts.create({
+      expect(createdDaveId).toBeDefined();
+      const post = await orm.posts.create({
         data: {
           title: "Defaulted Post",
           content: "Has defaults",
-          authorId: 4,
+          authorId: createdDaveId!,
         },
       });
 
-      expect(error).toBeNull();
       expect(post).not.toBeNull();
-      // debug
-      // eslint-disable-next-line no-console
-      // console.log("DEBUG_POST_PUBLISHED:", JSON.stringify(post));
-      expect(post!.createdAt).toBeDefined();
-      expect(post!.published === false).toBeTruthy();
+      expect(post.createdAt).toBeDefined();
+      expect(post.published === false).toBeTruthy();
     });
   });
 
   describe("update", () => {
     test("should update a row and return it", async () => {
-      const [error, user] = await orm.users.update({
+      const user = await orm.users.update({
         where: { name: "Dave" },
         data: { email: "dave.updated@example.com" },
       });
-      expect(error).toBeNull();
       expect(user!.email).toBe("dave.updated@example.com");
     });
   });
 
   describe("delete", () => {
     test("should delete a row and return it", async () => {
-      const [error, post] = await orm.posts.delete({
-        where: { title: "Dave Post" },
-      });
-      expect(error).toBeNull();
+      const post = await orm.posts.delete({ where: { title: "Dave Post" } });
       expect(post!.title).toBe("Dave Post");
 
-      const [, check] = await orm.posts.findOne({
-        where: { title: "Dave Post" },
-      });
+      const check = await orm.posts.findOne({ where: { title: "Dave Post" } });
       expect(check).toBeNull();
     });
   });

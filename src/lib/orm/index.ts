@@ -1,15 +1,14 @@
 import { SQL } from "bun";
-import { err, mightThrow, ok } from "../errors/index.js";
 import {
   buildDelete,
   buildInsert,
   buildSelect,
   buildUpdate,
-  type Dialect,
   detectDialect,
   loadRelations,
   mapRow,
   resolveTableMeta,
+  type Dialect,
   type TableMeta,
 } from "./query.js";
 import type {
@@ -216,22 +215,16 @@ class TableClient<TColumns extends Record<string, unknown>> {
     take?: number;
     skip?: number;
   }) {
-    const [error, rows] = await mightThrow(
-      buildSelect(
-        this.db,
-        this.meta,
-        this.allTableMetas,
-        options?.where as Record<string, unknown> | undefined,
-        options?.take,
-        options?.skip,
-      ),
-    );
+    const rows = (await buildSelect(
+      this.db,
+      this.meta,
+      this.allTableMetas,
+      options?.where as Record<string, unknown> | undefined,
+      options?.take,
+      options?.skip,
+    )) as Record<string, unknown>[];
 
-    if (error) return err("QueryError", String(error));
-
-    const results = (rows as Record<string, unknown>[]).map((r) =>
-      mapRow(r, this.meta),
-    );
+    const results = rows.map((r) => mapRow(r, this.meta));
 
     if (options?.include && Object.keys(options.include).length > 0) {
       await loadRelations(
@@ -243,28 +236,24 @@ class TableClient<TColumns extends Record<string, unknown>> {
       );
     }
 
-    return ok(results as SelectWithInclude<TColumns, TInclude>[]);
+    return results as SelectWithInclude<TColumns, TInclude>[];
   }
 
   public async findOne<TInclude extends Include<TColumns> = {}>(options?: {
     where?: Where<TColumns>;
     include?: TInclude;
   }) {
-    const [error, rows] = await mightThrow(
-      buildSelect(
-        this.db,
-        this.meta,
-        this.allTableMetas,
-        options?.where as Record<string, unknown> | undefined,
-        1,
-        undefined,
-      ),
-    );
+    const rows = (await buildSelect(
+      this.db,
+      this.meta,
+      this.allTableMetas,
+      options?.where as Record<string, unknown> | undefined,
+      1,
+      undefined,
+    )) as Record<string, unknown>[];
 
-    if (error) return err("QueryError", String(error));
-
-    const row = (rows as Record<string, unknown>[])[0];
-    if (!row) return ok(null);
+    const row = rows[0];
+    if (!row) return null;
 
     const result = mapRow(row, this.meta);
 
@@ -278,64 +267,49 @@ class TableClient<TColumns extends Record<string, unknown>> {
       );
     }
 
-    return ok(result as SelectWithInclude<TColumns, TInclude>);
+    return result as SelectWithInclude<TColumns, TInclude>;
   }
 
   public async create(options: { data: Insert<TColumns> }) {
-    const [error, row] = await mightThrow(
-      buildInsert(
-        this.db,
-        this.meta,
-        options.data as Record<string, unknown>,
-        this.dialect,
-      ),
-    );
+    const row = (await buildInsert(
+      this.db,
+      this.meta,
+      options.data as Record<string, unknown>,
+      this.dialect,
+    )) as Record<string, unknown> | undefined;
 
-    if (error) return err("QueryError", String(error));
-    const mapped = row
-      ? mapRow(row as Record<string, unknown>, this.meta)
-      : null;
-    return ok(mapped as Select<TColumns>);
+    const mapped = row ? mapRow(row, this.meta) : null;
+    return mapped as Select<TColumns>;
   }
 
   public async update(options: {
     where: Where<TColumns>;
     data: Update<TColumns>;
   }) {
-    const [error, row] = await mightThrow(
-      buildUpdate(
-        this.db,
-        this.meta,
-        options.data as Record<string, unknown>,
-        this.allTableMetas,
-        options.where as Record<string, unknown>,
-        this.dialect,
-      ),
-    );
+    const row = (await buildUpdate(
+      this.db,
+      this.meta,
+      options.data as Record<string, unknown>,
+      this.allTableMetas,
+      options.where as Record<string, unknown>,
+      this.dialect,
+    )) as Record<string, unknown> | undefined;
 
-    if (error) return err("QueryError", String(error));
-    const mapped = row
-      ? mapRow(row as Record<string, unknown>, this.meta)
-      : null;
-    return ok(mapped as Select<TColumns>);
+    const mapped = row ? mapRow(row, this.meta) : null;
+    return mapped as Select<TColumns>;
   }
 
   public async delete(options: { where: Where<TColumns> }) {
-    const [error, row] = await mightThrow(
-      buildDelete(
-        this.db,
-        this.meta,
-        this.allTableMetas,
-        options.where as Record<string, unknown>,
-        this.dialect,
-      ),
-    );
+    const row = (await buildDelete(
+      this.db,
+      this.meta,
+      this.allTableMetas,
+      options.where as Record<string, unknown>,
+      this.dialect,
+    )) as Record<string, unknown> | undefined;
 
-    if (error) return err("QueryError", String(error));
-    const mapped = row
-      ? mapRow(row as Record<string, unknown>, this.meta)
-      : null;
-    return ok(mapped as Select<TColumns>);
+    const mapped = row ? mapRow(row, this.meta) : null;
+    return mapped as Select<TColumns>;
   }
 }
 
