@@ -91,6 +91,11 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
       return normalizedPath || "/";
     }
 
+    // If path is root, return just the prefix
+    if (normalizedPath === "/") {
+      return normalizedPrefix;
+    }
+
     // Avoid double slashes when path starts with /
     if (normalizedPath.startsWith("/")) {
       return normalizedPrefix + normalizedPath;
