@@ -4,11 +4,11 @@ import {
   buildInsert,
   buildSelect,
   buildUpdate,
+  type Dialect,
   detectDialect,
   loadRelations,
   mapRow,
   resolveTableMeta,
-  type Dialect,
   type TableMeta,
 } from "./query.js";
 import type {
