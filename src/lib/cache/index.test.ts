@@ -329,6 +329,108 @@ describe("Cache", () => {
     });
   });
 
+  describe("enabled", () => {
+    test("get should return NotFoundError when disabled", async () => {
+      const redis = createMockRedis();
+      await redis.set("key", JSON.stringify("value"));
+      const cache = new Cache<string>({ redis, enabled: false });
+
+      const [error, data] = await cache.get("key");
+      expect(error).toEqual({
+        type: "NotFoundError",
+        message: "Key key not found",
+      });
+      expect(data).toBeNull();
+    });
+
+    test("set should return ok(value) without storing when disabled", async () => {
+      const redis = createMockRedis();
+      const cache = new Cache<string>({ redis, enabled: false });
+
+      const [error, data] = await cache.set("key", "value");
+      expect(error).toBeNull();
+      expect(data).toBe("value");
+      expect(redis.getStore().has("key")).toBe(false);
+    });
+
+    test("delete should return ok(0) without deleting when disabled", async () => {
+      const redis = createMockRedis();
+      await redis.set("key", "value");
+      const cache = new Cache<string>({ redis, enabled: false });
+
+      const [error, count] = await cache.delete("key");
+      expect(error).toBeNull();
+      expect(count).toBe(0);
+      expect(redis.getStore().has("key")).toBe(true);
+    });
+
+    test("should work normally when enabled is true", async () => {
+      const redis = createMockRedis();
+      const cache = new Cache<string>({ redis, enabled: true });
+
+      const [setError] = await cache.set("key", "value");
+      expect(setError).toBeNull();
+
+      const [getError, data] = await cache.get("key");
+      expect(getError).toBeNull();
+      expect(data).toBe("value");
+    });
+
+    test("should work normally when enabled is not provided", async () => {
+      const redis = createMockRedis();
+      const cache = new Cache<string>({ redis });
+
+      const [setError] = await cache.set("key", "value");
+      expect(setError).toBeNull();
+
+      const [getError, data] = await cache.get("key");
+      expect(getError).toBeNull();
+      expect(data).toBe("value");
+    });
+  });
+
+  describe("prefix", () => {
+    test("get should use prefixed key in Redis", async () => {
+      const redis = createMockRedis();
+      const cache = new Cache<string>({ redis, prefix: "users" });
+
+      await redis.set("users:123", JSON.stringify("John"));
+
+      const [error, data] = await cache.get("123");
+      expect(error).toBeNull();
+      expect(data).toBe("John");
+    });
+
+    test("set should store with prefixed key in Redis", async () => {
+      const redis = createMockRedis();
+      const cache = new Cache<string>({ redis, prefix: "users" });
+
+      await cache.set("123", "John");
+      expect(redis.getStore().has("users:123")).toBe(true);
+      expect(redis.getStore().has("123")).toBe(false);
+    });
+
+    test("delete should delete with prefixed key in Redis", async () => {
+      const redis = createMockRedis();
+      const cache = new Cache<string>({ redis, prefix: "users" });
+
+      await redis.set("users:123", JSON.stringify("John"));
+
+      const [error, count] = await cache.delete("123");
+      expect(error).toBeNull();
+      expect(count).toBe(1);
+      expect(redis.getStore().has("users:123")).toBe(false);
+    });
+
+    test("should not prefix when option is not provided", async () => {
+      const redis = createMockRedis();
+      const cache = new Cache<string>({ redis });
+
+      await cache.set("123", "John");
+      expect(redis.getStore().has("123")).toBe(true);
+    });
+  });
+
   describe("Integration scenarios", () => {
     test("should handle complete set-get-delete flow", async () => {
       const redis = createMockRedis();
