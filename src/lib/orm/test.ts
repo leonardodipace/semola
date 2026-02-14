@@ -13,3 +13,5 @@ const orm = new Orm({
     users: usersTable,
   },
 });
+
+orm.tables.users.findMany();

@@ -15,7 +15,7 @@ export type ColumnOptions<Kind extends ColumnKind> = {
   defaultValue?: ColumnValue<Kind>;
 };
 
-export type OrmOptions = {
+export type OrmOptions<Tables extends Record<string, Table>> = {
   url: string;
-  tables: Record<string, Table>;
+  tables: Tables;
 };

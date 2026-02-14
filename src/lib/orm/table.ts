@@ -2,8 +2,8 @@ import type { Column } from "./column.js";
 import type { ColumnKind } from "./types.js";
 
 export class Table {
-  public readonly sqlName: string;
-  public readonly columns: Record<string, Column<ColumnKind>>;
+  private readonly sqlName: string;
+  private readonly columns: Record<string, Column<ColumnKind>>;
 
   public constructor(
     sqlName: string,
