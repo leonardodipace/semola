@@ -14,4 +14,4 @@ const orm = new Orm({
   },
 });
 
-const users = await orm.tables.users.findMany();
+const _users = await orm.tables.users.findMany();
