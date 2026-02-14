@@ -2,10 +2,14 @@ import { err, mightThrow, mightThrowSync, ok } from "../errors/index.js";
 import type { CacheOptions } from "./types.js";
 
 export class Cache<T> {
-  private options: CacheOptions;
+  private options: CacheOptions<T>;
+  private serialize: (value: T) => string;
+  private deserialize: (raw: string) => T;
 
-  public constructor(options: CacheOptions) {
+  public constructor(options: CacheOptions<T>) {
     this.options = options;
+    this.serialize = options.serializer ?? JSON.stringify;
+    this.deserialize = options.deserializer ?? ((raw) => JSON.parse(raw));
   }
 
   public async get(key: string) {
@@ -20,20 +24,25 @@ export class Cache<T> {
     );
 
     if (error) {
-      return err("CacheError", `Unable to get value for key ${key}`);
+      return this.fail("CacheError", `Unable to get value for key ${key}`);
     }
 
     if (!value) {
       return err("NotFoundError", `Key ${key} not found`);
     }
 
-    const [parseError, parsed] = mightThrowSync<T>(() => JSON.parse(value));
+    const [deserializeErr, deserialized] = mightThrowSync<T>(() =>
+      this.deserialize(value),
+    );
 
-    if (parseError) {
-      return err("CacheError", `Unable to parse value for key ${key}`);
+    if (deserializeErr) {
+      return this.fail(
+        "CacheError",
+        `Unable to deserialize value for key ${key}`,
+      );
     }
 
-    return ok(parsed);
+    return ok(deserialized);
   }
 
   public async set(key: string, value: T) {
@@ -41,40 +50,46 @@ export class Cache<T> {
       return ok(value);
     }
 
-    const [stringifyError, stringified] = mightThrowSync(() =>
-      JSON.stringify(value),
+    const [serializeErr, serialized] = mightThrowSync(() =>
+      this.serialize(value),
     );
 
-    if (stringifyError) {
-      return err("CacheError", `Unable to stringify value for key ${key}`);
+    if (serializeErr) {
+      return this.fail(
+        "CacheError",
+        `Unable to serialize value for key ${key}`,
+      );
     }
 
-    if (!stringified) {
-      return err("CacheError", `Unable to stringify value for key ${key}`);
+    if (!serialized) {
+      return this.fail(
+        "CacheError",
+        `Unable to serialize value for key ${key}`,
+      );
     }
 
-    if (!this.isTTLValid()) {
-      return err(
+    const ttl =
+      typeof this.options.ttl === "function"
+        ? this.options.ttl(key, value)
+        : this.options.ttl;
+
+    if (!this.isTTLValid(ttl)) {
+      return this.fail(
         "InvalidTTLError",
-        `Unable to save records with ttl equal to ${this.options.ttl}`,
+        `Unable to save records with ttl equal to ${ttl}`,
       );
     }
 
     const resolvedKey = this.resolveKey(key);
 
     const [setError] = await mightThrow(
-      this.options.ttl
-        ? this.options.redis.set(
-            resolvedKey,
-            stringified,
-            "PX",
-            this.options.ttl,
-          )
-        : this.options.redis.set(resolvedKey, stringified),
+      ttl
+        ? this.options.redis.set(resolvedKey, serialized, "PX", ttl)
+        : this.options.redis.set(resolvedKey, serialized),
     );
 
     if (setError) {
-      return err("CacheError", `Unable to set value for key ${key}`);
+      return this.fail("CacheError", `Unable to set value for key ${key}`);
     }
 
     return ok(value);
@@ -90,10 +105,20 @@ export class Cache<T> {
     const [error, data] = await mightThrow(this.options.redis.del(resolvedKey));
 
     if (error) {
-      return err("CacheError", `Unable to delete key ${key}`);
+      return this.fail("CacheError", `Unable to delete key ${key}`);
     }
 
     return ok(data);
+  }
+
+  private fail<E extends "CacheError" | "InvalidTTLError">(
+    type: E,
+    message: string,
+  ) {
+    const result = err(type, message);
+    const [cacheErr] = result;
+    this.options.onError?.(cacheErr);
+    return result;
   }
 
   private get isEnabled() {
@@ -108,9 +133,7 @@ export class Cache<T> {
     return key;
   }
 
-  private isTTLValid() {
-    const { ttl } = this.options;
-
+  private isTTLValid(ttl: number | undefined | null) {
     if (ttl === undefined || ttl === null) return true;
 
     if (!Number.isFinite(ttl)) return false;
