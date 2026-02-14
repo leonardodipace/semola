@@ -17,12 +17,15 @@ Creates a new cache instance with optional TTL configuration.
 ```typescript
 type CacheOptions = {
   redis: Bun.RedisClient;
-  ttl?: number; // Time-to-live in milliseconds
+  ttl?: number;     // Time-to-live in milliseconds
+  enabled?: boolean; // Enable/disable caching (default: true)
+  prefix?: string;   // Key prefix, e.g. "users" -> "users:key"
 };
 
 const cache = new Cache<User>({
   redis: redisClient,
-  ttl: 60000 // Optional: cache entries expire after 60 seconds
+  ttl: 60000, // Optional: cache entries expire after 60 seconds
+  prefix: "users" // Optional: keys are prefixed as "users:<key>"
 });
 ```
 
@@ -111,6 +114,36 @@ async function getUser(id: string) {
   
   return ok(user);
 }
+```
+
+### Prefix
+
+When a `prefix` is provided, all keys are automatically prefixed with `prefix:key`:
+
+```typescript
+const usersCache = new Cache<User>({
+  redis: redisClient,
+  prefix: "users"
+});
+
+await usersCache.set("123", user);   // Stored as "users:123"
+await usersCache.get("123");         // Reads from "users:123"
+await usersCache.delete("123");      // Deletes "users:123"
+```
+
+### Enabled
+
+When `enabled` is set to `false`, all cache operations become no-ops:
+
+- `get` returns a `NotFoundError` (cache miss)
+- `set` returns the value without storing it
+- `delete` returns `0` without deleting
+
+```typescript
+const cache = new Cache<User>({
+  redis: redisClient,
+  enabled: process.env.CACHE_ENABLED !== "false"
+});
 ```
 
 **Note on lifecycle management:** The `Cache` class does not manage the Redis client lifecycle. Since you provide the client when creating the cache, you're responsible for closing it when done:
