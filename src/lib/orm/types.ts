@@ -1,4 +1,4 @@
-import type { Table } from "./table.js";
+import type { Table, TableClient } from "./table.js";
 
 export type ColumnKind = "number" | "string" | "boolean";
 
@@ -18,4 +18,8 @@ export type ColumnOptions<Kind extends ColumnKind> = {
 export type OrmOptions<Tables extends Record<string, Table>> = {
   url: string;
   tables: Tables;
+};
+
+export type TableClients<Tables extends Record<string, Table>> = {
+  [K in keyof Tables]: TableClient<Tables[K]>;
 };
