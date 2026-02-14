@@ -44,7 +44,7 @@
   "scripts": {
     "build": "tsc",
     "check": "biome check --write . && tsc --noEmit",
-    "test": "bun test src",
+    "test": "bun test",
     "prepublishOnly": "bun run build"
   },
   "keywords": [
