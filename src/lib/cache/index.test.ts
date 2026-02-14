@@ -105,7 +105,7 @@ describe("Cache", () => {
       const [error, data] = await cache.get("invalid");
       expect(error).toEqual({
         type: "CacheError",
-        message: "Unable to parse value for key invalid",
+        message: "Unable to deserialize value for key invalid",
       });
       expect(data).toBeNull();
     });
@@ -190,7 +190,7 @@ describe("Cache", () => {
       const [error, data] = await cache.set("circular", circular);
       expect(error).toEqual({
         type: "CacheError",
-        message: "Unable to stringify value for key circular",
+        message: "Unable to serialize value for key circular",
       });
       expect(data).toBeNull();
     });
@@ -471,7 +471,7 @@ describe("Cache", () => {
       const [error, data] = await cache.set("key", "value");
       expect(error).toEqual({
         type: "CacheError",
-        message: "Unable to stringify value for key key",
+        message: "Unable to serialize value for key key",
       });
       expect(data).toBeNull();
     });
@@ -490,7 +490,7 @@ describe("Cache", () => {
       const [error, data] = await cache.get("key");
       expect(error).toEqual({
         type: "CacheError",
-        message: "Unable to parse value for key key",
+        message: "Unable to deserialize value for key key",
       });
       expect(data).toBeNull();
     });
