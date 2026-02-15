@@ -3,6 +3,7 @@ import { boolean, date, number, string } from "../column/index.js";
 import { Orm } from "../index.js";
 import { many, one } from "../relations/index.js";
 import { Table } from "./index.js";
+import type { CreateInput } from "./types.js";
 
 const testUrl =
   process.env.DATABASE_URL ||
@@ -625,5 +626,56 @@ describe("Table - delete method", () => {
     expect(async () => {
       await orm.tables.users.delete({} as any);
     }).toThrow();
+  });
+});
+
+describe("Table - CreateInput type validation", () => {
+  test("should infer required fields correctly", () => {
+    const testTable = new Table("test", {
+      id: number("id").primaryKey(),
+      name: string("name").notNull(),
+      email: string("email").notNull().unique(),
+      active: boolean("active").default(true),
+      createdAt: date("created_at").default(new Date()),
+    });
+
+    type TestInput = CreateInput<typeof testTable>;
+
+    // This should compile - has all required fields
+    const valid1: TestInput = {
+      name: "test",
+      email: "test@example.com",
+    };
+
+    // This should compile - has required + optional
+    const valid2: TestInput = {
+      name: "test",
+      email: "test@example.com",
+      active: false,
+    };
+
+    expect(valid1.name).toBe("test");
+    expect(valid2.email).toBe("test@example.com");
+  });
+
+  test("column builder methods should maintain metadata", () => {
+    const col1 = string("test");
+    const col2 = col1.notNull();
+    const col3 = col2.unique();
+    const col4 = col3.default("default");
+
+    expect(col1.meta.notNull).toBe(false);
+    expect(col2.meta.notNull).toBe(true);
+    expect(col3.meta.unique).toBe(true);
+    expect(col4.meta.hasDefault).toBe(true);
+  });
+
+  test("chained methods should preserve all metadata", () => {
+    const col = string("email").notNull().unique();
+
+    expect(col.meta.notNull).toBe(true);
+    expect(col.meta.unique).toBe(true);
+    expect(col.meta.primaryKey).toBe(false);
+    expect(col.meta.hasDefault).toBe(false);
   });
 });
