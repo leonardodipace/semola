@@ -74,3 +74,7 @@ export const string = (sqlName: string) => {
 export const boolean = (sqlName: string) => {
   return new Column(sqlName, "boolean");
 };
+
+export const date = (sqlName: string) => {
+  return new Column(sqlName, "date");
+};

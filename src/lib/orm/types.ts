@@ -1,13 +1,15 @@
 import type { Column } from "./column.js";
 import type { Table, TableClient } from "./table.js";
 
-export type ColumnKind = "number" | "string" | "boolean";
+export type ColumnKind = "number" | "string" | "boolean" | "date";
 
 export type ColumnValue<Kind extends ColumnKind> = Kind extends "number"
   ? number
   : Kind extends "string"
     ? string
-    : boolean;
+    : Kind extends "date"
+      ? Date
+      : boolean;
 
 export type ColumnMeta = {
   primaryKey: boolean;
