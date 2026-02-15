@@ -187,8 +187,8 @@ describe("Table - findMany with where clause", () => {
   });
 
   test("should throw error for invalid column names", async () => {
-    await expect(
-      orm.tables.users.findMany({
+    expect(
+      await orm.tables.users.findMany({
         // @ts-expect-error - invalidColumn doesn't exist on users table
         where: { invalidColumn: "value" },
       }),
@@ -362,18 +362,17 @@ describe("Table - findMany with where clause", () => {
   });
 
   test("findUnique should throw error for non-unique column", async () => {
-    await expect(
-      orm.tables.users.findUnique({
-        // Type system accepts this (active can be boolean filter), but runtime validates
-        where: { active: { equals: true } } as any,
+    expect(
+      await orm.tables.users.findUnique({
+        where: { active: { equals: true } },
       }),
     ).rejects.toThrow('Column "active" is not a primary key or unique column');
   });
 
   test("findUnique should throw error for multiple columns", async () => {
-    await expect(
-      orm.tables.users.findUnique({
-        where: { id: 1, email: "test@example.com" } as any,
+    expect(
+      await orm.tables.users.findUnique({
+        where: { id: 1, email: "test@example.com" },
       }),
     ).rejects.toThrow("findUnique requires exactly one column in where clause");
   });
@@ -526,9 +525,10 @@ describe("Table - create method", () => {
 
   test("should throw error when required field is missing", async () => {
     expect(async () => {
+      // @ts-expect-error - missing required fields
       await orm.tables.users.create({
         email: "invalid@example.com",
-      } as any);
+      });
     }).toThrow();
   });
 });
@@ -567,9 +567,10 @@ describe("Table - update method", () => {
 
   test("should throw error when where clause is missing", async () => {
     expect(async () => {
+      // @ts-expect-error - missing where clause
       await orm.tables.users.update({
         data: { name: "Test" },
-      } as any);
+      });
     }).toThrow();
   });
 });
@@ -618,7 +619,8 @@ describe("Table - delete method", () => {
 
   test("should throw error when where clause is missing", async () => {
     expect(async () => {
-      await orm.tables.users.delete({} as any);
+      // @ts-expect-error - missing where clause
+      await orm.tables.users.delete({});
     }).toThrow();
   });
 });
