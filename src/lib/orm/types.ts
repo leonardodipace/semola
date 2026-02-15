@@ -85,3 +85,16 @@ export type InferTableType<T extends Table> =
         }
       >
     : never;
+
+export type WhereClause<T extends Table> =
+  T extends Table<infer Cols>
+    ? {
+        [K in keyof Cols]?: Cols[K] extends Column<infer Kind, ColumnMeta>
+          ? ColumnValue<Kind> | null
+          : never;
+      }
+    : never;
+
+export type FindManyOptions<T extends Table> = {
+  where?: WhereClause<T>;
+};
