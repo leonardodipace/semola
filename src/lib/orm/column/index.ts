@@ -53,7 +53,7 @@ export class Column<
       primaryKey: this.options.primaryKey,
       notNull: this.options.notNull,
       unique: this.options.unique,
-      hasDefault: !!this.options.defaultValue,
+      hasDefault: this.options.defaultValue !== undefined,
     };
   }
 

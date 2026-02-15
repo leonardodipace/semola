@@ -2,12 +2,16 @@ import type { Column } from "../column/index.js";
 import type { ColumnKind, ColumnMeta } from "../column/types.js";
 import type { Relation, WithIncluded } from "../relations/types.js";
 import type {
+  BooleanFilter,
   CreateInput,
+  DateFilter,
   DeleteOptions,
   FindFirstOptions,
   FindManyOptions,
   FindUniqueOptions,
   InferTableType,
+  NumberFilter,
+  StringFilter,
   UpdateOptions,
   WhereClause,
 } from "./types.js";
@@ -29,6 +33,19 @@ export type {
   UpdateOptions,
   WhereClause,
 } from "./types.js";
+
+type AnyColumnFilter =
+  | StringFilter
+  | NumberFilter
+  | DateFilter
+  | BooleanFilter
+  | string
+  | number
+  | boolean
+  | Date
+  | null;
+
+type AnyWhereClause = Record<string, AnyColumnFilter>;
 
 export class Table<
   Columns extends Record<string, Column<ColumnKind, ColumnMeta>> = Record<
@@ -61,17 +78,20 @@ export class TableClient<T extends Table> {
   private readonly getTableClient?: (
     relation: Relation,
   ) => TableClient<Table> | undefined;
+  private readonly dialect: "sqlite" | "mysql" | "postgres";
 
   public constructor(
     sql: Bun.SQL,
     table: T,
     relations?: Record<string, Relation>,
     getTableClient?: (relation: Relation) => TableClient<Table> | undefined,
+    dialect: "sqlite" | "mysql" | "postgres" = "sqlite",
   ) {
     this.sql = sql;
     this.table = table;
     this.relations = relations;
     this.getTableClient = getTableClient;
+    this.dialect = dialect;
   }
 
   private validateColumnName(key: string) {
@@ -90,6 +110,25 @@ export class TableClient<T extends Table> {
     return column.sqlName;
   }
 
+  private getPrimaryKeyColumn() {
+    for (const [key, column] of Object.entries(this.table.columns)) {
+      if (column.meta.primaryKey) {
+        return { key, sqlName: column.sqlName, kind: column.columnKind };
+      }
+    }
+
+    return null;
+  }
+
+  private isFilterObject(value: unknown): value is Record<string, unknown> {
+    return (
+      typeof value === "object" &&
+      value !== null &&
+      !(value instanceof Date) &&
+      !Array.isArray(value)
+    );
+  }
+
   private buildCondition(key: string, value: unknown) {
     const sqlColumnName = this.getSqlColumnName(key);
 
@@ -98,12 +137,8 @@ export class TableClient<T extends Table> {
     }
 
     // Check if value is a filter object (has operator properties)
-    if (
-      typeof value === "object" &&
-      value !== null &&
-      !(value instanceof Date)
-    ) {
-      const filters = value as Record<string, unknown>;
+    if (this.isFilterObject(value)) {
+      const filters = value;
       const conditions = [];
 
       // Equality operator
@@ -115,7 +150,7 @@ export class TableClient<T extends Table> {
 
       // String operators (case-insensitive, works across all databases)
       if ("contains" in filters && typeof filters.contains === "string") {
-        const searchValue = filters.contains as string;
+        const searchValue = filters.contains;
         conditions.push(
           this
             .sql`LOWER(${this.sql(sqlColumnName)}) LIKE LOWER(${`%${searchValue}%`})`,
@@ -138,7 +173,7 @@ export class TableClient<T extends Table> {
 
       // Handle 'in' operator
       if ("in" in filters && Array.isArray(filters.in)) {
-        const inValues = filters.in as unknown[];
+        const inValues = filters.in;
         if (inValues.length === 0) {
           conditions.push(this.sql`FALSE`);
         } else if (inValues.length === 1) {
@@ -176,12 +211,12 @@ export class TableClient<T extends Table> {
     return this.sql`${this.sql(sqlColumnName)} = ${value}`;
   }
 
-  private buildWhereClause(where?: Record<string, unknown>) {
+  private buildWhereClause(where?: WhereClause<T>) {
     if (!where) {
       return null;
     }
 
-    const whereEntries = Object.entries(where);
+    const whereEntries: [string, unknown][] = Object.entries(where);
 
     if (whereEntries.length === 0) {
       return null;
@@ -205,12 +240,8 @@ export class TableClient<T extends Table> {
 
     // Add remaining conditions with AND
     for (let i = 1; i < whereEntries.length; i++) {
-      const entry = whereEntries[i];
-
-      if (!entry) continue;
-
-      const [key, value] = entry;
-
+      const [key, value] = whereEntries[i] ?? [];
+      if (!key) continue;
       const condition = this.buildCondition(key, value);
 
       whereClause = this.sql`${whereClause} AND ${condition}`;
@@ -224,15 +255,76 @@ export class TableClient<T extends Table> {
       return null;
     }
 
-    if (skip > 0 && take) {
-      return this.sql`LIMIT ${take} OFFSET ${skip}`;
+    if (take !== undefined) {
+      if (skip > 0) {
+        return this.sql`LIMIT ${take} OFFSET ${skip}`;
+      }
+
+      return this.sql`LIMIT ${take}`;
     }
 
     if (skip > 0) {
+      if (this.dialect === "postgres") {
+        return this.sql`LIMIT ALL OFFSET ${skip}`;
+      }
+
+      if (this.dialect === "mysql") {
+        const mysqlMaxLimit = Number.MAX_SAFE_INTEGER;
+        return this.sql`LIMIT ${mysqlMaxLimit} OFFSET ${skip}`;
+      }
+
       return this.sql`LIMIT -1 OFFSET ${skip}`;
     }
 
-    return this.sql`LIMIT ${take}`;
+    return null;
+  }
+
+  private collectValuesByKind(
+    rows: Record<string, unknown>[],
+    sqlColumnName: string,
+    kind: "number",
+  ): number[];
+  private collectValuesByKind(
+    rows: Record<string, unknown>[],
+    sqlColumnName: string,
+    kind: "string",
+  ): string[];
+  private collectValuesByKind(
+    rows: Record<string, unknown>[],
+    sqlColumnName: string,
+    kind: "date",
+  ): Date[];
+  private collectValuesByKind(
+    rows: Record<string, unknown>[],
+    sqlColumnName: string,
+    kind: "boolean",
+  ): boolean[];
+  private collectValuesByKind(
+    rows: Record<string, unknown>[],
+    sqlColumnName: string,
+    kind: ColumnKind,
+  ) {
+    if (kind === "number") {
+      return rows
+        .map((row) => row[sqlColumnName])
+        .filter((value): value is number => typeof value === "number");
+    }
+
+    if (kind === "string") {
+      return rows
+        .map((row) => row[sqlColumnName])
+        .filter((value): value is string => typeof value === "string");
+    }
+
+    if (kind === "date") {
+      return rows
+        .map((row) => row[sqlColumnName])
+        .filter((value): value is Date => value instanceof Date);
+    }
+
+    return rows
+      .map((row) => row[sqlColumnName])
+      .filter((value): value is boolean => typeof value === "boolean");
   }
 
   private convertBooleanValues(rows: Record<string, unknown>[]) {
@@ -273,58 +365,155 @@ export class TableClient<T extends Table> {
         // Get SQL column name for the FK
         const fkSqlColumn = this.getSqlColumnName(relation.fkColumn);
 
-        // Collect unique FK values
-        const fkValues = [
-          ...new Set(
-            rows.map((row) => row[fkSqlColumn]).filter((v) => v != null),
-          ),
-        ];
+        const relatedPk = relatedClient.getPrimaryKeyColumn();
+        if (!relatedPk) {
+          throw new Error("Relation requires a primary key on related table");
+        }
+        if (relatedPk.kind === "boolean") {
+          throw new Error(
+            "Boolean primary keys are not supported for relation loading",
+          );
+        }
 
-        if (fkValues.length === 0) continue;
+        let relatedRecords: Record<string, unknown>[] = [];
 
-        // Batch load all related records in a single query using IN operator
-        const relatedRecords = await relatedClient.findMany({
-          where: { id: { in: fkValues } } as WhereClause<Table>,
-        });
+        if (relatedPk.kind === "number") {
+          const fkValues = [
+            ...new Set(
+              this.collectValuesByKind(rows, fkSqlColumn, "number").filter(
+                (value) => value != null,
+              ),
+            ),
+          ];
+
+          if (fkValues.length === 0) continue;
+
+          const where: AnyWhereClause = {
+            [relatedPk.key]: { in: fkValues },
+          };
+
+          relatedRecords = await relatedClient.findMany({ where });
+        } else if (relatedPk.kind === "string") {
+          const fkValues = [
+            ...new Set(
+              this.collectValuesByKind(rows, fkSqlColumn, "string").filter(
+                (value) => value != null,
+              ),
+            ),
+          ];
+
+          if (fkValues.length === 0) continue;
+
+          const where: AnyWhereClause = {
+            [relatedPk.key]: { in: fkValues },
+          };
+
+          relatedRecords = await relatedClient.findMany({ where });
+        } else {
+          const fkValues = [
+            ...new Set(
+              this.collectValuesByKind(rows, fkSqlColumn, "date").filter(
+                (value) => value != null,
+              ),
+            ),
+          ];
+
+          if (fkValues.length === 0) continue;
+
+          const where: AnyWhereClause = {
+            [relatedPk.key]: { in: fkValues },
+          };
+
+          relatedRecords = await relatedClient.findMany({ where });
+        }
 
         // Build map for quick lookup
-        const relatedMap = new Map(
-          relatedRecords.map((r) => [(r as Record<string, unknown>).id, r]),
-        );
+        const relatedMap = new Map<unknown, unknown>();
+        for (const record of relatedRecords) {
+          if (typeof record !== "object" || record === null) continue;
+          const value = Reflect.get(record, relatedPk.sqlName);
+          if (value == null) continue;
+          relatedMap.set(value, record);
+        }
 
         // Attach loaded relations to rows
         for (const row of rows) {
           const fkValue = row[fkSqlColumn];
-          row[relationName] = fkValue ? relatedMap.get(fkValue) : undefined;
+          row[relationName] =
+            fkValue != null ? relatedMap.get(fkValue) : undefined;
         }
       } else if (relation.type === "many") {
         // many() relation: child has FK pointing to parent
         // Get SQL column name for the FK on the related table
         const fkSqlColumn = relatedClient.getSqlColumnName(relation.fkColumn);
 
-        // Collect unique parent IDs
-        const parentIds = [
-          ...new Set(
-            rows
-              .map((row) => (row as Record<string, unknown>).id)
-              .filter((v) => v != null),
-          ),
-        ];
+        const parentPk = this.getPrimaryKeyColumn();
+        if (!parentPk) {
+          throw new Error("Relation requires a primary key on source table");
+        }
+        if (parentPk.kind === "boolean") {
+          throw new Error(
+            "Boolean primary keys are not supported for relation loading",
+          );
+        }
 
-        if (parentIds.length === 0) continue;
+        let relatedRecords: Record<string, unknown>[] = [];
 
-        // Batch load all related records where FK matches parent IDs
-        const relatedRecords = await relatedClient.findMany({
-          where: {
+        if (parentPk.kind === "number") {
+          const parentIds = [
+            ...new Set(
+              this.collectValuesByKind(rows, parentPk.sqlName, "number").filter(
+                (value) => value != null,
+              ),
+            ),
+          ];
+
+          if (parentIds.length === 0) continue;
+
+          const where: AnyWhereClause = {
             [relation.fkColumn]: { in: parentIds },
-          } as WhereClause<Table>,
-        });
+          };
+
+          relatedRecords = await relatedClient.findMany({ where });
+        } else if (parentPk.kind === "string") {
+          const parentIds = [
+            ...new Set(
+              this.collectValuesByKind(rows, parentPk.sqlName, "string").filter(
+                (value) => value != null,
+              ),
+            ),
+          ];
+
+          if (parentIds.length === 0) continue;
+
+          const where: AnyWhereClause = {
+            [relation.fkColumn]: { in: parentIds },
+          };
+
+          relatedRecords = await relatedClient.findMany({ where });
+        } else {
+          const parentIds = [
+            ...new Set(
+              this.collectValuesByKind(rows, parentPk.sqlName, "date").filter(
+                (value) => value != null,
+              ),
+            ),
+          ];
+
+          if (parentIds.length === 0) continue;
+
+          const where: AnyWhereClause = {
+            [relation.fkColumn]: { in: parentIds },
+          };
+
+          relatedRecords = await relatedClient.findMany({ where });
+        }
 
         // Group related records by their FK value
         const relatedMap = new Map<unknown, unknown[]>();
 
         for (const record of relatedRecords) {
-          const fkValue = record[fkSqlColumn];
+          const fkValue = Reflect.get(record, fkSqlColumn);
 
           if (!relatedMap.has(fkValue)) {
             relatedMap.set(fkValue, []);
@@ -337,7 +526,7 @@ export class TableClient<T extends Table> {
 
         // Attach loaded relations to rows
         for (const row of rows) {
-          const parentId = (row as Record<string, unknown>).id;
+          const parentId = row[parentPk.sqlName];
           row[relationName] = relatedMap.get(parentId) || [];
         }
       }
@@ -420,7 +609,7 @@ export class TableClient<T extends Table> {
     options: FindUniqueOptions<T> & { include?: Inc },
   ): Promise<WithIncluded<InferTableType<T>, T, Inc> | null> {
     // Runtime validation: ensure only unique/primary key columns are used
-    const whereKeys = Object.keys(options.where as object);
+    const whereKeys = Object.keys(options.where);
 
     if (whereKeys.length === 0) {
       throw new Error(
@@ -443,22 +632,13 @@ export class TableClient<T extends Table> {
     }
 
     // Check if this column is a primary key or unique column
-    const columnWithOptions = column as unknown as {
-      options: { primaryKey?: boolean; unique?: boolean };
-    };
-
-    if (
-      !columnWithOptions.options.primaryKey &&
-      !columnWithOptions.options.unique
-    ) {
+    if (!column.meta.primaryKey && !column.meta.unique) {
       throw new Error(
         `Column "${columnKey}" is not a primary key or unique column. findUnique requires a unique constraint.`,
       );
     }
 
-    const whereClause = this.buildWhereClause(
-      options.where as Record<string, unknown>,
-    );
+    const whereClause = this.buildWhereClause(options.where);
 
     if (!whereClause) {
       throw new Error("findUnique requires a where clause");
@@ -502,30 +682,31 @@ export class TableClient<T extends Table> {
     this.convertBooleanValues(results);
 
     const [result] = results;
+    if (!result) {
+      throw new Error("create did not return a row");
+    }
 
-    return result as InferTableType<T>;
+    return result;
   }
 
   public async update(options: UpdateOptions<T>): Promise<InferTableType<T>[]> {
-    const whereClause = this.buildWhereClause(
-      options.where as Record<string, unknown>,
-    );
+    const whereClause = this.buildWhereClause(options.where);
 
     if (!whereClause) {
       throw new Error("update requires a where clause");
     }
 
-    const dataKeys = Object.keys(options.data);
+    const dataEntries: [string, unknown][] = Object.entries(options.data);
 
-    if (dataKeys.length === 0) {
+    if (dataEntries.length === 0) {
       throw new Error("update requires at least one field in data");
     }
 
     // Build a map to translate JS field names to SQL column names
     const sqlData: Record<string, unknown> = {};
-    for (const key of dataKeys) {
+    for (const [key, value] of dataEntries) {
       const sqlColumnName = this.getSqlColumnName(key);
-      sqlData[sqlColumnName] = (options.data as Record<string, unknown>)[key];
+      sqlData[sqlColumnName] = value;
     }
 
     return await this.sql<InferTableType<T>[]>`
@@ -540,9 +721,7 @@ export class TableClient<T extends Table> {
   }
 
   public async delete(options: DeleteOptions<T>): Promise<number> {
-    const whereClause = this.buildWhereClause(
-      options.where as Record<string, unknown>,
-    );
+    const whereClause = this.buildWhereClause(options.where);
 
     if (!whereClause) {
       throw new Error("delete requires a where clause");

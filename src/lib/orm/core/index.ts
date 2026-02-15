@@ -1,7 +1,7 @@
 import type { Relation } from "../relations/types.js";
 import type { Table } from "../table/index.js";
 import { TableClient } from "../table/index.js";
-import type { OrmOptions, TableClients } from "./types.js";
+import type { OrmDialect, OrmOptions, TableClients } from "./types.js";
 
 export type { OrmOptions, TableClients } from "./types.js";
 
@@ -12,6 +12,7 @@ const bindTables = <
   sql: Bun.SQL,
   tables: Tables,
   relations?: Relations,
+  dialect: OrmDialect = "sqlite",
 ) => {
   const result: Record<string, TableClient<Table>> = {};
   const tableNameMap = new Map<Table, string>();
@@ -30,11 +31,17 @@ const bindTables = <
 
     if (!match) continue;
 
-    result[key] = new TableClient(sql, match, relations?.[key], (relation) => {
-      const relatedTable = relation.table();
-      const relatedTableName = tableNameMap.get(relatedTable);
-      return relatedTableName ? result[relatedTableName] : undefined;
-    });
+    result[key] = new TableClient(
+      sql,
+      match,
+      relations?.[key],
+      (relation) => {
+        const relatedTable = relation.table();
+        const relatedTableName = tableNameMap.get(relatedTable);
+        return relatedTableName ? result[relatedTableName] : undefined;
+      },
+      dialect,
+    );
   }
 
   return result as unknown as TableClients<Tables, Relations>;
@@ -49,10 +56,20 @@ export class Orm<
 
   public constructor(options: OrmOptions<Tables, Relations>) {
     this.sql = new Bun.SQL(options.url);
-    this._tables = bindTables(this.sql, options.tables, options.relations);
+    const dialect = options.dialect ?? "sqlite";
+    this._tables = bindTables(
+      this.sql,
+      options.tables,
+      options.relations,
+      dialect,
+    );
   }
 
   public get tables() {
     return this._tables;
+  }
+
+  public close() {
+    this.sql.close();
   }
 }

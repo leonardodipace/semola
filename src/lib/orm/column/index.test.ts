@@ -79,6 +79,16 @@ describe("Column - modifiers", () => {
     expect(col).toBeInstanceOf(Column);
     expect(col.sqlName).toBe("user_id");
   });
+
+  test("hasDefault should be true for falsy defaults", () => {
+    const zeroDefault = number("count").default(0);
+    const falseDefault = boolean("active").default(false);
+    const emptyDefault = string("name").default("");
+
+    expect(zeroDefault.meta.hasDefault).toBe(true);
+    expect(falseDefault.meta.hasDefault).toBe(true);
+    expect(emptyDefault.meta.hasDefault).toBe(true);
+  });
 });
 
 describe("Column - SQL name mapping", () => {

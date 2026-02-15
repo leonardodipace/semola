@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { number, string } from "../column/index.js";
 import { many, one } from "../relations/index.js";
 import { Table } from "../table/index.js";
@@ -108,6 +108,11 @@ describe("Orm - table clients", () => {
     `;
   });
 
+  afterAll(async () => {
+    await orm.sql`DROP TABLE IF EXISTS test_orm_users`;
+    orm.close();
+  });
+
   test("table clients should have query methods", () => {
     expect(orm.tables.users.findMany).toBeDefined();
     expect(orm.tables.users.findFirst).toBeDefined();
@@ -176,6 +181,8 @@ describe("Orm - table clients", () => {
     expect(users.length).toBeGreaterThan(0);
     expect(posts.length).toBeGreaterThan(0);
     expect(posts[0]?.title).toBe("Test Post");
+
+    orm2.close();
   });
 });
 
@@ -192,5 +199,7 @@ describe("Orm - SQL access", () => {
 
     expect(orm.sql).toBeDefined();
     expect(typeof orm.sql).toBe("function");
+
+    orm.close();
   });
 });

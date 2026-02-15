@@ -19,11 +19,11 @@ export type Relation<T extends Table = Table> =
 
 // Extract relation names from a table
 type RelationNames<T extends Table> =
-  T extends Table<any, infer Rels> ? keyof Rels : never;
+  T extends Table<infer _Cols, infer Rels> ? keyof Rels : never;
 
 // Helper type to determine if a relation returns an array or single value
 type RelationResult<T extends Table, K extends string> = T extends Table<
-  any,
+  infer _Cols,
   infer Rels
 >
   ? K extends keyof Rels

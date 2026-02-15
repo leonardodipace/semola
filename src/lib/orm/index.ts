@@ -11,7 +11,7 @@ export type {
 } from "./column/types.js";
 export { Orm } from "./core/index.js";
 // Export types from core
-export type { OrmOptions, TableClients } from "./core/types.js";
+export type { OrmDialect, OrmOptions, TableClients } from "./core/types.js";
 
 // Export relation utilities
 export { many, one } from "./relations/index.js";

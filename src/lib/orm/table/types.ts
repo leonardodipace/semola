@@ -3,13 +3,11 @@ import type { ColumnKind, ColumnMeta, ColumnValue } from "../column/types.js";
 import type { IncludeOptions } from "../relations/types.js";
 import type { Table } from "./index.js";
 
-type IsRequired<Meta extends ColumnMeta> = Meta["primaryKey"] extends true
-  ? true
+type IsNullable<Meta extends ColumnMeta> = Meta["primaryKey"] extends true
+  ? false
   : Meta["notNull"] extends true
-    ? true
-    : Meta["hasDefault"] extends true
-      ? true
-      : false;
+    ? false
+    : true;
 
 // For create: required fields are non-nullable with no default, excluding primary keys
 type IsCreateRequired<Meta extends ColumnMeta> = Meta["primaryKey"] extends true
@@ -36,43 +34,15 @@ type CreateOptionalColumns<Cols> = {
     : never;
 }[keyof Cols];
 
-type RequiredColumns<Cols> = {
-  [K in keyof Cols]: Cols[K] extends Column<infer _K, infer M>
-    ? IsRequired<M> extends true
-      ? K
-      : never
-    : never;
-}[keyof Cols];
-
-type OptionalColumns<Cols> = {
-  [K in keyof Cols]: Cols[K] extends Column<infer _K, infer M>
-    ? IsRequired<M> extends true
-      ? never
-      : K
-    : never;
-}[keyof Cols];
-
 type Prettify<T> = { [K in keyof T]: T[K] } & {};
 
 export type InferTableType<T extends Table> =
   T extends Table<infer Cols>
-    ? Prettify<
-        {
-          [K in RequiredColumns<Cols>]: Cols[K] extends Column<
-            infer Kind,
-            ColumnMeta
-          >
-            ? ColumnValue<Kind>
-            : never;
-        } & {
-          [K in OptionalColumns<Cols>]?: Cols[K] extends Column<
-            infer Kind,
-            ColumnMeta
-          >
-            ? ColumnValue<Kind> | null
-            : never;
-        }
-      >
+    ? Prettify<{
+        [K in keyof Cols]: Cols[K] extends Column<infer Kind, infer Meta>
+          ? ColumnValue<Kind> | (IsNullable<Meta> extends true ? null : never)
+          : never;
+      }>
     : never;
 
 // String filter operators
@@ -117,7 +87,7 @@ type ColumnFilter<Kind extends ColumnKind> = Kind extends "string"
       : boolean | null | BooleanFilter;
 
 export type WhereClause<T extends Table> =
-  T extends Table<infer Cols, any>
+  T extends Table<infer Cols, infer _Rels>
     ? {
         [K in keyof Cols]?: Cols[K] extends Column<infer Kind, ColumnMeta>
           ? ColumnFilter<Kind>
@@ -154,9 +124,9 @@ export type CreateInput<T extends Table> =
         } & {
           [K in CreateOptionalColumns<Cols>]?: Cols[K] extends Column<
             infer Kind,
-            ColumnMeta
+            infer Meta
           >
-            ? ColumnValue<Kind> | null
+            ? ColumnValue<Kind> | (IsNullable<Meta> extends true ? null : never)
             : never;
         }
       >
@@ -165,8 +135,8 @@ export type CreateInput<T extends Table> =
 export type UpdateInput<T extends Table> =
   T extends Table<infer Cols>
     ? Prettify<{
-        [K in keyof Cols]?: Cols[K] extends Column<infer Kind, ColumnMeta>
-          ? ColumnValue<Kind> | null
+        [K in keyof Cols]?: Cols[K] extends Column<infer Kind, infer Meta>
+          ? ColumnValue<Kind> | (IsNullable<Meta> extends true ? null : never)
           : never;
       }>
     : never;

@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { boolean, date, number, string } from "../column/index.js";
 import { Orm } from "../index.js";
 import { many, one } from "../relations/index.js";
@@ -10,7 +10,8 @@ const usersTable = new Table("test_users", {
   name: string("name").notNull(),
   email: string("email").unique().notNull(),
   active: boolean("active").default(true),
-  createdAt: date("created_at").default(new Date()),
+  // Static value only for type metadata; SQL default remains in schema setup.
+  createdAt: date("created_at").default(new Date(0)),
 });
 
 const postsTable = new Table("test_posts", {
@@ -525,12 +526,12 @@ describe("Table - create method", () => {
   });
 
   test("should throw error when required field is missing", async () => {
-    expect(async () => {
-      // @ts-expect-error - missing required fields
-      await orm.tables.users.create({
-        email: "invalid@example.com",
-      });
-    }).toThrow();
+    // @ts-expect-error - missing required fields
+    const invalidCreate = orm.tables.users.create({
+      email: "invalid@example.com",
+    });
+
+    await expect(invalidCreate).rejects.toThrow();
   });
 });
 
@@ -567,12 +568,12 @@ describe("Table - update method", () => {
   });
 
   test("should throw error when where clause is missing", async () => {
-    expect(async () => {
-      // @ts-expect-error - missing where clause
-      await orm.tables.users.update({
-        data: { name: "Test" },
-      });
-    }).toThrow();
+    // @ts-expect-error - missing where clause
+    const invalidUpdate = orm.tables.users.update({
+      data: { name: "Test" },
+    });
+
+    await expect(invalidUpdate).rejects.toThrow();
   });
 });
 
@@ -619,10 +620,8 @@ describe("Table - delete method", () => {
   });
 
   test("should throw error when where clause is missing", async () => {
-    expect(async () => {
-      // @ts-expect-error - missing where clause
-      await orm.tables.users.delete({});
-    }).toThrow();
+    // @ts-expect-error - missing where clause
+    await expect(orm.tables.users.delete({})).rejects.toThrow();
   });
 });
 
@@ -633,7 +632,8 @@ describe("Table - CreateInput type validation", () => {
       name: string("name").notNull(),
       email: string("email").notNull().unique(),
       active: boolean("active").default(true),
-      createdAt: date("created_at").default(new Date()),
+      // Static value only for type metadata; SQL default remains in schema setup.
+      createdAt: date("created_at").default(new Date(0)),
     });
 
     type TestInput = CreateInput<typeof testTable>;
@@ -675,4 +675,94 @@ describe("Table - CreateInput type validation", () => {
     expect(col.meta.primaryKey).toBe(false);
     expect(col.meta.hasDefault).toBe(false);
   });
+});
+
+describe("Table - relations with custom primary key", () => {
+  const accountsTable = new Table("test_accounts", {
+    accountId: number("account_id").primaryKey(),
+    name: string("name").notNull(),
+  });
+
+  const messagesTable = new Table("test_messages", {
+    messageId: number("message_id").primaryKey(),
+    accountId: number("account_id").notNull(),
+    body: string("body").notNull(),
+  });
+
+  const customOrm = new Orm({
+    url: ":memory:",
+    tables: {
+      accounts: accountsTable,
+      messages: messagesTable,
+    },
+    relations: {
+      accounts: {
+        messages: many("accountId", () => messagesTable),
+      },
+      messages: {
+        account: one("accountId", () => accountsTable),
+      },
+    },
+  });
+
+  beforeAll(async () => {
+    await customOrm.sql`DROP TABLE IF EXISTS test_messages`;
+    await customOrm.sql`DROP TABLE IF EXISTS test_accounts`;
+
+    await customOrm.sql`
+      CREATE TABLE test_accounts (
+        account_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL
+      )
+    `;
+
+    await customOrm.sql`
+      CREATE TABLE test_messages (
+        message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        body TEXT NOT NULL,
+        FOREIGN KEY (account_id) REFERENCES test_accounts(account_id)
+      )
+    `;
+
+    await customOrm.sql`
+      INSERT INTO test_accounts (name)
+      VALUES ('Acme')
+    `;
+
+    await customOrm.sql`
+      INSERT INTO test_messages (account_id, body)
+      VALUES (1, 'One'), (1, 'Two')
+    `;
+  });
+
+  afterAll(async () => {
+    await customOrm.sql`DROP TABLE IF EXISTS test_messages`;
+    await customOrm.sql`DROP TABLE IF EXISTS test_accounts`;
+    customOrm.close();
+  });
+
+  test("include should use custom primary key for one()", async () => {
+    const message = await customOrm.tables.messages.findFirst({
+      include: { account: true },
+    });
+
+    expect(message?.account).toBeDefined();
+    expect(message?.account?.name).toBe("Acme");
+  });
+
+  test("include should use custom primary key for many()", async () => {
+    const account = await customOrm.tables.accounts.findFirst({
+      include: { messages: true },
+    });
+
+    expect(account?.messages).toBeDefined();
+    expect(account?.messages.length).toBe(2);
+  });
+});
+
+afterAll(async () => {
+  await orm.sql`DROP TABLE IF EXISTS test_posts`;
+  await orm.sql`DROP TABLE IF EXISTS test_users`;
+  orm.close();
 });
