@@ -6,20 +6,22 @@ export * from "./column.js";
 export * from "./table.js";
 export * from "./types.js";
 
-function bindTables<Tables extends Record<string, Table>>(
+const bindTables = <Tables extends Record<string, Table>>(
   sql: Bun.SQL,
   tables: Tables,
-): TableClients<Tables> {
+) => {
   const result: Record<string, TableClient<Table>> = {};
+
   for (const [key, table] of Object.entries(tables)) {
     result[key] = new TableClient(sql, table);
   }
+
   return result as TableClients<Tables>;
-}
+};
 
 export class Orm<Tables extends Record<string, Table>> {
-  private readonly sql: Bun.SQL;
   private readonly _tables: TableClients<Tables>;
+  public readonly sql: Bun.SQL;
 
   public constructor(options: OrmOptions<Tables>) {
     this.sql = new Bun.SQL(options.url);
