@@ -31,6 +31,10 @@
     "./pubsub": {
       "import": "./dist/lib/pubsub/index.js",
       "types": "./dist/lib/pubsub/index.d.ts"
+    },
+    "./orm": {
+      "import": "./dist/lib/orm/index.js",
+      "types": "./dist/lib/orm/index.d.ts"
     }
   },
   "files": [
