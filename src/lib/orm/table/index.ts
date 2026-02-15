@@ -161,7 +161,10 @@ export class TableClient<T extends Table> {
         throw new Error(`No valid operators found for column: ${key}`);
       }
 
-      let combined = conditions[0]!;
+      const [firstCondition] = conditions;
+
+      let combined = firstCondition;
+
       for (let i = 1; i < conditions.length; i++) {
         combined = this.sql`${combined} AND ${conditions[i]}`;
       }
@@ -202,7 +205,12 @@ export class TableClient<T extends Table> {
 
     // Add remaining conditions with AND
     for (let i = 1; i < whereEntries.length; i++) {
-      const [key, value] = whereEntries[i]!;
+      const entry = whereEntries[i];
+
+      if (!entry) continue;
+
+      const [key, value] = entry;
+
       const condition = this.buildCondition(key, value);
 
       whereClause = this.sql`${whereClause} AND ${condition}`;
@@ -314,12 +322,17 @@ export class TableClient<T extends Table> {
 
         // Group related records by their FK value
         const relatedMap = new Map<unknown, unknown[]>();
+
         for (const record of relatedRecords) {
-          const fkValue = (record as Record<string, unknown>)[fkSqlColumn];
+          const fkValue = record[fkSqlColumn];
+
           if (!relatedMap.has(fkValue)) {
             relatedMap.set(fkValue, []);
           }
-          relatedMap.get(fkValue)!.push(record);
+
+          const match = relatedMap.get(fkValue);
+
+          if (match) match.push(record);
         }
 
         // Attach loaded relations to rows
@@ -419,7 +432,10 @@ export class TableClient<T extends Table> {
       throw new Error("findUnique requires exactly one column in where clause");
     }
 
-    const columnKey = whereKeys[0]!;
+    const [columnKey] = whereKeys;
+
+    if (!columnKey) return null;
+
     const column = this.table.columns[columnKey];
 
     if (!column) {
@@ -484,7 +500,10 @@ export class TableClient<T extends Table> {
     `;
 
     this.convertBooleanValues(results);
-    return results[0]!;
+
+    const [result] = results;
+
+    return result as InferTableType<T>;
   }
 
   public async update(options: UpdateOptions<T>): Promise<InferTableType<T>[]> {

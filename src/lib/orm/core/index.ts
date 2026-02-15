@@ -18,20 +18,23 @@ const bindTables = <
 
   // Build map of Table instances to their names
   for (const key in tables) {
-    tableNameMap.set(tables[key]!, key);
+    const match = tables[key];
+
+    if (!match) continue;
+
+    tableNameMap.set(match, key);
   }
 
   for (const key in tables) {
-    result[key] = new TableClient(
-      sql,
-      tables[key]!,
-      relations?.[key],
-      (relation) => {
-        const relatedTable = relation.table();
-        const relatedTableName = tableNameMap.get(relatedTable);
-        return relatedTableName ? result[relatedTableName] : undefined;
-      },
-    );
+    const match = tables[key];
+
+    if (!match) continue;
+
+    result[key] = new TableClient(sql, match, relations?.[key], (relation) => {
+      const relatedTable = relation.table();
+      const relatedTableName = tableNameMap.get(relatedTable);
+      return relatedTableName ? result[relatedTableName] : undefined;
+    });
   }
 
   return result as unknown as TableClients<Tables, Relations>;

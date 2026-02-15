@@ -421,10 +421,11 @@ describe("Table - findMany with where clause", () => {
       include: { author: true },
     });
     expect(posts.length).toBeGreaterThan(0);
-    const post = posts[0]!;
-    expect(post.author).toBeDefined();
-    expect(post.author?.name).toBeDefined();
-    expect(post.author?.email).toBeDefined();
+
+    const [post] = posts;
+    expect(post?.author).toBeDefined();
+    expect(post?.author?.name).toBeDefined();
+    expect(post?.author?.email).toBeDefined();
   });
 
   test("findFirst with include should load one() relations", async () => {
