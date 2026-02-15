@@ -504,3 +504,126 @@ describe("Table - findMany with where clause", () => {
     }
   });
 });
+describe("Table - create method", () => {
+  test("should create a new user with required fields", async () => {
+    const newUser = await orm.tables.users.create({
+      name: "Eve",
+      email: "eve@example.com",
+    });
+
+    expect(newUser.id).toBeDefined();
+    expect(newUser.name).toBe("Eve");
+    expect(newUser.email).toBe("eve@example.com");
+    expect(newUser.active).toBe(true); // Default value
+  });
+
+  test("should create a user with optional fields set", async () => {
+    const newUser = await orm.tables.users.create({
+      name: "Frank",
+      email: "frank@example.com",
+      active: false,
+    });
+
+    expect(newUser.name).toBe("Frank");
+    expect(newUser.email).toBe("frank@example.com");
+    expect(newUser.active).toBe(false);
+  });
+
+  test("should throw error when required field is missing", async () => {
+    expect(async () => {
+      await orm.tables.users.create({
+        email: "invalid@example.com",
+      } as any);
+    }).toThrow();
+  });
+});
+
+describe("Table - update method", () => {
+  test("should update a user by id", async () => {
+    const updated = await orm.tables.users.update({
+      where: { id: 1 },
+      data: { name: "Alice Updated" },
+    });
+
+    expect(updated.length).toBe(1);
+    expect(updated[0]?.name).toBe("Alice Updated");
+  });
+
+  test("should update multiple fields", async () => {
+    const updated = await orm.tables.users.update({
+      where: { id: 2 },
+      data: { name: "Bob Updated", active: true },
+    });
+
+    expect(updated.length).toBe(1);
+    expect(updated[0]?.name).toBe("Bob Updated");
+    expect(updated[0]?.active).toBe(true);
+  });
+
+  test("should update multiple users matching condition", async () => {
+    const updated = await orm.tables.users.update({
+      where: { active: false },
+      data: { active: true },
+    });
+
+    expect(updated.length).toBeGreaterThan(1);
+    expect(updated.every((u: any) => u.active === true)).toBe(true);
+  });
+
+  test("should throw error when where clause is missing", async () => {
+    expect(async () => {
+      await orm.tables.users.update({
+        data: { name: "Test" },
+      } as any);
+    }).toThrow();
+  });
+});
+
+describe("Table - delete method", () => {
+  test("should delete a user by id", async () => {
+    // First create a user to delete
+    const newUser = await orm.tables.users.create({
+      name: "ToDelete",
+      email: "todelete@example.com",
+    });
+
+    const count = await orm.tables.users.delete({
+      where: { id: newUser.id },
+    });
+
+    expect(count).toBe(1);
+
+    // Verify it's deleted
+    const found = await orm.tables.users.findFirst({
+      where: { id: newUser.id },
+    });
+    expect(found).toBeNull();
+  });
+
+  test("should delete multiple users matching condition", async () => {
+    // Create two users to delete
+    await orm.tables.users.create({
+      name: "Delete1",
+      email: "delete1@example.com",
+      active: false,
+    });
+
+    await orm.tables.users.create({
+      name: "Delete2",
+      email: "delete2@example.com",
+      active: false,
+    });
+
+    const count = await orm.tables.users.delete({
+      where: { name: { in: ["Delete1", "Delete2"] } },
+    });
+
+    expect(count).toBe(2);
+  });
+
+  test("should throw error when where clause is missing", async () => {
+    expect(async () => {
+      await orm.tables.users.delete({} as any);
+    }).toThrow();
+  });
+});

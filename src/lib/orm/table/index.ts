@@ -2,10 +2,13 @@ import type { Column } from "../column/index.js";
 import type { ColumnKind, ColumnMeta } from "../column/types.js";
 import type { Relation, WithIncluded } from "../relations/types.js";
 import type {
+  CreateInput,
+  DeleteOptions,
   FindFirstOptions,
   FindManyOptions,
   FindUniqueOptions,
   InferTableType,
+  UpdateOptions,
   WhereClause,
 } from "./types.js";
 
@@ -13,13 +16,17 @@ import type {
 export type { WithIncluded } from "../relations/types.js";
 export type {
   BooleanFilter,
+  CreateInput,
   DateFilter,
+  DeleteOptions,
   FindFirstOptions,
   FindManyOptions,
   FindUniqueOptions,
   InferTableType,
   NumberFilter,
   StringFilter,
+  UpdateInput,
+  UpdateOptions,
   WhereClause,
 } from "./types.js";
 
@@ -438,5 +445,73 @@ export class TableClient<T extends Table> {
       this.getTableClient,
     );
     return result as WithIncluded<InferTableType<T>, T, Inc>;
+  }
+
+  public async create(data: CreateInput<T>): Promise<InferTableType<T>> {
+    if (Object.keys(data).length === 0) {
+      throw new Error("create requires at least one field");
+    }
+
+    // Build a map to translate JS field names to SQL column names
+    const sqlData: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(data)) {
+      const sqlColumnName = this.getSqlColumnName(key);
+      sqlData[sqlColumnName] = value;
+    }
+
+    const results = await this.sql<InferTableType<T>[]>`
+      INSERT INTO ${this.sql(this.table.sqlName)} ${this.sql(sqlData)}
+      RETURNING *
+    `;
+
+    return results[0]!;
+  }
+
+  public async update(options: UpdateOptions<T>): Promise<InferTableType<T>[]> {
+    const whereClause = this.buildWhereClause(
+      options.where as Record<string, unknown>,
+    );
+
+    if (!whereClause) {
+      throw new Error("update requires a where clause");
+    }
+
+    const dataKeys = Object.keys(options.data);
+
+    if (dataKeys.length === 0) {
+      throw new Error("update requires at least one field in data");
+    }
+
+    // Build a map to translate JS field names to SQL column names
+    const sqlData: Record<string, unknown> = {};
+    for (const key of dataKeys) {
+      const sqlColumnName = this.getSqlColumnName(key);
+      sqlData[sqlColumnName] = (options.data as Record<string, unknown>)[key];
+    }
+
+    return this.sql<InferTableType<T>[]>`
+      UPDATE ${this.sql(this.table.sqlName)}
+      SET ${this.sql(sqlData)}
+      WHERE ${whereClause}
+      RETURNING *
+    `;
+  }
+
+  public async delete(options: DeleteOptions<T>): Promise<number> {
+    const whereClause = this.buildWhereClause(
+      options.where as Record<string, unknown>,
+    );
+
+    if (!whereClause) {
+      throw new Error("delete requires a where clause");
+    }
+
+    const results = await this.sql<InferTableType<T>[]>`
+      DELETE FROM ${this.sql(this.table.sqlName)}
+      WHERE ${whereClause}
+      RETURNING *
+    `;
+
+    return results.length;
   }
 }

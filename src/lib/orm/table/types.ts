@@ -11,6 +11,31 @@ type IsRequired<Meta extends ColumnMeta> = Meta["primaryKey"] extends true
       ? true
       : false;
 
+// For create: required fields are non-nullable with no default, excluding primary keys
+type IsCreateRequired<Meta extends ColumnMeta> = Meta["primaryKey"] extends true
+  ? false
+  : Meta["notNull"] extends true
+    ? Meta["hasDefault"] extends true
+      ? false
+      : true
+    : false;
+
+type CreateRequiredColumns<Cols> = {
+  [K in keyof Cols]: Cols[K] extends Column<infer _K, infer M>
+    ? IsCreateRequired<M> extends true
+      ? K
+      : never
+    : never;
+}[keyof Cols];
+
+type CreateOptionalColumns<Cols> = {
+  [K in keyof Cols]: Cols[K] extends Column<infer _K, infer M>
+    ? IsCreateRequired<M> extends true
+      ? never
+      : K
+    : never;
+}[keyof Cols];
+
 type RequiredColumns<Cols> = {
   [K in keyof Cols]: Cols[K] extends Column<infer _K, infer M>
     ? IsRequired<M> extends true
@@ -115,4 +140,42 @@ export type FindFirstOptions<T extends Table> = {
 export type FindUniqueOptions<T extends Table> = {
   where: WhereClause<T>;
   include?: IncludeOptions<T>;
+};
+export type CreateInput<T extends Table> =
+  T extends Table<infer Cols>
+    ? Prettify<
+        {
+          [K in CreateRequiredColumns<Cols>]: Cols[K] extends Column<
+            infer Kind,
+            ColumnMeta
+          >
+            ? ColumnValue<Kind>
+            : never;
+        } & {
+          [K in CreateOptionalColumns<Cols>]?: Cols[K] extends Column<
+            infer Kind,
+            ColumnMeta
+          >
+            ? ColumnValue<Kind> | null
+            : never;
+        }
+      >
+    : never;
+
+export type UpdateInput<T extends Table> =
+  T extends Table<infer Cols>
+    ? Prettify<{
+        [K in keyof Cols]?: Cols[K] extends Column<infer Kind, ColumnMeta>
+          ? ColumnValue<Kind> | null
+          : never;
+      }>
+    : never;
+
+export type UpdateOptions<T extends Table> = {
+  where: WhereClause<T>;
+  data: UpdateInput<T>;
+};
+
+export type DeleteOptions<T extends Table> = {
+  where: WhereClause<T>;
 };

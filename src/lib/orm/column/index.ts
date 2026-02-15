@@ -42,6 +42,15 @@ export class Column<
     return this._sqlName;
   }
 
+  public get meta() {
+    return {
+      primaryKey: this.options.primaryKey,
+      notNull: this.options.notNull,
+      unique: this.options.unique,
+      hasDefault: !!this.options.defaultValue,
+    };
+  }
+
   public primaryKey() {
     return this.withOptions({ primaryKey: true }) as Column<
       Kind,
