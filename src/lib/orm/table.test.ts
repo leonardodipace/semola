@@ -249,5 +249,77 @@ describe("Table - findMany with where clause", () => {
     });
     expect(users.length).toBe(2);
     expect(users.every((u) => u.active && u.id >= 2)).toBe(true);
+
+    // Restore original test data for subsequent tests
+    await orm.sql`DELETE FROM test_users`;
+    await orm.sql`ALTER SEQUENCE test_users_id_seq RESTART WITH 1`;
+    await orm.sql`
+      INSERT INTO test_users (name, email, active)
+      VALUES
+        ('Alice', 'alice@example.com', true),
+        ('Bob', 'bob@example.com', false),
+        ('Charlie', 'charlie@example.com', true),
+        ('Diana', 'diana@example.com', false)
+    `;
+  });
+
+  test("findFirst should return first matching row", async () => {
+    const user = await orm.tables.users.findFirst({
+      where: { active: true },
+    });
+    expect(user).not.toBeNull();
+    expect(user?.active).toBe(true);
+  });
+
+  test("findFirst should return null when no matches found", async () => {
+    const user = await orm.tables.users.findFirst({
+      where: { name: "NonExistent" },
+    });
+    expect(user).toBeNull();
+  });
+
+  test("findFirst without where should return first row", async () => {
+    const user = await orm.tables.users.findFirst();
+    expect(user).not.toBeNull();
+  });
+
+  test("findUnique should return row by primary key", async () => {
+    const user = await orm.tables.users.findUnique({
+      where: { id: 1 },
+    });
+    expect(user).not.toBeNull();
+    expect(user?.id).toBe(1);
+  });
+
+  test("findUnique should return row by unique field", async () => {
+    const user = await orm.tables.users.findUnique({
+      where: { email: "alice@example.com" },
+    });
+    expect(user).not.toBeNull();
+    expect(user?.email).toBe("alice@example.com");
+  });
+
+  test("findUnique should return null when not found", async () => {
+    const user = await orm.tables.users.findUnique({
+      where: { id: 999 },
+    });
+    expect(user).toBeNull();
+  });
+
+  test("findUnique should throw error for non-unique column", async () => {
+    await expect(
+      orm.tables.users.findUnique({
+        // Type system accepts this (active can be boolean filter), but runtime validates
+        where: { active: { equals: true } } as any,
+      }),
+    ).rejects.toThrow('Column "active" is not a primary key or unique column');
+  });
+
+  test("findUnique should throw error for multiple columns", async () => {
+    await expect(
+      orm.tables.users.findUnique({
+        where: { id: 1, email: "test@example.com" } as any,
+      }),
+    ).rejects.toThrow("findUnique requires exactly one column in where clause");
   });
 });

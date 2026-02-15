@@ -2,8 +2,11 @@ import type { Column } from "./column.js";
 import type {
   ColumnKind,
   ColumnMeta,
+  FindFirstOptions,
   FindManyOptions,
+  FindUniqueOptions,
   InferTableType,
+  WhereClause,
 } from "./types.js";
 
 export class Table<
@@ -156,5 +159,85 @@ export class TableClient<T extends Table> {
       SELECT * FROM ${this.sql(this.table.sqlName)}
       WHERE ${whereClause}
     `;
+  }
+
+  public async findFirst(options?: FindFirstOptions<T>) {
+    if (!options?.where) {
+      const [result] = await this.sql<InferTableType<T>[]>`
+        SELECT * FROM ${this.sql(this.table.sqlName)}
+        LIMIT 1
+      `;
+
+      return result ?? null;
+    }
+
+    const whereClause = this.buildWhereClause(options.where);
+
+    if (!whereClause) {
+      const [result] = await this.sql<InferTableType<T>[]>`
+        SELECT * FROM ${this.sql(this.table.sqlName)}
+        LIMIT 1
+      `;
+
+      return result ?? null;
+    }
+
+    const [result] = await this.sql<InferTableType<T>[]>`
+      SELECT * FROM ${this.sql(this.table.sqlName)}
+      WHERE ${whereClause}
+      LIMIT 1
+    `;
+
+    return result ?? null;
+  }
+
+  public async findUnique(options: FindUniqueOptions<T>) {
+    // Runtime validation: ensure only unique/primary key columns are used
+    const whereKeys = Object.keys(options.where as object);
+
+    if (whereKeys.length === 0) {
+      throw new Error(
+        "findUnique requires at least one column in where clause",
+      );
+    }
+
+    if (whereKeys.length > 1) {
+      throw new Error("findUnique requires exactly one column in where clause");
+    }
+
+    const columnKey = whereKeys[0]!;
+    const column = this.table.columns[columnKey];
+
+    if (!column) {
+      throw new Error(`Invalid column: ${columnKey}`);
+    }
+
+    // Check if this column is a primary key or unique column
+    const columnWithOptions = column as unknown as {
+      options: { primaryKey?: boolean; unique?: boolean };
+    };
+
+    if (
+      !columnWithOptions.options.primaryKey &&
+      !columnWithOptions.options.unique
+    ) {
+      throw new Error(
+        `Column "${columnKey}" is not a primary key or unique column. findUnique requires a unique constraint.`,
+      );
+    }
+
+    const whereClause = this.buildWhereClause(options.where as WhereClause<T>);
+
+    if (!whereClause) {
+      throw new Error("findUnique requires a where clause");
+    }
+
+    const results = await this.sql<InferTableType<T>[]>`
+      SELECT * FROM ${this.sql(this.table.sqlName)}
+      WHERE ${whereClause}
+      LIMIT 1
+    `;
+
+    return results[0] ?? null;
   }
 }

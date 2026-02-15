@@ -45,7 +45,10 @@ export class Column<
   }
 
   public unique() {
-    return this.withOptions({ unique: true }) as Column<Kind, Meta>;
+    return this.withOptions({ unique: true }) as Column<
+      Kind,
+      Meta & { unique: true }
+    >;
   }
 
   public default(value: ColumnValue<Kind>) {

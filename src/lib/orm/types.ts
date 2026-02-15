@@ -15,12 +15,14 @@ export type ColumnMeta = {
   primaryKey: boolean;
   notNull: boolean;
   hasDefault: boolean;
+  unique: boolean;
 };
 
 export type DefaultColumnMeta = {
   primaryKey: false;
   notNull: false;
   hasDefault: false;
+  unique: false;
 };
 
 export type ColumnOptions<Kind extends ColumnKind> = {
@@ -135,4 +137,12 @@ export type WhereClause<T extends Table> =
 
 export type FindManyOptions<T extends Table> = {
   where?: WhereClause<T>;
+};
+
+export type FindFirstOptions<T extends Table> = {
+  where?: WhereClause<T>;
+};
+
+export type FindUniqueOptions<T extends Table> = {
+  where: WhereClause<T>;
 };
