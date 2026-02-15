@@ -4,6 +4,7 @@ import type { OrmOptions, TableClients } from "./types.js";
 
 export * from "./column.js";
 export * from "./table.js";
+export * from "./types.js";
 
 function bindTables<Tables extends Record<string, Table>>(
   sql: Bun.SQL,

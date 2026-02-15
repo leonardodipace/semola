@@ -1,10 +1,10 @@
 import type { Column } from "./column.js";
-import type { ColumnKind } from "./types.js";
+import type { ColumnKind, ColumnMeta, InferTableType } from "./types.js";
 
 export class Table<
-  Columns extends Record<string, Column<ColumnKind>> = Record<
+  Columns extends Record<string, Column<ColumnKind, ColumnMeta>> = Record<
     string,
-    Column<ColumnKind>
+    Column<ColumnKind, ColumnMeta>
   >,
 > {
   private readonly _sqlName: string;
@@ -34,6 +34,8 @@ export class TableClient<T extends Table> {
   }
 
   public async findMany() {
-    return this.sql`SELECT * FROM ${this.sql(this.table.sqlName)}`;
+    return this.sql<InferTableType<T>[]>`
+      SELECT * FROM ${this.sql(this.table.sqlName)}
+    `;
   }
 }
