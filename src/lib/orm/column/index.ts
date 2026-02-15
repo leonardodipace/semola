@@ -4,6 +4,7 @@ import type {
   ColumnOptions,
   ColumnValue,
   DefaultColumnMeta,
+  UpdateMeta,
 } from "./types.js";
 
 export type {
@@ -12,6 +13,7 @@ export type {
   ColumnOptions,
   ColumnValue,
   DefaultColumnMeta,
+  UpdateMeta,
 } from "./types.js";
 
 const defaultOptions = {
@@ -51,31 +53,33 @@ export class Column<
     };
   }
 
-  public primaryKey() {
+  public primaryKey(): Column<Kind, UpdateMeta<Meta, "primaryKey", true>> {
     return this.withOptions({ primaryKey: true }) as Column<
       Kind,
-      Meta & { primaryKey: true }
+      UpdateMeta<Meta, "primaryKey", true>
     >;
   }
 
-  public notNull() {
+  public notNull(): Column<Kind, UpdateMeta<Meta, "notNull", true>> {
     return this.withOptions({ notNull: true }) as Column<
       Kind,
-      Meta & { notNull: true }
+      UpdateMeta<Meta, "notNull", true>
     >;
   }
 
-  public unique() {
+  public unique(): Column<Kind, UpdateMeta<Meta, "unique", true>> {
     return this.withOptions({ unique: true }) as Column<
       Kind,
-      Meta & { unique: true }
+      UpdateMeta<Meta, "unique", true>
     >;
   }
 
-  public default(value: ColumnValue<Kind>) {
+  public default(
+    value: ColumnValue<Kind>,
+  ): Column<Kind, UpdateMeta<Meta, "hasDefault", true>> {
     return this.withOptions({ defaultValue: value }) as Column<
       Kind,
-      Meta & { hasDefault: true }
+      UpdateMeta<Meta, "hasDefault", true>
     >;
   }
 
@@ -88,17 +92,17 @@ export class Column<
 }
 
 export const number = (sqlName: string) => {
-  return new Column(sqlName, "number");
+  return new Column<"number", DefaultColumnMeta>(sqlName, "number");
 };
 
 export const string = (sqlName: string) => {
-  return new Column(sqlName, "string");
+  return new Column<"string", DefaultColumnMeta>(sqlName, "string");
 };
 
 export const boolean = (sqlName: string) => {
-  return new Column(sqlName, "boolean");
+  return new Column<"boolean", DefaultColumnMeta>(sqlName, "boolean");
 };
 
 export const date = (sqlName: string) => {
-  return new Column(sqlName, "date");
+  return new Column<"date", DefaultColumnMeta>(sqlName, "date");
 };

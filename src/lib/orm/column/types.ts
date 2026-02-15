@@ -22,6 +22,18 @@ export type DefaultColumnMeta = {
   unique: false;
 };
 
+// Helper type to update a single key in metadata
+export type UpdateMeta<
+  Meta extends ColumnMeta,
+  Key extends keyof ColumnMeta,
+  Value extends boolean,
+> = {
+  primaryKey: Key extends "primaryKey" ? Value : Meta["primaryKey"];
+  notNull: Key extends "notNull" ? Value : Meta["notNull"];
+  hasDefault: Key extends "hasDefault" ? Value : Meta["hasDefault"];
+  unique: Key extends "unique" ? Value : Meta["unique"];
+};
+
 export type ColumnOptions<Kind extends ColumnKind> = {
   primaryKey: boolean;
   notNull: boolean;
