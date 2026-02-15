@@ -44,6 +44,10 @@ export class Column<
     return this._sqlName;
   }
 
+  public get columnKind() {
+    return this.kind;
+  }
+
   public get meta() {
     return {
       primaryKey: this.options.primaryKey,

@@ -96,12 +96,12 @@ describe("Orm - table clients", () => {
 
   beforeAll(async () => {
     // Cleanup
-    await orm.sql`DROP TABLE IF EXISTS test_orm_users CASCADE`;
+    await orm.sql`DROP TABLE IF EXISTS test_orm_users`;
 
     // Create table
     await orm.sql`
       CREATE TABLE test_orm_users (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         email TEXT NOT NULL UNIQUE
       )
@@ -133,6 +133,7 @@ describe("Orm - table clients", () => {
       title: string("title").notNull(),
     });
 
+    // Create a combined ORM with both tables
     const orm2 = new Orm({
       url: ":memory:",
       tables: {
@@ -141,10 +142,26 @@ describe("Orm - table clients", () => {
       },
     });
 
-    await orm2.sql`DROP TABLE IF EXISTS test_orm_posts CASCADE`;
+    // Create users table
+    await orm2.sql`DROP TABLE IF EXISTS test_orm_users`;
+    await orm2.sql`
+      CREATE TABLE test_orm_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE
+      )
+    `;
+
+    // Insert test user
+    await orm2.sql`
+      INSERT INTO test_orm_users (name, email) VALUES ('TestUser', 'test@example.com')
+    `;
+
+    // Create posts table
+    await orm2.sql`DROP TABLE IF EXISTS test_orm_posts`;
     await orm2.sql`
       CREATE TABLE test_orm_posts (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL
       )
     `;

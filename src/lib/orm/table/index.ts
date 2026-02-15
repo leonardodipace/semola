@@ -113,10 +113,12 @@ export class TableClient<T extends Table> {
         );
       }
 
-      // String operators
+      // String operators (case-insensitive, works across all databases)
       if ("contains" in filters && typeof filters.contains === "string") {
+        const searchValue = filters.contains as string;
         conditions.push(
-          this.sql`${this.sql(sqlColumnName)} ILIKE ${`%${filters.contains}%`}`,
+          this
+            .sql`LOWER(${this.sql(sqlColumnName)}) LIKE LOWER(${`%${searchValue}%`})`,
         );
       }
 
@@ -215,14 +217,28 @@ export class TableClient<T extends Table> {
     }
 
     if (skip > 0 && take) {
-      return this.sql`OFFSET ${skip} LIMIT ${take}`;
+      return this.sql`LIMIT ${take} OFFSET ${skip}`;
     }
 
     if (skip > 0) {
-      return this.sql`OFFSET ${skip}`;
+      return this.sql`LIMIT -1 OFFSET ${skip}`;
     }
 
     return this.sql`LIMIT ${take}`;
+  }
+
+  private convertBooleanValues(rows: Record<string, unknown>[]) {
+    for (const row of rows) {
+      for (const [_key, column] of Object.entries(this.table.columns)) {
+        const sqlColumnName = column.sqlName;
+        const value = row[sqlColumnName];
+
+        // Check if this column is a boolean type and convert 0/1 to true/false
+        if (column.columnKind === "boolean" && typeof value === "number") {
+          row[sqlColumnName] = value === 1;
+        }
+      }
+    }
   }
 
   private async loadIncludedRelations(
@@ -342,6 +358,7 @@ export class TableClient<T extends Table> {
     }
 
     const rows = await sql;
+    this.convertBooleanValues(rows);
     await this.loadIncludedRelations(
       rows,
       options?.include,
@@ -375,6 +392,7 @@ export class TableClient<T extends Table> {
     if (!result) return null;
 
     const rows = [result];
+    this.convertBooleanValues(rows);
     await this.loadIncludedRelations(
       rows,
       options?.include,
@@ -439,6 +457,7 @@ export class TableClient<T extends Table> {
     const result = results[0];
     if (!result) return null;
 
+    this.convertBooleanValues([result]);
     await this.loadIncludedRelations(
       [result],
       options?.include,
@@ -464,6 +483,7 @@ export class TableClient<T extends Table> {
       RETURNING *
     `;
 
+    this.convertBooleanValues(results);
     return results[0]!;
   }
 
@@ -489,12 +509,15 @@ export class TableClient<T extends Table> {
       sqlData[sqlColumnName] = (options.data as Record<string, unknown>)[key];
     }
 
-    return this.sql<InferTableType<T>[]>`
+    return await this.sql<InferTableType<T>[]>`
       UPDATE ${this.sql(this.table.sqlName)}
       SET ${this.sql(sqlData)}
       WHERE ${whereClause}
       RETURNING *
-    `;
+    `.then((results) => {
+      this.convertBooleanValues(results);
+      return results;
+    });
   }
 
   public async delete(options: DeleteOptions<T>): Promise<number> {

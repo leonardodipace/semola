@@ -39,15 +39,13 @@ const orm = new Orm({
 describe("Table - findMany with where clause", () => {
   beforeAll(async () => {
     // Cleanup test tables
-    await orm.sql`DROP TABLE IF EXISTS test_posts CASCADE`;
-    await orm.sql`DROP TABLE IF EXISTS test_users CASCADE`;
-    await orm.sql`DROP SEQUENCE IF EXISTS test_users_id_seq CASCADE`;
-    await orm.sql`DROP SEQUENCE IF EXISTS test_posts_id_seq CASCADE`;
+    await orm.sql`DROP TABLE IF EXISTS test_posts`;
+    await orm.sql`DROP TABLE IF EXISTS test_users`;
 
     // Create tables
     await orm.sql`
       CREATE TABLE test_users (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         email TEXT NOT NULL UNIQUE,
         active BOOLEAN DEFAULT true,
@@ -56,10 +54,11 @@ describe("Table - findMany with where clause", () => {
     `;
     await orm.sql`
       CREATE TABLE test_posts (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
         content TEXT NOT NULL,
-        author_id INTEGER NOT NULL REFERENCES test_users(id)
+        author_id INTEGER NOT NULL,
+        FOREIGN KEY (author_id) REFERENCES test_users(id)
       )
     `;
 
@@ -129,10 +128,10 @@ describe("Table - findMany with where clause", () => {
 
   test("should handle null values with IS NULL", async () => {
     // Create a table with nullable columns for this test
-    await orm.sql`DROP TABLE IF EXISTS test_nullable CASCADE`;
+    await orm.sql`DROP TABLE IF EXISTS test_nullable`;
     await orm.sql`
       CREATE TABLE test_nullable (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT,
         value INTEGER
       )
@@ -151,25 +150,24 @@ describe("Table - findMany with where clause", () => {
       value: number("value"),
     });
 
-    const nullableOrm = new Orm({
-      url: ":memory:",
-      tables: { nullable: nullableTable },
-    });
+    // Create client using the same orm's sql connection
+    const { TableClient } = await import("./index.js");
+    const nullableClient = new TableClient(orm.sql, nullableTable);
 
-    const nullNameRows = await nullableOrm.tables.nullable.findMany({
+    const nullNameRows = await nullableClient.findMany({
       where: { name: null },
     });
     expect(nullNameRows.length).toBe(1);
     expect(nullNameRows[0]?.value).toBe(200);
 
-    const nullValueRows = await nullableOrm.tables.nullable.findMany({
+    const nullValueRows = await nullableClient.findMany({
       where: { value: null },
     });
     expect(nullValueRows.length).toBe(1);
     expect(nullValueRows[0]?.name).toBe("another");
 
     // Cleanup
-    await orm.sql`DROP TABLE IF EXISTS test_nullable CASCADE`;
+    await orm.sql`DROP TABLE IF EXISTS test_nullable`;
   });
 
   test("should prevent SQL injection in string values", async () => {
@@ -299,9 +297,9 @@ describe("Table - findMany with where clause", () => {
     expect(users.every((u: any) => u.active && u.id >= 2)).toBe(true);
 
     // Restore original test data for subsequent tests
-    await orm.sql`DELETE FROM test_users`;
     await orm.sql`DELETE FROM test_posts`;
-    await orm.sql`ALTER SEQUENCE test_users_id_seq RESTART WITH 1`;
+    await orm.sql`DELETE FROM test_users`;
+    await orm.sql`DELETE FROM sqlite_sequence WHERE name='test_users'`;
     await orm.sql`
       INSERT INTO test_users (name, email, active)
       VALUES
