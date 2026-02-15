@@ -51,6 +51,55 @@ export class TableClient<T extends Table> {
       return this.sql`${this.sql(key)} IS NULL`;
     }
 
+    // Check if value is a filter object (has operator properties)
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      !(value instanceof Date)
+    ) {
+      const filters = value as Record<string, unknown>;
+      const conditions = [];
+
+      // Equality operator
+      if ("equals" in filters) {
+        conditions.push(this.sql`${this.sql(key)} = ${filters.equals}`);
+      }
+
+      // String operators
+      if ("contains" in filters && typeof filters.contains === "string") {
+        conditions.push(
+          this.sql`${this.sql(key)} ILIKE ${`%${filters.contains}%`}`,
+        );
+      }
+
+      // Number/Date comparison operators
+      if ("gt" in filters) {
+        conditions.push(this.sql`${this.sql(key)} > ${filters.gt}`);
+      }
+      if ("gte" in filters) {
+        conditions.push(this.sql`${this.sql(key)} >= ${filters.gte}`);
+      }
+      if ("lt" in filters) {
+        conditions.push(this.sql`${this.sql(key)} < ${filters.lt}`);
+      }
+      if ("lte" in filters) {
+        conditions.push(this.sql`${this.sql(key)} <= ${filters.lte}`);
+      }
+
+      // Combine multiple operators with AND
+      if (conditions.length === 0) {
+        throw new Error(`No valid operators found for column: ${key}`);
+      }
+
+      let combined = conditions[0]!;
+      for (let i = 1; i < conditions.length; i++) {
+        combined = this.sql`${combined} AND ${conditions[i]}`;
+      }
+
+      return combined;
+    }
+
+    // Direct equality
     return this.sql`${this.sql(key)} = ${value}`;
   }
 

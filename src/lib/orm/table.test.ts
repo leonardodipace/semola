@@ -160,4 +160,94 @@ describe("Table - findMany with where clause", () => {
       }),
     ).rejects.toThrow("Invalid column: invalidColumn");
   });
+
+  test("should filter with equals operator", async () => {
+    const users = await orm.tables.users.findMany({
+      where: { name: { equals: "Alice" } },
+    });
+    expect(users.length).toBe(1);
+    expect(users[0]?.name).toBe("Alice");
+
+    // Test with boolean
+    const activeUsers = await orm.tables.users.findMany({
+      where: { active: { equals: true } },
+    });
+    expect(activeUsers.length).toBe(2);
+  });
+
+  test("should filter with contains operator (case insensitive)", async () => {
+    const users = await orm.tables.users.findMany({
+      where: { name: { contains: "ali" } },
+    });
+    expect(users.length).toBe(1);
+    expect(users[0]?.name).toBe("Alice");
+
+    // Test case insensitivity
+    const usersUpper = await orm.tables.users.findMany({
+      where: { name: { contains: "ALI" } },
+    });
+    expect(usersUpper.length).toBe(1);
+  });
+
+  test("should filter with gt operator", async () => {
+    // Insert test data with known IDs
+    await orm.sql`DELETE FROM test_users`;
+    await orm.sql`
+      INSERT INTO test_users (id, name, email, active)
+      VALUES
+        (1, 'User1', 'user1@example.com', true),
+        (2, 'User2', 'user2@example.com', true),
+        (3, 'User3', 'user3@example.com', true)
+    `;
+
+    const users = await orm.tables.users.findMany({
+      where: { id: { gt: 1 } },
+    });
+    expect(users.length).toBe(2);
+    expect(users.every((u) => u.id > 1)).toBe(true);
+  });
+
+  test("should filter with gte operator", async () => {
+    const users = await orm.tables.users.findMany({
+      where: { id: { gte: 2 } },
+    });
+    expect(users.length).toBe(2);
+    expect(users.every((u) => u.id >= 2)).toBe(true);
+  });
+
+  test("should filter with lt operator", async () => {
+    const users = await orm.tables.users.findMany({
+      where: { id: { lt: 3 } },
+    });
+    expect(users.length).toBe(2);
+    expect(users.every((u) => u.id < 3)).toBe(true);
+  });
+
+  test("should filter with lte operator", async () => {
+    const users = await orm.tables.users.findMany({
+      where: { id: { lte: 2 } },
+    });
+    expect(users.length).toBe(2);
+    expect(users.every((u) => u.id <= 2)).toBe(true);
+  });
+
+  test("should filter with multiple operators combined", async () => {
+    // ID between 1 and 2 (inclusive)
+    const users = await orm.tables.users.findMany({
+      where: { id: { gte: 1, lte: 2 } },
+    });
+    expect(users.length).toBe(2);
+    expect(users.every((u) => u.id >= 1 && u.id <= 2)).toBe(true);
+  });
+
+  test("should combine direct values and operators", async () => {
+    const users = await orm.tables.users.findMany({
+      where: {
+        active: true,
+        id: { gte: 2 },
+      },
+    });
+    expect(users.length).toBe(2);
+    expect(users.every((u) => u.active && u.id >= 2)).toBe(true);
+  });
 });

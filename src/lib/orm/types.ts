@@ -86,11 +86,49 @@ export type InferTableType<T extends Table> =
       >
     : never;
 
+// String filter operators
+export type StringFilter = {
+  equals?: string;
+  contains?: string;
+};
+
+// Number filter operators
+export type NumberFilter = {
+  equals?: number;
+  gt?: number;
+  gte?: number;
+  lt?: number;
+  lte?: number;
+};
+
+// Date filter operators
+export type DateFilter = {
+  equals?: Date;
+  gt?: Date;
+  gte?: Date;
+  lt?: Date;
+  lte?: Date;
+};
+
+// Boolean filter operators
+export type BooleanFilter = {
+  equals?: boolean;
+};
+
+// Map column kind to its filter type
+type ColumnFilter<Kind extends ColumnKind> = Kind extends "string"
+  ? string | null | StringFilter
+  : Kind extends "number"
+    ? number | null | NumberFilter
+    : Kind extends "date"
+      ? Date | null | DateFilter
+      : boolean | null | BooleanFilter;
+
 export type WhereClause<T extends Table> =
   T extends Table<infer Cols>
     ? {
         [K in keyof Cols]?: Cols[K] extends Column<infer Kind, ColumnMeta>
-          ? ColumnValue<Kind> | null
+          ? ColumnFilter<Kind>
           : never;
       }
     : never;
