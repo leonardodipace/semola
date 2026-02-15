@@ -5,10 +5,6 @@ import { many, one } from "../relations/index.js";
 import { Table } from "./index.js";
 import type { CreateInput } from "./types.js";
 
-const testUrl =
-  process.env.DATABASE_URL ||
-  "postgres://postgres:postgres@localhost:5432/semola_test";
-
 const usersTable = new Table("test_users", {
   id: number("id").primaryKey(),
   name: string("name").notNull(),
@@ -25,7 +21,7 @@ const postsTable = new Table("test_posts", {
 });
 
 const orm = new Orm({
-  url: testUrl,
+  url: ":memory:",
   tables: {
     users: usersTable,
     posts: postsTable,
@@ -156,7 +152,7 @@ describe("Table - findMany with where clause", () => {
     });
 
     const nullableOrm = new Orm({
-      url: testUrl,
+      url: ":memory:",
       tables: { nullable: nullableTable },
     });
 

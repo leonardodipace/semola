@@ -4,10 +4,6 @@ import { many, one } from "../relations/index.js";
 import { Table } from "../table/index.js";
 import { Orm } from "./index.js";
 
-const testUrl =
-  process.env.DATABASE_URL ||
-  "postgres://postgres:postgres@localhost:5432/semola_test";
-
 describe("Orm - initialization", () => {
   test("should create Orm instance with tables", () => {
     const usersTable = new Table("users", {
@@ -16,7 +12,7 @@ describe("Orm - initialization", () => {
     });
 
     const orm = new Orm({
-      url: testUrl,
+      url: ":memory:",
       tables: {
         users: usersTable,
       },
@@ -40,7 +36,7 @@ describe("Orm - initialization", () => {
     });
 
     const orm = new Orm({
-      url: testUrl,
+      url: ":memory:",
       tables: {
         users: usersTable,
         posts: postsTable,
@@ -64,7 +60,7 @@ describe("Orm - initialization", () => {
     });
 
     const orm = new Orm({
-      url: testUrl,
+      url: ":memory:",
       tables: {
         users: usersTable,
         posts: postsTable,
@@ -92,7 +88,7 @@ describe("Orm - table clients", () => {
   });
 
   const orm = new Orm({
-    url: testUrl,
+    url: ":memory:",
     tables: {
       users: usersTable,
     },
@@ -138,7 +134,7 @@ describe("Orm - table clients", () => {
     });
 
     const orm2 = new Orm({
-      url: testUrl,
+      url: ":memory:",
       tables: {
         users: usersTable,
         posts: postsTable,
@@ -173,7 +169,7 @@ describe("Orm - SQL access", () => {
     });
 
     const orm = new Orm({
-      url: testUrl,
+      url: ":memory:",
       tables: { users: usersTable },
     });
 
