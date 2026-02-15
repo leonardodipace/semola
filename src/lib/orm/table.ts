@@ -187,9 +187,7 @@ export class TableClient<T extends Table> {
   }
 
   public async findFirst(options?: FindFirstOptions<T>) {
-    const skip = options?.skip ?? 0;
     const whereClause = this.buildWhereClause(options?.where);
-    const pagination = this.buildPagination(skip, 1);
 
     let sql = this.sql<InferTableType<T>[]>`
       SELECT * FROM ${this.sql(this.table.sqlName)}
@@ -202,12 +200,10 @@ export class TableClient<T extends Table> {
       `;
     }
 
-    if (pagination) {
-      sql = this.sql<InferTableType<T>[]>`
-        ${sql}
-        ${pagination}
-      `;
-    }
+    sql = this.sql<InferTableType<T>[]>`
+      ${sql}
+      LIMIT 1
+    `;
 
     const [result] = await sql;
     return result ?? null;

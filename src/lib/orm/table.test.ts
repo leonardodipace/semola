@@ -353,14 +353,6 @@ describe("Table - findMany with where clause", () => {
     expect(page1[0]?.id).not.toBe(page2[0]?.id);
   });
 
-  test("findFirst with skip should skip results", async () => {
-    const first = await orm.tables.users.findFirst();
-    const second = await orm.tables.users.findFirst({
-      skip: 1,
-    });
-    expect(first?.id).not.toBe(second?.id);
-  });
-
   test("findMany with where and pagination should work together", async () => {
     const users = await orm.tables.users.findMany({
       where: { active: true },
