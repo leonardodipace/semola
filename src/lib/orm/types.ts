@@ -137,10 +137,13 @@ export type WhereClause<T extends Table> =
 
 export type FindManyOptions<T extends Table> = {
   where?: WhereClause<T>;
+  take?: number;
+  skip?: number;
 };
 
 export type FindFirstOptions<T extends Table> = {
   where?: WhereClause<T>;
+  skip?: number;
 };
 
 export type FindUniqueOptions<T extends Table> = {

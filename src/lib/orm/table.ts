@@ -6,7 +6,6 @@ import type {
   FindManyOptions,
   FindUniqueOptions,
   InferTableType,
-  WhereClause,
 } from "./types.js";
 
 export class Table<
@@ -106,7 +105,11 @@ export class TableClient<T extends Table> {
     return this.sql`${this.sql(key)} = ${value}`;
   }
 
-  private buildWhereClause(where: Record<string, unknown>) {
+  private buildWhereClause(where?: Record<string, unknown>) {
+    if (!where) {
+      return null;
+    }
+
     const whereEntries = Object.entries(where);
 
     if (whereEntries.length === 0) {
@@ -140,54 +143,73 @@ export class TableClient<T extends Table> {
     return whereClause;
   }
 
+  private buildPagination(skip: number, take: number | undefined) {
+    if (skip === 0 && !take) {
+      return null;
+    }
+
+    if (skip > 0 && take) {
+      return this.sql`OFFSET ${skip} LIMIT ${take}`;
+    }
+
+    if (skip > 0) {
+      return this.sql`OFFSET ${skip}`;
+    }
+
+    return this.sql`LIMIT ${take}`;
+  }
+
   public async findMany(options?: FindManyOptions<T>) {
-    if (!options?.where) {
-      return this.sql<InferTableType<T>[]>`
-        SELECT * FROM ${this.sql(this.table.sqlName)}
-      `;
-    }
+    const whereClause = this.buildWhereClause(options?.where);
+    const skip = options?.skip ?? 0;
+    const take = options?.take;
+    const pagination = this.buildPagination(skip, take);
 
-    const whereClause = this.buildWhereClause(options.where);
-
-    if (!whereClause) {
-      return this.sql<InferTableType<T>[]>`
-        SELECT * FROM ${this.sql(this.table.sqlName)}
-      `;
-    }
-
-    return this.sql<InferTableType<T>[]>`
+    let sql = this.sql<InferTableType<T>[]>`
       SELECT * FROM ${this.sql(this.table.sqlName)}
-      WHERE ${whereClause}
     `;
+
+    if (whereClause) {
+      sql = this.sql<InferTableType<T>[]>`
+        ${sql}
+        WHERE ${whereClause}
+      `;
+    }
+
+    if (pagination) {
+      sql = this.sql<InferTableType<T>[]>`
+        ${sql}
+        ${pagination}
+      `;
+    }
+
+    return sql;
   }
 
   public async findFirst(options?: FindFirstOptions<T>) {
-    if (!options?.where) {
-      const [result] = await this.sql<InferTableType<T>[]>`
-        SELECT * FROM ${this.sql(this.table.sqlName)}
-        LIMIT 1
-      `;
+    const skip = options?.skip ?? 0;
+    const whereClause = this.buildWhereClause(options?.where);
+    const pagination = this.buildPagination(skip, 1);
 
-      return result ?? null;
-    }
-
-    const whereClause = this.buildWhereClause(options.where);
-
-    if (!whereClause) {
-      const [result] = await this.sql<InferTableType<T>[]>`
-        SELECT * FROM ${this.sql(this.table.sqlName)}
-        LIMIT 1
-      `;
-
-      return result ?? null;
-    }
-
-    const [result] = await this.sql<InferTableType<T>[]>`
+    let sql = this.sql<InferTableType<T>[]>`
       SELECT * FROM ${this.sql(this.table.sqlName)}
-      WHERE ${whereClause}
-      LIMIT 1
     `;
 
+    if (whereClause) {
+      sql = this.sql<InferTableType<T>[]>`
+        ${sql}
+        WHERE ${whereClause}
+      `;
+    }
+
+    if (pagination) {
+      sql = this.sql<InferTableType<T>[]>`
+        ${sql}
+        ${pagination}
+      `;
+    }
+
+    const [result] = await sql;
     return result ?? null;
   }
 
@@ -226,7 +248,9 @@ export class TableClient<T extends Table> {
       );
     }
 
-    const whereClause = this.buildWhereClause(options.where as WhereClause<T>);
+    const whereClause = this.buildWhereClause(
+      options.where as Record<string, unknown>,
+    );
 
     if (!whereClause) {
       throw new Error("findUnique requires a where clause");

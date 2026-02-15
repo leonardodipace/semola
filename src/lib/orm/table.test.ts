@@ -322,4 +322,51 @@ describe("Table - findMany with where clause", () => {
       }),
     ).rejects.toThrow("findUnique requires exactly one column in where clause");
   });
+
+  test("findMany with take should limit results", async () => {
+    const users = await orm.tables.users.findMany({
+      take: 2,
+    });
+    expect(users.length).toBe(2);
+  });
+
+  test("findMany with skip should skip results", async () => {
+    const allUsers = await orm.tables.users.findMany();
+    const skipped = await orm.tables.users.findMany({
+      skip: 2,
+    });
+    expect(skipped.length).toBe(allUsers.length - 2);
+    expect(skipped[0]?.id).toBe(allUsers[2]?.id);
+  });
+
+  test("findMany with take and skip should paginate", async () => {
+    const page1 = await orm.tables.users.findMany({
+      take: 2,
+      skip: 0,
+    });
+    const page2 = await orm.tables.users.findMany({
+      take: 2,
+      skip: 2,
+    });
+    expect(page1.length).toBe(2);
+    expect(page2.length).toBe(2);
+    expect(page1[0]?.id).not.toBe(page2[0]?.id);
+  });
+
+  test("findFirst with skip should skip results", async () => {
+    const first = await orm.tables.users.findFirst();
+    const second = await orm.tables.users.findFirst({
+      skip: 1,
+    });
+    expect(first?.id).not.toBe(second?.id);
+  });
+
+  test("findMany with where and pagination should work together", async () => {
+    const users = await orm.tables.users.findMany({
+      where: { active: true },
+      take: 1,
+    });
+    expect(users.length).toBeLessThanOrEqual(1);
+    expect(users.every((u) => u.active)).toBe(true);
+  });
 });
