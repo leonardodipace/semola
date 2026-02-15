@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { boolean, date, number, string } from "./column.js";
-import { Orm } from "./index.js";
-import { Table } from "./table.js";
+import { boolean, date, number, string } from "../column/index.js";
+import { Orm } from "../index.js";
+import { many, one } from "../relations/index.js";
+import { Table } from "./index.js";
 
 const testUrl =
   process.env.DATABASE_URL ||
@@ -15,17 +16,38 @@ const usersTable = new Table("test_users", {
   createdAt: date("created_at").default(new Date()),
 });
 
+const postsTable = new Table("test_posts", {
+  id: number("id").primaryKey(),
+  title: string("title").notNull(),
+  content: string("content").notNull(),
+  authorId: number("author_id").notNull(),
+});
+
 const orm = new Orm({
   url: testUrl,
   tables: {
     users: usersTable,
+    posts: postsTable,
+  },
+  relations: {
+    users: {
+      posts: many("authorId", () => postsTable),
+    },
+    posts: {
+      author: one("authorId", () => usersTable),
+    },
   },
 });
 
 describe("Table - findMany with where clause", () => {
   beforeAll(async () => {
-    // Setup test table
+    // Cleanup test tables
+    await orm.sql`DROP TABLE IF EXISTS test_posts CASCADE`;
     await orm.sql`DROP TABLE IF EXISTS test_users CASCADE`;
+    await orm.sql`DROP SEQUENCE IF EXISTS test_users_id_seq CASCADE`;
+    await orm.sql`DROP SEQUENCE IF EXISTS test_posts_id_seq CASCADE`;
+
+    // Create tables
     await orm.sql`
       CREATE TABLE test_users (
         id SERIAL PRIMARY KEY,
@@ -33,6 +55,14 @@ describe("Table - findMany with where clause", () => {
         email TEXT NOT NULL UNIQUE,
         active BOOLEAN DEFAULT true,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+    await orm.sql`
+      CREATE TABLE test_posts (
+        id SERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        author_id INTEGER NOT NULL REFERENCES test_users(id)
       )
     `;
 
@@ -44,6 +74,15 @@ describe("Table - findMany with where clause", () => {
         ('Bob', 'bob@example.com', false),
         ('Charlie', 'charlie@example.com', true),
         ('Diana', 'diana@example.com', false)
+    `;
+
+    await orm.sql`
+      INSERT INTO test_posts (title, content, author_id)
+      VALUES
+        ('Post 1', 'Content 1', 1),
+        ('Post 2', 'Content 2', 1),
+        ('Post 3', 'Content 3', 2),
+        ('Post 4', 'Content 4', 3)
     `;
   });
 
@@ -75,13 +114,13 @@ describe("Table - findMany with where clause", () => {
       where: { active: true },
     });
     expect(activeUsers.length).toBe(2);
-    expect(activeUsers.every((u) => u.active)).toBe(true);
+    expect(activeUsers.every((u: any) => u.active)).toBe(true);
 
     const inactiveUsers = await orm.tables.users.findMany({
       where: { active: false },
     });
     expect(inactiveUsers.length).toBe(2);
-    expect(inactiveUsers.every((u) => !u.active)).toBe(true);
+    expect(inactiveUsers.every((u: any) => !u.active)).toBe(true);
   });
 
   test("should return empty array when no matches found", async () => {
@@ -155,7 +194,7 @@ describe("Table - findMany with where clause", () => {
   test("should throw error for invalid column names", async () => {
     await expect(
       orm.tables.users.findMany({
-        // @ts-expect-error - Testing runtime validation of invalid columns
+        // @ts-expect-error - invalidColumn doesn't exist on users table
         where: { invalidColumn: "value" },
       }),
     ).rejects.toThrow("Invalid column: invalidColumn");
@@ -191,6 +230,7 @@ describe("Table - findMany with where clause", () => {
 
   test("should filter with gt operator", async () => {
     // Insert test data with known IDs
+    await orm.sql`DELETE FROM test_posts`;
     await orm.sql`DELETE FROM test_users`;
     await orm.sql`
       INSERT INTO test_users (id, name, email, active)
@@ -204,7 +244,7 @@ describe("Table - findMany with where clause", () => {
       where: { id: { gt: 1 } },
     });
     expect(users.length).toBe(2);
-    expect(users.every((u) => u.id > 1)).toBe(true);
+    expect(users.every((u: any) => u.id > 1)).toBe(true);
   });
 
   test("should filter with gte operator", async () => {
@@ -212,7 +252,7 @@ describe("Table - findMany with where clause", () => {
       where: { id: { gte: 2 } },
     });
     expect(users.length).toBe(2);
-    expect(users.every((u) => u.id >= 2)).toBe(true);
+    expect(users.every((u: any) => u.id >= 2)).toBe(true);
   });
 
   test("should filter with lt operator", async () => {
@@ -220,7 +260,7 @@ describe("Table - findMany with where clause", () => {
       where: { id: { lt: 3 } },
     });
     expect(users.length).toBe(2);
-    expect(users.every((u) => u.id < 3)).toBe(true);
+    expect(users.every((u: any) => u.id < 3)).toBe(true);
   });
 
   test("should filter with lte operator", async () => {
@@ -228,7 +268,7 @@ describe("Table - findMany with where clause", () => {
       where: { id: { lte: 2 } },
     });
     expect(users.length).toBe(2);
-    expect(users.every((u) => u.id <= 2)).toBe(true);
+    expect(users.every((u: any) => u.id <= 2)).toBe(true);
   });
 
   test("should filter with multiple operators combined", async () => {
@@ -237,10 +277,21 @@ describe("Table - findMany with where clause", () => {
       where: { id: { gte: 1, lte: 2 } },
     });
     expect(users.length).toBe(2);
-    expect(users.every((u) => u.id >= 1 && u.id <= 2)).toBe(true);
+    expect(users.every((u: any) => u.id >= 1 && u.id <= 2)).toBe(true);
   });
 
   test("should combine direct values and operators", async () => {
+    // Setup test data (3 users, all active)
+    await orm.sql`DELETE FROM test_posts`;
+    await orm.sql`DELETE FROM test_users`;
+    await orm.sql`
+      INSERT INTO test_users (id, name, email, active)
+      VALUES
+        (1, 'User1', 'user1@example.com', true),
+        (2, 'User2', 'user2@example.com', true),
+        (3, 'User3', 'user3@example.com', true)
+    `;
+
     const users = await orm.tables.users.findMany({
       where: {
         active: true,
@@ -248,10 +299,11 @@ describe("Table - findMany with where clause", () => {
       },
     });
     expect(users.length).toBe(2);
-    expect(users.every((u) => u.active && u.id >= 2)).toBe(true);
+    expect(users.every((u: any) => u.active && u.id >= 2)).toBe(true);
 
     // Restore original test data for subsequent tests
     await orm.sql`DELETE FROM test_users`;
+    await orm.sql`DELETE FROM test_posts`;
     await orm.sql`ALTER SEQUENCE test_users_id_seq RESTART WITH 1`;
     await orm.sql`
       INSERT INTO test_users (name, email, active)
@@ -260,6 +312,14 @@ describe("Table - findMany with where clause", () => {
         ('Bob', 'bob@example.com', false),
         ('Charlie', 'charlie@example.com', true),
         ('Diana', 'diana@example.com', false)
+    `;
+    await orm.sql`
+      INSERT INTO test_posts (title, content, author_id)
+      VALUES
+        ('Post 1', 'Content 1', 1),
+        ('Post 2', 'Content 2', 1),
+        ('Post 3', 'Content 3', 2),
+        ('Post 4', 'Content 4', 3)
     `;
   });
 
@@ -359,6 +419,88 @@ describe("Table - findMany with where clause", () => {
       take: 1,
     });
     expect(users.length).toBeLessThanOrEqual(1);
-    expect(users.every((u) => u.active)).toBe(true);
+    expect(users.every((u: any) => u.active)).toBe(true);
+  });
+
+  test("findMany with include should load one() relations", async () => {
+    const posts = await orm.tables.posts.findMany({
+      include: { author: true },
+    });
+    expect(posts.length).toBeGreaterThan(0);
+    const post = posts[0]!;
+    expect(post.author).toBeDefined();
+    expect(post.author?.name).toBeDefined();
+    expect(post.author?.email).toBeDefined();
+  });
+
+  test("findFirst with include should load one() relations", async () => {
+    const post = await orm.tables.posts.findFirst({
+      include: { author: true },
+    });
+    if (post) {
+      expect(post.author).toBeDefined();
+      expect(post.author?.name).toBeDefined();
+    }
+  });
+
+  test("findUnique with include should load one() relations", async () => {
+    const post = await orm.tables.posts.findUnique({
+      where: { id: 1 },
+      include: { author: true },
+    });
+    if (post) {
+      expect(post.author).toBeDefined();
+      expect(post.author?.name).toBe("Alice");
+    }
+  });
+
+  test("findMany with include should load many() relations", async () => {
+    const users = await orm.tables.users.findMany({
+      include: { posts: true },
+    });
+    expect(users.length).toBeGreaterThan(0);
+    const alice = users.find((u: any) => u.name === "Alice");
+    expect(alice).toBeDefined();
+    expect(alice?.posts).toBeDefined();
+    expect(Array.isArray(alice?.posts)).toBe(true);
+    expect(alice?.posts.length).toBe(2); // Alice has 2 posts
+    // Note: posts have author_id (SQL column name) not authorId
+    expect(alice?.posts.every((p: any) => p.author_id === alice.id)).toBe(true);
+  });
+
+  test("findFirst with include should load many() relations", async () => {
+    const user = await orm.tables.users.findFirst({
+      where: { name: "Alice" },
+      include: { posts: true },
+    });
+    if (user) {
+      expect(user.posts).toBeDefined();
+      expect(Array.isArray(user.posts)).toBe(true);
+      expect(user.posts.length).toBe(2);
+    }
+  });
+
+  test("findUnique with include should load many() relations", async () => {
+    const user = await orm.tables.users.findUnique({
+      where: { id: 1 },
+      include: { posts: true },
+    });
+    if (user) {
+      expect(user.posts).toBeDefined();
+      expect(Array.isArray(user.posts)).toBe(true);
+      expect(user.posts.length).toBe(2);
+    }
+  });
+
+  test("many() relations should return empty array when no related records", async () => {
+    const user = await orm.tables.users.findUnique({
+      where: { id: 4 }, // Diana has no posts
+      include: { posts: true },
+    });
+    if (user) {
+      expect(user.posts).toBeDefined();
+      expect(Array.isArray(user.posts)).toBe(true);
+      expect(user.posts.length).toBe(0);
+    }
   });
 });

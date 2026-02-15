@@ -1,34 +1,38 @@
-import type { Table } from "./table.js";
-import { TableClient } from "./table.js";
-import type { OrmOptions, TableClients } from "./types.js";
+// Export main Orm class
 
-export * from "./column.js";
-export * from "./table.js";
-export * from "./types.js";
+// Export column utilities
+export { boolean, Column, date, number, string } from "./column/index.js";
+export type {
+  ColumnKind,
+  ColumnMeta,
+  ColumnOptions,
+  ColumnValue,
+  DefaultColumnMeta,
+} from "./column/types.js";
+export { Orm } from "./core/index.js";
+// Export types from core
+export type { OrmOptions, TableClients } from "./core/types.js";
 
-const bindTables = <Tables extends Record<string, Table>>(
-  sql: Bun.SQL,
-  tables: Tables,
-) => {
-  const result: Record<string, TableClient<Table>> = {};
+// Export relation utilities
+export { many, one } from "./relations/index.js";
+export type {
+  IncludeOptions,
+  ManyRelation,
+  OneRelation,
+  Relation,
+  WithIncluded,
+} from "./relations/types.js";
 
-  for (const [key, table] of Object.entries(tables)) {
-    result[key] = new TableClient(sql, table);
-  }
-
-  return result as TableClients<Tables>;
-};
-
-export class Orm<Tables extends Record<string, Table>> {
-  private readonly _tables: TableClients<Tables>;
-  public readonly sql: Bun.SQL;
-
-  public constructor(options: OrmOptions<Tables>) {
-    this.sql = new Bun.SQL(options.url);
-    this._tables = bindTables(this.sql, options.tables);
-  }
-
-  public get tables() {
-    return this._tables;
-  }
-}
+// Export table utilities
+export { Table, TableClient } from "./table/index.js";
+export type {
+  BooleanFilter,
+  DateFilter,
+  FindFirstOptions,
+  FindManyOptions,
+  FindUniqueOptions,
+  InferTableType,
+  NumberFilter,
+  StringFilter,
+  WhereClause,
+} from "./table/types.js";

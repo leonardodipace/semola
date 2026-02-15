@@ -1,45 +1,7 @@
-import type { Column } from "./column.js";
-import type { Table, TableClient } from "./table.js";
-
-export type ColumnKind = "number" | "string" | "boolean" | "date";
-
-export type ColumnValue<Kind extends ColumnKind> = Kind extends "number"
-  ? number
-  : Kind extends "string"
-    ? string
-    : Kind extends "date"
-      ? Date
-      : boolean;
-
-export type ColumnMeta = {
-  primaryKey: boolean;
-  notNull: boolean;
-  hasDefault: boolean;
-  unique: boolean;
-};
-
-export type DefaultColumnMeta = {
-  primaryKey: false;
-  notNull: false;
-  hasDefault: false;
-  unique: false;
-};
-
-export type ColumnOptions<Kind extends ColumnKind> = {
-  primaryKey: boolean;
-  notNull: boolean;
-  unique: boolean;
-  defaultValue?: ColumnValue<Kind>;
-};
-
-export type OrmOptions<Tables extends Record<string, Table>> = {
-  url: string;
-  tables: Tables;
-};
-
-export type TableClients<Tables extends Record<string, Table>> = {
-  [K in keyof Tables]: TableClient<Tables[K]>;
-};
+import type { Column } from "../column/index.js";
+import type { ColumnKind, ColumnMeta, ColumnValue } from "../column/types.js";
+import type { IncludeOptions } from "../relations/types.js";
+import type { Table } from "./index.js";
 
 type IsRequired<Meta extends ColumnMeta> = Meta["primaryKey"] extends true
   ? true
@@ -92,6 +54,7 @@ export type InferTableType<T extends Table> =
 export type StringFilter = {
   equals?: string;
   contains?: string;
+  in?: string[];
 };
 
 // Number filter operators
@@ -101,6 +64,7 @@ export type NumberFilter = {
   gte?: number;
   lt?: number;
   lte?: number;
+  in?: number[];
 };
 
 // Date filter operators
@@ -110,6 +74,7 @@ export type DateFilter = {
   gte?: Date;
   lt?: Date;
   lte?: Date;
+  in?: Date[];
 };
 
 // Boolean filter operators
@@ -127,7 +92,7 @@ type ColumnFilter<Kind extends ColumnKind> = Kind extends "string"
       : boolean | null | BooleanFilter;
 
 export type WhereClause<T extends Table> =
-  T extends Table<infer Cols>
+  T extends Table<infer Cols, any>
     ? {
         [K in keyof Cols]?: Cols[K] extends Column<infer Kind, ColumnMeta>
           ? ColumnFilter<Kind>
@@ -139,12 +104,15 @@ export type FindManyOptions<T extends Table> = {
   where?: WhereClause<T>;
   take?: number;
   skip?: number;
+  include?: IncludeOptions<T>;
 };
 
 export type FindFirstOptions<T extends Table> = {
   where?: WhereClause<T>;
+  include?: IncludeOptions<T>;
 };
 
 export type FindUniqueOptions<T extends Table> = {
   where: WhereClause<T>;
+  include?: IncludeOptions<T>;
 };

@@ -6,6 +6,14 @@ import type {
   DefaultColumnMeta,
 } from "./types.js";
 
+export type {
+  ColumnKind,
+  ColumnMeta,
+  ColumnOptions,
+  ColumnValue,
+  DefaultColumnMeta,
+} from "./types.js";
+
 const defaultOptions = {
   primaryKey: false,
   notNull: false,
@@ -16,7 +24,7 @@ export class Column<
   Kind extends ColumnKind,
   Meta extends ColumnMeta = DefaultColumnMeta,
 > {
-  private readonly sqlName: string;
+  private readonly _sqlName: string;
   private readonly kind: Kind;
   private readonly options: ColumnOptions<Kind>;
 
@@ -25,9 +33,13 @@ export class Column<
     kind: Kind,
     options: ColumnOptions<Kind> = defaultOptions,
   ) {
-    this.sqlName = sqlName;
+    this._sqlName = sqlName;
     this.kind = kind;
     this.options = options;
+  }
+
+  public get sqlName() {
+    return this._sqlName;
   }
 
   public primaryKey() {
@@ -59,7 +71,7 @@ export class Column<
   }
 
   private withOptions(options: Partial<ColumnOptions<Kind>>) {
-    return new Column(this.sqlName, this.kind, {
+    return new Column(this._sqlName, this.kind, {
       ...this.options,
       ...options,
     });
