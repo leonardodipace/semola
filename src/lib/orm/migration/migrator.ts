@@ -253,5 +253,4 @@ export const getMigrationStatus = async (options: MigrationRuntimeOptions) => {
   }
 };
 
-export type { MigrationRuntimeOptions };
-export type { MigrationCreateOptions };
+export type { MigrationCreateOptions, MigrationRuntimeOptions };
