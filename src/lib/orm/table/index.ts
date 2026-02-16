@@ -720,7 +720,7 @@ export class TableClient<T extends Table> {
     return result;
   }
 
-  public async update(options: UpdateOptions<T>): Promise<InferTableType<T>[]> {
+  public async update(options: UpdateOptions<T>): Promise<InferTableType<T>> {
     const whereClause = this.buildWhereClause(options.where);
 
     if (!whereClause) {
@@ -748,11 +748,15 @@ export class TableClient<T extends Table> {
     `.then((results) => {
       this.convertBooleanValues(results);
       this.mapColumnNames(results);
-      return results;
+      const [result] = results;
+      if (!result) {
+        throw new Error("update did not return a row");
+      }
+      return result;
     });
   }
 
-  public async delete(options: DeleteOptions<T>): Promise<number> {
+  public async delete(options: DeleteOptions<T>): Promise<InferTableType<T>> {
     const whereClause = this.buildWhereClause(options.where);
 
     if (!whereClause) {
@@ -765,6 +769,14 @@ export class TableClient<T extends Table> {
       RETURNING *
     `;
 
-    return results.length;
+    this.convertBooleanValues(results);
+    this.mapColumnNames(results);
+
+    const [result] = results;
+    if (!result) {
+      throw new Error("delete did not return a row");
+    }
+
+    return result;
   }
 }

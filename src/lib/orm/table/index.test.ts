@@ -547,8 +547,8 @@ describe("Table - update method", () => {
       data: { name: "Alice Updated" },
     });
 
-    expect(updated.length).toBe(1);
-    expect(updated[0]?.name).toBe("Alice Updated");
+    expect(updated.name).toBe("Alice Updated");
+    expect(updated.id).toBe(1);
   });
 
   test("should update multiple fields", async () => {
@@ -557,19 +557,18 @@ describe("Table - update method", () => {
       data: { name: "Bob Updated", active: true },
     });
 
-    expect(updated.length).toBe(1);
-    expect(updated[0]?.name).toBe("Bob Updated");
-    expect(updated[0]?.active).toBe(true);
+    expect(updated.name).toBe("Bob Updated");
+    expect(updated.active).toBe(true);
+    expect(updated.id).toBe(2);
   });
 
-  test("should update multiple users matching condition", async () => {
+  test("should update first user matching condition", async () => {
     const updated = await orm.tables.users.update({
       where: { active: false },
       data: { active: true },
     });
 
-    expect(updated.length).toBeGreaterThan(1);
-    expect(updated.every((u) => u.active === true)).toBe(true);
+    expect(updated.active).toBe(true);
   });
 
   test("should throw error when where clause is missing", async () => {
@@ -590,11 +589,12 @@ describe("Table - delete method", () => {
       email: "todelete@example.com",
     });
 
-    const count = await orm.tables.users.delete({
+    const deleted = await orm.tables.users.delete({
       where: { id: newUser.id },
     });
 
-    expect(count).toBe(1);
+    expect(deleted.id).toBe(newUser.id);
+    expect(deleted.name).toBe("ToDelete");
 
     // Verify it's deleted
     const found = await orm.tables.users.findFirst({
@@ -603,7 +603,7 @@ describe("Table - delete method", () => {
     expect(found).toBeNull();
   });
 
-  test("should delete multiple users matching condition", async () => {
+  test("should delete first user matching condition", async () => {
     // Create two users to delete
     await orm.tables.users.create({
       name: "Delete1",
@@ -617,11 +617,11 @@ describe("Table - delete method", () => {
       active: false,
     });
 
-    const count = await orm.tables.users.delete({
+    const deleted = await orm.tables.users.delete({
       where: { name: { in: ["Delete1", "Delete2"] } },
     });
 
-    expect(count).toBe(2);
+    expect(["Delete1", "Delete2"]).toContain(deleted.name);
   });
 
   test("should throw error when where clause is missing", async () => {
