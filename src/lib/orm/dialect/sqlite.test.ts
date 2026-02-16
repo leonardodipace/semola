@@ -197,7 +197,7 @@ describe("SqliteDialect - CREATE TABLE", () => {
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS complex");
     expect(sql).toContain("id INTEGER PRIMARY KEY");
     expect(sql).toContain("name TEXT NOT NULL");
-    expect(sql).toContain("active INTEGER");
+    expect(sql).toContain("active INTEGER DEFAULT 1");
     expect(sql).toContain("config TEXT");
     expect(sql).toContain("session_id TEXT");
   });

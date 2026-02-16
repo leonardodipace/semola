@@ -10,7 +10,7 @@ const usersTable = new Table("test_users", {
   name: string("name").notNull(),
   email: string("email").unique().notNull(),
   active: boolean("active").default(true),
-  // Static value only for type metadata; SQL default remains in schema setup.
+  // Static value for type metadata and DDL default generation.
   createdAt: date("created_at").default(new Date(0)),
 });
 
@@ -637,7 +637,7 @@ describe("Table - CreateInput type validation", () => {
       name: string("name").notNull(),
       email: string("email").notNull().unique(),
       active: boolean("active").default(true),
-      // Static value only for type metadata; SQL default remains in schema setup.
+      // Static value for type metadata and DDL default generation.
       createdAt: date("created_at").default(new Date(0)),
     });
 

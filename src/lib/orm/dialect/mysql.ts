@@ -27,6 +27,35 @@ export class MysqlDialect implements Dialect {
     uuid: "CHAR(36)", // MySQL stores UUIDs as CHAR(36)
   };
 
+  private escapeString(value: string) {
+    return value.replace(/'/g, "''");
+  }
+
+  private formatDefaultValue(kind: ColumnKind, value: unknown): string {
+    if (kind === "number" && typeof value === "number") {
+      return String(value);
+    }
+
+    if (kind === "boolean" && typeof value === "boolean") {
+      return value ? "true" : "false";
+    }
+
+    if (kind === "date") {
+      if (value instanceof Date) {
+        return `'${this.escapeString(value.toISOString())}'`;
+      }
+      return `'${this.escapeString(String(value))}'`;
+    }
+
+    if (kind === "json" || kind === "jsonb") {
+      const jsonValue =
+        typeof value === "string" ? value : (JSON.stringify(value) ?? "null");
+      return `'${this.escapeString(jsonValue)}'`;
+    }
+
+    return `'${this.escapeString(String(value))}'`;
+  }
+
   public buildSelect(
     tableName: string,
     columns: string[],
@@ -62,9 +91,7 @@ export class MysqlDialect implements Dialect {
     const placeholders = columns.map(() => "?").join(", ");
     const columnList = columns.join(", ");
 
-    // MySQL 8.0+ supports RETURNING, but for compatibility we use the standard approach
-    // In practice, you'd get the ID via LAST_INSERT_ID() or another mechanism
-    const sql = `INSERT INTO ${options.tableName} (${columnList}) VALUES (${placeholders})`;
+    const sql = `INSERT INTO ${options.tableName} (${columnList}) VALUES (${placeholders}) RETURNING *`;
     const params = Object.values(options.values);
 
     return { sql, params };
@@ -120,6 +147,14 @@ export class MysqlDialect implements Dialect {
         if (column.meta.unique && !column.meta.primaryKey) {
           parts.push("UNIQUE");
         }
+
+        if (column.meta.hasDefault && column.defaultValue !== undefined) {
+          const defaultValue = this.formatDefaultValue(
+            column.columnKind,
+            column.defaultValue,
+          );
+          parts.push(`DEFAULT ${defaultValue}`);
+        }
       }
 
       columnDefs.push(parts.join(" "));
@@ -147,6 +182,11 @@ export class MysqlDialect implements Dialect {
     }
 
     const parts: string[] = [];
+
+    if (limit === undefined && offset !== undefined && offset > 0) {
+      const maxLimit = "18446744073709551615";
+      parts.push(`LIMIT ${maxLimit}`);
+    }
 
     if (limit !== undefined) {
       parts.push(`LIMIT ${limit}`);

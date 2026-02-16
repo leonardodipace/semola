@@ -54,7 +54,9 @@ describe("MysqlDialect - query building", () => {
       offset: 20,
     });
 
-    expect(result.sql).toBe("SELECT id, name FROM users OFFSET 20");
+    expect(result.sql).toBe(
+      "SELECT id, name FROM users LIMIT 18446744073709551615 OFFSET 20",
+    );
   });
 
   test("buildInsert should use ? placeholders", () => {
@@ -63,7 +65,9 @@ describe("MysqlDialect - query building", () => {
       values: { name: "Alice", age: 30 },
     });
 
-    expect(result.sql).toBe("INSERT INTO users (name, age) VALUES (?, ?)");
+    expect(result.sql).toBe(
+      "INSERT INTO users (name, age) VALUES (?, ?) RETURNING *",
+    );
     expect(result.params).toEqual(["Alice", 30]);
   });
 
@@ -198,7 +202,7 @@ describe("MysqlDialect - CREATE TABLE", () => {
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS complex");
     expect(sql).toContain("id BIGINT AUTO_INCREMENT PRIMARY KEY");
     expect(sql).toContain("name VARCHAR(255) NOT NULL");
-    expect(sql).toContain("active BOOLEAN");
+    expect(sql).toContain("active BOOLEAN DEFAULT true");
     expect(sql).toContain("config JSON");
     expect(sql).toContain("session_id CHAR(36)");
   });
@@ -243,7 +247,7 @@ describe("MysqlDialect - pagination", () => {
 
   test("should build OFFSET only", () => {
     const result = dialect.buildPagination(undefined, 20);
-    expect(result).toBe("OFFSET 20");
+    expect(result).toBe("LIMIT 18446744073709551615 OFFSET 20");
   });
 
   test("should return null when no pagination params", () => {

@@ -26,7 +26,7 @@ describe("PostgresDialect - query building", () => {
     });
 
     expect(result.sql).toBe(
-      "SELECT id, name FROM users WHERE age > $2 AND active = $1",
+      "SELECT id, name FROM users WHERE age > $1 AND active = $2",
     );
     expect(result.params).toEqual([18, true]);
   });
@@ -54,7 +54,7 @@ describe("PostgresDialect - query building", () => {
       offset: 20,
     });
 
-    expect(result.sql).toBe("SELECT id, name FROM users OFFSET 20");
+    expect(result.sql).toBe("SELECT id, name FROM users LIMIT ALL OFFSET 20");
   });
 
   test("buildInsert should use $1, $2, $3 placeholders", () => {
@@ -189,7 +189,7 @@ describe("PostgresDialect - CREATE TABLE", () => {
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS complex");
     expect(sql).toContain("id BIGSERIAL PRIMARY KEY");
     expect(sql).toContain("name TEXT NOT NULL");
-    expect(sql).toContain("active BOOLEAN");
+    expect(sql).toContain("active BOOLEAN DEFAULT true");
     expect(sql).toContain("config JSONB");
     expect(sql).toContain("session_id UUID");
   });

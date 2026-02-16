@@ -264,27 +264,15 @@ export class TableClient<T extends Table> {
     }
 
     if (skip > 0) {
-      // Use dialect to get the right pagination behavior for "skip only" queries
-      const paginationStr = this.dialect.buildPagination(undefined, skip);
-      if (!paginationStr) {
-        return null;
-      }
-
-      // For SQLite: "LIMIT -1 OFFSET n"
-      // For Postgres: "LIMIT ALL OFFSET n"
-      // For MySQL: "LIMIT <max> OFFSET n"
-      // We need to parse and reconstruct
-      if (paginationStr.includes("LIMIT -1")) {
+      if (this.dialect.name === "sqlite") {
         return this.sql`LIMIT -1 OFFSET ${skip}`;
       }
-      if (paginationStr.includes("LIMIT ALL")) {
+      if (this.dialect.name === "postgres") {
         return this.sql`LIMIT ALL OFFSET ${skip}`;
       }
-      // MySQL case - extract the limit value
-      const match = paginationStr.match(/LIMIT (\d+)/);
-      if (match) {
-        const limit = Number.parseInt(match[1] ?? "0", 10);
-        return this.sql`LIMIT ${limit} OFFSET ${skip}`;
+      if (this.dialect.name === "mysql") {
+        const maxLimit = "18446744073709551615";
+        return this.sql`LIMIT ${maxLimit} OFFSET ${skip}`;
       }
     }
 

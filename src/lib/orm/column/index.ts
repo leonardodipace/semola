@@ -57,6 +57,10 @@ export class Column<
     };
   }
 
+  public get defaultValue() {
+    return this.options.defaultValue;
+  }
+
   public primaryKey(): Column<Kind, UpdateMeta<Meta, "primaryKey", true>> {
     return this.withOptions({ primaryKey: true }) as Column<
       Kind,

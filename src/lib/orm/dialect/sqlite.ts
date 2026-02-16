@@ -26,6 +26,35 @@ export class SqliteDialect implements Dialect {
     uuid: "TEXT", // SQLite stores UUIDs as text
   };
 
+  private escapeString(value: string) {
+    return value.replace(/'/g, "''");
+  }
+
+  private formatDefaultValue(kind: ColumnKind, value: unknown): string {
+    if (kind === "number" && typeof value === "number") {
+      return String(value);
+    }
+
+    if (kind === "boolean" && typeof value === "boolean") {
+      return value ? "1" : "0";
+    }
+
+    if (kind === "date") {
+      if (value instanceof Date) {
+        return String(value.getTime());
+      }
+      return String(value);
+    }
+
+    if (kind === "json" || kind === "jsonb") {
+      const jsonValue =
+        typeof value === "string" ? value : (JSON.stringify(value) ?? "null");
+      return `'${this.escapeString(jsonValue)}'`;
+    }
+
+    return `'${this.escapeString(String(value))}'`;
+  }
+
   public buildSelect(
     tableName: string,
     columns: string[],
@@ -115,11 +144,12 @@ export class SqliteDialect implements Dialect {
       }
 
       // Default value (if hasDefault is true)
-      if (column.meta.hasDefault) {
-        // Note: Column doesn't store the default value,
-        // so we can't generate it here. This is a limitation.
-        // For now, just add a comment
-        // In a real implementation, Column would need to store the default value
+      if (column.meta.hasDefault && column.defaultValue !== undefined) {
+        const defaultValue = this.formatDefaultValue(
+          column.columnKind,
+          column.defaultValue,
+        );
+        parts.push(`DEFAULT ${defaultValue}`);
       }
 
       columnDefs.push(parts.join(" "));

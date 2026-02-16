@@ -30,11 +30,40 @@ export class PostgresDialect implements Dialect {
   // Convert ? placeholders to $1, $2, $3 format for Postgres
   private toPostgresPlaceholders(sql: string, paramCount: number): string {
     let result = sql;
-    for (let i = paramCount; i > 0; i--) {
-      // Replace from end to start to avoid replacing already replaced placeholders
+    for (let i = 1; i <= paramCount; i++) {
+      // Replace left-to-right so placeholders map in order
       result = result.replace("?", `$${i}`);
     }
     return result;
+  }
+
+  private escapeString(value: string) {
+    return value.replace(/'/g, "''");
+  }
+
+  private formatDefaultValue(kind: ColumnKind, value: unknown): string {
+    if (kind === "number" && typeof value === "number") {
+      return String(value);
+    }
+
+    if (kind === "boolean" && typeof value === "boolean") {
+      return value ? "true" : "false";
+    }
+
+    if (kind === "date") {
+      if (value instanceof Date) {
+        return `'${this.escapeString(value.toISOString())}'`;
+      }
+      return `'${this.escapeString(String(value))}'`;
+    }
+
+    if (kind === "json" || kind === "jsonb") {
+      const jsonValue =
+        typeof value === "string" ? value : (JSON.stringify(value) ?? "null");
+      return `'${this.escapeString(jsonValue)}'`;
+    }
+
+    return `'${this.escapeString(String(value))}'`;
   }
 
   public buildSelect(
@@ -142,6 +171,14 @@ export class PostgresDialect implements Dialect {
         if (column.meta.unique && !column.meta.primaryKey) {
           parts.push("UNIQUE");
         }
+
+        if (column.meta.hasDefault && column.defaultValue !== undefined) {
+          const defaultValue = this.formatDefaultValue(
+            column.columnKind,
+            column.defaultValue,
+          );
+          parts.push(`DEFAULT ${defaultValue}`);
+        }
       }
 
       columnDefs.push(parts.join(" "));
@@ -169,6 +206,10 @@ export class PostgresDialect implements Dialect {
 
     if (limit !== undefined) {
       parts.push(`LIMIT ${limit}`);
+    }
+
+    if (limit === undefined && offset !== undefined && offset > 0) {
+      parts.push("LIMIT ALL");
     }
 
     if (offset !== undefined && offset > 0) {
