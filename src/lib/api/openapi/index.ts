@@ -113,23 +113,114 @@ type JsonSchema = {
   [key: string]: unknown;
 };
 
+// Schema registry for deduplication across the entire spec generation
+type SchemaRegistry = Map<string, { name: string; schema: JsonSchema }>;
+
+// Generate a deterministic hash from a JSON schema
+const hashSchema = (schema: JsonSchema) => {
+  const str = JSON.stringify(schema);
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash).toString(36);
+};
+
+// Extract schema to components and return a $ref
+const extractSchemaToComponent = (
+  jsonSchema: JsonSchema,
+  _context: string,
+  shouldExtract: boolean,
+  registry: SchemaRegistry,
+): { schema: JsonSchema | { $ref: string }; components?: OpenAPIV3_1.ComponentsObject } => {
+  // Don't extract if disabled
+  if (!shouldExtract) {
+    return { schema: jsonSchema, components: undefined };
+  }
+
+  // Only extract object schemas (not primitives)
+  if (!jsonSchema.type || jsonSchema.type !== "object") {
+    return { schema: jsonSchema, components: undefined };
+  }
+
+  // Remove $schema property from the schema as it's not needed in components
+  const { $schema, ...schemaWithoutMeta } = jsonSchema;
+
+  // Generate a hash for deduplication
+  const hash = hashSchema(schemaWithoutMeta);
+
+  // Check if we've already registered this schema
+  let schemaName: string;
+  const existing = registry.get(hash);
+
+  if (existing) {
+    // Reuse existing schema name
+    schemaName = existing.name;
+  } else {
+    // Create new schema name
+    schemaName = `Schema_${hash}`;
+    registry.set(hash, { name: schemaName, schema: schemaWithoutMeta });
+  }
+
+  // Create $ref to the schema
+  const refSchema = {
+    $ref: `#/components/schemas/${schemaName}`,
+  };
+
+  // Return the reference and the component
+  return {
+    schema: refSchema,
+    components: {
+      schemas: {
+        [schemaName]: schemaWithoutMeta,
+      },
+    } as OpenAPIV3_1.ComponentsObject,
+  };
+};
+
 const convertSchemaToOpenApi = async (
   schema: StandardSchemaV1,
   io: "input" | "output" = "input",
-) => {
+  context = "Schema",
+  extract = true,
+  registry: SchemaRegistry,
+): Promise<{
+  schema: JsonSchema | { $ref: string };
+  components?: OpenAPIV3_1.ComponentsObject;
+}> => {
   const result = toOpenAPISchema(schema, io);
-  return result as {
-    schema: JsonSchema;
-    components?: OpenAPIV3_1.ComponentsObject;
+  const { schema: jsonSchema, components } = extractSchemaToComponent(
+    result.schema,
+    context,
+    extract,
+    registry,
+  );
+
+  return {
+    schema: jsonSchema,
+    components,
   };
 };
 
 const extractParametersFromSchema = async (
   schema: StandardSchemaV1,
   location: "query" | "header" | "cookie",
+  registry: SchemaRegistry,
 ) => {
-  const { schema: jsonSchema, components } =
-    await convertSchemaToOpenApi(schema);
+  const { schema: jsonSchema, components } = await convertSchemaToOpenApi(
+    schema,
+    "input",
+    location,
+    false, // Don't extract parameter schemas
+    registry,
+  );
+
+  // If it's a reference, we can't extract parameters
+  if ("$ref" in jsonSchema) {
+    return { parameters: [], components };
+  }
 
   if (jsonSchema.type !== "object") {
     return { parameters: [], components };
@@ -178,14 +269,18 @@ const paramSources = [
   ["cookies", "cookie"],
 ] as const;
 
-const createParameters = async (request: RequestSchema, path: string) => {
+const createParameters = async (
+  request: RequestSchema,
+  path: string,
+  registry: SchemaRegistry,
+) => {
   const parameters: OpenApiParameter[] = [];
   const allComponents: Array<OpenAPIV3_1.ComponentsObject | undefined> = [];
 
   for (const [field, location] of paramSources) {
     if (request[field]) {
       const { parameters: params, components } =
-        await extractParametersFromSchema(request[field], location);
+        await extractParametersFromSchema(request[field], location, registry);
       parameters.push(...params);
       if (components) {
         allComponents.push(components);
@@ -198,13 +293,18 @@ const createParameters = async (request: RequestSchema, path: string) => {
   if (pathParamNames.length > 0 && request.params) {
     const { schema: jsonSchema, components } = await convertSchemaToOpenApi(
       request.params,
+      "input",
+      "params",
+      false, // Don't extract parameter schemas
+      registry,
     );
 
     if (components) {
       allComponents.push(components);
     }
 
-    if (jsonSchema.type === "object" && jsonSchema.properties) {
+    // If it's a reference, we can't extract parameters
+    if (!("$ref" in jsonSchema) && jsonSchema.type === "object" && jsonSchema.properties) {
       for (const name of pathParamNames) {
         const propertySchema = jsonSchema.properties[name];
 
@@ -223,8 +323,17 @@ const createParameters = async (request: RequestSchema, path: string) => {
   return { parameters, components: allComponents };
 };
 
-const createRequestBody = async (bodySchema: StandardSchemaV1) => {
-  const { schema, components } = await convertSchemaToOpenApi(bodySchema);
+const createRequestBody = async (
+  bodySchema: StandardSchemaV1,
+  registry: SchemaRegistry,
+) => {
+  const { schema, components } = await convertSchemaToOpenApi(
+    bodySchema,
+    "input",
+    "RequestBody",
+    true, // Extract request body schemas
+    registry,
+  );
 
   return {
     components,
@@ -239,7 +348,10 @@ const createRequestBody = async (bodySchema: StandardSchemaV1) => {
   };
 };
 
-const createResponses = async (response?: ResponseSchema) => {
+const createResponses = async (
+  response: ResponseSchema | undefined,
+  registry: SchemaRegistry,
+) => {
   const responses: Record<string, OpenApiResponse> = {};
   const allComponents: Array<OpenAPIV3_1.ComponentsObject | undefined> = [];
 
@@ -259,6 +371,9 @@ const createResponses = async (response?: ResponseSchema) => {
     const { schema: jsonSchema, components } = await convertSchemaToOpenApi(
       schema,
       "output",
+      `Response_${statusCode}`,
+      true, // Extract response schemas
+      registry,
     );
 
     if (components) {
@@ -281,6 +396,7 @@ const createResponses = async (response?: ResponseSchema) => {
 const createOperation = async (
   route: RouteConfigInternal,
   globalMiddlewares: readonly Middleware[],
+  registry: SchemaRegistry,
   prefix?: string,
 ) => {
   const allMiddlewares = [
@@ -304,9 +420,11 @@ const createOperation = async (
 
   const fullPath = prefix ? prefix + route.path : route.path;
   const { parameters, components: parameterComponents } =
-    await createParameters(mergedRequest, fullPath);
-  const { responses, components: responseComponents } =
-    await createResponses(mergedResponse);
+    await createParameters(mergedRequest, fullPath, registry);
+  const { responses, components: responseComponents } = await createResponses(
+    mergedResponse,
+    registry,
+  );
 
   const operation: OpenApiOperation = {
     responses,
@@ -333,8 +451,10 @@ const createOperation = async (
   const bodySchema = mergedRequest.body;
 
   if (bodySchema) {
-    const { requestBody, components: bodyComponents } =
-      await createRequestBody(bodySchema);
+    const { requestBody, components: bodyComponents } = await createRequestBody(
+      bodySchema,
+      registry,
+    );
     operation.requestBody = requestBody;
     if (bodyComponents) {
       allComponents.push(bodyComponents);
@@ -374,6 +494,9 @@ const mergeComponents = (
 };
 
 export const generateOpenApiSpec = async (options: OpenApiGeneratorOptions) => {
+  // Create a schema registry for deduplication
+  const schemaRegistry: SchemaRegistry = new Map();
+
   const spec: OpenApiSpec = {
     openapi: "3.1.0",
     info: {
@@ -409,6 +532,7 @@ export const generateOpenApiSpec = async (options: OpenApiGeneratorOptions) => {
     const { operation, components } = await createOperation(
       route,
       options.globalMiddlewares ?? [],
+      schemaRegistry,
       options.prefix,
     );
 

@@ -47,18 +47,30 @@ describe("OpenAPI Generation", () => {
       expect.objectContaining({ name: "age", in: "query" }),
     );
 
-    // Check request body
-    expect(
-      route?.requestBody?.content["application/json"]?.schema,
-    ).toMatchObject({
+    // Check request body - should now be a $ref
+    const requestBodySchema =
+      route?.requestBody?.content["application/json"]?.schema;
+    expect(requestBodySchema).toHaveProperty("$ref");
+    expect(typeof requestBodySchema?.$ref).toBe("string");
+
+    // Verify the schema exists in components
+    const requestSchemaRef = requestBodySchema?.$ref as string;
+    const requestSchemaName = requestSchemaRef?.split("/").pop();
+    expect(spec.components?.schemas?.[requestSchemaName]).toMatchObject({
       type: "object",
       properties: { name: { type: "string" } },
     });
 
-    // Check responses
-    expect(
-      route?.responses["201"]?.content?.["application/json"]?.schema,
-    ).toMatchObject({
+    // Check responses - should now be a $ref
+    const responseSchema =
+      route?.responses["201"]?.content?.["application/json"]?.schema;
+    expect(responseSchema).toHaveProperty("$ref");
+    expect(typeof responseSchema?.$ref).toBe("string");
+
+    // Verify the schema exists in components
+    const responseSchemaRef = responseSchema?.$ref as string;
+    const responseSchemaName = responseSchemaRef?.split("/").pop();
+    expect(spec.components?.schemas?.[responseSchemaName]).toMatchObject({
       type: "object",
       properties: { id: { type: "string" } },
     });
@@ -246,7 +258,16 @@ describe("OpenAPI Generation", () => {
     });
 
     const requestBody = spec.paths["/data"]?.post?.requestBody;
-    expect(requestBody?.content["application/json"]?.schema).toMatchObject({
+    const requestBodySchema = requestBody?.content["application/json"]?.schema;
+
+    // Check that schema is now a $ref
+    expect(requestBodySchema).toHaveProperty("$ref");
+    expect(typeof requestBodySchema?.$ref).toBe("string");
+
+    // Verify the schema exists in components
+    const schemaRef = requestBodySchema?.$ref as string;
+    const schemaName = schemaRef?.split("/").pop();
+    expect(spec.components?.schemas?.[schemaName]).toMatchObject({
       type: "object",
       properties: { validated: { type: "boolean" } },
     });
@@ -422,5 +443,100 @@ describe("OpenAPI Generation", () => {
     expect(parameters).toContainEqual(
       expect.objectContaining({ name: "page", in: "query" }),
     );
+  });
+
+  test("should reuse schemas in components instead of inlining", async () => {
+    // Create a schema that will be reused
+    const UserSchema = z.object({
+      id: z.string(),
+      name: z.string(),
+      email: z.string().email(),
+    });
+
+    const spec = await generateOpenApiSpec({
+      title: "Test API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/users",
+          method: "POST",
+          request: { body: UserSchema },
+          response: { 201: UserSchema },
+          handler: () => {},
+        },
+        {
+          path: "/users/:id",
+          method: "GET",
+          request: { params: z.object({ id: z.string() }) },
+          response: { 200: UserSchema },
+          handler: () => {},
+        },
+        {
+          path: "/users/:id",
+          method: "PUT",
+          request: {
+            params: z.object({ id: z.string() }),
+            body: UserSchema,
+          },
+          response: { 200: UserSchema },
+          handler: () => {},
+        },
+      ],
+    });
+
+    // All schemas should be references
+    const postRequest =
+      spec.paths["/users"]?.post?.requestBody?.content["application/json"]
+        ?.schema;
+    const postResponse =
+      spec.paths["/users"]?.post?.responses["201"]?.content?.[
+        "application/json"
+      ]?.schema;
+    const getResponse =
+      spec.paths["/users/{id}"]?.get?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema;
+    const putRequest =
+      spec.paths["/users/{id}"]?.put?.requestBody?.content["application/json"]
+        ?.schema;
+    const putResponse =
+      spec.paths["/users/{id}"]?.put?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema;
+
+    // All should have $ref
+    expect(postRequest).toHaveProperty("$ref");
+    expect(postResponse).toHaveProperty("$ref");
+    expect(getResponse).toHaveProperty("$ref");
+    expect(putRequest).toHaveProperty("$ref");
+    expect(putResponse).toHaveProperty("$ref");
+
+    // Response schemas should all reference the same schema (with additionalProperties: false)
+    expect(postResponse.$ref).toBe(getResponse.$ref);
+    expect(getResponse.$ref).toBe(putResponse.$ref);
+
+    // Request schemas should reference the same schema (without additionalProperties: false)
+    expect(postRequest.$ref).toBe(putRequest.$ref);
+
+    // But request and response schemas should be different (due to additionalProperties difference)
+    expect(postRequest.$ref).not.toBe(postResponse.$ref);
+
+    // Verify only 2 unique schemas are created in components (1 for requests, 1 for responses)
+    const schemaCount = Object.keys(spec.components?.schemas ?? {}).length;
+    expect(schemaCount).toBe(2);
+
+    // Verify both schemas have the expected properties
+    for (const schemaName in spec.components?.schemas) {
+      const schema = spec.components.schemas[schemaName];
+      expect(schema).toMatchObject({
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          name: { type: "string" },
+          email: { type: "string", format: "email" },
+        },
+        required: ["id", "name", "email"],
+      });
+    }
   });
 });
