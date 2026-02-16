@@ -1,8 +1,7 @@
-import type { Column } from "../column/index.js";
-import type { ColumnKind, ColumnMeta } from "../column/types.js";
 import type { OrmDialect } from "../core/types.js";
 import type { Table } from "../table/index.js";
 import type { SchemaBuilder } from "./builder.js";
+import type { ColumnSnapshot, TableSnapshot } from "./snapshot.js";
 
 export type MigrationDefinition = {
   up: (t: SchemaBuilder) => void | Promise<void>;
@@ -43,22 +42,22 @@ export type SemolaMigrationConfig = {
   orm: {
     dialect: OrmDialect;
     url: string;
-  };
-  schema: {
-    path: string;
-    exportName?: string;
+    schema: {
+      path: string;
+      exportName?: string;
+    };
   };
 };
 
 export type TableDiffOperation =
   | {
       type: "createTable";
-      table: Table;
+      tableSnapshot: TableSnapshot;
     }
   | {
       type: "addColumn";
       tableName: string;
-      column: Column<ColumnKind, ColumnMeta>;
+      columnSnapshot: ColumnSnapshot;
     }
   | {
       type: "dropTable";
@@ -68,4 +67,11 @@ export type TableDiffOperation =
       type: "dropColumn";
       tableName: string;
       columnName: string;
+    }
+  | {
+      type: "alterColumn";
+      tableName: string;
+      columnName: string;
+      oldColumn: ColumnSnapshot;
+      newColumn: ColumnSnapshot;
     };

@@ -4,13 +4,6 @@ import { pathToFileURL } from "node:url";
 import type { SemolaMigrationConfig } from "../lib/orm/migration/types.js";
 import type { Table } from "../lib/orm/table/index.js";
 
-const toError = (value: unknown) => {
-  if (value instanceof Error) {
-    return value;
-  }
-  return new Error(String(value));
-};
-
 const isObject = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null;
 };
@@ -32,20 +25,14 @@ const validateConfig = (value: unknown): SemolaMigrationConfig => {
   }
 
   const orm = Reflect.get(value, "orm");
-  const schema = Reflect.get(value, "schema");
 
   if (!isObject(orm)) {
     throw new Error("Invalid semola config: missing orm section");
   }
 
-  if (!isObject(schema)) {
-    throw new Error("Invalid semola config: missing schema section");
-  }
-
   const dialect = Reflect.get(orm, "dialect");
   const url = Reflect.get(orm, "url");
-  const path = Reflect.get(schema, "path");
-  const exportName = Reflect.get(schema, "exportName");
+  const schema = Reflect.get(orm, "schema");
 
   if (dialect !== "sqlite" && dialect !== "mysql" && dialect !== "postgres") {
     throw new Error("Invalid semola config: orm.dialect is required");
@@ -55,22 +42,31 @@ const validateConfig = (value: unknown): SemolaMigrationConfig => {
     throw new Error("Invalid semola config: orm.url is required");
   }
 
+  if (!isObject(schema)) {
+    throw new Error("Invalid semola config: missing orm.schema section");
+  }
+
+  const path = Reflect.get(schema, "path");
+  const exportName = Reflect.get(schema, "exportName");
+
   if (typeof path !== "string" || path.length === 0) {
-    throw new Error("Invalid semola config: schema.path is required");
+    throw new Error("Invalid semola config: orm.schema.path is required");
   }
 
   if (exportName !== undefined && typeof exportName !== "string") {
-    throw new Error("Invalid semola config: schema.exportName must be string");
+    throw new Error(
+      "Invalid semola config: orm.schema.exportName must be string",
+    );
   }
 
   return {
     orm: {
       dialect,
       url,
-    },
-    schema: {
-      path,
-      exportName,
+      schema: {
+        path,
+        exportName,
+      },
     },
   };
 };
@@ -98,32 +94,27 @@ const tryResolveConfigFile = async (cwd: string) => {
 };
 
 export const loadSemolaConfig = async (cwd: string) => {
-  try {
-    const filePath = await tryResolveConfigFile(cwd);
+  const filePath = await tryResolveConfigFile(cwd);
 
-    if (!filePath) {
-      return [new Error("Missing semola config file"), null] as const;
-    }
-
-    // Convert file path to file:// URL for dynamic import
-    const moduleUrl = pathToFileURL(filePath).href;
-    const mod = await import(`${moduleUrl}?cache=${Date.now()}`);
-    const raw = Reflect.get(mod, "default") ?? mod;
-    const config = validateConfig(raw);
-
-    return [
-      null,
-      {
-        ...config,
-        schema: {
-          ...config.schema,
-          path: resolve(cwd, config.schema.path),
-        },
-      },
-    ] as const;
-  } catch (error) {
-    return [toError(error), null] as const;
+  if (!filePath) {
+    throw new Error("Missing semola config file");
   }
+
+  // Convert file path to file:// URL for dynamic import
+  const moduleUrl = pathToFileURL(filePath).href;
+  const mod = await import(`${moduleUrl}?cache=${Date.now()}`);
+  const raw = Reflect.get(mod, "default") ?? mod;
+  const config = validateConfig(raw);
+
+  return {
+    orm: {
+      ...config.orm,
+      schema: {
+        ...config.orm.schema,
+        path: resolve(cwd, config.orm.schema.path),
+      },
+    },
+  };
 };
 
 const toTableRecord = (value: unknown) => {
@@ -156,28 +147,21 @@ export const loadSchemaTables = async (
   schemaPath: string,
   exportName?: string,
 ) => {
-  try {
-    // Convert file path to file:// URL for dynamic import
-    const moduleUrl = pathToFileURL(schemaPath).href;
-    const mod = await import(`${moduleUrl}?cache=${Date.now()}`);
-    const key = exportName ?? "tables";
+  // Convert file path to file:// URL for dynamic import
+  const moduleUrl = pathToFileURL(schemaPath).href;
+  const mod = await import(`${moduleUrl}?cache=${Date.now()}`);
+  const key = exportName ?? "tables";
 
-    // Check if the named export exists; if not, fall back to default
-    const exportedValue =
-      key in mod ? Reflect.get(mod, key) : Reflect.get(mod, "default");
+  // Check if the named export exists; if not, fall back to default
+  const exportedValue =
+    key in mod ? Reflect.get(mod, key) : Reflect.get(mod, "default");
 
-    if (exportedValue === undefined) {
-      return [
-        new Error(
-          `Schema module does not export ${key} or a default export with tables`,
-        ),
-        null,
-      ] as const;
-    }
-
-    const tables = toTableRecord(exportedValue);
-    return [null, tables] as const;
-  } catch (error) {
-    return [toError(error), null] as const;
+  if (exportedValue === undefined) {
+    throw new Error(
+      `Schema module does not export ${key} or a default export with tables`,
+    );
   }
+
+  const tables = toTableRecord(exportedValue);
+  return tables;
 };

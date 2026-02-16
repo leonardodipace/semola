@@ -1,22 +1,48 @@
 import { describe, expect, test } from "bun:test";
-import { boolean, number, string } from "../column/index.js";
-import { Table } from "../table/index.js";
 import { generateMigrationSource } from "./generator.js";
+import type { ColumnSnapshot, TableSnapshot } from "./snapshot.js";
 
 describe("generateMigrationSource", () => {
   test("renders createTable and addColumn operations", () => {
-    const users = new Table("users", {
-      id: number("id").primaryKey(),
-      name: string("name").notNull(),
-    });
+    const usersSnapshot: TableSnapshot = {
+      name: "users",
+      columns: {
+        id: {
+          name: "id",
+          type: "number",
+          primaryKey: true,
+          notNull: false,
+          unique: false,
+          hasDefault: false,
+        },
+        name: {
+          name: "name",
+          type: "string",
+          primaryKey: false,
+          notNull: true,
+          unique: false,
+          hasDefault: false,
+        },
+      },
+    };
+
+    const activeColumn: ColumnSnapshot = {
+      name: "active",
+      type: "boolean",
+      primaryKey: false,
+      notNull: true,
+      unique: false,
+      hasDefault: true,
+      defaultValue: false,
+    };
 
     const source = generateMigrationSource(
       [
-        { type: "createTable", table: users },
+        { type: "createTable", tableSnapshot: usersSnapshot },
         {
           type: "addColumn",
           tableName: "users",
-          column: boolean("active").notNull().default(false),
+          columnSnapshot: activeColumn,
         },
       ],
       [

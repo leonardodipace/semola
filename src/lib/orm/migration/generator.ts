@@ -1,6 +1,5 @@
-import type { Column } from "../column/index.js";
-import type { ColumnKind, ColumnMeta } from "../column/types.js";
-import type { Table } from "../table/index.js";
+import type { ColumnKind } from "../column/types.js";
+import type { ColumnSnapshot, TableSnapshot } from "./snapshot.js";
 import type { TableDiffOperation } from "./types.js";
 
 const kindToMethod = (kind: ColumnKind) => {
@@ -29,50 +28,42 @@ const valueToCode = (value: unknown): string => {
   return `JSON.parse(${JSON.stringify(JSON.stringify(value))})`;
 };
 
-const renderColumn = (
-  column: Column<ColumnKind, ColumnMeta>,
-  builder = "t",
-) => {
-  let code = `${builder}.${kindToMethod(column.columnKind)}(${JSON.stringify(column.sqlName)})`;
+const renderColumnSnapshot = (column: ColumnSnapshot, builder = "t") => {
+  let code = `${builder}.${kindToMethod(column.type)}(${JSON.stringify(column.name)})`;
 
-  if (column.meta.primaryKey) {
+  if (column.primaryKey) {
     code = `${code}.primaryKey()`;
   }
 
-  if (column.meta.notNull) {
+  if (column.notNull) {
     code = `${code}.notNull()`;
   }
 
-  if (column.meta.unique) {
+  if (column.unique) {
     code = `${code}.unique()`;
   }
 
-  if (column.meta.hasDefault && column.defaultValue !== undefined) {
+  if (column.hasDefault && column.defaultValue !== undefined) {
     code = `${code}.default(${valueToCode(column.defaultValue)})`;
   }
 
   return `${code};`;
 };
 
-const renderCreateTable = (table: Table) => {
+const renderCreateTable = (table: TableSnapshot) => {
   const lines: string[] = [];
-  lines.push(
-    `await t.createTable(${JSON.stringify(table.sqlName)}, (table) => {`,
-  );
+  lines.push(`await t.createTable(${JSON.stringify(table.name)}, (table) => {`);
 
   for (const column of Object.values(table.columns)) {
-    lines.push(`    ${renderColumn(column, "table")}`);
+    lines.push(`    ${renderColumnSnapshot(column, "table")}`);
   }
 
   lines.push("  });");
   return lines;
 };
 
-const renderAddColumn = (
-  tableName: string,
-  column: Column<ColumnKind, ColumnMeta>,
-) => {
-  const definition = renderColumn(column, "table").replace(/;$/, "");
+const renderAddColumn = (tableName: string, column: ColumnSnapshot) => {
+  const definition = renderColumnSnapshot(column, "table").replace(/;$/, "");
   return [
     `await t.addColumn(${JSON.stringify(tableName)}, (table) => {`,
     `    ${definition};`,
@@ -80,13 +71,34 @@ const renderAddColumn = (
   ];
 };
 
+const renderAlterColumn = (
+  tableName: string,
+  columnName: string,
+  newColumn: ColumnSnapshot,
+) => {
+  const definition = renderColumnSnapshot(newColumn, "table").replace(/;$/, "");
+  return [
+    `await t.alterColumn(${JSON.stringify(tableName)}, ${JSON.stringify(columnName)}, (table) => {`,
+    `    ${definition};`,
+    "  });",
+  ];
+};
+
 const renderOperation = (operation: TableDiffOperation) => {
   if (operation.type === "createTable") {
-    return renderCreateTable(operation.table);
+    return renderCreateTable(operation.tableSnapshot);
   }
 
   if (operation.type === "addColumn") {
-    return renderAddColumn(operation.tableName, operation.column);
+    return renderAddColumn(operation.tableName, operation.columnSnapshot);
+  }
+
+  if (operation.type === "alterColumn") {
+    return renderAlterColumn(
+      operation.tableName,
+      operation.columnName,
+      operation.newColumn,
+    );
   }
 
   if (operation.type === "dropTable") {
