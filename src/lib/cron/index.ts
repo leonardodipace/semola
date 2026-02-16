@@ -315,7 +315,6 @@ export class Cron {
       if (part === "*") {
         // Wildcard: enable all values in range
         this.fillRange(values, min, max);
-
         continue;
       }
 
@@ -413,7 +412,7 @@ export class Cron {
   }
 
   public start() {
-    if (this.status === "running") return;
+    if (this.status !== "idle") return;
 
     this.status = "running";
     this.next();
