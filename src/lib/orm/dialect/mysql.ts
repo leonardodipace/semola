@@ -21,6 +21,9 @@ export class MysqlDialect implements Dialect {
     string: "VARCHAR(255)",
     boolean: "BOOLEAN",
     date: "DATETIME",
+    json: "JSON",
+    jsonb: "JSON", // MySQL doesn't distinguish JSONB, uses JSON
+    uuid: "CHAR(36)", // MySQL stores UUIDs as CHAR(36)
   };
 
   public buildSelect(

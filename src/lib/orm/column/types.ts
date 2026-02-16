@@ -1,4 +1,11 @@
-export type ColumnKind = "number" | "string" | "boolean" | "date";
+export type ColumnKind =
+  | "number"
+  | "string"
+  | "boolean"
+  | "date"
+  | "json"
+  | "jsonb"
+  | "uuid";
 
 export type ColumnValue<Kind extends ColumnKind> = Kind extends "number"
   ? number
@@ -6,7 +13,11 @@ export type ColumnValue<Kind extends ColumnKind> = Kind extends "number"
     ? string
     : Kind extends "date"
       ? Date
-      : boolean;
+      : Kind extends "boolean"
+        ? boolean
+        : Kind extends "json" | "jsonb"
+          ? unknown
+          : string; // uuid is a string
 
 export type ColumnMeta = {
   primaryKey: boolean;

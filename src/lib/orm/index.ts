@@ -1,7 +1,16 @@
 // Export main Orm class
 
 // Export column utilities
-export { boolean, Column, date, number, string } from "./column/index.js";
+export {
+  boolean,
+  Column,
+  date,
+  json,
+  jsonb,
+  number,
+  string,
+  uuid,
+} from "./column/index.js";
 export type {
   ColumnKind,
   ColumnMeta,

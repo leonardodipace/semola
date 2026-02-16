@@ -110,3 +110,16 @@ export const boolean = (sqlName: string) => {
 export const date = (sqlName: string) => {
   return new Column<"date", DefaultColumnMeta>(sqlName, "date");
 };
+
+// Postgres-specific column types
+export const json = (sqlName: string) => {
+  return new Column<"json", DefaultColumnMeta>(sqlName, "json");
+};
+
+export const jsonb = (sqlName: string) => {
+  return new Column<"jsonb", DefaultColumnMeta>(sqlName, "jsonb");
+};
+
+export const uuid = (sqlName: string) => {
+  return new Column<"uuid", DefaultColumnMeta>(sqlName, "uuid");
+};

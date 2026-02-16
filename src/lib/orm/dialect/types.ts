@@ -46,6 +46,9 @@ export type ColumnTypeMapping = {
   string: string;
   boolean: string;
   date: string;
+  json?: string;
+  jsonb?: string;
+  uuid?: string;
 };
 
 // Database dialect interface implementing the Strategy pattern.

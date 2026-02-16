@@ -284,9 +284,10 @@ describe("Orm - dialect support", () => {
     orm.close();
   });
 
-  test("should throw error for Postgres dialect (not yet implemented)", () => {
+  test("should support Postgres dialect", () => {
     const usersTable = new Table("users", {
       id: number("id").primaryKey(),
+      name: string("name").notNull(),
     });
 
     const orm = new Orm({
@@ -295,9 +296,9 @@ describe("Orm - dialect support", () => {
       dialect: "postgres",
     });
 
-    expect(() => orm.createTable(usersTable)).toThrow(
-      "PostgreSQL dialect not yet implemented",
-    );
+    const createTableSql = orm.createTable(usersTable);
+    expect(createTableSql).toContain("BIGSERIAL PRIMARY KEY");
+    expect(createTableSql).toContain("name TEXT NOT NULL");
 
     orm.close();
   });
