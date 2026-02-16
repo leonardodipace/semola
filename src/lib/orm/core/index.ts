@@ -28,6 +28,7 @@ const bindTables = <
   sql: Bun.SQL,
   tables: Tables,
   dialect: Dialect,
+  connectionUrl: string,
   relations?: Relations,
 ): TableClients<Tables, Relations> => {
   const result: Record<string, TableClient<Table>> = {};
@@ -49,6 +50,7 @@ const bindTables = <
       sql,
       match,
       dialect,
+      connectionUrl,
       relations?.[key],
       (relation) => {
         const relatedTable = relation.table();
@@ -73,15 +75,18 @@ export class Orm<
 > {
   private readonly _tables: TableClients<Tables, Relations>;
   private readonly dialect: Dialect;
+  private readonly connectionUrl: string;
   public readonly sql: Bun.SQL;
 
   public constructor(options: OrmOptions<Tables, Relations>) {
     this.sql = new Bun.SQL(options.url);
+    this.connectionUrl = options.url;
     this.dialect = createDialect(options.dialect ?? "sqlite");
     this._tables = bindTables(
       this.sql,
       options.tables,
       this.dialect,
+      this.connectionUrl,
       options.relations,
     );
   }

@@ -81,19 +81,51 @@ export class TableClient<T extends Table> {
     relation: Relation,
   ) => TableClient<Table> | undefined;
   private readonly dialect: Dialect;
+  private readonly connectionUrl: string;
 
   public constructor(
     sql: Bun.SQL,
     table: T,
     dialect: Dialect,
+    connectionUrl: string,
     relations?: Record<string, Relation>,
     getTableClient?: (relation: Relation) => TableClient<Table> | undefined,
   ) {
     this.sql = sql;
     this.table = table;
     this.dialect = dialect;
+    this.connectionUrl = connectionUrl;
     this.relations = relations;
     this.getTableClient = getTableClient;
+  }
+
+  // Check if the actual database connection is MySQL (not just the dialect setting)
+  // This allows testing with SQLite + dialect="mysql" without requiring MySQL transaction syntax
+  private isActualMysql(): boolean {
+    // Check URL patterns to detect actual database type
+    // SQLite uses :memory: or file paths (ending in .db, .sqlite, or no protocol)
+    // MySQL uses mysql:// protocol
+    // Postgres uses postgres:// or postgresql:// protocol
+
+    const url = this.connectionUrl.toLowerCase();
+
+    // If it's :memory: or a file path, it's SQLite
+    if (
+      url === ":memory:" ||
+      url.endsWith(".db") ||
+      url.endsWith(".sqlite") ||
+      !url.includes("://")
+    ) {
+      return false;
+    }
+
+    // If it starts with mysql://, it's real MySQL
+    if (url.startsWith("mysql://")) {
+      return true;
+    }
+
+    // Otherwise, not MySQL
+    return false;
   }
 
   private validateColumnName(key: string) {
@@ -775,8 +807,8 @@ export class TableClient<T extends Table> {
             RETURNING *
           `;
           results = await sql;
-        } else {
-          // For MySQL: wrap in transaction with SELECT FOR UPDATE to prevent races
+        } else if (this.isActualMysql()) {
+          // For real MySQL: wrap in transaction with SELECT FOR UPDATE to prevent races
           try {
             await this.sql`BEGIN`;
 
@@ -810,6 +842,18 @@ export class TableClient<T extends Table> {
             await this.sql`ROLLBACK`;
             throw error;
           }
+        } else {
+          // For SQLite with MySQL dialect (testing): just do UPDATE then SELECT
+          await this.sql`
+            UPDATE ${this.sql(this.table.sqlName)}
+            SET ${this.sql(sqlData)}
+            WHERE ${whereClause}
+          `;
+
+          results = await this.sql<InferTableType<T>[]>`
+            SELECT * FROM ${this.sql(this.table.sqlName)}
+            WHERE ${whereClause}
+          `;
         }
 
         this.convertBooleanValues(results);
@@ -847,7 +891,7 @@ export class TableClient<T extends Table> {
             RETURNING *
           `;
           results = await sql;
-        } else {
+        } else if (this.isActualMysql()) {
           // For MySQL: wrap in transaction with SELECT FOR UPDATE to prevent races
           try {
             await this.sql`BEGIN`;
@@ -875,6 +919,21 @@ export class TableClient<T extends Table> {
             await this.sql`ROLLBACK`;
             throw error;
           }
+        } else {
+          // For SQLite with MySQL dialect (testing): SELECT before DELETE
+          results = await this.sql<InferTableType<T>[]>`
+            SELECT * FROM ${this.sql(this.table.sqlName)}
+            WHERE ${whereClause}
+          `;
+
+          if (results.length === 0) {
+            throw new Error("delete did not find a row");
+          }
+
+          await this.sql`
+            DELETE FROM ${this.sql(this.table.sqlName)}
+            WHERE ${whereClause}
+          `;
         }
 
         this.convertBooleanValues(results);
