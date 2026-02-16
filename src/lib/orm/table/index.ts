@@ -154,7 +154,7 @@ export class TableClient<T extends Table> {
     return null;
   }
 
-  private isFilterObject(value: unknown): value is Record<string, unknown> {
+  private isFilterObject(value: unknown) {
     return (
       typeof value === "object" &&
       value !== null &&
@@ -172,7 +172,7 @@ export class TableClient<T extends Table> {
 
     // Check if value is a filter object (has operator properties)
     if (this.isFilterObject(value)) {
-      const filters = value;
+      const filters = value as Record<string, unknown>;
       const conditions = [];
 
       // Equality operator
@@ -340,24 +340,24 @@ export class TableClient<T extends Table> {
     if (kind === "number") {
       return rows
         .map((row) => row[columnKey])
-        .filter((value): value is number => typeof value === "number");
+        .filter((value) => typeof value === "number");
     }
 
     if (kind === "string") {
       return rows
         .map((row) => row[columnKey])
-        .filter((value): value is string => typeof value === "string");
+        .filter((value) => typeof value === "string");
     }
 
     if (kind === "date") {
       return rows
         .map((row) => row[columnKey])
-        .filter((value): value is Date => value instanceof Date);
+        .filter((value) => value instanceof Date);
     }
 
     return rows
       .map((row) => row[columnKey])
-      .filter((value): value is boolean => typeof value === "boolean");
+      .filter((value) => typeof value === "boolean");
   }
 
   private convertBooleanValues(rows: Record<string, unknown>[]) {

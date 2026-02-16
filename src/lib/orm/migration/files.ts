@@ -5,9 +5,7 @@ import type { MigrationDefinition, MigrationFile } from "./types.js";
 
 const migrationRegex = /^(\d{14})_([a-zA-Z0-9_-]+)\.(ts|js|mts|mjs|cts|cjs)$/;
 
-const isMigrationDefinition = (
-  value: unknown,
-): value is MigrationDefinition => {
+const isMigrationDefinition = (value: unknown) => {
   if (typeof value !== "object" || value === null) {
     return false;
   }
@@ -75,7 +73,7 @@ export const loadMigration = async (file: MigrationFile) => {
   // Convert file path to file:// URL for dynamic import
   const moduleUrl = pathToFileURL(file.filePath).href;
   const mod = await import(`${moduleUrl}?cache=${Date.now()}`);
-  const definition = Reflect.get(mod, "default");
+  const definition = Reflect.get(mod, "default") as MigrationDefinition;
 
   if (!isMigrationDefinition(definition)) {
     return err(
