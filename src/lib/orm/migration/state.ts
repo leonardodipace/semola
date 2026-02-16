@@ -24,7 +24,10 @@ export const ensureMigrationsTable = async (
   orm: Orm<Record<string, Table>>,
   tableName: string,
 ) => {
-  const safeTableName = toSqlIdentifier(tableName, "table name");
+  const [error, safeTableName] = toSqlIdentifier(tableName, "table name");
+  if (error) {
+    throw new Error(error.message);
+  }
 
   await orm.sql`
     CREATE TABLE IF NOT EXISTS ${orm.sql(safeTableName)} (
@@ -39,7 +42,11 @@ export const getAppliedMigrations = async (
   orm: Orm<Record<string, Table>>,
   tableName: string,
 ) => {
-  const safeTableName = toSqlIdentifier(tableName, "table name");
+  const [error, safeTableName] = toSqlIdentifier(tableName, "table name");
+  if (error) {
+    throw new Error(error.message);
+  }
+
   const rows = await orm.sql`
     SELECT version, name, applied_at
     FROM ${orm.sql(safeTableName)}
@@ -80,7 +87,11 @@ export const recordMigration = async (
   version: string,
   name: string,
 ) => {
-  const safeTableName = toSqlIdentifier(tableName, "table name");
+  const [error, safeTableName] = toSqlIdentifier(tableName, "table name");
+  if (error) {
+    throw new Error(error.message);
+  }
+
   const appliedAt = new Date().toISOString();
   await orm.sql`
     INSERT INTO ${orm.sql(safeTableName)} (version, name, applied_at)
@@ -93,7 +104,10 @@ export const removeMigration = async (
   tableName: string,
   version: string,
 ) => {
-  const safeTableName = toSqlIdentifier(tableName, "table name");
+  const [error, safeTableName] = toSqlIdentifier(tableName, "table name");
+  if (error) {
+    throw new Error(error.message);
+  }
 
   await orm.sql`
     DELETE FROM ${orm.sql(safeTableName)}

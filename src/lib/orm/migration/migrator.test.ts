@@ -49,13 +49,19 @@ describe("Migration runtime functions", () => {
       migrationTable: "semola_migrations",
     };
 
-    const filePath = await createMigration({
+    const [error, filePath] = await createMigration({
       ...migrationOptions,
       name: "create users",
       tables: { users },
     });
 
+    expect(error).toBeNull();
+    expect(filePath).toBeDefined();
     expect(filePath).toContain("create_users.ts");
+
+    if (!filePath) {
+      throw new Error("filePath is undefined");
+    }
 
     const source = await Bun.file(filePath).text();
     expect(source).toContain('import { defineMigration } from "semola/orm"');
@@ -98,7 +104,8 @@ describe("Migration runtime functions", () => {
       migrationTable: "semola_migrations",
     };
 
-    const applied = await applyMigrations(migrationOptions);
+    const [appliedError, applied] = await applyMigrations(migrationOptions);
+    expect(appliedError).toBeNull();
     expect(applied).toEqual(["20260216120000"]);
 
     const rows = await orm.sql.unsafe(
@@ -107,7 +114,9 @@ describe("Migration runtime functions", () => {
     expect(Array.isArray(rows)).toBe(true);
     expect(Array.isArray(rows) && rows.length > 0).toBe(true);
 
-    const rolledBack = await rollbackMigration(migrationOptions);
+    const [rollbackError, rolledBack] =
+      await rollbackMigration(migrationOptions);
+    expect(rollbackError).toBeNull();
     expect(rolledBack).toBe("20260216120000");
 
     const rowsAfter = await orm.sql.unsafe(
@@ -149,11 +158,13 @@ describe("Migration runtime functions", () => {
     };
 
     await applyMigrations(migrationOptions);
-    const status = await getMigrationStatus(migrationOptions);
+    const [statusError, status] = await getMigrationStatus(migrationOptions);
 
-    expect(status.length).toBe(1);
-    expect(status[0]?.version).toBe("20260216120000");
-    expect(status[0]?.applied).toBe(true);
+    expect(statusError).toBeNull();
+    expect(status).toBeDefined();
+    expect(status?.length).toBe(1);
+    expect(status?.[0]?.version).toBe("20260216120000");
+    expect(status?.[0]?.applied).toBe(true);
 
     orm.close();
   });
@@ -178,13 +189,14 @@ describe("Migration runtime functions", () => {
       migrationTable: "semola_migrations",
     };
 
-    await expect(
-      createMigration({
-        ...migrationOptions,
-        name: "___---",
-        tables: { users },
-      }),
-    ).rejects.toThrow("Migration name cannot be empty");
+    const [error, _filePath] = await createMigration({
+      ...migrationOptions,
+      name: "___---",
+      tables: { users },
+    });
+
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain("Migration name cannot be empty");
 
     orm.close();
   });
@@ -209,16 +221,17 @@ describe("Migration runtime functions", () => {
       migrationTable: "semola_migrations",
     };
 
-    const filePath = await createMigration({
+    const [filePathError, filePath] = await createMigration({
       ...migrationOptions,
       name: "../DROP TABLE users; -- add@email!!",
       tables: { users },
     });
 
+    expect(filePathError).toBeNull();
     expect(filePath).toBeDefined();
-    expect(filePath.includes("..")).toBe(false);
-    expect(filePath.includes("/DROP")).toBe(false);
-    expect(filePath.endsWith("drop_table_users_add_email.ts")).toBe(true);
+    expect(filePath?.includes("..")).toBe(false);
+    expect(filePath?.includes("/DROP")).toBe(false);
+    expect(filePath?.endsWith("drop_table_users_add_email.ts")).toBe(true);
 
     orm.close();
   });
@@ -265,10 +278,13 @@ describe("Migration runtime functions", () => {
       migrationTable: "semola_migrations",
     };
 
-    const firstApplied = await applyMigrations(migrationOptions);
+    const [firstError, firstApplied] = await applyMigrations(migrationOptions);
+    expect(firstError).toBeNull();
     expect(firstApplied).toEqual(["20260216120000", "20260216120100"]);
 
-    const secondApplied = await applyMigrations(migrationOptions);
+    const [secondError, secondApplied] =
+      await applyMigrations(migrationOptions);
+    expect(secondError).toBeNull();
     expect(secondApplied).toEqual([]);
 
     orm.close();
@@ -290,7 +306,8 @@ describe("Migration runtime functions", () => {
       migrationTable: "semola_migrations",
     };
 
-    const rolledBack = await rollbackMigration(migrationOptions);
+    const [error, rolledBack] = await rollbackMigration(migrationOptions);
+    expect(error).toBeNull();
     expect(rolledBack).toBeNull();
 
     orm.close();
@@ -328,9 +345,9 @@ describe("Migration runtime functions", () => {
     await applyMigrations(migrationOptions);
     await rm(`${migrationsDir}/20260216120000_first.ts`);
 
-    await expect(rollbackMigration(migrationOptions)).rejects.toThrow(
-      "Missing migration file for version",
-    );
+    const [error] = await rollbackMigration(migrationOptions);
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain("Missing migration file for version");
 
     orm.close();
   });
@@ -356,9 +373,9 @@ describe("Migration runtime functions", () => {
       migrationTable: "semola_migrations",
     };
 
-    await expect(applyMigrations(migrationOptions)).rejects.toThrow(
-      "default export must be defineMigration",
-    );
+    const [error] = await applyMigrations(migrationOptions);
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain("default export must be defineMigration");
 
     orm.close();
   });
@@ -412,13 +429,15 @@ describe("Migration runtime functions", () => {
       "INSERT INTO semola_migrations (version, name, applied_at) VALUES ('20260216120000', 'first', '2026-02-16T12:00:00.000Z')",
     );
 
-    const statuses = await getMigrationStatus(migrationOptions);
+    const [error, statuses] = await getMigrationStatus(migrationOptions);
 
-    expect(statuses.length).toBe(2);
-    expect(statuses[0]?.version).toBe("20260216120000");
-    expect(statuses[0]?.applied).toBe(true);
-    expect(statuses[1]?.version).toBe("20260216120100");
-    expect(statuses[1]?.applied).toBe(false);
+    expect(error).toBeNull();
+    expect(statuses).toBeDefined();
+    expect(statuses?.length).toBe(2);
+    expect(statuses?.[0]?.version).toBe("20260216120000");
+    expect(statuses?.[0]?.applied).toBe(true);
+    expect(statuses?.[1]?.version).toBe("20260216120100");
+    expect(statuses?.[1]?.applied).toBe(false);
 
     orm.close();
   });

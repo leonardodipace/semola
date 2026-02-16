@@ -1,5 +1,6 @@
 import { readdir } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
+import { mightThrow } from "../../errors/index.js";
 import type { MigrationDefinition, MigrationFile } from "./types.js";
 
 const migrationRegex = /^(\d{14})_([a-zA-Z0-9_-]+)\.(ts|js|mts|mjs|cts|cjs)$/;
@@ -65,22 +66,26 @@ export const scanMigrationFiles = async (dirPath: string) => {
 };
 
 export const loadMigration = async (file: MigrationFile) => {
-  // Convert file path to file:// URL for dynamic import
-  const moduleUrl = pathToFileURL(file.filePath).href;
-  const mod = await import(`${moduleUrl}?cache=${Date.now()}`);
-  const definition = Reflect.get(mod, "default");
+  return await mightThrow(
+    (async () => {
+      // Convert file path to file:// URL for dynamic import
+      const moduleUrl = pathToFileURL(file.filePath).href;
+      const mod = await import(`${moduleUrl}?cache=${Date.now()}`);
+      const definition = Reflect.get(mod, "default");
 
-  if (!isMigrationDefinition(definition)) {
-    throw new Error(
-      `Invalid migration file ${file.filePath}: default export must be defineMigration({ up, down })`,
-    );
-  }
+      if (!isMigrationDefinition(definition)) {
+        throw new Error(
+          `Invalid migration file ${file.filePath}: default export must be defineMigration({ up, down })`,
+        );
+      }
 
-  return {
-    version: file.version,
-    name: file.name,
-    filePath: file.filePath,
-    up: definition.up,
-    down: definition.down,
-  };
+      return {
+        version: file.version,
+        name: file.name,
+        filePath: file.filePath,
+        up: definition.up,
+        down: definition.down,
+      };
+    })(),
+  );
 };

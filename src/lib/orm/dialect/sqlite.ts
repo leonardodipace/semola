@@ -14,7 +14,7 @@ import type {
 // SQLite dialect implementation.
 // Fully implements all query building and type conversion for SQLite databases.
 export class SqliteDialect implements Dialect {
-  public readonly name = "sqlite" as const;
+  public readonly name = "sqlite";
 
   public readonly types: ColumnTypeMapping = {
     number: "INTEGER",

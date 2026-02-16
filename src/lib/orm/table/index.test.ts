@@ -84,47 +84,53 @@ describe("Table - findMany with where clause", () => {
   });
 
   test("should return all rows when no where clause is provided", async () => {
-    const users = await orm.tables.users.findMany();
-    expect(users.length).toBe(4);
+    const [error, users] = await orm.tables.users.findMany();
+    expect(error).toBeNull();
+    expect(users?.length).toBe(4);
   });
 
   test("should filter by single condition", async () => {
-    const users = await orm.tables.users.findMany({
+    const [error, users] = await orm.tables.users.findMany({
       where: { name: "Alice" },
     });
-    expect(users.length).toBe(1);
-    expect(users[0]?.name).toBe("Alice");
-    expect(users[0]?.email).toBe("alice@example.com");
+    expect(error).toBeNull();
+    expect(users?.length).toBe(1);
+    expect(users?.[0]?.name).toBe("Alice");
+    expect(users?.[0]?.email).toBe("alice@example.com");
   });
 
   test("should filter by multiple conditions (AND)", async () => {
-    const users = await orm.tables.users.findMany({
+    const [error, users] = await orm.tables.users.findMany({
       where: { name: "Bob", active: false },
     });
-    expect(users.length).toBe(1);
-    expect(users[0]?.name).toBe("Bob");
-    expect(users[0]?.active).toBe(false);
+    expect(error).toBeNull();
+    expect(users?.length).toBe(1);
+    expect(users?.[0]?.name).toBe("Bob");
+    expect(users?.[0]?.active).toBe(false);
   });
 
   test("should filter by boolean value", async () => {
-    const activeUsers = await orm.tables.users.findMany({
+    const [error1, activeUsers] = await orm.tables.users.findMany({
       where: { active: true },
     });
-    expect(activeUsers.length).toBe(2);
-    expect(activeUsers.every((u) => u.active)).toBe(true);
+    expect(error1).toBeNull();
+    expect(activeUsers?.length).toBe(2);
+    expect(activeUsers?.every((u) => u.active)).toBe(true);
 
-    const inactiveUsers = await orm.tables.users.findMany({
+    const [error2, inactiveUsers] = await orm.tables.users.findMany({
       where: { active: false },
     });
-    expect(inactiveUsers.length).toBe(2);
-    expect(inactiveUsers.every((u) => !u.active)).toBe(true);
+    expect(error2).toBeNull();
+    expect(inactiveUsers?.length).toBe(2);
+    expect(inactiveUsers?.every((u) => !u.active)).toBe(true);
   });
 
   test("should return empty array when no matches found", async () => {
-    const users = await orm.tables.users.findMany({
+    const [error, users] = await orm.tables.users.findMany({
       where: { name: "NonExistent" },
     });
-    expect(users.length).toBe(0);
+    expect(error).toBeNull();
+    expect(users?.length).toBe(0);
   });
 
   test("should handle null values with IS NULL", async () => {
@@ -160,17 +166,19 @@ describe("Table - findMany with where clause", () => {
       new SqliteDialect(),
     );
 
-    const nullNameRows = await nullableClient.findMany({
+    const [error1, nullNameRows] = await nullableClient.findMany({
       where: { name: null },
     });
-    expect(nullNameRows.length).toBe(1);
-    expect(nullNameRows[0]?.value).toBe(200);
+    expect(error1).toBeNull();
+    expect(nullNameRows?.length).toBe(1);
+    expect(nullNameRows?.[0]?.value).toBe(200);
 
-    const nullValueRows = await nullableClient.findMany({
+    const [error2, nullValueRows] = await nullableClient.findMany({
       where: { value: null },
     });
-    expect(nullValueRows.length).toBe(1);
-    expect(nullValueRows[0]?.name).toBe("another");
+    expect(error2).toBeNull();
+    expect(nullValueRows?.length).toBe(1);
+    expect(nullValueRows?.[0]?.name).toBe("another");
 
     // Cleanup
     await orm.sql`DROP TABLE IF EXISTS test_nullable`;
@@ -180,53 +188,62 @@ describe("Table - findMany with where clause", () => {
     const maliciousName = "Alice'; DROP TABLE test_users; --";
 
     // This should safely escape the value, not execute the SQL injection
-    const users = await orm.tables.users.findMany({
+    const [error1, users] = await orm.tables.users.findMany({
       where: { name: maliciousName },
     });
 
     // Should return no results (or 0 if the malicious string doesn't match any real data)
-    expect(users.length).toBe(0);
+    expect(error1).toBeNull();
+    expect(users?.length).toBe(0);
 
     // Verify table still exists by querying it
-    const allUsers = await orm.tables.users.findMany();
-    expect(allUsers.length).toBe(4); // Original 4 users should still be there
+    const [error2, allUsers] = await orm.tables.users.findMany();
+    expect(error2).toBeNull();
+    expect(allUsers?.length).toBe(4); // Original 4 users should still be there
   });
 
   test("should throw error for invalid column names", async () => {
-    await expect(
-      orm.tables.users.findMany({
-        // @ts-expect-error - invalidColumn doesn't exist on users table
-        where: { invalidColumn: "value" },
-      }),
-    ).rejects.toThrow("Invalid column: invalidColumn");
+    const [error, users] = await orm.tables.users.findMany({
+      // @ts-expect-error - invalidColumn doesn't exist on users table
+      where: { invalidColumn: "value" },
+    });
+    expect(error).not.toBeNull();
+    if (error && typeof error === "object" && "message" in error) {
+      expect(error.message).toContain("Invalid column: invalidColumn");
+    }
+    expect(users).toBeNull();
   });
 
   test("should filter with equals operator", async () => {
-    const users = await orm.tables.users.findMany({
+    const [error1, users] = await orm.tables.users.findMany({
       where: { name: { equals: "Alice" } },
     });
-    expect(users.length).toBe(1);
-    expect(users[0]?.name).toBe("Alice");
+    expect(error1).toBeNull();
+    expect(users?.length).toBe(1);
+    expect(users?.[0]?.name).toBe("Alice");
 
     // Test with boolean
-    const activeUsers = await orm.tables.users.findMany({
+    const [error2, activeUsers] = await orm.tables.users.findMany({
       where: { active: { equals: true } },
     });
-    expect(activeUsers.length).toBe(2);
+    expect(error2).toBeNull();
+    expect(activeUsers?.length).toBe(2);
   });
 
   test("should filter with contains operator (case insensitive)", async () => {
-    const users = await orm.tables.users.findMany({
+    const [error1, users] = await orm.tables.users.findMany({
       where: { name: { contains: "ali" } },
     });
-    expect(users.length).toBe(1);
-    expect(users[0]?.name).toBe("Alice");
+    expect(error1).toBeNull();
+    expect(users?.length).toBe(1);
+    expect(users?.[0]?.name).toBe("Alice");
 
     // Test case insensitivity
-    const usersUpper = await orm.tables.users.findMany({
+    const [error2, usersUpper] = await orm.tables.users.findMany({
       where: { name: { contains: "ALI" } },
     });
-    expect(usersUpper.length).toBe(1);
+    expect(error2).toBeNull();
+    expect(usersUpper?.length).toBe(1);
   });
 
   test("should filter with gt operator", async () => {
@@ -241,44 +258,49 @@ describe("Table - findMany with where clause", () => {
         (3, 'User3', 'user3@example.com', true)
     `;
 
-    const users = await orm.tables.users.findMany({
+    const [error, users] = await orm.tables.users.findMany({
       where: { id: { gt: 1 } },
     });
-    expect(users.length).toBe(2);
-    expect(users.every((u) => u.id > 1)).toBe(true);
+    expect(error).toBeNull();
+    expect(users?.length).toBe(2);
+    expect(users?.every((u) => u.id > 1)).toBe(true);
   });
 
   test("should filter with gte operator", async () => {
-    const users = await orm.tables.users.findMany({
+    const [error, users] = await orm.tables.users.findMany({
       where: { id: { gte: 2 } },
     });
-    expect(users.length).toBe(2);
-    expect(users.every((u) => u.id >= 2)).toBe(true);
+    expect(error).toBeNull();
+    expect(users?.length).toBe(2);
+    expect(users?.every((u) => u.id >= 2)).toBe(true);
   });
 
   test("should filter with lt operator", async () => {
-    const users = await orm.tables.users.findMany({
+    const [error, users] = await orm.tables.users.findMany({
       where: { id: { lt: 3 } },
     });
-    expect(users.length).toBe(2);
-    expect(users.every((u) => u.id < 3)).toBe(true);
+    expect(error).toBeNull();
+    expect(users?.length).toBe(2);
+    expect(users?.every((u) => u.id < 3)).toBe(true);
   });
 
   test("should filter with lte operator", async () => {
-    const users = await orm.tables.users.findMany({
+    const [error, users] = await orm.tables.users.findMany({
       where: { id: { lte: 2 } },
     });
-    expect(users.length).toBe(2);
-    expect(users.every((u) => u.id <= 2)).toBe(true);
+    expect(error).toBeNull();
+    expect(users?.length).toBe(2);
+    expect(users?.every((u) => u.id <= 2)).toBe(true);
   });
 
   test("should filter with multiple operators combined", async () => {
     // ID between 1 and 2 (inclusive)
-    const users = await orm.tables.users.findMany({
+    const [error, users] = await orm.tables.users.findMany({
       where: { id: { gte: 1, lte: 2 } },
     });
-    expect(users.length).toBe(2);
-    expect(users.every((u) => u.id >= 1 && u.id <= 2)).toBe(true);
+    expect(error).toBeNull();
+    expect(users?.length).toBe(2);
+    expect(users?.every((u) => u.id >= 1 && u.id <= 2)).toBe(true);
   });
 
   test("should combine direct values and operators", async () => {
@@ -293,14 +315,15 @@ describe("Table - findMany with where clause", () => {
         (3, 'User3', 'user3@example.com', true)
     `;
 
-    const users = await orm.tables.users.findMany({
+    const [error, users] = await orm.tables.users.findMany({
       where: {
         active: true,
         id: { gte: 2 },
       },
     });
-    expect(users.length).toBe(2);
-    expect(users.every((u) => u.active && u.id >= 2)).toBe(true);
+    expect(error).toBeNull();
+    expect(users?.length).toBe(2);
+    expect(users?.every((u) => u.active && u.id >= 2)).toBe(true);
 
     // Restore original test data for subsequent tests
     await orm.sql`DELETE FROM test_posts`;
@@ -325,120 +348,140 @@ describe("Table - findMany with where clause", () => {
   });
 
   test("findFirst should return first matching row", async () => {
-    const user = await orm.tables.users.findFirst({
+    const [error, user] = await orm.tables.users.findFirst({
       where: { active: true },
     });
+    expect(error).toBeNull();
     expect(user).not.toBeNull();
     expect(user?.active).toBe(true);
   });
 
   test("findFirst should return null when no matches found", async () => {
-    const user = await orm.tables.users.findFirst({
+    const [error, user] = await orm.tables.users.findFirst({
       where: { name: "NonExistent" },
     });
+    expect(error).toBeNull();
     expect(user).toBeNull();
   });
 
   test("findFirst without where should return first row", async () => {
-    const user = await orm.tables.users.findFirst();
+    const [error, user] = await orm.tables.users.findFirst();
+    expect(error).toBeNull();
     expect(user).not.toBeNull();
   });
 
   test("findUnique should return row by primary key", async () => {
-    const user = await orm.tables.users.findUnique({
+    const [error, user] = await orm.tables.users.findUnique({
       where: { id: 1 },
     });
+    expect(error).toBeNull();
     expect(user).not.toBeNull();
     expect(user?.id).toBe(1);
   });
 
   test("findUnique should return row by unique field", async () => {
-    const user = await orm.tables.users.findUnique({
+    const [error, user] = await orm.tables.users.findUnique({
       where: { email: "alice@example.com" },
     });
+    expect(error).toBeNull();
     expect(user).not.toBeNull();
     expect(user?.email).toBe("alice@example.com");
   });
 
   test("findUnique should return null when not found", async () => {
-    const user = await orm.tables.users.findUnique({
+    const [error, user] = await orm.tables.users.findUnique({
       where: { id: 999 },
     });
+    expect(error).toBeNull();
     expect(user).toBeNull();
   });
 
   test("findUnique should throw error for non-unique column", async () => {
-    await expect(
-      orm.tables.users.findUnique({
-        where: { active: { equals: true } },
-      }),
-    ).rejects.toThrow('Column "active" is not a primary key or unique column');
+    const [error, user] = await orm.tables.users.findUnique({
+      where: { active: { equals: true } },
+    });
+    expect(error).not.toBeNull();
+    if (error && typeof error === "object" && "message" in error) {
+      expect(error.message).toContain(
+        'Column "active" is not a primary key or unique column',
+      );
+    }
+    expect(user).toBeNull();
   });
 
   test("findUnique should support composite unique lookups with multiple columns", async () => {
-    const user = await orm.tables.users.findUnique({
+    const [error, user] = await orm.tables.users.findUnique({
       where: { id: 1, email: "alice@example.com" },
     });
+    expect(error).toBeNull();
     expect(user).not.toBeNull();
     expect(user?.id).toBe(1);
     expect(user?.email).toBe("alice@example.com");
   });
 
   test("findMany with take should limit results", async () => {
-    const users = await orm.tables.users.findMany({
+    const [error, users] = await orm.tables.users.findMany({
       take: 2,
     });
-    expect(users.length).toBe(2);
+    expect(error).toBeNull();
+    expect(users?.length).toBe(2);
   });
 
   test("findMany with skip should skip results", async () => {
-    const allUsers = await orm.tables.users.findMany();
-    const skipped = await orm.tables.users.findMany({
+    const [error1, allUsers] = await orm.tables.users.findMany();
+    expect(error1).toBeNull();
+    const [error2, skipped] = await orm.tables.users.findMany({
       skip: 2,
     });
-    expect(skipped.length).toBe(allUsers.length - 2);
-    expect(skipped[0]?.id).toBe(allUsers[2]?.id);
+    expect(error2).toBeNull();
+    expect(skipped?.length).toBe(allUsers?.length ? allUsers.length - 2 : 0);
+    expect(skipped?.[0]?.id).toBe(allUsers?.[2]?.id);
   });
 
   test("findMany with take and skip should paginate", async () => {
-    const page1 = await orm.tables.users.findMany({
+    const [error1, page1] = await orm.tables.users.findMany({
       take: 2,
       skip: 0,
     });
-    const page2 = await orm.tables.users.findMany({
+    expect(error1).toBeNull();
+    const [error2, page2] = await orm.tables.users.findMany({
       take: 2,
       skip: 2,
     });
-    expect(page1.length).toBe(2);
-    expect(page2.length).toBe(2);
-    expect(page1[0]?.id).not.toBe(page2[0]?.id);
+    expect(error2).toBeNull();
+    expect(page1?.length).toBe(2);
+    expect(page2?.length).toBe(2);
+    expect(page1?.[0]?.id).not.toBe(page2?.[0]?.id);
   });
 
   test("findMany with where and pagination should work together", async () => {
-    const users = await orm.tables.users.findMany({
+    const [error, users] = await orm.tables.users.findMany({
       where: { active: true },
       take: 1,
     });
-    expect(users.length).toBeLessThanOrEqual(1);
-    expect(users.every((u) => u.active)).toBe(true);
+    expect(error).toBeNull();
+    expect(users?.length).toBeLessThanOrEqual(1);
+    expect(users?.every((u) => u.active)).toBe(true);
   });
 
   test("findMany with include should load one() relations", async () => {
-    const posts = await orm.tables.posts.findMany({
+    const [error, posts] = await orm.tables.posts.findMany({
       include: { author: true },
     });
-    expect(posts.length).toBeGreaterThan(0);
+    expect(error).toBeNull();
+    expect(posts?.length).toBeGreaterThan(0);
 
-    const [post] = posts;
+    const [post] = posts || [];
     expect(post?.author).toBeDefined();
     expect(post?.author?.name).toBeDefined();
     expect(post?.author?.email).toBeDefined();
   });
 
   test("findFirst with include should load one() relations", async () => {
-    const post = await orm.tables.posts.findFirst({
+    const [error, post] = await orm.tables.posts.findFirst({
       include: { author: true },
     });
+    expect(error).toBeNull();
     if (post) {
       expect(post.author).toBeDefined();
       expect(post.author?.name).toBeDefined();
@@ -446,10 +489,11 @@ describe("Table - findMany with where clause", () => {
   });
 
   test("findUnique with include should load one() relations", async () => {
-    const post = await orm.tables.posts.findUnique({
+    const [error, post] = await orm.tables.posts.findUnique({
       where: { id: 1 },
       include: { author: true },
     });
+    expect(error).toBeNull();
     if (post) {
       expect(post.author).toBeDefined();
       expect(post.author?.name).toBe("Alice");
@@ -457,11 +501,12 @@ describe("Table - findMany with where clause", () => {
   });
 
   test("findMany with include should load many() relations", async () => {
-    const users = await orm.tables.users.findMany({
+    const [error, users] = await orm.tables.users.findMany({
       include: { posts: true },
     });
-    expect(users.length).toBeGreaterThan(0);
-    const alice = users.find((u) => u.name === "Alice");
+    expect(error).toBeNull();
+    expect(users?.length).toBeGreaterThan(0);
+    const alice = users?.find((u) => u.name === "Alice");
     expect(alice).toBeDefined();
     expect(alice?.posts).toBeDefined();
     expect(Array.isArray(alice?.posts)).toBe(true);
@@ -470,10 +515,11 @@ describe("Table - findMany with where clause", () => {
   });
 
   test("findFirst with include should load many() relations", async () => {
-    const user = await orm.tables.users.findFirst({
+    const [error, user] = await orm.tables.users.findFirst({
       where: { name: "Alice" },
       include: { posts: true },
     });
+    expect(error).toBeNull();
     if (user) {
       expect(user.posts).toBeDefined();
       expect(Array.isArray(user.posts)).toBe(true);
@@ -482,10 +528,11 @@ describe("Table - findMany with where clause", () => {
   });
 
   test("findUnique with include should load many() relations", async () => {
-    const user = await orm.tables.users.findUnique({
+    const [error, user] = await orm.tables.users.findUnique({
       where: { id: 1 },
       include: { posts: true },
     });
+    expect(error).toBeNull();
     if (user) {
       expect(user.posts).toBeDefined();
       expect(Array.isArray(user.posts)).toBe(true);
@@ -494,10 +541,11 @@ describe("Table - findMany with where clause", () => {
   });
 
   test("many() relations should return empty array when no related records", async () => {
-    const user = await orm.tables.users.findUnique({
+    const [error, user] = await orm.tables.users.findUnique({
       where: { id: 4 }, // Diana has no posts
       include: { posts: true },
     });
+    expect(error).toBeNull();
     if (user) {
       expect(user.posts).toBeDefined();
       expect(Array.isArray(user.posts)).toBe(true);
@@ -507,126 +555,142 @@ describe("Table - findMany with where clause", () => {
 });
 describe("Table - create method", () => {
   test("should create a new user with required fields", async () => {
-    const newUser = await orm.tables.users.create({
+    const [error, newUser] = await orm.tables.users.create({
       name: "Eve",
       email: "eve@example.com",
     });
 
-    expect(newUser.id).toBeDefined();
-    expect(newUser.name).toBe("Eve");
-    expect(newUser.email).toBe("eve@example.com");
-    expect(newUser.active).toBe(true); // Default value
+    expect(error).toBeNull();
+    expect(newUser?.id).toBeDefined();
+    expect(newUser?.name).toBe("Eve");
+    expect(newUser?.email).toBe("eve@example.com");
+    expect(newUser?.active).toBe(true); // Default value
   });
 
   test("should create a user with optional fields set", async () => {
-    const newUser = await orm.tables.users.create({
+    const [error, newUser] = await orm.tables.users.create({
       name: "Frank",
       email: "frank@example.com",
       active: false,
     });
 
-    expect(newUser.name).toBe("Frank");
-    expect(newUser.email).toBe("frank@example.com");
-    expect(newUser.active).toBe(false);
+    expect(error).toBeNull();
+    expect(newUser?.name).toBe("Frank");
+    expect(newUser?.email).toBe("frank@example.com");
+    expect(newUser?.active).toBe(false);
   });
 
   test("should throw error when required field is missing", async () => {
     // @ts-expect-error - missing required fields
-    const invalidCreate = orm.tables.users.create({
+    const [error, newUser] = await orm.tables.users.create({
       email: "invalid@example.com",
     });
 
-    await expect(invalidCreate).rejects.toThrow();
+    expect(error).not.toBeNull();
+    expect(newUser).toBeNull();
   });
 });
 
 describe("Table - update method", () => {
   test("should update a user by id", async () => {
-    const updated = await orm.tables.users.update({
+    const [error, updated] = await orm.tables.users.update({
       where: { id: 1 },
       data: { name: "Alice Updated" },
     });
 
-    expect(updated.name).toBe("Alice Updated");
-    expect(updated.id).toBe(1);
+    expect(error).toBeNull();
+    expect(updated?.name).toBe("Alice Updated");
+    expect(updated?.id).toBe(1);
   });
 
   test("should update multiple fields", async () => {
-    const updated = await orm.tables.users.update({
+    const [error, updated] = await orm.tables.users.update({
       where: { id: 2 },
       data: { name: "Bob Updated", active: true },
     });
 
-    expect(updated.name).toBe("Bob Updated");
-    expect(updated.active).toBe(true);
-    expect(updated.id).toBe(2);
+    expect(error).toBeNull();
+    expect(updated?.name).toBe("Bob Updated");
+    expect(updated?.active).toBe(true);
+    expect(updated?.id).toBe(2);
   });
 
   test("should update first user matching condition", async () => {
-    const updated = await orm.tables.users.update({
+    const [error, updated] = await orm.tables.users.update({
       where: { active: false },
       data: { active: true },
     });
 
-    expect(updated.active).toBe(true);
+    expect(error).toBeNull();
+    expect(updated?.active).toBe(true);
   });
 
   test("should throw error when where clause is missing", async () => {
     // @ts-expect-error - missing where clause
-    const invalidUpdate = orm.tables.users.update({
+    const [error, updated] = await orm.tables.users.update({
       data: { name: "Test" },
     });
 
-    await expect(invalidUpdate).rejects.toThrow();
+    expect(error).not.toBeNull();
+    expect(updated).toBeNull();
   });
 });
 
 describe("Table - delete method", () => {
   test("should delete a user by id", async () => {
     // First create a user to delete
-    const newUser = await orm.tables.users.create({
+    const [error1, newUser] = await orm.tables.users.create({
       name: "ToDelete",
       email: "todelete@example.com",
     });
+    expect(error1).toBeNull();
 
-    const deleted = await orm.tables.users.delete({
-      where: { id: newUser.id },
+    const [error2, deleted] = await orm.tables.users.delete({
+      where: { id: newUser?.id },
     });
 
-    expect(deleted.id).toBe(newUser.id);
-    expect(deleted.name).toBe("ToDelete");
+    expect(error2).toBeNull();
+    expect(deleted?.id).toBe(newUser?.id);
+    expect(deleted?.name).toBe("ToDelete");
 
     // Verify it's deleted
-    const found = await orm.tables.users.findFirst({
-      where: { id: newUser.id },
+    const [error3, found] = await orm.tables.users.findFirst({
+      where: { id: newUser?.id },
     });
+    expect(error3).toBeNull();
     expect(found).toBeNull();
   });
 
   test("should delete first user matching condition", async () => {
     // Create two users to delete
-    await orm.tables.users.create({
+    const [error1] = await orm.tables.users.create({
       name: "Delete1",
       email: "delete1@example.com",
       active: false,
     });
+    expect(error1).toBeNull();
 
-    await orm.tables.users.create({
+    const [error2] = await orm.tables.users.create({
       name: "Delete2",
       email: "delete2@example.com",
       active: false,
     });
+    expect(error2).toBeNull();
 
-    const deleted = await orm.tables.users.delete({
+    const [error3, deleted] = await orm.tables.users.delete({
       where: { name: { in: ["Delete1", "Delete2"] } },
     });
 
-    expect(["Delete1", "Delete2"]).toContain(deleted.name);
+    expect(error3).toBeNull();
+    expect(deleted?.name).toBeDefined();
+    expect(["Delete1", "Delete2"]).toContain(deleted?.name ?? "");
   });
 
   test("should throw error when where clause is missing", async () => {
     // @ts-expect-error - missing where clause
-    await expect(orm.tables.users.delete({})).rejects.toThrow();
+    const [error, deleted] = await orm.tables.users.delete({});
+    expect(error).not.toBeNull();
+    expect(deleted).toBeNull();
   });
 });
 
@@ -748,19 +812,21 @@ describe("Table - relations with custom primary key", () => {
   });
 
   test("include should use custom primary key for one()", async () => {
-    const message = await customOrm.tables.messages.findFirst({
+    const [error, message] = await customOrm.tables.messages.findFirst({
       include: { account: true },
     });
 
+    expect(error).toBeNull();
     expect(message?.account).toBeDefined();
     expect(message?.account?.name).toBe("Acme");
   });
 
   test("include should use custom primary key for many()", async () => {
-    const account = await customOrm.tables.accounts.findFirst({
+    const [error, account] = await customOrm.tables.accounts.findFirst({
       include: { messages: true },
     });
 
+    expect(error).toBeNull();
     expect(account?.messages).toBeDefined();
     expect(account?.messages.length).toBe(2);
   });
@@ -792,19 +858,21 @@ describe("Table - MySQL dialect compatibility", () => {
       )
     `;
 
-    const user = await testOrm.tables.users.create({
+    const [error1, user] = await testOrm.tables.users.create({
       name: "Test User",
       email: "test@example.com",
     });
+    expect(error1).toBeNull();
 
     // Verify update returns a row (has RETURNING *in SQLite)
-    const updated = await testOrm.tables.users.update({
-      where: { id: user.id },
+    const [error2, updated] = await testOrm.tables.users.update({
+      where: { id: user?.id },
       data: { name: "Updated" },
     });
 
-    expect(updated.name).toBe("Updated");
-    expect(updated.id).toBe(user.id);
+    expect(error2).toBeNull();
+    expect(updated?.name).toBe("Updated");
+    expect(updated?.id).toBe(user?.id);
 
     testOrm.close();
   });
@@ -832,18 +900,20 @@ describe("Table - MySQL dialect compatibility", () => {
       )
     `;
 
-    const user = await testOrm.tables.users.create({
+    const [error1, user] = await testOrm.tables.users.create({
       name: "Delete Test",
       email: "delete@example.com",
     });
+    expect(error1).toBeNull();
 
     // Delete and verify it returns the deleted row
-    const deleted = await testOrm.tables.users.delete({
-      where: { id: user.id },
+    const [error2, deleted] = await testOrm.tables.users.delete({
+      where: { id: user?.id },
     });
 
-    expect(deleted.id).toBe(user.id);
-    expect(deleted.name).toBe("Delete Test");
+    expect(error2).toBeNull();
+    expect(deleted?.id).toBe(user?.id);
+    expect(deleted?.name).toBe("Delete Test");
 
     testOrm.close();
   });

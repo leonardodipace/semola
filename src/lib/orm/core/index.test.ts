@@ -126,10 +126,12 @@ describe("Orm - table clients", () => {
       VALUES ('Alice', 'alice@test.com')
     `;
 
-    const users = await orm.tables.users.findMany();
-    expect(users.length).toBeGreaterThan(0);
-    expect(users[0]?.name).toBe("Alice");
-    expect(users[0]?.email).toBe("alice@test.com");
+    const [error, users] = await orm.tables.users.findMany();
+    expect(error).toBeNull();
+    expect(users).toBeDefined();
+    expect(users?.length).toBeGreaterThan(0);
+    expect(users?.[0]?.name).toBe("Alice");
+    expect(users?.[0]?.email).toBe("alice@test.com");
   });
 
   test("multiple table clients should work independently", async () => {
@@ -175,12 +177,14 @@ describe("Orm - table clients", () => {
       INSERT INTO test_orm_posts (title) VALUES ('Test Post')
     `;
 
-    const users = await orm2.tables.users.findMany();
-    const posts = await orm2.tables.posts.findMany();
+    const [usersError, users] = await orm2.tables.users.findMany();
+    const [postsError, posts] = await orm2.tables.posts.findMany();
 
-    expect(users.length).toBeGreaterThan(0);
-    expect(posts.length).toBeGreaterThan(0);
-    expect(posts[0]?.title).toBe("Test Post");
+    expect(usersError).toBeNull();
+    expect(postsError).toBeNull();
+    expect(users?.length).toBeGreaterThan(0);
+    expect(posts?.length).toBeGreaterThan(0);
+    expect(posts?.[0]?.title).toBe("Test Post");
 
     orm2.close();
   });

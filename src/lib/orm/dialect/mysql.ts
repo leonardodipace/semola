@@ -15,7 +15,7 @@ import type {
 // Fully implements all query building and type conversion for MySQL databases.
 // Uses ? placeholder syntax and BIGINT AUTO_INCREMENT for auto-incrementing primary keys.
 export class MysqlDialect implements Dialect {
-  public readonly name = "mysql" as const;
+  public readonly name = "mysql";
 
   public readonly types: ColumnTypeMapping = {
     number: "INT",

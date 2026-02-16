@@ -1,3 +1,4 @@
+import { mightThrow } from "../../errors/index.js";
 import type { Column } from "../column/index.js";
 import type { ColumnKind, ColumnMeta } from "../column/types.js";
 import type { Dialect } from "../dialect/types.js";
@@ -406,7 +407,8 @@ export class TableClient<T extends Table> {
             [relatedPk.key]: { in: fkValues },
           };
 
-          relatedRecords = await relatedClient.findMany({ where });
+          const [, records] = await relatedClient.findMany({ where });
+          relatedRecords = records ?? [];
         } else if (relatedPk.kind === "string") {
           const fkValues = [
             ...new Set(
@@ -422,7 +424,8 @@ export class TableClient<T extends Table> {
             [relatedPk.key]: { in: fkValues },
           };
 
-          relatedRecords = await relatedClient.findMany({ where });
+          const [, records] = await relatedClient.findMany({ where });
+          relatedRecords = records ?? [];
         } else {
           const fkValues = [
             ...new Set(
@@ -438,7 +441,8 @@ export class TableClient<T extends Table> {
             [relatedPk.key]: { in: fkValues },
           };
 
-          relatedRecords = await relatedClient.findMany({ where });
+          const [, records] = await relatedClient.findMany({ where });
+          relatedRecords = records ?? [];
         }
 
         // Build map for quick lookup
@@ -488,7 +492,8 @@ export class TableClient<T extends Table> {
             [relation.fkColumn]: { in: parentIds },
           };
 
-          relatedRecords = await relatedClient.findMany({ where });
+          const [, records] = await relatedClient.findMany({ where });
+          relatedRecords = records ?? [];
         } else if (parentPk.kind === "string") {
           const parentIds = [
             ...new Set(
@@ -504,7 +509,8 @@ export class TableClient<T extends Table> {
             [relation.fkColumn]: { in: parentIds },
           };
 
-          relatedRecords = await relatedClient.findMany({ where });
+          const [, records] = await relatedClient.findMany({ where });
+          relatedRecords = records ?? [];
         } else {
           const parentIds = [
             ...new Set(
@@ -520,7 +526,8 @@ export class TableClient<T extends Table> {
             [relation.fkColumn]: { in: parentIds },
           };
 
-          relatedRecords = await relatedClient.findMany({ where });
+          const [, records] = await relatedClient.findMany({ where });
+          relatedRecords = records ?? [];
         }
 
         // Group related records by their FK value
@@ -549,249 +556,268 @@ export class TableClient<T extends Table> {
 
   public async findMany<
     Inc extends Record<string, boolean> | undefined = undefined,
-  >(
-    options?: FindManyOptions<T> & { include?: Inc },
-  ): Promise<WithIncluded<InferTableType<T>, T, Inc>[]> {
-    const whereClause = this.buildWhereClause(options?.where);
-    const skip = options?.skip ?? 0;
-    const take = options?.take;
-    const pagination = this.buildPagination(skip, take);
+  >(options?: FindManyOptions<T> & { include?: Inc }) {
+    return await mightThrow(
+      (async () => {
+        const whereClause = this.buildWhereClause(options?.where);
+        const skip = options?.skip ?? 0;
+        const take = options?.take;
+        const pagination = this.buildPagination(skip, take);
 
-    let sql = this.sql<InferTableType<T>[]>`
-      SELECT * FROM ${this.sql(this.table.sqlName)}
-    `;
-
-    if (whereClause) {
-      sql = this.sql<InferTableType<T>[]>`
-        ${sql}
-        WHERE ${whereClause}
+        let sql = this.sql<InferTableType<T>[]>`
+        SELECT * FROM ${this.sql(this.table.sqlName)}
       `;
-    }
 
-    if (pagination) {
-      sql = this.sql<InferTableType<T>[]>`
-        ${sql}
-        ${pagination}
-      `;
-    }
+        if (whereClause) {
+          sql = this.sql<InferTableType<T>[]>`
+          ${sql}
+          WHERE ${whereClause}
+        `;
+        }
 
-    const rows = await sql;
-    this.convertBooleanValues(rows);
-    this.mapColumnNames(rows);
-    await this.loadIncludedRelations(
-      rows,
-      options?.include,
-      this.getTableClient,
+        if (pagination) {
+          sql = this.sql<InferTableType<T>[]>`
+          ${sql}
+          ${pagination}
+        `;
+        }
+
+        const rows = await sql;
+        this.convertBooleanValues(rows);
+        this.mapColumnNames(rows);
+        await this.loadIncludedRelations(
+          rows,
+          options?.include,
+          this.getTableClient,
+        );
+        return Array.from(rows) as WithIncluded<InferTableType<T>, T, Inc>[];
+      })(),
     );
-    return Array.from(rows) as WithIncluded<InferTableType<T>, T, Inc>[];
   }
 
   public async findFirst<
     Inc extends Record<string, boolean> | undefined = undefined,
-  >(
-    options?: FindFirstOptions<T> & { include?: Inc },
-  ): Promise<WithIncluded<InferTableType<T>, T, Inc> | null> {
-    const whereClause = this.buildWhereClause(options?.where);
+  >(options?: FindFirstOptions<T> & { include?: Inc }) {
+    return await mightThrow(
+      (async () => {
+        const whereClause = this.buildWhereClause(options?.where);
 
-    let sql = this.sql<InferTableType<T>[]>`
-      SELECT * FROM ${this.sql(this.table.sqlName)}
-    `;
-
-    if (whereClause) {
-      sql = this.sql<InferTableType<T>[]>`
-        ${sql}
-        WHERE ${whereClause}
+        let sql = this.sql<InferTableType<T>[]>`
+        SELECT * FROM ${this.sql(this.table.sqlName)}
       `;
-    }
 
-    sql = this.sql<InferTableType<T>[]>`
-      ${sql}
-      LIMIT 1
-    `;
+        if (whereClause) {
+          sql = this.sql<InferTableType<T>[]>`
+          ${sql}
+          WHERE ${whereClause}
+        `;
+        }
 
-    const [result] = await sql;
-    if (!result) return null;
+        sql = this.sql<InferTableType<T>[]>`
+        ${sql}
+        LIMIT 1
+      `;
 
-    const rows = [result];
-    this.convertBooleanValues(rows);
-    this.mapColumnNames(rows);
-    await this.loadIncludedRelations(
-      rows,
-      options?.include,
-      this.getTableClient,
-    );
-    return (
-      (rows[0] as WithIncluded<InferTableType<T>, T, Inc> | undefined) ?? null
+        const [result] = await sql;
+        if (!result) return null;
+
+        const rows = [result];
+        this.convertBooleanValues(rows);
+        this.mapColumnNames(rows);
+        await this.loadIncludedRelations(
+          rows,
+          options?.include,
+          this.getTableClient,
+        );
+        return (
+          (rows[0] as WithIncluded<InferTableType<T>, T, Inc> | undefined) ??
+          null
+        );
+      })(),
     );
   }
 
   public async findUnique<
     Inc extends Record<string, boolean> | undefined = undefined,
-  >(
-    options: FindUniqueOptions<T> & { include?: Inc },
-  ): Promise<WithIncluded<InferTableType<T>, T, Inc> | null> {
-    // Runtime validation: ensure only unique/primary key columns are used
-    const whereKeys = Object.keys(options.where);
+  >(options: FindUniqueOptions<T> & { include?: Inc }) {
+    return await mightThrow(
+      (async () => {
+        // Runtime validation: ensure only unique/primary key columns are used
+        const whereKeys = Object.keys(options.where);
 
-    if (whereKeys.length === 0) {
-      throw new Error(
-        "findUnique requires at least one column in where clause",
-      );
-    }
+        if (whereKeys.length === 0) {
+          throw new Error(
+            "findUnique requires at least one column in where clause",
+          );
+        }
 
-    // Validate all columns exist and are either primary keys or unique columns
-    for (const columnKey of whereKeys) {
-      const column = this.table.columns[columnKey];
+        // Validate all columns exist and are either primary keys or unique columns
+        for (const columnKey of whereKeys) {
+          const column = this.table.columns[columnKey];
 
-      if (!column) {
-        throw new Error(`Invalid column: ${columnKey}`);
-      }
+          if (!column) {
+            throw new Error(`Invalid column: ${columnKey}`);
+          }
 
-      // Check if this column is a primary key or unique column
-      if (!column.meta.primaryKey && !column.meta.unique) {
-        throw new Error(
-          `Column "${columnKey}" is not a primary key or unique column. findUnique requires a unique constraint.`,
+          // Check if this column is a primary key or unique column
+          if (!column.meta.primaryKey && !column.meta.unique) {
+            throw new Error(
+              `Column "${columnKey}" is not a primary key or unique column. findUnique requires a unique constraint.`,
+            );
+          }
+        }
+
+        const whereClause = this.buildWhereClause(options.where);
+
+        if (!whereClause) {
+          throw new Error("findUnique requires a where clause");
+        }
+
+        const results = await this.sql<InferTableType<T>[]>`
+        SELECT * FROM ${this.sql(this.table.sqlName)}
+        WHERE ${whereClause}
+        LIMIT 1
+      `;
+
+        const result = results[0];
+        if (!result) return null;
+
+        this.convertBooleanValues([result]);
+        this.mapColumnNames([result]);
+        await this.loadIncludedRelations(
+          [result],
+          options?.include,
+          this.getTableClient,
         );
-      }
-    }
-
-    const whereClause = this.buildWhereClause(options.where);
-
-    if (!whereClause) {
-      throw new Error("findUnique requires a where clause");
-    }
-
-    const results = await this.sql<InferTableType<T>[]>`
-      SELECT * FROM ${this.sql(this.table.sqlName)}
-      WHERE ${whereClause}
-      LIMIT 1
-    `;
-
-    const result = results[0];
-    if (!result) return null;
-
-    this.convertBooleanValues([result]);
-    this.mapColumnNames([result]);
-    await this.loadIncludedRelations(
-      [result],
-      options?.include,
-      this.getTableClient,
+        return result as WithIncluded<InferTableType<T>, T, Inc>;
+      })(),
     );
-    return result as WithIncluded<InferTableType<T>, T, Inc>;
   }
 
-  public async create(data: CreateInput<T>): Promise<InferTableType<T>> {
-    if (Object.keys(data).length === 0) {
-      throw new Error("create requires at least one field");
-    }
+  public async create(data: CreateInput<T>) {
+    return await mightThrow(
+      (async () => {
+        if (Object.keys(data).length === 0) {
+          throw new Error("create requires at least one field");
+        }
 
-    // Build a map to translate JS field names to SQL column names
-    const sqlData: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(data)) {
-      const sqlColumnName = this.getSqlColumnName(key);
-      sqlData[sqlColumnName] = value;
-    }
+        // Build a map to translate JS field names to SQL column names
+        const sqlData: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(data)) {
+          const sqlColumnName = this.getSqlColumnName(key);
+          sqlData[sqlColumnName] = value;
+        }
 
-    // Use dialect-specific SQL generation
-    const query = this.dialect.buildInsert({
-      tableName: this.table.sqlName,
-      values: sqlData,
-    });
+        // Use dialect-specific SQL generation
+        const query = this.dialect.buildInsert({
+          tableName: this.table.sqlName,
+          values: sqlData,
+        });
 
-    const results = await this.sql.unsafe<InferTableType<T>[]>(
-      query.sql,
-      query.params,
+        const results = await this.sql.unsafe<InferTableType<T>[]>(
+          query.sql,
+          query.params,
+        );
+
+        this.convertBooleanValues(results);
+        this.mapColumnNames(results);
+
+        const [result] = results;
+        if (!result) {
+          throw new Error("create did not return a row");
+        }
+
+        return result as InferTableType<T>;
+      })(),
     );
-
-    this.convertBooleanValues(results);
-    this.mapColumnNames(results);
-
-    const [result] = results;
-    if (!result) {
-      throw new Error("create did not return a row");
-    }
-
-    return result;
   }
 
-  public async update(options: UpdateOptions<T>): Promise<InferTableType<T>> {
-    const whereClause = this.buildWhereClause(options.where);
+  public async update(options: UpdateOptions<T>) {
+    return await mightThrow(
+      (async () => {
+        const whereClause = this.buildWhereClause(options.where);
 
-    if (!whereClause) {
-      throw new Error("update requires a where clause");
-    }
+        if (!whereClause) {
+          throw new Error("update requires a where clause");
+        }
 
-    const dataEntries: [string, unknown][] = Object.entries(options.data);
+        const dataEntries: [string, unknown][] = Object.entries(options.data);
 
-    if (dataEntries.length === 0) {
-      throw new Error("update requires at least one field in data");
-    }
+        if (dataEntries.length === 0) {
+          throw new Error("update requires at least one field in data");
+        }
 
-    // Build a map to translate JS field names to SQL column names
-    const sqlData: Record<string, unknown> = {};
-    for (const [key, value] of dataEntries) {
-      const sqlColumnName = this.getSqlColumnName(key);
-      sqlData[sqlColumnName] = value;
-    }
+        // Build a map to translate JS field names to SQL column names
+        const sqlData: Record<string, unknown> = {};
+        for (const [key, value] of dataEntries) {
+          const sqlColumnName = this.getSqlColumnName(key);
+          sqlData[sqlColumnName] = value;
+        }
 
-    // Build the UPDATE query with proper dialect handling
-    const hasReturning = this.dialect.name !== "mysql";
-    const sql = hasReturning
-      ? this.sql<InferTableType<T>[]>`
-          UPDATE ${this.sql(this.table.sqlName)}
-          SET ${this.sql(sqlData)}
-          WHERE ${whereClause}
-          RETURNING *
-        `
-      : this.sql<InferTableType<T>[]>`
-          UPDATE ${this.sql(this.table.sqlName)}
-          SET ${this.sql(sqlData)}
-          WHERE ${whereClause}
-        `;
+        // Build the UPDATE query with proper dialect handling
+        const hasReturning = this.dialect.name !== "mysql";
+        const sql = hasReturning
+          ? this.sql<InferTableType<T>[]>`
+            UPDATE ${this.sql(this.table.sqlName)}
+            SET ${this.sql(sqlData)}
+            WHERE ${whereClause}
+            RETURNING *
+          `
+          : this.sql<InferTableType<T>[]>`
+            UPDATE ${this.sql(this.table.sqlName)}
+            SET ${this.sql(sqlData)}
+            WHERE ${whereClause}
+          `;
 
-    const results = await sql;
+        const results = await sql;
 
-    this.convertBooleanValues(results);
-    this.mapColumnNames(results);
+        this.convertBooleanValues(results);
+        this.mapColumnNames(results);
 
-    const [result] = results;
-    if (!result) {
-      throw new Error("update did not return a row");
-    }
+        const [result] = results;
+        if (!result) {
+          throw new Error("update did not return a row");
+        }
 
-    return result;
+        return result as InferTableType<T>;
+      })(),
+    );
   }
 
-  public async delete(options: DeleteOptions<T>): Promise<InferTableType<T>> {
-    const whereClause = this.buildWhereClause(options.where);
+  public async delete(options: DeleteOptions<T>) {
+    return await mightThrow(
+      (async () => {
+        const whereClause = this.buildWhereClause(options.where);
 
-    if (!whereClause) {
-      throw new Error("delete requires a where clause");
-    }
+        if (!whereClause) {
+          throw new Error("delete requires a where clause");
+        }
 
-    // Build the DELETE query with proper dialect handling
-    const hasReturning = this.dialect.name !== "mysql";
-    const sql = hasReturning
-      ? this.sql<InferTableType<T>[]>`
-          DELETE FROM ${this.sql(this.table.sqlName)}
-          WHERE ${whereClause}
-          RETURNING *
-        `
-      : this.sql<InferTableType<T>[]>`
-          DELETE FROM ${this.sql(this.table.sqlName)}
-          WHERE ${whereClause}
-        `;
+        // Build the DELETE query with proper dialect handling
+        const hasReturning = this.dialect.name !== "mysql";
+        const sql = hasReturning
+          ? this.sql<InferTableType<T>[]>`
+            DELETE FROM ${this.sql(this.table.sqlName)}
+            WHERE ${whereClause}
+            RETURNING *
+          `
+          : this.sql<InferTableType<T>[]>`
+            DELETE FROM ${this.sql(this.table.sqlName)}
+            WHERE ${whereClause}
+          `;
 
-    const results = await sql;
+        const results = await sql;
 
-    this.convertBooleanValues(results);
-    this.mapColumnNames(results);
+        this.convertBooleanValues(results);
+        this.mapColumnNames(results);
 
-    const [result] = results;
-    if (!result) {
-      throw new Error("delete did not return a row");
-    }
+        const [result] = results;
+        if (!result) {
+          throw new Error("delete did not return a row");
+        }
 
-    return result;
+        return result as InferTableType<T>;
+      })(),
+    );
   }
 }

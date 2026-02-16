@@ -64,37 +64,58 @@ class TableBuilder {
   }
 
   public number(sqlName: string) {
-    const safeName = toSqlIdentifier(sqlName, "column name");
+    const [error, safeName] = toSqlIdentifier(sqlName, "column name");
+    if (error) {
+      throw new Error(error.message);
+    }
     return this.add(number(safeName));
   }
 
   public string(sqlName: string) {
-    const safeName = toSqlIdentifier(sqlName, "column name");
+    const [error, safeName] = toSqlIdentifier(sqlName, "column name");
+    if (error) {
+      throw new Error(error.message);
+    }
     return this.add(string(safeName));
   }
 
   public boolean(sqlName: string) {
-    const safeName = toSqlIdentifier(sqlName, "column name");
+    const [error, safeName] = toSqlIdentifier(sqlName, "column name");
+    if (error) {
+      throw new Error(error.message);
+    }
     return this.add(boolean(safeName));
   }
 
   public date(sqlName: string) {
-    const safeName = toSqlIdentifier(sqlName, "column name");
+    const [error, safeName] = toSqlIdentifier(sqlName, "column name");
+    if (error) {
+      throw new Error(error.message);
+    }
     return this.add(date(safeName));
   }
 
   public json(sqlName: string) {
-    const safeName = toSqlIdentifier(sqlName, "column name");
+    const [error, safeName] = toSqlIdentifier(sqlName, "column name");
+    if (error) {
+      throw new Error(error.message);
+    }
     return this.add(json(safeName));
   }
 
   public jsonb(sqlName: string) {
-    const safeName = toSqlIdentifier(sqlName, "column name");
+    const [error, safeName] = toSqlIdentifier(sqlName, "column name");
+    if (error) {
+      throw new Error(error.message);
+    }
     return this.add(jsonb(safeName));
   }
 
   public uuid(sqlName: string) {
-    const safeName = toSqlIdentifier(sqlName, "column name");
+    const [error, safeName] = toSqlIdentifier(sqlName, "column name");
+    if (error) {
+      throw new Error(error.message);
+    }
     return this.add(uuid(safeName));
   }
 
@@ -239,7 +260,10 @@ export class SchemaBuilder {
   }
 
   public async createTable(name: string, build: (t: TableBuilder) => unknown) {
-    const safeTableName = toSqlIdentifier(name, "table name");
+    const [error, safeTableName] = toSqlIdentifier(name, "table name");
+    if (error) {
+      throw new Error(error.message);
+    }
     const tableBuilder = new TableBuilder();
     build(tableBuilder);
     const table = new Table(safeTableName, tableBuilder.columns);
@@ -248,7 +272,10 @@ export class SchemaBuilder {
   }
 
   public async dropTable(name: string) {
-    const safeTableName = toSqlIdentifier(name, "table name");
+    const [error, safeTableName] = toSqlIdentifier(name, "table name");
+    if (error) {
+      throw new Error(error.message);
+    }
     await this.execute(`DROP TABLE IF EXISTS ${safeTableName}`);
   }
 
@@ -256,15 +283,30 @@ export class SchemaBuilder {
     tableName: string,
     build: (t: TableBuilder) => unknown,
   ) {
-    const safeTableName = toSqlIdentifier(tableName, "table name");
+    const [error, safeTableName] = toSqlIdentifier(tableName, "table name");
+    if (error) {
+      throw new Error(error.message);
+    }
     const column = normalizeColumn(build);
     const definition = buildColumnDefinition(this.dialect, column);
     await this.execute(`ALTER TABLE ${safeTableName} ADD COLUMN ${definition}`);
   }
 
   public async dropColumn(tableName: string, columnName: string) {
-    const safeTableName = toSqlIdentifier(tableName, "table name");
-    const safeColumnName = toSqlIdentifier(columnName, "column name");
+    const [tableError, safeTableName] = toSqlIdentifier(
+      tableName,
+      "table name",
+    );
+    if (tableError) {
+      throw new Error(tableError.message);
+    }
+    const [columnError, safeColumnName] = toSqlIdentifier(
+      columnName,
+      "column name",
+    );
+    if (columnError) {
+      throw new Error(columnError.message);
+    }
     await this.execute(
       `ALTER TABLE ${safeTableName} DROP COLUMN ${safeColumnName}`,
     );
@@ -275,8 +317,20 @@ export class SchemaBuilder {
     columnName: string,
     build: (t: TableBuilder) => unknown,
   ) {
-    const safeTableName = toSqlIdentifier(tableName, "table name");
-    const safeColumnName = toSqlIdentifier(columnName, "column name");
+    const [tableError, safeTableName] = toSqlIdentifier(
+      tableName,
+      "table name",
+    );
+    if (tableError) {
+      throw new Error(tableError.message);
+    }
+    const [columnError, safeColumnName] = toSqlIdentifier(
+      columnName,
+      "column name",
+    );
+    if (columnError) {
+      throw new Error(columnError.message);
+    }
     const column = normalizeColumn(build);
 
     if (this.dialect === "sqlite") {
@@ -322,12 +376,30 @@ export class SchemaBuilder {
     columns: string[],
     options?: { name?: string; unique?: boolean },
   ) {
-    const safeTableName = toSqlIdentifier(tableName, "table name");
-    const safeColumns = toSqlIdentifierList(columns, "column name");
+    const [tableError, safeTableName] = toSqlIdentifier(
+      tableName,
+      "table name",
+    );
+    if (tableError) {
+      throw new Error(tableError.message);
+    }
+    const [columnsError, safeColumns] = toSqlIdentifierList(
+      columns,
+      "column name",
+    );
+    if (columnsError) {
+      throw new Error(columnsError.message);
+    }
     const indexName =
       options?.name ??
       `${safeTableName}_${safeColumns.join("_")}${options?.unique ? "_uniq" : "_idx"}`;
-    const safeIndexName = toSqlIdentifier(indexName, "index name");
+    const [indexError, safeIndexName] = toSqlIdentifier(
+      indexName,
+      "index name",
+    );
+    if (indexError) {
+      throw new Error(indexError.message);
+    }
     const uniqueKeyword = options?.unique ? "UNIQUE " : "";
     await this.execute(
       `CREATE ${uniqueKeyword}INDEX IF NOT EXISTS ${safeIndexName} ON ${safeTableName} (${safeColumns.join(", ")})`,
@@ -335,9 +407,21 @@ export class SchemaBuilder {
   }
 
   public async dropIndex(indexName: string, tableName?: string) {
-    const safeIndexName = toSqlIdentifier(indexName, "index name");
+    const [indexError, safeIndexName] = toSqlIdentifier(
+      indexName,
+      "index name",
+    );
+    if (indexError) {
+      throw new Error(indexError.message);
+    }
     if (this.dialect === "mysql" && tableName) {
-      const safeTableName = toSqlIdentifier(tableName, "table name");
+      const [tableError, safeTableName] = toSqlIdentifier(
+        tableName,
+        "table name",
+      );
+      if (tableError) {
+        throw new Error(tableError.message);
+      }
       await this.execute(`DROP INDEX ${safeIndexName} ON ${safeTableName}`);
       return;
     }

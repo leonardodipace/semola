@@ -1,3 +1,5 @@
+import { mightThrow } from "../../errors/index.js";
+
 export type JournalEntry = {
   version: string;
   name: string;
@@ -17,28 +19,32 @@ const createEmptyJournal = (): Journal => {
   };
 };
 
-export const readJournal = async (filePath: string): Promise<Journal> => {
-  const file = Bun.file(filePath);
-  const exists = await file.exists();
+export const readJournal = async (filePath: string) => {
+  return await mightThrow(
+    (async () => {
+      const file = Bun.file(filePath);
+      const exists = await file.exists();
 
-  if (!exists) {
-    return createEmptyJournal();
-  }
+      if (!exists) {
+        return createEmptyJournal();
+      }
 
-  const content = await file.text();
-  const journal = JSON.parse(content);
+      const content = await file.text();
+      const journal = JSON.parse(content);
 
-  // Basic validation
-  if (
-    typeof journal !== "object" ||
-    journal === null ||
-    typeof journal.version !== "number" ||
-    !Array.isArray(journal.entries)
-  ) {
-    throw new Error(`Invalid journal format in ${filePath}`);
-  }
+      // Basic validation
+      if (
+        typeof journal !== "object" ||
+        journal === null ||
+        typeof journal.version !== "number" ||
+        !Array.isArray(journal.entries)
+      ) {
+        throw new Error(`Invalid journal format in ${filePath}`);
+      }
 
-  return journal as Journal;
+      return journal as Journal;
+    })(),
+  );
 };
 
 export const writeJournal = async (filePath: string, journal: Journal) => {

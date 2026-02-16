@@ -15,7 +15,7 @@ import type {
 // Fully implements all query building and type conversion for PostgreSQL databases.
 // Uses $1, $2, $3 placeholder syntax and BIGSERIAL for auto-incrementing primary keys.
 export class PostgresDialect implements Dialect {
-  public readonly name = "postgres" as const;
+  public readonly name = "postgres";
 
   public readonly types: ColumnTypeMapping = {
     number: "INTEGER",

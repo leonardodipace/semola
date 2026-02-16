@@ -57,16 +57,18 @@ describe("loadMigration", () => {
 `,
     );
 
-    const migration = await loadMigration({
+    const [error, migration] = await loadMigration({
       version: "20260216120000",
       name: "valid",
       filePath,
     });
 
-    expect(migration.version).toBe("20260216120000");
-    expect(migration.name).toBe("valid");
-    expect(typeof migration.up).toBe("function");
-    expect(typeof migration.down).toBe("function");
+    expect(error).toBeNull();
+    expect(migration).toBeDefined();
+    expect(migration?.version).toBe("20260216120000");
+    expect(migration?.name).toBe("valid");
+    expect(typeof migration?.up).toBe("function");
+    expect(typeof migration?.down).toBe("function");
   });
 
   test("throws when default export does not match migration shape", async () => {
@@ -81,12 +83,15 @@ describe("loadMigration", () => {
 `,
     );
 
-    await expect(
-      loadMigration({
-        version: "20260216120000",
-        name: "invalid",
-        filePath,
-      }),
-    ).rejects.toThrow("default export must be defineMigration({ up, down })");
+    const [error] = await loadMigration({
+      version: "20260216120000",
+      name: "invalid",
+      filePath,
+    });
+
+    expect(error).not.toBeNull();
+    expect(String(error)).toContain(
+      "default export must be defineMigration({ up, down })",
+    );
   });
 });

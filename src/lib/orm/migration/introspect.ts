@@ -24,7 +24,11 @@ const queryColumns = async (
   tableName: string,
 ) => {
   // Validate table name to prevent SQL injection
-  const safeTableName = toSqlIdentifier(tableName, "table name");
+  const [error, safeTableName] = toSqlIdentifier(tableName, "table name");
+  if (error) {
+    throw new Error(error.message);
+  }
+
   const dialect = orm.getDialectName();
 
   if (dialect === "sqlite") {

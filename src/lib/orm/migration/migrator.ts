@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { err, ok } from "../../errors/index.js";
 import type { Orm } from "../core/index.js";
 import type { Table } from "../table/index.js";
 import { SchemaBuilder } from "./builder.js";
@@ -98,7 +99,7 @@ export const createMigration = async (
 
   const safeName = slugify(options.name);
   if (safeName.length === 0) {
-    throw new Error("Migration name cannot be empty");
+    return err("ValidationError", "Migration name cannot be empty");
   }
 
   // Create snapshot of current schema
@@ -108,20 +109,43 @@ export const createMigration = async (
   );
 
   // Read journal to find last snapshot
-  const journal = await readJournal(resolve(metaDir, "_journal.json"));
+  const [journalError, journalResult] = await readJournal(
+    resolve(metaDir, "_journal.json"),
+  );
+  if (journalError) {
+    return err(
+      "InternalServerError",
+      journalError instanceof Error
+        ? journalError.message
+        : String(journalError),
+    );
+  }
+  const journal = journalResult ?? { version: 1, entries: [] };
   const lastEntry = getLastEntry(journal);
 
   // Read last snapshot if it exists
-  const lastSnapshot = lastEntry
-    ? await readSnapshot(resolve(metaDir, `${lastEntry.version}_snapshot.json`))
-    : null;
+  let lastSnapshot = null;
+  if (lastEntry) {
+    const [snapshotError, snapshot] = await readSnapshot(
+      resolve(metaDir, `${lastEntry.version}_snapshot.json`),
+    );
+    if (snapshotError) {
+      return err(
+        "InternalServerError",
+        snapshotError instanceof Error
+          ? snapshotError.message
+          : String(snapshotError),
+      );
+    }
+    lastSnapshot = snapshot;
+  }
 
   // Generate diff operations
   const up = diffSnapshots(lastSnapshot, newSnapshot);
   const down = reverseOperations(up);
 
   if (up.length === 0) {
-    throw new Error("No schema changes detected");
+    return err("ValidationError", "No schema changes detected");
   }
 
   // Generate migration file
@@ -143,7 +167,7 @@ export const createMigration = async (
   });
   await writeJournal(resolve(metaDir, "_journal.json"), updatedJournal);
 
-  return filePath;
+  return ok(filePath);
 };
 
 export const applyMigrations = async (options: MigrationRuntimeOptions) => {
@@ -160,7 +184,18 @@ export const applyMigrations = async (options: MigrationRuntimeOptions) => {
   const result: string[] = [];
 
   for (const file of pending) {
-    const migration = await loadMigration(file);
+    const [migrationError, migration] = await loadMigration(file);
+    if (migrationError) {
+      return err(
+        "InternalServerError",
+        migrationError instanceof Error
+          ? migrationError.message
+          : String(migrationError),
+      );
+    }
+    if (!migration) {
+      return err("InternalServerError", "Failed to load migration");
+    }
     const schema = new SchemaBuilder(runtime.orm, runtime.orm.getDialectName());
 
     await runInTransaction(runtime.orm, async () => {
@@ -176,7 +211,7 @@ export const applyMigrations = async (options: MigrationRuntimeOptions) => {
     result.push(migration.version);
   }
 
-  return result;
+  return ok(result);
 };
 
 export const rollbackMigration = async (options: MigrationRuntimeOptions) => {
@@ -190,23 +225,35 @@ export const rollbackMigration = async (options: MigrationRuntimeOptions) => {
   );
 
   if (applied.length === 0) {
-    return null;
+    return ok(null);
   }
 
   const latestApplied = applied[applied.length - 1];
   if (!latestApplied) {
-    return null;
+    return ok(null);
   }
 
   const file = files.find((entry) => entry.version === latestApplied.version);
 
   if (!file) {
-    throw new Error(
+    return err(
+      "NotFoundError",
       `Missing migration file for version ${latestApplied.version}`,
     );
   }
 
-  const migration = await loadMigration(file);
+  const [migrationError, migration] = await loadMigration(file);
+  if (migrationError) {
+    return err(
+      "InternalServerError",
+      migrationError instanceof Error
+        ? migrationError.message
+        : String(migrationError),
+    );
+  }
+  if (!migration) {
+    return err("InternalServerError", "Failed to load migration");
+  }
   const schema = new SchemaBuilder(runtime.orm, runtime.orm.getDialectName());
 
   await runInTransaction(runtime.orm, async () => {
@@ -220,11 +267,22 @@ export const rollbackMigration = async (options: MigrationRuntimeOptions) => {
 
   // Update journal
   const metaDir = resolve(runtime.migrationsDir, "meta");
-  const journal = await readJournal(resolve(metaDir, "_journal.json"));
+  const [journalError, journalResult] = await readJournal(
+    resolve(metaDir, "_journal.json"),
+  );
+  if (journalError) {
+    return err(
+      "InternalServerError",
+      journalError instanceof Error
+        ? journalError.message
+        : String(journalError),
+    );
+  }
+  const journal = journalResult ?? { version: 1, entries: [] };
   const updatedJournal = removeLastJournalEntry(journal);
   await writeJournal(resolve(metaDir, "_journal.json"), updatedJournal);
 
-  return migration.version;
+  return ok(migration.version);
 };
 
 export const getMigrationStatus = async (options: MigrationRuntimeOptions) => {
@@ -250,7 +308,7 @@ export const getMigrationStatus = async (options: MigrationRuntimeOptions) => {
     };
   });
 
-  return statuses;
+  return ok(statuses);
 };
 
 export type { MigrationCreateOptions, MigrationRuntimeOptions };

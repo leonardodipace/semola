@@ -15,6 +15,7 @@ const printLine = (value: string) => {
 
 const printError = (value: string) => {
   process.stderr.write(`${value}\n`);
+  process.exitCode = 1;
 };
 
 const printUsage = () => {
@@ -36,80 +37,94 @@ const run = async () => {
   const command = args[2];
   const cwd = process.cwd();
 
-  try {
-    const config = await loadSemolaConfig(cwd);
-    const tables = await loadSchemaTables(
-      config.orm.schema.path,
-      config.orm.schema.exportName,
-    );
+  const config = await loadSemolaConfig(cwd);
+  const tables = await loadSchemaTables(
+    config.orm.schema.path,
+    config.orm.schema.exportName,
+  );
 
-    const orm = new Orm({
-      url: config.orm.url,
-      dialect: config.orm.dialect,
+  const orm = new Orm({
+    url: config.orm.url,
+    dialect: config.orm.dialect,
+    tables,
+  });
+
+  const migrationOptions = {
+    orm,
+    migrationsDir: resolve(cwd, "migrations"),
+    migrationTable: "semola_migrations",
+  };
+
+  if (command === "create") {
+    const name = args[3];
+
+    if (!name) {
+      printError("Missing migration name");
+      orm.close();
+      return;
+    }
+
+    const [createError, filePath] = await createMigration({
+      ...migrationOptions,
+      name,
       tables,
     });
 
-    const migrationOptions = {
-      orm,
-      migrationsDir: resolve(cwd, "migrations"),
-      migrationTable: "semola_migrations",
-    };
-
-    try {
-      if (command === "create") {
-        const name = args[3];
-
-        if (!name) {
-          printError("Missing migration name");
-          process.exitCode = 1;
-          return;
-        }
-
-        const filePath = await createMigration({
-          ...migrationOptions,
-          name,
-          tables,
-        });
-
-        printLine(`Created migration: ${filePath}`);
-        return;
-      }
-
-      if (command === "apply") {
-        const applied = await applyMigrations(migrationOptions);
-
-        if (applied.length === 0) {
-          printLine("No pending migrations");
-          return;
-        }
-
-        printLine(`Applied migrations: ${applied.join(", ")}`);
-        return;
-      }
-
-      if (command === "rollback") {
-        const rolledBack = await rollbackMigration(migrationOptions);
-
-        if (!rolledBack) {
-          printLine("No applied migrations to rollback");
-          return;
-        }
-
-        printLine(`Rolled back migration: ${rolledBack}`);
-        return;
-      }
-
-      printError(`Unknown command: ${command}`);
-      printUsage();
-      process.exitCode = 1;
-    } finally {
+    if (createError) {
+      printError(createError.message);
       orm.close();
+      return;
     }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    printError(message);
-    process.exitCode = 1;
+
+    printLine(`Created migration: ${filePath}`);
+    orm.close();
+    return;
   }
+
+  if (command === "apply") {
+    const [error, applied] = await applyMigrations(migrationOptions);
+
+    if (error) {
+      printError(error.message);
+      orm.close();
+      return;
+    }
+
+    if (applied?.length === 0) {
+      printLine("No pending migrations");
+      orm.close();
+      return;
+    }
+
+    printLine(`Applied migrations: ${applied?.join(", ")}`);
+    orm.close();
+    return;
+  }
+
+  if (command === "rollback") {
+    const [rollbackError, rolledBack] =
+      await rollbackMigration(migrationOptions);
+
+    if (rollbackError) {
+      printError(rollbackError.message);
+      orm.close();
+      return;
+    }
+
+    if (!rolledBack) {
+      printLine("No applied migrations to rollback");
+      orm.close();
+      return;
+    }
+
+    printLine(`Rolled back migration: ${rolledBack}`);
+    orm.close();
+    return;
+  }
+
+  printError(`Unknown command: ${command}`);
+  printUsage();
+  orm.close();
 };
 
 void run();

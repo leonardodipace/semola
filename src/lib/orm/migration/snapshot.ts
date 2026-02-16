@@ -1,3 +1,4 @@
+import { mightThrow } from "../../errors/index.js";
 import type { Column } from "../column/index.js";
 import type { ColumnKind, ColumnMeta } from "../column/types.js";
 import type { OrmDialect } from "../core/types.js";
@@ -76,29 +77,31 @@ export const writeSnapshot = async (
   await Bun.write(filePath, json);
 };
 
-export const readSnapshot = async (
-  filePath: string,
-): Promise<SchemaSnapshot | null> => {
-  const file = Bun.file(filePath);
-  const exists = await file.exists();
+export const readSnapshot = async (filePath: string) => {
+  return await mightThrow(
+    (async () => {
+      const file = Bun.file(filePath);
+      const exists = await file.exists();
 
-  if (!exists) {
-    return null;
-  }
+      if (!exists) {
+        return null;
+      }
 
-  const content = await file.text();
-  const snapshot = JSON.parse(content);
+      const content = await file.text();
+      const snapshot = JSON.parse(content);
 
-  // Basic validation
-  if (
-    typeof snapshot !== "object" ||
-    snapshot === null ||
-    typeof snapshot.version !== "number" ||
-    typeof snapshot.dialect !== "string" ||
-    typeof snapshot.tables !== "object"
-  ) {
-    throw new Error(`Invalid snapshot format in ${filePath}`);
-  }
+      // Basic validation
+      if (
+        typeof snapshot !== "object" ||
+        snapshot === null ||
+        typeof snapshot.version !== "number" ||
+        typeof snapshot.dialect !== "string" ||
+        typeof snapshot.tables !== "object"
+      ) {
+        throw new Error(`Invalid snapshot format in ${filePath}`);
+      }
 
-  return snapshot as SchemaSnapshot;
+      return snapshot as SchemaSnapshot;
+    })(),
+  );
 };
