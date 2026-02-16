@@ -87,9 +87,9 @@ export class Orm<
   }
 
   // Generate CREATE TABLE statement for the given table using the current dialect.
-  // Returns the SQL string. Users should execute it manually using template literals:
+  // Returns the SQL string. Users should execute it manually:
   // const ddl = orm.createTable(table);
-  // await orm.sql`${orm.sql.raw(ddl)}`;
+  // await orm.sql.unsafe(ddl);
   public createTable(table: Table): string {
     return this.dialect.buildCreateTable(table);
   }
