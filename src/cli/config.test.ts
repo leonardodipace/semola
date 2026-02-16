@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { loadSchemaTables, loadSemolaConfig } from "./config.js";
 
 const tempDirs: string[] = [];
@@ -14,7 +13,7 @@ afterEach(async () => {
 });
 
 const createTempDir = async () => {
-  const dir = await mkdtemp(join(tmpdir(), "semola-cli-config-"));
+  const dir = await mkdtemp(`${tmpdir()}/semola-cli-config-`);
   tempDirs.push(dir);
   return dir;
 };
@@ -31,8 +30,8 @@ describe("loadSemolaConfig", () => {
   test("loads valid config and resolves schema path", async () => {
     const dir = await createTempDir();
 
-    await writeFile(
-      join(dir, "semola.config.ts"),
+    await Bun.write(
+      `${dir}/semola.config.ts`,
       `export default {
   orm: {
     dialect: "sqlite",
@@ -43,28 +42,26 @@ describe("loadSemolaConfig", () => {
   },
 };
 `,
-      "utf8",
     );
 
     const [error, config] = await loadSemolaConfig(dir);
 
     expect(error).toBeNull();
     expect(config?.orm.dialect).toBe("sqlite");
-    expect(config?.schema.path).toBe(join(dir, "src/db/schema.ts"));
+    expect(config?.schema.path).toBe(`${dir}/src/db/schema.ts`);
   });
 
   test("returns validation error for invalid config shape", async () => {
     const dir = await createTempDir();
 
-    await writeFile(
-      join(dir, "semola.config.ts"),
+    await Bun.write(
+      `${dir}/semola.config.ts`,
       `export default {
   orm: {
     dialect: "sqlite",
   },
 };
 `,
-      "utf8",
     );
 
     const [error, config] = await loadSemolaConfig(dir);
@@ -77,11 +74,11 @@ describe("loadSemolaConfig", () => {
 describe("loadSchemaTables", () => {
   test("loads named export tables object", async () => {
     const dir = await createTempDir();
-    const schemaPath = join(dir, "schema.ts");
+    const schemaPath = `${dir}/schema.ts`;
 
-    await writeFile(
+    await Bun.write(
       schemaPath,
-      `import { Table, number, string } from "${join(process.cwd(), "src/lib/orm/index.ts")}";
+      `import { Table, number, string } from "${process.cwd()}/src/lib/orm/index.ts";
 
 export const tables = {
   users: new Table("users", {
@@ -90,7 +87,6 @@ export const tables = {
   }),
 };
 `,
-      "utf8",
     );
 
     const [error, tables] = await loadSchemaTables(schemaPath);
@@ -101,11 +97,11 @@ export const tables = {
 
   test("loads default export array of tables", async () => {
     const dir = await createTempDir();
-    const schemaPath = join(dir, "schema.ts");
+    const schemaPath = `${dir}/schema.ts`;
 
-    await writeFile(
+    await Bun.write(
       schemaPath,
-      `import { Table, number } from "${join(process.cwd(), "src/lib/orm/index.ts")}";
+      `import { Table, number } from "${process.cwd()}/src/lib/orm/index.ts";
 
 export default [
   new Table("users", {
@@ -113,7 +109,6 @@ export default [
   }),
 ];
 `,
-      "utf8",
     );
 
     const [error, tables] = await loadSchemaTables(schemaPath);
@@ -124,9 +119,9 @@ export default [
 
   test("returns error when schema export is missing", async () => {
     const dir = await createTempDir();
-    const schemaPath = join(dir, "schema.ts");
+    const schemaPath = `${dir}/schema.ts`;
 
-    await writeFile(schemaPath, "export const nope = 1;", "utf8");
+    await Bun.write(schemaPath, "export const nope = 1;");
 
     const [error, tables] = await loadSchemaTables(schemaPath);
 
@@ -136,15 +131,14 @@ export default [
 
   test("returns error when schema contains non-table values", async () => {
     const dir = await createTempDir();
-    const schemaPath = join(dir, "schema.ts");
+    const schemaPath = `${dir}/schema.ts`;
 
-    await writeFile(
+    await Bun.write(
       schemaPath,
       `export const tables = {
   users: { not: "a table" },
 };
 `,
-      "utf8",
     );
 
     const [error, tables] = await loadSchemaTables(schemaPath);
@@ -155,13 +149,13 @@ export default [
 
   test("distinguishes between undefined named export and missing export (falsy value handling)", async () => {
     const dir = await createTempDir();
-    const schemaPath = join(dir, "schema.ts");
+    const schemaPath = `${dir}/schema.ts`;
 
     // Tests the fix for: using nullish coalescing would incorrectly fall through
     // when named export is explicitly undefined. We use 'in' operator instead.
-    await writeFile(
+    await Bun.write(
       schemaPath,
-      `import { Table, number } from "${join(process.cwd(), "src/lib/orm/index.ts")}";
+      `import { Table, number } from "${process.cwd()}/src/lib/orm/index.ts";
 
 const defaultTables = {
   users: new Table("users", {
@@ -175,7 +169,6 @@ export const tables = undefined;
 // Default export as fallback
 export default defaultTables;
 `,
-      "utf8",
     );
 
     const [error, tables] = await loadSchemaTables(schemaPath);
@@ -187,11 +180,11 @@ export default defaultTables;
 
   test("falls back to default export when named export doesn't exist", async () => {
     const dir = await createTempDir();
-    const schemaPath = join(dir, "schema.ts");
+    const schemaPath = `${dir}/schema.ts`;
 
-    await writeFile(
+    await Bun.write(
       schemaPath,
-      `import { Table, number } from "${join(process.cwd(), "src/lib/orm/index.ts")}";
+      `import { Table, number } from "${process.cwd()}/src/lib/orm/index.ts";
 
 export default {
   users: new Table("users", {
@@ -199,7 +192,6 @@ export default {
   }),
 };
 `,
-      "utf8",
     );
 
     const [error, tables] = await loadSchemaTables(schemaPath);

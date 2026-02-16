@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { number, string } from "../column/index.js";
@@ -31,8 +31,6 @@ describe("Migration runtime functions", () => {
   test("create generates migration file with defineMigration default export", async () => {
     const dir = await createTempDir();
     const migrationsDir = join(dir, "migrations");
-
-    await mkdir(migrationsDir, { recursive: true });
 
     const users = new Table("users", {
       id: number("id").primaryKey(),
@@ -78,9 +76,7 @@ describe("Migration runtime functions", () => {
     const dir = await createTempDir();
     const migrationsDir = join(dir, "migrations");
 
-    await mkdir(migrationsDir, { recursive: true });
-
-    await writeFile(
+    await Bun.write(
       `${migrationsDir}/20260216120000_create_users.ts`,
       `export default {
   up: async (t) => {
@@ -94,7 +90,6 @@ describe("Migration runtime functions", () => {
   },
 };
 `,
-      "utf8",
     );
 
     const orm = new Orm({
@@ -137,9 +132,7 @@ describe("Migration runtime functions", () => {
     const dir = await createTempDir();
     const migrationsDir = join(dir, "migrations");
 
-    await mkdir(migrationsDir, { recursive: true });
-
-    await writeFile(
+    await Bun.write(
       `${migrationsDir}/20260216120000_create_users.ts`,
       `export default {
   up: async (t) => {
@@ -150,7 +143,6 @@ describe("Migration runtime functions", () => {
   },
 };
 `,
-      "utf8",
     );
 
     const orm = new Orm({
@@ -179,8 +171,6 @@ describe("Migration runtime functions", () => {
   test("create returns error when migration name is empty after slugify", async () => {
     const dir = await createTempDir();
     const migrationsDir = join(dir, "migrations");
-
-    await mkdir(migrationsDir, { recursive: true });
 
     const users = new Table("users", {
       id: number("id").primaryKey(),
@@ -213,8 +203,6 @@ describe("Migration runtime functions", () => {
   test("create sanitizes malicious migration name into safe filename", async () => {
     const dir = await createTempDir();
     const migrationsDir = join(dir, "migrations");
-
-    await mkdir(migrationsDir, { recursive: true });
 
     const users = new Table("users", {
       id: number("id").primaryKey(),
@@ -251,9 +239,7 @@ describe("Migration runtime functions", () => {
     const dir = await createTempDir();
     const migrationsDir = join(dir, "migrations");
 
-    await mkdir(migrationsDir, { recursive: true });
-
-    await writeFile(
+    await Bun.write(
       `${migrationsDir}/20260216120000_first.ts`,
       `export default {
   up: async (t) => {
@@ -264,10 +250,9 @@ describe("Migration runtime functions", () => {
   },
 };
 `,
-      "utf8",
     );
 
-    await writeFile(
+    await Bun.write(
       `${migrationsDir}/20260216120100_second.ts`,
       `export default {
   up: async (t) => {
@@ -278,7 +263,6 @@ describe("Migration runtime functions", () => {
   },
 };
 `,
-      "utf8",
     );
 
     const orm = new Orm({
@@ -309,8 +293,6 @@ describe("Migration runtime functions", () => {
     const dir = await createTempDir();
     const migrationsDir = join(dir, "migrations");
 
-    await mkdir(migrationsDir, { recursive: true });
-
     const orm = new Orm({
       url: ":memory:",
       dialect: "sqlite",
@@ -334,9 +316,7 @@ describe("Migration runtime functions", () => {
     const dir = await createTempDir();
     const migrationsDir = join(dir, "migrations");
 
-    await mkdir(migrationsDir, { recursive: true });
-
-    await writeFile(
+    await Bun.write(
       `${migrationsDir}/20260216120000_first.ts`,
       `export default {
   up: async (t) => {
@@ -347,7 +327,6 @@ describe("Migration runtime functions", () => {
   },
 };
 `,
-      "utf8",
     );
 
     const orm = new Orm({
@@ -376,12 +355,9 @@ describe("Migration runtime functions", () => {
     const dir = await createTempDir();
     const migrationsDir = join(dir, "migrations");
 
-    await mkdir(migrationsDir, { recursive: true });
-
-    await writeFile(
+    await Bun.write(
       `${migrationsDir}/20260216120000_invalid.ts`,
       `export default { up: async () => {} };`,
-      "utf8",
     );
 
     const orm = new Orm({
@@ -407,9 +383,7 @@ describe("Migration runtime functions", () => {
     const dir = await createTempDir();
     const migrationsDir = join(dir, "migrations");
 
-    await mkdir(migrationsDir, { recursive: true });
-
-    await writeFile(
+    await Bun.write(
       `${migrationsDir}/20260216120000_first.ts`,
       `export default {
   up: async (t) => {
@@ -420,10 +394,9 @@ describe("Migration runtime functions", () => {
   },
 };
 `,
-      "utf8",
     );
 
-    await writeFile(
+    await Bun.write(
       `${migrationsDir}/20260216120100_second.ts`,
       `export default {
   up: async (t) => {
@@ -434,7 +407,6 @@ describe("Migration runtime functions", () => {
   },
 };
 `,
-      "utf8",
     );
 
     const orm = new Orm({

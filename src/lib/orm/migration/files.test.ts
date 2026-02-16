@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadMigration, scanMigrationFiles } from "./files.js";
@@ -27,12 +27,11 @@ describe("scanMigrationFiles", () => {
 
   test("filters invalid names and sorts by version", async () => {
     const dir = await createTempDir();
-    await mkdir(dir, { recursive: true });
 
-    await writeFile(join(dir, "README.md"), "ignore", "utf8");
-    await writeFile(join(dir, "bad_name.ts"), "ignore", "utf8");
-    await writeFile(join(dir, "20260216120100_second.ts"), "", "utf8");
-    await writeFile(join(dir, "20260216120000_first.ts"), "", "utf8");
+    await Bun.write(join(dir, "README.md"), "ignore");
+    await Bun.write(join(dir, "bad_name.ts"), "ignore");
+    await Bun.write(join(dir, "20260216120100_second.ts"), "");
+    await Bun.write(join(dir, "20260216120000_first.ts"), "");
 
     const files = await scanMigrationFiles(dir);
 
@@ -49,14 +48,13 @@ describe("loadMigration", () => {
     const dir = await createTempDir();
     const filePath = join(dir, "20260216120000_valid.ts");
 
-    await writeFile(
+    await Bun.write(
       filePath,
       `export default {
   up: async () => {},
   down: async () => {},
 };
 `,
-      "utf8",
     );
 
     const migration = await loadMigration({
@@ -75,13 +73,12 @@ describe("loadMigration", () => {
     const dir = await createTempDir();
     const filePath = join(dir, "20260216120000_invalid.ts");
 
-    await writeFile(
+    await Bun.write(
       filePath,
       `export default {
   up: async () => {},
 };
 `,
-      "utf8",
     );
 
     await expect(

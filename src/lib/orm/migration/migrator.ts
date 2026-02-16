@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { resolve } from "node:path";
 import type { Orm } from "../core/index.js";
 import type { Table } from "../table/index.js";
 import { SchemaBuilder } from "./builder.js";
@@ -94,7 +94,9 @@ export const createMigration = async (
   const runtime = getRuntimeContext(options);
 
   try {
-    await mkdir(runtime.migrationsDir, { recursive: true });
+    // Ensure migrations directory exists by writing a marker file
+    // Bun.write() automatically creates parent directories
+    await Bun.write(resolve(runtime.migrationsDir, ".keep"), "");
 
     const up: TableDiffOperation[] = [];
     const down: TableDiffOperation[] = [];

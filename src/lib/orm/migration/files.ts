@@ -18,6 +18,7 @@ const isMigrationDefinition = (
 };
 
 export const scanMigrationFiles = async (dirPath: string) => {
+  const files: MigrationFile[] = [];
   let entries: Array<{ name: string }> = [];
 
   try {
@@ -25,8 +26,6 @@ export const scanMigrationFiles = async (dirPath: string) => {
   } catch {
     return [] as MigrationFile[];
   }
-
-  const files: MigrationFile[] = [];
 
   for (const entry of entries) {
     if (!("isFile" in entry) || typeof entry.isFile !== "function") {
@@ -66,8 +65,9 @@ export const scanMigrationFiles = async (dirPath: string) => {
 };
 
 export const loadMigration = async (file: MigrationFile) => {
-  const url = pathToFileURL(file.filePath).href;
-  const mod = await import(`${url}?cache=${Date.now()}`);
+  // Convert file path to file:// URL for dynamic import
+  const moduleUrl = pathToFileURL(file.filePath).href;
+  const mod = await import(`${moduleUrl}?cache=${Date.now()}`);
   const definition = Reflect.get(mod, "default");
 
   if (!isMigrationDefinition(definition)) {

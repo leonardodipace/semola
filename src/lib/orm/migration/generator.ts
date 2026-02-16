@@ -1,4 +1,3 @@
-import { writeFile } from "node:fs/promises";
 import type { Column } from "../column/index.js";
 import type { ColumnKind, ColumnMeta } from "../column/types.js";
 import type { Table } from "../table/index.js";
@@ -131,5 +130,5 @@ export const writeMigrationSource = async (
   filePath: string,
   source: string,
 ) => {
-  await writeFile(filePath, source, "utf8");
+  await Bun.write(filePath, source);
 };

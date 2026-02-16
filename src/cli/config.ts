@@ -85,11 +85,13 @@ const tryResolveConfigFile = async (cwd: string) => {
   for (const candidate of candidates) {
     const fullPath = resolve(cwd, candidate);
     try {
-      const fileStat = await stat(fullPath);
-      if (fileStat.isFile()) {
+      const statResult = await stat(fullPath);
+      if (statResult.isFile()) {
         return fullPath;
       }
-    } catch {}
+    } catch {
+      // File doesn't exist, continue to next candidate
+    }
   }
 
   return null;
@@ -103,6 +105,7 @@ export const loadSemolaConfig = async (cwd: string) => {
       return [new Error("Missing semola config file"), null] as const;
     }
 
+    // Convert file path to file:// URL for dynamic import
     const moduleUrl = pathToFileURL(filePath).href;
     const mod = await import(`${moduleUrl}?cache=${Date.now()}`);
     const raw = Reflect.get(mod, "default") ?? mod;
@@ -154,6 +157,7 @@ export const loadSchemaTables = async (
   exportName?: string,
 ) => {
   try {
+    // Convert file path to file:// URL for dynamic import
     const moduleUrl = pathToFileURL(schemaPath).href;
     const mod = await import(`${moduleUrl}?cache=${Date.now()}`);
     const key = exportName ?? "tables";
