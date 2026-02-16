@@ -111,13 +111,13 @@ describe("Table - findMany with where clause", () => {
       where: { active: true },
     });
     expect(activeUsers.length).toBe(2);
-    expect(activeUsers.every((u: any) => u.active)).toBe(true);
+    expect(activeUsers.every((u) => u.active)).toBe(true);
 
     const inactiveUsers = await orm.tables.users.findMany({
       where: { active: false },
     });
     expect(inactiveUsers.length).toBe(2);
-    expect(inactiveUsers.every((u: any) => !u.active)).toBe(true);
+    expect(inactiveUsers.every((u) => !u.active)).toBe(true);
   });
 
   test("should return empty array when no matches found", async () => {
@@ -245,7 +245,7 @@ describe("Table - findMany with where clause", () => {
       where: { id: { gt: 1 } },
     });
     expect(users.length).toBe(2);
-    expect(users.every((u: any) => u.id > 1)).toBe(true);
+    expect(users.every((u) => u.id > 1)).toBe(true);
   });
 
   test("should filter with gte operator", async () => {
@@ -253,7 +253,7 @@ describe("Table - findMany with where clause", () => {
       where: { id: { gte: 2 } },
     });
     expect(users.length).toBe(2);
-    expect(users.every((u: any) => u.id >= 2)).toBe(true);
+    expect(users.every((u) => u.id >= 2)).toBe(true);
   });
 
   test("should filter with lt operator", async () => {
@@ -261,7 +261,7 @@ describe("Table - findMany with where clause", () => {
       where: { id: { lt: 3 } },
     });
     expect(users.length).toBe(2);
-    expect(users.every((u: any) => u.id < 3)).toBe(true);
+    expect(users.every((u) => u.id < 3)).toBe(true);
   });
 
   test("should filter with lte operator", async () => {
@@ -269,7 +269,7 @@ describe("Table - findMany with where clause", () => {
       where: { id: { lte: 2 } },
     });
     expect(users.length).toBe(2);
-    expect(users.every((u: any) => u.id <= 2)).toBe(true);
+    expect(users.every((u) => u.id <= 2)).toBe(true);
   });
 
   test("should filter with multiple operators combined", async () => {
@@ -278,7 +278,7 @@ describe("Table - findMany with where clause", () => {
       where: { id: { gte: 1, lte: 2 } },
     });
     expect(users.length).toBe(2);
-    expect(users.every((u: any) => u.id >= 1 && u.id <= 2)).toBe(true);
+    expect(users.every((u) => u.id >= 1 && u.id <= 2)).toBe(true);
   });
 
   test("should combine direct values and operators", async () => {
@@ -300,7 +300,7 @@ describe("Table - findMany with where clause", () => {
       },
     });
     expect(users.length).toBe(2);
-    expect(users.every((u: any) => u.active && u.id >= 2)).toBe(true);
+    expect(users.every((u) => u.active && u.id >= 2)).toBe(true);
 
     // Restore original test data for subsequent tests
     await orm.sql`DELETE FROM test_posts`;
@@ -419,7 +419,7 @@ describe("Table - findMany with where clause", () => {
       take: 1,
     });
     expect(users.length).toBeLessThanOrEqual(1);
-    expect(users.every((u: any) => u.active)).toBe(true);
+    expect(users.every((u) => u.active)).toBe(true);
   });
 
   test("findMany with include should load one() relations", async () => {
@@ -460,13 +460,12 @@ describe("Table - findMany with where clause", () => {
       include: { posts: true },
     });
     expect(users.length).toBeGreaterThan(0);
-    const alice = users.find((u: any) => u.name === "Alice");
+    const alice = users.find((u) => u.name === "Alice");
     expect(alice).toBeDefined();
     expect(alice?.posts).toBeDefined();
     expect(Array.isArray(alice?.posts)).toBe(true);
     expect(alice?.posts.length).toBe(2); // Alice has 2 posts
-    // Note: posts have author_id (SQL column name) not authorId
-    expect(alice?.posts.every((p: any) => p.author_id === alice.id)).toBe(true);
+    expect(alice?.posts.every((p) => p.authorId === alice.id)).toBe(true);
   });
 
   test("findFirst with include should load many() relations", async () => {
@@ -569,7 +568,7 @@ describe("Table - update method", () => {
     });
 
     expect(updated.length).toBeGreaterThan(1);
-    expect(updated.every((u: any) => u.active === true)).toBe(true);
+    expect(updated.every((u) => u.active === true)).toBe(true);
   });
 
   test("should throw error when where clause is missing", async () => {

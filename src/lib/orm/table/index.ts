@@ -293,49 +293,49 @@ export class TableClient<T extends Table> {
 
   private collectValuesByKind(
     rows: Record<string, unknown>[],
-    sqlColumnName: string,
+    columnKey: string,
     kind: "number",
   ): number[];
   private collectValuesByKind(
     rows: Record<string, unknown>[],
-    sqlColumnName: string,
+    columnKey: string,
     kind: "string",
   ): string[];
   private collectValuesByKind(
     rows: Record<string, unknown>[],
-    sqlColumnName: string,
+    columnKey: string,
     kind: "date",
   ): Date[];
   private collectValuesByKind(
     rows: Record<string, unknown>[],
-    sqlColumnName: string,
+    columnKey: string,
     kind: "boolean",
   ): boolean[];
   private collectValuesByKind(
     rows: Record<string, unknown>[],
-    sqlColumnName: string,
+    columnKey: string,
     kind: ColumnKind,
   ) {
     if (kind === "number") {
       return rows
-        .map((row) => row[sqlColumnName])
+        .map((row) => row[columnKey])
         .filter((value): value is number => typeof value === "number");
     }
 
     if (kind === "string") {
       return rows
-        .map((row) => row[sqlColumnName])
+        .map((row) => row[columnKey])
         .filter((value): value is string => typeof value === "string");
     }
 
     if (kind === "date") {
       return rows
-        .map((row) => row[sqlColumnName])
+        .map((row) => row[columnKey])
         .filter((value): value is Date => value instanceof Date);
     }
 
     return rows
-      .map((row) => row[sqlColumnName])
+      .map((row) => row[columnKey])
       .filter((value): value is boolean => typeof value === "boolean");
   }
 
@@ -347,6 +347,21 @@ export class TableClient<T extends Table> {
 
         if (column.columnKind === "boolean") {
           row[sqlColumnName] = this.dialect.convertBooleanValue(value);
+        }
+      }
+    }
+  }
+
+  // Map SQL column names back to TypeScript property names
+  private mapColumnNames(rows: Record<string, unknown>[]) {
+    for (const row of rows) {
+      for (const [key, column] of Object.entries(this.table.columns)) {
+        const sqlColumnName = column.sqlName;
+
+        // If SQL name differs from TS key, map it
+        if (sqlColumnName !== key && sqlColumnName in row) {
+          row[key] = row[sqlColumnName];
+          delete row[sqlColumnName];
         }
       }
     }
@@ -373,8 +388,8 @@ export class TableClient<T extends Table> {
 
       if (relation.type === "one") {
         // one() relation: parent has FK pointing to child
-        // Get SQL column name for the FK
-        const fkSqlColumn = this.getSqlColumnName(relation.fkColumn);
+        // Use TypeScript key directly since rows are already mapped
+        const fkKey = relation.fkColumn;
 
         const relatedPk = relatedClient.getPrimaryKeyColumn();
         if (!relatedPk) {
@@ -391,7 +406,7 @@ export class TableClient<T extends Table> {
         if (relatedPk.kind === "number") {
           const fkValues = [
             ...new Set(
-              this.collectValuesByKind(rows, fkSqlColumn, "number").filter(
+              this.collectValuesByKind(rows, fkKey, "number").filter(
                 (value) => value != null,
               ),
             ),
@@ -407,7 +422,7 @@ export class TableClient<T extends Table> {
         } else if (relatedPk.kind === "string") {
           const fkValues = [
             ...new Set(
-              this.collectValuesByKind(rows, fkSqlColumn, "string").filter(
+              this.collectValuesByKind(rows, fkKey, "string").filter(
                 (value) => value != null,
               ),
             ),
@@ -423,7 +438,7 @@ export class TableClient<T extends Table> {
         } else {
           const fkValues = [
             ...new Set(
-              this.collectValuesByKind(rows, fkSqlColumn, "date").filter(
+              this.collectValuesByKind(rows, fkKey, "date").filter(
                 (value) => value != null,
               ),
             ),
@@ -442,21 +457,21 @@ export class TableClient<T extends Table> {
         const relatedMap = new Map<unknown, unknown>();
         for (const record of relatedRecords) {
           if (typeof record !== "object" || record === null) continue;
-          const value = Reflect.get(record, relatedPk.sqlName);
+          const value = Reflect.get(record, relatedPk.key);
           if (value == null) continue;
           relatedMap.set(value, record);
         }
 
         // Attach loaded relations to rows
         for (const row of rows) {
-          const fkValue = row[fkSqlColumn];
+          const fkValue = row[fkKey];
           row[relationName] =
             fkValue != null ? relatedMap.get(fkValue) : undefined;
         }
       } else if (relation.type === "many") {
         // many() relation: child has FK pointing to parent
-        // Get SQL column name for the FK on the related table
-        const fkSqlColumn = relatedClient.getSqlColumnName(relation.fkColumn);
+        // Use TypeScript key directly since records are already mapped
+        const fkKey = relation.fkColumn;
 
         const parentPk = this.getPrimaryKeyColumn();
         if (!parentPk) {
@@ -473,7 +488,7 @@ export class TableClient<T extends Table> {
         if (parentPk.kind === "number") {
           const parentIds = [
             ...new Set(
-              this.collectValuesByKind(rows, parentPk.sqlName, "number").filter(
+              this.collectValuesByKind(rows, parentPk.key, "number").filter(
                 (value) => value != null,
               ),
             ),
@@ -489,7 +504,7 @@ export class TableClient<T extends Table> {
         } else if (parentPk.kind === "string") {
           const parentIds = [
             ...new Set(
-              this.collectValuesByKind(rows, parentPk.sqlName, "string").filter(
+              this.collectValuesByKind(rows, parentPk.key, "string").filter(
                 (value) => value != null,
               ),
             ),
@@ -505,7 +520,7 @@ export class TableClient<T extends Table> {
         } else {
           const parentIds = [
             ...new Set(
-              this.collectValuesByKind(rows, parentPk.sqlName, "date").filter(
+              this.collectValuesByKind(rows, parentPk.key, "date").filter(
                 (value) => value != null,
               ),
             ),
@@ -524,7 +539,7 @@ export class TableClient<T extends Table> {
         const relatedMap = new Map<unknown, unknown[]>();
 
         for (const record of relatedRecords) {
-          const fkValue = Reflect.get(record, fkSqlColumn);
+          const fkValue = Reflect.get(record, fkKey);
 
           if (!relatedMap.has(fkValue)) {
             relatedMap.set(fkValue, []);
@@ -537,7 +552,7 @@ export class TableClient<T extends Table> {
 
         // Attach loaded relations to rows
         for (const row of rows) {
-          const parentId = row[parentPk.sqlName];
+          const parentId = row[parentPk.key];
           row[relationName] = relatedMap.get(parentId) || [];
         }
       }
@@ -574,6 +589,7 @@ export class TableClient<T extends Table> {
 
     const rows = await sql;
     this.convertBooleanValues(rows);
+    this.mapColumnNames(rows);
     await this.loadIncludedRelations(
       rows,
       options?.include,
@@ -610,6 +626,7 @@ export class TableClient<T extends Table> {
 
     const rows = [result];
     this.convertBooleanValues(rows);
+    this.mapColumnNames(rows);
     await this.loadIncludedRelations(
       rows,
       options?.include,
@@ -671,6 +688,7 @@ export class TableClient<T extends Table> {
     if (!result) return null;
 
     this.convertBooleanValues([result]);
+    this.mapColumnNames([result]);
     await this.loadIncludedRelations(
       [result],
       options?.include,
@@ -697,6 +715,7 @@ export class TableClient<T extends Table> {
     `;
 
     this.convertBooleanValues(results);
+    this.mapColumnNames(results);
 
     const [result] = results;
     if (!result) {
@@ -733,6 +752,7 @@ export class TableClient<T extends Table> {
       RETURNING *
     `.then((results) => {
       this.convertBooleanValues(results);
+      this.mapColumnNames(results);
       return results;
     });
   }
