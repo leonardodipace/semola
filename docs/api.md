@@ -96,6 +96,84 @@ This framework generates OpenAPI 3.1.0 specifications, which provide several adv
 
 The generated spec is compatible with modern OpenAPI tooling including Swagger UI, Redoc, and OpenAPI Generator.
 
+#### Schema Reuse in OpenAPI
+
+To optimize your OpenAPI specification and reduce redundancy, you can define reusable schemas using the `.meta({ id: "SchemaName" })` method. Schemas with an ID are extracted to `components.schemas` and referenced using `$ref` instead of being inlined everywhere they're used.
+
+**With Zod:**
+
+```typescript
+import { z } from "zod";
+
+// Define a reusable schema with an ID
+const UserSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  email: z.string().email(),
+}).meta({ id: "User" });
+
+const ErrorResponse = z.object({
+  error: z.string(),
+  message: z.string(),
+}).meta({ id: "ErrorResponse" });
+
+// Use across multiple routes
+api.defineRoute({
+  path: "/users",
+  method: "POST",
+  request: { body: UserSchema },
+  response: { 201: UserSchema, 400: ErrorResponse },
+  handler: async (c) => { /* ... */ },
+});
+
+api.defineRoute({
+  path: "/users/:id",
+  method: "GET",
+  response: { 200: UserSchema, 404: ErrorResponse },
+  handler: async (c) => { /* ... */ },
+});
+
+// Result: UserSchema and ErrorResponse are defined once in components.schemas
+// and referenced as { "$ref": "#/components/schemas/User" } everywhere
+```
+
+**With Valibot:**
+
+```typescript
+import * as v from "valibot";
+
+// Valibot uses metadata in the schema pipeline
+const UserSchema = v.pipe(
+  v.object({
+    id: v.pipe(v.string(), v.uuid()),
+    name: v.string(),
+    email: v.pipe(v.string(), v.email()),
+  }),
+  v.metadata({ id: "User" })
+);
+```
+
+**With ArkType:**
+
+```typescript
+import { type } from "arktype";
+
+// ArkType uses describe() with id metadata
+const UserSchema = type({
+  id: "string.uuid",
+  name: "string",
+  email: "string.email",
+}).describe("User");
+```
+
+**Benefits:**
+- **Smaller spec size**: Schema defined once, referenced multiple times
+- **Better maintainability**: Update schema in one place
+- **Improved readability**: Cleaner OpenAPI specifications
+- **Backward compatible**: Schemas without `.meta({ id })` are inlined as before
+
+**Note:** Query parameters, headers, cookies, and path parameters are always inlined (OpenAPI requirement), regardless of whether they have an ID.
+
 ### `api.serve(port, callback?)`
 
 Starts the server on the specified port.
@@ -129,9 +207,10 @@ The handler receives a context object with type-safe request data and response m
 ## Features
 
 - **Full type safety**: Request/response types inferred from schemas
-- **Standard Schema support**: Works with Zod, Valibot, ArkType, and other Standard Schema libraries
+- **Standard Schema support**: Works with Zod, Valibot, ArkType, and other Standard Schema v1 libraries
 - **Automatic validation**: Request validation (400 on error)
 - **OpenAPI generation**: Automatic OpenAPI 3.1.0 spec from route definitions
+- **Schema reuse**: Define schemas once with `.meta({ id })` and reference them across routes
 - **Bun-native routing**: Leverages Bun.serve's SIMD-accelerated routing
 - **Result pattern**: Uses `[error, data]` tuples internally for error handling
 
@@ -141,21 +220,21 @@ The handler receives a context object with type-safe request data and response m
 import { z } from "zod";
 import { Api } from "semola/api";
 
-// Define schemas
+// Define reusable schemas with IDs for OpenAPI optimization
 const CreateUserSchema = z.object({
   name: z.string().min(1),
   email: z.email(),
-});
+}).meta({ id: "CreateUserRequest" });
 
 const UserSchema = z.object({
   id: z.uuid(),
   name: z.string(),
   email: z.email(),
-});
+}).meta({ id: "User" });
 
 const ErrorSchema = z.object({
   message: z.string(),
-});
+}).meta({ id: "ErrorResponse" });
 
 // Create API
 const api = new Api({
@@ -241,6 +320,8 @@ api.defineRoute({
 });
 
 // Generate OpenAPI spec (optional)
+// Note: UserSchema, CreateUserSchema, and ErrorSchema are defined once 
+// in components.schemas and referenced everywhere via $ref
 const spec = await api.getOpenApiSpec();
 console.log(JSON.stringify(spec, null, 2));
 
