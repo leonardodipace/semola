@@ -37,7 +37,7 @@ export class MysqlDialect implements Dialect {
     }
 
     if (kind === "boolean" && typeof value === "boolean") {
-      return value ? "true" : "false";
+      return value ? "1" : "0";
     }
 
     if (kind === "date") {
@@ -91,7 +91,7 @@ export class MysqlDialect implements Dialect {
     const placeholders = columns.map(() => "?").join(", ");
     const columnList = columns.join(", ");
 
-    const sql = `INSERT INTO ${options.tableName} (${columnList}) VALUES (${placeholders}) RETURNING *`;
+    const sql = `INSERT INTO ${options.tableName} (${columnList}) VALUES (${placeholders})`;
     const params = Object.values(options.values);
 
     return { sql, params };

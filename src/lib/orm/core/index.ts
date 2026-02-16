@@ -29,7 +29,7 @@ const bindTables = <
   tables: Tables,
   dialect: Dialect,
   relations?: Relations,
-) => {
+): TableClients<Tables, Relations> => {
   const result: Record<string, TableClient<Table>> = {};
   const tableNameMap = new Map<Table, string>();
 

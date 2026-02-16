@@ -271,8 +271,8 @@ export class TableClient<T extends Table> {
         return this.sql`LIMIT ALL OFFSET ${skip}`;
       }
       if (this.dialect.name === "mysql") {
-        const maxLimit = "18446744073709551615";
-        return this.sql`LIMIT ${maxLimit} OFFSET ${skip}`;
+        // For MySQL without LIMIT, use max uint64 as numeric literal
+        return this.sql`LIMIT 18446744073709551615 OFFSET ${skip}`;
       }
     }
 

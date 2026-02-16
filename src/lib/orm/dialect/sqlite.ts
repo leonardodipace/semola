@@ -20,7 +20,7 @@ export class SqliteDialect implements Dialect {
     number: "INTEGER",
     string: "TEXT",
     boolean: "INTEGER", // SQLite stores booleans as 0/1
-    date: "INTEGER", // SQLite stores dates as Unix timestamps
+    date: "INTEGER", // SQLite stores dates as milliseconds since epoch
     json: "TEXT", // SQLite stores JSON as text
     jsonb: "TEXT", // SQLite stores JSONB as text (no distinction)
     uuid: "TEXT", // SQLite stores UUIDs as text

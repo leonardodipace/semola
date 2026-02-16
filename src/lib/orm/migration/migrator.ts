@@ -80,14 +80,9 @@ const runInTransaction = async (
   orm: Orm<Record<string, Table>>,
   run: () => Promise<void>,
 ) => {
-  await orm.sql.unsafe("BEGIN");
-  try {
+  await orm.sql.begin(async () => {
     await run();
-    await orm.sql.unsafe("COMMIT");
-  } catch (error) {
-    await orm.sql.unsafe("ROLLBACK");
-    throw error;
-  }
+  });
 };
 
 export const createMigration = async (

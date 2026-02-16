@@ -118,10 +118,10 @@ export const generateMigrationSource = (
 
 export default defineMigration({
   up: async (t) => {
-  ${upLines.join("\n  ")}
+    ${upLines.join("\n    ")}
   },
   down: async (t) => {
-  ${downLines.join("\n  ")}
+    ${downLines.join("\n    ")}
   },
 });
 `;

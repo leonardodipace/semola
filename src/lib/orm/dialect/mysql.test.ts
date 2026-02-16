@@ -65,9 +65,7 @@ describe("MysqlDialect - query building", () => {
       values: { name: "Alice", age: 30 },
     });
 
-    expect(result.sql).toBe(
-      "INSERT INTO users (name, age) VALUES (?, ?) RETURNING *",
-    );
+    expect(result.sql).toBe("INSERT INTO users (name, age) VALUES (?, ?)");
     expect(result.params).toEqual(["Alice", 30]);
   });
 
@@ -202,7 +200,7 @@ describe("MysqlDialect - CREATE TABLE", () => {
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS complex");
     expect(sql).toContain("id BIGINT AUTO_INCREMENT PRIMARY KEY");
     expect(sql).toContain("name VARCHAR(255) NOT NULL");
-    expect(sql).toContain("active BOOLEAN DEFAULT true");
+    expect(sql).toContain("active BOOLEAN DEFAULT 1");
     expect(sql).toContain("config JSON");
     expect(sql).toContain("session_id CHAR(36)");
   });
