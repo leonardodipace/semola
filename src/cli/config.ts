@@ -4,11 +4,11 @@ import { pathToFileURL } from "node:url";
 import { err, ok } from "../lib/errors/index.js";
 import type { Table } from "../lib/orm/table/index.js";
 
-const isObject = (value: unknown): value is Record<string, unknown> => {
+const isObject = (value: unknown) => {
   return typeof value === "object" && value !== null;
 };
 
-const isTableLike = (value: unknown): value is Table => {
+const isTableLike = (value: unknown) => {
   if (!isObject(value)) {
     return false;
   }
@@ -151,7 +151,8 @@ const toTableRecord = (value: unknown) => {
           "Schema export array must contain Table instances",
         );
       }
-      record[entry.sqlName] = entry;
+      const table = entry as Table;
+      record[table.sqlName] = table;
     }
     return ok(record);
   }
@@ -171,7 +172,7 @@ const toTableRecord = (value: unknown) => {
         `Schema export field ${key} is not a Table instance`,
       );
     }
-    record[key] = entry;
+    record[key] = entry as Table;
   }
   return ok(record);
 };
