@@ -86,6 +86,14 @@ export class Orm<
     return this._tables;
   }
 
+  public getDialect() {
+    return this.dialect;
+  }
+
+  public getDialectName() {
+    return this.dialect.name;
+  }
+
   // Generate CREATE TABLE statement for the given table using the current dialect.
   // Returns the SQL string. Users should execute it manually:
   // const ddl = orm.createTable(table);

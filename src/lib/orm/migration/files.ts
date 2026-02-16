@@ -1,0 +1,86 @@
+import { readdir } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
+import type { MigrationDefinition, MigrationFile } from "./types.js";
+
+const migrationRegex = /^(\d{14})_([a-zA-Z0-9_-]+)\.(ts|js|mts|mjs|cts|cjs)$/;
+
+const isMigrationDefinition = (
+  value: unknown,
+): value is MigrationDefinition => {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const up = Reflect.get(value, "up");
+  const down = Reflect.get(value, "down");
+
+  return typeof up === "function" && typeof down === "function";
+};
+
+export const scanMigrationFiles = async (dirPath: string) => {
+  let entries: Array<{ name: string }> = [];
+
+  try {
+    entries = await readdir(dirPath, { withFileTypes: true });
+  } catch {
+    return [] as MigrationFile[];
+  }
+
+  const files: MigrationFile[] = [];
+
+  for (const entry of entries) {
+    if (!("isFile" in entry) || typeof entry.isFile !== "function") {
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    const match = migrationRegex.exec(entry.name);
+    if (!match) {
+      continue;
+    }
+
+    const version = match[1];
+    const name = match[2];
+
+    if (!version || !name) {
+      continue;
+    }
+
+    files.push({
+      version,
+      name,
+      filePath: `${dirPath}/${entry.name}`,
+    });
+  }
+
+  files.sort((left, right) => {
+    if (left.version < right.version) return -1;
+    if (left.version > right.version) return 1;
+    return 0;
+  });
+
+  return files;
+};
+
+export const loadMigration = async (file: MigrationFile) => {
+  const url = pathToFileURL(file.filePath).href;
+  const mod = await import(`${url}?cache=${Date.now()}`);
+  const definition = Reflect.get(mod, "default");
+
+  if (!isMigrationDefinition(definition)) {
+    throw new Error(
+      `Invalid migration file ${file.filePath}: default export must be defineMigration({ up, down })`,
+    );
+  }
+
+  return {
+    version: file.version,
+    name: file.name,
+    filePath: file.filePath,
+    up: definition.up,
+    down: definition.down,
+  };
+};

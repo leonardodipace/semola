@@ -34,7 +34,22 @@ export type {
   QueryFragment,
   QueryResult,
 } from "./dialect/types.js";
-
+export type {
+  Migration,
+  MigrationCreateOptions,
+  MigrationDefinition,
+  MigrationRuntimeOptions,
+  SemolaMigrationConfig,
+} from "./migration/index.js";
+// Export migration utilities
+export {
+  applyMigrations,
+  createMigration,
+  defineMigration,
+  getMigrationStatus,
+  rollbackMigration,
+  SchemaBuilder,
+} from "./migration/index.js";
 // Export relation utilities
 export { many, one } from "./relations/index.js";
 export type {
@@ -44,7 +59,6 @@ export type {
   Relation,
   WithIncluded,
 } from "./relations/types.js";
-
 // Export table utilities
 export { Table, TableClient } from "./table/index.js";
 export type {
