@@ -651,25 +651,20 @@ export class TableClient<T extends Table> {
       );
     }
 
-    if (whereKeys.length > 1) {
-      throw new Error("findUnique requires exactly one column in where clause");
-    }
+    // Validate all columns exist and are either primary keys or unique columns
+    for (const columnKey of whereKeys) {
+      const column = this.table.columns[columnKey];
 
-    const [columnKey] = whereKeys;
+      if (!column) {
+        throw new Error(`Invalid column: ${columnKey}`);
+      }
 
-    if (!columnKey) return null;
-
-    const column = this.table.columns[columnKey];
-
-    if (!column) {
-      throw new Error(`Invalid column: ${columnKey}`);
-    }
-
-    // Check if this column is a primary key or unique column
-    if (!column.meta.primaryKey && !column.meta.unique) {
-      throw new Error(
-        `Column "${columnKey}" is not a primary key or unique column. findUnique requires a unique constraint.`,
-      );
+      // Check if this column is a primary key or unique column
+      if (!column.meta.primaryKey && !column.meta.unique) {
+        throw new Error(
+          `Column "${columnKey}" is not a primary key or unique column. findUnique requires a unique constraint.`,
+        );
+      }
     }
 
     const whereClause = this.buildWhereClause(options.where);

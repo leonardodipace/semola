@@ -193,7 +193,7 @@ describe("Table - findMany with where clause", () => {
   });
 
   test("should throw error for invalid column names", async () => {
-    expect(
+    await expect(
       orm.tables.users.findMany({
         // @ts-expect-error - invalidColumn doesn't exist on users table
         where: { invalidColumn: "value" },
@@ -368,19 +368,20 @@ describe("Table - findMany with where clause", () => {
   });
 
   test("findUnique should throw error for non-unique column", async () => {
-    expect(
+    await expect(
       orm.tables.users.findUnique({
         where: { active: { equals: true } },
       }),
     ).rejects.toThrow('Column "active" is not a primary key or unique column');
   });
 
-  test("findUnique should throw error for multiple columns", async () => {
-    expect(
-      orm.tables.users.findUnique({
-        where: { id: 1, email: "test@example.com" },
-      }),
-    ).rejects.toThrow("findUnique requires exactly one column in where clause");
+  test("findUnique should support composite unique lookups with multiple columns", async () => {
+    const user = await orm.tables.users.findUnique({
+      where: { id: 1, email: "alice@example.com" },
+    });
+    expect(user).not.toBeNull();
+    expect(user?.id).toBe(1);
+    expect(user?.email).toBe("alice@example.com");
   });
 
   test("findMany with take should limit results", async () => {
