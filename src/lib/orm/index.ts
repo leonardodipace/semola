@@ -36,20 +36,12 @@ export type {
 } from "./dialect/types.js";
 export type {
   Migration,
-  MigrationCreateOptions,
   MigrationDefinition,
-  MigrationRuntimeOptions,
   SemolaMigrationConfig,
 } from "./migration/index.js";
-// Export migration utilities
-export {
-  applyMigrations,
-  createMigration,
-  defineMigration,
-  getMigrationStatus,
-  rollbackMigration,
-  SchemaBuilder,
-} from "./migration/index.js";
+// Export migration utilities - only the helper for defining migrations
+// Execution functions (apply, create, rollback) are CLI-only
+export { defineMigration } from "./migration/index.js";
 // Export relation utilities
 export { many, one } from "./relations/index.js";
 export type {

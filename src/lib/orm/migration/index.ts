@@ -1,19 +1,8 @@
-export { SchemaBuilder } from "./builder.js";
 export { defineMigration } from "./define.js";
 export type {
-  MigrationCreateOptions,
-  MigrationRuntimeOptions,
-} from "./migrator.js";
-export {
-  applyMigrations,
-  createMigration,
-  getMigrationStatus,
-  rollbackMigration,
-} from "./migrator.js";
-export type {
-  AppliedMigration,
   Migration,
   MigrationDefinition,
-  MigrationStatus,
   SemolaMigrationConfig,
 } from "./types.js";
+// Migration execution functions (apply, create, status, rollback)
+// and SchemaBuilder are CLI-only and should not be exposed in the public API
