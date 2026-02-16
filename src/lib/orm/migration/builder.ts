@@ -1,3 +1,4 @@
+import { err, ok } from "../../errors/index.js";
 import {
   boolean,
   type Column,
@@ -256,17 +257,25 @@ const buildColumnDefinition = (dialect: OrmDialect, column: AnyColumn) => {
   return parts.join(" ");
 };
 
-const normalizeColumn = (build: (t: TableBuilder) => unknown) => {
+const normalizeColumn = (build: (t: TableBuilder) => unknown): AnyColumn => {
   const tableBuilder = new TableBuilder();
   build(tableBuilder);
   const values = Object.values(tableBuilder.columns);
-  const first = values[0];
 
-  if (!first) {
-    throw new Error("Expected at least one column in migration operation");
+  if (values.length === 0) {
+    throw new Error("Expected exactly one column in migration operation");
   }
 
-  return first;
+  if (values.length > 1) {
+    throw new Error("Expected exactly one column in migration operation");
+  }
+
+  const column = values[0];
+  if (!column) {
+    throw new Error("Expected exactly one column in migration operation");
+  }
+
+  return column;
 };
 
 export class SchemaBuilder {
@@ -285,24 +294,36 @@ export class SchemaBuilder {
   public async createTable(name: string, build: (t: TableBuilder) => unknown) {
     const [error, safeTableName] = toSqlIdentifier(name, "table name");
     if (error) {
-      throw new Error(error.message);
+      return err("ValidationError", error.message);
     }
     const tableBuilder = new TableBuilder();
     build(tableBuilder);
     const table = new Table(safeTableName, tableBuilder.columns);
     const [createError, sql] = this.orm.createTable(table);
     if (createError) {
-      throw new Error(createError.message);
+      return err("ValidationError", createError.message);
     }
-    await this.execute(sql);
+    try {
+      await this.execute(sql);
+      return ok(true);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return err("InternalServerError", message);
+    }
   }
 
   public async dropTable(name: string) {
     const [error, safeTableName] = toSqlIdentifier(name, "table name");
     if (error) {
-      throw new Error(error.message);
+      return err("ValidationError", error.message);
     }
-    await this.execute(`DROP TABLE IF EXISTS ${safeTableName}`);
+    try {
+      await this.execute(`DROP TABLE IF EXISTS ${safeTableName}`);
+      return ok(true);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return err("InternalServerError", message);
+    }
   }
 
   public async addColumn(
@@ -311,11 +332,19 @@ export class SchemaBuilder {
   ) {
     const [error, safeTableName] = toSqlIdentifier(tableName, "table name");
     if (error) {
-      throw new Error(error.message);
+      return err("ValidationError", error.message);
     }
     const column = normalizeColumn(build);
     const definition = buildColumnDefinition(this.dialect, column);
-    await this.execute(`ALTER TABLE ${safeTableName} ADD COLUMN ${definition}`);
+    try {
+      await this.execute(
+        `ALTER TABLE ${safeTableName} ADD COLUMN ${definition}`,
+      );
+      return ok(true);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return err("InternalServerError", message);
+    }
   }
 
   public async dropColumn(tableName: string, columnName: string) {
@@ -324,18 +353,24 @@ export class SchemaBuilder {
       "table name",
     );
     if (tableError) {
-      throw new Error(tableError.message);
+      return err("ValidationError", tableError.message);
     }
     const [columnError, safeColumnName] = toSqlIdentifier(
       columnName,
       "column name",
     );
     if (columnError) {
-      throw new Error(columnError.message);
+      return err("ValidationError", columnError.message);
     }
-    await this.execute(
-      `ALTER TABLE ${safeTableName} DROP COLUMN ${safeColumnName}`,
-    );
+    try {
+      await this.execute(
+        `ALTER TABLE ${safeTableName} DROP COLUMN ${safeColumnName}`,
+      );
+      return ok(true);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return err("InternalServerError", message);
+    }
   }
 
   public async alterColumn(
@@ -348,91 +383,97 @@ export class SchemaBuilder {
       "table name",
     );
     if (tableError) {
-      throw new Error(tableError.message);
+      return err("ValidationError", tableError.message);
     }
     const [columnError, safeColumnName] = toSqlIdentifier(
       columnName,
       "column name",
     );
     if (columnError) {
-      throw new Error(columnError.message);
+      return err("ValidationError", columnError.message);
     }
     const column = normalizeColumn(build);
 
     if (this.dialect === "sqlite") {
-      throw new Error("alterColumn is not supported for sqlite");
+      return err("ValidationError", "alterColumn is not supported for sqlite");
     }
 
-    if (this.dialect === "mysql") {
-      const definition = buildColumnDefinition(this.dialect, column);
-      await this.execute(
-        `ALTER TABLE ${safeTableName} MODIFY COLUMN ${definition}`,
-      );
-      return;
-    }
+    try {
+      if (this.dialect === "mysql") {
+        const definition = buildColumnDefinition(this.dialect, column);
+        await this.execute(
+          `ALTER TABLE ${safeTableName} MODIFY COLUMN ${definition}`,
+        );
+        return ok(true);
+      }
 
-    // PostgreSQL: wrap in transaction for atomicity
-    if (this.dialect === "postgres") {
-      try {
+      // PostgreSQL: wrap in transaction for atomicity
+      if (this.dialect === "postgres") {
         await this.execute("BEGIN");
 
-        const typeSql = sqlType(this.dialect, column.columnKind);
-        await this.execute(
-          `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} TYPE ${typeSql}`,
-        );
+        try {
+          const typeSql = sqlType(this.dialect, column.columnKind);
+          await this.execute(
+            `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} TYPE ${typeSql}`,
+          );
 
-        if (column.meta.notNull) {
-          await this.execute(
-            `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET NOT NULL`,
-          );
-        } else {
-          await this.execute(
-            `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP NOT NULL`,
-          );
+          if (column.meta.notNull) {
+            await this.execute(
+              `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET NOT NULL`,
+            );
+          } else {
+            await this.execute(
+              `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP NOT NULL`,
+            );
+          }
+
+          if (column.meta.hasDefault && column.defaultValue !== undefined) {
+            await this.execute(
+              `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET DEFAULT ${quoteValue(this.dialect, column.columnKind, column.defaultValue)}`,
+            );
+          } else {
+            await this.execute(
+              `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP DEFAULT`,
+            );
+          }
+
+          await this.execute("COMMIT");
+          return ok(true);
+        } catch (innerError) {
+          await this.execute("ROLLBACK");
+          throw innerError;
         }
-
-        if (column.meta.hasDefault && column.defaultValue !== undefined) {
-          await this.execute(
-            `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET DEFAULT ${quoteValue(this.dialect, column.columnKind, column.defaultValue)}`,
-          );
-        } else {
-          await this.execute(
-            `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP DEFAULT`,
-          );
-        }
-
-        await this.execute("COMMIT");
-      } catch (error) {
-        await this.execute("ROLLBACK");
-        throw error;
       }
-      return;
-    }
 
-    // Fallback for other dialects
-    const typeSql = sqlType(this.dialect, column.columnKind);
-    await this.execute(
-      `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} TYPE ${typeSql}`,
-    );
+      // Fallback for other dialects
+      const typeSql = sqlType(this.dialect, column.columnKind);
+      await this.execute(
+        `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} TYPE ${typeSql}`,
+      );
 
-    if (column.meta.notNull) {
-      await this.execute(
-        `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET NOT NULL`,
-      );
-    } else {
-      await this.execute(
-        `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP NOT NULL`,
-      );
-    }
+      if (column.meta.notNull) {
+        await this.execute(
+          `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET NOT NULL`,
+        );
+      } else {
+        await this.execute(
+          `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP NOT NULL`,
+        );
+      }
 
-    if (column.meta.hasDefault && column.defaultValue !== undefined) {
-      await this.execute(
-        `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET DEFAULT ${quoteValue(this.dialect, column.columnKind, column.defaultValue)}`,
-      );
-    } else {
-      await this.execute(
-        `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP DEFAULT`,
-      );
+      if (column.meta.hasDefault && column.defaultValue !== undefined) {
+        await this.execute(
+          `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET DEFAULT ${quoteValue(this.dialect, column.columnKind, column.defaultValue)}`,
+        );
+      } else {
+        await this.execute(
+          `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP DEFAULT`,
+        );
+      }
+      return ok(true);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return err("InternalServerError", message);
     }
   }
 
@@ -446,14 +487,14 @@ export class SchemaBuilder {
       "table name",
     );
     if (tableError) {
-      throw new Error(tableError.message);
+      return err("ValidationError", tableError.message);
     }
     const [columnsError, safeColumns] = toSqlIdentifierList(
       columns,
       "column name",
     );
     if (columnsError) {
-      throw new Error(columnsError.message);
+      return err("ValidationError", columnsError.message);
     }
     const indexName =
       options?.name ??
@@ -463,13 +504,19 @@ export class SchemaBuilder {
       "index name",
     );
     if (indexError) {
-      throw new Error(indexError.message);
+      return err("ValidationError", indexError.message);
     }
     const uniqueKeyword = options?.unique ? "UNIQUE " : "";
     const ifNotExists = this.dialect === "mysql" ? "" : "IF NOT EXISTS ";
-    await this.execute(
-      `CREATE ${uniqueKeyword}INDEX ${ifNotExists}${safeIndexName} ON ${safeTableName} (${safeColumns.join(", ")})`,
-    );
+    try {
+      await this.execute(
+        `CREATE ${uniqueKeyword}INDEX ${ifNotExists}${safeIndexName} ON ${safeTableName} (${safeColumns.join(", ")})`,
+      );
+      return ok(true);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return err("InternalServerError", message);
+    }
   }
 
   public async dropIndex(indexName: string, tableName?: string) {
@@ -478,27 +525,42 @@ export class SchemaBuilder {
       "index name",
     );
     if (indexError) {
-      throw new Error(indexError.message);
+      return err("ValidationError", indexError.message);
     }
     if (this.dialect === "mysql" && !tableName) {
-      throw new Error("tableName is required for DROP INDEX on mysql");
-    }
-    if (this.dialect === "mysql" && tableName) {
-      const [tableError, safeTableName] = toSqlIdentifier(
-        tableName,
-        "table name",
+      return err(
+        "ValidationError",
+        "tableName is required for DROP INDEX on mysql",
       );
-      if (tableError) {
-        throw new Error(tableError.message);
-      }
-      await this.execute(`DROP INDEX ${safeIndexName} ON ${safeTableName}`);
-      return;
     }
+    try {
+      if (this.dialect === "mysql" && tableName) {
+        const [tableError, safeTableName] = toSqlIdentifier(
+          tableName,
+          "table name",
+        );
+        if (tableError) {
+          return err("ValidationError", tableError.message);
+        }
+        await this.execute(`DROP INDEX ${safeIndexName} ON ${safeTableName}`);
+        return ok(true);
+      }
 
-    await this.execute(`DROP INDEX IF EXISTS ${safeIndexName}`);
+      await this.execute(`DROP INDEX IF EXISTS ${safeIndexName}`);
+      return ok(true);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return err("InternalServerError", message);
+    }
   }
 
   public async raw(sql: string) {
-    await this.execute(sql);
+    try {
+      await this.execute(sql);
+      return ok(true);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return err("InternalServerError", message);
+    }
   }
 }

@@ -143,12 +143,11 @@ export const writeMigrationSource = async (
   filePath: string,
   source: string,
 ) => {
-  try {
-    await Bun.write(filePath, source);
-    return ok(filePath);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to write migration";
-    return err("InternalServerError", message);
-  }
+  return Bun.write(filePath, source)
+    .then(() => ok(filePath))
+    .catch((error) => {
+      const message =
+        error instanceof Error ? error.message : "Failed to write migration";
+      return err("InternalServerError", message);
+    });
 };

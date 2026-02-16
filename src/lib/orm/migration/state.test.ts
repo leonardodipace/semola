@@ -37,9 +37,10 @@ describe("migration state", () => {
       "semola_migrations",
     );
     expect(appliedError).toBeNull();
-    expect(applied.length).toBe(2);
-    expect(applied[0]?.version).toBe("20260216120000");
-    expect(applied[1]?.version).toBe("20260216120100");
+    expect(applied).toBeDefined();
+    expect(applied?.length).toBe(2);
+    expect(applied?.[0]?.version).toBe("20260216120000");
+    expect(applied?.[1]?.version).toBe("20260216120100");
 
     const [removeError] = await removeMigration(
       orm,
@@ -53,8 +54,9 @@ describe("migration state", () => {
       "semola_migrations",
     );
     expect(afterRemoveError).toBeNull();
-    expect(afterRemove.length).toBe(1);
-    expect(afterRemove[0]?.version).toBe("20260216120000");
+    expect(afterRemove).toBeDefined();
+    expect(afterRemove?.length).toBe(1);
+    expect(afterRemove?.[0]?.version).toBe("20260216120000");
 
     orm.close();
   });
@@ -81,8 +83,9 @@ describe("migration state", () => {
       "semola_migrations",
     );
     expect(appliedError).toBeNull();
-    expect(applied.length).toBe(1);
-    expect(applied[0]?.name).toBe("add user's table");
+    expect(applied).toBeDefined();
+    expect(applied?.length).toBe(1);
+    expect(applied?.[0]?.name).toBe("add user's table");
 
     orm.close();
   });
@@ -126,7 +129,7 @@ describe("migration state", () => {
     );
 
     expect(error).not.toBeNull();
-    expect(migrations).toEqual([]);
+    expect(migrations).toBeNull();
 
     orm.close();
   });

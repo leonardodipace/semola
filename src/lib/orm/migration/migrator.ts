@@ -1,3 +1,4 @@
+import { unlink } from "node:fs/promises";
 import { resolve } from "node:path";
 import { err, ok } from "../../errors/index.js";
 import type { Orm } from "../core/index.js";
@@ -186,11 +187,7 @@ export const createMigration = async (
   if (snapshotResult[0]) {
     // Rollback: delete migration file
     try {
-      await Bun.write(filePath, "").then(() => {});
-      const file = Bun.file(filePath);
-      if (await file.exists()) {
-        await Bun.spawn(["rm", filePath]).exited;
-      }
+      await unlink(filePath);
     } catch {
       // Ignore cleanup errors
     }
@@ -216,14 +213,8 @@ export const createMigration = async (
   if (journalResult[0]) {
     // Rollback: delete both snapshot and migration file
     try {
-      const snapshotFile = Bun.file(snapshotPath);
-      if (await snapshotFile.exists()) {
-        await Bun.spawn(["rm", snapshotPath]).exited;
-      }
-      const migrationFile = Bun.file(filePath);
-      if (await migrationFile.exists()) {
-        await Bun.spawn(["rm", filePath]).exited;
-      }
+      await unlink(snapshotPath).catch(() => {});
+      await unlink(filePath).catch(() => {});
     } catch {
       // Ignore cleanup errors
     }
@@ -249,14 +240,15 @@ export const applyMigrations = async (options: MigrationRuntimeOptions) => {
     return [ensureError, null] as const;
   }
 
-  let files: Awaited<ReturnType<typeof scanMigrationFiles>>;
-  try {
-    files = await scanMigrationFiles(runtime.migrationsDir);
-  } catch (error) {
+  const [filesError, files] = await scanMigrationFiles(runtime.migrationsDir);
+  if (filesError) {
     return err(
       "InternalServerError",
-      `Failed to scan migration files: ${error instanceof Error ? error.message : String(error)}`,
+      `Failed to scan migration files: ${filesError?.message ?? "Unknown error"}`,
     );
+  }
+  if (!files) {
+    return err("InternalServerError", "Failed to scan migration files");
   }
 
   const [appliedError, applied] = await getAppliedMigrations(
@@ -273,12 +265,7 @@ export const applyMigrations = async (options: MigrationRuntimeOptions) => {
   for (const file of pending) {
     const [migrationError, migration] = await loadMigration(file);
     if (migrationError) {
-      return err(
-        "InternalServerError",
-        migrationError instanceof Error
-          ? migrationError.message
-          : String(migrationError),
-      );
+      return err("InternalServerError", migrationError.message);
     }
     if (!migration) {
       return err("InternalServerError", "Failed to load migration");
@@ -327,13 +314,11 @@ export const rollbackMigration = async (options: MigrationRuntimeOptions) => {
     return [ensureError, null] as const;
   }
 
-  let files: Awaited<ReturnType<typeof scanMigrationFiles>>;
-  try {
-    files = await scanMigrationFiles(runtime.migrationsDir);
-  } catch (error) {
+  const [filesError, files] = await scanMigrationFiles(runtime.migrationsDir);
+  if (filesError || !files) {
     return err(
       "InternalServerError",
-      `Failed to scan migration files: ${error instanceof Error ? error.message : String(error)}`,
+      `Failed to scan migration files: ${filesError?.message ?? "Unknown error"}`,
     );
   }
 
@@ -445,13 +430,11 @@ export const getMigrationStatus = async (options: MigrationRuntimeOptions) => {
     return [ensureError, null] as const;
   }
 
-  let files: Awaited<ReturnType<typeof scanMigrationFiles>>;
-  try {
-    files = await scanMigrationFiles(runtime.migrationsDir);
-  } catch (error) {
+  const [filesError, files] = await scanMigrationFiles(runtime.migrationsDir);
+  if (filesError || !files) {
     return err(
       "InternalServerError",
-      `Failed to scan migration files: ${error instanceof Error ? error.message : String(error)}`,
+      `Failed to scan migration files: ${filesError?.message ?? "Unknown error"}`,
     );
   }
 

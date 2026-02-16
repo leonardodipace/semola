@@ -1,5 +1,4 @@
 import type { Table } from "../table/index.js";
-import type { ManyRelation, OneRelation } from "./types.js";
 
 export type {
   IncludeOptions,
@@ -9,20 +8,14 @@ export type {
   WithIncluded,
 } from "./types.js";
 
-export const many = <T extends Table>(
-  fkColumn: string,
-  table: () => T,
-): ManyRelation<T> => ({
-  type: "many",
+export const many = <T extends Table>(fkColumn: string, table: () => T) => ({
+  type: "many" as const,
   fkColumn,
   table,
 });
 
-export const one = <T extends Table>(
-  fkColumn: string,
-  table: () => T,
-): OneRelation<T> => ({
-  type: "one",
+export const one = <T extends Table>(fkColumn: string, table: () => T) => ({
+  type: "one" as const,
   fkColumn,
   table,
 });

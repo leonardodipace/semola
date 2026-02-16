@@ -54,7 +54,7 @@ const run = async () => {
 
   const orm = new Orm({
     url: config.orm.url,
-    dialect: config.orm.dialect as "sqlite" | "mysql" | "postgres",
+    dialect: config.orm.dialect,
     tables,
   });
 

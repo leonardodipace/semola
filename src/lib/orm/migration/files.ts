@@ -1,6 +1,6 @@
 import { readdir } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import { mightThrow } from "../../errors/index.js";
+import { err, mightThrow, ok } from "../../errors/index.js";
 import type { MigrationDefinition, MigrationFile } from "./types.js";
 
 const migrationRegex = /^(\d{14})_([a-zA-Z0-9_-]+)\.(ts|js|mts|mjs|cts|cjs)$/;
@@ -21,11 +21,17 @@ const isMigrationDefinition = (
 export const scanMigrationFiles = async (dirPath: string) => {
   const files: MigrationFile[] = [];
 
-  const [err, entries] = await mightThrow(
+  const [error, entries] = await mightThrow(
     readdir(dirPath, { withFileTypes: true }),
   );
-  if (err || !entries) {
-    return [];
+  if (error) {
+    return err(
+      "InternalServerError",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  if (!entries) {
+    return ok([]);
   }
 
   for (const entry of entries) {
@@ -62,30 +68,27 @@ export const scanMigrationFiles = async (dirPath: string) => {
     return 0;
   });
 
-  return files;
+  return ok(files);
 };
 
 export const loadMigration = async (file: MigrationFile) => {
-  return await mightThrow(
-    (async () => {
-      // Convert file path to file:// URL for dynamic import
-      const moduleUrl = pathToFileURL(file.filePath).href;
-      const mod = await import(`${moduleUrl}?cache=${Date.now()}`);
-      const definition = Reflect.get(mod, "default");
+  // Convert file path to file:// URL for dynamic import
+  const moduleUrl = pathToFileURL(file.filePath).href;
+  const mod = await import(`${moduleUrl}?cache=${Date.now()}`);
+  const definition = Reflect.get(mod, "default");
 
-      if (!isMigrationDefinition(definition)) {
-        throw new Error(
-          `Invalid migration file ${file.filePath}: default export must be defineMigration({ up, down })`,
-        );
-      }
+  if (!isMigrationDefinition(definition)) {
+    return err(
+      "ValidationError",
+      `Invalid migration file ${file.filePath}: default export must be defineMigration({ up, down })`,
+    );
+  }
 
-      return {
-        version: file.version,
-        name: file.name,
-        filePath: file.filePath,
-        up: definition.up,
-        down: definition.down,
-      };
-    })(),
-  );
+  return ok({
+    version: file.version,
+    name: file.name,
+    filePath: file.filePath,
+    up: definition.up,
+    down: definition.down,
+  });
 };

@@ -122,11 +122,12 @@ describe("SchemaBuilder", () => {
       t.string("email").notNull();
     });
 
-    await expect(
-      schema.alterColumn("users", "email", (t) => {
-        t.string("email").unique();
-      }),
-    ).rejects.toThrow("alterColumn is not supported for sqlite");
+    const [error] = await schema.alterColumn("users", "email", (t) => {
+      t.string("email").unique();
+    });
+
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain("alterColumn is not supported for sqlite");
 
     orm.close();
   });
@@ -140,11 +141,15 @@ describe("SchemaBuilder", () => {
 
     const schema = new SchemaBuilder(orm, "sqlite");
 
-    await expect(
-      schema.createTable("users; DROP TABLE users; --", (t) => {
+    const [error] = await schema.createTable(
+      "users; DROP TABLE users; --",
+      (t) => {
         t.number("id").primaryKey();
-      }),
-    ).rejects.toThrow("Invalid SQL table name");
+      },
+    );
+
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain("Invalid SQL table name");
 
     orm.close();
   });
@@ -185,11 +190,12 @@ describe("SchemaBuilder", () => {
       t.string("email").notNull();
     });
 
-    await expect(
-      schema.createIndex("users", ["email"], {
-        name: "users_email_idx; DROP TABLE users; --",
-      }),
-    ).rejects.toThrow("Invalid SQL index name");
+    const [error] = await schema.createIndex("users", ["email"], {
+      name: "users_email_idx; DROP TABLE users; --",
+    });
+
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain("Invalid SQL index name");
 
     orm.close();
   });
@@ -245,9 +251,11 @@ describe("SchemaBuilder", () => {
     expect(hasColumn(indexes, "idx_email")).toBe(true);
 
     // Without IF NOT EXISTS, creating the same index twice should fail
-    await expect(
-      schema.createIndex("users", ["email"], { name: "idx_email" }),
-    ).rejects.toThrow();
+    const [error] = await schema.createIndex("users", ["email"], {
+      name: "idx_email",
+    });
+
+    expect(error).not.toBeNull();
 
     orm.close();
   });
@@ -268,9 +276,12 @@ describe("SchemaBuilder", () => {
 
     await schema.createIndex("users", ["email"], { name: "idx_email" });
 
-    await expect(
-      schema.dropIndex("idx_email"), // Missing tableName
-    ).rejects.toThrow("tableName is required for DROP INDEX on mysql");
+    const [error] = await schema.dropIndex("idx_email"); // Missing tableName
+
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain(
+      "tableName is required for DROP INDEX on mysql",
+    );
 
     orm.close();
   });

@@ -20,9 +20,12 @@ const createTempDir = async () => {
 };
 
 describe("scanMigrationFiles", () => {
-  test("returns empty list when directory does not exist", async () => {
-    const files = await scanMigrationFiles("/tmp/semola-not-existing-dir");
-    expect(files).toEqual([]);
+  test("returns error tuple when directory does not exist", async () => {
+    const [error, files] = await scanMigrationFiles(
+      "/tmp/semola-not-existing-dir",
+    );
+    expect(error).toBeTruthy();
+    expect(files).toBeNull();
   });
 
   test("filters invalid names and sorts by version", async () => {
@@ -33,13 +36,15 @@ describe("scanMigrationFiles", () => {
     await Bun.write(join(dir, "20260216120100_second.ts"), "");
     await Bun.write(join(dir, "20260216120000_first.ts"), "");
 
-    const files = await scanMigrationFiles(dir);
+    const [error, files] = await scanMigrationFiles(dir);
 
-    expect(files.length).toBe(2);
-    expect(files[0]?.version).toBe("20260216120000");
-    expect(files[0]?.name).toBe("first");
-    expect(files[1]?.version).toBe("20260216120100");
-    expect(files[1]?.name).toBe("second");
+    expect(error).toBeNull();
+    expect(files).toBeDefined();
+    expect(files?.length).toBe(2);
+    expect(files?.[0]?.version).toBe("20260216120000");
+    expect(files?.[0]?.name).toBe("first");
+    expect(files?.[1]?.version).toBe("20260216120100");
+    expect(files?.[1]?.name).toBe("second");
   });
 });
 
@@ -90,7 +95,7 @@ describe("loadMigration", () => {
     });
 
     expect(error).not.toBeNull();
-    expect(String(error)).toContain(
+    expect(error?.message).toContain(
       "default export must be defineMigration({ up, down })",
     );
   });

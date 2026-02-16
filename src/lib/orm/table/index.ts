@@ -590,7 +590,9 @@ export class TableClient<T extends Table> {
           options?.include,
           this.getTableClient,
         );
-        return Array.from(rows) as WithIncluded<InferTableType<T>, T, Inc>[];
+        // TypeScript can't track type changes from mutation helper loadIncludedRelations,
+        // but we know the rows now conform to WithIncluded after the mutation
+        return rows as WithIncluded<InferTableType<T>, T, Inc>[];
       })(),
     );
   }
@@ -618,10 +620,10 @@ export class TableClient<T extends Table> {
         LIMIT 1
       `;
 
-        const [result] = await sql;
-        if (!result) return null;
+        const [row] = await sql;
+        if (!row) return null;
 
-        const rows = [result];
+        const rows = [row];
         this.convertBooleanValues(rows);
         this.mapColumnNames(rows);
         await this.loadIncludedRelations(
@@ -629,6 +631,8 @@ export class TableClient<T extends Table> {
           options?.include,
           this.getTableClient,
         );
+        // TypeScript can't track type changes from mutation helper loadIncludedRelations,
+        // but rows[0] now conforms to WithIncluded after the mutation
         return (
           (rows[0] as WithIncluded<InferTableType<T>, T, Inc> | undefined) ??
           null
@@ -689,6 +693,8 @@ export class TableClient<T extends Table> {
           options?.include,
           this.getTableClient,
         );
+        // TypeScript can't track type changes from mutation helper loadIncludedRelations,
+        // but result now conforms to WithIncluded after the mutation
         return result as WithIncluded<InferTableType<T>, T, Inc>;
       })(),
     );
@@ -727,7 +733,9 @@ export class TableClient<T extends Table> {
           throw new Error("create did not return a row");
         }
 
-        return result as InferTableType<T>;
+        // Type-safe return without assertion - TypeScript tracks the array element type
+        const typedResult: InferTableType<T> = result;
+        return typedResult;
       })(),
     );
   }
@@ -768,18 +776,40 @@ export class TableClient<T extends Table> {
           `;
           results = await sql;
         } else {
-          // For MySQL: execute UPDATE without RETURNING, then SELECT the updated row
-          await this.sql`
-            UPDATE ${this.sql(this.table.sqlName)}
-            SET ${this.sql(sqlData)}
-            WHERE ${whereClause}
-          `;
+          // For MySQL: wrap in transaction with SELECT FOR UPDATE to prevent races
+          try {
+            await this.sql`BEGIN`;
 
-          // Fetch the updated row using the same whereClause
-          results = await this.sql<InferTableType<T>[]>`
-            SELECT * FROM ${this.sql(this.table.sqlName)}
-            WHERE ${whereClause}
-          `;
+            // Lock the rows we're about to update
+            results = await this.sql<InferTableType<T>[]>`
+              SELECT * FROM ${this.sql(this.table.sqlName)}
+              WHERE ${whereClause}
+              FOR UPDATE
+            `;
+
+            if (results.length === 0) {
+              await this.sql`ROLLBACK`;
+              throw new Error("update did not find a row");
+            }
+
+            // Perform the update
+            await this.sql`
+              UPDATE ${this.sql(this.table.sqlName)}
+              SET ${this.sql(sqlData)}
+              WHERE ${whereClause}
+            `;
+
+            // Select the updated rows to return
+            results = await this.sql<InferTableType<T>[]>`
+              SELECT * FROM ${this.sql(this.table.sqlName)}
+              WHERE ${whereClause}
+            `;
+
+            await this.sql`COMMIT`;
+          } catch (error) {
+            await this.sql`ROLLBACK`;
+            throw error;
+          }
         }
 
         this.convertBooleanValues(results);
@@ -790,7 +820,8 @@ export class TableClient<T extends Table> {
           throw new Error("update did not return a row");
         }
 
-        return result as InferTableType<T>;
+        const typedResult: InferTableType<T> = result;
+        return typedResult;
       })(),
     );
   }
@@ -817,17 +848,33 @@ export class TableClient<T extends Table> {
           `;
           results = await sql;
         } else {
-          // For MySQL: fetch the row before deleting it
-          results = await this.sql<InferTableType<T>[]>`
-            SELECT * FROM ${this.sql(this.table.sqlName)}
-            WHERE ${whereClause}
-          `;
+          // For MySQL: wrap in transaction with SELECT FOR UPDATE to prevent races
+          try {
+            await this.sql`BEGIN`;
 
-          // Execute DELETE without RETURNING
-          await this.sql`
-            DELETE FROM ${this.sql(this.table.sqlName)}
-            WHERE ${whereClause}
-          `;
+            // Lock and fetch the rows we're about to delete
+            results = await this.sql<InferTableType<T>[]>`
+              SELECT * FROM ${this.sql(this.table.sqlName)}
+              WHERE ${whereClause}
+              FOR UPDATE
+            `;
+
+            if (results.length === 0) {
+              await this.sql`ROLLBACK`;
+              throw new Error("delete did not find a row");
+            }
+
+            // Execute DELETE
+            await this.sql`
+              DELETE FROM ${this.sql(this.table.sqlName)}
+              WHERE ${whereClause}
+            `;
+
+            await this.sql`COMMIT`;
+          } catch (error) {
+            await this.sql`ROLLBACK`;
+            throw error;
+          }
         }
 
         this.convertBooleanValues(results);
@@ -838,7 +885,8 @@ export class TableClient<T extends Table> {
           throw new Error("delete did not return a row");
         }
 
-        return result as InferTableType<T>;
+        const typedResult: InferTableType<T> = result;
+        return typedResult;
       })(),
     );
   }

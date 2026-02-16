@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { number, string } from "../column/index.js";
@@ -294,6 +294,7 @@ describe("Migration runtime functions", () => {
   test("rollback returns null when no migrations were applied", async () => {
     const dir = await createTempDir();
     const migrationsDir = join(dir, "migrations");
+    await mkdir(migrationsDir);
 
     const orm = new Orm({
       url: ":memory:",

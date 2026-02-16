@@ -66,31 +66,30 @@ export const introspectSchema = async (
   orm: Orm<Record<string, Table>>,
   tableNames: string[],
 ) => {
-  try {
-    const schema = new Map<string, Set<string>>();
+  const schema = new Map<string, Set<string>>();
 
-    for (const tableName of tableNames) {
-      const [error, rows] = await queryColumns(orm, tableName);
-      if (error) {
-        return [error, null] as const;
-      }
-
-      const columns = new Set<string>();
-
-      if (Array.isArray(rows)) {
-        for (const row of rows) {
-          const name = readColumnName(row);
-          if (name) {
-            columns.add(name);
-          }
-        }
-      }
-
-      schema.set(tableName, columns);
+  for (const tableName of tableNames) {
+    const [error, rows] = await queryColumns(orm, tableName);
+    if (error) {
+      return err(
+        "InternalServerError",
+        error instanceof Error ? error.message : String(error),
+      );
     }
 
-    return [null, schema] as const;
-  } catch (error) {
-    return [error, null] as const;
+    const columns = new Set<string>();
+
+    if (Array.isArray(rows)) {
+      for (const row of rows) {
+        const name = readColumnName(row);
+        if (name) {
+          columns.add(name);
+        }
+      }
+    }
+
+    schema.set(tableName, columns);
   }
+
+  return ok(schema);
 };

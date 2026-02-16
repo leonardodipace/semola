@@ -44,8 +44,8 @@ export class Column<
     sqlName: string,
     kind: Kind,
     options: ColumnOptions<Kind>,
-  ): Column<Kind, Meta> {
-    return new Column(sqlName, kind, options) as Column<Kind, Meta>;
+  ) {
+    return new Column<Kind, Meta>(sqlName, kind, options);
   }
 
   public get sqlName() {

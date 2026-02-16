@@ -41,6 +41,9 @@ const validateConfig = (value: unknown) => {
     );
   }
 
+  // TypeScript now knows dialect is one of the three valid values
+  const validDialect = dialect as "sqlite" | "mysql" | "postgres";
+
   if (typeof url !== "string" || url.length === 0) {
     return err("ValidationError", "Invalid semola config: orm.url is required");
   }
@@ -71,7 +74,7 @@ const validateConfig = (value: unknown) => {
 
   return ok({
     orm: {
-      dialect,
+      dialect: validDialect,
       url,
       schema: {
         path,

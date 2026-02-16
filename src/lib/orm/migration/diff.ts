@@ -1,3 +1,4 @@
+import { err, ok } from "../../errors/index.js";
 import type {
   ColumnSnapshot,
   SchemaSnapshot,
@@ -69,6 +70,9 @@ const diffTable = (
   for (const colName of oldColumns) {
     if (!newColumns.has(colName)) {
       const column = oldTable.columns[colName];
+      if (!column) {
+        continue;
+      }
       operations.push({
         type: "dropColumn",
         tableName,
@@ -133,9 +137,7 @@ export const diffSnapshots = (
 };
 
 // Generate reverse operations for rollback
-export const reverseOperations = (
-  operations: TableDiffOperation[],
-): [Error, null] | [null, TableDiffOperation[]] => {
+export const reverseOperations = (operations: TableDiffOperation[]) => {
   const reversed: TableDiffOperation[] = [];
 
   for (const op of operations) {
@@ -147,7 +149,7 @@ export const reverseOperations = (
       });
     } else if (op.type === "dropTable") {
       if (!op.tableSnapshot) {
-        return [new Error("missing snapshot for reverse"), null];
+        return err("ValidationError", "missing snapshot for reverse");
       }
       reversed.unshift({
         type: "createTable",
@@ -162,7 +164,7 @@ export const reverseOperations = (
       });
     } else if (op.type === "dropColumn") {
       if (!op.columnSnapshot) {
-        return [new Error("missing snapshot for reverse"), null];
+        return err("ValidationError", "missing snapshot for reverse");
       }
       reversed.unshift({
         type: "addColumn",
@@ -180,5 +182,5 @@ export const reverseOperations = (
     }
   }
 
-  return [null, reversed];
+  return ok(reversed);
 };

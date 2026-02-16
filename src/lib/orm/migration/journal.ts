@@ -51,13 +51,12 @@ export const readJournal = async (filePath: string) => {
 };
 
 export const writeJournal = async (filePath: string, journal: Journal) => {
-  try {
-    const json = JSON.stringify(journal, null, 2);
-    await Bun.write(filePath, json);
-    return [null, journal] as const;
-  } catch (error) {
-    return [error, null] as const;
-  }
+  return Bun.write(filePath, JSON.stringify(journal, null, 2))
+    .then(() => ok(journal))
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      return err("InternalServerError", message);
+    });
 };
 
 export const addJournalEntry = (

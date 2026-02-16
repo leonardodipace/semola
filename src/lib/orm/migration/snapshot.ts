@@ -73,13 +73,12 @@ export const writeSnapshot = async (
   filePath: string,
   snapshot: SchemaSnapshot,
 ) => {
-  try {
-    const json = JSON.stringify(snapshot, null, 2);
-    await Bun.write(filePath, json);
-    return [null, snapshot] as const;
-  } catch (error) {
-    return [error, null] as const;
-  }
+  return Bun.write(filePath, JSON.stringify(snapshot, null, 2))
+    .then(() => ok(snapshot))
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      return err("InternalServerError", message);
+    });
 };
 
 export const readSnapshot = async (filePath: string) => {

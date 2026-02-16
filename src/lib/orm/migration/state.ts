@@ -51,7 +51,7 @@ export const getAppliedMigrations = async (
 ) => {
   const [error, safeTableName] = toSqlIdentifier(tableName, "table name");
   if (error) {
-    return [error, []] as const;
+    return err("ValidationError", error.message);
   }
 
   try {
@@ -64,7 +64,7 @@ export const getAppliedMigrations = async (
     const list: AppliedMigration[] = [];
 
     if (!Array.isArray(rows)) {
-      return [null, list] as const;
+      return ok(list);
     }
 
     for (const row of rows) {
@@ -86,10 +86,10 @@ export const getAppliedMigrations = async (
       list.push({ version, name, appliedAt });
     }
 
-    return [null, list] as const;
+    return ok(list);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    return [err("InternalServerError", message)[0], []] as const;
+    return err("InternalServerError", message);
   }
 };
 
@@ -101,7 +101,7 @@ export const recordMigration = async (
 ) => {
   const [error, safeTableName] = toSqlIdentifier(tableName, "table name");
   if (error) {
-    return [error, null] as const;
+    return err("ValidationError", error.message);
   }
 
   try {
@@ -110,10 +110,10 @@ export const recordMigration = async (
       INSERT INTO ${orm.sql(safeTableName)} (version, name, applied_at)
       VALUES (${version}, ${name}, ${appliedAt})
     `;
-    return [null, true] as const;
+    return ok(true);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    return [err("InternalServerError", message)[0], null] as const;
+    return err("InternalServerError", message);
   }
 };
 
@@ -124,7 +124,7 @@ export const removeMigration = async (
 ) => {
   const [error, safeTableName] = toSqlIdentifier(tableName, "table name");
   if (error) {
-    return [error, null] as const;
+    return err("ValidationError", error.message);
   }
 
   try {
@@ -132,9 +132,9 @@ export const removeMigration = async (
       DELETE FROM ${orm.sql(safeTableName)}
       WHERE version = ${version}
     `;
-    return [null, true] as const;
+    return ok(true);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    return [err("InternalServerError", message)[0], null] as const;
+    return err("InternalServerError", message);
   }
 };

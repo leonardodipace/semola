@@ -29,7 +29,8 @@ export class MysqlDialect implements Dialect {
   };
 
   private escapeString(value: string) {
-    return value.replace(/'/g, "''");
+    // Escape backslashes first, then single quotes
+    return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
   }
 
   private formatDefaultValue(kind: ColumnKind, value: unknown): string {
@@ -43,7 +44,9 @@ export class MysqlDialect implements Dialect {
 
     if (kind === "date") {
       if (value instanceof Date) {
-        return `'${this.escapeString(value.toISOString())}'`;
+        // Format as MySQL DATETIME: YYYY-MM-DD HH:MM:SS
+        const formatted = value.toISOString().slice(0, 19).replace("T", " ");
+        return `'${this.escapeString(formatted)}'`;
       }
       return `'${this.escapeString(String(value))}'`;
     }
