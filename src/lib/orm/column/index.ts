@@ -61,41 +61,35 @@ export class Column<
     return this.options.defaultValue;
   }
 
-  public primaryKey(): Column<Kind, UpdateMeta<Meta, "primaryKey", true>> {
-    return this.withOptions({ primaryKey: true }) as Column<
-      Kind,
-      UpdateMeta<Meta, "primaryKey", true>
-    >;
+  public primaryKey() {
+    return this.withOptions<UpdateMeta<Meta, "primaryKey", true>>({
+      primaryKey: true,
+    });
   }
 
-  public notNull(): Column<Kind, UpdateMeta<Meta, "notNull", true>> {
-    return this.withOptions({ notNull: true }) as Column<
-      Kind,
-      UpdateMeta<Meta, "notNull", true>
-    >;
+  public notNull() {
+    return this.withOptions<UpdateMeta<Meta, "notNull", true>>({
+      notNull: true,
+    });
   }
 
-  public unique(): Column<Kind, UpdateMeta<Meta, "unique", true>> {
-    return this.withOptions({ unique: true }) as Column<
-      Kind,
-      UpdateMeta<Meta, "unique", true>
-    >;
+  public unique() {
+    return this.withOptions<UpdateMeta<Meta, "unique", true>>({ unique: true });
   }
 
-  public default(
-    value: ColumnValue<Kind>,
-  ): Column<Kind, UpdateMeta<Meta, "hasDefault", true>> {
-    return this.withOptions({ defaultValue: value }) as Column<
-      Kind,
-      UpdateMeta<Meta, "hasDefault", true>
-    >;
+  public default(value: ColumnValue<Kind>) {
+    return this.withOptions<UpdateMeta<Meta, "hasDefault", true>>({
+      defaultValue: value,
+    });
   }
 
-  private withOptions(options: Partial<ColumnOptions<Kind>>) {
+  private withOptions<NewMeta extends ColumnMeta>(
+    options: Partial<ColumnOptions<Kind>>,
+  ) {
     return new Column(this._sqlName, this.kind, {
       ...this.options,
       ...options,
-    });
+    }) as Column<Kind, NewMeta>;
   }
 }
 
