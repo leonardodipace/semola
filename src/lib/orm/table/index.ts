@@ -595,7 +595,7 @@ export class TableClient<T extends Table> {
       options?.include,
       this.getTableClient,
     );
-    return rows as WithIncluded<InferTableType<T>, T, Inc>[];
+    return Array.from(rows) as WithIncluded<InferTableType<T>, T, Inc>[];
   }
 
   public async findFirst<
