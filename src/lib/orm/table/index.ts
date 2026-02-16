@@ -1,5 +1,6 @@
 import type { Column } from "../column/index.js";
 import type { ColumnKind, ColumnMeta } from "../column/types.js";
+import type { Dialect } from "../dialect/types.js";
 import type { Relation, WithIncluded } from "../relations/types.js";
 import type {
   BooleanFilter,
@@ -78,20 +79,20 @@ export class TableClient<T extends Table> {
   private readonly getTableClient?: (
     relation: Relation,
   ) => TableClient<Table> | undefined;
-  private readonly dialect: "sqlite" | "mysql" | "postgres";
+  private readonly dialect: Dialect;
 
   public constructor(
     sql: Bun.SQL,
     table: T,
+    dialect: Dialect,
     relations?: Record<string, Relation>,
     getTableClient?: (relation: Relation) => TableClient<Table> | undefined,
-    dialect: "sqlite" | "mysql" | "postgres" = "sqlite",
   ) {
     this.sql = sql;
     this.table = table;
+    this.dialect = dialect;
     this.relations = relations;
     this.getTableClient = getTableClient;
-    this.dialect = dialect;
   }
 
   private validateColumnName(key: string) {
@@ -259,21 +260,32 @@ export class TableClient<T extends Table> {
       if (skip > 0) {
         return this.sql`LIMIT ${take} OFFSET ${skip}`;
       }
-
       return this.sql`LIMIT ${take}`;
     }
 
     if (skip > 0) {
-      if (this.dialect === "postgres") {
+      // Use dialect to get the right pagination behavior for "skip only" queries
+      const paginationStr = this.dialect.buildPagination(undefined, skip);
+      if (!paginationStr) {
+        return null;
+      }
+
+      // For SQLite: "LIMIT -1 OFFSET n"
+      // For Postgres: "LIMIT ALL OFFSET n"
+      // For MySQL: "LIMIT <max> OFFSET n"
+      // We need to parse and reconstruct
+      if (paginationStr.includes("LIMIT -1")) {
+        return this.sql`LIMIT -1 OFFSET ${skip}`;
+      }
+      if (paginationStr.includes("LIMIT ALL")) {
         return this.sql`LIMIT ALL OFFSET ${skip}`;
       }
-
-      if (this.dialect === "mysql") {
-        const mysqlMaxLimit = Number.MAX_SAFE_INTEGER;
-        return this.sql`LIMIT ${mysqlMaxLimit} OFFSET ${skip}`;
+      // MySQL case - extract the limit value
+      const match = paginationStr.match(/LIMIT (\d+)/);
+      if (match) {
+        const limit = Number.parseInt(match[1] ?? "0", 10);
+        return this.sql`LIMIT ${limit} OFFSET ${skip}`;
       }
-
-      return this.sql`LIMIT -1 OFFSET ${skip}`;
     }
 
     return null;
@@ -333,9 +345,8 @@ export class TableClient<T extends Table> {
         const sqlColumnName = column.sqlName;
         const value = row[sqlColumnName];
 
-        // Check if this column is a boolean type and convert 0/1 to true/false
-        if (column.columnKind === "boolean" && typeof value === "number") {
-          row[sqlColumnName] = value === 1;
+        if (column.columnKind === "boolean") {
+          row[sqlColumnName] = this.dialect.convertBooleanValue(value);
         }
       }
     }
@@ -533,7 +544,9 @@ export class TableClient<T extends Table> {
     }
   }
 
-  public async findMany<Inc extends Record<string, boolean> | undefined>(
+  public async findMany<
+    Inc extends Record<string, boolean> | undefined = undefined,
+  >(
     options?: FindManyOptions<T> & { include?: Inc },
   ): Promise<WithIncluded<InferTableType<T>, T, Inc>[]> {
     const whereClause = this.buildWhereClause(options?.where);
@@ -569,7 +582,9 @@ export class TableClient<T extends Table> {
     return rows as WithIncluded<InferTableType<T>, T, Inc>[];
   }
 
-  public async findFirst<Inc extends Record<string, boolean> | undefined>(
+  public async findFirst<
+    Inc extends Record<string, boolean> | undefined = undefined,
+  >(
     options?: FindFirstOptions<T> & { include?: Inc },
   ): Promise<WithIncluded<InferTableType<T>, T, Inc> | null> {
     const whereClause = this.buildWhereClause(options?.where);
@@ -605,7 +620,9 @@ export class TableClient<T extends Table> {
     );
   }
 
-  public async findUnique<Inc extends Record<string, boolean> | undefined>(
+  public async findUnique<
+    Inc extends Record<string, boolean> | undefined = undefined,
+  >(
     options: FindUniqueOptions<T> & { include?: Inc },
   ): Promise<WithIncluded<InferTableType<T>, T, Inc> | null> {
     // Runtime validation: ensure only unique/primary key columns are used

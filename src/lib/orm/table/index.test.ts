@@ -153,7 +153,12 @@ describe("Table - findMany with where clause", () => {
 
     // Create client using the same orm's sql connection
     const { TableClient } = await import("./index.js");
-    const nullableClient = new TableClient(orm.sql, nullableTable);
+    const { SqliteDialect } = await import("../dialect/sqlite.js");
+    const nullableClient = new TableClient(
+      orm.sql,
+      nullableTable,
+      new SqliteDialect(),
+    );
 
     const nullNameRows = await nullableClient.findMany({
       where: { name: null },

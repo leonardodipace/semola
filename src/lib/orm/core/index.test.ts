@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { number, string } from "../column/index.js";
+import { boolean, number, string } from "../column/index.js";
 import { many, one } from "../relations/index.js";
 import { Table } from "../table/index.js";
 import { Orm } from "./index.js";
@@ -199,6 +199,123 @@ describe("Orm - SQL access", () => {
 
     expect(orm.sql).toBeDefined();
     expect(typeof orm.sql).toBe("function");
+
+    orm.close();
+  });
+});
+
+describe("Orm - DDL generation", () => {
+  test("should generate CREATE TABLE statement with SQLite dialect", () => {
+    const usersTable = new Table("users", {
+      id: number("id").primaryKey(),
+      name: string("name").notNull(),
+      email: string("email").unique(),
+    });
+
+    const orm = new Orm({
+      url: ":memory:",
+      tables: { users: usersTable },
+    });
+
+    const sql = orm.createTable(usersTable);
+
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS users");
+    expect(sql).toContain("id INTEGER PRIMARY KEY");
+    expect(sql).toContain("name TEXT NOT NULL");
+    expect(sql).toContain("email TEXT UNIQUE");
+
+    orm.close();
+  });
+
+  test("should generate DDL with all column types", () => {
+    const testTable = new Table("test_types", {
+      id: number("id").primaryKey(),
+      name: string("name").notNull(),
+      active: boolean("is_active").default(true),
+    });
+
+    const orm = new Orm({
+      url: ":memory:",
+      tables: { test: testTable },
+    });
+
+    const ddl = orm.createTable(testTable);
+
+    expect(ddl).toContain("id INTEGER PRIMARY KEY");
+    expect(ddl).toContain("name TEXT NOT NULL");
+    expect(ddl).toContain("is_active INTEGER");
+
+    orm.close();
+  });
+});
+
+describe("Orm - dialect support", () => {
+  test("should use SQLite dialect by default", () => {
+    const usersTable = new Table("users", {
+      id: number("id").primaryKey(),
+    });
+
+    const orm = new Orm({
+      url: ":memory:",
+      tables: { users: usersTable },
+    });
+
+    const sql = orm.createTable(usersTable);
+
+    // SQLite uses INTEGER for numbers
+    expect(sql).toContain("INTEGER");
+
+    orm.close();
+  });
+
+  test("should accept explicit SQLite dialect", () => {
+    const usersTable = new Table("users", {
+      id: number("id").primaryKey(),
+    });
+
+    const orm = new Orm({
+      url: ":memory:",
+      tables: { users: usersTable },
+      dialect: "sqlite",
+    });
+
+    expect(orm).toBeDefined();
+
+    orm.close();
+  });
+
+  test("should throw error for Postgres dialect (not yet implemented)", () => {
+    const usersTable = new Table("users", {
+      id: number("id").primaryKey(),
+    });
+
+    const orm = new Orm({
+      url: ":memory:",
+      tables: { users: usersTable },
+      dialect: "postgres",
+    });
+
+    expect(() => orm.createTable(usersTable)).toThrow(
+      "PostgreSQL dialect not yet implemented",
+    );
+
+    orm.close();
+  });
+
+  test("should throw error for MySQL dialect (not yet implemented)", () => {
+    const usersTable = new Table("users", {
+      id: number("id").primaryKey(),
+    });
+
+    const orm = new Orm({
+      url: ":memory:",
+      tables: { users: usersTable },
+      dialect: "mysql",
+    });
+
+    expect(() => orm.createTable(usersTable)).toThrow(
+      "MySQL dialect not yet implemented",
+    );
 
     orm.close();
   });

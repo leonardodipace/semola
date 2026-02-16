@@ -13,6 +13,19 @@ export { Orm } from "./core/index.js";
 // Export types from core
 export type { OrmDialect, OrmOptions, TableClients } from "./core/types.js";
 
+// Export dialect utilities (for advanced users)
+export {
+  MysqlDialect,
+  PostgresDialect,
+  SqliteDialect,
+} from "./dialect/index.js";
+export type {
+  ColumnTypeMapping,
+  Dialect,
+  QueryFragment,
+  QueryResult,
+} from "./dialect/types.js";
+
 // Export relation utilities
 export { many, one } from "./relations/index.js";
 export type {
