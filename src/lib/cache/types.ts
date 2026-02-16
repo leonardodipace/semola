@@ -1,4 +1,4 @@
-type CacheError = "CacheError" | "InvalidTTLError";
+type CacheError = "CacheError" | "InvalidTTLError" | "NotFoundError";
 
 export type CacheOptions<T> = {
   redis: Bun.RedisClient;
