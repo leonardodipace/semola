@@ -1,3 +1,4 @@
+import { err, ok } from "../../errors/index.js";
 import type { Column } from "../column/index.js";
 import type { ColumnKind, ColumnMeta } from "../column/types.js";
 import type { Table } from "../table/index.js";
@@ -116,7 +117,7 @@ export class MysqlDialect implements Dialect {
 
   public buildCreateTable<
     Columns extends Record<string, Column<ColumnKind, ColumnMeta>>,
-  >(table: Table<Columns>): string {
+  >(table: Table<Columns>) {
     const columnDefs: string[] = [];
     const constraints: string[] = [];
 
@@ -129,7 +130,10 @@ export class MysqlDialect implements Dialect {
       } else {
         const sqlType = this.types[column.columnKind];
         if (!sqlType) {
-          throw new Error(`Unsupported column type: ${column.columnKind}`);
+          return err(
+            "UnsupportedType",
+            `Unsupported column type: ${column.columnKind}`,
+          );
         }
         parts.push(sqlType);
 
@@ -161,7 +165,7 @@ export class MysqlDialect implements Dialect {
     }
 
     const allDefs = [...columnDefs, ...constraints].join(", ");
-    return `CREATE TABLE IF NOT EXISTS ${table.sqlName} (${allDefs})`;
+    return ok(`CREATE TABLE IF NOT EXISTS ${table.sqlName} (${allDefs})`);
   }
 
   public convertBooleanValue(value: unknown): boolean {

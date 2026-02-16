@@ -1,3 +1,4 @@
+import { err, ok } from "../../errors/index.js";
 import type { ColumnKind } from "../column/types.js";
 import type { ColumnSnapshot, TableSnapshot } from "./snapshot.js";
 import type { TableDiffOperation } from "./types.js";
@@ -142,5 +143,12 @@ export const writeMigrationSource = async (
   filePath: string,
   source: string,
 ) => {
-  await Bun.write(filePath, source);
+  try {
+    await Bun.write(filePath, source);
+    return ok(filePath);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to write migration";
+    return err("InternalServerError", message);
+  }
 };

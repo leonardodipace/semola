@@ -221,8 +221,9 @@ describe("Orm - DDL generation", () => {
       tables: { users: usersTable },
     });
 
-    const sql = orm.createTable(usersTable);
+    const [error, sql] = orm.createTable(usersTable);
 
+    expect(error).toBeNull();
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS users");
     expect(sql).toContain("id INTEGER PRIMARY KEY");
     expect(sql).toContain("name TEXT NOT NULL");
@@ -243,8 +244,9 @@ describe("Orm - DDL generation", () => {
       tables: { test: testTable },
     });
 
-    const ddl = orm.createTable(testTable);
+    const [error, ddl] = orm.createTable(testTable);
 
+    expect(error).toBeNull();
     expect(ddl).toContain("id INTEGER PRIMARY KEY");
     expect(ddl).toContain("name TEXT NOT NULL");
     expect(ddl).toContain("is_active INTEGER");
@@ -264,8 +266,9 @@ describe("Orm - dialect support", () => {
       tables: { users: usersTable },
     });
 
-    const sql = orm.createTable(usersTable);
+    const [error, sql] = orm.createTable(usersTable);
 
+    expect(error).toBeNull();
     // SQLite uses INTEGER for numbers
     expect(sql).toContain("INTEGER");
 
@@ -300,7 +303,8 @@ describe("Orm - dialect support", () => {
       dialect: "postgres",
     });
 
-    const createTableSql = orm.createTable(usersTable);
+    const [error, createTableSql] = orm.createTable(usersTable);
+    expect(error).toBeNull();
     expect(createTableSql).toContain("BIGSERIAL PRIMARY KEY");
     expect(createTableSql).toContain("name TEXT NOT NULL");
 
@@ -319,7 +323,8 @@ describe("Orm - dialect support", () => {
       dialect: "mysql",
     });
 
-    const createTableSql = orm.createTable(usersTable);
+    const [error, createTableSql] = orm.createTable(usersTable);
+    expect(error).toBeNull();
     expect(createTableSql).toContain("BIGINT AUTO_INCREMENT PRIMARY KEY");
     expect(createTableSql).toContain("name VARCHAR(255) NOT NULL");
 

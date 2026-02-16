@@ -20,12 +20,12 @@ const isMigrationDefinition = (
 
 export const scanMigrationFiles = async (dirPath: string) => {
   const files: MigrationFile[] = [];
-  let entries: Array<{ name: string }> = [];
 
-  try {
-    entries = await readdir(dirPath, { withFileTypes: true });
-  } catch {
-    return [] as MigrationFile[];
+  const [err, entries] = await mightThrow(
+    readdir(dirPath, { withFileTypes: true }),
+  );
+  if (err || !entries) {
+    return [];
   }
 
   for (const entry of entries) {

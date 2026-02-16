@@ -1,3 +1,4 @@
+import { err, ok } from "../../errors/index.js";
 import type { Orm } from "../core/index.js";
 import type { Table } from "../table/index.js";
 import { toSqlIdentifier } from "./sql.js";
@@ -26,56 +27,70 @@ const queryColumns = async (
   // Validate table name to prevent SQL injection
   const [error, safeTableName] = toSqlIdentifier(tableName, "table name");
   if (error) {
-    throw new Error(error.message);
+    return err("ValidationError", error.message);
   }
 
   const dialect = orm.getDialectName();
 
   if (dialect === "sqlite") {
-    return orm.sql`
+    return ok(
+      await orm.sql`
       SELECT name
       FROM pragma_table_info(${safeTableName})
-    `;
+    `,
+    );
   }
 
   if (dialect === "postgres") {
-    return orm.sql`
+    return ok(
+      await orm.sql`
       SELECT column_name
       FROM information_schema.columns
       WHERE table_schema = current_schema()
       AND table_name = ${safeTableName}
-    `;
+    `,
+    );
   }
 
-  return orm.sql`
+  return ok(
+    await orm.sql`
     SELECT COLUMN_NAME AS column_name
     FROM information_schema.columns
     WHERE table_schema = DATABASE()
     AND table_name = ${safeTableName}
-  `;
+  `,
+  );
 };
 
 export const introspectSchema = async (
   orm: Orm<Record<string, Table>>,
   tableNames: string[],
 ) => {
-  const schema = new Map<string, Set<string>>();
+  try {
+    const schema = new Map<string, Set<string>>();
 
-  for (const tableName of tableNames) {
-    const rows = await queryColumns(orm, tableName);
-    const columns = new Set<string>();
+    for (const tableName of tableNames) {
+      const [error, rows] = await queryColumns(orm, tableName);
+      if (error) {
+        return [error, null] as const;
+      }
 
-    if (Array.isArray(rows)) {
-      for (const row of rows) {
-        const name = readColumnName(row);
-        if (name) {
-          columns.add(name);
+      const columns = new Set<string>();
+
+      if (Array.isArray(rows)) {
+        for (const row of rows) {
+          const name = readColumnName(row);
+          if (name) {
+            columns.add(name);
+          }
         }
       }
+
+      schema.set(tableName, columns);
     }
 
-    schema.set(tableName, columns);
+    return [null, schema] as const;
+  } catch (error) {
+    return [error, null] as const;
   }
-
-  return schema;
 };

@@ -11,6 +11,7 @@ import {
   getMigrationStatus,
   rollbackMigration,
 } from "./migrator.js";
+import { getAppliedMigrations } from "./state.js";
 
 const tempDirs: string[] = [];
 
@@ -438,6 +439,150 @@ describe("Migration runtime functions", () => {
     expect(statuses?.[0]?.applied).toBe(true);
     expect(statuses?.[1]?.version).toBe("20260216120100");
     expect(statuses?.[1]?.applied).toBe(false);
+
+    orm.close();
+  });
+
+  test("createMigration rolls back on snapshot write failure", async () => {
+    const dir = await createTempDir();
+    const migrationsDir = join(dir, "migrations");
+
+    const users = new Table("users", {
+      id: number("id").primaryKey(),
+      name: string("name").notNull(),
+    });
+
+    const orm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: { users },
+    });
+
+    // Create initial migration to establish first snapshot
+    await createMigration({
+      orm,
+      migrationsDir,
+      migrationTable: "semola_migrations",
+      name: "initial",
+      tables: { users },
+    });
+
+    // Now try to create second migration with invalid meta directory
+    // This will fail when trying to write snapshot
+    const metaDir = join(migrationsDir, "meta");
+    await rm(metaDir, { recursive: true, force: true });
+    await Bun.write(metaDir, "not-a-directory-but-a-file");
+
+    const [error, filePath] = await createMigration({
+      orm,
+      migrationsDir,
+      migrationTable: "semola_migrations",
+      name: "second",
+      tables: {
+        users,
+        posts: new Table("posts", {
+          id: number("id").primaryKey(),
+        }),
+      },
+    });
+
+    // Verify error is returned
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain("Failed to create migration directories");
+
+    // Verify no migration file was created (compensating rollback)
+    expect(filePath).toBeNull();
+
+    orm.close();
+  });
+
+  test("applyMigrations rolls back transaction on migration.up failure", async () => {
+    const dir = await createTempDir();
+    const migrationsDir = join(dir, "migrations");
+
+    // Create a migration that will fail during up()
+    await Bun.write(
+      `${migrationsDir}/20260216120000_failing.ts`,
+      `export default {
+  up: async (t) => {
+    await t.createTable("users", (table) => {
+      table.number("id").primaryKey();
+    });
+    // This will throw an error
+    throw new Error("Simulated migration failure");
+  },
+  down: async (t) => {
+    await t.dropTable("users");
+  },
+};
+`,
+    );
+
+    const orm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: {},
+    });
+
+    const migrationOptions = {
+      orm,
+      migrationsDir,
+      migrationTable: "semola_migrations",
+    };
+
+    // Apply migrations - should fail
+    const [error, applied] = await applyMigrations(migrationOptions);
+
+    // Verify error is returned
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain("Failed to apply migration");
+    expect(error?.message).toContain("Simulated migration failure");
+    expect(applied).toBeNull();
+
+    // Verify transaction was rolled back - table should not exist
+    const rows = await orm.sql.unsafe(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
+    );
+    expect(Array.isArray(rows) && rows.length).toBe(0);
+
+    // Verify no migration recorded in state table
+    const [, migrations] = await getAppliedMigrations(
+      orm,
+      migrationOptions.migrationTable,
+    );
+    expect(migrations?.length).toBe(0);
+
+    orm.close();
+  });
+
+  test("createMigration returns error when directory creation fails", async () => {
+    const invalidDir = "/invalid/nonexistent/path/that/cannot/be/created";
+
+    const users = new Table("users", {
+      id: number("id").primaryKey(),
+    });
+
+    const orm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: { users },
+    });
+
+    const [error, filePath] = await createMigration({
+      orm,
+      migrationsDir: invalidDir,
+      migrationTable: "semola_migrations",
+      name: "test",
+      tables: { users },
+    });
+
+    // Verify error is returned
+    expect(error).not.toBeNull();
+    expect(error?.type).toBe("InternalServerError");
+    expect(error?.message).toContain("Failed to create migration directories");
+
+    // Verify no file path returned
+    expect(filePath).toBeNull();
 
     orm.close();
   });

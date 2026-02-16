@@ -40,6 +40,14 @@ export class Column<
     this.options = options;
   }
 
+  public static create<Kind extends ColumnKind, Meta extends ColumnMeta>(
+    sqlName: string,
+    kind: Kind,
+    options: ColumnOptions<Kind>,
+  ): Column<Kind, Meta> {
+    return new Column(sqlName, kind, options) as Column<Kind, Meta>;
+  }
+
   public get sqlName() {
     return this._sqlName;
   }
@@ -86,10 +94,10 @@ export class Column<
   private withOptions<NewMeta extends ColumnMeta>(
     options: Partial<ColumnOptions<Kind>>,
   ) {
-    return new Column(this._sqlName, this.kind, {
+    return Column.create<Kind, NewMeta>(this._sqlName, this.kind, {
       ...this.options,
       ...options,
-    }) as Column<Kind, NewMeta>;
+    });
   }
 }
 

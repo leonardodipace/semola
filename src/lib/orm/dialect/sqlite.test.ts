@@ -122,7 +122,8 @@ describe("SqliteDialect - CREATE TABLE", () => {
       name: string("name").notNull(),
     });
 
-    const sql = dialect.buildCreateTable(table);
+    const [error, sql] = dialect.buildCreateTable(table);
+    expect(error).toBeNull();
     expect(sql).toContain("id INTEGER PRIMARY KEY");
     expect(sql).toContain("name TEXT NOT NULL");
   });
@@ -133,7 +134,8 @@ describe("SqliteDialect - CREATE TABLE", () => {
       name: string("name").notNull(),
     });
 
-    const sql = dialect.buildCreateTable(table);
+    const [error, sql] = dialect.buildCreateTable(table);
+    expect(error).toBeNull();
     expect(sql).toContain("uuid TEXT PRIMARY KEY");
     expect(sql).toContain("name TEXT NOT NULL");
   });
@@ -145,7 +147,8 @@ describe("SqliteDialect - CREATE TABLE", () => {
       metadata: jsonb("metadata"),
     });
 
-    const sql = dialect.buildCreateTable(table);
+    const [error, sql] = dialect.buildCreateTable(table);
+    expect(error).toBeNull();
     expect(sql).toContain("id INTEGER PRIMARY KEY");
     expect(sql).toContain("data TEXT NOT NULL");
     expect(sql).toContain("metadata TEXT");
@@ -158,7 +161,8 @@ describe("SqliteDialect - CREATE TABLE", () => {
       token: string("token").notNull(),
     });
 
-    const sql = dialect.buildCreateTable(table);
+    const [error, sql] = dialect.buildCreateTable(table);
+    expect(error).toBeNull();
     expect(sql).toContain("id TEXT PRIMARY KEY");
     expect(sql).toContain("user_id TEXT NOT NULL");
     expect(sql).toContain("token TEXT NOT NULL");
@@ -170,7 +174,8 @@ describe("SqliteDialect - CREATE TABLE", () => {
       active: boolean("active").notNull(),
     });
 
-    const sql = dialect.buildCreateTable(table);
+    const [error, sql] = dialect.buildCreateTable(table);
+    expect(error).toBeNull();
     expect(sql).toContain("active INTEGER NOT NULL");
   });
 
@@ -180,7 +185,8 @@ describe("SqliteDialect - CREATE TABLE", () => {
       email: string("email").unique().notNull(),
     });
 
-    const sql = dialect.buildCreateTable(table);
+    const [error, sql] = dialect.buildCreateTable(table);
+    expect(error).toBeNull();
     expect(sql).toContain("email TEXT NOT NULL UNIQUE");
   });
 
@@ -192,8 +198,8 @@ describe("SqliteDialect - CREATE TABLE", () => {
       config: jsonb("config"),
       sessionId: uuid("session_id"),
     });
-
-    const sql = dialect.buildCreateTable(table);
+    const [error, sql] = dialect.buildCreateTable(table);
+    expect(error).toBeNull();
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS complex");
     expect(sql).toContain("id INTEGER PRIMARY KEY");
     expect(sql).toContain("name TEXT NOT NULL");
@@ -206,8 +212,8 @@ describe("SqliteDialect - CREATE TABLE", () => {
     const table = new Table("users", {
       id: number("id").primaryKey().notNull(),
     });
-
-    const sql = dialect.buildCreateTable(table);
+    const [error, sql] = dialect.buildCreateTable(table);
+    expect(error).toBeNull();
     // Should only have PRIMARY KEY, not NOT NULL twice
     expect(sql).toBe(
       "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY)",
@@ -219,7 +225,8 @@ describe("SqliteDialect - CREATE TABLE", () => {
       id: number("id").primaryKey().unique(),
     });
 
-    const sql = dialect.buildCreateTable(table);
+    const [error, sql] = dialect.buildCreateTable(table);
+    expect(error).toBeNull();
     // Should only have PRIMARY KEY, not UNIQUE
     expect(sql).toBe(
       "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY)",
@@ -253,5 +260,34 @@ describe("SqliteDialect - pagination", () => {
   test("should return null when offset is 0", () => {
     const result = dialect.buildPagination(undefined, 0);
     expect(result).toBeNull();
+  });
+
+  test("buildCreateTable returns error for unsupported column type", () => {
+    const dialect = new SqliteDialect();
+
+    // Create a table with an invalid column type for testing
+    const invalidColumn = {
+      sqlName: "bad_col",
+      columnKind: "unsupported_type" as any,
+      meta: {
+        primaryKey: false,
+        notNull: false,
+        unique: false,
+        hasDefault: false,
+      },
+    };
+
+    const invalidTable = {
+      sqlName: "test",
+      columns: { badCol: invalidColumn },
+    } as any;
+
+    const [error, sql] = dialect.buildCreateTable(invalidTable);
+
+    expect(error).not.toBeNull();
+    expect(error?.type).toBe("UnsupportedType");
+    expect(error?.message).toContain("Unsupported column type");
+    expect(error?.message).toContain("unsupported_type");
+    expect(sql).toBeNull();
   });
 });

@@ -71,7 +71,7 @@ describe("loadMigration", () => {
     expect(typeof migration?.down).toBe("function");
   });
 
-  test("throws when default export does not match migration shape", async () => {
+  test("returns error when default export does not match migration shape", async () => {
     const dir = await createTempDir();
     const filePath = join(dir, "20260216120000_invalid.ts");
 

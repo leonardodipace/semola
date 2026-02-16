@@ -1,3 +1,4 @@
+import { err, ok } from "../../errors/index.js";
 import type { Orm } from "../core/index.js";
 import type { Table } from "../table/index.js";
 import { toSqlIdentifier } from "./sql.js";
@@ -26,16 +27,22 @@ export const ensureMigrationsTable = async (
 ) => {
   const [error, safeTableName] = toSqlIdentifier(tableName, "table name");
   if (error) {
-    throw new Error(error.message);
+    return err("ValidationError", error.message);
   }
 
-  await orm.sql`
-    CREATE TABLE IF NOT EXISTS ${orm.sql(safeTableName)} (
-      version TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      applied_at TEXT NOT NULL
-    )
-  `;
+  try {
+    await orm.sql`
+      CREATE TABLE IF NOT EXISTS ${orm.sql(safeTableName)} (
+        version TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        applied_at TEXT NOT NULL
+      )
+    `;
+    return ok(undefined);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return err("InternalServerError", message);
+  }
 };
 
 export const getAppliedMigrations = async (
@@ -44,41 +51,46 @@ export const getAppliedMigrations = async (
 ) => {
   const [error, safeTableName] = toSqlIdentifier(tableName, "table name");
   if (error) {
-    throw new Error(error.message);
+    return [error, []] as const;
   }
 
-  const rows = await orm.sql`
-    SELECT version, name, applied_at
-    FROM ${orm.sql(safeTableName)}
-    ORDER BY version ASC
-  `;
+  try {
+    const rows = await orm.sql`
+      SELECT version, name, applied_at
+      FROM ${orm.sql(safeTableName)}
+      ORDER BY version ASC
+    `;
 
-  const list: AppliedMigration[] = [];
+    const list: AppliedMigration[] = [];
 
-  if (!Array.isArray(rows)) {
-    return list;
-  }
-
-  for (const row of rows) {
-    const record = asRecord(row);
-    if (!record) {
-      continue;
+    if (!Array.isArray(rows)) {
+      return [null, list] as const;
     }
 
-    const version = readString(Reflect.get(record, "version"));
-    const name = readString(Reflect.get(record, "name"));
-    const appliedAt = readString(
-      Reflect.get(record, "applied_at") ?? Reflect.get(record, "appliedAt"),
-    );
+    for (const row of rows) {
+      const record = asRecord(row);
+      if (!record) {
+        continue;
+      }
 
-    if (version.length === 0 || name.length === 0) {
-      continue;
+      const version = readString(Reflect.get(record, "version"));
+      const name = readString(Reflect.get(record, "name"));
+      const appliedAt = readString(
+        Reflect.get(record, "applied_at") ?? Reflect.get(record, "appliedAt"),
+      );
+
+      if (version.length === 0 || name.length === 0) {
+        continue;
+      }
+
+      list.push({ version, name, appliedAt });
     }
 
-    list.push({ version, name, appliedAt });
+    return [null, list] as const;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return [err("InternalServerError", message)[0], []] as const;
   }
-
-  return list;
 };
 
 export const recordMigration = async (
@@ -89,14 +101,20 @@ export const recordMigration = async (
 ) => {
   const [error, safeTableName] = toSqlIdentifier(tableName, "table name");
   if (error) {
-    throw new Error(error.message);
+    return [error, null] as const;
   }
 
-  const appliedAt = new Date().toISOString();
-  await orm.sql`
-    INSERT INTO ${orm.sql(safeTableName)} (version, name, applied_at)
-    VALUES (${version}, ${name}, ${appliedAt})
-  `;
+  try {
+    const appliedAt = new Date().toISOString();
+    await orm.sql`
+      INSERT INTO ${orm.sql(safeTableName)} (version, name, applied_at)
+      VALUES (${version}, ${name}, ${appliedAt})
+    `;
+    return [null, true] as const;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return [err("InternalServerError", message)[0], null] as const;
+  }
 };
 
 export const removeMigration = async (
@@ -106,11 +124,17 @@ export const removeMigration = async (
 ) => {
   const [error, safeTableName] = toSqlIdentifier(tableName, "table name");
   if (error) {
-    throw new Error(error.message);
+    return [error, null] as const;
   }
 
-  await orm.sql`
-    DELETE FROM ${orm.sql(safeTableName)}
-    WHERE version = ${version}
-  `;
+  try {
+    await orm.sql`
+      DELETE FROM ${orm.sql(safeTableName)}
+      WHERE version = ${version}
+    `;
+    return [null, true] as const;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return [err("InternalServerError", message)[0], null] as const;
+  }
 };

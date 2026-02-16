@@ -78,9 +78,17 @@ const runInTransaction = async (
   orm: Orm<Record<string, Table>>,
   run: () => Promise<void>,
 ) => {
-  await orm.sql.begin(async () => {
-    await run();
-  });
+  try {
+    await orm.sql.begin(async () => {
+      await run();
+    });
+    return ok(undefined);
+  } catch (error) {
+    return err(
+      "InternalServerError",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 };
 
 export const createMigration = async (
@@ -94,8 +102,15 @@ export const createMigration = async (
   const metaDir = resolve(migrationsDir, "meta");
 
   // Ensure directories exist
-  await Bun.write(resolve(migrationsDir, ".keep"), "");
-  await Bun.write(resolve(metaDir, ".keep"), "");
+  try {
+    await Bun.write(resolve(migrationsDir, ".keep"), "");
+    await Bun.write(resolve(metaDir, ".keep"), "");
+  } catch (error) {
+    return err(
+      "InternalServerError",
+      `Failed to create migration directories: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
   const safeName = slugify(options.name);
   if (safeName.length === 0) {
@@ -109,7 +124,7 @@ export const createMigration = async (
   );
 
   // Read journal to find last snapshot
-  const [journalError, journalResult] = await readJournal(
+  const [journalError, journalData] = await readJournal(
     resolve(metaDir, "_journal.json"),
   );
   if (journalError) {
@@ -120,7 +135,7 @@ export const createMigration = async (
         : String(journalError),
     );
   }
-  const journal = journalResult ?? { version: 1, entries: [] };
+  const journal = journalData ?? { version: 1, entries: [] };
   const lastEntry = getLastEntry(journal);
 
   // Read last snapshot if it exists
@@ -142,7 +157,14 @@ export const createMigration = async (
 
   // Generate diff operations
   const up = diffSnapshots(lastSnapshot, newSnapshot);
-  const down = reverseOperations(up);
+  const [reverseError, down] = reverseOperations(up);
+
+  if (reverseError) {
+    return err(
+      "InternalServerError",
+      `Failed to generate down migration: ${reverseError.message}`,
+    );
+  }
 
   if (up.length === 0) {
     return err("ValidationError", "No schema changes detected");
@@ -152,20 +174,66 @@ export const createMigration = async (
   const version = timestamp();
   const filePath = resolve(migrationsDir, `${version}_${safeName}.ts`);
   const source = generateMigrationSource(up, down);
-  await writeMigrationSource(filePath, source);
+  const writeResult = await writeMigrationSource(filePath, source);
 
-  // Save snapshot
+  if (writeResult[0]) {
+    return writeResult;
+  }
+
+  // Save snapshot with rollback on failure
   const snapshotPath = resolve(metaDir, `${version}_snapshot.json`);
-  await writeSnapshot(snapshotPath, newSnapshot);
+  const snapshotResult = await writeSnapshot(snapshotPath, newSnapshot);
+  if (snapshotResult[0]) {
+    // Rollback: delete migration file
+    try {
+      await Bun.write(filePath, "").then(() => {});
+      const file = Bun.file(filePath);
+      if (await file.exists()) {
+        await Bun.spawn(["rm", filePath]).exited;
+      }
+    } catch {
+      // Ignore cleanup errors
+    }
+    return err(
+      "InternalServerError",
+      snapshotResult[0] instanceof Error
+        ? snapshotResult[0].message
+        : String(snapshotResult[0]),
+    );
+  }
 
-  // Update journal
+  // Update journal with rollback on failure
   const updatedJournal = addJournalEntry(journal, {
     version,
     name: safeName,
     applied: new Date().toISOString(),
     breakpoints: false,
   });
-  await writeJournal(resolve(metaDir, "_journal.json"), updatedJournal);
+  const journalResult = await writeJournal(
+    resolve(metaDir, "_journal.json"),
+    updatedJournal,
+  );
+  if (journalResult[0]) {
+    // Rollback: delete both snapshot and migration file
+    try {
+      const snapshotFile = Bun.file(snapshotPath);
+      if (await snapshotFile.exists()) {
+        await Bun.spawn(["rm", snapshotPath]).exited;
+      }
+      const migrationFile = Bun.file(filePath);
+      if (await migrationFile.exists()) {
+        await Bun.spawn(["rm", filePath]).exited;
+      }
+    } catch {
+      // Ignore cleanup errors
+    }
+    return err(
+      "InternalServerError",
+      journalResult[0] instanceof Error
+        ? journalResult[0].message
+        : String(journalResult[0]),
+    );
+  }
 
   return ok(filePath);
 };
@@ -173,12 +241,31 @@ export const createMigration = async (
 export const applyMigrations = async (options: MigrationRuntimeOptions) => {
   const runtime = getRuntimeContext(options);
 
-  await ensureMigrationsTable(runtime.orm, runtime.migrationTable);
-  const files = await scanMigrationFiles(runtime.migrationsDir);
-  const applied = await getAppliedMigrations(
+  const [ensureError] = await ensureMigrationsTable(
     runtime.orm,
     runtime.migrationTable,
   );
+  if (ensureError) {
+    return [ensureError, null] as const;
+  }
+
+  let files: Awaited<ReturnType<typeof scanMigrationFiles>>;
+  try {
+    files = await scanMigrationFiles(runtime.migrationsDir);
+  } catch (error) {
+    return err(
+      "InternalServerError",
+      `Failed to scan migration files: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  const [appliedError, applied] = await getAppliedMigrations(
+    runtime.orm,
+    runtime.migrationTable,
+  );
+  if (appliedError) {
+    return [appliedError, null] as const;
+  }
   const appliedVersions = new Set(applied.map((item) => item.version));
   const pending = files.filter((file) => !appliedVersions.has(file.version));
   const result: string[] = [];
@@ -198,15 +285,30 @@ export const applyMigrations = async (options: MigrationRuntimeOptions) => {
     }
     const schema = new SchemaBuilder(runtime.orm, runtime.orm.getDialectName());
 
-    await runInTransaction(runtime.orm, async () => {
+    const [txError] = await runInTransaction(runtime.orm, async () => {
       await migration.up(schema);
-      await recordMigration(
+      const [recordError] = await recordMigration(
         runtime.orm,
         runtime.migrationTable,
         migration.version,
         migration.name,
       );
+      if (recordError) {
+        throw new Error(
+          recordError.type === "ValidationError" ||
+            recordError.type === "InternalServerError"
+            ? recordError.message
+            : String(recordError),
+        );
+      }
     });
+
+    if (txError) {
+      return err(
+        "InternalServerError",
+        `Failed to apply migration ${migration.version}: ${txError.message}`,
+      );
+    }
 
     result.push(migration.version);
   }
@@ -217,12 +319,31 @@ export const applyMigrations = async (options: MigrationRuntimeOptions) => {
 export const rollbackMigration = async (options: MigrationRuntimeOptions) => {
   const runtime = getRuntimeContext(options);
 
-  await ensureMigrationsTable(runtime.orm, runtime.migrationTable);
-  const files = await scanMigrationFiles(runtime.migrationsDir);
-  const applied = await getAppliedMigrations(
+  const [ensureError] = await ensureMigrationsTable(
     runtime.orm,
     runtime.migrationTable,
   );
+  if (ensureError) {
+    return [ensureError, null] as const;
+  }
+
+  let files: Awaited<ReturnType<typeof scanMigrationFiles>>;
+  try {
+    files = await scanMigrationFiles(runtime.migrationsDir);
+  } catch (error) {
+    return err(
+      "InternalServerError",
+      `Failed to scan migration files: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  const [appliedError, applied] = await getAppliedMigrations(
+    runtime.orm,
+    runtime.migrationTable,
+  );
+  if (appliedError) {
+    return [appliedError, null] as const;
+  }
 
   if (applied.length === 0) {
     return ok(null);
@@ -256,14 +377,29 @@ export const rollbackMigration = async (options: MigrationRuntimeOptions) => {
   }
   const schema = new SchemaBuilder(runtime.orm, runtime.orm.getDialectName());
 
-  await runInTransaction(runtime.orm, async () => {
+  const [txError] = await runInTransaction(runtime.orm, async () => {
     await migration.down(schema);
-    await removeMigration(
+    const [removeError] = await removeMigration(
       runtime.orm,
       runtime.migrationTable,
       migration.version,
     );
+    if (removeError) {
+      throw new Error(
+        removeError.type === "ValidationError" ||
+          removeError.type === "InternalServerError"
+          ? removeError.message
+          : String(removeError),
+      );
+    }
   });
+
+  if (txError) {
+    return err(
+      "InternalServerError",
+      `Failed to rollback migration ${migration.version}: ${txError.message}`,
+    );
+  }
 
   // Update journal
   const metaDir = resolve(runtime.migrationsDir, "meta");
@@ -280,7 +416,20 @@ export const rollbackMigration = async (options: MigrationRuntimeOptions) => {
   }
   const journal = journalResult ?? { version: 1, entries: [] };
   const updatedJournal = removeLastJournalEntry(journal);
-  await writeJournal(resolve(metaDir, "_journal.json"), updatedJournal);
+  const writeJournalResult = await writeJournal(
+    resolve(metaDir, "_journal.json"),
+    updatedJournal,
+  );
+  if (writeJournalResult[0]) {
+    return err(
+      "InternalServerError",
+      `Failed to update journal after rollback: ${
+        writeJournalResult[0] instanceof Error
+          ? writeJournalResult[0].message
+          : String(writeJournalResult[0])
+      }`,
+    );
+  }
 
   return ok(migration.version);
 };
@@ -288,12 +437,31 @@ export const rollbackMigration = async (options: MigrationRuntimeOptions) => {
 export const getMigrationStatus = async (options: MigrationRuntimeOptions) => {
   const runtime = getRuntimeContext(options);
 
-  await ensureMigrationsTable(runtime.orm, runtime.migrationTable);
-  const files = await scanMigrationFiles(runtime.migrationsDir);
-  const applied = await getAppliedMigrations(
+  const [ensureError] = await ensureMigrationsTable(
     runtime.orm,
     runtime.migrationTable,
   );
+  if (ensureError) {
+    return [ensureError, null] as const;
+  }
+
+  let files: Awaited<ReturnType<typeof scanMigrationFiles>>;
+  try {
+    files = await scanMigrationFiles(runtime.migrationsDir);
+  } catch (error) {
+    return err(
+      "InternalServerError",
+      `Failed to scan migration files: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  const [appliedError, applied] = await getAppliedMigrations(
+    runtime.orm,
+    runtime.migrationTable,
+  );
+  if (appliedError) {
+    return [appliedError, null] as const;
+  }
   const appliedMap = new Map(
     applied.map((item) => [item.version, item.appliedAt] as const),
   );

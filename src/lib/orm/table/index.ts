@@ -756,20 +756,31 @@ export class TableClient<T extends Table> {
 
         // Build the UPDATE query with proper dialect handling
         const hasReturning = this.dialect.name !== "mysql";
-        const sql = hasReturning
-          ? this.sql<InferTableType<T>[]>`
+
+        let results: InferTableType<T>[];
+
+        if (hasReturning) {
+          const sql = this.sql<InferTableType<T>[]>`
             UPDATE ${this.sql(this.table.sqlName)}
             SET ${this.sql(sqlData)}
             WHERE ${whereClause}
             RETURNING *
-          `
-          : this.sql<InferTableType<T>[]>`
+          `;
+          results = await sql;
+        } else {
+          // For MySQL: execute UPDATE without RETURNING, then SELECT the updated row
+          await this.sql`
             UPDATE ${this.sql(this.table.sqlName)}
             SET ${this.sql(sqlData)}
             WHERE ${whereClause}
           `;
 
-        const results = await sql;
+          // Fetch the updated row using the same whereClause
+          results = await this.sql<InferTableType<T>[]>`
+            SELECT * FROM ${this.sql(this.table.sqlName)}
+            WHERE ${whereClause}
+          `;
+        }
 
         this.convertBooleanValues(results);
         this.mapColumnNames(results);
@@ -795,18 +806,29 @@ export class TableClient<T extends Table> {
 
         // Build the DELETE query with proper dialect handling
         const hasReturning = this.dialect.name !== "mysql";
-        const sql = hasReturning
-          ? this.sql<InferTableType<T>[]>`
+
+        let results: InferTableType<T>[];
+
+        if (hasReturning) {
+          const sql = this.sql<InferTableType<T>[]>`
             DELETE FROM ${this.sql(this.table.sqlName)}
             WHERE ${whereClause}
             RETURNING *
-          `
-          : this.sql<InferTableType<T>[]>`
-            DELETE FROM ${this.sql(this.table.sqlName)}
+          `;
+          results = await sql;
+        } else {
+          // For MySQL: fetch the row before deleting it
+          results = await this.sql<InferTableType<T>[]>`
+            SELECT * FROM ${this.sql(this.table.sqlName)}
             WHERE ${whereClause}
           `;
 
-        const results = await sql;
+          // Execute DELETE without RETURNING
+          await this.sql`
+            DELETE FROM ${this.sql(this.table.sqlName)}
+            WHERE ${whereClause}
+          `;
+        }
 
         this.convertBooleanValues(results);
         this.mapColumnNames(results);

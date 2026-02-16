@@ -1,4 +1,4 @@
-import { mightThrow } from "../../errors/index.js";
+import { err, ok } from "../../errors/index.js";
 
 export type JournalEntry = {
   version: string;
@@ -20,36 +20,44 @@ const createEmptyJournal = (): Journal => {
 };
 
 export const readJournal = async (filePath: string) => {
-  return await mightThrow(
-    (async () => {
-      const file = Bun.file(filePath);
-      const exists = await file.exists();
+  const file = Bun.file(filePath);
+  const exists = await file.exists();
 
-      if (!exists) {
-        return createEmptyJournal();
-      }
+  if (!exists) {
+    return ok(createEmptyJournal());
+  }
 
-      const content = await file.text();
-      const journal = JSON.parse(content);
+  try {
+    const content = await file.text();
+    const journal = JSON.parse(content);
 
-      // Basic validation
-      if (
-        typeof journal !== "object" ||
-        journal === null ||
-        typeof journal.version !== "number" ||
-        !Array.isArray(journal.entries)
-      ) {
-        throw new Error(`Invalid journal format in ${filePath}`);
-      }
+    // Basic validation
+    if (
+      typeof journal !== "object" ||
+      journal === null ||
+      typeof journal.version !== "number" ||
+      !Array.isArray(journal.entries)
+    ) {
+      return err("ValidationError", `Invalid journal format in ${filePath}`);
+    }
 
-      return journal as Journal;
-    })(),
-  );
+    return ok(journal);
+  } catch (error) {
+    return err(
+      "InternalServerError",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 };
 
 export const writeJournal = async (filePath: string, journal: Journal) => {
-  const json = JSON.stringify(journal, null, 2);
-  await Bun.write(filePath, json);
+  try {
+    const json = JSON.stringify(journal, null, 2);
+    await Bun.write(filePath, json);
+    return [null, journal] as const;
+  } catch (error) {
+    return [error, null] as const;
+  }
 };
 
 export const addJournalEntry = (

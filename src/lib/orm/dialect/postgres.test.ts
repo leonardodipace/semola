@@ -124,7 +124,8 @@ describe("PostgresDialect - CREATE TABLE", () => {
       name: string("name").notNull(),
     });
 
-    const sql = dialect.buildCreateTable(table);
+    const [error, sql] = dialect.buildCreateTable(table);
+    expect(error).toBeNull();
     expect(sql).toContain("id BIGSERIAL PRIMARY KEY");
     expect(sql).toContain("name TEXT NOT NULL");
   });
@@ -135,7 +136,8 @@ describe("PostgresDialect - CREATE TABLE", () => {
       name: string("name").notNull(),
     });
 
-    const sql = dialect.buildCreateTable(table);
+    const [error, sql] = dialect.buildCreateTable(table);
+    expect(error).toBeNull();
     expect(sql).toContain("uuid UUID PRIMARY KEY");
     expect(sql).toContain("name TEXT NOT NULL");
   });
@@ -147,7 +149,8 @@ describe("PostgresDialect - CREATE TABLE", () => {
       metadata: jsonb("metadata"),
     });
 
-    const sql = dialect.buildCreateTable(table);
+    const [error, sql] = dialect.buildCreateTable(table);
+    expect(error).toBeNull();
     expect(sql).toContain("id BIGSERIAL PRIMARY KEY");
     expect(sql).toContain("data JSON NOT NULL");
     expect(sql).toContain("metadata JSONB");
@@ -160,7 +163,8 @@ describe("PostgresDialect - CREATE TABLE", () => {
       token: string("token").notNull(),
     });
 
-    const sql = dialect.buildCreateTable(table);
+    const [error, sql] = dialect.buildCreateTable(table);
+    expect(error).toBeNull();
     expect(sql).toContain("id UUID PRIMARY KEY");
     expect(sql).toContain("user_id UUID NOT NULL");
     expect(sql).toContain("token TEXT NOT NULL");
@@ -172,7 +176,8 @@ describe("PostgresDialect - CREATE TABLE", () => {
       email: string("email").unique().notNull(),
     });
 
-    const sql = dialect.buildCreateTable(table);
+    const [error, sql] = dialect.buildCreateTable(table);
+    expect(error).toBeNull();
     expect(sql).toContain("email TEXT NOT NULL UNIQUE");
   });
 
@@ -185,12 +190,42 @@ describe("PostgresDialect - CREATE TABLE", () => {
       sessionId: uuid("session_id"),
     });
 
-    const sql = dialect.buildCreateTable(table);
+    const [error, sql] = dialect.buildCreateTable(table);
+    expect(error).toBeNull();
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS complex");
     expect(sql).toContain("id BIGSERIAL PRIMARY KEY");
     expect(sql).toContain("name TEXT NOT NULL");
     expect(sql).toContain("active BOOLEAN DEFAULT true");
     expect(sql).toContain("config JSONB");
     expect(sql).toContain("session_id UUID");
+  });
+
+  test("buildCreateTable returns error for unsupported column type", () => {
+    const dialect = new PostgresDialect();
+
+    // Create a table with an invalid column type for testing
+    const invalidColumn = {
+      sqlName: "bad_col",
+      columnKind: "unsupported_type" as any,
+      meta: {
+        primaryKey: false,
+        notNull: false,
+        unique: false,
+        hasDefault: false,
+      },
+    };
+
+    const invalidTable = {
+      sqlName: "test",
+      columns: { badCol: invalidColumn },
+    } as any;
+
+    const [error, sql] = dialect.buildCreateTable(invalidTable);
+
+    expect(error).not.toBeNull();
+    expect(error?.type).toBe("UnsupportedType");
+    expect(error?.message).toContain("Unsupported column type");
+    expect(error?.message).toContain("unsupported_type");
+    expect(sql).toBeNull();
   });
 });

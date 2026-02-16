@@ -17,10 +17,13 @@ describe("introspectSchema", () => {
       tables: { users },
     });
 
-    await orm.sql.unsafe(orm.createTable(users));
+    const [error, ddl] = orm.createTable(users);
+    if (error) throw new Error(error.message);
+    await orm.sql.unsafe(ddl);
 
-    const schema = await introspectSchema(orm, ["users"]);
-    const columns = schema.get("users");
+    const [schemaError, schema] = await introspectSchema(orm, ["users"]);
+    expect(schemaError).toBeNull();
+    const columns = schema?.get("users");
 
     expect(columns?.has("id")).toBe(true);
     expect(columns?.has("name")).toBe(true);
@@ -35,8 +38,11 @@ describe("introspectSchema", () => {
       tables: {},
     });
 
-    const schema = await introspectSchema(orm, ["unknown_table"]);
-    const columns = schema.get("unknown_table");
+    const [schemaError, schema] = await introspectSchema(orm, [
+      "unknown_table",
+    ]);
+    expect(schemaError).toBeNull();
+    const columns = schema?.get("unknown_table");
 
     expect(columns).toBeDefined();
     expect(columns?.size).toBe(0);
@@ -56,17 +62,16 @@ describe("introspectSchema", () => {
       tables: { users },
     });
 
-    await orm.sql.unsafe(orm.createTable(users));
+    const [error, ddl] = orm.createTable(users);
+    if (error) throw new Error(error.message);
+    await orm.sql.unsafe(ddl);
 
     // Malicious table names should be rejected by validation
-    let throwsError = false;
-    try {
-      await introspectSchema(orm, ["users'; DROP TABLE users; --"]);
-    } catch {
-      throwsError = true;
-    }
+    const [schemaError] = await introspectSchema(orm, [
+      "users'; DROP TABLE users; --",
+    ]);
 
-    expect(throwsError).toBe(true);
+    expect(schemaError).not.toBeNull();
 
     // Verify the users table still exists (wasn't dropped)
     const rows = await orm.sql.unsafe(

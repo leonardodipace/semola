@@ -37,15 +37,24 @@ const run = async () => {
   const command = args[2];
   const cwd = process.cwd();
 
-  const config = await loadSemolaConfig(cwd);
-  const tables = await loadSchemaTables(
+  const [configError, config] = await loadSemolaConfig(cwd);
+  if (configError) {
+    printError(configError.message);
+    return;
+  }
+
+  const [schemaError, tables] = await loadSchemaTables(
     config.orm.schema.path,
     config.orm.schema.exportName,
   );
+  if (schemaError) {
+    printError(schemaError.message);
+    return;
+  }
 
   const orm = new Orm({
     url: config.orm.url,
-    dialect: config.orm.dialect,
+    dialect: config.orm.dialect as "sqlite" | "mysql" | "postgres",
     tables,
   });
 

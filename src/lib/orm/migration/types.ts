@@ -62,11 +62,13 @@ export type TableDiffOperation =
   | {
       type: "dropTable";
       tableName: string;
+      tableSnapshot?: TableSnapshot;
     }
   | {
       type: "dropColumn";
       tableName: string;
       columnName: string;
+      columnSnapshot?: ColumnSnapshot;
     }
   | {
       type: "alterColumn";

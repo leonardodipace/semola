@@ -3,6 +3,17 @@ import { Orm } from "../core/index.js";
 import type { Table } from "../table/index.js";
 import { SchemaBuilder } from "./builder.js";
 
+const hasColumn = (rows: unknown, colName: string): boolean => {
+  if (!Array.isArray(rows)) return false;
+  return rows.some(
+    (row) =>
+      typeof row === "object" &&
+      row !== null &&
+      "name" in row &&
+      row.name === colName,
+  );
+};
+
 const tableExists = async (orm: Orm<Record<string, Table>>, name: string) => {
   const rows = await orm.sql.unsafe(
     `SELECT name FROM sqlite_master WHERE type='table' AND name='${name}'`,
@@ -51,24 +62,14 @@ describe("SchemaBuilder", () => {
     });
 
     const withColumnRows = await orm.sql.unsafe("PRAGMA table_info('users')");
-    const withColumn = Array.isArray(withColumnRows)
-      ? withColumnRows.some((row) => {
-          const columnName = Reflect.get(row as object, "name");
-          return columnName === "email";
-        })
-      : false;
+    const withColumn = hasColumn(withColumnRows, "email");
 
     expect(withColumn).toBe(true);
 
     await schema.dropColumn("users", "email");
 
     const afterDropRows = await orm.sql.unsafe("PRAGMA table_info('users')");
-    const hasDroppedColumn = Array.isArray(afterDropRows)
-      ? afterDropRows.some((row) => {
-          const columnName = Reflect.get(row as object, "name");
-          return columnName === "email";
-        })
-      : false;
+    const hasDroppedColumn = hasColumn(afterDropRows, "email");
 
     expect(hasDroppedColumn).toBe(false);
     orm.close();
@@ -94,24 +95,14 @@ describe("SchemaBuilder", () => {
     });
 
     const indexes = await orm.sql.unsafe("PRAGMA index_list('users')");
-    const hasIndex = Array.isArray(indexes)
-      ? indexes.some((row) => {
-          const name = Reflect.get(row as object, "name");
-          return name === "users_email_idx";
-        })
-      : false;
+    const hasIndex = hasColumn(indexes, "users_email_idx");
 
     expect(hasIndex).toBe(true);
 
     await schema.dropIndex("users_email_idx");
 
     const indexesAfter = await orm.sql.unsafe("PRAGMA index_list('users')");
-    const hasIndexAfter = Array.isArray(indexesAfter)
-      ? indexesAfter.some((row) => {
-          const name = Reflect.get(row as object, "name");
-          return name === "users_email_idx";
-        })
-      : false;
+    const hasIndexAfter = hasColumn(indexesAfter, "users_email_idx");
 
     expect(hasIndexAfter).toBe(false);
     orm.close();
@@ -199,6 +190,87 @@ describe("SchemaBuilder", () => {
         name: "users_email_idx; DROP TABLE users; --",
       }),
     ).rejects.toThrow("Invalid SQL index name");
+
+    orm.close();
+  });
+
+  test("formatDefaultValue handles circular JSON references", async () => {
+    const orm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: {},
+    });
+
+    const schema = new SchemaBuilder(orm, "sqlite");
+
+    // Create circular object
+    const circular: any = { name: "test" };
+    circular.self = circular;
+
+    // Create table first
+    await schema.createTable("test", (table) => {
+      table.number("id").primaryKey();
+    });
+
+    // This should not throw when adding column with circular JSON default
+    await schema.addColumn("test", (table) => {
+      table.json("data").default(circular);
+    });
+
+    // Verify column was added (circular refs replaced with null)
+    const rows = await orm.sql.unsafe("PRAGMA table_info('test')");
+    expect(hasColumn(rows, "data")).toBe(true);
+
+    orm.close();
+  });
+
+  test("createIndex omits IF NOT EXISTS for MySQL", async () => {
+    const orm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: {},
+    });
+
+    const schema = new SchemaBuilder(orm, "mysql");
+
+    await schema.createTable("users", (t) => {
+      t.number("id").primaryKey();
+      t.string("email");
+    });
+
+    await schema.createIndex("users", ["email"], { name: "idx_email" });
+
+    // Verify index exists
+    const indexes = await orm.sql.unsafe("PRAGMA index_list('users')");
+    expect(hasColumn(indexes, "idx_email")).toBe(true);
+
+    // Without IF NOT EXISTS, creating the same index twice should fail
+    await expect(
+      schema.createIndex("users", ["email"], { name: "idx_email" }),
+    ).rejects.toThrow();
+
+    orm.close();
+  });
+
+  test("dropIndex throws for MySQL without tableName", async () => {
+    const orm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: {},
+    });
+
+    const schema = new SchemaBuilder(orm, "mysql");
+
+    await schema.createTable("users", (t) => {
+      t.number("id").primaryKey();
+      t.string("email");
+    });
+
+    await schema.createIndex("users", ["email"], { name: "idx_email" });
+
+    await expect(
+      schema.dropIndex("idx_email"), // Missing tableName
+    ).rejects.toThrow("tableName is required for DROP INDEX on mysql");
 
     orm.close();
   });

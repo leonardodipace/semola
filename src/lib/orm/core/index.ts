@@ -30,7 +30,7 @@ const bindTables = <
   dialect: Dialect,
   relations?: Relations,
 ): TableClients<Tables, Relations> => {
-  const entries: Array<[string, TableClient<Table>]> = [];
+  const result: Record<string, TableClient<Table>> = {};
   const tableNameMap = new Map<Table, string>();
 
   // Build map of Table instances to their names
@@ -40,7 +40,7 @@ const bindTables = <
     tableNameMap.set(match, key);
   }
 
-  // Build entries array with table clients
+  // Build result object with table clients
   for (const key in tables) {
     const match = tables[key];
     if (!match) continue;
@@ -54,23 +54,16 @@ const bindTables = <
         const relatedTable = relation.table();
         const relatedTableName = tableNameMap.get(relatedTable);
         if (!relatedTableName) return undefined;
-
-        // Get the client from entries by finding the matching key
-        const found = entries.find(
-          ([entryKey]) => entryKey === relatedTableName,
-        );
-        return found ? found[1] : undefined;
+        return result[relatedTableName];
       },
     );
 
-    entries.push([key, client]);
+    result[key] = client;
   }
 
-  // Build result object from entries. The 'as' cast is necessary here because
-  // TypeScript cannot track that we've created entries for every key in Tables
-  // through the dynamic loop. At runtime, we guarantee that every table key has
-  // been processed and added to entries.
-  const result = Object.fromEntries(entries);
+  // TypeScript cannot verify that the dynamically built object matches the mapped
+  // type TableClients<Tables, Relations>. At runtime, we guarantee every table key
+  // has been processed and added to result with the correct client type.
   return result as TableClients<Tables, Relations>;
 };
 
@@ -106,10 +99,12 @@ export class Orm<
   }
 
   // Generate CREATE TABLE statement for the given table using the current dialect.
-  // Returns the SQL string. Users should execute it manually:
-  // const ddl = orm.createTable(table);
+  // Returns [error, null] on unsupported column type or [null, sql] on success.
+  // Users should execute the SQL manually:
+  // const [error, ddl] = orm.createTable(table);
+  // if (error) throw new Error(error.message);
   // await orm.sql.unsafe(ddl);
-  public createTable(table: Table): string {
+  public createTable(table: Table) {
     return this.dialect.buildCreateTable(table);
   }
 

@@ -156,8 +156,31 @@ const quoteValue = (dialect: OrmDialect, kind: ColumnKind, value: unknown) => {
   }
 
   if (kind === "json" || kind === "jsonb") {
-    const jsonValue =
-      typeof value === "string" ? value : (JSON.stringify(value) ?? "null");
+    let jsonValue: string;
+    if (typeof value === "string") {
+      jsonValue = value;
+    } else {
+      try {
+        jsonValue = JSON.stringify(value) ?? "null";
+      } catch (error) {
+        if (error instanceof TypeError) {
+          // Handle circular references
+          const seen = new Set();
+          const replacer = (_key: string, val: unknown) => {
+            if (typeof val === "object" && val !== null) {
+              if (seen.has(val)) {
+                return null;
+              }
+              seen.add(val);
+            }
+            return val;
+          };
+          jsonValue = JSON.stringify(value, replacer) ?? "null";
+        } else {
+          throw error;
+        }
+      }
+    }
     return `'${escapeString(jsonValue)}'`;
   }
 
@@ -267,7 +290,10 @@ export class SchemaBuilder {
     const tableBuilder = new TableBuilder();
     build(tableBuilder);
     const table = new Table(safeTableName, tableBuilder.columns);
-    const sql = this.orm.createTable(table);
+    const [createError, sql] = this.orm.createTable(table);
+    if (createError) {
+      throw new Error(createError.message);
+    }
     await this.execute(sql);
   }
 
@@ -345,6 +371,45 @@ export class SchemaBuilder {
       return;
     }
 
+    // PostgreSQL: wrap in transaction for atomicity
+    if (this.dialect === "postgres") {
+      try {
+        await this.execute("BEGIN");
+
+        const typeSql = sqlType(this.dialect, column.columnKind);
+        await this.execute(
+          `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} TYPE ${typeSql}`,
+        );
+
+        if (column.meta.notNull) {
+          await this.execute(
+            `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET NOT NULL`,
+          );
+        } else {
+          await this.execute(
+            `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP NOT NULL`,
+          );
+        }
+
+        if (column.meta.hasDefault && column.defaultValue !== undefined) {
+          await this.execute(
+            `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET DEFAULT ${quoteValue(this.dialect, column.columnKind, column.defaultValue)}`,
+          );
+        } else {
+          await this.execute(
+            `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP DEFAULT`,
+          );
+        }
+
+        await this.execute("COMMIT");
+      } catch (error) {
+        await this.execute("ROLLBACK");
+        throw error;
+      }
+      return;
+    }
+
+    // Fallback for other dialects
     const typeSql = sqlType(this.dialect, column.columnKind);
     await this.execute(
       `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} TYPE ${typeSql}`,
@@ -401,8 +466,9 @@ export class SchemaBuilder {
       throw new Error(indexError.message);
     }
     const uniqueKeyword = options?.unique ? "UNIQUE " : "";
+    const ifNotExists = this.dialect === "mysql" ? "" : "IF NOT EXISTS ";
     await this.execute(
-      `CREATE ${uniqueKeyword}INDEX IF NOT EXISTS ${safeIndexName} ON ${safeTableName} (${safeColumns.join(", ")})`,
+      `CREATE ${uniqueKeyword}INDEX ${ifNotExists}${safeIndexName} ON ${safeTableName} (${safeColumns.join(", ")})`,
     );
   }
 
@@ -413,6 +479,9 @@ export class SchemaBuilder {
     );
     if (indexError) {
       throw new Error(indexError.message);
+    }
+    if (this.dialect === "mysql" && !tableName) {
+      throw new Error("tableName is required for DROP INDEX on mysql");
     }
     if (this.dialect === "mysql" && tableName) {
       const [tableError, safeTableName] = toSqlIdentifier(

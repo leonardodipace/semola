@@ -1,4 +1,11 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { boolean, date, number, string } from "../column/index.js";
 import { Orm } from "../index.js";
 import { many, one } from "../relations/index.js";
@@ -38,6 +45,32 @@ const orm = new Orm({
 });
 
 describe("Table - findMany with where clause", () => {
+  // Helper to reset test data to known state
+  const resetTestData = async () => {
+    await orm.sql`DELETE FROM test_posts`;
+    await orm.sql`DELETE FROM test_users`;
+    await orm.sql`DELETE FROM sqlite_sequence WHERE name='test_users'`;
+    await orm.sql`DELETE FROM sqlite_sequence WHERE name='test_posts'`;
+
+    await orm.sql`
+      INSERT INTO test_users (name, email, active)
+      VALUES
+        ('Alice', 'alice@example.com', true),
+        ('Bob', 'bob@example.com', false),
+        ('Charlie', 'charlie@example.com', true),
+        ('Diana', 'diana@example.com', false)
+    `;
+
+    await orm.sql`
+      INSERT INTO test_posts (title, content, author_id)
+      VALUES
+        ('Post 1', 'Content 1', 1),
+        ('Post 2', 'Content 2', 1),
+        ('Post 3', 'Content 3', 2),
+        ('Post 4', 'Content 4', 3)
+    `;
+  };
+
   beforeAll(async () => {
     // Cleanup test tables
     await orm.sql`DROP TABLE IF EXISTS test_posts`;
@@ -63,24 +96,13 @@ describe("Table - findMany with where clause", () => {
       )
     `;
 
-    // Insert test data
-    await orm.sql`
-      INSERT INTO test_users (name, email, active)
-      VALUES
-        ('Alice', 'alice@example.com', true),
-        ('Bob', 'bob@example.com', false),
-        ('Charlie', 'charlie@example.com', true),
-        ('Diana', 'diana@example.com', false)
-    `;
+    // Insert initial test data
+    await resetTestData();
+  });
 
-    await orm.sql`
-      INSERT INTO test_posts (title, content, author_id)
-      VALUES
-        ('Post 1', 'Content 1', 1),
-        ('Post 2', 'Content 2', 1),
-        ('Post 3', 'Content 3', 2),
-        ('Post 4', 'Content 4', 3)
-    `;
+  beforeEach(async () => {
+    // Reset to known state before each test
+    await resetTestData();
   });
 
   test("should return all rows when no where clause is provided", async () => {
@@ -247,22 +269,12 @@ describe("Table - findMany with where clause", () => {
   });
 
   test("should filter with gt operator", async () => {
-    // Insert test data with known IDs
-    await orm.sql`DELETE FROM test_posts`;
-    await orm.sql`DELETE FROM test_users`;
-    await orm.sql`
-      INSERT INTO test_users (id, name, email, active)
-      VALUES
-        (1, 'User1', 'user1@example.com', true),
-        (2, 'User2', 'user2@example.com', true),
-        (3, 'User3', 'user3@example.com', true)
-    `;
-
+    // beforeEach ensures clean state with IDs 1-4
     const [error, users] = await orm.tables.users.findMany({
       where: { id: { gt: 1 } },
     });
     expect(error).toBeNull();
-    expect(users?.length).toBe(2);
+    expect(users?.length).toBe(3);
     expect(users?.every((u) => u.id > 1)).toBe(true);
   });
 
@@ -271,7 +283,7 @@ describe("Table - findMany with where clause", () => {
       where: { id: { gte: 2 } },
     });
     expect(error).toBeNull();
-    expect(users?.length).toBe(2);
+    expect(users?.length).toBe(3);
     expect(users?.every((u) => u.id >= 2)).toBe(true);
   });
 
@@ -304,17 +316,8 @@ describe("Table - findMany with where clause", () => {
   });
 
   test("should combine direct values and operators", async () => {
-    // Setup test data (3 users, all active)
-    await orm.sql`DELETE FROM test_posts`;
-    await orm.sql`DELETE FROM test_users`;
-    await orm.sql`
-      INSERT INTO test_users (id, name, email, active)
-      VALUES
-        (1, 'User1', 'user1@example.com', true),
-        (2, 'User2', 'user2@example.com', true),
-        (3, 'User3', 'user3@example.com', true)
-    `;
-
+    // beforeEach ensures clean state with 4 users (IDs 1-4)
+    // Alice and Charlie are active (IDs 1, 3)
     const [error, users] = await orm.tables.users.findMany({
       where: {
         active: true,
@@ -322,29 +325,8 @@ describe("Table - findMany with where clause", () => {
       },
     });
     expect(error).toBeNull();
-    expect(users?.length).toBe(2);
+    expect(users?.length).toBe(1);
     expect(users?.every((u) => u.active && u.id >= 2)).toBe(true);
-
-    // Restore original test data for subsequent tests
-    await orm.sql`DELETE FROM test_posts`;
-    await orm.sql`DELETE FROM test_users`;
-    await orm.sql`DELETE FROM sqlite_sequence WHERE name='test_users'`;
-    await orm.sql`
-      INSERT INTO test_users (name, email, active)
-      VALUES
-        ('Alice', 'alice@example.com', true),
-        ('Bob', 'bob@example.com', false),
-        ('Charlie', 'charlie@example.com', true),
-        ('Diana', 'diana@example.com', false)
-    `;
-    await orm.sql`
-      INSERT INTO test_posts (title, content, author_id)
-      VALUES
-        ('Post 1', 'Content 1', 1),
-        ('Post 2', 'Content 2', 1),
-        ('Post 3', 'Content 3', 2),
-        ('Post 4', 'Content 4', 3)
-    `;
   });
 
   test("findFirst should return first matching row", async () => {
@@ -833,22 +815,25 @@ describe("Table - relations with custom primary key", () => {
 });
 
 describe("Table - MySQL dialect compatibility", () => {
-  test("update should work with MySQL dialect (no RETURNING clause)", async () => {
-    // MySQL doesn't support RETURNING clause, so update/delete should handle this gracefully
-    // This test ensures the dialect check is in place
-    const testOrm = new Orm({
+  // These tests verify that MySQL's lack of RETURNING support is handled correctly
+  // by using SELECT-after-UPDATE and SELECT-before-DELETE patterns.
+  // We use SQLite with dialect="mysql" to test the code path without needing a real MySQL instance.
+
+  test("update works correctly with MySQL dialect (SELECT after UPDATE)", async () => {
+    // Create ORM with MySQL dialect to trigger SELECT-after-UPDATE flow
+    const mysqlOrm = new Orm({
       url: ":memory:",
-      dialect: "sqlite", // Using SQLite for testing but verify the dialect property works
+      dialect: "mysql",
       tables: {
         users: usersTable,
         posts: postsTable,
       },
     });
 
-    await testOrm.sql`DROP TABLE IF EXISTS test_users`;
-    await testOrm.sql`DROP TABLE IF EXISTS test_posts`;
+    await mysqlOrm.sql`DROP TABLE IF EXISTS test_users`;
+    await mysqlOrm.sql`DROP TABLE IF EXISTS test_posts`;
 
-    await testOrm.sql`
+    await mysqlOrm.sql`
       CREATE TABLE test_users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -858,39 +843,45 @@ describe("Table - MySQL dialect compatibility", () => {
       )
     `;
 
-    const [error1, user] = await testOrm.tables.users.create({
-      name: "Test User",
-      email: "test@example.com",
+    // Insert test user using raw SQL (MySQL buildInsert doesn't include RETURNING)
+    await mysqlOrm.sql`
+      INSERT INTO test_users (name, email, active)
+      VALUES ('MySQL Test User', 'mysql@example.com', 1)
+    `;
+
+    const userId = 1; // Known ID from first insert
+
+    // Update using MySQL dialect (triggers SELECT after UPDATE)
+    const [updateError, updated] = await mysqlOrm.tables.users.update({
+      where: { id: userId },
+      data: { name: "Updated Name" },
     });
-    expect(error1).toBeNull();
 
-    // Verify update returns a row (has RETURNING *in SQLite)
-    const [error2, updated] = await testOrm.tables.users.update({
-      where: { id: user?.id },
-      data: { name: "Updated" },
+    expect(updateError).toBeNull();
+    expect(updated).toBeDefined();
+    expect(updated?.name).toBe("Updated Name");
+    expect(updated?.id).toBe(userId);
+    expect(updated?.email).toBe("mysql@example.com");
+
+    // Verify the update actually persisted
+    const [findError, found] = await mysqlOrm.tables.users.findFirst({
+      where: { id: userId },
     });
+    expect(findError).toBeNull();
+    expect(found?.name).toBe("Updated Name");
 
-    expect(error2).toBeNull();
-    expect(updated?.name).toBe("Updated");
-    expect(updated?.id).toBe(user?.id);
-
-    testOrm.close();
+    mysqlOrm.close();
   });
 
-  test("delete should return the deleted row even without RETURNING support", async () => {
-    const testOrm = new Orm({
+  test("update with multiple fields works correctly with MySQL dialect", async () => {
+    const mysqlOrm = new Orm({
       url: ":memory:",
-      dialect: "sqlite",
-      tables: {
-        users: usersTable,
-        posts: postsTable,
-      },
+      dialect: "mysql",
+      tables: { users: usersTable },
     });
 
-    await testOrm.sql`DROP TABLE IF EXISTS test_users`;
-    await testOrm.sql`DROP TABLE IF EXISTS test_posts`;
-
-    await testOrm.sql`
+    await mysqlOrm.sql`DROP TABLE IF EXISTS test_users`;
+    await mysqlOrm.sql`
       CREATE TABLE test_users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -900,25 +891,124 @@ describe("Table - MySQL dialect compatibility", () => {
       )
     `;
 
-    const [error1, user] = await testOrm.tables.users.create({
-      name: "Delete Test",
-      email: "delete@example.com",
-    });
-    expect(error1).toBeNull();
+    // Insert test user using raw SQL
+    await mysqlOrm.sql`
+      INSERT INTO test_users (name, email, active)
+      VALUES ('Test', 'test@test.com', 1)
+    `;
 
-    // Delete and verify it returns the deleted row
-    const [error2, deleted] = await testOrm.tables.users.delete({
-      where: { id: user?.id },
+    const userId = 1;
+
+    // Update multiple fields
+    const [error, updated] = await mysqlOrm.tables.users.update({
+      where: { id: userId },
+      data: {
+        name: "New Name",
+        email: "new@test.com",
+        active: false,
+      },
     });
 
-    expect(error2).toBeNull();
-    expect(deleted?.id).toBe(user?.id);
+    expect(error).toBeNull();
+    expect(updated?.name).toBe("New Name");
+    expect(updated?.email).toBe("new@test.com");
+    expect(updated?.active).toBe(false);
+
+    mysqlOrm.close();
+  });
+
+  test("delete works correctly with MySQL dialect (SELECT before DELETE)", async () => {
+    const mysqlOrm = new Orm({
+      url: ":memory:",
+      dialect: "mysql",
+      tables: {
+        users: usersTable,
+        posts: postsTable,
+      },
+    });
+
+    await mysqlOrm.sql`DROP TABLE IF EXISTS test_users`;
+    await mysqlOrm.sql`DROP TABLE IF EXISTS test_posts`;
+
+    await mysqlOrm.sql`
+      CREATE TABLE test_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        active BOOLEAN DEFAULT 1,
+        created_at TEXT
+      )
+    `;
+
+    // Insert test user using raw SQL
+    await mysqlOrm.sql`
+      INSERT INTO test_users (name, email, active)
+      VALUES ('Delete Test', 'delete@example.com', 1)
+    `;
+
+    const userId = 1;
+
+    // Delete using MySQL dialect (triggers SELECT before DELETE)
+    const [deleteError, deleted] = await mysqlOrm.tables.users.delete({
+      where: { id: userId },
+    });
+
+    expect(deleteError).toBeNull();
+    expect(deleted).toBeDefined();
+    expect(deleted?.id).toBe(userId);
     expect(deleted?.name).toBe("Delete Test");
+    expect(deleted?.email).toBe("delete@example.com");
 
-    testOrm.close();
+    // Verify the row was actually deleted
+    const [findError, found] = await mysqlOrm.tables.users.findFirst({
+      where: { id: userId },
+    });
+    expect(findError).toBeNull();
+    expect(found).toBeNull();
+
+    mysqlOrm.close();
   });
 
-  test("dialect property should correctly identify MySQL as not supporting RETURNING", async () => {
+  test("delete with complex where clause works with MySQL dialect", async () => {
+    const mysqlOrm = new Orm({
+      url: ":memory:",
+      dialect: "mysql",
+      tables: { users: usersTable },
+    });
+
+    await mysqlOrm.sql`DROP TABLE IF EXISTS test_users`;
+    await mysqlOrm.sql`
+      CREATE TABLE test_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        active BOOLEAN DEFAULT 1,
+        created_at TEXT
+      )
+    `;
+
+    await mysqlOrm.sql`
+      INSERT INTO test_users (name, email, active)
+      VALUES ('User1', 'user1@test.com', 0)
+    `;
+
+    // Delete using non-id where clause
+    const [error, deleted] = await mysqlOrm.tables.users.delete({
+      where: {
+        email: "user1@test.com",
+        active: false,
+      },
+    });
+
+    expect(error).toBeNull();
+    expect(deleted?.name).toBe("User1");
+    expect(deleted?.email).toBe("user1@test.com");
+    expect(deleted?.active).toBe(false);
+
+    mysqlOrm.close();
+  });
+
+  test("dialect property correctly identifies MySQL", async () => {
     const sqliteOrm = new Orm({
       url: ":memory:",
       dialect: "sqlite",
@@ -944,6 +1034,45 @@ describe("Table - MySQL dialect compatibility", () => {
 
     sqliteOrm.close();
     postgresOrm.close();
+    mysqlOrm.close();
+  });
+
+  test("MySQL update returns correct data when row matches where clause", async () => {
+    const mysqlOrm = new Orm({
+      url: ":memory:",
+      dialect: "mysql",
+      tables: { users: usersTable },
+    });
+
+    await mysqlOrm.sql`DROP TABLE IF EXISTS test_users`;
+    await mysqlOrm.sql`
+      CREATE TABLE test_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        active BOOLEAN DEFAULT 1,
+        created_at TEXT
+      )
+    `;
+
+    // Insert multiple users
+    await mysqlOrm.sql`
+      INSERT INTO test_users (name, email, active)
+      VALUES
+        ('Alice', 'alice@test.com', 1),
+        ('Bob', 'bob@test.com', 0)
+    `;
+
+    // Update using where clause
+    const [error, updated] = await mysqlOrm.tables.users.update({
+      where: { email: "bob@test.com" },
+      data: { active: true },
+    });
+
+    expect(error).toBeNull();
+    expect(updated?.name).toBe("Bob");
+    expect(updated?.active).toBe(true);
+
     mysqlOrm.close();
   });
 });

@@ -22,9 +22,9 @@ describe("loadSemolaConfig", () => {
   test("throws error when config file is missing", async () => {
     const dir = await createTempDir();
 
-    await expect(loadSemolaConfig(dir)).rejects.toThrow(
-      "Missing semola config file",
-    );
+    const [error] = await loadSemolaConfig(dir);
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain("Missing semola config file");
   });
 
   test("loads valid config and resolves schema path", async () => {
@@ -44,10 +44,11 @@ describe("loadSemolaConfig", () => {
 `,
     );
 
-    const config = await loadSemolaConfig(dir);
+    const [error, config] = await loadSemolaConfig(dir);
 
-    expect(config.orm.dialect).toBe("sqlite");
-    expect(config.orm.schema.path).toBe(`${dir}/src/db/schema.ts`);
+    expect(error).toBeNull();
+    expect(config?.orm.dialect).toBe("sqlite");
+    expect(config?.orm.schema.path).toBe(`${dir}/src/db/schema.ts`);
   });
 
   test("throws validation error for invalid config shape", async () => {
@@ -64,9 +65,9 @@ describe("loadSemolaConfig", () => {
 `,
     );
 
-    await expect(loadSemolaConfig(dir)).rejects.toThrow(
-      "missing orm.schema section",
-    );
+    const [error] = await loadSemolaConfig(dir);
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain("missing orm.schema section");
   });
 });
 
@@ -88,9 +89,10 @@ export const tables = {
 `,
     );
 
-    const tables = await loadSchemaTables(schemaPath);
+    const [error, tables] = await loadSchemaTables(schemaPath);
 
-    expect(tables.users?.sqlName).toBe("users");
+    expect(error).toBeNull();
+    expect(tables?.users?.sqlName).toBe("users");
   });
 
   test("loads default export array of tables", async () => {
@@ -109,9 +111,10 @@ export default [
 `,
     );
 
-    const tables = await loadSchemaTables(schemaPath);
+    const [error, tables] = await loadSchemaTables(schemaPath);
 
-    expect(tables.users?.sqlName).toBe("users");
+    expect(error).toBeNull();
+    expect(tables?.users?.sqlName).toBe("users");
   });
 
   test("throws error when schema export is missing", async () => {
@@ -120,9 +123,9 @@ export default [
 
     await Bun.write(schemaPath, "export const nope = 1;");
 
-    await expect(loadSchemaTables(schemaPath)).rejects.toThrow(
-      "does not export tables",
-    );
+    const [error] = await loadSchemaTables(schemaPath);
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain("does not export tables");
   });
 
   test("throws error when schema contains non-table values", async () => {
@@ -137,9 +140,9 @@ export default [
 `,
     );
 
-    await expect(loadSchemaTables(schemaPath)).rejects.toThrow(
-      "is not a Table instance",
-    );
+    const [error] = await loadSchemaTables(schemaPath);
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain("is not a Table instance");
   });
 
   test("distinguishes between undefined named export and missing export (falsy value handling)", async () => {
@@ -167,9 +170,9 @@ export default defaultTables;
     );
 
     // Should throw error since tables is explicitly undefined, not missing
-    await expect(loadSchemaTables(schemaPath)).rejects.toThrow(
-      "does not export tables",
-    );
+    const [error] = await loadSchemaTables(schemaPath);
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain("does not export tables");
   });
 
   test("falls back to default export when named export doesn't exist", async () => {
@@ -188,8 +191,9 @@ export default {
 `,
     );
 
-    const tables = await loadSchemaTables(schemaPath);
+    const [error, tables] = await loadSchemaTables(schemaPath);
 
-    expect(tables.users?.sqlName).toBe("users");
+    expect(error).toBeNull();
+    expect(tables?.users?.sqlName).toBe("users");
   });
 });

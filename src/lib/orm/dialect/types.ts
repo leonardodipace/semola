@@ -77,9 +77,14 @@ export interface Dialect {
   buildDelete(options: DeleteOptions): QueryResult;
 
   // Build a CREATE TABLE statement for the given table definition.
+  // Returns [error, null] on unsupported column type or [null, sql] on success.
   buildCreateTable<
     Columns extends Record<string, Column<ColumnKind, ColumnMeta>>,
-  >(table: Table<Columns>): string;
+  >(
+    table: Table<Columns>,
+  ):
+    | readonly [{ type: string; message: string }, null]
+    | readonly [null, string];
 
   // Convert a raw database value for a boolean column to a JavaScript boolean.
   // SQLite stores booleans as 0/1, while Postgres/MySQL support native booleans.

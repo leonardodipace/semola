@@ -29,6 +29,7 @@ const diffTable = (
     operations.push({
       type: "dropTable",
       tableName,
+      tableSnapshot: oldTable,
     });
     return operations;
   }
@@ -67,10 +68,12 @@ const diffTable = (
   // Removed columns
   for (const colName of oldColumns) {
     if (!newColumns.has(colName)) {
+      const column = oldTable.columns[colName];
       operations.push({
         type: "dropColumn",
         tableName,
         columnName: colName,
+        columnSnapshot: column,
       });
     }
   }
@@ -132,7 +135,7 @@ export const diffSnapshots = (
 // Generate reverse operations for rollback
 export const reverseOperations = (
   operations: TableDiffOperation[],
-): TableDiffOperation[] => {
+): [Error, null] | [null, TableDiffOperation[]] => {
   const reversed: TableDiffOperation[] = [];
 
   for (const op of operations) {
@@ -140,26 +143,31 @@ export const reverseOperations = (
       reversed.unshift({
         type: "dropTable",
         tableName: op.tableSnapshot.name,
+        tableSnapshot: op.tableSnapshot,
       });
     } else if (op.type === "dropTable") {
-      // Cannot reverse a dropTable without the table definition
-      // This should ideally be stored in the migration
+      if (!op.tableSnapshot) {
+        return [new Error("missing snapshot for reverse"), null];
+      }
       reversed.unshift({
-        type: "dropTable",
-        tableName: op.tableName,
+        type: "createTable",
+        tableSnapshot: op.tableSnapshot,
       });
     } else if (op.type === "addColumn") {
       reversed.unshift({
         type: "dropColumn",
         tableName: op.tableName,
         columnName: op.columnSnapshot.name,
+        columnSnapshot: op.columnSnapshot,
       });
     } else if (op.type === "dropColumn") {
-      // Cannot reverse without column definition
+      if (!op.columnSnapshot) {
+        return [new Error("missing snapshot for reverse"), null];
+      }
       reversed.unshift({
-        type: "dropColumn",
+        type: "addColumn",
         tableName: op.tableName,
-        columnName: op.columnName,
+        columnSnapshot: op.columnSnapshot,
       });
     } else if (op.type === "alterColumn") {
       reversed.unshift({
@@ -172,5 +180,5 @@ export const reverseOperations = (
     }
   }
 
-  return reversed;
+  return [null, reversed];
 };

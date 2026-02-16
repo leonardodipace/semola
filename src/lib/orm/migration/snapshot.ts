@@ -1,4 +1,4 @@
-import { mightThrow } from "../../errors/index.js";
+import { err, ok } from "../../errors/index.js";
 import type { Column } from "../column/index.js";
 import type { ColumnKind, ColumnMeta } from "../column/types.js";
 import type { OrmDialect } from "../core/types.js";
@@ -73,35 +73,43 @@ export const writeSnapshot = async (
   filePath: string,
   snapshot: SchemaSnapshot,
 ) => {
-  const json = JSON.stringify(snapshot, null, 2);
-  await Bun.write(filePath, json);
+  try {
+    const json = JSON.stringify(snapshot, null, 2);
+    await Bun.write(filePath, json);
+    return [null, snapshot] as const;
+  } catch (error) {
+    return [error, null] as const;
+  }
 };
 
 export const readSnapshot = async (filePath: string) => {
-  return await mightThrow(
-    (async () => {
-      const file = Bun.file(filePath);
-      const exists = await file.exists();
+  const file = Bun.file(filePath);
+  const exists = await file.exists();
 
-      if (!exists) {
-        return null;
-      }
+  if (!exists) {
+    return ok(null);
+  }
 
-      const content = await file.text();
-      const snapshot = JSON.parse(content);
+  try {
+    const content = await file.text();
+    const snapshot = JSON.parse(content);
 
-      // Basic validation
-      if (
-        typeof snapshot !== "object" ||
-        snapshot === null ||
-        typeof snapshot.version !== "number" ||
-        typeof snapshot.dialect !== "string" ||
-        typeof snapshot.tables !== "object"
-      ) {
-        throw new Error(`Invalid snapshot format in ${filePath}`);
-      }
+    // Basic validation
+    if (
+      typeof snapshot !== "object" ||
+      snapshot === null ||
+      typeof snapshot.version !== "number" ||
+      typeof snapshot.dialect !== "string" ||
+      typeof snapshot.tables !== "object"
+    ) {
+      return err("ValidationError", `Invalid snapshot format in ${filePath}`);
+    }
 
-      return snapshot as SchemaSnapshot;
-    })(),
-  );
+    return ok(snapshot);
+  } catch (error) {
+    return err(
+      "InternalServerError",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 };
