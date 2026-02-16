@@ -303,9 +303,10 @@ describe("Orm - dialect support", () => {
     orm.close();
   });
 
-  test("should throw error for MySQL dialect (not yet implemented)", () => {
+  test("should support MySQL dialect", () => {
     const usersTable = new Table("users", {
       id: number("id").primaryKey(),
+      name: string("name").notNull(),
     });
 
     const orm = new Orm({
@@ -314,9 +315,9 @@ describe("Orm - dialect support", () => {
       dialect: "mysql",
     });
 
-    expect(() => orm.createTable(usersTable)).toThrow(
-      "MySQL dialect not yet implemented",
-    );
+    const createTableSql = orm.createTable(usersTable);
+    expect(createTableSql).toContain("BIGINT AUTO_INCREMENT PRIMARY KEY");
+    expect(createTableSql).toContain("name VARCHAR(255) NOT NULL");
 
     orm.close();
   });

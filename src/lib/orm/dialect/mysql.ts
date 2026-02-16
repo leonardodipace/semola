@@ -11,8 +11,9 @@ import type {
   UpdateOptions,
 } from "./types.js";
 
-// MySQL dialect implementation (stub - not yet implemented).
-// This is a placeholder for future MySQL support.
+// MySQL dialect implementation.
+// Fully implements all query building and type conversion for MySQL databases.
+// Uses ? placeholder syntax and BIGINT AUTO_INCREMENT for auto-incrementing primary keys.
 export class MysqlDialect implements Dialect {
   public readonly name = "mysql" as const;
 
@@ -27,39 +28,134 @@ export class MysqlDialect implements Dialect {
   };
 
   public buildSelect(
-    _tableName: string,
-    _columns: string[],
-    _options: SelectOptions,
+    tableName: string,
+    columns: string[],
+    options: SelectOptions,
   ): QueryResult {
-    throw new Error("MySQL dialect not yet implemented");
+    const parts: string[] = [];
+    const params: unknown[] = [];
+
+    // SELECT clause
+    const columnList = columns.join(", ");
+    parts.push(`SELECT ${columnList} FROM ${tableName}`);
+
+    // WHERE clause
+    if (options.where) {
+      parts.push(`WHERE ${options.where.text}`);
+      params.push(...options.where.values);
+    }
+
+    // LIMIT/OFFSET
+    const pagination = this.buildPagination(options.limit, options.offset);
+    if (pagination) {
+      parts.push(pagination);
+    }
+
+    return {
+      sql: parts.join(" "),
+      params,
+    };
   }
 
-  public buildInsert(_options: InsertOptions): QueryResult {
-    throw new Error("MySQL dialect not yet implemented");
+  public buildInsert(options: InsertOptions): QueryResult {
+    const columns = Object.keys(options.values);
+    const placeholders = columns.map(() => "?").join(", ");
+    const columnList = columns.join(", ");
+
+    // MySQL 8.0+ supports RETURNING, but for compatibility we use the standard approach
+    // In practice, you'd get the ID via LAST_INSERT_ID() or another mechanism
+    const sql = `INSERT INTO ${options.tableName} (${columnList}) VALUES (${placeholders})`;
+    const params = Object.values(options.values);
+
+    return { sql, params };
   }
 
-  public buildUpdate(_options: UpdateOptions): QueryResult {
-    throw new Error("MySQL dialect not yet implemented");
+  public buildUpdate(options: UpdateOptions): QueryResult {
+    const columns = Object.keys(options.values);
+    const setClause = columns.map((col) => `${col} = ?`).join(", ");
+
+    const sql = `UPDATE ${options.tableName} SET ${setClause} WHERE ${options.where.text}`;
+    const params = [...Object.values(options.values), ...options.where.values];
+
+    return { sql, params };
   }
 
-  public buildDelete(_options: DeleteOptions): QueryResult {
-    throw new Error("MySQL dialect not yet implemented");
+  public buildDelete(options: DeleteOptions): QueryResult {
+    const sql = `DELETE FROM ${options.tableName} WHERE ${options.where.text}`;
+    const params = [...options.where.values];
+
+    return { sql, params };
   }
 
   public buildCreateTable<
     Columns extends Record<string, Column<ColumnKind, ColumnMeta>>,
-  >(_table: Table<Columns>): string {
-    throw new Error("MySQL dialect not yet implemented");
+  >(table: Table<Columns>): string {
+    const columnDefs: string[] = [];
+    const constraints: string[] = [];
+
+    for (const [_key, column] of Object.entries(table.columns)) {
+      const parts: string[] = [column.sqlName];
+
+      // For primary keys, use BIGINT AUTO_INCREMENT (MySQL best practice)
+      if (column.meta.primaryKey && column.columnKind === "number") {
+        parts.push("BIGINT AUTO_INCREMENT PRIMARY KEY");
+      } else {
+        const sqlType = this.types[column.columnKind];
+        if (!sqlType) {
+          throw new Error(`Unsupported column type: ${column.columnKind}`);
+        }
+        parts.push(sqlType);
+
+        // Primary key (non-auto-incrementing)
+        if (column.meta.primaryKey) {
+          parts.push("PRIMARY KEY");
+        }
+
+        // Not null
+        if (column.meta.notNull && !column.meta.primaryKey) {
+          parts.push("NOT NULL");
+        }
+
+        // Unique
+        if (column.meta.unique && !column.meta.primaryKey) {
+          parts.push("UNIQUE");
+        }
+      }
+
+      columnDefs.push(parts.join(" "));
+    }
+
+    const allDefs = [...columnDefs, ...constraints].join(", ");
+    return `CREATE TABLE IF NOT EXISTS ${table.sqlName} (${allDefs})`;
   }
 
   public convertBooleanValue(value: unknown): boolean {
+    // MySQL can return booleans as 1/0 or as native booleans
     if (typeof value === "boolean") {
       return value;
     }
-    throw new Error("MySQL dialect not yet implemented");
+    if (typeof value === "number") {
+      return value === 1;
+    }
+    // Fallback for edge cases
+    return Boolean(value);
   }
 
-  public buildPagination(_limit?: number, _offset?: number): string | null {
-    throw new Error("MySQL dialect not yet implemented");
+  public buildPagination(limit?: number, offset?: number): string | null {
+    if (limit === undefined && offset === undefined) {
+      return null;
+    }
+
+    const parts: string[] = [];
+
+    if (limit !== undefined) {
+      parts.push(`LIMIT ${limit}`);
+    }
+
+    if (offset !== undefined && offset > 0) {
+      parts.push(`OFFSET ${offset}`);
+    }
+
+    return parts.length > 0 ? parts.join(" ") : null;
   }
 }
