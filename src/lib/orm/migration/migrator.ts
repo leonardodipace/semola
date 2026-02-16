@@ -25,12 +25,30 @@ const toError = (value: unknown) => {
 };
 
 const slugify = (value: string) => {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+/, "")
-    .replace(/_+$/, "");
+  const lowered = value.trim().toLowerCase();
+  const parts: string[] = [];
+  let current = "";
+
+  for (const ch of lowered) {
+    const isLowerAlpha = ch >= "a" && ch <= "z";
+    const isDigit = ch >= "0" && ch <= "9";
+
+    if (isLowerAlpha || isDigit) {
+      current += ch;
+      continue;
+    }
+
+    if (current.length > 0) {
+      parts.push(current);
+      current = "";
+    }
+  }
+
+  if (current.length > 0) {
+    parts.push(current);
+  }
+
+  return parts.join("_");
 };
 
 const timestamp = () => {

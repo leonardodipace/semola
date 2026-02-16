@@ -210,6 +210,43 @@ describe("Migration runtime functions", () => {
     orm.close();
   });
 
+  test("create sanitizes malicious migration name into safe filename", async () => {
+    const dir = await createTempDir();
+    const migrationsDir = join(dir, "migrations");
+
+    await mkdir(migrationsDir, { recursive: true });
+
+    const users = new Table("users", {
+      id: number("id").primaryKey(),
+    });
+
+    const orm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: { users },
+    });
+
+    const migrationOptions = {
+      orm,
+      migrationsDir,
+      migrationTable: "semola_migrations",
+    };
+
+    const [error, filePath] = await createMigration({
+      ...migrationOptions,
+      name: "../DROP TABLE users; -- add@email!!",
+      tables: { users },
+    });
+
+    expect(error).toBeNull();
+    expect(filePath).toBeDefined();
+    expect(filePath?.includes(".."))?.toBe(false);
+    expect(filePath?.includes("/DROP"))?.toBe(false);
+    expect(filePath?.endsWith("drop_table_users_add_email.ts")).toBe(true);
+
+    orm.close();
+  });
+
   test("apply skips already-applied migrations", async () => {
     const dir = await createTempDir();
     const migrationsDir = join(dir, "migrations");
