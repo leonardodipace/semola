@@ -692,10 +692,16 @@ export class TableClient<T extends Table> {
       sqlData[sqlColumnName] = value;
     }
 
-    const results = await this.sql<InferTableType<T>[]>`
-      INSERT INTO ${this.sql(this.table.sqlName)} ${this.sql(sqlData)}
-      RETURNING *
-    `;
+    // Use dialect-specific SQL generation
+    const query = this.dialect.buildInsert({
+      tableName: this.table.sqlName,
+      values: sqlData,
+    });
+
+    const results = await this.sql.unsafe<InferTableType<T>[]>(
+      query.sql,
+      query.params,
+    );
 
     this.convertBooleanValues(results);
     this.mapColumnNames(results);
@@ -728,20 +734,32 @@ export class TableClient<T extends Table> {
       sqlData[sqlColumnName] = value;
     }
 
-    return await this.sql<InferTableType<T>[]>`
-      UPDATE ${this.sql(this.table.sqlName)}
-      SET ${this.sql(sqlData)}
-      WHERE ${whereClause}
-      RETURNING *
-    `.then((results) => {
-      this.convertBooleanValues(results);
-      this.mapColumnNames(results);
-      const [result] = results;
-      if (!result) {
-        throw new Error("update did not return a row");
-      }
-      return result;
-    });
+    // Build the UPDATE query with proper dialect handling
+    const hasReturning = this.dialect.name !== "mysql";
+    const sql = hasReturning
+      ? this.sql<InferTableType<T>[]>`
+          UPDATE ${this.sql(this.table.sqlName)}
+          SET ${this.sql(sqlData)}
+          WHERE ${whereClause}
+          RETURNING *
+        `
+      : this.sql<InferTableType<T>[]>`
+          UPDATE ${this.sql(this.table.sqlName)}
+          SET ${this.sql(sqlData)}
+          WHERE ${whereClause}
+        `;
+
+    const results = await sql;
+
+    this.convertBooleanValues(results);
+    this.mapColumnNames(results);
+
+    const [result] = results;
+    if (!result) {
+      throw new Error("update did not return a row");
+    }
+
+    return result;
   }
 
   public async delete(options: DeleteOptions<T>): Promise<InferTableType<T>> {
@@ -751,11 +769,20 @@ export class TableClient<T extends Table> {
       throw new Error("delete requires a where clause");
     }
 
-    const results = await this.sql<InferTableType<T>[]>`
-      DELETE FROM ${this.sql(this.table.sqlName)}
-      WHERE ${whereClause}
-      RETURNING *
-    `;
+    // Build the DELETE query with proper dialect handling
+    const hasReturning = this.dialect.name !== "mysql";
+    const sql = hasReturning
+      ? this.sql<InferTableType<T>[]>`
+          DELETE FROM ${this.sql(this.table.sqlName)}
+          WHERE ${whereClause}
+          RETURNING *
+        `
+      : this.sql<InferTableType<T>[]>`
+          DELETE FROM ${this.sql(this.table.sqlName)}
+          WHERE ${whereClause}
+        `;
+
+    const results = await sql;
 
     this.convertBooleanValues(results);
     this.mapColumnNames(results);

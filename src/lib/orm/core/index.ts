@@ -30,24 +30,22 @@ const bindTables = <
   dialect: Dialect,
   relations?: Relations,
 ): TableClients<Tables, Relations> => {
-  const result: Record<string, TableClient<Table>> = {};
+  const entries: Array<[string, TableClient<Table>]> = [];
   const tableNameMap = new Map<Table, string>();
 
   // Build map of Table instances to their names
   for (const key in tables) {
     const match = tables[key];
-
     if (!match) continue;
-
     tableNameMap.set(match, key);
   }
 
+  // Build entries array with table clients
   for (const key in tables) {
     const match = tables[key];
-
     if (!match) continue;
 
-    result[key] = new TableClient(
+    const client = new TableClient(
       sql,
       match,
       dialect,
@@ -55,12 +53,25 @@ const bindTables = <
       (relation) => {
         const relatedTable = relation.table();
         const relatedTableName = tableNameMap.get(relatedTable);
-        return relatedTableName ? result[relatedTableName] : undefined;
+        if (!relatedTableName) return undefined;
+
+        // Get the client from entries by finding the matching key
+        const found = entries.find(
+          ([entryKey]) => entryKey === relatedTableName,
+        );
+        return found ? found[1] : undefined;
       },
     );
+
+    entries.push([key, client]);
   }
 
-  return result as unknown as TableClients<Tables, Relations>;
+  // Build result object from entries. The 'as' cast is necessary here because
+  // TypeScript cannot track that we've created entries for every key in Tables
+  // through the dynamic loop. At runtime, we guarantee that every table key has
+  // been processed and added to entries.
+  const result = Object.fromEntries(entries);
+  return result as TableClients<Tables, Relations>;
 };
 
 export class Orm<

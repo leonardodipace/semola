@@ -58,8 +58,17 @@ describe("introspectSchema", () => {
 
     await orm.sql.unsafe(orm.createTable(users));
 
-    await introspectSchema(orm, ["users'; DROP TABLE users; --"]);
+    // Malicious table names should be rejected by validation
+    let throwsError = false;
+    try {
+      await introspectSchema(orm, ["users'; DROP TABLE users; --"]);
+    } catch {
+      throwsError = true;
+    }
 
+    expect(throwsError).toBe(true);
+
+    // Verify the users table still exists (wasn't dropped)
     const rows = await orm.sql.unsafe(
       "SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
     );

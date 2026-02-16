@@ -152,4 +152,59 @@ export default [
     expect(tables).toBeNull();
     expect(error?.message).toContain("is not a Table instance");
   });
+
+  test("distinguishes between undefined named export and missing export (falsy value handling)", async () => {
+    const dir = await createTempDir();
+    const schemaPath = join(dir, "schema.ts");
+
+    // Tests the fix for: using nullish coalescing would incorrectly fall through
+    // when named export is explicitly undefined. We use 'in' operator instead.
+    await writeFile(
+      schemaPath,
+      `import { Table, number } from "${join(process.cwd(), "src/lib/orm/index.ts")}";
+
+const defaultTables = {
+  users: new Table("users", {
+    id: number("id").primaryKey(),
+  }),
+};
+
+// Explicitly set tables to undefined (edge case)
+export const tables = undefined;
+
+// Default export as fallback
+export default defaultTables;
+`,
+      "utf8",
+    );
+
+    const [error, tables] = await loadSchemaTables(schemaPath);
+
+    // Should report error since tables is explicitly undefined, not missing
+    expect(tables).toBeNull();
+    expect(error?.message).toContain("does not export tables");
+  });
+
+  test("falls back to default export when named export doesn't exist", async () => {
+    const dir = await createTempDir();
+    const schemaPath = join(dir, "schema.ts");
+
+    await writeFile(
+      schemaPath,
+      `import { Table, number } from "${join(process.cwd(), "src/lib/orm/index.ts")}";
+
+export default {
+  users: new Table("users", {
+    id: number("id").primaryKey(),
+  }),
+};
+`,
+      "utf8",
+    );
+
+    const [error, tables] = await loadSchemaTables(schemaPath);
+
+    expect(error).toBeNull();
+    expect(tables?.users?.sqlName).toBe("users");
+  });
 });

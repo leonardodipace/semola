@@ -157,7 +157,10 @@ export const loadSchemaTables = async (
     const moduleUrl = pathToFileURL(schemaPath).href;
     const mod = await import(`${moduleUrl}?cache=${Date.now()}`);
     const key = exportName ?? "tables";
-    const exportedValue = Reflect.get(mod, key) ?? Reflect.get(mod, "default");
+
+    // Check if the named export exists; if not, fall back to default
+    const exportedValue =
+      key in mod ? Reflect.get(mod, key) : Reflect.get(mod, "default");
 
     if (exportedValue === undefined) {
       return [

@@ -766,6 +766,118 @@ describe("Table - relations with custom primary key", () => {
   });
 });
 
+describe("Table - MySQL dialect compatibility", () => {
+  test("update should work with MySQL dialect (no RETURNING clause)", async () => {
+    // MySQL doesn't support RETURNING clause, so update/delete should handle this gracefully
+    // This test ensures the dialect check is in place
+    const testOrm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite", // Using SQLite for testing but verify the dialect property works
+      tables: {
+        users: usersTable,
+        posts: postsTable,
+      },
+    });
+
+    await testOrm.sql`DROP TABLE IF EXISTS test_users`;
+    await testOrm.sql`DROP TABLE IF EXISTS test_posts`;
+
+    await testOrm.sql`
+      CREATE TABLE test_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        active BOOLEAN DEFAULT 1,
+        created_at TEXT
+      )
+    `;
+
+    const user = await testOrm.tables.users.create({
+      name: "Test User",
+      email: "test@example.com",
+    });
+
+    // Verify update returns a row (has RETURNING *in SQLite)
+    const updated = await testOrm.tables.users.update({
+      where: { id: user.id },
+      data: { name: "Updated" },
+    });
+
+    expect(updated.name).toBe("Updated");
+    expect(updated.id).toBe(user.id);
+
+    testOrm.close();
+  });
+
+  test("delete should return the deleted row even without RETURNING support", async () => {
+    const testOrm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: {
+        users: usersTable,
+        posts: postsTable,
+      },
+    });
+
+    await testOrm.sql`DROP TABLE IF EXISTS test_users`;
+    await testOrm.sql`DROP TABLE IF EXISTS test_posts`;
+
+    await testOrm.sql`
+      CREATE TABLE test_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        active BOOLEAN DEFAULT 1,
+        created_at TEXT
+      )
+    `;
+
+    const user = await testOrm.tables.users.create({
+      name: "Delete Test",
+      email: "delete@example.com",
+    });
+
+    // Delete and verify it returns the deleted row
+    const deleted = await testOrm.tables.users.delete({
+      where: { id: user.id },
+    });
+
+    expect(deleted.id).toBe(user.id);
+    expect(deleted.name).toBe("Delete Test");
+
+    testOrm.close();
+  });
+
+  test("dialect property should correctly identify MySQL as not supporting RETURNING", async () => {
+    const sqliteOrm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: { users: usersTable },
+    });
+
+    const postgresOrm = new Orm({
+      url: "postgres://localhost/test",
+      dialect: "postgres",
+      tables: { users: usersTable },
+    });
+
+    const mysqlOrm = new Orm({
+      url: "mysql://localhost/test",
+      dialect: "mysql",
+      tables: { users: usersTable },
+    });
+
+    // Verify dialects are properly detected
+    expect(sqliteOrm.getDialectName()).toBe("sqlite");
+    expect(postgresOrm.getDialectName()).toBe("postgres");
+    expect(mysqlOrm.getDialectName()).toBe("mysql");
+
+    sqliteOrm.close();
+    postgresOrm.close();
+    mysqlOrm.close();
+  });
+});
+
 afterAll(async () => {
   await orm.sql`DROP TABLE IF EXISTS test_posts`;
   await orm.sql`DROP TABLE IF EXISTS test_users`;

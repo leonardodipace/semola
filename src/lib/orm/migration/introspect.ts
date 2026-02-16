@@ -1,5 +1,6 @@
 import type { Orm } from "../core/index.js";
 import type { Table } from "../table/index.js";
+import { toSqlIdentifier } from "./sql.js";
 
 const readColumnName = (row: unknown) => {
   if (typeof row !== "object" || row === null) {
@@ -22,12 +23,14 @@ const queryColumns = async (
   orm: Orm<Record<string, Table>>,
   tableName: string,
 ) => {
+  // Validate table name to prevent SQL injection
+  const safeTableName = toSqlIdentifier(tableName, "table name");
   const dialect = orm.getDialectName();
 
   if (dialect === "sqlite") {
     return orm.sql`
       SELECT name
-      FROM pragma_table_info(${tableName})
+      FROM pragma_table_info(${safeTableName})
     `;
   }
 
@@ -36,7 +39,7 @@ const queryColumns = async (
       SELECT column_name
       FROM information_schema.columns
       WHERE table_schema = current_schema()
-      AND table_name = ${tableName}
+      AND table_name = ${safeTableName}
     `;
   }
 
@@ -44,7 +47,7 @@ const queryColumns = async (
     SELECT COLUMN_NAME AS column_name
     FROM information_schema.columns
     WHERE table_schema = DATABASE()
-    AND table_name = ${tableName}
+    AND table_name = ${safeTableName}
   `;
 };
 
