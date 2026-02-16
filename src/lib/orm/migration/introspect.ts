@@ -18,30 +18,34 @@ const readColumnName = (row: unknown) => {
   return null;
 };
 
-const escapeLiteral = (value: string) => {
-  return value.replace(/'/g, "''");
-};
-
 const queryColumns = async (
   orm: Orm<Record<string, Table>>,
   tableName: string,
 ) => {
   const dialect = orm.getDialectName();
-  const safeTableName = escapeLiteral(tableName);
 
   if (dialect === "sqlite") {
-    return orm.sql.unsafe(`PRAGMA table_info('${safeTableName}')`);
+    return orm.sql`
+      SELECT name
+      FROM pragma_table_info(${tableName})
+    `;
   }
 
   if (dialect === "postgres") {
-    return orm.sql.unsafe(
-      `SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = '${safeTableName}'`,
-    );
+    return orm.sql`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+      AND table_name = ${tableName}
+    `;
   }
 
-  return orm.sql.unsafe(
-    `SELECT COLUMN_NAME AS column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = '${safeTableName}'`,
-  );
+  return orm.sql`
+    SELECT COLUMN_NAME AS column_name
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+    AND table_name = ${tableName}
+  `;
 };
 
 export const introspectSchema = async (

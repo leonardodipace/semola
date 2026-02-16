@@ -59,4 +59,18 @@ describe("migration state", () => {
 
     orm.close();
   });
+
+  test("rejects unsafe migration table identifier", async () => {
+    const orm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: {},
+    });
+
+    await expect(
+      ensureMigrationsTable(orm, "semola_migrations; DROP TABLE users; --"),
+    ).rejects.toThrow("Invalid SQL table name");
+
+    orm.close();
+  });
 });

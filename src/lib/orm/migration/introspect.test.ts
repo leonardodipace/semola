@@ -43,4 +43,28 @@ describe("introspectSchema", () => {
 
     orm.close();
   });
+
+  test("does not execute SQL from malicious table names", async () => {
+    const users = new Table("users", {
+      id: number("id").primaryKey(),
+      name: string("name").notNull(),
+    });
+
+    const orm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: { users },
+    });
+
+    await orm.sql.unsafe(orm.createTable(users));
+
+    await introspectSchema(orm, ["users'; DROP TABLE users; --"]);
+
+    const rows = await orm.sql.unsafe(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
+    );
+    expect(Array.isArray(rows) && rows.length > 0).toBe(true);
+
+    orm.close();
+  });
 });

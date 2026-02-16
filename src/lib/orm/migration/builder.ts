@@ -12,6 +12,7 @@ import type { ColumnKind, ColumnMeta, ColumnValue } from "../column/types.js";
 import type { Orm } from "../core/index.js";
 import type { OrmDialect } from "../core/types.js";
 import { Table } from "../table/index.js";
+import { toSqlIdentifier, toSqlIdentifierList } from "./sql.js";
 
 type AnyColumn = Column<ColumnKind, ColumnMeta>;
 
@@ -63,31 +64,38 @@ class TableBuilder {
   }
 
   public number(sqlName: string) {
-    return this.add(number(sqlName));
+    const safeName = toSqlIdentifier(sqlName, "column name");
+    return this.add(number(safeName));
   }
 
   public string(sqlName: string) {
-    return this.add(string(sqlName));
+    const safeName = toSqlIdentifier(sqlName, "column name");
+    return this.add(string(safeName));
   }
 
   public boolean(sqlName: string) {
-    return this.add(boolean(sqlName));
+    const safeName = toSqlIdentifier(sqlName, "column name");
+    return this.add(boolean(safeName));
   }
 
   public date(sqlName: string) {
-    return this.add(date(sqlName));
+    const safeName = toSqlIdentifier(sqlName, "column name");
+    return this.add(date(safeName));
   }
 
   public json(sqlName: string) {
-    return this.add(json(sqlName));
+    const safeName = toSqlIdentifier(sqlName, "column name");
+    return this.add(json(safeName));
   }
 
   public jsonb(sqlName: string) {
-    return this.add(jsonb(sqlName));
+    const safeName = toSqlIdentifier(sqlName, "column name");
+    return this.add(jsonb(safeName));
   }
 
   public uuid(sqlName: string) {
-    return this.add(uuid(sqlName));
+    const safeName = toSqlIdentifier(sqlName, "column name");
+    return this.add(uuid(safeName));
   }
 
   public get columns() {
@@ -231,28 +239,35 @@ export class SchemaBuilder {
   }
 
   public async createTable(name: string, build: (t: TableBuilder) => unknown) {
+    const safeTableName = toSqlIdentifier(name, "table name");
     const tableBuilder = new TableBuilder();
     build(tableBuilder);
-    const table = new Table(name, tableBuilder.columns);
+    const table = new Table(safeTableName, tableBuilder.columns);
     const sql = this.orm.createTable(table);
     await this.execute(sql);
   }
 
   public async dropTable(name: string) {
-    await this.execute(`DROP TABLE IF EXISTS ${name}`);
+    const safeTableName = toSqlIdentifier(name, "table name");
+    await this.execute(`DROP TABLE IF EXISTS ${safeTableName}`);
   }
 
   public async addColumn(
     tableName: string,
     build: (t: TableBuilder) => unknown,
   ) {
+    const safeTableName = toSqlIdentifier(tableName, "table name");
     const column = normalizeColumn(build);
     const definition = buildColumnDefinition(this.dialect, column);
-    await this.execute(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`);
+    await this.execute(`ALTER TABLE ${safeTableName} ADD COLUMN ${definition}`);
   }
 
   public async dropColumn(tableName: string, columnName: string) {
-    await this.execute(`ALTER TABLE ${tableName} DROP COLUMN ${columnName}`);
+    const safeTableName = toSqlIdentifier(tableName, "table name");
+    const safeColumnName = toSqlIdentifier(columnName, "column name");
+    await this.execute(
+      `ALTER TABLE ${safeTableName} DROP COLUMN ${safeColumnName}`,
+    );
   }
 
   public async alterColumn(
@@ -260,6 +275,8 @@ export class SchemaBuilder {
     columnName: string,
     build: (t: TableBuilder) => unknown,
   ) {
+    const safeTableName = toSqlIdentifier(tableName, "table name");
+    const safeColumnName = toSqlIdentifier(columnName, "column name");
     const column = normalizeColumn(build);
 
     if (this.dialect === "sqlite") {
@@ -269,33 +286,33 @@ export class SchemaBuilder {
     if (this.dialect === "mysql") {
       const definition = buildColumnDefinition(this.dialect, column);
       await this.execute(
-        `ALTER TABLE ${tableName} MODIFY COLUMN ${definition}`,
+        `ALTER TABLE ${safeTableName} MODIFY COLUMN ${definition}`,
       );
       return;
     }
 
     const typeSql = sqlType(this.dialect, column.columnKind);
     await this.execute(
-      `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} TYPE ${typeSql}`,
+      `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} TYPE ${typeSql}`,
     );
 
     if (column.meta.notNull) {
       await this.execute(
-        `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} SET NOT NULL`,
+        `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET NOT NULL`,
       );
     } else {
       await this.execute(
-        `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} DROP NOT NULL`,
+        `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP NOT NULL`,
       );
     }
 
     if (column.meta.hasDefault && column.defaultValue !== undefined) {
       await this.execute(
-        `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} SET DEFAULT ${quoteValue(this.dialect, column.columnKind, column.defaultValue)}`,
+        `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET DEFAULT ${quoteValue(this.dialect, column.columnKind, column.defaultValue)}`,
       );
     } else {
       await this.execute(
-        `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} DROP DEFAULT`,
+        `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP DEFAULT`,
       );
     }
   }
@@ -305,22 +322,27 @@ export class SchemaBuilder {
     columns: string[],
     options?: { name?: string; unique?: boolean },
   ) {
+    const safeTableName = toSqlIdentifier(tableName, "table name");
+    const safeColumns = toSqlIdentifierList(columns, "column name");
     const indexName =
       options?.name ??
-      `${tableName}_${columns.join("_")}${options?.unique ? "_uniq" : "_idx"}`;
+      `${safeTableName}_${safeColumns.join("_")}${options?.unique ? "_uniq" : "_idx"}`;
+    const safeIndexName = toSqlIdentifier(indexName, "index name");
     const uniqueKeyword = options?.unique ? "UNIQUE " : "";
     await this.execute(
-      `CREATE ${uniqueKeyword}INDEX IF NOT EXISTS ${indexName} ON ${tableName} (${columns.join(", ")})`,
+      `CREATE ${uniqueKeyword}INDEX IF NOT EXISTS ${safeIndexName} ON ${safeTableName} (${safeColumns.join(", ")})`,
     );
   }
 
   public async dropIndex(indexName: string, tableName?: string) {
+    const safeIndexName = toSqlIdentifier(indexName, "index name");
     if (this.dialect === "mysql" && tableName) {
-      await this.execute(`DROP INDEX ${indexName} ON ${tableName}`);
+      const safeTableName = toSqlIdentifier(tableName, "table name");
+      await this.execute(`DROP INDEX ${safeIndexName} ON ${safeTableName}`);
       return;
     }
 
-    await this.execute(`DROP INDEX IF EXISTS ${indexName}`);
+    await this.execute(`DROP INDEX IF EXISTS ${safeIndexName}`);
   }
 
   public async raw(sql: string) {

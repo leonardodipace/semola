@@ -139,4 +139,67 @@ describe("SchemaBuilder", () => {
 
     orm.close();
   });
+
+  test("rejects unsafe table identifier", async () => {
+    const orm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: {},
+    });
+
+    const schema = new SchemaBuilder(orm, "sqlite");
+
+    await expect(
+      schema.createTable("users; DROP TABLE users; --", (t) => {
+        t.number("id").primaryKey();
+      }),
+    ).rejects.toThrow("Invalid SQL table name");
+
+    orm.close();
+  });
+
+  test("rejects unsafe column identifier", async () => {
+    const orm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: {},
+    });
+
+    const schema = new SchemaBuilder(orm, "sqlite");
+
+    await schema.createTable("users", (t) => {
+      t.number("id").primaryKey();
+    });
+
+    await expect(
+      schema.addColumn("users", (t) => {
+        t.string("email; DROP TABLE users; --");
+      }),
+    ).rejects.toThrow("Invalid SQL column name");
+
+    orm.close();
+  });
+
+  test("rejects unsafe index identifier", async () => {
+    const orm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: {},
+    });
+
+    const schema = new SchemaBuilder(orm, "sqlite");
+
+    await schema.createTable("users", (t) => {
+      t.number("id").primaryKey();
+      t.string("email").notNull();
+    });
+
+    await expect(
+      schema.createIndex("users", ["email"], {
+        name: "users_email_idx; DROP TABLE users; --",
+      }),
+    ).rejects.toThrow("Invalid SQL index name");
+
+    orm.close();
+  });
 });

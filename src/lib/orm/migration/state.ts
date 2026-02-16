@@ -1,5 +1,6 @@
 import type { Orm } from "../core/index.js";
 import type { Table } from "../table/index.js";
+import { toSqlIdentifier } from "./sql.js";
 import type { AppliedMigration } from "./types.js";
 
 const asRecord = (value: unknown) => {
@@ -23,16 +24,27 @@ export const ensureMigrationsTable = async (
   orm: Orm<Record<string, Table>>,
   tableName: string,
 ) => {
-  const sql = `CREATE TABLE IF NOT EXISTS ${tableName} (version TEXT PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)`;
-  await orm.sql.unsafe(sql);
+  const safeTableName = toSqlIdentifier(tableName, "table name");
+
+  await orm.sql`
+    CREATE TABLE IF NOT EXISTS ${orm.sql(safeTableName)} (
+      version TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      applied_at TEXT NOT NULL
+    )
+  `;
 };
 
 export const getAppliedMigrations = async (
   orm: Orm<Record<string, Table>>,
   tableName: string,
 ) => {
-  const sql = `SELECT version, name, applied_at FROM ${tableName} ORDER BY version ASC`;
-  const rows = await orm.sql.unsafe(sql);
+  const safeTableName = toSqlIdentifier(tableName, "table name");
+  const rows = await orm.sql`
+    SELECT version, name, applied_at
+    FROM ${orm.sql(safeTableName)}
+    ORDER BY version ASC
+  `;
 
   const list: AppliedMigration[] = [];
 
@@ -68,10 +80,12 @@ export const recordMigration = async (
   version: string,
   name: string,
 ) => {
+  const safeTableName = toSqlIdentifier(tableName, "table name");
   const appliedAt = new Date().toISOString();
-  await orm.sql.unsafe(
-    `INSERT INTO ${tableName} (version, name, applied_at) VALUES ('${version.replace(/'/g, "''")}', '${name.replace(/'/g, "''")}', '${appliedAt}')`,
-  );
+  await orm.sql`
+    INSERT INTO ${orm.sql(safeTableName)} (version, name, applied_at)
+    VALUES (${version}, ${name}, ${appliedAt})
+  `;
 };
 
 export const removeMigration = async (
@@ -79,7 +93,10 @@ export const removeMigration = async (
   tableName: string,
   version: string,
 ) => {
-  await orm.sql.unsafe(
-    `DELETE FROM ${tableName} WHERE version = '${version.replace(/'/g, "''")}'`,
-  );
+  const safeTableName = toSqlIdentifier(tableName, "table name");
+
+  await orm.sql`
+    DELETE FROM ${orm.sql(safeTableName)}
+    WHERE version = ${version}
+  `;
 };
