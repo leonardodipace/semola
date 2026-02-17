@@ -11,7 +11,7 @@ enum ComponentAmount {
   Max = 6,
 }
 
-type TokenValueType = string | number | number[];
+type TokenValueType = string | number;
 
 class Token {
   private readonly type: ComponentType;
@@ -130,8 +130,8 @@ export class Scanner {
     let ch = this.peek(component);
 
     while (ch && this.isDigit(ch)) {
-      ch = this.peek(component);
       this.current += 1;
+      ch = this.peek(component);
     }
 
     ch = this.peek(component);
@@ -148,21 +148,35 @@ export class Scanner {
     if (this.match(component, "-")) {
       this.handleRange(component);
     }
+
+    if (this.match(component, ",")) {
+      this.handleList(component);
+    }
   }
 
   private handleRange(component: string) {
     let ch = this.peek(component);
 
     while (ch && this.isDigit(ch)) {
-      ch = this.peek(component);
       this.current += 1;
+      ch = this.peek(component);
     }
 
     if (ch) ErrorReporter.report("Invalid range expression", this.expression);
 
-    const rangeValues = component.slice(0, this.current).split("-");
-    const values = [Number(rangeValues[0]), Number(rangeValues[1])];
-    this.addToken(component, ComponentType.Range, values);
+    this.addToken(component, ComponentType.Range, component);
+  }
+
+  private handleList(component: string) {
+    let ch = this.peek(component);
+
+    while (ch && this.isDigit(ch)) {
+      this.current += 1;
+      this.match(component, ",");
+      ch = this.peek(component);
+    }
+
+    this.addToken(component, ComponentType.List, component);
   }
 
   private isDigit(ch: string) {
