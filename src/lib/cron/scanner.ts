@@ -158,7 +158,6 @@ export class Scanner {
       this.current += 1;
     }
 
-    ch = this.peek(component);
     if (ch) ErrorReporter.report("Invalid range expression", this.expression);
 
     const rangeValues = component.slice(0, this.current);
