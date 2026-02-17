@@ -162,6 +162,11 @@ export class Scanner {
       ch = this.peek(component);
     }
 
+    if (this.match(component, "/")) {
+      this.handleStep(component);
+      return;
+    }
+
     if (ch) ErrorReporter.report("Invalid range expression", this.expression);
 
     this.addToken(component, ComponentType.Range, component);
