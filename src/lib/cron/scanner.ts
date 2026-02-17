@@ -38,7 +38,6 @@ class ErrorReporter {
 export class Scanner {
   private expression: string;
   private current: number = 0;
-  private expressionIdx: number = 0;
   private tokens: Token[] = [];
 
   constructor(expression: string) {
@@ -60,7 +59,6 @@ export class Scanner {
       this.current = 0;
 
       this.scanComponent(component);
-      this.expressionIdx += component.length + 1;
     }
 
     return this.tokens;
