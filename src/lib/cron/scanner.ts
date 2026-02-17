@@ -29,9 +29,16 @@ class Token {
   }
 }
 
+class ErrorReporter {
+  public static report(msg: string, expression: string) {
+    throw new Error(`${msg}: '${expression}'`);
+  }
+}
+
 export class Scanner {
   private expression: string;
   private current: number = 0;
+  private expressionIdx: number = 0;
   private tokens: Token[] = [];
 
   constructor(expression: string) {
@@ -53,6 +60,7 @@ export class Scanner {
       this.current = 0;
 
       this.scanComponent(component);
+      this.expressionIdx += component.length + 1;
     }
 
     return this.tokens;
@@ -77,7 +85,7 @@ export class Scanner {
           if (this.isDigit(currentCh)) {
             this.handleNumber(component);
           } else {
-            throw new Error("Invalid Cron expression");
+            ErrorReporter.report("Invalid Cron Expression", this.expression);
           }
 
           break;
@@ -152,8 +160,11 @@ export class Scanner {
       this.current += 1;
     }
 
-    const value = component.slice(0, this.current);
-    this.addToken(component, ComponentType.Range, value);
+    ch = this.peek(component);
+    if (ch) ErrorReporter.report("Invalid range expression", this.expression);
+
+    const rangeValues = component.slice(0, this.current);
+    this.addToken(component, ComponentType.Range, rangeValues);
   }
 
   private isDigit(ch: string) {
