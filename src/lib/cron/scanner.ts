@@ -181,6 +181,8 @@ export class Scanner {
       ch = this.peek(component);
     }
 
+    if (ch) ErrorReporter.report("Invalid list expression", this.expression);
+
     this.addToken(component, ComponentType.List, component);
   }
 
