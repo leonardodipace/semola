@@ -121,7 +121,6 @@ export class Scanner {
   }
 
   private handleNumber(component: string) {
-    let start = 0;
     let ch = this.peek(component);
 
     while (ch && this.isDigit(ch)) {
@@ -130,20 +129,34 @@ export class Scanner {
     }
 
     ch = this.peek(component);
-
     if (!ch) {
       this.addToken(component, ComponentType.Number, Number(component));
       return;
     }
 
-    if (this.isDigit(ch)) this.current += 1;
-    this.addToken(component, ComponentType.Number, Number(component));
+    if (this.isDigit(ch)) {
+      this.current += 1;
+      this.addToken(component, ComponentType.Number, Number(component));
+    }
+
+    if (this.match(component, "-")) {
+      this.handleRange(component);
+    }
+  }
+
+  private handleRange(component: string) {
+    let ch = this.peek(component);
+
+    while (ch && this.isDigit(ch)) {
+      ch = this.peek(component);
+      this.current += 1;
+    }
+
+    const value = component.slice(0, this.current);
+    this.addToken(component, ComponentType.Range, value);
   }
 
   private isDigit(ch: string) {
     return ch >= "0" && ch <= "9";
   }
 }
-
-// 11
-//  ^
