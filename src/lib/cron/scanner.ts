@@ -160,8 +160,9 @@ export class Scanner {
 
     if (ch) ErrorReporter.report("Invalid range expression", this.expression);
 
-    const rangeValues = component.slice(0, this.current);
-    this.addToken(component, ComponentType.Range, rangeValues);
+    const rangeValues = component.slice(0, this.current).split("-");
+    const values = [Number(rangeValues[0]), Number(rangeValues[1])];
+    this.addToken(component, ComponentType.Range, values);
   }
 
   private isDigit(ch: string) {
