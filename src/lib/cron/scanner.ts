@@ -49,8 +49,8 @@ export class Scanner {
 
     for (let idx = 0; idx < components.length; idx++) {
       const component = components[idx];
-      this.current = 0;
       if (!component) return [];
+      this.current = 0;
 
       this.scanComponent(component);
     }
@@ -125,20 +125,19 @@ export class Scanner {
     let ch = this.peek(component);
 
     while (ch && this.isDigit(ch)) {
+      ch = this.peek(component);
       this.current += 1;
     }
 
     ch = this.peek(component);
-    const isList = ch && ch === ",";
-    const isRange = ch && ch === "-";
 
-    // if (!ch) {
-    //   this.addToken(component, ComponentType.Number, Number(component));
-    //   return;
-    // }
+    if (!ch) {
+      this.addToken(component, ComponentType.Number, Number(component));
+      return;
+    }
 
-    // if (this.isDigit(ch)) this.current += 1;
-    // this.addToken(component, ComponentType.Number, Number(component));
+    if (this.isDigit(ch)) this.current += 1;
+    this.addToken(component, ComponentType.Number, Number(component));
   }
 
   private isDigit(ch: string) {
