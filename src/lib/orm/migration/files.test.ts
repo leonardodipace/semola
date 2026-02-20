@@ -68,6 +68,21 @@ describe("scanMigrationFiles", () => {
 });
 
 describe("loadMigration", () => {
+  test("returns error tuple when migration import throws", async () => {
+    const dir = await createTempDir();
+    const filePath = join(dir, "20260216120000_missing.ts");
+
+    const [error, migration] = await loadMigration({
+      version: "20260216120000",
+      name: "missing",
+      filePath,
+    });
+
+    expect(error).not.toBeNull();
+    expect(error?.type).toBe("InternalServerError");
+    expect(migration).toBeNull();
+  });
+
   test("loads migration with default export up/down", async () => {
     const dir = await createTempDir();
     const filePath = join(dir, "20260216120000_valid.ts");

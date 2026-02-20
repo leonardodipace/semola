@@ -6,7 +6,9 @@ import type { MigrationDefinition, MigrationFile } from "./types.js";
 const migrationRegex =
   /^(\d{14}(?:\d{6})?)_([a-zA-Z0-9_-]+)\.(ts|js|mts|mjs|cts|cjs)$/;
 
-const isMigrationDefinition = (value: unknown) => {
+const isMigrationDefinition = (
+  value: unknown,
+): value is MigrationDefinition => {
   if (typeof value !== "object" || value === null) {
     return false;
   }
@@ -73,8 +75,21 @@ export const scanMigrationFiles = async (dirPath: string) => {
 export const loadMigration = async (file: MigrationFile) => {
   // Convert file path to file:// URL for dynamic import
   const moduleUrl = pathToFileURL(file.filePath).href;
-  const mod = await import(`${moduleUrl}?cache=${Date.now()}`);
-  const definition = Reflect.get(mod, "default") as MigrationDefinition;
+  const [importError, mod] = await mightThrow(
+    import(`${moduleUrl}?cache=${Date.now()}`),
+  );
+  if (importError) {
+    return err(
+      "InternalServerError",
+      importError instanceof Error ? importError.message : String(importError),
+    );
+  }
+
+  if (!mod) {
+    return err("InternalServerError", "Failed to load migration module");
+  }
+
+  const definition = Reflect.get(mod, "default");
 
   if (!isMigrationDefinition(definition)) {
     return err(
