@@ -8,7 +8,13 @@ const isObject = (value: unknown) => {
   return typeof value === "object" && value !== null;
 };
 
-const isTableLike = (value: unknown) => {
+const isDialect = (
+  value: unknown,
+): value is "sqlite" | "mysql" | "postgres" => {
+  return value === "sqlite" || value === "mysql" || value === "postgres";
+};
+
+const isTableLike = (value: unknown): value is Table => {
   if (!isObject(value)) {
     return false;
   }
@@ -34,15 +40,12 @@ const validateConfig = (value: unknown) => {
   const url = Reflect.get(orm, "url");
   const schema = Reflect.get(orm, "schema");
 
-  if (dialect !== "sqlite" && dialect !== "mysql" && dialect !== "postgres") {
+  if (!isDialect(dialect)) {
     return err(
       "ValidationError",
       "Invalid semola config: orm.dialect is required",
     );
   }
-
-  // TypeScript now knows dialect is one of the three valid values
-  const validDialect = dialect as "sqlite" | "mysql" | "postgres";
 
   if (typeof url !== "string" || url.length === 0) {
     return err("ValidationError", "Invalid semola config: orm.url is required");
@@ -74,7 +77,7 @@ const validateConfig = (value: unknown) => {
 
   return ok({
     orm: {
-      dialect: validDialect,
+      dialect,
       url,
       schema: {
         path,
@@ -151,8 +154,15 @@ const toTableRecord = (value: unknown) => {
           "Schema export array must contain Table instances",
         );
       }
-      const table = entry as Table;
-      record[table.sqlName] = table;
+
+      if (entry.sqlName in record) {
+        return err(
+          "ValidationError",
+          `Schema export array contains duplicate table sqlName: ${entry.sqlName}`,
+        );
+      }
+
+      record[entry.sqlName] = entry;
     }
     return ok(record);
   }
@@ -172,7 +182,7 @@ const toTableRecord = (value: unknown) => {
         `Schema export field ${key} is not a Table instance`,
       );
     }
-    record[key] = entry as Table;
+    record[key] = entry;
   }
   return ok(record);
 };

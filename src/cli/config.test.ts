@@ -117,6 +117,33 @@ export default [
     expect(tables?.users?.sqlName).toBe("users");
   });
 
+  test("returns validation error when array export has duplicate sqlName", async () => {
+    const dir = await createTempDir();
+    const schemaPath = `${dir}/schema.ts`;
+
+    await Bun.write(
+      schemaPath,
+      `import { Table, number } from "${process.cwd()}/src/lib/orm/index.ts";
+
+export default [
+  new Table("users", {
+    id: number("id").primaryKey(),
+  }),
+  new Table("users", {
+    id: number("id").primaryKey(),
+  }),
+];
+`,
+    );
+
+    const [error] = await loadSchemaTables(schemaPath);
+
+    expect(error).not.toBeNull();
+    expect(error?.type).toBe("ValidationError");
+    expect(error?.message).toContain("duplicate table sqlName");
+    expect(error?.message).toContain("users");
+  });
+
   test("throws error when schema export is missing", async () => {
     const dir = await createTempDir();
     const schemaPath = `${dir}/schema.ts`;
