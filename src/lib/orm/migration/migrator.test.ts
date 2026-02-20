@@ -73,6 +73,79 @@ describe("Migration runtime functions", () => {
     orm.close();
   });
 
+  test("create generates unique, lexically ordered versions for same timestamp", async () => {
+    const dir = await createTempDir();
+    const migrationsDir = join(dir, "migrations");
+
+    const users = new Table("users", {
+      id: number("id").primaryKey(),
+      name: string("name").notNull(),
+    });
+
+    const posts = new Table("posts", {
+      id: number("id").primaryKey(),
+    });
+
+    const comments = new Table("comments", {
+      id: number("id").primaryKey(),
+    });
+
+    const orm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: { users },
+    });
+
+    const migrationOptions = {
+      orm,
+      migrationsDir,
+      migrationTable: "semola_migrations",
+    };
+
+    const [firstError, firstPath] = await createMigration({
+      ...migrationOptions,
+      name: "initial",
+      tables: { users },
+    });
+
+    expect(firstError).toBeNull();
+    expect(firstPath).toBeDefined();
+
+    const [secondError, secondPath] = await createMigration({
+      ...migrationOptions,
+      name: "add posts",
+      tables: { users, posts },
+    });
+
+    expect(secondError).toBeNull();
+    expect(secondPath).toBeDefined();
+
+    const [thirdError, thirdPath] = await createMigration({
+      ...migrationOptions,
+      name: "add comments",
+      tables: { users, posts, comments },
+    });
+
+    expect(thirdError).toBeNull();
+    expect(thirdPath).toBeDefined();
+
+    expect(firstPath).not.toBe(secondPath);
+    expect(secondPath).not.toBe(thirdPath);
+
+    const [scanError, files] = await getMigrationStatus(migrationOptions);
+    expect(scanError).toBeNull();
+    expect(files?.length).toBe(3);
+
+    const versions = files?.map((item) => item.version) ?? [];
+    expect(versions[0] && /^\d{20}$/.test(versions[0])).toBe(true);
+    expect(versions[1] && /^\d{20}$/.test(versions[1])).toBe(true);
+    expect(versions[2] && /^\d{20}$/.test(versions[2])).toBe(true);
+    expect(versions[0] && versions[1] && versions[0] < versions[1]).toBe(true);
+    expect(versions[1] && versions[2] && versions[1] < versions[2]).toBe(true);
+
+    orm.close();
+  });
+
   test("apply and rollback execute default-export migration", async () => {
     const dir = await createTempDir();
     const migrationsDir = join(dir, "migrations");

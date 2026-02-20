@@ -46,6 +46,25 @@ describe("scanMigrationFiles", () => {
     expect(files?.[1]?.version).toBe("20260216120100");
     expect(files?.[1]?.name).toBe("second");
   });
+
+  test("supports both legacy and extended versions and keeps lexical order", async () => {
+    const dir = await createTempDir();
+
+    await Bun.write(join(dir, "20260216120000_legacy.ts"), "");
+    await Bun.write(join(dir, "20260216120000123000_first.ts"), "");
+    await Bun.write(join(dir, "20260216120000123001_second.ts"), "");
+    await Bun.write(join(dir, "20260216120000123002_third.ts"), "");
+
+    const [error, files] = await scanMigrationFiles(dir);
+
+    expect(error).toBeNull();
+    expect(files).toBeDefined();
+    expect(files?.length).toBe(4);
+    expect(files?.[0]?.version).toBe("20260216120000");
+    expect(files?.[1]?.version).toBe("20260216120000123000");
+    expect(files?.[2]?.version).toBe("20260216120000123001");
+    expect(files?.[3]?.version).toBe("20260216120000123002");
+  });
 });
 
 describe("loadMigration", () => {

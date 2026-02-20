@@ -3,7 +3,8 @@ import { pathToFileURL } from "node:url";
 import { err, mightThrow, ok } from "../../errors/index.js";
 import type { MigrationDefinition, MigrationFile } from "./types.js";
 
-const migrationRegex = /^(\d{14})_([a-zA-Z0-9_-]+)\.(ts|js|mts|mjs|cts|cjs)$/;
+const migrationRegex =
+  /^(\d{14}(?:\d{6})?)_([a-zA-Z0-9_-]+)\.(ts|js|mts|mjs|cts|cjs)$/;
 
 const isMigrationDefinition = (value: unknown) => {
   if (typeof value !== "object" || value === null) {

@@ -50,7 +50,7 @@ const slugify = (value: string) => {
   return parts.join("_");
 };
 
-const timestamp = () => {
+const timestampWithMilliseconds = () => {
   const date = new Date();
   const year = String(date.getUTCFullYear());
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
@@ -58,7 +58,43 @@ const timestamp = () => {
   const hours = String(date.getUTCHours()).padStart(2, "0");
   const minutes = String(date.getUTCMinutes()).padStart(2, "0");
   const seconds = String(date.getUTCSeconds()).padStart(2, "0");
-  return `${year}${month}${day}${hours}${minutes}${seconds}`;
+  const milliseconds = String(date.getUTCMilliseconds()).padStart(3, "0");
+  return `${year}${month}${day}${hours}${minutes}${seconds}${milliseconds}`;
+};
+
+const VERSION_COUNTER_DIGITS = 3;
+
+let lastTimestampBase = "";
+let lastTimestampCounter = 0;
+
+const incrementVersion = (value: string) => {
+  const next = BigInt(value) + 1n;
+  return String(next).padStart(value.length, "0");
+};
+
+const createMigrationVersion = (lastVersion: string | null) => {
+  const timestampBase = timestampWithMilliseconds();
+
+  let counter = 0;
+  if (timestampBase === lastTimestampBase) {
+    counter = lastTimestampCounter + 1;
+  }
+
+  let version = `${timestampBase}${String(counter).padStart(VERSION_COUNTER_DIGITS, "0")}`;
+
+  if (lastVersion && version <= lastVersion) {
+    version = incrementVersion(lastVersion);
+  }
+
+  lastTimestampBase = version.slice(0, timestampBase.length);
+  const parsedCounter = Number(version.slice(-VERSION_COUNTER_DIGITS));
+  if (Number.isNaN(parsedCounter)) {
+    lastTimestampCounter = 0;
+  } else {
+    lastTimestampCounter = parsedCounter;
+  }
+
+  return version;
 };
 
 type MigrationRuntimeOptions = {
@@ -172,7 +208,7 @@ export const createMigration = async (
   }
 
   // Generate migration file
-  const version = timestamp();
+  const version = createMigrationVersion(lastEntry?.version ?? null);
   const filePath = resolve(migrationsDir, `${version}_${safeName}.ts`);
   const source = generateMigrationSource(up, down);
   const writeResult = await writeMigrationSource(filePath, source);
