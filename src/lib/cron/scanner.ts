@@ -53,11 +53,13 @@ class ErrorReporter {
 export class Scanner {
   private expression: string;
   private current: number;
+  private start: number;
   private tokens: Token[];
 
   constructor(expression: string) {
     this.expression = expression;
     this.current = 0;
+    this.start = 0;
     this.tokens = [];
   }
 
@@ -108,6 +110,8 @@ export class Scanner {
           }
           break;
         }
+        case ",":
+          break;
         default: {
           if (this.isDigit(currentCh)) {
             this.handleNumber(component);
@@ -147,15 +151,24 @@ export class Scanner {
 
   private handleStep(component: ComponentType) {
     const { field, content } = component;
-    const value = content.substring(this.current, content.length);
-    this.current += content.length;
-    this.addToken(content, ComponentEnum.Step, Number(value), field);
+    let ch = this.peek(content);
+
+    while (ch && this.isDigit(ch)) {
+      this.current += 1;
+      ch = this.peek(content);
+    }
+
+    const tokenContent = content.substring(this.start, this.current);
+    const slashIdx = tokenContent.indexOf("/");
+    const value = tokenContent.slice(slashIdx + 1);
+
+    this.addToken(tokenContent, ComponentEnum.Step, Number(value), field);
   }
 
   private handleNumber(component: ComponentType) {
     const { field, content } = component;
     let ch = this.peek(content);
-    let start = this.current - 1;
+    this.start = this.current - 1;
 
     while (ch && this.isDigit(ch)) {
       this.current += 1;
@@ -164,7 +177,7 @@ export class Scanner {
 
     if (!ch) {
       // Reached the end of the component
-      const item = content.substring(start);
+      const item = content.substring(this.start);
       this.addToken(item, ComponentEnum.Number, Number(item), field);
       return;
     }
@@ -179,7 +192,7 @@ export class Scanner {
       return;
     }
 
-    const item = content.substring(start, this.current - 1);
+    const item = content.substring(this.start, this.current);
     this.addToken(item, ComponentEnum.Number, Number(item), field);
   }
 
@@ -201,7 +214,8 @@ export class Scanner {
       ErrorReporter.report("Invalid range expression", this.expression);
     }
 
-    this.addToken(content, ComponentEnum.Range, content, field);
+    const tokenContent = content.substring(this.start, this.current);
+    this.addToken(tokenContent, ComponentEnum.Range, tokenContent, field);
   }
 
   private isDigit(ch: string) {
