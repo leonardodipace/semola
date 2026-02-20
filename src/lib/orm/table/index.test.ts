@@ -386,20 +386,20 @@ describe("Table - findMany with where clause", () => {
     expect(error).not.toBeNull();
     if (error && typeof error === "object" && "message" in error) {
       expect(error.message).toContain(
-        'Column "active" is not a primary key or unique column',
+        "findUnique requires a unique selector on a primary key or unique column",
       );
     }
     expect(user).toBeNull();
   });
 
-  test("findUnique should support composite unique lookups with multiple columns", async () => {
+  test("findUnique should reject composite unique lookups with multiple columns", async () => {
     const [error, user] = await orm.tables.users.findUnique({
       where: { id: 1, email: "alice@example.com" },
     });
     expect(error).not.toBeNull();
     if (error && typeof error === "object" && "message" in error) {
       expect(error.message).toContain(
-        "findUnique requires exactly one unique column in where clause",
+        "findUnique requires a unique selector with exactly one column",
       );
     }
     expect(user).toBeNull();

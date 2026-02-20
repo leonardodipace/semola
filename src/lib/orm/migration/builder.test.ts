@@ -154,7 +154,7 @@ describe("SchemaBuilder", () => {
     orm.close();
   });
 
-  test("rejects unsafe column identifier", async () => {
+  test("returns error for unsafe column identifier", async () => {
     const orm = new Orm({
       url: ":memory:",
       dialect: "sqlite",
@@ -167,11 +167,12 @@ describe("SchemaBuilder", () => {
       t.number("id").primaryKey();
     });
 
-    await expect(
-      schema.addColumn("users", (t) => {
-        t.string("email; DROP TABLE users; --");
-      }),
-    ).rejects.toThrow("Invalid SQL column name");
+    const [error] = await schema.addColumn("users", (t) => {
+      t.string("email; DROP TABLE users; --");
+    });
+
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain("Invalid SQL column name");
 
     orm.close();
   });

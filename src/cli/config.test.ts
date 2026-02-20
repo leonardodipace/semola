@@ -19,7 +19,7 @@ const createTempDir = async () => {
 };
 
 describe("loadSemolaConfig", () => {
-  test("throws error when config file is missing", async () => {
+  test("returns error when config file is missing", async () => {
     const dir = await createTempDir();
 
     const [error] = await loadSemolaConfig(dir);
@@ -51,7 +51,7 @@ describe("loadSemolaConfig", () => {
     expect(config?.orm.schema.path).toBe(`${dir}/src/db/schema.ts`);
   });
 
-  test("throws validation error for invalid config shape", async () => {
+  test("returns validation error for invalid config shape", async () => {
     const dir = await createTempDir();
 
     await Bun.write(
@@ -70,7 +70,7 @@ describe("loadSemolaConfig", () => {
     expect(error?.message).toContain("missing orm.schema section");
   });
 
-  test("throws explicit error for unsupported orm dialect", async () => {
+  test("returns explicit error for unsupported orm dialect", async () => {
     const dir = await createTempDir();
 
     await Bun.write(
@@ -219,7 +219,7 @@ export default [
     expect(error?.message).toContain("users");
   });
 
-  test("throws error when schema export is missing", async () => {
+  test("returns error when schema export is missing", async () => {
     const dir = await createTempDir();
     const schemaPath = `${dir}/schema.ts`;
 
@@ -230,7 +230,7 @@ export default [
     expect(error?.message).toContain("does not export tables");
   });
 
-  test("throws error when schema contains non-table values", async () => {
+  test("returns error when schema contains non-table values", async () => {
     const dir = await createTempDir();
     const schemaPath = `${dir}/schema.ts`;
 
