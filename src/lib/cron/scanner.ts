@@ -78,6 +78,7 @@ export class Scanner {
       if (!component) return [];
 
       this.current = 0;
+      this.start = 0;
       this.scanComponent(component);
     }
 
@@ -122,6 +123,8 @@ export class Scanner {
           break;
         }
       }
+
+      this.start = this.current;
     }
   }
 
