@@ -218,6 +218,14 @@ export class TableClient<T extends Table> {
     }
   }
 
+  private normalizeRelationKey(value: unknown) {
+    if (value instanceof Date) {
+      return value.getTime();
+    }
+
+    return value;
+  }
+
   private extractUniqueSelector(where: WhereClause<T>, operation: string) {
     const whereEntries: [string, unknown][] = Object.entries(where);
 
@@ -633,14 +641,16 @@ export class TableClient<T extends Table> {
           if (typeof record !== "object" || record === null) continue;
           const value = Reflect.get(record, relatedPk.key);
           if (value == null) continue;
-          relatedMap.set(value, record);
+          relatedMap.set(this.normalizeRelationKey(value), record);
         }
 
         // Attach loaded relations to rows
         for (const row of rows) {
           const fkValue = row[fkKey];
           row[relationName] =
-            fkValue != null ? relatedMap.get(fkValue) : undefined;
+            fkValue != null
+              ? relatedMap.get(this.normalizeRelationKey(fkValue))
+              : undefined;
         }
       } else if (relation.type === "many") {
         // many() relation: child has FK pointing to parent
@@ -717,12 +727,13 @@ export class TableClient<T extends Table> {
 
         for (const record of relatedRecords) {
           const fkValue = Reflect.get(record, fkKey);
+          const normalizedFkValue = this.normalizeRelationKey(fkValue);
 
-          if (!relatedMap.has(fkValue)) {
-            relatedMap.set(fkValue, []);
+          if (!relatedMap.has(normalizedFkValue)) {
+            relatedMap.set(normalizedFkValue, []);
           }
 
-          const match = relatedMap.get(fkValue);
+          const match = relatedMap.get(normalizedFkValue);
 
           if (match) match.push(record);
         }
@@ -730,7 +741,8 @@ export class TableClient<T extends Table> {
         // Attach loaded relations to rows
         for (const row of rows) {
           const parentId = row[parentPk.key];
-          row[relationName] = relatedMap.get(parentId) || [];
+          row[relationName] =
+            relatedMap.get(this.normalizeRelationKey(parentId)) || [];
         }
       }
     }

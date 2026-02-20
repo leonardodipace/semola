@@ -871,6 +871,100 @@ describe("Table - relations with custom primary key", () => {
   });
 });
 
+describe("Table - relations with date primary keys", () => {
+  const eventsTable = new Table("test_events", {
+    occurredAt: date("occurred_at").primaryKey(),
+    name: string("name").notNull(),
+  });
+
+  const logsTable = new Table("test_event_logs", {
+    id: number("id").primaryKey(),
+    occurredAt: date("occurred_at").notNull(),
+    message: string("message").notNull(),
+  });
+
+  const dateRelationOrm = new Orm({
+    url: ":memory:",
+    tables: {
+      events: eventsTable,
+      logs: logsTable,
+    },
+    relations: {
+      events: {
+        logs: many("occurredAt", () => logsTable),
+      },
+      logs: {
+        event: one("occurredAt", () => eventsTable),
+      },
+    },
+  });
+
+  const occurredAt = new Date("2026-02-20T10:20:30.000Z");
+
+  beforeAll(async () => {
+    await dateRelationOrm.sql`DROP TABLE IF EXISTS test_event_logs`;
+    await dateRelationOrm.sql`DROP TABLE IF EXISTS test_events`;
+
+    await dateRelationOrm.sql`
+      CREATE TABLE test_events (
+        occurred_at INTEGER PRIMARY KEY,
+        name TEXT NOT NULL
+      )
+    `;
+
+    await dateRelationOrm.sql`
+      CREATE TABLE test_event_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        occurred_at INTEGER NOT NULL,
+        message TEXT NOT NULL
+      )
+    `;
+
+    await dateRelationOrm.tables.events.create({
+      occurredAt,
+      name: "Deploy",
+    });
+
+    await dateRelationOrm.tables.logs.create({
+      occurredAt,
+      message: "Log 1",
+    });
+
+    await dateRelationOrm.tables.logs.create({
+      occurredAt,
+      message: "Log 2",
+    });
+  });
+
+  afterAll(async () => {
+    await dateRelationOrm.sql`DROP TABLE IF EXISTS test_event_logs`;
+    await dateRelationOrm.sql`DROP TABLE IF EXISTS test_events`;
+    dateRelationOrm.close();
+  });
+
+  test("include should load one() relation when fk/pk are dates", async () => {
+    const [error, log] = await dateRelationOrm.tables.logs.findFirst({
+      include: { event: true },
+    });
+
+    expect(error).toBeNull();
+    expect(log?.event).toBeDefined();
+    expect(log?.event?.name).toBe("Deploy");
+    expect(log?.event?.occurredAt).toBeInstanceOf(Date);
+  });
+
+  test("include should load many() relation when fk/pk are dates", async () => {
+    const [error, event] = await dateRelationOrm.tables.events.findFirst({
+      include: { logs: true },
+    });
+
+    expect(error).toBeNull();
+    expect(event?.logs).toBeDefined();
+    expect(event?.logs.length).toBe(2);
+    expect(event?.logs[0]?.occurredAt).toBeInstanceOf(Date);
+  });
+});
+
 describe("Table - MySQL dialect compatibility", () => {
   // These tests use SQLite with dialect="mysql" to verify that MySQL's lack of RETURNING support
   // is handled correctly by using SELECT-after-UPDATE and SELECT-before-DELETE patterns.
