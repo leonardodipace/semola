@@ -261,9 +261,9 @@ describe("SqliteDialect - pagination", () => {
     expect(result).toBeNull();
   });
 
-  test("should return null when offset is 0", () => {
+  test("should build OFFSET clause when offset is 0", () => {
     const result = dialect.buildPagination(undefined, 0);
-    expect(result).toBeNull();
+    expect(result).toBe("LIMIT -1 OFFSET 0");
   });
 
   test("buildCreateTable returns error for unsupported column type", () => {

@@ -199,7 +199,7 @@ export class SqliteDialect implements Dialect {
       return `LIMIT ${limit}`;
     }
 
-    if (offset !== undefined && offset > 0) {
+    if (offset !== undefined) {
       // SQLite uses LIMIT -1 to mean "no limit"
       return `LIMIT -1 OFFSET ${offset}`;
     }
