@@ -113,11 +113,11 @@ const getRuntimeContext = (options: MigrationRuntimeOptions) => {
 
 const runInTransaction = async (
   orm: Orm<Record<string, Table>>,
-  run: () => Promise<void>,
+  run: (tx: Bun.SQL) => Promise<void>,
 ) => {
   try {
-    await orm.sql.begin(async () => {
-      await run();
+    await orm.sql.begin(async (tx) => {
+      await run(tx);
     });
     return ok(undefined);
   } catch (error) {
@@ -306,10 +306,11 @@ export const applyMigrations = async (options: MigrationRuntimeOptions) => {
     if (!migration) {
       return err("InternalServerError", "Failed to load migration");
     }
-    const [txError] = await runInTransaction(runtime.orm, async () => {
+    const [txError] = await runInTransaction(runtime.orm, async (tx) => {
       const schema = new SchemaBuilder(
         runtime.orm,
         runtime.orm.getDialectName(),
+        tx,
       );
       await migration.up(schema);
       const [recordError] = await recordMigration(
@@ -317,6 +318,7 @@ export const applyMigrations = async (options: MigrationRuntimeOptions) => {
         runtime.migrationTable,
         migration.version,
         migration.name,
+        tx,
       );
       if (recordError) {
         throw new Error(
@@ -398,13 +400,18 @@ export const rollbackMigration = async (options: MigrationRuntimeOptions) => {
   if (!migration) {
     return err("InternalServerError", "Failed to load migration");
   }
-  const [txError] = await runInTransaction(runtime.orm, async () => {
-    const schema = new SchemaBuilder(runtime.orm, runtime.orm.getDialectName());
+  const [txError] = await runInTransaction(runtime.orm, async (tx) => {
+    const schema = new SchemaBuilder(
+      runtime.orm,
+      runtime.orm.getDialectName(),
+      tx,
+    );
     await migration.down(schema);
     const [removeError] = await removeMigration(
       runtime.orm,
       runtime.migrationTable,
       migration.version,
+      tx,
     );
     if (removeError) {
       throw new Error(

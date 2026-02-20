@@ -7,7 +7,6 @@ import type {
   DeleteOptions,
   Dialect,
   InsertOptions,
-  QueryResult,
   SelectOptions,
   UpdateOptions,
 } from "./types.js";
@@ -75,7 +74,7 @@ export class PostgresDialect implements Dialect {
     tableName: string,
     columns: string[],
     options: SelectOptions,
-  ): QueryResult {
+  ) {
     const parts: string[] = [];
     const params: unknown[] = [];
 
@@ -101,7 +100,7 @@ export class PostgresDialect implements Dialect {
     return { sql, params };
   }
 
-  public buildInsert(options: InsertOptions): QueryResult {
+  public buildInsert(options: InsertOptions) {
     const columns = Object.keys(options.values);
     const placeholders = columns.map((_, i) => `$${i + 1}`).join(", ");
     const columnList = columns
@@ -114,7 +113,7 @@ export class PostgresDialect implements Dialect {
     return { sql, params };
   }
 
-  public buildUpdate(options: UpdateOptions): QueryResult {
+  public buildUpdate(options: UpdateOptions) {
     const columns = Object.keys(options.values);
     const setClause = columns
       .map((col, i) => `${this.quoteIdentifier(col)} = $${i + 1}`)
@@ -137,7 +136,7 @@ export class PostgresDialect implements Dialect {
     return { sql, params };
   }
 
-  public buildDelete(options: DeleteOptions): QueryResult {
+  public buildDelete(options: DeleteOptions) {
     const whereClause = this.toPostgresPlaceholders(
       options.where.text,
       options.where.values.length,

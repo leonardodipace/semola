@@ -7,7 +7,6 @@ import type {
   DeleteOptions,
   Dialect,
   InsertOptions,
-  QueryResult,
   SelectOptions,
   UpdateOptions,
 } from "./types.js";
@@ -64,7 +63,7 @@ export class SqliteDialect implements Dialect {
     tableName: string,
     columns: string[],
     options: SelectOptions,
-  ): QueryResult {
+  ) {
     const parts: string[] = [];
     const params: unknown[] = [];
 
@@ -92,7 +91,7 @@ export class SqliteDialect implements Dialect {
     };
   }
 
-  public buildInsert(options: InsertOptions): QueryResult {
+  public buildInsert(options: InsertOptions) {
     const columns = Object.keys(options.values);
     const placeholders = columns.map(() => "?").join(", ");
     const columnList = columns
@@ -105,7 +104,7 @@ export class SqliteDialect implements Dialect {
     return { sql, params };
   }
 
-  public buildUpdate(options: UpdateOptions): QueryResult {
+  public buildUpdate(options: UpdateOptions) {
     const columns = Object.keys(options.values);
     const setClause = columns
       .map((col) => `${this.quoteIdentifier(col)} = ?`)
@@ -117,7 +116,7 @@ export class SqliteDialect implements Dialect {
     return { sql, params };
   }
 
-  public buildDelete(options: DeleteOptions): QueryResult {
+  public buildDelete(options: DeleteOptions) {
     const sql = `DELETE FROM ${this.quoteIdentifier(options.tableName)} WHERE ${options.where.text} RETURNING *`;
     const params = [...options.where.values];
 
@@ -175,7 +174,7 @@ export class SqliteDialect implements Dialect {
     );
   }
 
-  public convertBooleanValue(value: unknown): boolean {
+  public convertBooleanValue(value: unknown) {
     // SQLite stores booleans as 0/1
     if (typeof value === "number") {
       return value === 1;
@@ -187,7 +186,7 @@ export class SqliteDialect implements Dialect {
     return false;
   }
 
-  public buildPagination(limit?: number, offset?: number): string | null {
+  public buildPagination(limit?: number, offset?: number) {
     if (limit === undefined && offset === undefined) {
       return null;
     }

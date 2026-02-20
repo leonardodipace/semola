@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { err, ok } from "../lib/errors/index.js";
+import { err, mightThrow, ok } from "../lib/errors/index.js";
 import type { Table } from "../lib/orm/table/index.js";
 
 const isObject = (value: unknown) => {
@@ -103,17 +103,22 @@ const tryResolveConfigFile = async (cwd: string) => {
 
   for (const candidate of candidates) {
     const fullPath = resolve(cwd, candidate);
-    try {
-      const statResult = await stat(fullPath);
-      if (statResult.isFile()) {
-        return fullPath;
-      }
-    } catch {
-      // File doesn't exist, continue to next candidate
+    const [statError, statResult] = await mightThrow(stat(fullPath));
+    if (statError || !statResult) {
+      continue;
+    }
+
+    if (statResult.isFile()) {
+      return fullPath;
     }
   }
 
   return null;
+};
+
+const importModule = async (filePath: string) => {
+  const moduleUrl = pathToFileURL(filePath).href;
+  return await mightThrow(import(`${moduleUrl}?cache=${Date.now()}`));
 };
 
 export const loadSemolaConfig = async (cwd: string) => {
@@ -123,32 +128,30 @@ export const loadSemolaConfig = async (cwd: string) => {
     return err("NotFoundError", "Missing semola config file");
   }
 
-  try {
-    // Convert file path to file:// URL for dynamic import
-    const moduleUrl = pathToFileURL(filePath).href;
-    const mod = await import(`${moduleUrl}?cache=${Date.now()}`);
-    const raw = Reflect.get(mod, "default") ?? mod;
-    const [configError, config] = validateConfig(raw);
-
-    if (configError) {
-      return err("ValidationError", configError.message);
-    }
-
-    return ok({
-      orm: {
-        ...config.orm,
-        schema: {
-          ...config.orm.schema,
-          path: resolve(cwd, config.orm.schema.path),
-        },
-      },
-    });
-  } catch (error) {
+  const [importError, mod] = await importModule(filePath);
+  if (importError || !mod) {
     return err(
       "InternalServerError",
-      error instanceof Error ? error.message : String(error),
+      importError instanceof Error ? importError.message : String(importError),
     );
   }
+
+  const raw = Reflect.get(mod, "default") ?? mod;
+  const [configError, config] = validateConfig(raw);
+
+  if (configError) {
+    return err("ValidationError", configError.message);
+  }
+
+  return ok({
+    orm: {
+      ...config.orm,
+      schema: {
+        ...config.orm.schema,
+        path: resolve(cwd, config.orm.schema.path),
+      },
+    },
+  });
 };
 
 const toTableRecord = (value: unknown) => {
@@ -198,33 +201,31 @@ export const loadSchemaTables = async (
   schemaPath: string,
   exportName?: string,
 ) => {
-  try {
-    // Convert file path to file:// URL for dynamic import
-    const moduleUrl = pathToFileURL(schemaPath).href;
-    const mod = await import(`${moduleUrl}?cache=${Date.now()}`);
-    const key = exportName ?? "tables";
-
-    // Check if the named export exists; if not, fall back to default
-    const exportedValue =
-      key in mod ? Reflect.get(mod, key) : Reflect.get(mod, "default");
-
-    if (exportedValue === undefined) {
-      return err(
-        "NotFoundError",
-        `Schema module does not export ${key} or a default export with tables`,
-      );
-    }
-
-    const [tableError, tables] = toTableRecord(exportedValue);
-    if (tableError) {
-      return err("ValidationError", tableError.message);
-    }
-
-    return ok(tables);
-  } catch (error) {
+  const [importError, mod] = await importModule(schemaPath);
+  if (importError || !mod) {
     return err(
       "InternalServerError",
-      error instanceof Error ? error.message : String(error),
+      importError instanceof Error ? importError.message : String(importError),
     );
   }
+
+  const key = exportName ?? "tables";
+
+  // Check if the named export exists; if not, fall back to default
+  const exportedValue =
+    key in mod ? Reflect.get(mod, key) : Reflect.get(mod, "default");
+
+  if (exportedValue === undefined) {
+    return err(
+      "NotFoundError",
+      `Schema module does not export ${key} or a default export with tables`,
+    );
+  }
+
+  const [tableError, tables] = toTableRecord(exportedValue);
+  if (tableError) {
+    return err("ValidationError", tableError.message);
+  }
+
+  return ok(tables);
 };

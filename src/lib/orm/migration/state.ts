@@ -98,6 +98,7 @@ export const recordMigration = async (
   tableName: string,
   version: string,
   name: string,
+  sqlExecutor?: Bun.SQL,
 ) => {
   const [error, safeTableName] = toSqlIdentifier(tableName, "table name");
   if (error) {
@@ -105,9 +106,10 @@ export const recordMigration = async (
   }
 
   try {
+    const sql = sqlExecutor ?? orm.sql;
     const appliedAt = new Date().toISOString();
-    await orm.sql`
-      INSERT INTO ${orm.sql(safeTableName)} (version, name, applied_at)
+    await sql`
+      INSERT INTO ${sql(safeTableName)} (version, name, applied_at)
       VALUES (${version}, ${name}, ${appliedAt})
     `;
     return ok(true);
@@ -121,6 +123,7 @@ export const removeMigration = async (
   orm: Orm<Record<string, Table>>,
   tableName: string,
   version: string,
+  sqlExecutor?: Bun.SQL,
 ) => {
   const [error, safeTableName] = toSqlIdentifier(tableName, "table name");
   if (error) {
@@ -128,8 +131,9 @@ export const removeMigration = async (
   }
 
   try {
-    await orm.sql`
-      DELETE FROM ${orm.sql(safeTableName)}
+    const sql = sqlExecutor ?? orm.sql;
+    await sql`
+      DELETE FROM ${sql(safeTableName)}
       WHERE version = ${version}
     `;
     return ok(true);

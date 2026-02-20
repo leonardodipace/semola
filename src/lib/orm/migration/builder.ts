@@ -281,14 +281,20 @@ const normalizeColumn = (build: (t: TableBuilder) => unknown): AnyColumn => {
 export class SchemaBuilder {
   private readonly orm: Orm<Record<string, Table>>;
   private readonly dialect: OrmDialect;
+  private readonly sql: Bun.SQL;
 
-  public constructor(orm: Orm<Record<string, Table>>, dialect: OrmDialect) {
+  public constructor(
+    orm: Orm<Record<string, Table>>,
+    dialect: OrmDialect,
+    sqlExecutor?: Bun.SQL,
+  ) {
     this.orm = orm;
     this.dialect = dialect;
+    this.sql = sqlExecutor ?? orm.sql;
   }
 
   private async execute(sql: string) {
-    await this.orm.sql.unsafe(sql);
+    await this.sql.unsafe(sql);
   }
 
   public async createTable(name: string, build: (t: TableBuilder) => unknown) {
@@ -446,29 +452,37 @@ export class SchemaBuilder {
       }
 
       // Fallback for other dialects
-      const typeSql = sqlType(this.dialect, column.columnKind);
-      await this.execute(
-        `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} TYPE ${typeSql}`,
-      );
+      await this.execute("BEGIN");
+      try {
+        const typeSql = sqlType(this.dialect, column.columnKind);
+        await this.execute(
+          `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} TYPE ${typeSql}`,
+        );
 
-      if (column.meta.notNull) {
-        await this.execute(
-          `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET NOT NULL`,
-        );
-      } else {
-        await this.execute(
-          `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP NOT NULL`,
-        );
-      }
+        if (column.meta.notNull) {
+          await this.execute(
+            `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET NOT NULL`,
+          );
+        } else {
+          await this.execute(
+            `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP NOT NULL`,
+          );
+        }
 
-      if (column.meta.hasDefault && column.defaultValue !== undefined) {
-        await this.execute(
-          `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET DEFAULT ${quoteValue(this.dialect, column.columnKind, column.defaultValue)}`,
-        );
-      } else {
-        await this.execute(
-          `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP DEFAULT`,
-        );
+        if (column.meta.hasDefault && column.defaultValue !== undefined) {
+          await this.execute(
+            `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET DEFAULT ${quoteValue(this.dialect, column.columnKind, column.defaultValue)}`,
+          );
+        } else {
+          await this.execute(
+            `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP DEFAULT`,
+          );
+        }
+
+        await this.execute("COMMIT");
+      } catch (innerError) {
+        await this.execute("ROLLBACK");
+        throw innerError;
       }
       return ok(true);
     } catch (e) {
