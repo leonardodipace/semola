@@ -306,9 +306,11 @@ export const applyMigrations = async (options: MigrationRuntimeOptions) => {
     if (!migration) {
       return err("InternalServerError", "Failed to load migration");
     }
-    const schema = new SchemaBuilder(runtime.orm, runtime.orm.getDialectName());
-
     const [txError] = await runInTransaction(runtime.orm, async () => {
+      const schema = new SchemaBuilder(
+        runtime.orm,
+        runtime.orm.getDialectName(),
+      );
       await migration.up(schema);
       const [recordError] = await recordMigration(
         runtime.orm,
@@ -396,9 +398,8 @@ export const rollbackMigration = async (options: MigrationRuntimeOptions) => {
   if (!migration) {
     return err("InternalServerError", "Failed to load migration");
   }
-  const schema = new SchemaBuilder(runtime.orm, runtime.orm.getDialectName());
-
   const [txError] = await runInTransaction(runtime.orm, async () => {
+    const schema = new SchemaBuilder(runtime.orm, runtime.orm.getDialectName());
     await migration.down(schema);
     const [removeError] = await removeMigration(
       runtime.orm,

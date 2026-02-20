@@ -11,7 +11,7 @@ import type { OrmDialect, OrmOptions, TableClients } from "./types.js";
 
 export type { OrmOptions, TableClients } from "./types.js";
 
-const createDialect = (name: OrmDialect): Dialect => {
+const createDialect = (name: OrmDialect) => {
   if (name === "postgres") {
     return new PostgresDialect();
   }
@@ -30,7 +30,7 @@ const bindTables = <
   dialect: Dialect,
   connectionUrl: string,
   relations?: Relations,
-): TableClients<Tables, Relations> => {
+) => {
   const result: Record<string, TableClient<Table>> = {};
   const tableNameMap = new Map<Table, string>();
 
@@ -63,9 +63,6 @@ const bindTables = <
     result[key] = client;
   }
 
-  // TypeScript cannot verify that the dynamically built object matches the mapped
-  // type TableClients<Tables, Relations>. At runtime, we guarantee every table key
-  // has been processed and added to result with the correct client type.
   return result as TableClients<Tables, Relations>;
 };
 

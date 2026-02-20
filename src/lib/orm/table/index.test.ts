@@ -847,7 +847,7 @@ describe("Table - relations with custom primary key", () => {
   afterAll(async () => {
     await customOrm.sql`DROP TABLE IF EXISTS test_messages`;
     await customOrm.sql`DROP TABLE IF EXISTS test_accounts`;
-    customOrm.close();
+    await customOrm.close();
   });
 
   test("include should use custom primary key for one()", async () => {
@@ -939,7 +939,7 @@ describe("Table - relations with date primary keys", () => {
   afterAll(async () => {
     await dateRelationOrm.sql`DROP TABLE IF EXISTS test_event_logs`;
     await dateRelationOrm.sql`DROP TABLE IF EXISTS test_events`;
-    dateRelationOrm.close();
+    await dateRelationOrm.close();
   });
 
   test("include should load one() relation when fk/pk are dates", async () => {
@@ -1021,7 +1021,7 @@ describe("Table - MySQL dialect compatibility", () => {
     expect(findError).toBeNull();
     expect(found?.name).toBe("Updated Name");
 
-    mysqlOrm.close();
+    await mysqlOrm.close();
   });
 
   test("create works correctly with MySQL dialect (reselect inserted row)", async () => {
@@ -1053,7 +1053,7 @@ describe("Table - MySQL dialect compatibility", () => {
     expect(created?.name).toBe("Created via mysql dialect");
     expect(created?.email).toBe("created-mysql@test.com");
 
-    mysqlOrm.close();
+    await mysqlOrm.close();
   });
 
   test("update with multiple fields works correctly with MySQL dialect", async () => {
@@ -1097,7 +1097,7 @@ describe("Table - MySQL dialect compatibility", () => {
     expect(updated?.email).toBe("new@test.com");
     expect(updated?.active).toBe(false);
 
-    mysqlOrm.close();
+    await mysqlOrm.close();
   });
 
   test("delete works correctly with MySQL dialect (SELECT before DELETE)", async () => {
@@ -1149,7 +1149,7 @@ describe("Table - MySQL dialect compatibility", () => {
     expect(findError).toBeNull();
     expect(found).toBeNull();
 
-    mysqlOrm.close();
+    await mysqlOrm.close();
   });
 
   test("delete using unique selector works with MySQL dialect", async () => {
@@ -1187,7 +1187,7 @@ describe("Table - MySQL dialect compatibility", () => {
     expect(deleted?.email).toBe("user1@test.com");
     expect(deleted?.active).toBe(false);
 
-    mysqlOrm.close();
+    await mysqlOrm.close();
   });
 
   test("dialect property correctly identifies MySQL", async () => {
@@ -1214,9 +1214,9 @@ describe("Table - MySQL dialect compatibility", () => {
     expect(postgresOrm.getDialectName()).toBe("postgres");
     expect(mysqlOrm.getDialectName()).toBe("mysql");
 
-    sqliteOrm.close();
-    postgresOrm.close();
-    mysqlOrm.close();
+    await sqliteOrm.close();
+    await postgresOrm.close();
+    await mysqlOrm.close();
   });
 
   test("MySQL update returns correct data when row matches where clause", async () => {
@@ -1255,7 +1255,7 @@ describe("Table - MySQL dialect compatibility", () => {
     expect(updated?.name).toBe("Bob");
     expect(updated?.active).toBe(true);
 
-    mysqlOrm.close();
+    await mysqlOrm.close();
   });
 
   test("MySQL update reselect works when filtered unique field changes", async () => {
@@ -1296,7 +1296,7 @@ describe("Table - MySQL dialect compatibility", () => {
     expect(findError).toBeNull();
     expect(found?.name).toBe("Bob Updated");
 
-    mysqlOrm.close();
+    await mysqlOrm.close();
   });
 });
 
@@ -1323,7 +1323,7 @@ describe("Table - date normalization", () => {
 
   afterAll(async () => {
     await dateOrm.sql`DROP TABLE IF EXISTS test_dates`;
-    dateOrm.close();
+    await dateOrm.close();
   });
 
   test("should normalize sqlite date writes and reads as Date", async () => {
@@ -1358,5 +1358,5 @@ describe("Table - date normalization", () => {
 afterAll(async () => {
   await orm.sql`DROP TABLE IF EXISTS test_posts`;
   await orm.sql`DROP TABLE IF EXISTS test_users`;
-  orm.close();
+  await orm.close();
 });
