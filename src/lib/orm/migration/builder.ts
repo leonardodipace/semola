@@ -57,6 +57,41 @@ class ColumnBuilder<Kind extends ColumnKind> {
 
 class TableBuilder {
   private readonly columnsMap: Record<string, AnyColumn> = {};
+  private _error: { type: string; message: string } | null = null;
+
+  private setError(error: { type: string; message: string }) {
+    if (!this._error) {
+      this._error = error;
+    }
+  }
+
+  private createNoopBuilder<Kind extends ColumnKind>(
+    column: Column<Kind, ColumnMeta>,
+  ) {
+    return new ColumnBuilder(column, () => {});
+  }
+
+  private buildColumn<Kind extends ColumnKind>(
+    sqlName: string,
+    factory: (safeName: string) => Column<Kind, ColumnMeta>,
+  ) {
+    const [error, safeName] = toSqlIdentifier(sqlName, "column name");
+    if (error || !safeName) {
+      this.setError(
+        error ?? {
+          type: "ValidationError",
+          message: `Invalid column: ${sqlName}`,
+        },
+      );
+      return this.createNoopBuilder(factory("invalid_column"));
+    }
+
+    if (this._error) {
+      return this.createNoopBuilder(factory(safeName));
+    }
+
+    return this.add(factory(safeName));
+  }
 
   private add<Kind extends ColumnKind>(column: Column<Kind, ColumnMeta>) {
     return new ColumnBuilder(column, (updated) => {
@@ -65,59 +100,35 @@ class TableBuilder {
   }
 
   public number(sqlName: string) {
-    const [error, safeName] = toSqlIdentifier(sqlName, "column name");
-    if (error) {
-      throw new Error(error.message);
-    }
-    return this.add(number(safeName));
+    return this.buildColumn(sqlName, number);
   }
 
   public string(sqlName: string) {
-    const [error, safeName] = toSqlIdentifier(sqlName, "column name");
-    if (error) {
-      throw new Error(error.message);
-    }
-    return this.add(string(safeName));
+    return this.buildColumn(sqlName, string);
   }
 
   public boolean(sqlName: string) {
-    const [error, safeName] = toSqlIdentifier(sqlName, "column name");
-    if (error) {
-      throw new Error(error.message);
-    }
-    return this.add(boolean(safeName));
+    return this.buildColumn(sqlName, boolean);
   }
 
   public date(sqlName: string) {
-    const [error, safeName] = toSqlIdentifier(sqlName, "column name");
-    if (error) {
-      throw new Error(error.message);
-    }
-    return this.add(date(safeName));
+    return this.buildColumn(sqlName, date);
   }
 
   public json(sqlName: string) {
-    const [error, safeName] = toSqlIdentifier(sqlName, "column name");
-    if (error) {
-      throw new Error(error.message);
-    }
-    return this.add(json(safeName));
+    return this.buildColumn(sqlName, json);
   }
 
   public jsonb(sqlName: string) {
-    const [error, safeName] = toSqlIdentifier(sqlName, "column name");
-    if (error) {
-      throw new Error(error.message);
-    }
-    return this.add(jsonb(safeName));
+    return this.buildColumn(sqlName, jsonb);
   }
 
   public uuid(sqlName: string) {
-    const [error, safeName] = toSqlIdentifier(sqlName, "column name");
-    if (error) {
-      throw new Error(error.message);
-    }
-    return this.add(uuid(safeName));
+    return this.buildColumn(sqlName, uuid);
+  }
+
+  public get error() {
+    return this._error;
   }
 
   public get columns() {
@@ -290,6 +301,10 @@ const normalizeColumn = (build: (t: TableBuilder) => unknown) => {
     return err("ValidationError", message);
   }
 
+  if (tableBuilder.error) {
+    return err(tableBuilder.error.type, tableBuilder.error.message);
+  }
+
   const values = Object.values(tableBuilder.columns);
 
   if (values.length === 0) {
@@ -349,6 +364,10 @@ export class SchemaBuilder {
       const message =
         buildError instanceof Error ? buildError.message : String(buildError);
       return err("ValidationError", message);
+    }
+
+    if (tableBuilder.error) {
+      return err(tableBuilder.error.type, tableBuilder.error.message);
     }
 
     const table = new Table(safeTableName, tableBuilder.columns);

@@ -3,7 +3,7 @@ import { Orm } from "../core/index.js";
 import type { Table } from "../table/index.js";
 import { SchemaBuilder } from "./builder.js";
 
-const hasColumn = (rows: unknown, colName: string): boolean => {
+const hasColumn = (rows: unknown, colName: string) => {
   if (!Array.isArray(rows)) return false;
   return rows.some(
     (row) =>
@@ -41,7 +41,7 @@ describe("SchemaBuilder", () => {
     await schema.dropTable("users");
 
     expect(await tableExists(orm, "users")).toBe(false);
-    orm.close();
+    await orm.close();
   });
 
   test("addColumn and dropColumn", async () => {
@@ -72,7 +72,7 @@ describe("SchemaBuilder", () => {
     const hasDroppedColumn = hasColumn(afterDropRows, "email");
 
     expect(hasDroppedColumn).toBe(false);
-    orm.close();
+    await orm.close();
   });
 
   test("createIndex and dropIndex", async () => {
@@ -105,7 +105,7 @@ describe("SchemaBuilder", () => {
     const hasIndexAfter = hasColumn(indexesAfter, "users_email_idx");
 
     expect(hasIndexAfter).toBe(false);
-    orm.close();
+    await orm.close();
   });
 
   test("alterColumn throws on sqlite", async () => {
@@ -129,7 +129,7 @@ describe("SchemaBuilder", () => {
     expect(error).not.toBeNull();
     expect(error?.message).toContain("alterColumn is not supported for sqlite");
 
-    orm.close();
+    await orm.close();
   });
 
   test("rejects unsafe table identifier", async () => {
@@ -151,7 +151,7 @@ describe("SchemaBuilder", () => {
     expect(error).not.toBeNull();
     expect(error?.message).toContain("Invalid SQL table name");
 
-    orm.close();
+    await orm.close();
   });
 
   test("returns error for unsafe column identifier", async () => {
@@ -174,7 +174,7 @@ describe("SchemaBuilder", () => {
     expect(error).not.toBeNull();
     expect(error?.message).toContain("Invalid SQL column name");
 
-    orm.close();
+    await orm.close();
   });
 
   test("rejects unsafe index identifier", async () => {
@@ -198,7 +198,7 @@ describe("SchemaBuilder", () => {
     expect(error).not.toBeNull();
     expect(error?.message).toContain("Invalid SQL index name");
 
-    orm.close();
+    await orm.close();
   });
 
   test("formatDefaultValue handles circular JSON references", async () => {
@@ -233,7 +233,7 @@ describe("SchemaBuilder", () => {
     const rows = await orm.sql.unsafe("PRAGMA table_info('test')");
     expect(hasColumn(rows, "data")).toBe(true);
 
-    orm.close();
+    await orm.close();
   });
 
   test("createIndex omits IF NOT EXISTS for MySQL", async () => {
@@ -263,7 +263,7 @@ describe("SchemaBuilder", () => {
 
     expect(error).not.toBeNull();
 
-    orm.close();
+    await orm.close();
   });
 
   test("dropIndex throws for MySQL without tableName", async () => {
@@ -289,6 +289,6 @@ describe("SchemaBuilder", () => {
       "tableName is required for DROP INDEX on mysql",
     );
 
-    orm.close();
+    await orm.close();
   });
 });
