@@ -463,6 +463,19 @@ describe("Cache", () => {
       expect(redis.getStore().get("key")).toBe("custom:John");
     });
 
+    test("should allow custom serializer to return empty string", async () => {
+      const redis = createMockRedis();
+      const cache = new Cache<string>({
+        redis,
+        serializer: () => "",
+      });
+
+      const [error, data] = await cache.set("key", "value");
+      expect(error).toBeNull();
+      expect(data).toBe("value");
+      expect(redis.getStore().get("key")).toBe("");
+    });
+
     test("should use custom deserializer on get", async () => {
       const redis = createMockRedis();
       const cache = new Cache<{ name: string }>({

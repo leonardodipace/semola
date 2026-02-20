@@ -15,6 +15,8 @@ import { Cache } from "semola/cache";
 Creates a new cache instance.
 
 ```typescript
+type CacheError = "CacheError" | "InvalidTTLError";
+
 type CacheOptions<T> = {
   redis: Bun.RedisClient;
   ttl?: number | ((key: string, value: T) => number); // TTL in ms, or per-entry function
@@ -22,7 +24,7 @@ type CacheOptions<T> = {
   prefix?: string; // Key prefix, e.g. "users" -> "users:key"
   serializer?: (value: T) => string; // Custom serializer (default: JSON.stringify)
   deserializer?: (raw: string) => T; // Custom deserializer (default: JSON.parse)
-  onError?: (error: { type: string; message: string }) => void; // Error callback
+  onError?: (error: { type: CacheError; message: string }) => void; // Error callback
 };
 
 const cache = new Cache<User>({

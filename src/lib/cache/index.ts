@@ -61,7 +61,7 @@ export class Cache<T> {
       );
     }
 
-    if (!serialized) {
+    if (serialized === null || serialized === undefined) {
       return this.fail(
         "CacheError",
         `Unable to serialize value for key ${key}`,
