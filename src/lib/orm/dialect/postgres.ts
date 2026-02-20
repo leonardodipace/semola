@@ -28,7 +28,7 @@ export class PostgresDialect implements Dialect {
   };
 
   // Convert ? placeholders to $1, $2, $3 format for Postgres
-  private toPostgresPlaceholders(sql: string, paramCount: number): string {
+  private toPostgresPlaceholders(sql: string, paramCount: number) {
     let result = sql;
     for (let i = 1; i <= paramCount; i++) {
       // Replace left-to-right so placeholders map in order
@@ -45,7 +45,7 @@ export class PostgresDialect implements Dialect {
     return `"${identifier.replace(/"/g, '""')}"`;
   }
 
-  private formatDefaultValue(kind: ColumnKind, value: unknown): string {
+  private formatDefaultValue(kind: ColumnKind, value: unknown) {
     if (kind === "number" && typeof value === "number") {
       return String(value);
     }
@@ -203,7 +203,7 @@ export class PostgresDialect implements Dialect {
     );
   }
 
-  public convertBooleanValue(value: unknown): boolean {
+  public convertBooleanValue(value: unknown) {
     // Postgres returns native booleans
     if (typeof value === "boolean") {
       return value;
@@ -212,7 +212,7 @@ export class PostgresDialect implements Dialect {
     return Boolean(value);
   }
 
-  public buildPagination(limit?: number, offset?: number): string | null {
+  public buildPagination(limit?: number, offset?: number) {
     if (limit === undefined && offset === undefined) {
       return null;
     }

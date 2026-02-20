@@ -31,7 +31,7 @@ const bindTables = <
   connectionUrl: string,
   relations?: Relations,
 ) => {
-  const result: Record<string, TableClient<Table>> = {};
+  const result: TableClients<Tables, Relations> = Object.create(null);
   const tableNameMap = new Map<Table, string>();
 
   // Build map of Table instances to their names
@@ -41,29 +41,31 @@ const bindTables = <
     tableNameMap.set(match, key);
   }
 
-  // Build result object with table clients
   for (const key in tables) {
     const match = tables[key];
     if (!match) continue;
 
-    const client = new TableClient(
-      sql,
-      match,
-      dialect,
-      connectionUrl,
-      relations?.[key],
-      (relation) => {
-        const relatedTable = relation.table();
-        const relatedTableName = tableNameMap.get(relatedTable);
-        if (!relatedTableName) return undefined;
-        return result[relatedTableName];
-      },
-    );
-
-    result[key] = client;
+    Object.defineProperty(result, key, {
+      value: new TableClient(
+        sql,
+        match,
+        dialect,
+        connectionUrl,
+        relations?.[key],
+        (relation) => {
+          const relatedTable = relation.table();
+          const relatedTableName = tableNameMap.get(relatedTable);
+          if (!relatedTableName) return undefined;
+          return result[relatedTableName];
+        },
+      ),
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
   }
 
-  return result as TableClients<Tables, Relations>;
+  return result;
 };
 
 export class Orm<

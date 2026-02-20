@@ -1,4 +1,4 @@
-import { err, ok } from "../../errors/index.js";
+import { err, mightThrow, ok } from "../../errors/index.js";
 import type { Orm } from "../core/index.js";
 import type { Table } from "../table/index.js";
 import { toSqlIdentifier } from "./sql.js";
@@ -30,19 +30,20 @@ export const ensureMigrationsTable = async (
     return err("ValidationError", error.message);
   }
 
-  try {
-    await orm.sql`
+  const [createError] = await mightThrow(orm.sql`
       CREATE TABLE IF NOT EXISTS ${orm.sql(safeTableName)} (
         version TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         applied_at TEXT NOT NULL
       )
-    `;
-    return ok(undefined);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    `);
+  if (createError) {
+    const message =
+      createError instanceof Error ? createError.message : String(createError);
     return err("InternalServerError", message);
   }
+
+  return ok(undefined);
 };
 
 export const getAppliedMigrations = async (
@@ -54,43 +55,43 @@ export const getAppliedMigrations = async (
     return err("ValidationError", error.message);
   }
 
-  try {
-    const rows = await orm.sql`
+  const [queryError, rows] = await mightThrow(orm.sql`
       SELECT version, name, applied_at
       FROM ${orm.sql(safeTableName)}
       ORDER BY version ASC
-    `;
-
-    const list: AppliedMigration[] = [];
-
-    if (!Array.isArray(rows)) {
-      return ok(list);
-    }
-
-    for (const row of rows) {
-      const record = asRecord(row);
-      if (!record) {
-        continue;
-      }
-
-      const version = readString(Reflect.get(record, "version"));
-      const name = readString(Reflect.get(record, "name"));
-      const appliedAt = readString(
-        Reflect.get(record, "applied_at") ?? Reflect.get(record, "appliedAt"),
-      );
-
-      if (version.length === 0 || name.length === 0) {
-        continue;
-      }
-
-      list.push({ version, name, appliedAt });
-    }
-
-    return ok(list);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    `);
+  if (queryError) {
+    const message =
+      queryError instanceof Error ? queryError.message : String(queryError);
     return err("InternalServerError", message);
   }
+
+  const list: AppliedMigration[] = [];
+
+  if (!Array.isArray(rows)) {
+    return ok(list);
+  }
+
+  for (const row of rows) {
+    const record = asRecord(row);
+    if (!record) {
+      continue;
+    }
+
+    const version = readString(Reflect.get(record, "version"));
+    const name = readString(Reflect.get(record, "name"));
+    const appliedAt = readString(
+      Reflect.get(record, "applied_at") ?? Reflect.get(record, "appliedAt"),
+    );
+
+    if (version.length === 0 || name.length === 0) {
+      continue;
+    }
+
+    list.push({ version, name, appliedAt });
+  }
+
+  return ok(list);
 };
 
 export const recordMigration = async (
@@ -105,18 +106,19 @@ export const recordMigration = async (
     return err("ValidationError", error.message);
   }
 
-  try {
-    const sql = sqlExecutor ?? orm.sql;
-    const appliedAt = new Date().toISOString();
-    await sql`
+  const sql = sqlExecutor ?? orm.sql;
+  const appliedAt = new Date().toISOString();
+  const [insertError] = await mightThrow(sql`
       INSERT INTO ${sql(safeTableName)} (version, name, applied_at)
       VALUES (${version}, ${name}, ${appliedAt})
-    `;
-    return ok(true);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    `);
+  if (insertError) {
+    const message =
+      insertError instanceof Error ? insertError.message : String(insertError);
     return err("InternalServerError", message);
   }
+
+  return ok(true);
 };
 
 export const removeMigration = async (
@@ -130,15 +132,16 @@ export const removeMigration = async (
     return err("ValidationError", error.message);
   }
 
-  try {
-    const sql = sqlExecutor ?? orm.sql;
-    await sql`
+  const sql = sqlExecutor ?? orm.sql;
+  const [deleteError] = await mightThrow(sql`
       DELETE FROM ${sql(safeTableName)}
       WHERE version = ${version}
-    `;
-    return ok(true);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    `);
+  if (deleteError) {
+    const message =
+      deleteError instanceof Error ? deleteError.message : String(deleteError);
     return err("InternalServerError", message);
   }
+
+  return ok(true);
 };

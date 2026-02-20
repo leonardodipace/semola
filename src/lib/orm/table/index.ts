@@ -1,4 +1,4 @@
-import { mightThrow } from "../../errors/index.js";
+import { err, mightThrow, ok } from "../../errors/index.js";
 import type { Column } from "../column/index.js";
 import type { ColumnKind, ColumnMeta } from "../column/types.js";
 import type { Dialect } from "../dialect/types.js";
@@ -101,7 +101,7 @@ export class TableClient<T extends Table> {
 
   // Check if the actual database connection is MySQL (not just the dialect setting)
   // This allows testing with SQLite + dialect="mysql" without requiring MySQL transaction syntax
-  private isActualMysql(): boolean {
+  private isActualMysql() {
     // Check URL patterns to detect actual database type
     // SQLite uses :memory: or file paths (ending in .db, .sqlite, or no protocol)
     // MySQL uses mysql:// protocol
@@ -132,8 +132,10 @@ export class TableClient<T extends Table> {
     const columnNames = Object.keys(this.table.columns);
 
     if (!columnNames.includes(key)) {
-      throw new Error(`Invalid column: ${key}`);
+      return err("ValidationError", `Invalid column: ${key}`);
     }
+
+    return ok(undefined);
   }
 
   private normalizeDateValue(value: unknown) {
@@ -230,28 +232,34 @@ export class TableClient<T extends Table> {
     const whereEntries: [string, unknown][] = Object.entries(where);
 
     if (whereEntries.length !== 1) {
-      throw new Error(
+      return err(
+        "ValidationError",
         `${operation} requires a unique selector with exactly one column`,
       );
     }
 
     const [entry] = whereEntries;
     if (!entry) {
-      throw new Error(
+      return err(
+        "ValidationError",
         `${operation} requires a unique selector with exactly one column`,
       );
     }
 
     const [key, rawValue] = entry;
-    this.validateColumnName(key);
+    const [nameError] = this.validateColumnName(key);
+    if (nameError) {
+      return err(nameError.type, nameError.message);
+    }
 
     const column = this.table.columns[key];
     if (!column) {
-      throw new Error(`Invalid column: ${key}`);
+      return err("ValidationError", `Invalid column: ${key}`);
     }
 
     if (!column.meta.primaryKey && !column.meta.unique) {
-      throw new Error(
+      return err(
+        "ValidationError",
         `${operation} requires a unique selector on a primary key or unique column`,
       );
     }
@@ -259,11 +267,12 @@ export class TableClient<T extends Table> {
     let value = rawValue;
 
     if (this.isFilterObject(rawValue)) {
-      const filters = rawValue as Record<string, unknown>;
+      const filters = rawValue;
       const filterKeys = Object.keys(filters);
 
       if (filterKeys.length !== 1 || !("equals" in filters)) {
-        throw new Error(
+        return err(
+          "ValidationError",
           `${operation} unique selector must use a direct value or { equals: value }`,
         );
       }
@@ -273,15 +282,15 @@ export class TableClient<T extends Table> {
 
     value = this.normalizeValueForWhere(column, value);
 
-    return {
+    return ok({
       key,
       value,
       column,
       isPrimaryKey: column.meta.primaryKey,
-    };
+    });
   }
 
-  public getSqlColumnName(key: string): string {
+  public getSqlColumnName(key: string) {
     const column = this.table.columns[key];
     if (!column) {
       throw new Error(`Invalid column: ${key}`);
@@ -299,7 +308,7 @@ export class TableClient<T extends Table> {
     return null;
   }
 
-  private isFilterObject(value: unknown) {
+  private isFilterObject(value: unknown): value is Record<string, unknown> {
     return (
       typeof value === "object" &&
       value !== null &&
@@ -329,7 +338,7 @@ export class TableClient<T extends Table> {
 
     // Check if value is a filter object (has operator properties)
     if (this.isFilterObject(value)) {
-      const filters = value as Record<string, unknown>;
+      const filters = value;
       const conditions = [];
 
       // Equality operator
@@ -421,7 +430,10 @@ export class TableClient<T extends Table> {
 
     // Validate all column names first
     for (const [key] of whereEntries) {
-      this.validateColumnName(key);
+      const [nameError] = this.validateColumnName(key);
+      if (nameError) {
+        throw new Error(nameError.message);
+      }
     }
 
     // Build the first condition
@@ -551,13 +563,15 @@ export class TableClient<T extends Table> {
     }
   }
 
-  private async loadIncludedRelations(
-    rows: Record<string, unknown>[],
-    include?: Record<string, boolean>,
+  private async loadIncludedRelations<
+    Inc extends Record<string, boolean> | undefined = undefined,
+  >(
+    rows: WithIncluded<InferTableType<T>, T, Inc>[],
+    include?: Inc,
     getTableClient?: (relation: Relation) => TableClient<Table> | undefined,
   ) {
     if (!include || !this.relations || !getTableClient || rows.length === 0) {
-      return;
+      return rows;
     }
 
     // Iterate over includes and check if relation exists in table
@@ -753,6 +767,8 @@ export class TableClient<T extends Table> {
         }
       }
     }
+
+    return rows;
   }
 
   public async findMany<
@@ -765,19 +781,19 @@ export class TableClient<T extends Table> {
         const take = options?.take;
         const pagination = this.buildPagination(skip, take);
 
-        let sql = this.sql<InferTableType<T>[]>`
+        let sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
         SELECT * FROM ${this.sql(this.table.sqlName)}
       `;
 
         if (whereClause) {
-          sql = this.sql<InferTableType<T>[]>`
+          sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
           ${sql}
           WHERE ${whereClause}
         `;
         }
 
         if (pagination) {
-          sql = this.sql<InferTableType<T>[]>`
+          sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
           ${sql}
           ${pagination}
         `;
@@ -787,14 +803,13 @@ export class TableClient<T extends Table> {
         this.convertBooleanValues(rows);
         this.convertDateValues(rows);
         this.mapColumnNames(rows);
-        await this.loadIncludedRelations(
+        const includedRows = await this.loadIncludedRelations(
           rows,
           options?.include,
           this.getTableClient,
         );
-        // TypeScript can't track type changes from mutation helper loadIncludedRelations,
-        // but we know the rows now conform to WithIncluded after the mutation
-        return rows as WithIncluded<InferTableType<T>, T, Inc>[];
+
+        return includedRows;
       })(),
     );
   }
@@ -806,18 +821,18 @@ export class TableClient<T extends Table> {
       (async () => {
         const whereClause = this.buildWhereClause(options?.where);
 
-        let sql = this.sql<InferTableType<T>[]>`
+        let sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
         SELECT * FROM ${this.sql(this.table.sqlName)}
       `;
 
         if (whereClause) {
-          sql = this.sql<InferTableType<T>[]>`
+          sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
           ${sql}
           WHERE ${whereClause}
         `;
         }
 
-        sql = this.sql<InferTableType<T>[]>`
+        sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
         ${sql}
         LIMIT 1
       `;
@@ -829,17 +844,13 @@ export class TableClient<T extends Table> {
         this.convertBooleanValues(rows);
         this.convertDateValues(rows);
         this.mapColumnNames(rows);
-        await this.loadIncludedRelations(
+        const includedRows = await this.loadIncludedRelations(
           rows,
           options?.include,
           this.getTableClient,
         );
-        // TypeScript can't track type changes from mutation helper loadIncludedRelations,
-        // but rows[0] now conforms to WithIncluded after the mutation
-        return (
-          (rows[0] as WithIncluded<InferTableType<T>, T, Inc> | undefined) ??
-          null
-        );
+
+        return includedRows[0] ?? null;
       })(),
     );
   }
@@ -849,31 +860,12 @@ export class TableClient<T extends Table> {
   >(options: FindUniqueOptions<T> & { include?: Inc }) {
     return await mightThrow(
       (async () => {
-        const whereKeys = Object.keys(options.where);
-
-        if (whereKeys.length !== 1) {
-          throw new Error(
-            "findUnique requires exactly one unique column in where clause",
-          );
-        }
-
-        const [columnKey] = whereKeys;
-        if (!columnKey) {
-          throw new Error(
-            "findUnique requires exactly one unique column in where clause",
-          );
-        }
-
-        const column = this.table.columns[columnKey];
-
-        if (!column) {
-          throw new Error(`Invalid column: ${columnKey}`);
-        }
-
-        if (!column.meta.primaryKey && !column.meta.unique) {
-          throw new Error(
-            `Column "${columnKey}" is not a primary key or unique column. findUnique requires a unique constraint.`,
-          );
+        const [uniqueError] = this.extractUniqueSelector(
+          options.where,
+          "findUnique",
+        );
+        if (uniqueError) {
+          throw new Error(uniqueError.message);
         }
 
         const whereClause = this.buildWhereClause(options.where);
@@ -882,7 +874,9 @@ export class TableClient<T extends Table> {
           throw new Error("findUnique requires a where clause");
         }
 
-        const results = await this.sql<InferTableType<T>[]>`
+        const results = await this.sql<
+          WithIncluded<InferTableType<T>, T, Inc>[]
+        >`
         SELECT * FROM ${this.sql(this.table.sqlName)}
         WHERE ${whereClause}
         LIMIT 1
@@ -894,14 +888,18 @@ export class TableClient<T extends Table> {
         this.convertBooleanValues([result]);
         this.convertDateValues([result]);
         this.mapColumnNames([result]);
-        await this.loadIncludedRelations(
+        const includedRows = await this.loadIncludedRelations(
           [result],
           options?.include,
           this.getTableClient,
         );
-        // TypeScript can't track type changes from mutation helper loadIncludedRelations,
-        // but result now conforms to WithIncluded after the mutation
-        return result as WithIncluded<InferTableType<T>, T, Inc>;
+
+        const [included] = includedRows;
+        if (!included) {
+          return null;
+        }
+
+        return included;
       })(),
     );
   }
@@ -916,7 +914,10 @@ export class TableClient<T extends Table> {
         // Build a map to translate JS field names to SQL column names
         const sqlData: Record<string, unknown> = {};
         for (const [key, value] of Object.entries(data)) {
-          this.validateColumnName(key);
+          const [nameError] = this.validateColumnName(key);
+          if (nameError) {
+            throw new Error(nameError.message);
+          }
           const column = this.table.columns[key];
           if (!column) {
             throw new Error(`Invalid column: ${key}`);
@@ -1005,10 +1006,15 @@ export class TableClient<T extends Table> {
   public async update(options: UpdateOptions<T>) {
     return await mightThrow(
       (async () => {
-        const uniqueSelector = this.extractUniqueSelector(
+        const [selectorError, uniqueSelector] = this.extractUniqueSelector(
           options.where,
           "update",
         );
+        if (selectorError || !uniqueSelector) {
+          throw new Error(
+            selectorError?.message ?? "update requires a unique selector",
+          );
+        }
 
         const whereClause = this.buildCondition(
           uniqueSelector.key,
@@ -1024,7 +1030,10 @@ export class TableClient<T extends Table> {
         // Build a map to translate JS field names to SQL column names
         const sqlData: Record<string, unknown> = {};
         for (const [key, value] of dataEntries) {
-          this.validateColumnName(key);
+          const [nameError] = this.validateColumnName(key);
+          if (nameError) {
+            throw new Error(nameError.message);
+          }
           const column = this.table.columns[key];
           if (!column) {
             throw new Error(`Invalid column: ${key}`);
@@ -1153,10 +1162,15 @@ export class TableClient<T extends Table> {
   public async delete(options: DeleteOptions<T>) {
     return await mightThrow(
       (async () => {
-        const uniqueSelector = this.extractUniqueSelector(
+        const [selectorError, uniqueSelector] = this.extractUniqueSelector(
           options.where,
           "delete",
         );
+        if (selectorError || !uniqueSelector) {
+          throw new Error(
+            selectorError?.message ?? "delete requires a unique selector",
+          );
+        }
 
         const whereClause = this.buildCondition(
           uniqueSelector.key,

@@ -34,7 +34,7 @@ export class SqliteDialect implements Dialect {
     return `"${identifier.replace(/"/g, '""')}"`;
   }
 
-  private formatDefaultValue(kind: ColumnKind, value: unknown): string {
+  private formatDefaultValue(kind: ColumnKind, value: unknown) {
     if (kind === "number" && typeof value === "number") {
       return String(value);
     }

@@ -1,6 +1,6 @@
 import { unlink } from "node:fs/promises";
 import { resolve } from "node:path";
-import { err, ok } from "../../errors/index.js";
+import { err, mightThrow, ok } from "../../errors/index.js";
 import type { Orm } from "../core/index.js";
 import type { Table } from "../table/index.js";
 import { SchemaBuilder } from "./builder.js";
@@ -113,19 +113,27 @@ const getRuntimeContext = (options: MigrationRuntimeOptions) => {
 
 const runInTransaction = async (
   orm: Orm<Record<string, Table>>,
-  run: (tx: Bun.SQL) => Promise<void>,
+  run: (
+    tx: Bun.SQL,
+  ) => Promise<readonly [{ type: string; message: string } | null, unknown]>,
 ) => {
-  try {
-    await orm.sql.begin(async (tx) => {
-      await run(tx);
-    });
-    return ok(undefined);
-  } catch (error) {
+  const [error] = await mightThrow(
+    orm.sql.begin(async (tx) => {
+      const [runError] = await run(tx);
+      if (runError) {
+        throw new Error(runError.message);
+      }
+    }),
+  );
+
+  if (error) {
     return err(
       "InternalServerError",
       error instanceof Error ? error.message : String(error),
     );
   }
+
+  return ok(undefined);
 };
 
 export const createMigration = async (
@@ -139,13 +147,23 @@ export const createMigration = async (
   const metaDir = resolve(migrationsDir, "meta");
 
   // Ensure directories exist
-  try {
-    await Bun.write(resolve(migrationsDir, ".keep"), "");
-    await Bun.write(resolve(metaDir, ".keep"), "");
-  } catch (error) {
+  const [migrationsDirError] = await mightThrow(
+    Bun.write(resolve(migrationsDir, ".keep"), ""),
+  );
+  if (migrationsDirError) {
     return err(
       "InternalServerError",
-      `Failed to create migration directories: ${error instanceof Error ? error.message : String(error)}`,
+      `Failed to create migration directories: ${migrationsDirError instanceof Error ? migrationsDirError.message : String(migrationsDirError)}`,
+    );
+  }
+
+  const [metaDirError] = await mightThrow(
+    Bun.write(resolve(metaDir, ".keep"), ""),
+  );
+  if (metaDirError) {
+    return err(
+      "InternalServerError",
+      `Failed to create migration directories: ${metaDirError instanceof Error ? metaDirError.message : String(metaDirError)}`,
     );
   }
 
@@ -222,11 +240,7 @@ export const createMigration = async (
   const snapshotResult = await writeSnapshot(snapshotPath, newSnapshot);
   if (snapshotResult[0]) {
     // Rollback: delete migration file
-    try {
-      await unlink(filePath);
-    } catch {
-      // Ignore cleanup errors
-    }
+    await mightThrow(unlink(filePath));
     return err(
       "InternalServerError",
       snapshotResult[0] instanceof Error
@@ -248,12 +262,8 @@ export const createMigration = async (
   );
   if (journalResult[0]) {
     // Rollback: delete both snapshot and migration file
-    try {
-      await unlink(snapshotPath).catch(() => {});
-      await unlink(filePath).catch(() => {});
-    } catch {
-      // Ignore cleanup errors
-    }
+    await mightThrow(unlink(snapshotPath));
+    await mightThrow(unlink(filePath));
     return err(
       "InternalServerError",
       journalResult[0] instanceof Error
@@ -273,7 +283,7 @@ export const applyMigrations = async (options: MigrationRuntimeOptions) => {
     runtime.migrationTable,
   );
   if (ensureError) {
-    return [ensureError, null] as const;
+    return err(ensureError.type, ensureError.message);
   }
 
   const [filesError, files] = await scanMigrationFiles(runtime.migrationsDir);
@@ -292,7 +302,7 @@ export const applyMigrations = async (options: MigrationRuntimeOptions) => {
     runtime.migrationTable,
   );
   if (appliedError) {
-    return [appliedError, null] as const;
+    return err(appliedError.type, appliedError.message);
   }
   const appliedVersions = new Set(applied.map((item) => item.version));
   const pending = files.filter((file) => !appliedVersions.has(file.version));
@@ -321,13 +331,10 @@ export const applyMigrations = async (options: MigrationRuntimeOptions) => {
         tx,
       );
       if (recordError) {
-        throw new Error(
-          recordError.type === "ValidationError" ||
-            recordError.type === "InternalServerError"
-            ? recordError.message
-            : String(recordError),
-        );
+        return err(recordError.type, recordError.message);
       }
+
+      return ok(undefined);
     });
 
     if (txError) {
@@ -351,7 +358,7 @@ export const rollbackMigration = async (options: MigrationRuntimeOptions) => {
     runtime.migrationTable,
   );
   if (ensureError) {
-    return [ensureError, null] as const;
+    return err(ensureError.type, ensureError.message);
   }
 
   const [filesError, files] = await scanMigrationFiles(runtime.migrationsDir);
@@ -367,7 +374,7 @@ export const rollbackMigration = async (options: MigrationRuntimeOptions) => {
     runtime.migrationTable,
   );
   if (appliedError) {
-    return [appliedError, null] as const;
+    return err(appliedError.type, appliedError.message);
   }
 
   if (applied.length === 0) {
@@ -414,13 +421,10 @@ export const rollbackMigration = async (options: MigrationRuntimeOptions) => {
       tx,
     );
     if (removeError) {
-      throw new Error(
-        removeError.type === "ValidationError" ||
-          removeError.type === "InternalServerError"
-          ? removeError.message
-          : String(removeError),
-      );
+      return err(removeError.type, removeError.message);
     }
+
+    return ok(undefined);
   });
 
   if (txError) {
@@ -471,7 +475,7 @@ export const getMigrationStatus = async (options: MigrationRuntimeOptions) => {
     runtime.migrationTable,
   );
   if (ensureError) {
-    return [ensureError, null] as const;
+    return err(ensureError.type, ensureError.message);
   }
 
   const [filesError, files] = await scanMigrationFiles(runtime.migrationsDir);
@@ -487,7 +491,7 @@ export const getMigrationStatus = async (options: MigrationRuntimeOptions) => {
     runtime.migrationTable,
   );
   if (appliedError) {
-    return [appliedError, null] as const;
+    return err(appliedError.type, appliedError.message);
   }
   const appliedMap = new Map(
     applied.map((item) => [item.version, item.appliedAt] as const),

@@ -13,7 +13,7 @@ const kindToMethod = (kind: ColumnKind) => {
   return "uuid";
 };
 
-const valueToCode = (value: unknown): string => {
+const valueToCode = (value: unknown) => {
   if (typeof value === "string") {
     return JSON.stringify(value);
   }

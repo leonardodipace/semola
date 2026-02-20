@@ -1,4 +1,4 @@
-import { err, ok } from "../../errors/index.js";
+import { err, mightThrow, mightThrowSync, ok } from "../../errors/index.js";
 import {
   boolean,
   type Column,
@@ -131,29 +131,29 @@ const escapeString = (value: string) => {
 
 const quoteValue = (dialect: OrmDialect, kind: ColumnKind, value: unknown) => {
   if (kind === "number" && typeof value === "number") {
-    return String(value);
+    return ok(String(value));
   }
 
   if (kind === "boolean" && typeof value === "boolean") {
     if (dialect === "sqlite") {
-      return value ? "1" : "0";
+      return ok(value ? "1" : "0");
     }
-    return value ? "true" : "false";
+    return ok(value ? "true" : "false");
   }
 
   if (kind === "date") {
     if (dialect === "sqlite") {
       if (value instanceof Date) {
-        return String(value.getTime());
+        return ok(String(value.getTime()));
       }
-      return String(value);
+      return ok(String(value));
     }
 
     if (value instanceof Date) {
-      return `'${escapeString(value.toISOString())}'`;
+      return ok(`'${escapeString(value.toISOString())}'`);
     }
 
-    return `'${escapeString(String(value))}'`;
+    return ok(`'${escapeString(String(value))}'`);
   }
 
   if (kind === "json" || kind === "jsonb") {
@@ -161,31 +161,46 @@ const quoteValue = (dialect: OrmDialect, kind: ColumnKind, value: unknown) => {
     if (typeof value === "string") {
       jsonValue = value;
     } else {
-      try {
-        jsonValue = JSON.stringify(value) ?? "null";
-      } catch (error) {
-        if (error instanceof TypeError) {
-          // Handle circular references
-          const seen = new Set();
-          const replacer = (_key: string, val: unknown) => {
-            if (typeof val === "object" && val !== null) {
-              if (seen.has(val)) {
-                return null;
-              }
-              seen.add(val);
-            }
-            return val;
-          };
-          jsonValue = JSON.stringify(value, replacer) ?? "null";
-        } else {
-          throw error;
+      const [jsonError, stringified] = mightThrowSync(() => {
+        return JSON.stringify(value) ?? "null";
+      });
+
+      if (jsonError) {
+        if (!(jsonError instanceof TypeError)) {
+          const message =
+            jsonError instanceof Error ? jsonError.message : String(jsonError);
+          return err("InternalServerError", message);
         }
+
+        const seen = new Set();
+        const replacer = (_key: string, val: unknown) => {
+          if (typeof val === "object" && val !== null) {
+            if (seen.has(val)) {
+              return null;
+            }
+            seen.add(val);
+          }
+          return val;
+        };
+
+        const [safeError, safeStringified] = mightThrowSync(() => {
+          return JSON.stringify(value, replacer) ?? "null";
+        });
+        if (safeError) {
+          const message =
+            safeError instanceof Error ? safeError.message : String(safeError);
+          return err("InternalServerError", message);
+        }
+
+        jsonValue = safeStringified ?? "null";
+      } else {
+        jsonValue = stringified ?? "null";
       }
     }
-    return `'${escapeString(jsonValue)}'`;
+    return ok(`'${escapeString(jsonValue)}'`);
   }
 
-  return `'${escapeString(String(value))}'`;
+  return ok(`'${escapeString(String(value))}'`);
 };
 
 const sqlType = (dialect: OrmDialect, kind: ColumnKind) => {
@@ -222,16 +237,16 @@ const buildColumnDefinition = (dialect: OrmDialect, column: AnyColumn) => {
   if (column.meta.primaryKey && column.columnKind === "number") {
     if (dialect === "postgres") {
       parts.push("BIGSERIAL PRIMARY KEY");
-      return parts.join(" ");
+      return ok(parts.join(" "));
     }
 
     if (dialect === "mysql") {
       parts.push("BIGINT AUTO_INCREMENT PRIMARY KEY");
-      return parts.join(" ");
+      return ok(parts.join(" "));
     }
 
     parts.push("INTEGER PRIMARY KEY");
-    return parts.join(" ");
+    return ok(parts.join(" "));
   }
 
   parts.push(sqlType(dialect, column.columnKind));
@@ -249,33 +264,57 @@ const buildColumnDefinition = (dialect: OrmDialect, column: AnyColumn) => {
   }
 
   if (column.meta.hasDefault && column.defaultValue !== undefined) {
-    parts.push(
-      `DEFAULT ${quoteValue(dialect, column.columnKind, column.defaultValue)}`,
+    const [quoteError, quotedValue] = quoteValue(
+      dialect,
+      column.columnKind,
+      column.defaultValue,
     );
+    if (quoteError) {
+      return err(quoteError.type, quoteError.message);
+    }
+
+    parts.push(`DEFAULT ${quotedValue}`);
   }
 
-  return parts.join(" ");
+  return ok(parts.join(" "));
 };
 
-const normalizeColumn = (build: (t: TableBuilder) => unknown): AnyColumn => {
+const normalizeColumn = (build: (t: TableBuilder) => unknown) => {
   const tableBuilder = new TableBuilder();
-  build(tableBuilder);
+  const [buildError] = mightThrowSync(() => {
+    build(tableBuilder);
+  });
+  if (buildError) {
+    const message =
+      buildError instanceof Error ? buildError.message : String(buildError);
+    return err("ValidationError", message);
+  }
+
   const values = Object.values(tableBuilder.columns);
 
   if (values.length === 0) {
-    throw new Error("Expected exactly one column in migration operation");
+    return err(
+      "ValidationError",
+      "Expected exactly one column in migration operation",
+    );
   }
 
   if (values.length > 1) {
-    throw new Error("Expected exactly one column in migration operation");
+    return err(
+      "ValidationError",
+      "Expected exactly one column in migration operation",
+    );
   }
 
   const column = values[0];
   if (!column) {
-    throw new Error("Expected exactly one column in migration operation");
+    return err(
+      "ValidationError",
+      "Expected exactly one column in migration operation",
+    );
   }
 
-  return column;
+  return ok(column);
 };
 
 export class SchemaBuilder {
@@ -303,19 +342,30 @@ export class SchemaBuilder {
       return err("ValidationError", error.message);
     }
     const tableBuilder = new TableBuilder();
-    build(tableBuilder);
+    const [buildError] = mightThrowSync(() => {
+      build(tableBuilder);
+    });
+    if (buildError) {
+      const message =
+        buildError instanceof Error ? buildError.message : String(buildError);
+      return err("ValidationError", message);
+    }
+
     const table = new Table(safeTableName, tableBuilder.columns);
     const [createError, sql] = this.orm.createTable(table);
     if (createError) {
       return err("ValidationError", createError.message);
     }
-    try {
-      await this.execute(sql);
-      return ok(true);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+    const [executeError] = await mightThrow(this.execute(sql));
+    if (executeError) {
+      const message =
+        executeError instanceof Error
+          ? executeError.message
+          : String(executeError);
       return err("InternalServerError", message);
     }
+
+    return ok(true);
   }
 
   public async dropTable(name: string) {
@@ -323,13 +373,18 @@ export class SchemaBuilder {
     if (error) {
       return err("ValidationError", error.message);
     }
-    try {
-      await this.execute(`DROP TABLE IF EXISTS ${safeTableName}`);
-      return ok(true);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+    const [executeError] = await mightThrow(
+      this.execute(`DROP TABLE IF EXISTS ${safeTableName}`),
+    );
+    if (executeError) {
+      const message =
+        executeError instanceof Error
+          ? executeError.message
+          : String(executeError);
       return err("InternalServerError", message);
     }
+
+    return ok(true);
   }
 
   public async addColumn(
@@ -340,17 +395,38 @@ export class SchemaBuilder {
     if (error) {
       return err("ValidationError", error.message);
     }
-    const column = normalizeColumn(build);
-    const definition = buildColumnDefinition(this.dialect, column);
-    try {
-      await this.execute(
-        `ALTER TABLE ${safeTableName} ADD COLUMN ${definition}`,
+    const [normalizedColumnError, column] = normalizeColumn(build);
+    if (normalizedColumnError || !column) {
+      return err(
+        normalizedColumnError?.type ?? "ValidationError",
+        normalizedColumnError?.message ??
+          "Expected exactly one column in migration operation",
       );
-      return ok(true);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+    }
+
+    const [definitionError, definition] = buildColumnDefinition(
+      this.dialect,
+      column,
+    );
+    if (definitionError || !definition) {
+      return err(
+        definitionError?.type ?? "ValidationError",
+        definitionError?.message ?? "Failed to build column definition",
+      );
+    }
+
+    const [executeError] = await mightThrow(
+      this.execute(`ALTER TABLE ${safeTableName} ADD COLUMN ${definition}`),
+    );
+    if (executeError) {
+      const message =
+        executeError instanceof Error
+          ? executeError.message
+          : String(executeError);
       return err("InternalServerError", message);
     }
+
+    return ok(true);
   }
 
   public async dropColumn(tableName: string, columnName: string) {
@@ -368,15 +444,20 @@ export class SchemaBuilder {
     if (columnError) {
       return err("ValidationError", columnError.message);
     }
-    try {
-      await this.execute(
+    const [executeError] = await mightThrow(
+      this.execute(
         `ALTER TABLE ${safeTableName} DROP COLUMN ${safeColumnName}`,
-      );
-      return ok(true);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      ),
+    );
+    if (executeError) {
+      const message =
+        executeError instanceof Error
+          ? executeError.message
+          : String(executeError);
       return err("InternalServerError", message);
     }
+
+    return ok(true);
   }
 
   public async alterColumn(
@@ -398,97 +479,157 @@ export class SchemaBuilder {
     if (columnError) {
       return err("ValidationError", columnError.message);
     }
-    const column = normalizeColumn(build);
+    const [normalizedColumnError, column] = normalizeColumn(build);
+    if (normalizedColumnError || !column) {
+      return err(
+        normalizedColumnError?.type ?? "ValidationError",
+        normalizedColumnError?.message ??
+          "Expected exactly one column in migration operation",
+      );
+    }
 
     if (this.dialect === "sqlite") {
       return err("ValidationError", "alterColumn is not supported for sqlite");
     }
 
-    try {
-      if (this.dialect === "mysql") {
-        const definition = buildColumnDefinition(this.dialect, column);
-        await this.execute(
+    if (this.dialect === "mysql") {
+      const [definitionError, definition] = buildColumnDefinition(
+        this.dialect,
+        column,
+      );
+      if (definitionError || !definition) {
+        return err(
+          definitionError?.type ?? "ValidationError",
+          definitionError?.message ?? "Failed to build column definition",
+        );
+      }
+
+      const [executeError] = await mightThrow(
+        this.execute(
           `ALTER TABLE ${safeTableName} MODIFY COLUMN ${definition}`,
-        );
-        return ok(true);
+        ),
+      );
+      if (executeError) {
+        const message =
+          executeError instanceof Error
+            ? executeError.message
+            : String(executeError);
+        return err("InternalServerError", message);
       }
 
-      // PostgreSQL: wrap in transaction for atomicity
-      if (this.dialect === "postgres") {
-        await this.execute("BEGIN");
+      return ok(true);
+    }
 
-        try {
-          const typeSql = sqlType(this.dialect, column.columnKind);
-          await this.execute(
-            `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} TYPE ${typeSql}`,
-          );
-
-          if (column.meta.notNull) {
-            await this.execute(
-              `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET NOT NULL`,
-            );
-          } else {
-            await this.execute(
-              `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP NOT NULL`,
-            );
-          }
-
-          if (column.meta.hasDefault && column.defaultValue !== undefined) {
-            await this.execute(
-              `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET DEFAULT ${quoteValue(this.dialect, column.columnKind, column.defaultValue)}`,
-            );
-          } else {
-            await this.execute(
-              `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP DEFAULT`,
-            );
-          }
-
-          await this.execute("COMMIT");
-          return ok(true);
-        } catch (innerError) {
-          await this.execute("ROLLBACK");
-          throw innerError;
-        }
-      }
-
-      // Fallback for other dialects
-      await this.execute("BEGIN");
-      try {
-        const typeSql = sqlType(this.dialect, column.columnKind);
-        await this.execute(
+    const runAlterStatements = async (
+      executeStatement: (statement: string) => Promise<unknown>,
+    ) => {
+      const typeSql = sqlType(this.dialect, column.columnKind);
+      const [typeError] = await mightThrow(
+        executeStatement(
           `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} TYPE ${typeSql}`,
-        );
+        ),
+      );
+      if (typeError) {
+        const message =
+          typeError instanceof Error ? typeError.message : String(typeError);
+        return err("InternalServerError", message);
+      }
 
-        if (column.meta.notNull) {
-          await this.execute(
-            `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET NOT NULL`,
-          );
-        } else {
-          await this.execute(
-            `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP NOT NULL`,
+      const nullStatement = column.meta.notNull
+        ? `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET NOT NULL`
+        : `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP NOT NULL`;
+
+      const [nullError] = await mightThrow(executeStatement(nullStatement));
+      if (nullError) {
+        const message =
+          nullError instanceof Error ? nullError.message : String(nullError);
+        return err("InternalServerError", message);
+      }
+
+      let defaultStatement = `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP DEFAULT`;
+      if (column.meta.hasDefault && column.defaultValue !== undefined) {
+        const [quoteError, quotedValue] = quoteValue(
+          this.dialect,
+          column.columnKind,
+          column.defaultValue,
+        );
+        if (quoteError || !quotedValue) {
+          return err(
+            quoteError?.type ?? "InternalServerError",
+            quoteError?.message ?? "Failed to quote default value",
           );
         }
 
-        if (column.meta.hasDefault && column.defaultValue !== undefined) {
-          await this.execute(
-            `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET DEFAULT ${quoteValue(this.dialect, column.columnKind, column.defaultValue)}`,
-          );
-        } else {
-          await this.execute(
-            `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP DEFAULT`,
-          );
+        defaultStatement = `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} SET DEFAULT ${quotedValue}`;
+      }
+
+      const [defaultError] = await mightThrow(
+        executeStatement(defaultStatement),
+      );
+      if (defaultError) {
+        const message =
+          defaultError instanceof Error
+            ? defaultError.message
+            : String(defaultError);
+        return err("InternalServerError", message);
+      }
+
+      return ok(true);
+    };
+
+    const savepoint = Reflect.get(this.sql, "savepoint");
+
+    if (this.sql !== this.orm.sql && typeof savepoint === "function") {
+      const [savepointError] = await mightThrow(
+        Promise.resolve(
+          savepoint.call(this.sql, async (sp: Bun.SQL) => {
+            const [alterError] = await runAlterStatements(async (statement) => {
+              await sp.unsafe(statement);
+            });
+
+            if (alterError) {
+              throw new Error(alterError.message);
+            }
+          }),
+        ),
+      );
+
+      if (savepointError) {
+        const message =
+          savepointError instanceof Error
+            ? savepointError.message
+            : String(savepointError);
+        return err("InternalServerError", message);
+      }
+
+      return ok(true);
+    }
+
+    const [transactionError] = await mightThrow(
+      (async () => {
+        await this.execute("BEGIN");
+        const [alterError] = await runAlterStatements(async (statement) => {
+          await this.execute(statement);
+        });
+
+        if (alterError) {
+          await this.execute("ROLLBACK");
+          throw new Error(alterError.message);
         }
 
         await this.execute("COMMIT");
-      } catch (innerError) {
-        await this.execute("ROLLBACK");
-        throw innerError;
-      }
-      return ok(true);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      })(),
+    );
+
+    if (transactionError) {
+      const message =
+        transactionError instanceof Error
+          ? transactionError.message
+          : String(transactionError);
       return err("InternalServerError", message);
     }
+
+    return ok(true);
   }
 
   public async createIndex(
@@ -522,15 +663,20 @@ export class SchemaBuilder {
     }
     const uniqueKeyword = options?.unique ? "UNIQUE " : "";
     const ifNotExists = this.dialect === "mysql" ? "" : "IF NOT EXISTS ";
-    try {
-      await this.execute(
+    const [executeError] = await mightThrow(
+      this.execute(
         `CREATE ${uniqueKeyword}INDEX ${ifNotExists}${safeIndexName} ON ${safeTableName} (${safeColumns.join(", ")})`,
-      );
-      return ok(true);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      ),
+    );
+    if (executeError) {
+      const message =
+        executeError instanceof Error
+          ? executeError.message
+          : String(executeError);
       return err("InternalServerError", message);
     }
+
+    return ok(true);
   }
 
   public async dropIndex(indexName: string, tableName?: string) {
@@ -547,34 +693,51 @@ export class SchemaBuilder {
         "tableName is required for DROP INDEX on mysql",
       );
     }
-    try {
-      if (this.dialect === "mysql" && tableName) {
-        const [tableError, safeTableName] = toSqlIdentifier(
-          tableName,
-          "table name",
-        );
-        if (tableError) {
-          return err("ValidationError", tableError.message);
-        }
-        await this.execute(`DROP INDEX ${safeIndexName} ON ${safeTableName}`);
-        return ok(true);
+    if (this.dialect === "mysql" && tableName) {
+      const [tableError, safeTableName] = toSqlIdentifier(
+        tableName,
+        "table name",
+      );
+      if (tableError) {
+        return err("ValidationError", tableError.message);
       }
 
-      await this.execute(`DROP INDEX IF EXISTS ${safeIndexName}`);
+      const [dropOnTableError] = await mightThrow(
+        this.execute(`DROP INDEX ${safeIndexName} ON ${safeTableName}`),
+      );
+      if (dropOnTableError) {
+        const message =
+          dropOnTableError instanceof Error
+            ? dropOnTableError.message
+            : String(dropOnTableError);
+        return err("InternalServerError", message);
+      }
+
       return ok(true);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+    }
+
+    const [dropError] = await mightThrow(
+      this.execute(`DROP INDEX IF EXISTS ${safeIndexName}`),
+    );
+    if (dropError) {
+      const message =
+        dropError instanceof Error ? dropError.message : String(dropError);
       return err("InternalServerError", message);
     }
+
+    return ok(true);
   }
 
   public async raw(sql: string) {
-    try {
-      await this.execute(sql);
-      return ok(true);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+    const [executeError] = await mightThrow(this.execute(sql));
+    if (executeError) {
+      const message =
+        executeError instanceof Error
+          ? executeError.message
+          : String(executeError);
       return err("InternalServerError", message);
     }
+
+    return ok(true);
   }
 }
