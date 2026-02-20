@@ -272,7 +272,7 @@ describe("SqliteDialect - pagination", () => {
     // Create a table with an invalid column type for testing
     const invalidColumn = {
       sqlName: "bad_col",
-      columnKind: "unsupported_type" as any,
+      columnKind: "unsupported_type",
       meta: {
         primaryKey: false,
         notNull: false,
@@ -284,8 +284,9 @@ describe("SqliteDialect - pagination", () => {
     const invalidTable = {
       sqlName: "test",
       columns: { badCol: invalidColumn },
-    } as any;
+    };
 
+    // @ts-expect-error - testing runtime handling of invalid table shape
     const [error, sql] = dialect.buildCreateTable(invalidTable);
 
     expect(error).not.toBeNull();
