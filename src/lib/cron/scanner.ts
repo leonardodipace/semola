@@ -85,7 +85,7 @@ export class Scanner {
   private scanComponent(component: ComponentType) {
     const { field, content } = component;
     while (this.current < content.length) {
-      const currentCh = content.charAt(this.current);
+      let currentCh = content.charAt(this.current);
       this.current += 1;
 
       switch (currentCh) {
@@ -98,11 +98,21 @@ export class Scanner {
 
           break;
         }
+        case "-": {
+          this.current += 1;
+          currentCh = content.charAt(this.current);
+          if (this.isDigit(currentCh)) {
+            this.handleRange(component);
+          } else {
+            ErrorReporter.report("Invalid range expression", this.expression);
+          }
+          break;
+        }
         default: {
           if (this.isDigit(currentCh)) {
             this.handleNumber(component);
           } else {
-            ErrorReporter.report("Invalid Cron Expression", this.expression);
+            ErrorReporter.report("Invalid cron expression", this.expression);
           }
 
           break;
@@ -161,6 +171,11 @@ export class Scanner {
 
     if (this.match(content, "-")) {
       this.handleRange(component);
+      return;
+    }
+
+    if (this.match(content, "/")) {
+      this.handleStep(component);
       return;
     }
 
