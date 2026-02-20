@@ -1,6 +1,5 @@
 enum ComponentEnum {
   Any = "any",
-  List = "list",
   Range = "range",
   Step = "step",
   Number = "number",
@@ -94,7 +93,7 @@ export class Scanner {
           if (this.match(content, "/")) {
             this.handleStep(component);
           } else {
-            this.addToken(content, ComponentEnum.Any, "*", field);
+            this.addToken("*", ComponentEnum.Any, "*", field);
           }
 
           break;
@@ -122,59 +121,51 @@ export class Scanner {
     this.tokens.push(token);
   }
 
-  private match(component: string, expected: string) {
-    if (this.current >= component.length) return false;
-    if (component.charAt(this.current) !== expected) return false;
+  private match(content: string, expected: string) {
+    if (this.current >= content.length) return false;
+    if (content.charAt(this.current) !== expected) return false;
 
     this.current += 1;
     return true;
   }
 
-  private peek(component: string) {
-    if (this.current >= component.length) return undefined;
+  private peek(content: string) {
+    if (this.current >= content.length) return undefined;
 
-    return component.charAt(this.current);
+    return content.charAt(this.current);
   }
 
   private handleStep(component: ComponentType) {
-    const start = this.current;
     const { field, content } = component;
-    while (this.peek(content) && this.current < content.length) {
-      const ch = this.peek(content);
-      if (ch && this.isDigit(ch)) this.current += 1;
-    }
-
-    const value = content.substring(start, this.current);
+    const value = content.substring(this.current, content.length);
+    this.current += content.length;
     this.addToken(content, ComponentEnum.Step, Number(value), field);
   }
 
   private handleNumber(component: ComponentType) {
     const { field, content } = component;
     let ch = this.peek(content);
+    let start = this.current - 1;
 
     while (ch && this.isDigit(ch)) {
       this.current += 1;
       ch = this.peek(content);
     }
 
-    ch = this.peek(content);
     if (!ch) {
-      this.addToken(content, ComponentEnum.Number, Number(content), field);
+      // Reached the end of the component
+      const item = content.substring(start);
+      this.addToken(item, ComponentEnum.Number, Number(item), field);
       return;
-    }
-
-    if (this.isDigit(ch)) {
-      this.current += 1;
-      this.addToken(content, ComponentEnum.Number, Number(content), field);
     }
 
     if (this.match(content, "-")) {
       this.handleRange(component);
+      return;
     }
 
-    if (this.match(content, ",")) {
-      this.handleList(component);
-    }
+    const item = content.substring(start, this.current - 1);
+    this.addToken(item, ComponentEnum.Number, Number(item), field);
   }
 
   private handleRange(component: ComponentType) {
@@ -191,24 +182,11 @@ export class Scanner {
       return;
     }
 
-    if (ch) ErrorReporter.report("Invalid range expression", this.expression);
-
-    this.addToken(content, ComponentEnum.Range, content, field);
-  }
-
-  private handleList(component: ComponentType) {
-    const { field, content } = component;
-    let ch = this.peek(content);
-
-    while (ch && this.isDigit(ch)) {
-      this.current += 1;
-      this.match(content, ",");
-      ch = this.peek(content);
+    if (ch && ch !== ",") {
+      ErrorReporter.report("Invalid range expression", this.expression);
     }
 
-    if (ch) ErrorReporter.report("Invalid list expression", this.expression);
-
-    this.addToken(content, ComponentEnum.List, content, field);
+    this.addToken(content, ComponentEnum.Range, content, field);
   }
 
   private isDigit(ch: string) {
