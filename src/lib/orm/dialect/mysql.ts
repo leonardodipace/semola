@@ -188,7 +188,7 @@ export class MysqlDialect implements Dialect {
       return value;
     }
     if (typeof value === "number") {
-      return value === 1;
+      return value !== 0;
     }
     // Fallback for edge cases
     return Boolean(value);

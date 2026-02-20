@@ -146,6 +146,22 @@ export class TableClient<T extends Table> {
     return String(error);
   }
 
+  private normalizeTupleError(
+    error: unknown,
+    fallbackType = "InternalServerError",
+  ) {
+    if (typeof error === "object" && error !== null) {
+      const type = Reflect.get(error, "type");
+      const message = Reflect.get(error, "message");
+
+      if (typeof type === "string" && typeof message === "string") {
+        return { type, message };
+      }
+    }
+
+    return { type: fallbackType, message: this.toErrorMessage(error) };
+  }
+
   private normalizeDateValue(value: unknown) {
     if (value instanceof Date) {
       return value;
@@ -354,7 +370,7 @@ export class TableClient<T extends Table> {
     // Check if value is a filter object (has operator properties)
     if (this.isFilterObject(value)) {
       const filters = value;
-      const conditions = [];
+      const conditions: unknown[] = [];
 
       // Equality operator
       if ("equals" in filters) {
@@ -495,7 +511,7 @@ export class TableClient<T extends Table> {
   }
 
   private buildPagination(skip: number, take: number | undefined) {
-    if (skip === 0 && !take) {
+    if (skip === 0 && take === undefined) {
       return null;
     }
 
@@ -606,7 +622,7 @@ export class TableClient<T extends Table> {
     getTableClient?: (relation: Relation) => TableClient<Table> | undefined,
   ) {
     if (!include || !this.relations || !getTableClient || rows.length === 0) {
-      return rows;
+      return ok(rows);
     }
 
     // Iterate over includes and check if relation exists in table
@@ -615,11 +631,19 @@ export class TableClient<T extends Table> {
 
       const relation = this.relations[relationName];
       if (!relation) {
-        throw new Error(`Unknown relation in include: ${relationName}`);
+        return err(
+          "ValidationError",
+          `Unknown relation in include: ${relationName}`,
+        );
       }
 
       const relatedClient = getTableClient(relation);
-      if (!relatedClient) continue;
+      if (!relatedClient) {
+        return err(
+          "ValidationError",
+          `Missing table client for relation: ${relationName}`,
+        );
+      }
 
       if (relation.type === "one") {
         // one() relation: parent has FK pointing to child
@@ -628,10 +652,14 @@ export class TableClient<T extends Table> {
 
         const relatedPk = relatedClient.getPrimaryKeyColumn();
         if (!relatedPk) {
-          throw new Error("Relation requires a primary key on related table");
+          return err(
+            "ValidationError",
+            "Relation requires a primary key on related table",
+          );
         }
         if (relatedPk.kind === "boolean") {
-          throw new Error(
+          return err(
+            "ValidationError",
             "Boolean primary keys are not supported for relation loading",
           );
         }
@@ -657,7 +685,8 @@ export class TableClient<T extends Table> {
             where,
           });
           if (relatedError) {
-            throw relatedError;
+            const normalizedError = this.normalizeTupleError(relatedError);
+            return err(normalizedError.type, normalizedError.message);
           }
           relatedRecords = records ?? [];
         } else if (relatedPk.kind === "string") {
@@ -679,7 +708,8 @@ export class TableClient<T extends Table> {
             where,
           });
           if (relatedError) {
-            throw relatedError;
+            const normalizedError = this.normalizeTupleError(relatedError);
+            return err(normalizedError.type, normalizedError.message);
           }
           relatedRecords = records ?? [];
         } else {
@@ -701,7 +731,8 @@ export class TableClient<T extends Table> {
             where,
           });
           if (relatedError) {
-            throw relatedError;
+            const normalizedError = this.normalizeTupleError(relatedError);
+            return err(normalizedError.type, normalizedError.message);
           }
           relatedRecords = records ?? [];
         }
@@ -730,10 +761,14 @@ export class TableClient<T extends Table> {
 
         const parentPk = this.getPrimaryKeyColumn();
         if (!parentPk) {
-          throw new Error("Relation requires a primary key on source table");
+          return err(
+            "ValidationError",
+            "Relation requires a primary key on source table",
+          );
         }
         if (parentPk.kind === "boolean") {
-          throw new Error(
+          return err(
+            "ValidationError",
             "Boolean primary keys are not supported for relation loading",
           );
         }
@@ -759,7 +794,8 @@ export class TableClient<T extends Table> {
             where,
           });
           if (relatedError) {
-            throw relatedError;
+            const normalizedError = this.normalizeTupleError(relatedError);
+            return err(normalizedError.type, normalizedError.message);
           }
           relatedRecords = records ?? [];
         } else if (parentPk.kind === "string") {
@@ -781,7 +817,8 @@ export class TableClient<T extends Table> {
             where,
           });
           if (relatedError) {
-            throw relatedError;
+            const normalizedError = this.normalizeTupleError(relatedError);
+            return err(normalizedError.type, normalizedError.message);
           }
           relatedRecords = records ?? [];
         } else {
@@ -803,7 +840,8 @@ export class TableClient<T extends Table> {
             where,
           });
           if (relatedError) {
-            throw relatedError;
+            const normalizedError = this.normalizeTupleError(relatedError);
+            return err(normalizedError.type, normalizedError.message);
           }
           relatedRecords = records ?? [];
         }
@@ -833,150 +871,180 @@ export class TableClient<T extends Table> {
       }
     }
 
-    return rows;
+    return ok(rows);
   }
 
   public async findMany<
     Inc extends Record<string, boolean> | undefined = undefined,
   >(options?: FindManyOptions<T> & { include?: Inc }) {
-    return await mightThrow(
-      (async () => {
-        const [whereError, whereClause] = this.buildWhereClause(options?.where);
-        if (whereError) {
-          throw new Error(whereError.message);
-        }
+    const [whereError, whereClause] = this.buildWhereClause(options?.where);
+    if (whereError) {
+      return err(whereError.type, whereError.message);
+    }
 
-        const skip = options?.skip ?? 0;
-        const take = options?.take;
-        const pagination = this.buildPagination(skip, take);
+    const skip = options?.skip ?? 0;
+    const take = options?.take;
+    const pagination = this.buildPagination(skip, take);
 
-        let sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
-        SELECT * FROM ${this.sql(this.table.sqlName)}
+    let sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
+      SELECT * FROM ${this.sql(this.table.sqlName)}
+    `;
+
+    if (whereClause) {
+      sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
+        ${sql}
+        WHERE ${whereClause}
       `;
+    }
 
-        if (whereClause) {
-          sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
-          ${sql}
-          WHERE ${whereClause}
-        `;
-        }
+    if (pagination) {
+      sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
+        ${sql}
+        ${pagination}
+      `;
+    }
 
-        if (pagination) {
-          sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
-          ${sql}
-          ${pagination}
-        `;
-        }
+    const [queryError, rows] = await mightThrow(sql);
+    if (queryError || !rows) {
+      return err(
+        "InternalServerError",
+        `Failed to fetch rows: ${this.toErrorMessage(queryError)}`,
+      );
+    }
 
-        const rows = await sql;
-        this.convertBooleanValues(rows);
-        this.convertDateValues(rows);
-        this.mapColumnNames(rows);
-        const includedRows = await this.loadIncludedRelations(
-          rows,
-          options?.include,
-          this.getTableClient,
-        );
+    this.convertBooleanValues(rows);
+    this.convertDateValues(rows);
+    this.mapColumnNames(rows);
 
-        return includedRows;
-      })(),
+    const [includeError, includedRows] = await this.loadIncludedRelations(
+      rows,
+      options?.include,
+      this.getTableClient,
     );
+    if (includeError || !includedRows) {
+      return err(
+        includeError?.type ?? "InternalServerError",
+        includeError?.message ?? "Failed to load included relations",
+      );
+    }
+
+    return ok(includedRows);
   }
 
   public async findFirst<
     Inc extends Record<string, boolean> | undefined = undefined,
   >(options?: FindFirstOptions<T> & { include?: Inc }) {
-    return await mightThrow(
-      (async () => {
-        const [whereError, whereClause] = this.buildWhereClause(options?.where);
-        if (whereError) {
-          throw new Error(whereError.message);
-        }
+    const [whereError, whereClause] = this.buildWhereClause(options?.where);
+    if (whereError) {
+      return err(whereError.type, whereError.message);
+    }
 
-        let sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
-        SELECT * FROM ${this.sql(this.table.sqlName)}
-      `;
+    let sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
+      SELECT * FROM ${this.sql(this.table.sqlName)}
+    `;
 
-        if (whereClause) {
-          sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
-          ${sql}
-          WHERE ${whereClause}
-        `;
-        }
-
-        sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
+    if (whereClause) {
+      sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
         ${sql}
-        LIMIT 1
+        WHERE ${whereClause}
       `;
+    }
 
-        const [row] = await sql;
-        if (!row) return null;
+    sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
+      ${sql}
+      LIMIT 1
+    `;
 
-        const rows = [row];
-        this.convertBooleanValues(rows);
-        this.convertDateValues(rows);
-        this.mapColumnNames(rows);
-        const includedRows = await this.loadIncludedRelations(
-          rows,
-          options?.include,
-          this.getTableClient,
-        );
+    const [queryError, queryRows] = await mightThrow(sql);
+    if (queryError || !queryRows) {
+      return err(
+        "InternalServerError",
+        `Failed to fetch row: ${this.toErrorMessage(queryError)}`,
+      );
+    }
 
-        return includedRows[0] ?? null;
-      })(),
+    const [row] = queryRows;
+    if (!row) {
+      return ok(null);
+    }
+
+    const rows = [row];
+    this.convertBooleanValues(rows);
+    this.convertDateValues(rows);
+    this.mapColumnNames(rows);
+
+    const [includeError, includedRows] = await this.loadIncludedRelations(
+      rows,
+      options?.include,
+      this.getTableClient,
     );
+    if (includeError || !includedRows) {
+      return err(
+        includeError?.type ?? "InternalServerError",
+        includeError?.message ?? "Failed to load included relations",
+      );
+    }
+
+    return ok(includedRows[0] ?? null);
   }
 
   public async findUnique<
     Inc extends Record<string, boolean> | undefined = undefined,
   >(options: FindUniqueOptions<T> & { include?: Inc }) {
-    return await mightThrow(
-      (async () => {
-        const [uniqueError] = this.extractUniqueSelector(
-          options.where,
-          "findUnique",
-        );
-        if (uniqueError) {
-          throw new Error(uniqueError.message);
-        }
+    const [uniqueError] = this.extractUniqueSelector(
+      options.where,
+      "findUnique",
+    );
+    if (uniqueError) {
+      return err(uniqueError.type, uniqueError.message);
+    }
 
-        const [whereError, whereClause] = this.buildWhereClause(options.where);
-        if (whereError) {
-          throw new Error(whereError.message);
-        }
+    const [whereError, whereClause] = this.buildWhereClause(options.where);
+    if (whereError) {
+      return err(whereError.type, whereError.message);
+    }
 
-        if (!whereClause) {
-          throw new Error("findUnique requires a where clause");
-        }
+    if (!whereClause) {
+      return err("ValidationError", "findUnique requires a where clause");
+    }
 
-        const results = await this.sql<
-          WithIncluded<InferTableType<T>, T, Inc>[]
-        >`
+    const [queryError, results] = await mightThrow(
+      this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
         SELECT * FROM ${this.sql(this.table.sqlName)}
         WHERE ${whereClause}
         LIMIT 1
-      `;
-
-        const result = results[0];
-        if (!result) return null;
-
-        this.convertBooleanValues([result]);
-        this.convertDateValues([result]);
-        this.mapColumnNames([result]);
-        const includedRows = await this.loadIncludedRelations(
-          [result],
-          options?.include,
-          this.getTableClient,
-        );
-
-        const [included] = includedRows;
-        if (!included) {
-          return null;
-        }
-
-        return included;
-      })(),
+      `,
     );
+    if (queryError || !results) {
+      return err(
+        "InternalServerError",
+        `Failed to fetch row: ${this.toErrorMessage(queryError)}`,
+      );
+    }
+
+    const result = results[0];
+    if (!result) {
+      return ok(null);
+    }
+
+    this.convertBooleanValues([result]);
+    this.convertDateValues([result]);
+    this.mapColumnNames([result]);
+
+    const [includeError, includedRows] = await this.loadIncludedRelations(
+      [result],
+      options?.include,
+      this.getTableClient,
+    );
+    if (includeError || !includedRows) {
+      return err(
+        includeError?.type ?? "InternalServerError",
+        includeError?.message ?? "Failed to load included relations",
+      );
+    }
+
+    const [included] = includedRows;
+    return ok(included ?? null);
   }
 
   public async create(data: CreateInput<T>) {
@@ -1182,7 +1250,8 @@ export class TableClient<T extends Table> {
 
           const [existing] = existingRows;
           if (!existing) {
-            return [] as InferTableType<T>[];
+            const empty: InferTableType<T>[] = [];
+            return empty;
           }
 
           await tx`
@@ -1374,7 +1443,8 @@ export class TableClient<T extends Table> {
           `;
 
           if (existingRows.length === 0) {
-            return [] as InferTableType<T>[];
+            const empty: InferTableType<T>[] = [];
+            return empty;
           }
 
           await tx`
