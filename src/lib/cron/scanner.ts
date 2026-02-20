@@ -24,7 +24,7 @@ class Token {
 
   private readonly field: CronFieldType;
 
-  constructor(
+  public constructor(
     component: string,
     type: ComponentEnum,
     value: TokenValueType,
@@ -44,10 +44,8 @@ class Token {
   }
 }
 
-class ErrorReporter {
-  public static report(msg: string, expression: string) {
-    throw new Error(`${msg}: '${expression}'`);
-  }
+function report(msg: string, expression: string) {
+  throw new Error(`${msg}: '${expression}'`);
 }
 
 export class Scanner {
@@ -56,7 +54,7 @@ export class Scanner {
   private start: number;
   private tokens: Token[];
 
-  constructor(expression: string) {
+  public constructor(expression: string) {
     this.expression = expression;
     this.current = 0;
     this.start = 0;
@@ -107,7 +105,7 @@ export class Scanner {
           if (this.isDigit(currentCh)) {
             this.handleRange(component);
           } else {
-            ErrorReporter.report("Invalid range expression", this.expression);
+            report("Invalid range expression", this.expression);
           }
           break;
         }
@@ -117,7 +115,7 @@ export class Scanner {
           if (this.isDigit(currentCh)) {
             this.handleNumber(component);
           } else {
-            ErrorReporter.report("Invalid cron expression", this.expression);
+            report("Invalid cron expression", this.expression);
           }
 
           break;
@@ -214,7 +212,7 @@ export class Scanner {
     }
 
     if (ch && ch !== ",") {
-      ErrorReporter.report("Invalid range expression", this.expression);
+      report("Invalid range expression", this.expression);
     }
 
     const tokenContent = content.substring(this.start, this.current);
