@@ -158,10 +158,10 @@ Replace the default JSON serialization with custom functions:
 ```typescript
 const cache = new Cache<User>({
   redis: redisClient,
-  serializer: (user) => `${user.id}:${user.name}`,
+  serializer: (user) => `${user.id}:${user.name}:${user.email}`,
   deserializer: (raw) => {
-    const [id, name] = raw.split(":");
-    return { id: Number(id), name };
+    const [id, name, email] = raw.split(":");
+    return { id: Number(id), name, email };
   },
 });
 ```

@@ -476,6 +476,21 @@ describe("Cache", () => {
       expect(redis.getStore().get("key")).toBe("");
     });
 
+    test("should not treat empty string value as cache miss", async () => {
+      const redis = createMockRedis();
+      const cache = new Cache<string>({
+        redis,
+        serializer: () => "",
+        deserializer: (raw) => raw,
+      });
+
+      await cache.set("key", "value");
+
+      const [error, data] = await cache.get("key");
+      expect(error).toBeNull();
+      expect(data).toBe("");
+    });
+
     test("should use custom deserializer on get", async () => {
       const redis = createMockRedis();
       const cache = new Cache<{ name: string }>({

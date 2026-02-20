@@ -27,7 +27,7 @@ export class Cache<T> {
       return this.fail("CacheError", `Unable to get value for key ${key}`);
     }
 
-    if (!value) {
+    if (value === null || value === undefined) {
       return err("NotFoundError", `Key ${key} not found`);
     }
 
