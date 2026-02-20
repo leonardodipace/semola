@@ -396,10 +396,25 @@ describe("Table - findMany with where clause", () => {
     const [error, user] = await orm.tables.users.findUnique({
       where: { id: 1, email: "alice@example.com" },
     });
-    expect(error).toBeNull();
-    expect(user).not.toBeNull();
-    expect(user?.id).toBe(1);
-    expect(user?.email).toBe("alice@example.com");
+    expect(error).not.toBeNull();
+    if (error && typeof error === "object" && "message" in error) {
+      expect(error.message).toContain(
+        "findUnique requires exactly one unique column in where clause",
+      );
+    }
+    expect(user).toBeNull();
+  });
+
+  test("findMany should throw error for unknown include relation", async () => {
+    const [error, users] = await orm.tables.users.findMany({
+      include: { unknownRelation: true },
+    });
+
+    expect(error).not.toBeNull();
+    if (error && typeof error === "object" && "message" in error) {
+      expect(error.message).toContain("Unknown relation in include");
+    }
+    expect(users).toBeNull();
   });
 
   test("findMany with take should limit results", async () => {
@@ -598,14 +613,34 @@ describe("Table - update method", () => {
     expect(updated?.id).toBe(2);
   });
 
-  test("should update first user matching condition", async () => {
+  test("should reject update with non-unique selector", async () => {
     const [error, updated] = await orm.tables.users.update({
       where: { active: false },
       data: { active: true },
     });
 
-    expect(error).toBeNull();
-    expect(updated?.active).toBe(true);
+    expect(error).not.toBeNull();
+    if (error && typeof error === "object" && "message" in error) {
+      expect(error.message).toContain(
+        "update requires a unique selector on a primary key or unique column",
+      );
+    }
+    expect(updated).toBeNull();
+  });
+
+  test("should reject update with multi-field where selector", async () => {
+    const [error, updated] = await orm.tables.users.update({
+      where: { id: 1, email: "alice@example.com" },
+      data: { name: "Alice Changed" },
+    });
+
+    expect(error).not.toBeNull();
+    if (error && typeof error === "object" && "message" in error) {
+      expect(error.message).toContain(
+        "update requires a unique selector with exactly one column",
+      );
+    }
+    expect(updated).toBeNull();
   });
 
   test("should throw error when where clause is missing", async () => {
@@ -644,7 +679,7 @@ describe("Table - delete method", () => {
     expect(found).toBeNull();
   });
 
-  test("should delete first user matching condition", async () => {
+  test("should reject delete with non-unique selector", async () => {
     // Create two users to delete
     const [error1] = await orm.tables.users.create({
       name: "Delete1",
@@ -664,9 +699,30 @@ describe("Table - delete method", () => {
       where: { name: { in: ["Delete1", "Delete2"] } },
     });
 
-    expect(error3).toBeNull();
-    expect(deleted?.name).toBeDefined();
-    expect(["Delete1", "Delete2"]).toContain(deleted?.name ?? "");
+    expect(error3).not.toBeNull();
+    if (error3 && typeof error3 === "object" && "message" in error3) {
+      expect(error3.message).toContain(
+        "delete requires a unique selector on a primary key or unique column",
+      );
+    }
+    expect(deleted).toBeNull();
+
+    await orm.tables.users.delete({ where: { email: "delete1@example.com" } });
+    await orm.tables.users.delete({ where: { email: "delete2@example.com" } });
+  });
+
+  test("should reject delete with multi-field where selector", async () => {
+    const [error, deleted] = await orm.tables.users.delete({
+      where: { id: 1, email: "alice@example.com" },
+    });
+
+    expect(error).not.toBeNull();
+    if (error && typeof error === "object" && "message" in error) {
+      expect(error.message).toContain(
+        "delete requires a unique selector with exactly one column",
+      );
+    }
+    expect(deleted).toBeNull();
   });
 
   test("should throw error when where clause is missing", async () => {
@@ -874,6 +930,38 @@ describe("Table - MySQL dialect compatibility", () => {
     mysqlOrm.close();
   });
 
+  test("create works correctly with MySQL dialect (reselect inserted row)", async () => {
+    const mysqlOrm = new Orm({
+      url: ":memory:",
+      dialect: "mysql",
+      tables: { users: usersTable },
+    });
+
+    await mysqlOrm.sql`DROP TABLE IF EXISTS test_users`;
+    await mysqlOrm.sql`
+      CREATE TABLE test_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        active BOOLEAN DEFAULT 1,
+        created_at TEXT
+      )
+    `;
+
+    const [error, created] = await mysqlOrm.tables.users.create({
+      name: "Created via mysql dialect",
+      email: "created-mysql@test.com",
+      active: true,
+    });
+
+    expect(error).toBeNull();
+    expect(created?.id).toBe(1);
+    expect(created?.name).toBe("Created via mysql dialect");
+    expect(created?.email).toBe("created-mysql@test.com");
+
+    mysqlOrm.close();
+  });
+
   test("update with multiple fields works correctly with MySQL dialect", async () => {
     const mysqlOrm = new Orm({
       url: ":memory:",
@@ -970,7 +1058,7 @@ describe("Table - MySQL dialect compatibility", () => {
     mysqlOrm.close();
   });
 
-  test("delete with complex where clause works with MySQL dialect", async () => {
+  test("delete using unique selector works with MySQL dialect", async () => {
     const mysqlOrm = new Orm({
       url: ":memory:",
       dialect: "mysql",
@@ -993,11 +1081,10 @@ describe("Table - MySQL dialect compatibility", () => {
       VALUES ('User1', 'user1@test.com', 0)
     `;
 
-    // Delete using non-id where clause
+    // Delete using unique non-primary where clause
     const [error, deleted] = await mysqlOrm.tables.users.delete({
       where: {
         email: "user1@test.com",
-        active: false,
       },
     });
 
@@ -1075,6 +1162,102 @@ describe("Table - MySQL dialect compatibility", () => {
     expect(updated?.active).toBe(true);
 
     mysqlOrm.close();
+  });
+
+  test("MySQL update reselect works when filtered unique field changes", async () => {
+    const mysqlOrm = new Orm({
+      url: ":memory:",
+      dialect: "mysql",
+      tables: { users: usersTable },
+    });
+
+    await mysqlOrm.sql`DROP TABLE IF EXISTS test_users`;
+    await mysqlOrm.sql`
+      CREATE TABLE test_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        active BOOLEAN DEFAULT 1,
+        created_at TEXT
+      )
+    `;
+
+    await mysqlOrm.sql`
+      INSERT INTO test_users (name, email, active)
+      VALUES ('Bob', 'before-change@test.com', 1)
+    `;
+
+    const [error, updated] = await mysqlOrm.tables.users.update({
+      where: { email: "before-change@test.com" },
+      data: { email: "after-change@test.com", name: "Bob Updated" },
+    });
+
+    expect(error).toBeNull();
+    expect(updated?.name).toBe("Bob Updated");
+    expect(updated?.email).toBe("after-change@test.com");
+
+    const [findError, found] = await mysqlOrm.tables.users.findUnique({
+      where: { email: "after-change@test.com" },
+    });
+    expect(findError).toBeNull();
+    expect(found?.name).toBe("Bob Updated");
+
+    mysqlOrm.close();
+  });
+});
+
+describe("Table - date normalization", () => {
+  const dateTable = new Table("test_dates", {
+    id: number("id").primaryKey(),
+    happenedAt: date("happened_at").notNull(),
+  });
+
+  const dateOrm = new Orm({
+    url: ":memory:",
+    tables: { dates: dateTable },
+  });
+
+  beforeAll(async () => {
+    await dateOrm.sql`DROP TABLE IF EXISTS test_dates`;
+    await dateOrm.sql`
+      CREATE TABLE test_dates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        happened_at INTEGER NOT NULL
+      )
+    `;
+  });
+
+  afterAll(async () => {
+    await dateOrm.sql`DROP TABLE IF EXISTS test_dates`;
+    dateOrm.close();
+  });
+
+  test("should normalize sqlite date writes and reads as Date", async () => {
+    const happenedAt = new Date("2026-01-01T10:30:00.000Z");
+
+    const [createError, created] = await dateOrm.tables.dates.create({
+      happenedAt,
+    });
+
+    expect(createError).toBeNull();
+    expect(created?.happenedAt).toBeInstanceOf(Date);
+    expect(created?.happenedAt.getTime()).toBe(happenedAt.getTime());
+
+    const [findError, found] = await dateOrm.tables.dates.findUnique({
+      where: { id: created?.id },
+    });
+
+    expect(findError).toBeNull();
+    expect(found?.happenedAt).toBeInstanceOf(Date);
+    expect(found?.happenedAt.getTime()).toBe(happenedAt.getTime());
+
+    const [whereError, byDate] = await dateOrm.tables.dates.findMany({
+      where: { happenedAt },
+    });
+
+    expect(whereError).toBeNull();
+    expect(byDate?.length).toBe(1);
+    expect(byDate?.[0]?.id).toBe(created?.id);
   });
 });
 

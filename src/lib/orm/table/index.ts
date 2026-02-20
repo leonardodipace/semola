@@ -136,6 +136,143 @@ export class TableClient<T extends Table> {
     }
   }
 
+  private normalizeDateValue(value: unknown) {
+    if (value instanceof Date) {
+      return value;
+    }
+
+    if (typeof value === "number") {
+      const date = new Date(value);
+      if (!Number.isNaN(date.getTime())) {
+        return date;
+      }
+      return value;
+    }
+
+    if (typeof value === "string") {
+      const numeric = Number(value);
+      if (!Number.isNaN(numeric) && value.trim() !== "") {
+        const numericDate = new Date(numeric);
+        if (!Number.isNaN(numericDate.getTime())) {
+          return numericDate;
+        }
+      }
+
+      const parsedDate = new Date(value);
+      if (!Number.isNaN(parsedDate.getTime())) {
+        return parsedDate;
+      }
+    }
+
+    return value;
+  }
+
+  private normalizeValueForWrite(
+    column: Column<ColumnKind, ColumnMeta>,
+    value: unknown,
+  ) {
+    if (column.columnKind !== "date") {
+      return value;
+    }
+
+    if (value === null) {
+      return value;
+    }
+
+    if (this.dialect.name === "sqlite" && value instanceof Date) {
+      return value.getTime();
+    }
+
+    return value;
+  }
+
+  private normalizeValueForWhere(
+    column: Column<ColumnKind, ColumnMeta>,
+    value: unknown,
+  ) {
+    if (column.columnKind !== "date") {
+      return value;
+    }
+
+    if (value === null) {
+      return value;
+    }
+
+    if (this.dialect.name === "sqlite" && value instanceof Date) {
+      return value.getTime();
+    }
+
+    return value;
+  }
+
+  private convertDateValues(rows: Record<string, unknown>[]) {
+    for (const row of rows) {
+      for (const [_key, column] of Object.entries(this.table.columns)) {
+        if (column.columnKind !== "date") {
+          continue;
+        }
+
+        const sqlColumnName = column.sqlName;
+        row[sqlColumnName] = this.normalizeDateValue(row[sqlColumnName]);
+      }
+    }
+  }
+
+  private extractUniqueSelector(where: WhereClause<T>, operation: string) {
+    const whereEntries: [string, unknown][] = Object.entries(where);
+
+    if (whereEntries.length !== 1) {
+      throw new Error(
+        `${operation} requires a unique selector with exactly one column`,
+      );
+    }
+
+    const [entry] = whereEntries;
+    if (!entry) {
+      throw new Error(
+        `${operation} requires a unique selector with exactly one column`,
+      );
+    }
+
+    const [key, rawValue] = entry;
+    this.validateColumnName(key);
+
+    const column = this.table.columns[key];
+    if (!column) {
+      throw new Error(`Invalid column: ${key}`);
+    }
+
+    if (!column.meta.primaryKey && !column.meta.unique) {
+      throw new Error(
+        `${operation} requires a unique selector on a primary key or unique column`,
+      );
+    }
+
+    let value = rawValue;
+
+    if (this.isFilterObject(rawValue)) {
+      const filters = rawValue as Record<string, unknown>;
+      const filterKeys = Object.keys(filters);
+
+      if (filterKeys.length !== 1 || !("equals" in filters)) {
+        throw new Error(
+          `${operation} unique selector must use a direct value or { equals: value }`,
+        );
+      }
+
+      value = filters.equals;
+    }
+
+    value = this.normalizeValueForWhere(column, value);
+
+    return {
+      key,
+      value,
+      column,
+      isPrimaryKey: column.meta.primaryKey,
+    };
+  }
+
   public getSqlColumnName(key: string): string {
     const column = this.table.columns[key];
     if (!column) {
@@ -165,6 +302,11 @@ export class TableClient<T extends Table> {
 
   private buildCondition(key: string, value: unknown) {
     const sqlColumnName = this.getSqlColumnName(key);
+    const column = this.table.columns[key];
+
+    if (!column) {
+      throw new Error(`Invalid column: ${key}`);
+    }
 
     if (value === null) {
       return this.sql`${this.sql(sqlColumnName)} IS NULL`;
@@ -177,9 +319,8 @@ export class TableClient<T extends Table> {
 
       // Equality operator
       if ("equals" in filters) {
-        conditions.push(
-          this.sql`${this.sql(sqlColumnName)} = ${filters.equals}`,
-        );
+        const equalsValue = this.normalizeValueForWhere(column, filters.equals);
+        conditions.push(this.sql`${this.sql(sqlColumnName)} = ${equalsValue}`);
       }
 
       // String operators (case-insensitive, works across all databases)
@@ -193,21 +334,27 @@ export class TableClient<T extends Table> {
 
       // Number/Date comparison operators
       if ("gt" in filters) {
-        conditions.push(this.sql`${this.sql(sqlColumnName)} > ${filters.gt}`);
+        const gtValue = this.normalizeValueForWhere(column, filters.gt);
+        conditions.push(this.sql`${this.sql(sqlColumnName)} > ${gtValue}`);
       }
       if ("gte" in filters) {
-        conditions.push(this.sql`${this.sql(sqlColumnName)} >= ${filters.gte}`);
+        const gteValue = this.normalizeValueForWhere(column, filters.gte);
+        conditions.push(this.sql`${this.sql(sqlColumnName)} >= ${gteValue}`);
       }
       if ("lt" in filters) {
-        conditions.push(this.sql`${this.sql(sqlColumnName)} < ${filters.lt}`);
+        const ltValue = this.normalizeValueForWhere(column, filters.lt);
+        conditions.push(this.sql`${this.sql(sqlColumnName)} < ${ltValue}`);
       }
       if ("lte" in filters) {
-        conditions.push(this.sql`${this.sql(sqlColumnName)} <= ${filters.lte}`);
+        const lteValue = this.normalizeValueForWhere(column, filters.lte);
+        conditions.push(this.sql`${this.sql(sqlColumnName)} <= ${lteValue}`);
       }
 
       // Handle 'in' operator
       if ("in" in filters && Array.isArray(filters.in)) {
-        const inValues = filters.in;
+        const inValues = filters.in.map((entry) =>
+          this.normalizeValueForWhere(column, entry),
+        );
         if (inValues.length === 0) {
           conditions.push(this.sql`FALSE`);
         } else if (inValues.length === 1) {
@@ -242,7 +389,8 @@ export class TableClient<T extends Table> {
     }
 
     // Direct equality
-    return this.sql`${this.sql(sqlColumnName)} = ${value}`;
+    const normalizedValue = this.normalizeValueForWhere(column, value);
+    return this.sql`${this.sql(sqlColumnName)} = ${normalizedValue}`;
   }
 
   private buildWhereClause(where?: WhereClause<T>) {
@@ -402,7 +550,9 @@ export class TableClient<T extends Table> {
       if (!shouldInclude) continue;
 
       const relation = this.relations[relationName];
-      if (!relation) continue;
+      if (!relation) {
+        throw new Error(`Unknown relation in include: ${relationName}`);
+      }
 
       const relatedClient = getTableClient(relation);
       if (!relatedClient) continue;
@@ -616,6 +766,7 @@ export class TableClient<T extends Table> {
 
         const rows = await sql;
         this.convertBooleanValues(rows);
+        this.convertDateValues(rows);
         this.mapColumnNames(rows);
         await this.loadIncludedRelations(
           rows,
@@ -657,6 +808,7 @@ export class TableClient<T extends Table> {
 
         const rows = [row];
         this.convertBooleanValues(rows);
+        this.convertDateValues(rows);
         this.mapColumnNames(rows);
         await this.loadIncludedRelations(
           rows,
@@ -678,29 +830,31 @@ export class TableClient<T extends Table> {
   >(options: FindUniqueOptions<T> & { include?: Inc }) {
     return await mightThrow(
       (async () => {
-        // Runtime validation: ensure only unique/primary key columns are used
         const whereKeys = Object.keys(options.where);
 
-        if (whereKeys.length === 0) {
+        if (whereKeys.length !== 1) {
           throw new Error(
-            "findUnique requires at least one column in where clause",
+            "findUnique requires exactly one unique column in where clause",
           );
         }
 
-        // Validate all columns exist and are either primary keys or unique columns
-        for (const columnKey of whereKeys) {
-          const column = this.table.columns[columnKey];
+        const [columnKey] = whereKeys;
+        if (!columnKey) {
+          throw new Error(
+            "findUnique requires exactly one unique column in where clause",
+          );
+        }
 
-          if (!column) {
-            throw new Error(`Invalid column: ${columnKey}`);
-          }
+        const column = this.table.columns[columnKey];
 
-          // Check if this column is a primary key or unique column
-          if (!column.meta.primaryKey && !column.meta.unique) {
-            throw new Error(
-              `Column "${columnKey}" is not a primary key or unique column. findUnique requires a unique constraint.`,
-            );
-          }
+        if (!column) {
+          throw new Error(`Invalid column: ${columnKey}`);
+        }
+
+        if (!column.meta.primaryKey && !column.meta.unique) {
+          throw new Error(
+            `Column "${columnKey}" is not a primary key or unique column. findUnique requires a unique constraint.`,
+          );
         }
 
         const whereClause = this.buildWhereClause(options.where);
@@ -719,6 +873,7 @@ export class TableClient<T extends Table> {
         if (!result) return null;
 
         this.convertBooleanValues([result]);
+        this.convertDateValues([result]);
         this.mapColumnNames([result]);
         await this.loadIncludedRelations(
           [result],
@@ -742,8 +897,13 @@ export class TableClient<T extends Table> {
         // Build a map to translate JS field names to SQL column names
         const sqlData: Record<string, unknown> = {};
         for (const [key, value] of Object.entries(data)) {
-          const sqlColumnName = this.getSqlColumnName(key);
-          sqlData[sqlColumnName] = value;
+          this.validateColumnName(key);
+          const column = this.table.columns[key];
+          if (!column) {
+            throw new Error(`Invalid column: ${key}`);
+          }
+          const sqlColumnName = column.sqlName;
+          sqlData[sqlColumnName] = this.normalizeValueForWrite(column, value);
         }
 
         // Use dialect-specific SQL generation
@@ -752,12 +912,63 @@ export class TableClient<T extends Table> {
           values: sqlData,
         });
 
-        const results = await this.sql.unsafe<InferTableType<T>[]>(
+        const inserted = await this.sql.unsafe<InferTableType<T>[]>(
           query.sql,
           query.params,
         );
 
+        let results = inserted;
+
+        if (this.dialect.name === "mysql") {
+          const primaryKey = this.getPrimaryKeyColumn();
+
+          if (primaryKey && primaryKey.kind !== "boolean") {
+            if (this.isActualMysql()) {
+              results = await this.sql<InferTableType<T>[]>`
+                SELECT * FROM ${this.sql(this.table.sqlName)}
+                WHERE ${this.sql(primaryKey.sqlName)} = LAST_INSERT_ID()
+                LIMIT 1
+              `;
+            } else {
+              results = await this.sql<InferTableType<T>[]>`
+                SELECT * FROM ${this.sql(this.table.sqlName)}
+                WHERE ${this.sql(primaryKey.sqlName)} = last_insert_rowid()
+                LIMIT 1
+              `;
+            }
+          }
+
+          if (results.length === 0) {
+            for (const [key, column] of Object.entries(this.table.columns)) {
+              if (!column.meta.primaryKey && !column.meta.unique) {
+                continue;
+              }
+
+              const value = Reflect.get(data, key);
+              if (value === undefined) {
+                continue;
+              }
+
+              const normalizedValue = this.normalizeValueForWhere(
+                column,
+                value,
+              );
+
+              results = await this.sql<InferTableType<T>[]>`
+                SELECT * FROM ${this.sql(this.table.sqlName)}
+                WHERE ${this.sql(column.sqlName)} = ${normalizedValue}
+                LIMIT 1
+              `;
+
+              if (results.length > 0) {
+                break;
+              }
+            }
+          }
+        }
+
         this.convertBooleanValues(results);
+        this.convertDateValues(results);
         this.mapColumnNames(results);
 
         const [result] = results;
@@ -775,11 +986,15 @@ export class TableClient<T extends Table> {
   public async update(options: UpdateOptions<T>) {
     return await mightThrow(
       (async () => {
-        const whereClause = this.buildWhereClause(options.where);
+        const uniqueSelector = this.extractUniqueSelector(
+          options.where,
+          "update",
+        );
 
-        if (!whereClause) {
-          throw new Error("update requires a where clause");
-        }
+        const whereClause = this.buildCondition(
+          uniqueSelector.key,
+          uniqueSelector.value,
+        );
 
         const dataEntries: [string, unknown][] = Object.entries(options.data);
 
@@ -790,8 +1005,13 @@ export class TableClient<T extends Table> {
         // Build a map to translate JS field names to SQL column names
         const sqlData: Record<string, unknown> = {};
         for (const [key, value] of dataEntries) {
-          const sqlColumnName = this.getSqlColumnName(key);
-          sqlData[sqlColumnName] = value;
+          this.validateColumnName(key);
+          const column = this.table.columns[key];
+          if (!column) {
+            throw new Error(`Invalid column: ${key}`);
+          }
+          const sqlColumnName = column.sqlName;
+          sqlData[sqlColumnName] = this.normalizeValueForWrite(column, value);
         }
 
         // Build the UPDATE query with proper dialect handling
@@ -812,30 +1032,48 @@ export class TableClient<T extends Table> {
           try {
             await this.sql`BEGIN`;
 
-            // Lock the rows we're about to update
-            results = await this.sql<InferTableType<T>[]>`
+            const existingRows = await this.sql<InferTableType<T>[]>`
               SELECT * FROM ${this.sql(this.table.sqlName)}
               WHERE ${whereClause}
               FOR UPDATE
             `;
 
-            if (results.length === 0) {
+            const [existing] = existingRows;
+            if (!existing) {
               await this.sql`ROLLBACK`;
               throw new Error("update did not find a row");
             }
 
-            // Perform the update
             await this.sql`
               UPDATE ${this.sql(this.table.sqlName)}
               SET ${this.sql(sqlData)}
               WHERE ${whereClause}
             `;
 
-            // Select the updated rows to return
-            results = await this.sql<InferTableType<T>[]>`
-              SELECT * FROM ${this.sql(this.table.sqlName)}
-              WHERE ${whereClause}
-            `;
+            const primaryKey = this.getPrimaryKeyColumn();
+            if (primaryKey && primaryKey.kind !== "boolean") {
+              const pkValue = existing[primaryKey.sqlName];
+              results = await this.sql<InferTableType<T>[]>`
+                SELECT * FROM ${this.sql(this.table.sqlName)}
+                WHERE ${this.sql(primaryKey.sqlName)} = ${pkValue}
+                LIMIT 1
+              `;
+            } else {
+              const selectorColumn = uniqueSelector.column;
+              const updatedSelectorValue =
+                uniqueSelector.key in options.data
+                  ? this.normalizeValueForWhere(
+                      selectorColumn,
+                      Reflect.get(options.data, uniqueSelector.key),
+                    )
+                  : uniqueSelector.value;
+
+              results = await this.sql<InferTableType<T>[]>`
+                SELECT * FROM ${this.sql(this.table.sqlName)}
+                WHERE ${this.sql(selectorColumn.sqlName)} = ${updatedSelectorValue}
+                LIMIT 1
+              `;
+            }
 
             await this.sql`COMMIT`;
           } catch (error) {
@@ -843,20 +1081,51 @@ export class TableClient<T extends Table> {
             throw error;
           }
         } else {
-          // For SQLite with MySQL dialect (testing): just do UPDATE then SELECT
+          const existingRows = await this.sql<InferTableType<T>[]>`
+            SELECT * FROM ${this.sql(this.table.sqlName)}
+            WHERE ${whereClause}
+            LIMIT 1
+          `;
+
+          const [existing] = existingRows;
+          if (!existing) {
+            throw new Error("update did not find a row");
+          }
+
           await this.sql`
             UPDATE ${this.sql(this.table.sqlName)}
             SET ${this.sql(sqlData)}
             WHERE ${whereClause}
           `;
 
-          results = await this.sql<InferTableType<T>[]>`
-            SELECT * FROM ${this.sql(this.table.sqlName)}
-            WHERE ${whereClause}
-          `;
+          const primaryKey = this.getPrimaryKeyColumn();
+          if (primaryKey && primaryKey.kind !== "boolean") {
+            const pkValue = existing[primaryKey.sqlName];
+            results = await this.sql<InferTableType<T>[]>`
+              SELECT * FROM ${this.sql(this.table.sqlName)}
+              WHERE ${this.sql(primaryKey.sqlName)} = ${pkValue}
+              LIMIT 1
+            `;
+          } else {
+            const selectorColumn = uniqueSelector.column;
+            const updatedSelectorValue =
+              uniqueSelector.key in options.data
+                ? this.normalizeValueForWhere(
+                    selectorColumn,
+                    Reflect.get(options.data, uniqueSelector.key),
+                  )
+                : uniqueSelector.value;
+
+            results = await this.sql<InferTableType<T>[]>`
+              SELECT * FROM ${this.sql(this.table.sqlName)}
+              WHERE ${this.sql(selectorColumn.sqlName)} = ${updatedSelectorValue}
+              LIMIT 1
+            `;
+          }
         }
 
         this.convertBooleanValues(results);
+        this.convertDateValues(results);
         this.mapColumnNames(results);
 
         const [result] = results;
@@ -873,11 +1142,15 @@ export class TableClient<T extends Table> {
   public async delete(options: DeleteOptions<T>) {
     return await mightThrow(
       (async () => {
-        const whereClause = this.buildWhereClause(options.where);
+        const uniqueSelector = this.extractUniqueSelector(
+          options.where,
+          "delete",
+        );
 
-        if (!whereClause) {
-          throw new Error("delete requires a where clause");
-        }
+        const whereClause = this.buildCondition(
+          uniqueSelector.key,
+          uniqueSelector.value,
+        );
 
         // Build the DELETE query with proper dialect handling
         const hasReturning = this.dialect.name !== "mysql";
@@ -937,6 +1210,7 @@ export class TableClient<T extends Table> {
         }
 
         this.convertBooleanValues(results);
+        this.convertDateValues(results);
         this.mapColumnNames(results);
 
         const [result] = results;
