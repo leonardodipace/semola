@@ -40,10 +40,17 @@ const validateConfig = (value: unknown) => {
   const url = Reflect.get(orm, "url");
   const schema = Reflect.get(orm, "schema");
 
-  if (!isDialect(dialect)) {
+  if (dialect === undefined) {
     return err(
       "ValidationError",
       "Invalid semola config: orm.dialect is required",
+    );
+  }
+
+  if (!isDialect(dialect)) {
+    return err(
+      "ValidationError",
+      `Invalid semola config: unsupported orm.dialect value "${String(dialect)}"`,
     );
   }
 

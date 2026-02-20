@@ -69,6 +69,57 @@ describe("loadSemolaConfig", () => {
     expect(error).not.toBeNull();
     expect(error?.message).toContain("missing orm.schema section");
   });
+
+  test("throws explicit error for unsupported orm dialect", async () => {
+    const dir = await createTempDir();
+
+    await Bun.write(
+      `${dir}/semola.config.ts`,
+      `export default {
+  orm: {
+    dialect: "mssql",
+    url: ":memory:",
+    schema: {
+      path: "./src/db/schema.ts",
+    },
+  },
+};
+`,
+    );
+
+    const [error] = await loadSemolaConfig(dir);
+
+    expect(error).not.toBeNull();
+    expect(error?.type).toBe("ValidationError");
+    expect(error?.message).toContain("unsupported orm.dialect value");
+    expect(error?.message).toContain("mssql");
+  });
+
+  test("accepts all supported orm dialect values", async () => {
+    const dialects = ["sqlite", "mysql", "postgres"] as const;
+
+    for (const dialect of dialects) {
+      const dir = await createTempDir();
+
+      await Bun.write(
+        `${dir}/semola.config.ts`,
+        `export default {
+  orm: {
+    dialect: "${dialect}",
+    url: ":memory:",
+    schema: {
+      path: "./src/db/schema.ts",
+    },
+  },
+};
+`,
+      );
+
+      const [error, config] = await loadSemolaConfig(dir);
+      expect(error).toBeNull();
+      expect(config?.orm.dialect).toBe(dialect);
+    }
+  });
 });
 
 describe("loadSchemaTables", () => {
@@ -93,6 +144,30 @@ export const tables = {
 
     expect(error).toBeNull();
     expect(tables?.users?.sqlName).toBe("users");
+  });
+
+  test("uses object keys as table names even when sqlName differs", async () => {
+    const dir = await createTempDir();
+    const schemaPath = `${dir}/schema.ts`;
+
+    await Bun.write(
+      schemaPath,
+      `import { Table, number } from "${process.cwd()}/src/lib/orm/index.ts";
+
+export const tables = {
+  usersById: new Table("users", {
+    id: number("id").primaryKey(),
+  }),
+};
+`,
+    );
+
+    const [error, tables] = await loadSchemaTables(schemaPath);
+
+    expect(error).toBeNull();
+    expect(tables?.usersById).toBeDefined();
+    expect(tables?.usersById?.sqlName).toBe("users");
+    expect(tables?.users).toBeUndefined();
   });
 
   test("loads default export array of tables", async () => {
@@ -222,5 +297,33 @@ export default {
 
     expect(error).toBeNull();
     expect(tables?.users?.sqlName).toBe("users");
+  });
+
+  test("prefers named export over default when both exist", async () => {
+    const dir = await createTempDir();
+    const schemaPath = `${dir}/schema.ts`;
+
+    await Bun.write(
+      schemaPath,
+      `import { Table, number } from "${process.cwd()}/src/lib/orm/index.ts";
+
+export const tables = {
+  users: new Table("users_named", {
+    id: number("id").primaryKey(),
+  }),
+};
+
+export default {
+  users: new Table("users_default", {
+    id: number("id").primaryKey(),
+  }),
+};
+`,
+    );
+
+    const [error, tables] = await loadSchemaTables(schemaPath);
+
+    expect(error).toBeNull();
+    expect(tables?.users?.sqlName).toBe("users_named");
   });
 });
