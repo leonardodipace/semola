@@ -26,7 +26,7 @@ describe("MysqlDialect - query building", () => {
     });
 
     expect(result.sql).toBe(
-      "SELECT id, name FROM users WHERE age > ? AND active = ?",
+      "SELECT `id`, `name` FROM `users` WHERE age > ? AND active = ?",
     );
     expect(result.params).toEqual([18, true]);
   });
@@ -37,7 +37,9 @@ describe("MysqlDialect - query building", () => {
       offset: 20,
     });
 
-    expect(result.sql).toBe("SELECT id, name FROM users LIMIT 10 OFFSET 20");
+    expect(result.sql).toBe(
+      "SELECT `id`, `name` FROM `users` LIMIT 10 OFFSET 20",
+    );
     expect(result.params).toEqual([]);
   });
 
@@ -46,7 +48,7 @@ describe("MysqlDialect - query building", () => {
       limit: 10,
     });
 
-    expect(result.sql).toBe("SELECT id, name FROM users LIMIT 10");
+    expect(result.sql).toBe("SELECT `id`, `name` FROM `users` LIMIT 10");
   });
 
   test("buildSelect should handle offset only", () => {
@@ -55,7 +57,7 @@ describe("MysqlDialect - query building", () => {
     });
 
     expect(result.sql).toBe(
-      "SELECT id, name FROM users LIMIT 18446744073709551615 OFFSET 20",
+      "SELECT `id`, `name` FROM `users` LIMIT 18446744073709551615 OFFSET 20",
     );
   });
 
@@ -65,7 +67,9 @@ describe("MysqlDialect - query building", () => {
       values: { name: "Alice", age: 30 },
     });
 
-    expect(result.sql).toBe("INSERT INTO users (name, age) VALUES (?, ?)");
+    expect(result.sql).toBe(
+      "INSERT INTO `users` (`name`, `age`) VALUES (?, ?)",
+    );
     expect(result.params).toEqual(["Alice", 30]);
   });
 
@@ -81,7 +85,9 @@ describe("MysqlDialect - query building", () => {
       where,
     });
 
-    expect(result.sql).toBe("UPDATE users SET name = ?, age = ? WHERE id = ?");
+    expect(result.sql).toBe(
+      "UPDATE `users` SET `name` = ?, `age` = ? WHERE id = ?",
+    );
     expect(result.params).toEqual(["Bob", 25, 1]);
   });
 
@@ -96,7 +102,7 @@ describe("MysqlDialect - query building", () => {
       where,
     });
 
-    expect(result.sql).toBe("DELETE FROM users WHERE id = ?");
+    expect(result.sql).toBe("DELETE FROM `users` WHERE id = ?");
     expect(result.params).toEqual([1]);
   });
 
@@ -127,8 +133,8 @@ describe("MysqlDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("id BIGINT AUTO_INCREMENT PRIMARY KEY");
-    expect(sql).toContain("name VARCHAR(255) NOT NULL");
+    expect(sql).toContain("`id` BIGINT AUTO_INCREMENT PRIMARY KEY");
+    expect(sql).toContain("`name` VARCHAR(255) NOT NULL");
   });
 
   test("should handle non-auto-incrementing primary keys", () => {
@@ -139,8 +145,8 @@ describe("MysqlDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("uuid CHAR(36) PRIMARY KEY");
-    expect(sql).toContain("name VARCHAR(255) NOT NULL");
+    expect(sql).toContain("`uuid` CHAR(36) PRIMARY KEY");
+    expect(sql).toContain("`name` VARCHAR(255) NOT NULL");
   });
 
   test("should handle JSON columns", () => {
@@ -152,9 +158,9 @@ describe("MysqlDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("id BIGINT AUTO_INCREMENT PRIMARY KEY");
-    expect(sql).toContain("data JSON NOT NULL");
-    expect(sql).toContain("metadata JSON");
+    expect(sql).toContain("`id` BIGINT AUTO_INCREMENT PRIMARY KEY");
+    expect(sql).toContain("`data` JSON NOT NULL");
+    expect(sql).toContain("`metadata` JSON");
   });
 
   test("should handle UUID columns stored as CHAR(36)", () => {
@@ -166,9 +172,9 @@ describe("MysqlDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("id CHAR(36) PRIMARY KEY");
-    expect(sql).toContain("user_id CHAR(36) NOT NULL");
-    expect(sql).toContain("token VARCHAR(255) NOT NULL");
+    expect(sql).toContain("`id` CHAR(36) PRIMARY KEY");
+    expect(sql).toContain("`user_id` CHAR(36) NOT NULL");
+    expect(sql).toContain("`token` VARCHAR(255) NOT NULL");
   });
 
   test("should handle boolean columns", () => {
@@ -179,7 +185,7 @@ describe("MysqlDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("active BOOLEAN NOT NULL");
+    expect(sql).toContain("`active` BOOLEAN NOT NULL");
   });
 
   test("should handle unique constraints", () => {
@@ -190,7 +196,7 @@ describe("MysqlDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("email VARCHAR(255) NOT NULL UNIQUE");
+    expect(sql).toContain("`email` VARCHAR(255) NOT NULL UNIQUE");
   });
 
   test("should handle all column types", () => {
@@ -204,12 +210,12 @@ describe("MysqlDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("CREATE TABLE IF NOT EXISTS complex");
-    expect(sql).toContain("id BIGINT AUTO_INCREMENT PRIMARY KEY");
-    expect(sql).toContain("name VARCHAR(255) NOT NULL");
-    expect(sql).toContain("active BOOLEAN DEFAULT 1");
-    expect(sql).toContain("config JSON");
-    expect(sql).toContain("session_id CHAR(36)");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS `complex`");
+    expect(sql).toContain("`id` BIGINT AUTO_INCREMENT PRIMARY KEY");
+    expect(sql).toContain("`name` VARCHAR(255) NOT NULL");
+    expect(sql).toContain("`active` BOOLEAN DEFAULT 1");
+    expect(sql).toContain("`config` JSON");
+    expect(sql).toContain("`session_id` CHAR(36)");
   });
 
   test("should not add NOT NULL for primary key (implied)", () => {
@@ -221,7 +227,7 @@ describe("MysqlDialect - CREATE TABLE", () => {
     expect(error).toBeNull();
     // Should only have PRIMARY KEY, not NOT NULL twice
     expect(sql).toBe(
-      "CREATE TABLE IF NOT EXISTS users (id BIGINT AUTO_INCREMENT PRIMARY KEY)",
+      "CREATE TABLE IF NOT EXISTS `users` (`id` BIGINT AUTO_INCREMENT PRIMARY KEY)",
     );
   });
 
@@ -234,7 +240,7 @@ describe("MysqlDialect - CREATE TABLE", () => {
     expect(error).toBeNull();
     // Should only have PRIMARY KEY, not UNIQUE
     expect(sql).toBe(
-      "CREATE TABLE IF NOT EXISTS users (id BIGINT AUTO_INCREMENT PRIMARY KEY)",
+      "CREATE TABLE IF NOT EXISTS `users` (`id` BIGINT AUTO_INCREMENT PRIMARY KEY)",
     );
   });
 });

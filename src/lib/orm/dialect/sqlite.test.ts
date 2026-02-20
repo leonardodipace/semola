@@ -26,7 +26,7 @@ describe("SqliteDialect - query building", () => {
     });
 
     expect(result.sql).toBe(
-      "SELECT id, name FROM users WHERE age > ? AND active = ?",
+      'SELECT "id", "name" FROM "users" WHERE age > ? AND active = ?',
     );
     expect(result.params).toEqual([18, true]);
   });
@@ -37,7 +37,9 @@ describe("SqliteDialect - query building", () => {
       offset: 20,
     });
 
-    expect(result.sql).toBe("SELECT id, name FROM users LIMIT 10 OFFSET 20");
+    expect(result.sql).toBe(
+      'SELECT "id", "name" FROM "users" LIMIT 10 OFFSET 20',
+    );
     expect(result.params).toEqual([]);
   });
 
@@ -46,7 +48,7 @@ describe("SqliteDialect - query building", () => {
       limit: 10,
     });
 
-    expect(result.sql).toBe("SELECT id, name FROM users LIMIT 10");
+    expect(result.sql).toBe('SELECT "id", "name" FROM "users" LIMIT 10');
   });
 
   test("buildSelect should handle offset only", () => {
@@ -54,7 +56,9 @@ describe("SqliteDialect - query building", () => {
       offset: 20,
     });
 
-    expect(result.sql).toBe("SELECT id, name FROM users LIMIT -1 OFFSET 20");
+    expect(result.sql).toBe(
+      'SELECT "id", "name" FROM "users" LIMIT -1 OFFSET 20',
+    );
   });
 
   test("buildInsert should use ? placeholders", () => {
@@ -64,7 +68,7 @@ describe("SqliteDialect - query building", () => {
     });
 
     expect(result.sql).toBe(
-      "INSERT INTO users (name, age) VALUES (?, ?) RETURNING *",
+      'INSERT INTO "users" ("name", "age") VALUES (?, ?) RETURNING *',
     );
     expect(result.params).toEqual(["Alice", 30]);
   });
@@ -82,7 +86,7 @@ describe("SqliteDialect - query building", () => {
     });
 
     expect(result.sql).toBe(
-      "UPDATE users SET name = ?, age = ? WHERE id = ? RETURNING *",
+      'UPDATE "users" SET "name" = ?, "age" = ? WHERE id = ? RETURNING *',
     );
     expect(result.params).toEqual(["Bob", 25, 1]);
   });
@@ -98,7 +102,7 @@ describe("SqliteDialect - query building", () => {
       where,
     });
 
-    expect(result.sql).toBe("DELETE FROM users WHERE id = ? RETURNING *");
+    expect(result.sql).toBe('DELETE FROM "users" WHERE id = ? RETURNING *');
     expect(result.params).toEqual([1]);
   });
 
@@ -124,8 +128,8 @@ describe("SqliteDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("id INTEGER PRIMARY KEY");
-    expect(sql).toContain("name TEXT NOT NULL");
+    expect(sql).toContain('"id" INTEGER PRIMARY KEY');
+    expect(sql).toContain('"name" TEXT NOT NULL');
   });
 
   test("should handle non-numeric primary keys", () => {
@@ -136,8 +140,8 @@ describe("SqliteDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("uuid TEXT PRIMARY KEY");
-    expect(sql).toContain("name TEXT NOT NULL");
+    expect(sql).toContain('"uuid" TEXT PRIMARY KEY');
+    expect(sql).toContain('"name" TEXT NOT NULL');
   });
 
   test("should handle JSON columns stored as TEXT", () => {
@@ -149,9 +153,9 @@ describe("SqliteDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("id INTEGER PRIMARY KEY");
-    expect(sql).toContain("data TEXT NOT NULL");
-    expect(sql).toContain("metadata TEXT");
+    expect(sql).toContain('"id" INTEGER PRIMARY KEY');
+    expect(sql).toContain('"data" TEXT NOT NULL');
+    expect(sql).toContain('"metadata" TEXT');
   });
 
   test("should handle UUID columns stored as TEXT", () => {
@@ -163,9 +167,9 @@ describe("SqliteDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("id TEXT PRIMARY KEY");
-    expect(sql).toContain("user_id TEXT NOT NULL");
-    expect(sql).toContain("token TEXT NOT NULL");
+    expect(sql).toContain('"id" TEXT PRIMARY KEY');
+    expect(sql).toContain('"user_id" TEXT NOT NULL');
+    expect(sql).toContain('"token" TEXT NOT NULL');
   });
 
   test("should handle boolean columns stored as INTEGER", () => {
@@ -176,7 +180,7 @@ describe("SqliteDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("active INTEGER NOT NULL");
+    expect(sql).toContain('"active" INTEGER NOT NULL');
   });
 
   test("should handle unique constraints", () => {
@@ -187,7 +191,7 @@ describe("SqliteDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("email TEXT NOT NULL UNIQUE");
+    expect(sql).toContain('"email" TEXT NOT NULL UNIQUE');
   });
 
   test("should handle all column types", () => {
@@ -200,12 +204,12 @@ describe("SqliteDialect - CREATE TABLE", () => {
     });
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("CREATE TABLE IF NOT EXISTS complex");
-    expect(sql).toContain("id INTEGER PRIMARY KEY");
-    expect(sql).toContain("name TEXT NOT NULL");
-    expect(sql).toContain("active INTEGER DEFAULT 1");
-    expect(sql).toContain("config TEXT");
-    expect(sql).toContain("session_id TEXT");
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS "complex"');
+    expect(sql).toContain('"id" INTEGER PRIMARY KEY');
+    expect(sql).toContain('"name" TEXT NOT NULL');
+    expect(sql).toContain('"active" INTEGER DEFAULT 1');
+    expect(sql).toContain('"config" TEXT');
+    expect(sql).toContain('"session_id" TEXT');
   });
 
   test("should not add NOT NULL for primary key (implied)", () => {
@@ -216,7 +220,7 @@ describe("SqliteDialect - CREATE TABLE", () => {
     expect(error).toBeNull();
     // Should only have PRIMARY KEY, not NOT NULL twice
     expect(sql).toBe(
-      "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY)",
+      'CREATE TABLE IF NOT EXISTS "users" ("id" INTEGER PRIMARY KEY)',
     );
   });
 
@@ -229,7 +233,7 @@ describe("SqliteDialect - CREATE TABLE", () => {
     expect(error).toBeNull();
     // Should only have PRIMARY KEY, not UNIQUE
     expect(sql).toBe(
-      "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY)",
+      'CREATE TABLE IF NOT EXISTS "users" ("id" INTEGER PRIMARY KEY)',
     );
   });
 });

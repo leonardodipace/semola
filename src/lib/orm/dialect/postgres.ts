@@ -42,6 +42,10 @@ export class PostgresDialect implements Dialect {
     return value.replace(/'/g, "''");
   }
 
+  private quoteIdentifier(identifier: string) {
+    return `"${identifier.replace(/"/g, '""')}"`;
+  }
+
   private formatDefaultValue(kind: ColumnKind, value: unknown): string {
     if (kind === "number" && typeof value === "number") {
       return String(value);
@@ -76,8 +80,10 @@ export class PostgresDialect implements Dialect {
     const params: unknown[] = [];
 
     // SELECT clause
-    const columnList = columns.join(", ");
-    parts.push(`SELECT ${columnList} FROM ${tableName}`);
+    const columnList = columns
+      .map((column) => this.quoteIdentifier(column))
+      .join(", ");
+    parts.push(`SELECT ${columnList} FROM ${this.quoteIdentifier(tableName)}`);
 
     // WHERE clause
     if (options.where) {
@@ -98,9 +104,11 @@ export class PostgresDialect implements Dialect {
   public buildInsert(options: InsertOptions): QueryResult {
     const columns = Object.keys(options.values);
     const placeholders = columns.map((_, i) => `$${i + 1}`).join(", ");
-    const columnList = columns.join(", ");
+    const columnList = columns
+      .map((column) => this.quoteIdentifier(column))
+      .join(", ");
 
-    const sql = `INSERT INTO ${options.tableName} (${columnList}) VALUES (${placeholders}) RETURNING *`;
+    const sql = `INSERT INTO ${this.quoteIdentifier(options.tableName)} (${columnList}) VALUES (${placeholders}) RETURNING *`;
     const params = Object.values(options.values);
 
     return { sql, params };
@@ -108,7 +116,9 @@ export class PostgresDialect implements Dialect {
 
   public buildUpdate(options: UpdateOptions): QueryResult {
     const columns = Object.keys(options.values);
-    const setClause = columns.map((col, i) => `${col} = $${i + 1}`).join(", ");
+    const setClause = columns
+      .map((col, i) => `${this.quoteIdentifier(col)} = $${i + 1}`)
+      .join(", ");
 
     const whereClause = this.toPostgresPlaceholders(
       options.where.text,
@@ -121,7 +131,7 @@ export class PostgresDialect implements Dialect {
       (_, num) => `$${Number.parseInt(num, 10) + columns.length}`,
     );
 
-    const sql = `UPDATE ${options.tableName} SET ${setClause} WHERE ${adjustedWhereClause} RETURNING *`;
+    const sql = `UPDATE ${this.quoteIdentifier(options.tableName)} SET ${setClause} WHERE ${adjustedWhereClause} RETURNING *`;
     const params = [...Object.values(options.values), ...options.where.values];
 
     return { sql, params };
@@ -133,7 +143,7 @@ export class PostgresDialect implements Dialect {
       options.where.values.length,
     );
 
-    const sql = `DELETE FROM ${options.tableName} WHERE ${whereClause} RETURNING *`;
+    const sql = `DELETE FROM ${this.quoteIdentifier(options.tableName)} WHERE ${whereClause} RETURNING *`;
     const params = [...options.where.values];
 
     return { sql, params };
@@ -146,7 +156,7 @@ export class PostgresDialect implements Dialect {
     const constraints: string[] = [];
 
     for (const [_key, column] of Object.entries(table.columns)) {
-      const parts: string[] = [column.sqlName];
+      const parts: string[] = [this.quoteIdentifier(column.sqlName)];
 
       // For primary keys, use BIGSERIAL (auto-incrementing 64-bit integer)
       if (column.meta.primaryKey && column.columnKind === "number") {
@@ -189,7 +199,9 @@ export class PostgresDialect implements Dialect {
     }
 
     const allDefs = [...columnDefs, ...constraints].join(", ");
-    return ok(`CREATE TABLE IF NOT EXISTS ${table.sqlName} (${allDefs})`);
+    return ok(
+      `CREATE TABLE IF NOT EXISTS ${this.quoteIdentifier(table.sqlName)} (${allDefs})`,
+    );
   }
 
   public convertBooleanValue(value: unknown): boolean {

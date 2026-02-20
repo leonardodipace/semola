@@ -26,7 +26,7 @@ describe("PostgresDialect - query building", () => {
     });
 
     expect(result.sql).toBe(
-      "SELECT id, name FROM users WHERE age > $1 AND active = $2",
+      'SELECT "id", "name" FROM "users" WHERE age > $1 AND active = $2',
     );
     expect(result.params).toEqual([18, true]);
   });
@@ -37,7 +37,9 @@ describe("PostgresDialect - query building", () => {
       offset: 20,
     });
 
-    expect(result.sql).toBe("SELECT id, name FROM users LIMIT 10 OFFSET 20");
+    expect(result.sql).toBe(
+      'SELECT "id", "name" FROM "users" LIMIT 10 OFFSET 20',
+    );
     expect(result.params).toEqual([]);
   });
 
@@ -46,7 +48,7 @@ describe("PostgresDialect - query building", () => {
       limit: 10,
     });
 
-    expect(result.sql).toBe("SELECT id, name FROM users LIMIT 10");
+    expect(result.sql).toBe('SELECT "id", "name" FROM "users" LIMIT 10');
   });
 
   test("buildSelect should handle offset only", () => {
@@ -54,7 +56,9 @@ describe("PostgresDialect - query building", () => {
       offset: 20,
     });
 
-    expect(result.sql).toBe("SELECT id, name FROM users LIMIT ALL OFFSET 20");
+    expect(result.sql).toBe(
+      'SELECT "id", "name" FROM "users" LIMIT ALL OFFSET 20',
+    );
   });
 
   test("buildInsert should use $1, $2, $3 placeholders", () => {
@@ -64,7 +68,7 @@ describe("PostgresDialect - query building", () => {
     });
 
     expect(result.sql).toBe(
-      "INSERT INTO users (name, age) VALUES ($1, $2) RETURNING *",
+      'INSERT INTO "users" ("name", "age") VALUES ($1, $2) RETURNING *',
     );
     expect(result.params).toEqual(["Alice", 30]);
   });
@@ -82,7 +86,7 @@ describe("PostgresDialect - query building", () => {
     });
 
     expect(result.sql).toBe(
-      "UPDATE users SET name = $1, age = $2 WHERE id = $3 RETURNING *",
+      'UPDATE "users" SET "name" = $1, "age" = $2 WHERE id = $3 RETURNING *',
     );
     expect(result.params).toEqual(["Bob", 25, 1]);
   });
@@ -98,7 +102,7 @@ describe("PostgresDialect - query building", () => {
       where,
     });
 
-    expect(result.sql).toBe("DELETE FROM users WHERE id = $1 RETURNING *");
+    expect(result.sql).toBe('DELETE FROM "users" WHERE id = $1 RETURNING *');
     expect(result.params).toEqual([1]);
   });
 
@@ -126,8 +130,8 @@ describe("PostgresDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("id BIGSERIAL PRIMARY KEY");
-    expect(sql).toContain("name TEXT NOT NULL");
+    expect(sql).toContain('"id" BIGSERIAL PRIMARY KEY');
+    expect(sql).toContain('"name" TEXT NOT NULL');
   });
 
   test("should handle non-auto-incrementing primary keys", () => {
@@ -138,8 +142,8 @@ describe("PostgresDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("uuid UUID PRIMARY KEY");
-    expect(sql).toContain("name TEXT NOT NULL");
+    expect(sql).toContain('"uuid" UUID PRIMARY KEY');
+    expect(sql).toContain('"name" TEXT NOT NULL');
   });
 
   test("should handle JSON and JSONB columns", () => {
@@ -151,9 +155,9 @@ describe("PostgresDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("id BIGSERIAL PRIMARY KEY");
-    expect(sql).toContain("data JSON NOT NULL");
-    expect(sql).toContain("metadata JSONB");
+    expect(sql).toContain('"id" BIGSERIAL PRIMARY KEY');
+    expect(sql).toContain('"data" JSON NOT NULL');
+    expect(sql).toContain('"metadata" JSONB');
   });
 
   test("should handle UUID columns", () => {
@@ -165,9 +169,9 @@ describe("PostgresDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("id UUID PRIMARY KEY");
-    expect(sql).toContain("user_id UUID NOT NULL");
-    expect(sql).toContain("token TEXT NOT NULL");
+    expect(sql).toContain('"id" UUID PRIMARY KEY');
+    expect(sql).toContain('"user_id" UUID NOT NULL');
+    expect(sql).toContain('"token" TEXT NOT NULL');
   });
 
   test("should handle unique constraints", () => {
@@ -178,7 +182,7 @@ describe("PostgresDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("email TEXT NOT NULL UNIQUE");
+    expect(sql).toContain('"email" TEXT NOT NULL UNIQUE');
   });
 
   test("should handle all column types", () => {
@@ -192,12 +196,12 @@ describe("PostgresDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("CREATE TABLE IF NOT EXISTS complex");
-    expect(sql).toContain("id BIGSERIAL PRIMARY KEY");
-    expect(sql).toContain("name TEXT NOT NULL");
-    expect(sql).toContain("active BOOLEAN DEFAULT true");
-    expect(sql).toContain("config JSONB");
-    expect(sql).toContain("session_id UUID");
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS "complex"');
+    expect(sql).toContain('"id" BIGSERIAL PRIMARY KEY');
+    expect(sql).toContain('"name" TEXT NOT NULL');
+    expect(sql).toContain('"active" BOOLEAN DEFAULT true');
+    expect(sql).toContain('"config" JSONB');
+    expect(sql).toContain('"session_id" UUID');
   });
 
   test("buildCreateTable returns error for unsupported column type", () => {

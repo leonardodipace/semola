@@ -224,10 +224,10 @@ describe("Orm - DDL generation", () => {
     const [error, sql] = orm.createTable(usersTable);
 
     expect(error).toBeNull();
-    expect(sql).toContain("CREATE TABLE IF NOT EXISTS users");
-    expect(sql).toContain("id INTEGER PRIMARY KEY");
-    expect(sql).toContain("name TEXT NOT NULL");
-    expect(sql).toContain("email TEXT UNIQUE");
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS "users"');
+    expect(sql).toContain('"id" INTEGER PRIMARY KEY');
+    expect(sql).toContain('"name" TEXT NOT NULL');
+    expect(sql).toContain('"email" TEXT UNIQUE');
 
     orm.close();
   });
@@ -247,9 +247,9 @@ describe("Orm - DDL generation", () => {
     const [error, ddl] = orm.createTable(testTable);
 
     expect(error).toBeNull();
-    expect(ddl).toContain("id INTEGER PRIMARY KEY");
-    expect(ddl).toContain("name TEXT NOT NULL");
-    expect(ddl).toContain("is_active INTEGER");
+    expect(ddl).toContain('"id" INTEGER PRIMARY KEY');
+    expect(ddl).toContain('"name" TEXT NOT NULL');
+    expect(ddl).toContain('"is_active" INTEGER');
 
     orm.close();
   });
@@ -306,7 +306,7 @@ describe("Orm - dialect support", () => {
     const [error, createTableSql] = orm.createTable(usersTable);
     expect(error).toBeNull();
     expect(createTableSql).toContain("BIGSERIAL PRIMARY KEY");
-    expect(createTableSql).toContain("name TEXT NOT NULL");
+    expect(createTableSql).toContain('"name" TEXT NOT NULL');
 
     orm.close();
   });
@@ -326,7 +326,7 @@ describe("Orm - dialect support", () => {
     const [error, createTableSql] = orm.createTable(usersTable);
     expect(error).toBeNull();
     expect(createTableSql).toContain("BIGINT AUTO_INCREMENT PRIMARY KEY");
-    expect(createTableSql).toContain("name VARCHAR(255) NOT NULL");
+    expect(createTableSql).toContain("`name` VARCHAR(255) NOT NULL");
 
     orm.close();
   });
