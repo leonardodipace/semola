@@ -68,10 +68,14 @@ export class Cache<T> {
       );
     }
 
-    const ttl =
-      typeof this.options.ttl === "function"
-        ? this.options.ttl(key, value)
-        : this.options.ttl;
+    const [ttlErr, ttl] = mightThrowSync(() => this.resolveTTL(key, value));
+
+    if (ttlErr) {
+      return this.fail(
+        "InvalidTTLError",
+        `Unable to resolve ttl for key ${key}`,
+      );
+    }
 
     if (!this.isTTLValid(ttl)) {
       return this.fail(
@@ -82,11 +86,9 @@ export class Cache<T> {
 
     const resolvedKey = this.resolveKey(key);
 
-    const [setError] = await mightThrow(
-      ttl
-        ? this.options.redis.set(resolvedKey, serialized, "PX", ttl)
-        : this.options.redis.set(resolvedKey, serialized),
-    );
+    const setPromise = this.getSetPromise(resolvedKey, serialized, ttl);
+
+    const [setError] = await mightThrow(setPromise);
 
     if (setError) {
       return this.fail("CacheError", `Unable to set value for key ${key}`);
@@ -131,6 +133,26 @@ export class Cache<T> {
     }
 
     return key;
+  }
+
+  private resolveTTL(key: string, value: T) {
+    if (typeof this.options.ttl === "function") {
+      return this.options.ttl(key, value);
+    }
+
+    return this.options.ttl;
+  }
+
+  private getSetPromise(
+    key: string,
+    value: string,
+    ttl: number | undefined | null,
+  ) {
+    if (ttl === undefined || ttl === null) {
+      return this.options.redis.set(key, value);
+    }
+
+    return this.options.redis.set(key, value, "PX", ttl);
   }
 
   private isTTLValid(ttl: number | undefined | null) {

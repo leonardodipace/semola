@@ -5,6 +5,7 @@ import { Cache } from "./index.js";
 class MockRedisClient {
   private store = new Map<string, string>();
   private shouldFail = false;
+  private lastSetOptions: { mode?: string; ttl?: number } | null = null;
 
   public setShouldFail(value: boolean) {
     this.shouldFail = value;
@@ -18,10 +19,12 @@ class MockRedisClient {
     return this.store.get(key);
   }
 
-  public async set(key: string, value: string) {
+  public async set(key: string, value: string, mode?: string, ttl?: number) {
     if (this.shouldFail) {
       throw new Error("Redis connection error");
     }
+
+    this.lastSetOptions = { mode, ttl };
 
     this.store.set(key, value);
 
@@ -50,6 +53,10 @@ class MockRedisClient {
 
   public getStore() {
     return this.store;
+  }
+
+  public getLastSetOptions() {
+    return this.lastSetOptions;
   }
 }
 
@@ -176,6 +183,17 @@ describe("Cache", () => {
       const [error, data] = await cache.set("key", "value");
       expect(error).toBeNull();
       expect(data).toBe("value");
+      expect(redis.getLastSetOptions()).toEqual({ mode: "PX", ttl: 5000 });
+    });
+
+    test("should store value with TTL equal to 0", async () => {
+      const redis = createMockRedis();
+      const cache = new Cache<string>({ redis, ttl: 0 });
+
+      const [error, data] = await cache.set("key", "value");
+      expect(error).toBeNull();
+      expect(data).toBe("value");
+      expect(redis.getLastSetOptions()).toEqual({ mode: "PX", ttl: 0 });
     });
 
     test("should return CacheError on stringify failure", async () => {
@@ -637,6 +655,23 @@ describe("Cache", () => {
       expect(error).toEqual({
         type: "InvalidTTLError",
         message: "Unable to save records with ttl equal to -1",
+      });
+      expect(data).toBeNull();
+    });
+
+    test("should return InvalidTTLError when function throws", async () => {
+      const redis = createMockRedis();
+      const cache = new Cache<string>({
+        redis,
+        ttl: () => {
+          throw new Error("ttl failed");
+        },
+      });
+
+      const [error, data] = await cache.set("key", "value");
+      expect(error).toEqual({
+        type: "InvalidTTLError",
+        message: "Unable to resolve ttl for key key",
       });
       expect(data).toBeNull();
     });

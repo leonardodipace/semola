@@ -175,6 +175,9 @@ const cache = new Cache<Session>({
 });
 ```
 
+- `ttl: 0` is treated as a valid TTL and passed to Redis as `PX 0`.
+- If the TTL function throws, `set` returns `InvalidTTLError` (and triggers `onError` when configured).
+
 ### onError
 
 Receive a callback on unexpected errors (`CacheError`, `InvalidTTLError`). Not called on `NotFoundError` (normal cache miss).
