@@ -211,7 +211,12 @@ describe("SchemaBuilder", () => {
     const schema = new SchemaBuilder(orm, "sqlite");
 
     // Create circular object
-    const circular: any = { name: "test" };
+    interface Circular {
+      name: string;
+      self?: Circular;
+    }
+
+    const circular: Circular = { name: "test" };
     circular.self = circular;
 
     // Create table first
