@@ -113,7 +113,7 @@ export class Orm<
     return this.dialect.buildCreateTable(table);
   }
 
-  public close() {
-    this.sql.close();
+  public async close() {
+    await this.sql.close();
   }
 }

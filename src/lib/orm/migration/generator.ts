@@ -1,4 +1,4 @@
-import { err, ok } from "../../errors/index.js";
+import { err, mightThrow, ok } from "../../errors/index.js";
 import type { ColumnKind } from "../column/types.js";
 import type { ColumnSnapshot, TableSnapshot } from "./snapshot.js";
 import type { TableDiffOperation } from "./types.js";
@@ -59,7 +59,7 @@ const renderCreateTable = (table: TableSnapshot) => {
     lines.push(`    ${renderColumnSnapshot(column, "table")}`);
   }
 
-  lines.push("  });");
+  lines.push("});");
   return lines;
 };
 
@@ -68,7 +68,7 @@ const renderAddColumn = (tableName: string, column: ColumnSnapshot) => {
   return [
     `await t.addColumn(${JSON.stringify(tableName)}, (table) => {`,
     `    ${definition};`,
-    "  });",
+    "});",
   ];
 };
 
@@ -81,7 +81,7 @@ const renderAlterColumn = (
   return [
     `await t.alterColumn(${JSON.stringify(tableName)}, ${JSON.stringify(columnName)}, (table) => {`,
     `    ${definition};`,
-    "  });",
+    "});",
   ];
 };
 
@@ -143,11 +143,15 @@ export const writeMigrationSource = async (
   filePath: string,
   source: string,
 ) => {
-  return Bun.write(filePath, source)
-    .then(() => ok(filePath))
-    .catch((error) => {
-      const message =
-        error instanceof Error ? error.message : "Failed to write migration";
-      return err("InternalServerError", message);
-    });
+  const [writeError] = await mightThrow(Bun.write(filePath, source));
+  if (writeError) {
+    return err(
+      "InternalServerError",
+      writeError instanceof Error
+        ? writeError.message
+        : "Failed to write migration",
+    );
+  }
+
+  return ok(filePath);
 };

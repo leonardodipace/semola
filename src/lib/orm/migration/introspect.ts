@@ -1,4 +1,4 @@
-import { err, ok } from "../../errors/index.js";
+import { err, mightThrow, ok } from "../../errors/index.js";
 import type { Orm } from "../core/index.js";
 import type { Table } from "../table/index.js";
 import { toSqlIdentifier } from "./sql.js";
@@ -33,33 +33,57 @@ const queryColumns = async (
   const dialect = orm.getDialectName();
 
   if (dialect === "sqlite") {
-    return ok(
-      await orm.sql`
+    const [queryError, rows] = await mightThrow(
+      orm.sql`
       SELECT name
       FROM pragma_table_info(${safeTableName})
     `,
     );
+    if (queryError) {
+      return err(
+        "InternalServerError",
+        queryError instanceof Error ? queryError.message : String(queryError),
+      );
+    }
+
+    return ok(rows ?? []);
   }
 
   if (dialect === "postgres") {
-    return ok(
-      await orm.sql`
+    const [queryError, rows] = await mightThrow(
+      orm.sql`
       SELECT column_name
       FROM information_schema.columns
       WHERE table_schema = current_schema()
       AND table_name = ${safeTableName}
     `,
     );
+    if (queryError) {
+      return err(
+        "InternalServerError",
+        queryError instanceof Error ? queryError.message : String(queryError),
+      );
+    }
+
+    return ok(rows ?? []);
   }
 
-  return ok(
-    await orm.sql`
+  const [queryError, rows] = await mightThrow(
+    orm.sql`
     SELECT COLUMN_NAME AS column_name
     FROM information_schema.columns
     WHERE table_schema = DATABASE()
     AND table_name = ${safeTableName}
   `,
   );
+  if (queryError) {
+    return err(
+      "InternalServerError",
+      queryError instanceof Error ? queryError.message : String(queryError),
+    );
+  }
+
+  return ok(rows ?? []);
 };
 
 export const introspectSchema = async (
@@ -71,10 +95,7 @@ export const introspectSchema = async (
   for (const tableName of tableNames) {
     const [error, rows] = await queryColumns(orm, tableName);
     if (error) {
-      return err(
-        "InternalServerError",
-        error instanceof Error ? error.message : String(error),
-      );
+      return err(error.type, error.message);
     }
 
     const columns = new Set<string>();

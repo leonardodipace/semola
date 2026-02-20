@@ -186,7 +186,10 @@ describe("Migration runtime functions", () => {
       "SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
     );
     expect(Array.isArray(rows)).toBe(true);
-    expect(Array.isArray(rows) && rows.length > 0).toBe(true);
+    if (!Array.isArray(rows)) {
+      throw new Error("Expected rows to be an array");
+    }
+    expect(rows.length).toBeGreaterThan(0);
 
     const [rollbackError, rolledBack] =
       await rollbackMigration(migrationOptions);
@@ -197,9 +200,12 @@ describe("Migration runtime functions", () => {
       "SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
     );
     expect(Array.isArray(rowsAfter)).toBe(true);
-    expect(Array.isArray(rowsAfter) && rowsAfter.length).toBe(0);
+    if (!Array.isArray(rowsAfter)) {
+      throw new Error("Expected rowsAfter to be an array");
+    }
+    expect(rowsAfter.length).toBe(0);
 
-    orm.close();
+    await orm.close();
   });
 
   test("status marks applied migrations", async () => {
@@ -617,7 +623,11 @@ describe("Migration runtime functions", () => {
     const rows = await orm.sql.unsafe(
       "SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
     );
-    expect(Array.isArray(rows) && rows.length).toBe(0);
+    expect(Array.isArray(rows)).toBe(true);
+    if (!Array.isArray(rows)) {
+      throw new Error("Expected rows to be an array");
+    }
+    expect(rows.length).toBe(0);
 
     // Verify no migration recorded in state table
     const [, migrations] = await getAppliedMigrations(
@@ -626,7 +636,7 @@ describe("Migration runtime functions", () => {
     );
     expect(migrations?.length).toBe(0);
 
-    orm.close();
+    await orm.close();
   });
 
   test("createMigration returns error when directory creation fails", async () => {

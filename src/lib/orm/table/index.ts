@@ -308,6 +308,13 @@ export class TableClient<T extends Table> {
     );
   }
 
+  private escapeLikePattern(value: string) {
+    return value
+      .replaceAll("\\", "\\\\")
+      .replaceAll("%", "\\%")
+      .replaceAll("_", "\\_");
+  }
+
   private buildCondition(key: string, value: unknown) {
     const sqlColumnName = this.getSqlColumnName(key);
     const column = this.table.columns[key];
@@ -333,10 +340,10 @@ export class TableClient<T extends Table> {
 
       // String operators (case-insensitive, works across all databases)
       if ("contains" in filters && typeof filters.contains === "string") {
-        const searchValue = filters.contains;
+        const searchValue = this.escapeLikePattern(filters.contains);
         conditions.push(
           this
-            .sql`LOWER(${this.sql(sqlColumnName)}) LIKE LOWER(${`%${searchValue}%`})`,
+            .sql`LOWER(${this.sql(sqlColumnName)}) LIKE LOWER(${`%${searchValue}%`}) ESCAPE '\\'`,
         );
       }
 
@@ -1040,11 +1047,9 @@ export class TableClient<T extends Table> {
           `;
           results = await sql;
         } else if (this.isActualMysql()) {
-          // For real MySQL: wrap in transaction with SELECT FOR UPDATE to prevent races
-          try {
-            await this.sql`BEGIN`;
-
-            const existingRows = await this.sql<InferTableType<T>[]>`
+          // For real MySQL: use begin callback to keep all queries on one connection
+          results = await this.sql.begin(async (tx) => {
+            const existingRows = await tx<InferTableType<T>[]>`
               SELECT * FROM ${this.sql(this.table.sqlName)}
               WHERE ${whereClause}
               FOR UPDATE
@@ -1052,11 +1057,10 @@ export class TableClient<T extends Table> {
 
             const [existing] = existingRows;
             if (!existing) {
-              await this.sql`ROLLBACK`;
               throw new Error("update did not find a row");
             }
 
-            await this.sql`
+            await tx`
               UPDATE ${this.sql(this.table.sqlName)}
               SET ${this.sql(sqlData)}
               WHERE ${whereClause}
@@ -1065,33 +1069,28 @@ export class TableClient<T extends Table> {
             const primaryKey = this.getPrimaryKeyColumn();
             if (primaryKey && primaryKey.kind !== "boolean") {
               const pkValue = existing[primaryKey.sqlName];
-              results = await this.sql<InferTableType<T>[]>`
+              return await tx<InferTableType<T>[]>`
                 SELECT * FROM ${this.sql(this.table.sqlName)}
                 WHERE ${this.sql(primaryKey.sqlName)} = ${pkValue}
                 LIMIT 1
               `;
-            } else {
-              const selectorColumn = uniqueSelector.column;
-              const updatedSelectorValue =
-                uniqueSelector.key in options.data
-                  ? this.normalizeValueForWhere(
-                      selectorColumn,
-                      Reflect.get(options.data, uniqueSelector.key),
-                    )
-                  : uniqueSelector.value;
-
-              results = await this.sql<InferTableType<T>[]>`
-                SELECT * FROM ${this.sql(this.table.sqlName)}
-                WHERE ${this.sql(selectorColumn.sqlName)} = ${updatedSelectorValue}
-                LIMIT 1
-              `;
             }
 
-            await this.sql`COMMIT`;
-          } catch (error) {
-            await this.sql`ROLLBACK`;
-            throw error;
-          }
+            const selectorColumn = uniqueSelector.column;
+            const updatedSelectorValue =
+              uniqueSelector.key in options.data
+                ? this.normalizeValueForWhere(
+                    selectorColumn,
+                    Reflect.get(options.data, uniqueSelector.key),
+                  )
+                : uniqueSelector.value;
+
+            return await tx<InferTableType<T>[]>`
+              SELECT * FROM ${this.sql(this.table.sqlName)}
+              WHERE ${this.sql(selectorColumn.sqlName)} = ${updatedSelectorValue}
+              LIMIT 1
+            `;
+          });
         } else {
           const existingRows = await this.sql<InferTableType<T>[]>`
             SELECT * FROM ${this.sql(this.table.sqlName)}
@@ -1177,33 +1176,25 @@ export class TableClient<T extends Table> {
           `;
           results = await sql;
         } else if (this.isActualMysql()) {
-          // For MySQL: wrap in transaction with SELECT FOR UPDATE to prevent races
-          try {
-            await this.sql`BEGIN`;
-
-            // Lock and fetch the rows we're about to delete
-            results = await this.sql<InferTableType<T>[]>`
+          // For MySQL: use begin callback to keep all queries on one connection
+          results = await this.sql.begin(async (tx) => {
+            const existingRows = await tx<InferTableType<T>[]>`
               SELECT * FROM ${this.sql(this.table.sqlName)}
               WHERE ${whereClause}
               FOR UPDATE
             `;
 
-            if (results.length === 0) {
-              await this.sql`ROLLBACK`;
+            if (existingRows.length === 0) {
               throw new Error("delete did not find a row");
             }
 
-            // Execute DELETE
-            await this.sql`
+            await tx`
               DELETE FROM ${this.sql(this.table.sqlName)}
               WHERE ${whereClause}
             `;
 
-            await this.sql`COMMIT`;
-          } catch (error) {
-            await this.sql`ROLLBACK`;
-            throw error;
-          }
+            return existingRows;
+          });
         } else {
           // For SQLite with MySQL dialect (testing): SELECT before DELETE
           results = await this.sql<InferTableType<T>[]>`

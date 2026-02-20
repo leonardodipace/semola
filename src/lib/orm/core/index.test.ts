@@ -5,7 +5,7 @@ import { Table } from "../table/index.js";
 import { Orm } from "./index.js";
 
 describe("Orm - initialization", () => {
-  test("should create Orm instance with tables", () => {
+  test("should create Orm instance with tables", async () => {
     const usersTable = new Table("users", {
       id: number("id").primaryKey(),
       name: string("name").notNull(),
@@ -22,9 +22,11 @@ describe("Orm - initialization", () => {
     expect(orm.sql).toBeDefined();
     expect(orm.tables).toBeDefined();
     expect(orm.tables.users).toBeDefined();
+
+    await orm.close();
   });
 
-  test("should create Orm instance with multiple tables", () => {
+  test("should create Orm instance with multiple tables", async () => {
     const usersTable = new Table("users", {
       id: number("id").primaryKey(),
       name: string("name").notNull(),
@@ -45,9 +47,11 @@ describe("Orm - initialization", () => {
 
     expect(orm.tables.users).toBeDefined();
     expect(orm.tables.posts).toBeDefined();
+
+    await orm.close();
   });
 
-  test("should create Orm instance with relations", () => {
+  test("should create Orm instance with relations", async () => {
     const usersTable = new Table("users", {
       id: number("id").primaryKey(),
       name: string("name").notNull(),
@@ -77,6 +81,8 @@ describe("Orm - initialization", () => {
 
     expect(orm.tables.users).toBeDefined();
     expect(orm.tables.posts).toBeDefined();
+
+    await orm.close();
   });
 });
 
@@ -110,7 +116,7 @@ describe("Orm - table clients", () => {
 
   afterAll(async () => {
     await orm.sql`DROP TABLE IF EXISTS test_orm_users`;
-    orm.close();
+    await orm.close();
   });
 
   test("table clients should have query methods", () => {
@@ -186,7 +192,7 @@ describe("Orm - table clients", () => {
     expect(posts?.length).toBeGreaterThan(0);
     expect(posts?.[0]?.title).toBe("Test Post");
 
-    orm2.close();
+    await orm2.close();
   });
 });
 
@@ -204,12 +210,12 @@ describe("Orm - SQL access", () => {
     expect(orm.sql).toBeDefined();
     expect(typeof orm.sql).toBe("function");
 
-    orm.close();
+    await orm.close();
   });
 });
 
 describe("Orm - DDL generation", () => {
-  test("should generate CREATE TABLE statement with SQLite dialect", () => {
+  test("should generate CREATE TABLE statement with SQLite dialect", async () => {
     const usersTable = new Table("users", {
       id: number("id").primaryKey(),
       name: string("name").notNull(),
@@ -229,10 +235,10 @@ describe("Orm - DDL generation", () => {
     expect(sql).toContain('"name" TEXT NOT NULL');
     expect(sql).toContain('"email" TEXT UNIQUE');
 
-    orm.close();
+    await orm.close();
   });
 
-  test("should generate DDL with all column types", () => {
+  test("should generate DDL with all column types", async () => {
     const testTable = new Table("test_types", {
       id: number("id").primaryKey(),
       name: string("name").notNull(),
@@ -251,12 +257,12 @@ describe("Orm - DDL generation", () => {
     expect(ddl).toContain('"name" TEXT NOT NULL');
     expect(ddl).toContain('"is_active" INTEGER');
 
-    orm.close();
+    await orm.close();
   });
 });
 
 describe("Orm - dialect support", () => {
-  test("should use SQLite dialect by default", () => {
+  test("should use SQLite dialect by default", async () => {
     const usersTable = new Table("users", {
       id: number("id").primaryKey(),
     });
@@ -272,10 +278,10 @@ describe("Orm - dialect support", () => {
     // SQLite uses INTEGER for numbers
     expect(sql).toContain("INTEGER");
 
-    orm.close();
+    await orm.close();
   });
 
-  test("should accept explicit SQLite dialect", () => {
+  test("should accept explicit SQLite dialect", async () => {
     const usersTable = new Table("users", {
       id: number("id").primaryKey(),
     });
@@ -288,10 +294,10 @@ describe("Orm - dialect support", () => {
 
     expect(orm).toBeDefined();
 
-    orm.close();
+    await orm.close();
   });
 
-  test("should support Postgres dialect", () => {
+  test("should support Postgres dialect", async () => {
     const usersTable = new Table("users", {
       id: number("id").primaryKey(),
       name: string("name").notNull(),
@@ -308,10 +314,10 @@ describe("Orm - dialect support", () => {
     expect(createTableSql).toContain("BIGSERIAL PRIMARY KEY");
     expect(createTableSql).toContain('"name" TEXT NOT NULL');
 
-    orm.close();
+    await orm.close();
   });
 
-  test("should support MySQL dialect", () => {
+  test("should support MySQL dialect", async () => {
     const usersTable = new Table("users", {
       id: number("id").primaryKey(),
       name: string("name").notNull(),
@@ -328,6 +334,6 @@ describe("Orm - dialect support", () => {
     expect(createTableSql).toContain("BIGINT AUTO_INCREMENT PRIMARY KEY");
     expect(createTableSql).toContain("`name` VARCHAR(255) NOT NULL");
 
-    orm.close();
+    await orm.close();
   });
 });
