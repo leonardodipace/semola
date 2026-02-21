@@ -118,9 +118,65 @@ const convertSchemaToOpenApi = async (
   io: "input" | "output" = "input",
 ) => {
   const result = toOpenAPISchema(schema, io);
+  const { schema: jsonSchema } = result as {
+    schema: JsonSchema;
+    components?: OpenAPIV3_1.ComponentsObject;
+  };
+
+  // Check if schema has an id (from .meta({ id: "..." }))
+  const schemaId = jsonSchema.id;
+
+  if (schemaId && typeof schemaId === "string") {
+    // Extract to components and return a reference
+    const schemaWithoutId = { ...jsonSchema };
+    delete schemaWithoutId.id;
+    delete schemaWithoutId.$schema;
+
+    return {
+      schema: { $ref: `#/components/schemas/${schemaId}` },
+      components: {
+        schemas: {
+          [schemaId]: schemaWithoutId,
+        },
+      } as OpenAPIV3_1.ComponentsObject,
+    };
+  }
+
+  // Remove $schema from inline schemas
+  if (jsonSchema.$schema) {
+    const schemaWithoutMeta = { ...jsonSchema };
+    delete schemaWithoutMeta.$schema;
+    return {
+      schema: schemaWithoutMeta,
+      components: undefined,
+    };
+  }
+
   return result as {
     schema: JsonSchema;
     components?: OpenAPIV3_1.ComponentsObject;
+  };
+};
+
+// Convert schema to inline JSON schema (for parameters that don't support $ref)
+const convertSchemaToInlineOpenApi = async (
+  schema: StandardSchemaV1,
+  io: "input" | "output" = "input",
+) => {
+  const result = toOpenAPISchema(schema, io);
+  const { schema: jsonSchema } = result as {
+    schema: JsonSchema;
+    components?: OpenAPIV3_1.ComponentsObject;
+  };
+
+  // Remove $schema and id from inline schemas
+  const cleanSchema = { ...jsonSchema };
+  delete cleanSchema.$schema;
+  delete cleanSchema.id;
+
+  return {
+    schema: cleanSchema,
+    components: undefined,
   };
 };
 
@@ -129,7 +185,7 @@ const extractParametersFromSchema = async (
   location: "query" | "header" | "cookie",
 ) => {
   const { schema: jsonSchema, components } =
-    await convertSchemaToOpenApi(schema);
+    await convertSchemaToInlineOpenApi(schema);
 
   if (jsonSchema.type !== "object") {
     return { parameters: [], components };
@@ -196,9 +252,8 @@ const createParameters = async (request: RequestSchema, path: string) => {
   const pathParamNames = extractPathParameters(path);
 
   if (pathParamNames.length > 0 && request.params) {
-    const { schema: jsonSchema, components } = await convertSchemaToOpenApi(
-      request.params,
-    );
+    const { schema: jsonSchema, components } =
+      await convertSchemaToInlineOpenApi(request.params);
 
     if (components) {
       allComponents.push(components);

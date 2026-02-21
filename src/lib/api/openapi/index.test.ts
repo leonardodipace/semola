@@ -423,4 +423,157 @@ describe("OpenAPI Generation", () => {
       expect.objectContaining({ name: "page", in: "query" }),
     );
   });
+
+  test("should extract schemas with id to components and use $ref", async () => {
+    const UserSchema = z
+      .object({
+        id: z.string(),
+        name: z.string(),
+      })
+      .meta({ id: "User" });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/users",
+          method: "POST",
+          request: {
+            body: UserSchema,
+          },
+          response: {
+            201: UserSchema,
+          },
+          handler: () => {},
+        },
+      ],
+    });
+
+    // Check that the schema is in components
+    expect(spec.components?.schemas?.User).toBeDefined();
+    expect(spec.components?.schemas?.User).toMatchObject({
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        name: { type: "string" },
+      },
+      required: ["id", "name"],
+    });
+
+    // Check that the request body uses a $ref
+    const requestBody = spec.paths["/users"]?.post?.requestBody;
+    expect(requestBody?.content["application/json"]?.schema).toEqual({
+      $ref: "#/components/schemas/User",
+    });
+
+    // Check that the response uses a $ref
+    const response = spec.paths["/users"]?.post?.responses["201"];
+    expect(response?.content?.["application/json"]?.schema).toEqual({
+      $ref: "#/components/schemas/User",
+    });
+  });
+
+  test("should inline schemas without id", async () => {
+    const PostSchema = z.object({
+      title: z.string(),
+    });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/posts",
+          method: "POST",
+          request: {
+            body: PostSchema,
+          },
+          handler: () => {},
+        },
+      ],
+    });
+
+    // Check that the schema is NOT in components
+    expect(spec.components?.schemas).toBeUndefined();
+
+    // Check that the request body is inlined
+    const requestBody = spec.paths["/posts"]?.post?.requestBody;
+    expect(requestBody?.content["application/json"]?.schema).toMatchObject({
+      type: "object",
+      properties: {
+        title: { type: "string" },
+      },
+    });
+
+    // Should not have a $ref
+    expect(requestBody?.content["application/json"]?.schema).not.toHaveProperty(
+      "$ref",
+    );
+  });
+
+  test("should reuse the same schema across multiple operations", async () => {
+    const UserSchema = z
+      .object({
+        id: z.string(),
+        name: z.string(),
+      })
+      .meta({ id: "User" });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/users",
+          method: "POST",
+          request: { body: UserSchema },
+          response: { 201: UserSchema },
+          handler: () => {},
+        },
+        {
+          path: "/users/:id",
+          method: "GET",
+          response: { 200: UserSchema },
+          handler: () => {},
+        },
+        {
+          path: "/users/:id",
+          method: "PUT",
+          request: { body: UserSchema },
+          response: { 200: UserSchema },
+          handler: () => {},
+        },
+      ],
+    });
+
+    // Check that the schema is defined only once in components
+    expect(spec.components?.schemas?.User).toBeDefined();
+    expect(Object.keys(spec.components?.schemas || {}).length).toBe(1);
+
+    // Check that all operations use $ref
+    expect(
+      spec.paths["/users"]?.post?.requestBody?.content["application/json"]
+        ?.schema,
+    ).toEqual({ $ref: "#/components/schemas/User" });
+    expect(
+      spec.paths["/users"]?.post?.responses["201"]?.content?.[
+        "application/json"
+      ]?.schema,
+    ).toEqual({ $ref: "#/components/schemas/User" });
+    expect(
+      spec.paths["/users/{id}"]?.get?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema,
+    ).toEqual({ $ref: "#/components/schemas/User" });
+    expect(
+      spec.paths["/users/{id}"]?.put?.requestBody?.content["application/json"]
+        ?.schema,
+    ).toEqual({ $ref: "#/components/schemas/User" });
+    expect(
+      spec.paths["/users/{id}"]?.put?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema,
+    ).toEqual({ $ref: "#/components/schemas/User" });
+  });
 });
