@@ -136,8 +136,7 @@ export class Scanner {
   private scanComponent(component: ComponentType) {
     const { field, content } = component;
     while (this.current < content.length) {
-      let currentCh = content.charAt(this.current);
-      this.current += 1;
+      let currentCh = this.advance(content);
 
       switch (currentCh) {
         case "*": {
@@ -156,8 +155,7 @@ export class Scanner {
           break;
         }
         case "-": {
-          currentCh = content.charAt(this.current);
-          this.current += 1;
+          currentCh = this.advance(content);
           if (this.isDigit(currentCh)) {
             const [error, _] = this.handleRange(component);
             if (error) err<CronScannerError>(error.type, error.message);
@@ -209,6 +207,13 @@ export class Scanner {
   ) {
     const token = new Token(component, type, value, field);
     this.tokens.push(token);
+  }
+
+  private advance(content: string) {
+    let currentCh = content.charAt(this.current);
+    this.current += 1;
+
+    return currentCh;
   }
 
   private match(content: string, expected: string) {
