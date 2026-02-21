@@ -149,3 +149,13 @@ export type UpdateOptions<T extends Table> = {
 export type DeleteOptions<T extends Table> = {
   where: WhereClause<T>;
 };
+
+export type CountOptions<T extends Table> = {
+  where?: WhereClause<T>;
+};
+
+export type UpsertOptions<T extends Table> = {
+  where: WhereClause<T>;
+  create: CreateInput<T>;
+  update: UpdateInput<T>;
+};

@@ -5,6 +5,7 @@ import type { Dialect } from "../dialect/types.js";
 import type { Relation, WithIncluded } from "../relations/types.js";
 import type {
   BooleanFilter,
+  CountOptions,
   CreateInput,
   DateFilter,
   DeleteOptions,
@@ -15,6 +16,7 @@ import type {
   NumberFilter,
   StringFilter,
   UpdateOptions,
+  UpsertOptions,
   WhereClause,
 } from "./types.js";
 
@@ -22,6 +24,7 @@ import type {
 export type { WithIncluded } from "../relations/types.js";
 export type {
   BooleanFilter,
+  CountOptions,
   CreateInput,
   DateFilter,
   DeleteOptions,
@@ -33,6 +36,7 @@ export type {
   StringFilter,
   UpdateInput,
   UpdateOptions,
+  UpsertOptions,
   WhereClause,
 } from "./types.js";
 
@@ -868,6 +872,30 @@ export class TableClient<T extends Table> {
     return ok(included ?? null);
   }
 
+  public async count(options?: CountOptions<T>) {
+    const [whereError, whereClause] = this.buildWhereClause(options?.where);
+    if (whereError) {
+      return err(whereError.type, whereError.message);
+    }
+
+    const baseQuery = this.sql<{ count: number }[]>`
+      SELECT COUNT(*) AS count FROM ${this.sql(this.table.sqlName)}
+    `;
+    const query = whereClause
+      ? this.sql<{ count: number }[]>`${baseQuery} WHERE ${whereClause}`
+      : baseQuery;
+
+    const [queryError, rows] = await mightThrow(query);
+    if (queryError || !rows) {
+      return err(
+        "InternalServerError",
+        `Failed to count rows: ${this.toErrorMessage(queryError)}`,
+      );
+    }
+
+    return ok(Number(rows[0]?.count ?? 0));
+  }
+
   public async create(data: CreateInput<T>) {
     if (Object.keys(data).length === 0) {
       return err("ValidationError", "create requires at least one field");
@@ -998,6 +1026,47 @@ export class TableClient<T extends Table> {
     }
 
     return ok(result);
+  }
+
+  public async createMany(data: CreateInput<T>[]) {
+    if (data.length === 0) {
+      return ok([] as InferTableType<T>[]);
+    }
+
+    const results: InferTableType<T>[] = [];
+
+    for (const item of data) {
+      const [createError, created] = await this.create(item);
+      if (createError || !created) {
+        return err(
+          createError?.type ?? "InternalServerError",
+          createError?.message ?? "createMany failed on an item",
+        );
+      }
+      results.push(created);
+    }
+
+    return ok(results);
+  }
+
+  public async upsert(options: UpsertOptions<T>) {
+    const [selectorError] = this.extractUniqueSelector(options.where, "upsert");
+    if (selectorError) {
+      return err(selectorError.type, selectorError.message);
+    }
+
+    const [findError, existing] = await this.findUnique({
+      where: options.where,
+    });
+    if (findError) {
+      return err(findError.type, findError.message);
+    }
+
+    if (existing) {
+      return this.update({ where: options.where, data: options.update });
+    }
+
+    return this.create(options.create);
   }
 
   public async update(options: UpdateOptions<T>) {

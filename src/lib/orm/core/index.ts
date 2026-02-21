@@ -1,3 +1,4 @@
+import { err, mightThrow, ok } from "../../errors/index.js";
 import {
   MysqlDialect,
   PostgresDialect,
@@ -75,12 +76,16 @@ export class Orm<
   private readonly _tables: TableClients<Tables, Relations>;
   private readonly dialect: Dialect;
   private readonly connectionUrl: string;
+  private readonly rawTables: Tables;
+  private readonly rawRelations?: Relations;
   public readonly sql: Bun.SQL;
 
   public constructor(options: OrmOptions<Tables, Relations>) {
     this.sql = new Bun.SQL(options.url);
     this.connectionUrl = options.url;
     this.dialect = createDialect(options.dialect ?? "sqlite");
+    this.rawTables = options.tables;
+    this.rawRelations = options.relations;
     this._tables = bindTables(
       this.sql,
       options.tables,
@@ -110,6 +115,43 @@ export class Orm<
   // await orm.sql.unsafe(ddl);
   public createTable(table: Table) {
     return this.dialect.buildCreateTable(table);
+  }
+
+  public async transaction<R>(
+    fn: (tx: {
+      tables: TableClients<Tables, Relations>;
+    }) => Promise<
+      readonly [{ type: string; message: string } | null, R | null]
+    >,
+  ) {
+    const [txError, txResult] = await mightThrow(
+      this.sql.begin(async (txSql) => {
+        const txTables = bindTables(
+          txSql,
+          this.rawTables,
+          this.dialect,
+          this.connectionUrl,
+          this.rawRelations,
+        );
+
+        const [fnError, fnResult] = await fn({ tables: txTables });
+
+        if (fnError) {
+          throw new Error(fnError.message);
+        }
+
+        return fnResult;
+      }),
+    );
+
+    if (txError) {
+      return err(
+        "InternalServerError",
+        txError instanceof Error ? txError.message : String(txError),
+      );
+    }
+
+    return ok(txResult as R);
   }
 
   public async close() {

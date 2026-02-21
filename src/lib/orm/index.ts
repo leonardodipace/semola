@@ -50,6 +50,8 @@ export type {
 export { Table, TableClient } from "./table/index.js";
 export type {
   BooleanFilter,
+  CountOptions,
+  CreateInput,
   DateFilter,
   FindFirstOptions,
   FindManyOptions,
@@ -57,5 +59,7 @@ export type {
   InferTableType,
   NumberFilter,
   StringFilter,
+  UpdateInput,
+  UpsertOptions,
   WhereClause,
 } from "./table/types.js";

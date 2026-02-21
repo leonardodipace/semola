@@ -6,6 +6,7 @@ import {
   expect,
   test,
 } from "bun:test";
+import { err, ok } from "../../errors/index.js";
 import { boolean, date, number, string } from "../column/index.js";
 import { Orm } from "../index.js";
 import { many, one } from "../relations/index.js";
@@ -1352,6 +1353,453 @@ describe("Table - date normalization", () => {
     expect(whereError).toBeNull();
     expect(byDate?.length).toBe(1);
     expect(byDate?.[0]?.id).toBe(created?.id);
+  });
+});
+
+describe("Table - count method", () => {
+  const resetCountData = async () => {
+    await orm.sql`DELETE FROM test_users`;
+    await orm.sql`DELETE FROM sqlite_sequence WHERE name='test_users'`;
+
+    await orm.sql`
+      INSERT INTO test_users (name, email, active)
+      VALUES
+        ('Alice', 'alice@example.com', true),
+        ('Bob', 'bob@example.com', false),
+        ('Charlie', 'charlie@example.com', true),
+        ('Diana', 'diana@example.com', false)
+    `;
+  };
+
+  beforeEach(async () => {
+    await resetCountData();
+  });
+
+  test("should count all rows without where clause", async () => {
+    const [error, count] = await orm.tables.users.count();
+
+    expect(error).toBeNull();
+    expect(count).toBe(4);
+  });
+
+  test("should count filtered rows with where clause", async () => {
+    const [error, count] = await orm.tables.users.count({
+      where: { active: true },
+    });
+
+    expect(error).toBeNull();
+    expect(count).toBe(2);
+  });
+
+  test("should return 0 when no rows match", async () => {
+    const [error, count] = await orm.tables.users.count({
+      where: { name: "NonExistent" },
+    });
+
+    expect(error).toBeNull();
+    expect(count).toBe(0);
+  });
+
+  test("should count with multiple combined filters", async () => {
+    const [error, count] = await orm.tables.users.count({
+      where: { active: true, name: { contains: "Ali" } },
+    });
+
+    expect(error).toBeNull();
+    expect(count).toBe(1);
+  });
+
+  test("should count with in filter", async () => {
+    const [error, count] = await orm.tables.users.count({
+      where: { id: { in: [1, 2, 999] } },
+    });
+
+    expect(error).toBeNull();
+    expect(count).toBe(2);
+  });
+});
+
+describe("Table - createMany method", () => {
+  beforeEach(async () => {
+    await orm.sql`DELETE FROM test_users`;
+    await orm.sql`DELETE FROM sqlite_sequence WHERE name='test_users'`;
+  });
+
+  test("should return empty array for empty input", async () => {
+    const [error, result] = await orm.tables.users.createMany([]);
+
+    expect(error).toBeNull();
+    expect(result).toEqual([]);
+  });
+
+  test("should create multiple rows and return them", async () => {
+    const [error, result] = await orm.tables.users.createMany([
+      { name: "User1", email: "user1@example.com" },
+      { name: "User2", email: "user2@example.com" },
+      { name: "User3", email: "user3@example.com" },
+    ]);
+
+    expect(error).toBeNull();
+    expect(result?.length).toBe(3);
+    expect(result?.[0]?.name).toBe("User1");
+    expect(result?.[1]?.name).toBe("User2");
+    expect(result?.[2]?.name).toBe("User3");
+
+    const [countError, count] = await orm.tables.users.count();
+    expect(countError).toBeNull();
+    expect(count).toBe(3);
+  });
+
+  test("should fail fast on invalid data", async () => {
+    const [error, result] = await orm.tables.users.createMany([
+      { name: "Valid", email: "valid@example.com" },
+      // @ts-expect-error - missing required field
+      { email: "invalid@example.com" },
+    ]);
+
+    expect(error).not.toBeNull();
+    expect(result).toBeNull();
+
+    const [countError, count] = await orm.tables.users.count();
+    expect(countError).toBeNull();
+    expect(count).toBe(1);
+  });
+
+  test("should handle single item array", async () => {
+    const [error, result] = await orm.tables.users.createMany([
+      { name: "Single", email: "single@example.com" },
+    ]);
+
+    expect(error).toBeNull();
+    expect(result?.length).toBe(1);
+    expect(result?.[0]?.name).toBe("Single");
+  });
+
+  test("should preserve all field values including defaults", async () => {
+    const [error, result] = await orm.tables.users.createMany([
+      { name: "WithDefaults", email: "defaults@example.com", active: false },
+    ]);
+
+    expect(error).toBeNull();
+    expect(result?.[0]?.active).toBe(false);
+    expect(result?.[0]?.createdAt).toBeInstanceOf(Date);
+  });
+});
+
+describe("Table - upsert method", () => {
+  beforeEach(async () => {
+    await orm.sql`DELETE FROM test_users`;
+    await orm.sql`DELETE FROM sqlite_sequence WHERE name='test_users'`;
+
+    await orm.sql`
+      INSERT INTO test_users (name, email, active)
+      VALUES ('Alice', 'alice@example.com', true)
+    `;
+  });
+
+  test("should create new row when not found by unique column", async () => {
+    const [error, result] = await orm.tables.users.upsert({
+      where: { email: "new@example.com" },
+      create: { name: "New User", email: "new@example.com" },
+      update: { name: "Updated Name" },
+    });
+
+    expect(error).toBeNull();
+    expect(result?.name).toBe("New User");
+    expect(result?.email).toBe("new@example.com");
+
+    const [countError, count] = await orm.tables.users.count();
+    expect(countError).toBeNull();
+    expect(count).toBe(2);
+  });
+
+  test("should update existing row when found by pk", async () => {
+    const [error, result] = await orm.tables.users.upsert({
+      where: { id: 1 },
+      create: { name: "ShouldNotCreate", email: "should@example.com" },
+      update: { name: "Alice Updated" },
+    });
+
+    expect(error).toBeNull();
+    expect(result?.id).toBe(1);
+    expect(result?.name).toBe("Alice Updated");
+    expect(result?.email).toBe("alice@example.com");
+
+    const [countError, count] = await orm.tables.users.count();
+    expect(countError).toBeNull();
+    expect(count).toBe(1);
+  });
+
+  test("should update existing row when found by unique column", async () => {
+    const [error, result] = await orm.tables.users.upsert({
+      where: { email: "alice@example.com" },
+      create: { name: "ShouldNotCreate", email: "alice@example.com" },
+      update: { name: "Alice Updated Via Email", active: false },
+    });
+
+    expect(error).toBeNull();
+    expect(result?.name).toBe("Alice Updated Via Email");
+    expect(result?.active).toBe(false);
+  });
+
+  test("should error on non-unique where clause", async () => {
+    const [error, result] = await orm.tables.users.upsert({
+      where: { active: true },
+      create: { name: "New", email: "new@example.com" },
+      update: { name: "Updated" },
+    });
+
+    expect(error).not.toBeNull();
+    expect(result).toBeNull();
+  });
+
+  test("should error on multi-column where clause", async () => {
+    const [error, result] = await orm.tables.users.upsert({
+      where: { id: 1, email: "alice@example.com" },
+      create: { name: "New", email: "new@example.com" },
+      update: { name: "Updated" },
+    });
+
+    expect(error).not.toBeNull();
+    expect(result).toBeNull();
+  });
+
+  test("should update with partial data preserving other fields", async () => {
+    const [error, result] = await orm.tables.users.upsert({
+      where: { id: 1 },
+      create: { name: "New", email: "new@example.com" },
+      update: { active: false },
+    });
+
+    expect(error).toBeNull();
+    expect(result?.name).toBe("Alice");
+    expect(result?.email).toBe("alice@example.com");
+    expect(result?.active).toBe(false);
+  });
+
+  test("should create with all fields set", async () => {
+    const [error, result] = await orm.tables.users.upsert({
+      where: { id: 999 },
+      create: {
+        name: "Complete",
+        email: "complete@example.com",
+        active: false,
+      },
+      update: { name: "ShouldNotUpdate" },
+    });
+
+    expect(error).toBeNull();
+    expect(result?.name).toBe("Complete");
+    expect(result?.email).toBe("complete@example.com");
+    expect(result?.active).toBe(false);
+  });
+});
+
+describe("Orm - transaction method", () => {
+  beforeEach(async () => {
+    await orm.sql`DELETE FROM test_users`;
+    await orm.sql`DELETE FROM test_posts`;
+    await orm.sql`DELETE FROM sqlite_sequence WHERE name='test_users'`;
+    await orm.sql`DELETE FROM sqlite_sequence WHERE name='test_posts'`;
+  });
+
+  test("should commit successful transaction", async () => {
+    const [error, result] = await orm.transaction(async (tx) => {
+      const [err1, user] = await tx.tables.users.create({
+        name: "TxUser",
+        email: "tx@example.com",
+      });
+      if (err1) return err(err1.type, err1.message);
+
+      const [err2, post] = await tx.tables.posts.create({
+        title: "TxPost",
+        content: "Content",
+        authorId: user.id,
+      });
+      if (err2) return err(err2.type, err2.message);
+
+      return ok({ user, post });
+    });
+
+    expect(error).toBeNull();
+    expect(result?.user.name).toBe("TxUser");
+    expect(result?.post.title).toBe("TxPost");
+
+    const [userError, users] = await orm.tables.users.findMany();
+    expect(userError).toBeNull();
+    expect(users?.length).toBe(1);
+
+    const [postError, posts] = await orm.tables.posts.findMany();
+    expect(postError).toBeNull();
+    expect(posts?.length).toBe(1);
+  });
+
+  test("should rollback when callback returns error", async () => {
+    const [error, result] = await orm.transaction(async (tx) => {
+      const [err1] = await tx.tables.users.create({
+        name: "TxUser",
+        email: "tx@example.com",
+      });
+      if (err1) return err(err1.type, err1.message);
+
+      return err("CustomError", "Intentional rollback");
+    });
+
+    expect(error).not.toBeNull();
+    expect(result).toBeNull();
+
+    const [countError, count] = await orm.tables.users.count();
+    expect(countError).toBeNull();
+    expect(count).toBe(0);
+  });
+
+  test("should rollback when operation fails", async () => {
+    const [, existingUser] = await orm.tables.users.create({
+      name: "Existing",
+      email: "duplicate@example.com",
+    });
+    expect(existingUser).not.toBeNull();
+
+    const [error, result] = await orm.transaction(async (tx) => {
+      const [err1, user] = await tx.tables.users.create({
+        name: "TxUser",
+        email: "tx@example.com",
+      });
+      if (err1) return err(err1.type, err1.message);
+
+      const [err2] = await tx.tables.users.create({
+        name: "Duplicate",
+        email: "duplicate@example.com",
+      });
+
+      if (err2) return err(err2.type, err2.message);
+
+      return ok(user);
+    });
+
+    expect(error).not.toBeNull();
+    expect(result).toBeNull();
+
+    const [countError, count] = await orm.tables.users.count();
+    expect(countError).toBeNull();
+    expect(count).toBe(1);
+  });
+
+  test("should perform read operations in transaction", async () => {
+    await orm.tables.users.create({
+      name: "Existing",
+      email: "existing@example.com",
+    });
+
+    const [error, result] = await orm.transaction(async (tx) => {
+      const [err1, users] = await tx.tables.users.findMany();
+      if (err1) return err(err1.type, err1.message);
+
+      const [err2, count] = await tx.tables.users.count();
+      if (err2) return err(err2.type, err2.message);
+
+      return ok({ users, count });
+    });
+
+    expect(error).toBeNull();
+    expect(result?.count).toBe(1);
+    expect(result?.users[0]?.name).toBe("Existing");
+  });
+
+  test("should update existing rows in transaction", async () => {
+    const [, user] = await orm.tables.users.create({
+      name: "ToUpdate",
+      email: "update@example.com",
+    });
+    if (!user) throw new Error("User should not be null");
+    const userId = user.id;
+
+    const [error, result] = await orm.transaction(async (tx) => {
+      const [err1, updated] = await tx.tables.users.update({
+        where: { id: userId },
+        data: { name: "Updated" },
+      });
+      if (err1) return err(err1.type, err1.message);
+
+      const [err2, found] = await tx.tables.users.findUnique({
+        where: { id: userId },
+      });
+      if (err2) return err(err2.type, err2.message);
+
+      return ok({ updated, found });
+    });
+
+    expect(error).toBeNull();
+    expect(result?.updated.name).toBe("Updated");
+    expect(result?.found?.name).toBe("Updated");
+
+    const [, persisted] = await orm.tables.users.findUnique({
+      where: { id: userId },
+    });
+    expect(persisted?.name).toBe("Updated");
+  });
+
+  test("should delete rows in transaction", async () => {
+    const [, user] = await orm.tables.users.create({
+      name: "ToDelete",
+      email: "delete@example.com",
+    });
+    if (!user) throw new Error("User should not be null");
+    const userId = user.id;
+
+    const [error] = await orm.transaction(async (tx) => {
+      const [err1] = await tx.tables.users.delete({ where: { id: userId } });
+      if (err1) return err(err1.type, err1.message);
+
+      const [err2, count] = await tx.tables.users.count();
+      if (err2) return err(err2.type, err2.message);
+
+      return ok(count);
+    });
+
+    expect(error).toBeNull();
+
+    const [, count] = await orm.tables.users.count();
+    expect(count).toBe(0);
+  });
+
+  test("should use upsert within transaction", async () => {
+    const [error, result] = await orm.transaction(async (tx) => {
+      const [err1, created] = await tx.tables.users.upsert({
+        where: { email: "upsert@example.com" },
+        create: { name: "Upserted", email: "upsert@example.com" },
+        update: { name: "Updated" },
+      });
+      if (err1) return err(err1.type, err1.message);
+
+      return ok(created);
+    });
+
+    expect(error).toBeNull();
+    expect(result?.name).toBe("Upserted");
+
+    const [, found] = await orm.tables.users.findUnique({
+      where: { email: "upsert@example.com" },
+    });
+    expect(found?.name).toBe("Upserted");
+  });
+
+  test("should use createMany within transaction", async () => {
+    const [error, result] = await orm.transaction(async (tx) => {
+      const [err1, created] = await tx.tables.users.createMany([
+        { name: "Batch1", email: "batch1@example.com" },
+        { name: "Batch2", email: "batch2@example.com" },
+      ]);
+      if (err1) return err(err1.type, err1.message);
+
+      return ok(created);
+    });
+
+    expect(error).toBeNull();
+    expect(result?.length).toBe(2);
+
+    const [, count] = await orm.tables.users.count();
+    expect(count).toBe(2);
   });
 });
 
