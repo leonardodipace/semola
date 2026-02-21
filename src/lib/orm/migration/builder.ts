@@ -607,18 +607,16 @@ export class SchemaBuilder {
             });
 
             if (alterError) {
-              throw new Error(alterError.message);
+              return err("InternalServerError", alterError.message);
             }
+
+            return ok(true);
           }),
         ),
       );
 
       if (savepointError) {
-        const message =
-          savepointError instanceof Error
-            ? savepointError.message
-            : String(savepointError);
-        return err("InternalServerError", message);
+        return err("InternalServerError", "Failed to create savepoint");
       }
 
       return ok(true);
@@ -633,10 +631,11 @@ export class SchemaBuilder {
 
         if (alterError) {
           await this.execute("ROLLBACK");
-          throw new Error(alterError.message);
+          return err("InternalServerError", alterError.message);
         }
 
         await this.execute("COMMIT");
+        return ok(true);
       })(),
     );
 
