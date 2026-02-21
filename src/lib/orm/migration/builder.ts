@@ -214,8 +214,12 @@ const quoteValue = (dialect: OrmDialect, kind: ColumnKind, value: unknown) => {
 const toMsg = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
-const buildColumnDefinition = (dialect: Dialect, column: AnyColumn) => {
-  const parts: string[] = [column.sqlName];
+const buildColumnDefinition = (
+  dialect: Dialect,
+  column: AnyColumn,
+  nameOverride?: string,
+) => {
+  const parts: string[] = [nameOverride ?? column.sqlName];
 
   if (column.meta.primaryKey && column.columnKind === "number") {
     if (dialect.name === "postgres") {
@@ -467,6 +471,7 @@ export class SchemaBuilder {
       const [definitionError, definition] = buildColumnDefinition(
         this.orm.getDialect(),
         column,
+        safeColumnName,
       );
       if (definitionError || !definition) {
         return err(

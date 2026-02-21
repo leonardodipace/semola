@@ -70,7 +70,7 @@ describe("Migration runtime functions", () => {
     expect(source).toContain("up: async (t) => {");
     expect(source).toContain("down: async (t) => {");
 
-    orm.close();
+    await orm.close();
   });
 
   test("create generates unique, lexically ordered versions for same timestamp", async () => {
@@ -143,7 +143,7 @@ describe("Migration runtime functions", () => {
     expect(versions[0] && versions[1] && versions[0] < versions[1]).toBe(true);
     expect(versions[1] && versions[2] && versions[1] < versions[2]).toBe(true);
 
-    orm.close();
+    await orm.close();
   });
 
   test("apply and rollback execute default-export migration", async () => {
@@ -246,7 +246,7 @@ describe("Migration runtime functions", () => {
     expect(status?.[0]?.version).toBe("20260216120000");
     expect(status?.[0]?.applied).toBe(true);
 
-    orm.close();
+    await orm.close();
   });
 
   test("create returns error when migration name is empty after slugify", async () => {
@@ -278,7 +278,7 @@ describe("Migration runtime functions", () => {
     expect(error).not.toBeNull();
     expect(error?.message).toContain("Migration name cannot be empty");
 
-    orm.close();
+    await orm.close();
   });
 
   test("create sanitizes malicious migration name into safe filename", async () => {
@@ -313,7 +313,7 @@ describe("Migration runtime functions", () => {
     expect(filePath?.includes("/DROP")).toBe(false);
     expect(filePath?.endsWith("drop_table_users_add_email.ts")).toBe(true);
 
-    orm.close();
+    await orm.close();
   });
 
   test("apply skips already-applied migrations", async () => {
@@ -367,7 +367,7 @@ describe("Migration runtime functions", () => {
     expect(secondError).toBeNull();
     expect(secondApplied).toEqual([]);
 
-    orm.close();
+    await orm.close();
   });
 
   test("rollback returns null when no migrations were applied", async () => {
@@ -391,7 +391,7 @@ describe("Migration runtime functions", () => {
     expect(error).toBeNull();
     expect(rolledBack).toBeNull();
 
-    orm.close();
+    await orm.close();
   });
 
   test("rollback returns error when migration record exists but file is missing", async () => {
@@ -430,7 +430,7 @@ describe("Migration runtime functions", () => {
     expect(error).not.toBeNull();
     expect(error?.message).toContain("Missing migration file for version");
 
-    orm.close();
+    await orm.close();
   });
 
   test("apply returns error for invalid migration default export", async () => {
@@ -458,7 +458,7 @@ describe("Migration runtime functions", () => {
     expect(error).not.toBeNull();
     expect(error?.message).toContain("default export must be defineMigration");
 
-    orm.close();
+    await orm.close();
   });
 
   test("status shows pending and applied migrations", async () => {
@@ -520,7 +520,7 @@ describe("Migration runtime functions", () => {
     expect(statuses?.[1]?.version).toBe("20260216120100");
     expect(statuses?.[1]?.applied).toBe(false);
 
-    orm.close();
+    await orm.close();
   });
 
   test("createMigration rolls back on snapshot write failure", async () => {
@@ -573,7 +573,7 @@ describe("Migration runtime functions", () => {
     // Verify no migration file was created (compensating rollback)
     expect(filePath).toBeNull();
 
-    orm.close();
+    await orm.close();
   });
 
   test("applyMigrations rolls back transaction on migration.up failure", async () => {
@@ -668,6 +668,6 @@ describe("Migration runtime functions", () => {
     // Verify no file path returned
     expect(filePath).toBeNull();
 
-    orm.close();
+    await orm.close();
   });
 });

@@ -493,7 +493,7 @@ export const getMigrationStatus = async (options: MigrationRuntimeOptions) => {
     return err(appliedError.type, appliedError.message);
   }
   const appliedMap = new Map(
-    applied.map((item): [string, string] => [item.version, item.appliedAt]),
+    applied.map((item) => [item.version, item.appliedAt] as const),
   );
 
   const statuses: MigrationStatus[] = files.map((file) => {
