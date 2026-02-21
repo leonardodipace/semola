@@ -1033,20 +1033,162 @@ export class TableClient<T extends Table> {
       return ok([] as InferTableType<T>[]);
     }
 
-    const results: InferTableType<T>[] = [];
+    // Build validated data array
+    const sqlDataArray: Record<string, unknown>[] = [];
 
     for (const item of data) {
-      const [createError, created] = await this.create(item);
-      if (createError || !created) {
-        return err(
-          createError?.type ?? "InternalServerError",
-          createError?.message ?? "createMany failed on an item",
-        );
+      if (Object.keys(item).length === 0) {
+        return err("ValidationError", "createMany requires at least one field");
       }
-      results.push(created);
+
+      const sqlData: Record<string, unknown> = {};
+
+      for (const [key, value] of Object.entries(item)) {
+        const [nameError] = this.validateColumnName(key);
+
+        if (nameError) {
+          return err(nameError.type, nameError.message);
+        }
+
+        const column = this.table.columns[key];
+
+        if (!column) {
+          return err("ValidationError", `Invalid column: ${key}`);
+        }
+
+        sqlData[column.sqlName] = this.normalizeDateForStorage(column, value);
+      }
+
+      sqlDataArray.push(sqlData);
     }
 
+    let results: InferTableType<T>[] = [];
+
+    if (this.dialect.name === "mysql") {
+      // MySQL: Bulk insert without RETURNING, then query for inserted rows
+      const columns = Object.keys(sqlDataArray[0] ?? {});
+
+      if (columns.length === 0) {
+        return ok([] as InferTableType<T>[]);
+      }
+
+      // Build multi-value INSERT: INSERT INTO table (cols) VALUES (vals1), (vals2), ...
+      const valuePlaceholders: string[] = [];
+
+      for (const _sqlData of sqlDataArray) {
+        const placeholders = columns.map(() => "?").join(", ");
+        valuePlaceholders.push(`(${placeholders})`);
+      }
+
+      const valuesClause = valuePlaceholders.join(", ");
+
+      // Execute bulk insert using unsafe for the values clause
+      const [insertError] = await mightThrow(
+        this.sql.unsafe(
+          `INSERT INTO ${this.table.sqlName} (${columns.join(", ")}) VALUES ${valuesClause}`,
+          sqlDataArray.flatMap((data) => columns.map((col) => data[col])),
+        ),
+      );
+
+      if (insertError) {
+        return err(
+          "InternalServerError",
+          `Failed to create rows: ${this.toErrorMessage(insertError)}`,
+        );
+      }
+
+      // Retrieve inserted rows
+      results = await this.retrieveInsertedRows(sqlDataArray);
+    } else {
+      // SQLite/Postgres: Use bulk insert with RETURNING
+      const [insertError, inserted] = await mightThrow(
+        this.sql<InferTableType<T>[]>`
+          INSERT INTO ${this.sql(this.table.sqlName)} ${this.sql(sqlDataArray)}
+          RETURNING *
+        `,
+      );
+
+      if (insertError || !inserted) {
+        return err(
+          "InternalServerError",
+          `Failed to create rows: ${this.toErrorMessage(insertError)}`,
+        );
+      }
+
+      results = inserted;
+    }
+
+    this.normalizeRows(results);
     return ok(results);
+  }
+
+  private async retrieveInsertedRows(sqlDataArray: Record<string, unknown>[]) {
+    const insertedRows: InferTableType<T>[] = [];
+    const primaryKey = this.getPrimaryKeyColumn();
+    const isSingleColumnPk = !!(primaryKey && primaryKey.kind !== "boolean");
+
+    if (isSingleColumnPk) {
+      if (this.isActualMysql()) {
+        const [{ insertId }] = await this
+          .sql`SELECT LAST_INSERT_ID() as insertId`;
+        const startId = Number(insertId);
+        const endId = startId + sqlDataArray.length - 1;
+
+        if (startId > 0) {
+          const rows = await this.sql<InferTableType<T>[]>`
+            SELECT * FROM ${this.sql(this.table.sqlName)}
+            WHERE ${this.sql(primaryKey.sqlName)} BETWEEN ${startId} AND ${endId}
+          `;
+
+          return rows;
+        }
+      } else {
+        // SQLite with MySQL dialect
+        const [{ lastId }] = await this
+          .sql`SELECT last_insert_rowid() as lastId`;
+        const startId = Number(lastId) - sqlDataArray.length + 1;
+        const endId = Number(lastId);
+
+        if (startId > 0) {
+          const rows = await this.sql<InferTableType<T>[]>`
+            SELECT * FROM ${this.sql(this.table.sqlName)}
+            WHERE ${this.sql(primaryKey.sqlName)} BETWEEN ${startId} AND ${endId}
+          `;
+
+          return rows;
+        }
+      }
+    }
+
+    // Fallback: query by unique columns
+    for (const sqlData of sqlDataArray) {
+      for (const [_key, column] of Object.entries(this.table.columns)) {
+        if (!column.meta.primaryKey && !column.meta.unique) continue;
+
+        const value = sqlData[column.sqlName];
+
+        if (value === undefined) continue;
+
+        const [rowsError, rows] = await mightThrow(
+          this.sql<InferTableType<T>[]>`
+            SELECT * FROM ${this.sql(this.table.sqlName)}
+            WHERE ${this.sql(column.sqlName)} = ${value}
+            LIMIT 1
+          `,
+        );
+
+        if (rowsError || !rows) continue;
+
+        const [row] = rows;
+
+        if (row) {
+          insertedRows.push(row);
+          break;
+        }
+      }
+    }
+
+    return insertedRows;
   }
 
   public async upsert(options: UpsertOptions<T>) {

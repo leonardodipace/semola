@@ -1450,7 +1450,7 @@ describe("Table - createMany method", () => {
     expect(count).toBe(3);
   });
 
-  test("should fail fast on invalid data", async () => {
+  test("should fail atomically when data is invalid", async () => {
     const [error, result] = await orm.tables.users.createMany([
       { name: "Valid", email: "valid@example.com" },
       // @ts-expect-error - missing required field
@@ -1460,9 +1460,10 @@ describe("Table - createMany method", () => {
     expect(error).not.toBeNull();
     expect(result).toBeNull();
 
+    // No rows should be inserted due to atomic validation
     const [countError, count] = await orm.tables.users.count();
     expect(countError).toBeNull();
-    expect(count).toBe(1);
+    expect(count).toBe(0);
   });
 
   test("should handle single item array", async () => {
