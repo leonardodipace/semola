@@ -64,37 +64,35 @@ const timestampWithMilliseconds = () => {
 
 const VERSION_COUNTER_DIGITS = 3;
 
-let lastTimestampBase = "";
-let lastTimestampCounter = 0;
-
 const incrementVersion = (value: string) => {
   const next = BigInt(value) + 1n;
   return String(next).padStart(value.length, "0");
 };
 
-const createMigrationVersion = (lastVersion: string | null) => {
-  const timestampBase = timestampWithMilliseconds();
+const makeMigrationVersionGenerator = () => {
+  let lastBase = "";
+  let lastCounter = 0;
 
-  let counter = 0;
-  if (timestampBase === lastTimestampBase) {
-    counter = lastTimestampCounter + 1;
-  }
+  return (lastVersion: string | null) => {
+    const timestampBase = timestampWithMilliseconds();
 
-  let version = `${timestampBase}${String(counter).padStart(VERSION_COUNTER_DIGITS, "0")}`;
+    let counter = 0;
+    if (timestampBase === lastBase) {
+      counter = lastCounter + 1;
+    }
 
-  if (lastVersion && version <= lastVersion) {
-    version = incrementVersion(lastVersion);
-  }
+    let version = `${timestampBase}${String(counter).padStart(VERSION_COUNTER_DIGITS, "0")}`;
 
-  lastTimestampBase = version.slice(0, timestampBase.length);
-  const parsedCounter = Number(version.slice(-VERSION_COUNTER_DIGITS));
-  if (Number.isNaN(parsedCounter)) {
-    lastTimestampCounter = 0;
-  } else {
-    lastTimestampCounter = parsedCounter;
-  }
+    if (lastVersion && version <= lastVersion) {
+      version = incrementVersion(lastVersion);
+    }
 
-  return version;
+    lastBase = version.slice(0, timestampBase.length);
+    const parsedCounter = Number(version.slice(-VERSION_COUNTER_DIGITS));
+    lastCounter = Number.isNaN(parsedCounter) ? 0 : parsedCounter;
+
+    return version;
+  };
 };
 
 type MigrationRuntimeOptions = {
@@ -226,6 +224,7 @@ export const createMigration = async (
   }
 
   // Generate migration file
+  const createMigrationVersion = makeMigrationVersionGenerator();
   const version = createMigrationVersion(lastEntry?.version ?? null);
   const filePath = resolve(migrationsDir, `${version}_${safeName}.ts`);
   const source = generateMigrationSource(up, down);

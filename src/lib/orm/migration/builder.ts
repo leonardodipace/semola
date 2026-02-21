@@ -178,9 +178,7 @@ const quoteValue = (dialect: OrmDialect, kind: ColumnKind, value: unknown) => {
 
       if (jsonError) {
         if (!(jsonError instanceof TypeError)) {
-          const message =
-            jsonError instanceof Error ? jsonError.message : String(jsonError);
-          return err("InternalServerError", message);
+          return err("InternalServerError", toMsg(jsonError));
         }
 
         const seen = new Set();
@@ -198,9 +196,7 @@ const quoteValue = (dialect: OrmDialect, kind: ColumnKind, value: unknown) => {
           return JSON.stringify(value, replacer) ?? "null";
         });
         if (safeError) {
-          const message =
-            safeError instanceof Error ? safeError.message : String(safeError);
-          return err("InternalServerError", message);
+          return err("InternalServerError", toMsg(safeError));
         }
 
         jsonValue = safeStringified ?? "null";
@@ -213,6 +209,9 @@ const quoteValue = (dialect: OrmDialect, kind: ColumnKind, value: unknown) => {
 
   return ok(`'${escapeString(String(value))}'`);
 };
+
+const toMsg = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
 
 const sqlType = (dialect: OrmDialect, kind: ColumnKind) => {
   if (dialect === "postgres") {
@@ -296,9 +295,7 @@ const normalizeColumn = (build: (t: TableBuilder) => unknown) => {
     build(tableBuilder);
   });
   if (buildError) {
-    const message =
-      buildError instanceof Error ? buildError.message : String(buildError);
-    return err("ValidationError", message);
+    return err("ValidationError", toMsg(buildError));
   }
 
   if (tableBuilder.error) {
@@ -361,9 +358,7 @@ export class SchemaBuilder {
       build(tableBuilder);
     });
     if (buildError) {
-      const message =
-        buildError instanceof Error ? buildError.message : String(buildError);
-      return err("ValidationError", message);
+      return err("ValidationError", toMsg(buildError));
     }
 
     if (tableBuilder.error) {
@@ -377,11 +372,7 @@ export class SchemaBuilder {
     }
     const [executeError] = await mightThrow(this.execute(sql));
     if (executeError) {
-      const message =
-        executeError instanceof Error
-          ? executeError.message
-          : String(executeError);
-      return err("InternalServerError", message);
+      return err("InternalServerError", toMsg(executeError));
     }
 
     return ok(true);
@@ -396,11 +387,7 @@ export class SchemaBuilder {
       this.execute(`DROP TABLE IF EXISTS ${safeTableName}`),
     );
     if (executeError) {
-      const message =
-        executeError instanceof Error
-          ? executeError.message
-          : String(executeError);
-      return err("InternalServerError", message);
+      return err("InternalServerError", toMsg(executeError));
     }
 
     return ok(true);
@@ -438,11 +425,7 @@ export class SchemaBuilder {
       this.execute(`ALTER TABLE ${safeTableName} ADD COLUMN ${definition}`),
     );
     if (executeError) {
-      const message =
-        executeError instanceof Error
-          ? executeError.message
-          : String(executeError);
-      return err("InternalServerError", message);
+      return err("InternalServerError", toMsg(executeError));
     }
 
     return ok(true);
@@ -469,11 +452,7 @@ export class SchemaBuilder {
       ),
     );
     if (executeError) {
-      const message =
-        executeError instanceof Error
-          ? executeError.message
-          : String(executeError);
-      return err("InternalServerError", message);
+      return err("InternalServerError", toMsg(executeError));
     }
 
     return ok(true);
@@ -529,11 +508,7 @@ export class SchemaBuilder {
         ),
       );
       if (executeError) {
-        const message =
-          executeError instanceof Error
-            ? executeError.message
-            : String(executeError);
-        return err("InternalServerError", message);
+        return err("InternalServerError", toMsg(executeError));
       }
 
       return ok(true);
@@ -549,9 +524,7 @@ export class SchemaBuilder {
         ),
       );
       if (typeError) {
-        const message =
-          typeError instanceof Error ? typeError.message : String(typeError);
-        return err("InternalServerError", message);
+        return err("InternalServerError", toMsg(typeError));
       }
 
       const nullStatement = column.meta.notNull
@@ -560,9 +533,7 @@ export class SchemaBuilder {
 
       const [nullError] = await mightThrow(executeStatement(nullStatement));
       if (nullError) {
-        const message =
-          nullError instanceof Error ? nullError.message : String(nullError);
-        return err("InternalServerError", message);
+        return err("InternalServerError", toMsg(nullError));
       }
 
       let defaultStatement = `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} DROP DEFAULT`;
@@ -586,19 +557,16 @@ export class SchemaBuilder {
         executeStatement(defaultStatement),
       );
       if (defaultError) {
-        const message =
-          defaultError instanceof Error
-            ? defaultError.message
-            : String(defaultError);
-        return err("InternalServerError", message);
+        return err("InternalServerError", toMsg(defaultError));
       }
 
       return ok(true);
     };
 
-    const savepoint = Reflect.get(this.sql, "savepoint");
+    const savepoint =
+      this.sql !== this.orm.sql ? Reflect.get(this.sql, "savepoint") : null;
 
-    if (this.sql !== this.orm.sql && typeof savepoint === "function") {
+    if (typeof savepoint === "function") {
       const [savepointError] = await mightThrow(
         Promise.resolve(
           savepoint.call(this.sql, async (sp: Bun.SQL) => {
@@ -640,11 +608,7 @@ export class SchemaBuilder {
     );
 
     if (transactionError) {
-      const message =
-        transactionError instanceof Error
-          ? transactionError.message
-          : String(transactionError);
-      return err("InternalServerError", message);
+      return err("InternalServerError", toMsg(transactionError));
     }
 
     return ok(true);
@@ -687,11 +651,7 @@ export class SchemaBuilder {
       ),
     );
     if (executeError) {
-      const message =
-        executeError instanceof Error
-          ? executeError.message
-          : String(executeError);
-      return err("InternalServerError", message);
+      return err("InternalServerError", toMsg(executeError));
     }
 
     return ok(true);
@@ -724,11 +684,7 @@ export class SchemaBuilder {
         this.execute(`DROP INDEX ${safeIndexName} ON ${safeTableName}`),
       );
       if (dropOnTableError) {
-        const message =
-          dropOnTableError instanceof Error
-            ? dropOnTableError.message
-            : String(dropOnTableError);
-        return err("InternalServerError", message);
+        return err("InternalServerError", toMsg(dropOnTableError));
       }
 
       return ok(true);
@@ -738,9 +694,7 @@ export class SchemaBuilder {
       this.execute(`DROP INDEX IF EXISTS ${safeIndexName}`),
     );
     if (dropError) {
-      const message =
-        dropError instanceof Error ? dropError.message : String(dropError);
-      return err("InternalServerError", message);
+      return err("InternalServerError", toMsg(dropError));
     }
 
     return ok(true);
@@ -749,11 +703,7 @@ export class SchemaBuilder {
   public async raw(sql: string) {
     const [executeError] = await mightThrow(this.execute(sql));
     if (executeError) {
-      const message =
-        executeError instanceof Error
-          ? executeError.message
-          : String(executeError);
-      return err("InternalServerError", message);
+      return err("InternalServerError", toMsg(executeError));
     }
 
     return ok(true);

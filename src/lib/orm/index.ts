@@ -28,12 +28,7 @@ export {
   PostgresDialect,
   SqliteDialect,
 } from "./dialect/index.js";
-export type {
-  ColumnTypeMapping,
-  Dialect,
-  QueryFragment,
-  QueryResult,
-} from "./dialect/types.js";
+export type { ColumnTypeMapping, Dialect } from "./dialect/types.js";
 export type {
   Migration,
   MigrationDefinition,

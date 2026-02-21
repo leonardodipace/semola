@@ -2,14 +2,7 @@ import { err, ok } from "../../errors/index.js";
 import type { Column } from "../column/index.js";
 import type { ColumnKind, ColumnMeta } from "../column/types.js";
 import type { Table } from "../table/index.js";
-import type {
-  ColumnTypeMapping,
-  DeleteOptions,
-  Dialect,
-  InsertOptions,
-  SelectOptions,
-  UpdateOptions,
-} from "./types.js";
+import type { ColumnTypeMapping, Dialect } from "./types.js";
 
 // PostgreSQL dialect implementation.
 // Fully implements all query building and type conversion for PostgreSQL databases.
@@ -26,16 +19,6 @@ export class PostgresDialect implements Dialect {
     jsonb: "JSONB",
     uuid: "UUID",
   };
-
-  // Convert ? placeholders to $1, $2, $3 format for Postgres
-  private toPostgresPlaceholders(sql: string, paramCount: number) {
-    let result = sql;
-    for (let i = 1; i <= paramCount; i++) {
-      // Replace left-to-right so placeholders map in order
-      result = result.replace("?", `$${i}`);
-    }
-    return result;
-  }
 
   private escapeString(value: string) {
     return value.replace(/'/g, "''");
@@ -68,84 +51,6 @@ export class PostgresDialect implements Dialect {
     }
 
     return `'${this.escapeString(String(value))}'`;
-  }
-
-  public buildSelect(
-    tableName: string,
-    columns: string[],
-    options: SelectOptions,
-  ) {
-    const parts: string[] = [];
-    const params: unknown[] = [];
-
-    // SELECT clause
-    const columnList = columns
-      .map((column) => this.quoteIdentifier(column))
-      .join(", ");
-    parts.push(`SELECT ${columnList} FROM ${this.quoteIdentifier(tableName)}`);
-
-    // WHERE clause
-    if (options.where) {
-      parts.push(`WHERE ${options.where.text}`);
-      params.push(...options.where.values);
-    }
-
-    // LIMIT/OFFSET
-    const pagination = this.buildPagination(options.limit, options.offset);
-    if (pagination) {
-      parts.push(pagination);
-    }
-
-    const sql = this.toPostgresPlaceholders(parts.join(" "), params.length);
-    return { sql, params };
-  }
-
-  public buildInsert(options: InsertOptions) {
-    const columns = Object.keys(options.values);
-    const placeholders = columns.map((_, i) => `$${i + 1}`).join(", ");
-    const columnList = columns
-      .map((column) => this.quoteIdentifier(column))
-      .join(", ");
-
-    const sql = `INSERT INTO ${this.quoteIdentifier(options.tableName)} (${columnList}) VALUES (${placeholders}) RETURNING *`;
-    const params = Object.values(options.values);
-
-    return { sql, params };
-  }
-
-  public buildUpdate(options: UpdateOptions) {
-    const columns = Object.keys(options.values);
-    const setClause = columns
-      .map((col, i) => `${this.quoteIdentifier(col)} = $${i + 1}`)
-      .join(", ");
-
-    const whereClause = this.toPostgresPlaceholders(
-      options.where.text,
-      options.where.values.length,
-    );
-
-    // Adjust where clause placeholders to account for SET clause params
-    const adjustedWhereClause = whereClause.replace(
-      /\$(\d+)/g,
-      (_, num) => `$${Number.parseInt(num, 10) + columns.length}`,
-    );
-
-    const sql = `UPDATE ${this.quoteIdentifier(options.tableName)} SET ${setClause} WHERE ${adjustedWhereClause} RETURNING *`;
-    const params = [...Object.values(options.values), ...options.where.values];
-
-    return { sql, params };
-  }
-
-  public buildDelete(options: DeleteOptions) {
-    const whereClause = this.toPostgresPlaceholders(
-      options.where.text,
-      options.where.values.length,
-    );
-
-    const sql = `DELETE FROM ${this.quoteIdentifier(options.tableName)} WHERE ${whereClause} RETURNING *`;
-    const params = [...options.where.values];
-
-    return { sql, params };
   }
 
   public buildCreateTable<
@@ -210,27 +115,5 @@ export class PostgresDialect implements Dialect {
     }
     // Fallback for edge cases
     return Boolean(value);
-  }
-
-  public buildPagination(limit?: number, offset?: number) {
-    if (limit === undefined && offset === undefined) {
-      return null;
-    }
-
-    const parts: string[] = [];
-
-    if (limit !== undefined) {
-      parts.push(`LIMIT ${limit}`);
-    }
-
-    if (limit === undefined && offset !== undefined && offset > 0) {
-      parts.push("LIMIT ALL");
-    }
-
-    if (offset !== undefined && offset > 0) {
-      parts.push(`OFFSET ${offset}`);
-    }
-
-    return parts.length > 0 ? parts.join(" ") : null;
   }
 }

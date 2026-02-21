@@ -2,14 +2,7 @@ import { err, ok } from "../../errors/index.js";
 import type { Column } from "../column/index.js";
 import type { ColumnKind, ColumnMeta } from "../column/types.js";
 import type { Table } from "../table/index.js";
-import type {
-  ColumnTypeMapping,
-  DeleteOptions,
-  Dialect,
-  InsertOptions,
-  SelectOptions,
-  UpdateOptions,
-} from "./types.js";
+import type { ColumnTypeMapping, Dialect } from "./types.js";
 
 // MySQL dialect implementation.
 // Fully implements all query building and type conversion for MySQL databases.
@@ -61,70 +54,6 @@ export class MysqlDialect implements Dialect {
     }
 
     return `'${this.escapeString(String(value))}'`;
-  }
-
-  public buildSelect(
-    tableName: string,
-    columns: string[],
-    options: SelectOptions,
-  ) {
-    const parts: string[] = [];
-    const params: unknown[] = [];
-
-    // SELECT clause
-    const columnList = columns
-      .map((column) => this.quoteIdentifier(column))
-      .join(", ");
-    parts.push(`SELECT ${columnList} FROM ${this.quoteIdentifier(tableName)}`);
-
-    // WHERE clause
-    if (options.where) {
-      parts.push(`WHERE ${options.where.text}`);
-      params.push(...options.where.values);
-    }
-
-    // LIMIT/OFFSET
-    const pagination = this.buildPagination(options.limit, options.offset);
-    if (pagination) {
-      parts.push(pagination);
-    }
-
-    return {
-      sql: parts.join(" "),
-      params,
-    };
-  }
-
-  public buildInsert(options: InsertOptions) {
-    const columns = Object.keys(options.values);
-    const placeholders = columns.map(() => "?").join(", ");
-    const columnList = columns
-      .map((column) => this.quoteIdentifier(column))
-      .join(", ");
-
-    const sql = `INSERT INTO ${this.quoteIdentifier(options.tableName)} (${columnList}) VALUES (${placeholders})`;
-    const params = Object.values(options.values);
-
-    return { sql, params };
-  }
-
-  public buildUpdate(options: UpdateOptions) {
-    const columns = Object.keys(options.values);
-    const setClause = columns
-      .map((col) => `${this.quoteIdentifier(col)} = ?`)
-      .join(", ");
-
-    const sql = `UPDATE ${this.quoteIdentifier(options.tableName)} SET ${setClause} WHERE ${options.where.text}`;
-    const params = [...Object.values(options.values), ...options.where.values];
-
-    return { sql, params };
-  }
-
-  public buildDelete(options: DeleteOptions) {
-    const sql = `DELETE FROM ${this.quoteIdentifier(options.tableName)} WHERE ${options.where.text}`;
-    const params = [...options.where.values];
-
-    return { sql, params };
   }
 
   public buildCreateTable<
@@ -192,28 +121,5 @@ export class MysqlDialect implements Dialect {
     }
     // Fallback for edge cases
     return Boolean(value);
-  }
-
-  public buildPagination(limit?: number, offset?: number) {
-    if (limit === undefined && offset === undefined) {
-      return null;
-    }
-
-    const parts: string[] = [];
-
-    if (limit === undefined && offset !== undefined && offset > 0) {
-      const maxLimit = "18446744073709551615";
-      parts.push(`LIMIT ${maxLimit}`);
-    }
-
-    if (limit !== undefined) {
-      parts.push(`LIMIT ${limit}`);
-    }
-
-    if (offset !== undefined && offset > 0) {
-      parts.push(`OFFSET ${offset}`);
-    }
-
-    return parts.length > 0 ? parts.join(" ") : null;
   }
 }

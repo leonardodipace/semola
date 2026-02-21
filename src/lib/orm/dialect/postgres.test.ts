@@ -2,9 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { boolean, json, jsonb, number, string, uuid } from "../column/index.js";
 import { Table } from "../table/index.js";
 import { PostgresDialect } from "./postgres.js";
-import type { QueryFragment } from "./types.js";
 
-describe("PostgresDialect - query building", () => {
+describe("PostgresDialect - type mappings", () => {
   const dialect = new PostgresDialect();
 
   test("should use correct type mappings", () => {
@@ -15,95 +14,6 @@ describe("PostgresDialect - query building", () => {
     expect(dialect.types.json).toBe("JSON");
     expect(dialect.types.jsonb).toBe("JSONB");
     expect(dialect.types.uuid).toBe("UUID");
-  });
-
-  test("buildSelect should use $1, $2, $3 placeholders", () => {
-    const result = dialect.buildSelect("users", ["id", "name"], {
-      where: {
-        text: "age > ? AND active = ?",
-        values: [18, true],
-      },
-    });
-
-    expect(result.sql).toBe(
-      'SELECT "id", "name" FROM "users" WHERE age > $1 AND active = $2',
-    );
-    expect(result.params).toEqual([18, true]);
-  });
-
-  test("buildSelect should handle pagination", () => {
-    const result = dialect.buildSelect("users", ["id", "name"], {
-      limit: 10,
-      offset: 20,
-    });
-
-    expect(result.sql).toBe(
-      'SELECT "id", "name" FROM "users" LIMIT 10 OFFSET 20',
-    );
-    expect(result.params).toEqual([]);
-  });
-
-  test("buildSelect should handle limit only", () => {
-    const result = dialect.buildSelect("users", ["id", "name"], {
-      limit: 10,
-    });
-
-    expect(result.sql).toBe('SELECT "id", "name" FROM "users" LIMIT 10');
-  });
-
-  test("buildSelect should handle offset only", () => {
-    const result = dialect.buildSelect("users", ["id", "name"], {
-      offset: 20,
-    });
-
-    expect(result.sql).toBe(
-      'SELECT "id", "name" FROM "users" LIMIT ALL OFFSET 20',
-    );
-  });
-
-  test("buildInsert should use $1, $2, $3 placeholders", () => {
-    const result = dialect.buildInsert({
-      tableName: "users",
-      values: { name: "Alice", age: 30 },
-    });
-
-    expect(result.sql).toBe(
-      'INSERT INTO "users" ("name", "age") VALUES ($1, $2) RETURNING *',
-    );
-    expect(result.params).toEqual(["Alice", 30]);
-  });
-
-  test("buildUpdate should use $1, $2, $3 placeholders with correct offsets", () => {
-    const where: QueryFragment = {
-      text: "id = ?",
-      values: [1],
-    };
-
-    const result = dialect.buildUpdate({
-      tableName: "users",
-      values: { name: "Bob", age: 25 },
-      where,
-    });
-
-    expect(result.sql).toBe(
-      'UPDATE "users" SET "name" = $1, "age" = $2 WHERE id = $3 RETURNING *',
-    );
-    expect(result.params).toEqual(["Bob", 25, 1]);
-  });
-
-  test("buildDelete should use $1, $2, $3 placeholders", () => {
-    const where: QueryFragment = {
-      text: "id = ?",
-      values: [1],
-    };
-
-    const result = dialect.buildDelete({
-      tableName: "users",
-      where,
-    });
-
-    expect(result.sql).toBe('DELETE FROM "users" WHERE id = $1 RETURNING *');
-    expect(result.params).toEqual([1]);
   });
 
   test("convertBooleanValue should handle native booleans", () => {
@@ -204,10 +114,7 @@ describe("PostgresDialect - CREATE TABLE", () => {
     expect(sql).toContain('"session_id" UUID');
   });
 
-  test("buildCreateTable returns error for unsupported column type", () => {
-    const dialect = new PostgresDialect();
-
-    // Create a table with an invalid column type for testing
+  test("should return error for unsupported column type", () => {
     const invalidColumn = {
       sqlName: "bad_col",
       columnKind: "unsupported_type",
@@ -218,7 +125,6 @@ describe("PostgresDialect - CREATE TABLE", () => {
         hasDefault: false,
       },
     };
-
     const invalidTable = {
       sqlName: "test",
       columns: { badCol: invalidColumn },

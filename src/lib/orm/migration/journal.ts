@@ -1,4 +1,4 @@
-import { err, ok } from "../../errors/index.js";
+import { err, mightThrow, mightThrowSync, ok } from "../../errors/index.js";
 
 export type JournalEntry = {
   version: string;
@@ -27,36 +27,46 @@ export const readJournal = async (filePath: string) => {
     return ok(createEmptyJournal());
   }
 
-  try {
-    const content = await file.text();
-    const journal = JSON.parse(content);
+  const [readError, content] = await mightThrow(file.text());
+  if (readError) {
+    return err(
+      "InternalServerError",
+      readError instanceof Error ? readError.message : String(readError),
+    );
+  }
 
-    // Basic validation
-    if (
-      typeof journal !== "object" ||
-      journal === null ||
-      typeof journal.version !== "number" ||
-      !Array.isArray(journal.entries)
-    ) {
-      return err("ValidationError", `Invalid journal format in ${filePath}`);
-    }
+  const [parseError, journal] = mightThrowSync(() => JSON.parse(content ?? ""));
+  if (parseError) {
+    return err(
+      "InternalServerError",
+      parseError instanceof Error ? parseError.message : String(parseError),
+    );
+  }
 
-    return ok(journal);
-  } catch (error) {
+  // Basic validation
+  if (
+    typeof journal !== "object" ||
+    journal === null ||
+    typeof journal.version !== "number" ||
+    !Array.isArray(journal.entries)
+  ) {
+    return err("ValidationError", `Invalid journal format in ${filePath}`);
+  }
+
+  return ok(journal);
+};
+
+export const writeJournal = async (filePath: string, journal: Journal) => {
+  const [error] = await mightThrow(
+    Bun.write(filePath, JSON.stringify(journal, null, 2)),
+  );
+  if (error) {
     return err(
       "InternalServerError",
       error instanceof Error ? error.message : String(error),
     );
   }
-};
-
-export const writeJournal = async (filePath: string, journal: Journal) => {
-  return Bun.write(filePath, JSON.stringify(journal, null, 2))
-    .then(() => ok(journal))
-    .catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      return err("InternalServerError", message);
-    });
+  return ok(journal);
 };
 
 export const addJournalEntry = (

@@ -1,4 +1,4 @@
-import { err, ok } from "../../errors/index.js";
+import { err, mightThrow, mightThrowSync, ok } from "../../errors/index.js";
 import type { Column } from "../column/index.js";
 import type { ColumnKind, ColumnMeta } from "../column/types.js";
 import type { OrmDialect } from "../core/types.js";
@@ -73,12 +73,16 @@ export const writeSnapshot = async (
   filePath: string,
   snapshot: SchemaSnapshot,
 ) => {
-  return Bun.write(filePath, JSON.stringify(snapshot, null, 2))
-    .then(() => ok(snapshot))
-    .catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      return err("InternalServerError", message);
-    });
+  const [error] = await mightThrow(
+    Bun.write(filePath, JSON.stringify(snapshot, null, 2)),
+  );
+  if (error) {
+    return err(
+      "InternalServerError",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  return ok(snapshot);
 };
 
 export const readSnapshot = async (filePath: string) => {
@@ -89,26 +93,34 @@ export const readSnapshot = async (filePath: string) => {
     return ok(null);
   }
 
-  try {
-    const content = await file.text();
-    const snapshot = JSON.parse(content);
-
-    // Basic validation
-    if (
-      typeof snapshot !== "object" ||
-      snapshot === null ||
-      typeof snapshot.version !== "number" ||
-      typeof snapshot.dialect !== "string" ||
-      typeof snapshot.tables !== "object"
-    ) {
-      return err("ValidationError", `Invalid snapshot format in ${filePath}`);
-    }
-
-    return ok(snapshot);
-  } catch (error) {
+  const [readError, content] = await mightThrow(file.text());
+  if (readError) {
     return err(
       "InternalServerError",
-      error instanceof Error ? error.message : String(error),
+      readError instanceof Error ? readError.message : String(readError),
     );
   }
+
+  const [parseError, snapshot] = mightThrowSync(() =>
+    JSON.parse(content ?? ""),
+  );
+  if (parseError) {
+    return err(
+      "InternalServerError",
+      parseError instanceof Error ? parseError.message : String(parseError),
+    );
+  }
+
+  // Basic validation
+  if (
+    typeof snapshot !== "object" ||
+    snapshot === null ||
+    typeof snapshot.version !== "number" ||
+    typeof snapshot.dialect !== "string" ||
+    typeof snapshot.tables !== "object"
+  ) {
+    return err("ValidationError", `Invalid snapshot format in ${filePath}`);
+  }
+
+  return ok(snapshot);
 };

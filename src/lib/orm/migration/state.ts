@@ -4,6 +4,12 @@ import type { Table } from "../table/index.js";
 import { toSqlIdentifier } from "./sql.js";
 import type { AppliedMigration } from "./types.js";
 
+const toInternalErr = (error: unknown) =>
+  err(
+    "InternalServerError",
+    error instanceof Error ? error.message : String(error),
+  );
+
 const asRecord = (value: unknown) => {
   if (typeof value === "object" && value !== null) {
     return value;
@@ -38,9 +44,7 @@ export const ensureMigrationsTable = async (
       )
     `);
   if (createError) {
-    const message =
-      createError instanceof Error ? createError.message : String(createError);
-    return err("InternalServerError", message);
+    return toInternalErr(createError);
   }
 
   return ok(undefined);
@@ -61,9 +65,7 @@ export const getAppliedMigrations = async (
       ORDER BY version ASC
     `);
   if (queryError) {
-    const message =
-      queryError instanceof Error ? queryError.message : String(queryError);
-    return err("InternalServerError", message);
+    return toInternalErr(queryError);
   }
 
   const list: AppliedMigration[] = [];
@@ -113,9 +115,7 @@ export const recordMigration = async (
       VALUES (${version}, ${name}, ${appliedAt})
     `);
   if (insertError) {
-    const message =
-      insertError instanceof Error ? insertError.message : String(insertError);
-    return err("InternalServerError", message);
+    return toInternalErr(insertError);
   }
 
   return ok(true);
@@ -138,9 +138,7 @@ export const removeMigration = async (
       WHERE version = ${version}
     `);
   if (deleteError) {
-    const message =
-      deleteError instanceof Error ? deleteError.message : String(deleteError);
-    return err("InternalServerError", message);
+    return toInternalErr(deleteError);
   }
 
   return ok(true);

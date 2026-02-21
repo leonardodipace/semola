@@ -2,9 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { boolean, json, jsonb, number, string, uuid } from "../column/index.js";
 import { Table } from "../table/index.js";
 import { SqliteDialect } from "./sqlite.js";
-import type { QueryFragment } from "./types.js";
 
-describe("SqliteDialect - query building", () => {
+describe("SqliteDialect - type mappings", () => {
   const dialect = new SqliteDialect();
 
   test("should use correct type mappings", () => {
@@ -15,95 +14,6 @@ describe("SqliteDialect - query building", () => {
     expect(dialect.types.json).toBe("TEXT");
     expect(dialect.types.jsonb).toBe("TEXT");
     expect(dialect.types.uuid).toBe("TEXT");
-  });
-
-  test("buildSelect should use ? placeholders", () => {
-    const result = dialect.buildSelect("users", ["id", "name"], {
-      where: {
-        text: "age > ? AND active = ?",
-        values: [18, true],
-      },
-    });
-
-    expect(result.sql).toBe(
-      'SELECT "id", "name" FROM "users" WHERE age > ? AND active = ?',
-    );
-    expect(result.params).toEqual([18, true]);
-  });
-
-  test("buildSelect should handle pagination", () => {
-    const result = dialect.buildSelect("users", ["id", "name"], {
-      limit: 10,
-      offset: 20,
-    });
-
-    expect(result.sql).toBe(
-      'SELECT "id", "name" FROM "users" LIMIT 10 OFFSET 20',
-    );
-    expect(result.params).toEqual([]);
-  });
-
-  test("buildSelect should handle limit only", () => {
-    const result = dialect.buildSelect("users", ["id", "name"], {
-      limit: 10,
-    });
-
-    expect(result.sql).toBe('SELECT "id", "name" FROM "users" LIMIT 10');
-  });
-
-  test("buildSelect should handle offset only", () => {
-    const result = dialect.buildSelect("users", ["id", "name"], {
-      offset: 20,
-    });
-
-    expect(result.sql).toBe(
-      'SELECT "id", "name" FROM "users" LIMIT -1 OFFSET 20',
-    );
-  });
-
-  test("buildInsert should use ? placeholders", () => {
-    const result = dialect.buildInsert({
-      tableName: "users",
-      values: { name: "Alice", age: 30 },
-    });
-
-    expect(result.sql).toBe(
-      'INSERT INTO "users" ("name", "age") VALUES (?, ?) RETURNING *',
-    );
-    expect(result.params).toEqual(["Alice", 30]);
-  });
-
-  test("buildUpdate should use ? placeholders", () => {
-    const where: QueryFragment = {
-      text: "id = ?",
-      values: [1],
-    };
-
-    const result = dialect.buildUpdate({
-      tableName: "users",
-      values: { name: "Bob", age: 25 },
-      where,
-    });
-
-    expect(result.sql).toBe(
-      'UPDATE "users" SET "name" = ?, "age" = ? WHERE id = ? RETURNING *',
-    );
-    expect(result.params).toEqual(["Bob", 25, 1]);
-  });
-
-  test("buildDelete should use ? placeholders", () => {
-    const where: QueryFragment = {
-      text: "id = ?",
-      values: [1],
-    };
-
-    const result = dialect.buildDelete({
-      tableName: "users",
-      where,
-    });
-
-    expect(result.sql).toBe('DELETE FROM "users" WHERE id = ? RETURNING *');
-    expect(result.params).toEqual([1]);
   });
 
   test("convertBooleanValue should handle SQLite integers", () => {
@@ -218,7 +128,6 @@ describe("SqliteDialect - CREATE TABLE", () => {
     });
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    // Should only have PRIMARY KEY, not NOT NULL twice
     expect(sql).toBe(
       'CREATE TABLE IF NOT EXISTS "users" ("id" INTEGER PRIMARY KEY)',
     );
@@ -231,45 +140,12 @@ describe("SqliteDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    // Should only have PRIMARY KEY, not UNIQUE
     expect(sql).toBe(
       'CREATE TABLE IF NOT EXISTS "users" ("id" INTEGER PRIMARY KEY)',
     );
   });
-});
 
-describe("SqliteDialect - pagination", () => {
-  const dialect = new SqliteDialect();
-
-  test("should build LIMIT with offset", () => {
-    const result = dialect.buildPagination(10, 20);
-    expect(result).toBe("LIMIT 10 OFFSET 20");
-  });
-
-  test("should build LIMIT only", () => {
-    const result = dialect.buildPagination(10, undefined);
-    expect(result).toBe("LIMIT 10");
-  });
-
-  test("should build OFFSET only with LIMIT -1", () => {
-    const result = dialect.buildPagination(undefined, 20);
-    expect(result).toBe("LIMIT -1 OFFSET 20");
-  });
-
-  test("should return null when no pagination params", () => {
-    const result = dialect.buildPagination(undefined, undefined);
-    expect(result).toBeNull();
-  });
-
-  test("should build OFFSET clause when offset is 0", () => {
-    const result = dialect.buildPagination(undefined, 0);
-    expect(result).toBe("LIMIT -1 OFFSET 0");
-  });
-
-  test("buildCreateTable returns error for unsupported column type", () => {
-    const dialect = new SqliteDialect();
-
-    // Create a table with an invalid column type for testing
+  test("should return error for unsupported column type", () => {
     const invalidColumn = {
       sqlName: "bad_col",
       columnKind: "unsupported_type",
@@ -280,7 +156,6 @@ describe("SqliteDialect - pagination", () => {
         hasDefault: false,
       },
     };
-
     const invalidTable = {
       sqlName: "test",
       columns: { badCol: invalidColumn },

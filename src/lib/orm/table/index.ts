@@ -193,34 +193,11 @@ export class TableClient<T extends Table> {
     return value;
   }
 
-  private normalizeValueForWrite(
+  private normalizeDateForStorage(
     column: Column<ColumnKind, ColumnMeta>,
     value: unknown,
   ) {
-    if (column.columnKind !== "date") {
-      return value;
-    }
-
-    if (value === null) {
-      return value;
-    }
-
-    if (this.dialect.name === "sqlite" && value instanceof Date) {
-      return value.getTime();
-    }
-
-    return value;
-  }
-
-  private normalizeValueForWhere(
-    column: Column<ColumnKind, ColumnMeta>,
-    value: unknown,
-  ) {
-    if (column.columnKind !== "date") {
-      return value;
-    }
-
-    if (value === null) {
+    if (column.columnKind !== "date" || value === null) {
       return value;
     }
 
@@ -304,7 +281,7 @@ export class TableClient<T extends Table> {
       value = filters.equals;
     }
 
-    value = this.normalizeValueForWhere(column, value);
+    value = this.normalizeDateForStorage(column, value);
 
     return ok({
       key,
@@ -374,7 +351,10 @@ export class TableClient<T extends Table> {
 
       // Equality operator
       if ("equals" in filters) {
-        const equalsValue = this.normalizeValueForWhere(column, filters.equals);
+        const equalsValue = this.normalizeDateForStorage(
+          column,
+          filters.equals,
+        );
         conditions.push(this.sql`${this.sql(sqlColumnName)} = ${equalsValue}`);
       }
 
@@ -389,26 +369,26 @@ export class TableClient<T extends Table> {
 
       // Number/Date comparison operators
       if ("gt" in filters) {
-        const gtValue = this.normalizeValueForWhere(column, filters.gt);
+        const gtValue = this.normalizeDateForStorage(column, filters.gt);
         conditions.push(this.sql`${this.sql(sqlColumnName)} > ${gtValue}`);
       }
       if ("gte" in filters) {
-        const gteValue = this.normalizeValueForWhere(column, filters.gte);
+        const gteValue = this.normalizeDateForStorage(column, filters.gte);
         conditions.push(this.sql`${this.sql(sqlColumnName)} >= ${gteValue}`);
       }
       if ("lt" in filters) {
-        const ltValue = this.normalizeValueForWhere(column, filters.lt);
+        const ltValue = this.normalizeDateForStorage(column, filters.lt);
         conditions.push(this.sql`${this.sql(sqlColumnName)} < ${ltValue}`);
       }
       if ("lte" in filters) {
-        const lteValue = this.normalizeValueForWhere(column, filters.lte);
+        const lteValue = this.normalizeDateForStorage(column, filters.lte);
         conditions.push(this.sql`${this.sql(sqlColumnName)} <= ${lteValue}`);
       }
 
       // Handle 'in' operator
       if ("in" in filters && Array.isArray(filters.in)) {
         const inValues = filters.in.map((entry) =>
-          this.normalizeValueForWhere(column, entry),
+          this.normalizeDateForStorage(column, entry),
         );
         if (inValues.length === 0) {
           conditions.push(this.sql`FALSE`);
@@ -447,7 +427,7 @@ export class TableClient<T extends Table> {
     }
 
     // Direct equality
-    const normalizedValue = this.normalizeValueForWhere(column, value);
+    const normalizedValue = this.normalizeDateForStorage(column, value);
     return ok(this.sql`${this.sql(sqlColumnName)} = ${normalizedValue}`);
   }
 
@@ -538,52 +518,11 @@ export class TableClient<T extends Table> {
     return null;
   }
 
-  private collectValuesByKind(
+  private collectRelationValues(
     rows: Record<string, unknown>[],
-    columnKey: string,
-    kind: "number",
-  ): number[];
-  private collectValuesByKind(
-    rows: Record<string, unknown>[],
-    columnKey: string,
-    kind: "string",
-  ): string[];
-  private collectValuesByKind(
-    rows: Record<string, unknown>[],
-    columnKey: string,
-    kind: "date",
-  ): Date[];
-  private collectValuesByKind(
-    rows: Record<string, unknown>[],
-    columnKey: string,
-    kind: "boolean",
-  ): boolean[];
-  private collectValuesByKind(
-    rows: Record<string, unknown>[],
-    columnKey: string,
-    kind: ColumnKind,
-  ) {
-    if (kind === "number") {
-      return rows
-        .map((row) => row[columnKey])
-        .filter((value) => typeof value === "number");
-    }
-
-    if (kind === "string") {
-      return rows
-        .map((row) => row[columnKey])
-        .filter((value) => typeof value === "string");
-    }
-
-    if (kind === "date") {
-      return rows
-        .map((row) => row[columnKey])
-        .filter((value) => value instanceof Date);
-    }
-
-    return rows
-      .map((row) => row[columnKey])
-      .filter((value) => typeof value === "boolean");
+    key: string,
+  ): unknown[] {
+    return [...new Set(rows.map((row) => row[key]).filter((v) => v != null))];
   }
 
   private convertBooleanValues(rows: Record<string, unknown>[]) {
@@ -664,77 +603,20 @@ export class TableClient<T extends Table> {
           );
         }
 
-        let relatedRecords: Record<string, unknown>[] = [];
+        const fkValues = this.collectRelationValues(rows, fkKey);
 
-        if (relatedPk.kind === "number") {
-          const fkValues = [
-            ...new Set(
-              this.collectValuesByKind(rows, fkKey, "number").filter(
-                (value) => value != null,
-              ),
-            ),
-          ];
+        if (fkValues.length === 0) continue;
 
-          if (fkValues.length === 0) continue;
+        const oneWhere = {
+          [relatedPk.key]: { in: fkValues },
+        } as AnyWhereClause;
 
-          const where: AnyWhereClause = {
-            [relatedPk.key]: { in: fkValues },
-          };
-
-          const [relatedError, records] = await relatedClient.findMany({
-            where,
-          });
-          if (relatedError) {
-            const normalizedError = this.normalizeTupleError(relatedError);
-            return err(normalizedError.type, normalizedError.message);
-          }
-          relatedRecords = records ?? [];
-        } else if (relatedPk.kind === "string") {
-          const fkValues = [
-            ...new Set(
-              this.collectValuesByKind(rows, fkKey, "string").filter(
-                (value) => value != null,
-              ),
-            ),
-          ];
-
-          if (fkValues.length === 0) continue;
-
-          const where: AnyWhereClause = {
-            [relatedPk.key]: { in: fkValues },
-          };
-
-          const [relatedError, records] = await relatedClient.findMany({
-            where,
-          });
-          if (relatedError) {
-            const normalizedError = this.normalizeTupleError(relatedError);
-            return err(normalizedError.type, normalizedError.message);
-          }
-          relatedRecords = records ?? [];
-        } else {
-          const fkValues = [
-            ...new Set(
-              this.collectValuesByKind(rows, fkKey, "date").filter(
-                (value) => value != null,
-              ),
-            ),
-          ];
-
-          if (fkValues.length === 0) continue;
-
-          const where: AnyWhereClause = {
-            [relatedPk.key]: { in: fkValues },
-          };
-
-          const [relatedError, records] = await relatedClient.findMany({
-            where,
-          });
-          if (relatedError) {
-            const normalizedError = this.normalizeTupleError(relatedError);
-            return err(normalizedError.type, normalizedError.message);
-          }
-          relatedRecords = records ?? [];
+        const [relatedError, relatedRecords] = await relatedClient.findMany({
+          where: oneWhere,
+        });
+        if (relatedError) {
+          const normalizedError = this.normalizeTupleError(relatedError);
+          return err(normalizedError.type, normalizedError.message);
         }
 
         // Build map for quick lookup
@@ -773,77 +655,20 @@ export class TableClient<T extends Table> {
           );
         }
 
-        let relatedRecords: Record<string, unknown>[] = [];
+        const parentIds = this.collectRelationValues(rows, parentPk.key);
 
-        if (parentPk.kind === "number") {
-          const parentIds = [
-            ...new Set(
-              this.collectValuesByKind(rows, parentPk.key, "number").filter(
-                (value) => value != null,
-              ),
-            ),
-          ];
+        if (parentIds.length === 0) continue;
 
-          if (parentIds.length === 0) continue;
+        const manyWhere = {
+          [relation.fkColumn]: { in: parentIds },
+        } as AnyWhereClause;
 
-          const where: AnyWhereClause = {
-            [relation.fkColumn]: { in: parentIds },
-          };
-
-          const [relatedError, records] = await relatedClient.findMany({
-            where,
-          });
-          if (relatedError) {
-            const normalizedError = this.normalizeTupleError(relatedError);
-            return err(normalizedError.type, normalizedError.message);
-          }
-          relatedRecords = records ?? [];
-        } else if (parentPk.kind === "string") {
-          const parentIds = [
-            ...new Set(
-              this.collectValuesByKind(rows, parentPk.key, "string").filter(
-                (value) => value != null,
-              ),
-            ),
-          ];
-
-          if (parentIds.length === 0) continue;
-
-          const where: AnyWhereClause = {
-            [relation.fkColumn]: { in: parentIds },
-          };
-
-          const [relatedError, records] = await relatedClient.findMany({
-            where,
-          });
-          if (relatedError) {
-            const normalizedError = this.normalizeTupleError(relatedError);
-            return err(normalizedError.type, normalizedError.message);
-          }
-          relatedRecords = records ?? [];
-        } else {
-          const parentIds = [
-            ...new Set(
-              this.collectValuesByKind(rows, parentPk.key, "date").filter(
-                (value) => value != null,
-              ),
-            ),
-          ];
-
-          if (parentIds.length === 0) continue;
-
-          const where: AnyWhereClause = {
-            [relation.fkColumn]: { in: parentIds },
-          };
-
-          const [relatedError, records] = await relatedClient.findMany({
-            where,
-          });
-          if (relatedError) {
-            const normalizedError = this.normalizeTupleError(relatedError);
-            return err(normalizedError.type, normalizedError.message);
-          }
-          relatedRecords = records ?? [];
+        const [relatedError, relatedRecords] = await relatedClient.findMany({
+          where: manyWhere,
+        });
+        if (relatedError) {
+          const normalizedError = this.normalizeTupleError(relatedError);
+          return err(normalizedError.type, normalizedError.message);
         }
 
         // Group related records by their FK value
@@ -1065,25 +890,37 @@ export class TableClient<T extends Table> {
       }
 
       const sqlColumnName = column.sqlName;
-      sqlData[sqlColumnName] = this.normalizeValueForWrite(column, value);
+      sqlData[sqlColumnName] = this.normalizeDateForStorage(column, value);
     }
 
-    const query = this.dialect.buildInsert({
-      tableName: this.table.sqlName,
-      values: sqlData,
-    });
+    let results: InferTableType<T>[];
 
-    const [insertError, inserted] = await mightThrow(
-      this.sql.unsafe<InferTableType<T>[]>(query.sql, query.params),
-    );
-    if (insertError || !inserted) {
-      return err(
-        "InternalServerError",
-        `Failed to create row: ${this.toErrorMessage(insertError)}`,
+    if (this.dialect.name === "mysql") {
+      const [insertError] = await mightThrow(
+        this
+          .sql`INSERT INTO ${this.sql(this.table.sqlName)} ${this.sql(sqlData)}`,
       );
+      if (insertError) {
+        return err(
+          "InternalServerError",
+          `Failed to create row: ${this.toErrorMessage(insertError)}`,
+        );
+      }
+      results = [];
+    } else {
+      const [insertError, inserted] = await mightThrow(
+        this.sql<
+          InferTableType<T>[]
+        >`INSERT INTO ${this.sql(this.table.sqlName)} ${this.sql(sqlData)} RETURNING *`,
+      );
+      if (insertError || !inserted) {
+        return err(
+          "InternalServerError",
+          `Failed to create row: ${this.toErrorMessage(insertError)}`,
+        );
+      }
+      results = inserted;
     }
-
-    let results = inserted;
 
     if (this.dialect.name === "mysql") {
       const primaryKey = this.getPrimaryKeyColumn();
@@ -1133,7 +970,7 @@ export class TableClient<T extends Table> {
             continue;
           }
 
-          const normalizedValue = this.normalizeValueForWhere(column, value);
+          const normalizedValue = this.normalizeDateForStorage(column, value);
           const [readError, readResults] = await mightThrow(
             this.sql<InferTableType<T>[]>`
               SELECT * FROM ${this.sql(this.table.sqlName)}
@@ -1217,7 +1054,7 @@ export class TableClient<T extends Table> {
       }
 
       const sqlColumnName = column.sqlName;
-      sqlData[sqlColumnName] = this.normalizeValueForWrite(column, value);
+      sqlData[sqlColumnName] = this.normalizeDateForStorage(column, value);
     }
 
     const hasReturning = this.dialect.name !== "mysql";
@@ -1273,7 +1110,7 @@ export class TableClient<T extends Table> {
           const selectorColumn = uniqueSelector.column;
           const updatedSelectorValue =
             uniqueSelector.key in options.data
-              ? this.normalizeValueForWhere(
+              ? this.normalizeDateForStorage(
                   selectorColumn,
                   Reflect.get(options.data, uniqueSelector.key),
                 )
@@ -1349,7 +1186,7 @@ export class TableClient<T extends Table> {
         const selectorColumn = uniqueSelector.column;
         const updatedSelectorValue =
           uniqueSelector.key in options.data
-            ? this.normalizeValueForWhere(
+            ? this.normalizeDateForStorage(
                 selectorColumn,
                 Reflect.get(options.data, uniqueSelector.key),
               )
