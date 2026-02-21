@@ -1065,29 +1065,10 @@ export class TableClient<T extends Table> {
     let results: InferTableType<T>[] = [];
 
     if (this.dialect.name === "mysql") {
-      // MySQL: Bulk insert without RETURNING, then query for inserted rows
-      const columns = Object.keys(sqlDataArray[0] ?? {});
-
-      if (columns.length === 0) {
-        return ok([] as InferTableType<T>[]);
-      }
-
-      // Build multi-value INSERT: INSERT INTO table (cols) VALUES (vals1), (vals2), ...
-      const valuePlaceholders: string[] = [];
-
-      for (const _sqlData of sqlDataArray) {
-        const placeholders = columns.map(() => "?").join(", ");
-        valuePlaceholders.push(`(${placeholders})`);
-      }
-
-      const valuesClause = valuePlaceholders.join(", ");
-
-      // Execute bulk insert using unsafe for the values clause
+      // MySQL doesn't support RETURNING, so insert then query
       const [insertError] = await mightThrow(
-        this.sql.unsafe(
-          `INSERT INTO ${this.table.sqlName} (${columns.join(", ")}) VALUES ${valuesClause}`,
-          sqlDataArray.flatMap((data) => columns.map((col) => data[col])),
-        ),
+        this
+          .sql`INSERT INTO ${this.sql(this.table.sqlName)} ${this.sql(sqlDataArray)}`,
       );
 
       if (insertError) {
@@ -1097,8 +1078,8 @@ export class TableClient<T extends Table> {
         );
       }
 
-      // Retrieve inserted rows
-      results = await this.retrieveInsertedRows(sqlDataArray);
+      // Query inserted rows by primary key range
+      results = await this.queryInsertedRows(sqlDataArray.length);
     } else {
       // SQLite/Postgres: Use bulk insert with RETURNING
       const [insertError, inserted] = await mightThrow(
@@ -1122,73 +1103,38 @@ export class TableClient<T extends Table> {
     return ok(results);
   }
 
-  private async retrieveInsertedRows(sqlDataArray: Record<string, unknown>[]) {
-    const insertedRows: InferTableType<T>[] = [];
+  private async queryInsertedRows(count: number) {
     const primaryKey = this.getPrimaryKeyColumn();
-    const isSingleColumnPk = !!(primaryKey && primaryKey.kind !== "boolean");
 
-    if (isSingleColumnPk) {
-      if (this.isActualMysql()) {
-        const [{ insertId }] = await this
-          .sql`SELECT LAST_INSERT_ID() as insertId`;
-        const startId = Number(insertId);
-        const endId = startId + sqlDataArray.length - 1;
-
-        if (startId > 0) {
-          const rows = await this.sql<InferTableType<T>[]>`
-            SELECT * FROM ${this.sql(this.table.sqlName)}
-            WHERE ${this.sql(primaryKey.sqlName)} BETWEEN ${startId} AND ${endId}
-          `;
-
-          return rows;
-        }
-      } else {
-        // SQLite with MySQL dialect
-        const [{ lastId }] = await this
-          .sql`SELECT last_insert_rowid() as lastId`;
-        const startId = Number(lastId) - sqlDataArray.length + 1;
-        const endId = Number(lastId);
-
-        if (startId > 0) {
-          const rows = await this.sql<InferTableType<T>[]>`
-            SELECT * FROM ${this.sql(this.table.sqlName)}
-            WHERE ${this.sql(primaryKey.sqlName)} BETWEEN ${startId} AND ${endId}
-          `;
-
-          return rows;
-        }
-      }
+    if (!primaryKey || primaryKey.kind === "boolean") {
+      return [] as InferTableType<T>[];
     }
 
-    // Fallback: query by unique columns
-    for (const sqlData of sqlDataArray) {
-      for (const [_key, column] of Object.entries(this.table.columns)) {
-        if (!column.meta.primaryKey && !column.meta.unique) continue;
+    let startId: number;
+    let endId: number;
 
-        const value = sqlData[column.sqlName];
-
-        if (value === undefined) continue;
-
-        const [rowsError, rows] = await mightThrow(
-          this.sql<InferTableType<T>[]>`
-            SELECT * FROM ${this.sql(this.table.sqlName)}
-            WHERE ${this.sql(column.sqlName)} = ${value}
-            LIMIT 1
-          `,
-        );
-
-        if (rowsError || !rows) continue;
-
-        const [row] = rows;
-
-        if (row) {
-          insertedRows.push(row);
-          break;
-        }
-      }
+    if (this.isActualMysql()) {
+      const [{ insertId }] = await this
+        .sql`SELECT LAST_INSERT_ID() as insertId`;
+      startId = Number(insertId) - count + 1;
+      endId = Number(insertId);
+    } else {
+      // SQLite with MySQL dialect
+      const [{ lastId }] = await this.sql`SELECT last_insert_rowid() as lastId`;
+      startId = Number(lastId) - count + 1;
+      endId = Number(lastId);
     }
 
-    return insertedRows;
+    if (startId <= 0) {
+      return [] as InferTableType<T>[];
+    }
+
+    const rows = await this.sql<InferTableType<T>[]>`
+      SELECT * FROM ${this.sql(this.table.sqlName)}
+      WHERE ${this.sql(primaryKey.sqlName)} BETWEEN ${startId} AND ${endId}
+    `;
+
+    return rows;
   }
 
   public async upsert(options: UpsertOptions<T>) {
