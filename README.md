@@ -27,6 +27,7 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 | **🌍 i18n**          | Compile-time validated internationalization            | `semola/i18n`   |
 | **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`  |
 | **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors` |
+| **🗄️ ORM**           | Type-safe SQL ORM with relations & migrations          | `semola/orm`    |
 
 ---
 
@@ -135,6 +136,34 @@ const [error, user] = await cache.get("user:123");
 if (!error) console.log(user);
 ```
 
+### Query a Database
+
+```typescript
+import { Orm, Table, string, number } from "semola/orm";
+
+const users = new Table("users", {
+  id: number().primaryKey(),
+  name: string().notNull(),
+  email: string().unique().notNull(),
+});
+
+const orm = new Orm({
+  url: "sqlite://./app.db",
+  tables: [users],
+});
+
+// Create a user
+const [error, user] = await orm.tables.users.create({
+  name: "John Doe",
+  email: "john@example.com",
+});
+
+// Query with filters
+const [err, users] = await orm.tables.users.findMany({
+  where: { name: { contains: "John" } },
+});
+```
+
 ### Check Permissions
 
 ```typescript
@@ -238,6 +267,7 @@ _Higher is better for req/sec, lower is better for latency._
 - [i18n](./docs/i18n.md) - Type-safe internationalization
 - [Cache](./docs/cache.md) - Redis cache wrapper with TTL
 - [Errors](./docs/errors.md) - Result-based error handling
+- [ORM](./docs/orm.md) - Type-safe SQL ORM with relations & migrations
 
 ---
 
