@@ -43,10 +43,7 @@ const run = async () => {
     return;
   }
 
-  const [schemaError, tables] = await loadSchemaTables(
-    config.orm.schema.path,
-    config.orm.schema.exportName,
-  );
+  const [schemaError, tables] = await loadSchemaTables(config.orm.schema.path);
   if (schemaError) {
     printError(schemaError.message);
     return;

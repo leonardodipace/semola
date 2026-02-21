@@ -154,53 +154,7 @@ export const loadSemolaConfig = async (cwd: string) => {
   });
 };
 
-const toTableRecord = (value: unknown) => {
-  if (Array.isArray(value)) {
-    const record: Record<string, Table> = {};
-    for (const entry of value) {
-      if (!isTableLike(entry)) {
-        return err(
-          "ValidationError",
-          "Schema export array must contain Table instances",
-        );
-      }
-
-      if (entry.sqlName in record) {
-        return err(
-          "ValidationError",
-          `Schema export array contains duplicate table sqlName: ${entry.sqlName}`,
-        );
-      }
-
-      record[entry.sqlName] = entry;
-    }
-    return ok(record);
-  }
-
-  if (!isObject(value)) {
-    return err(
-      "ValidationError",
-      "Schema export must be an object or an array of tables",
-    );
-  }
-
-  const record: Record<string, Table> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (!isTableLike(entry)) {
-      return err(
-        "ValidationError",
-        `Schema export field ${key} is not a Table instance`,
-      );
-    }
-    record[key] = entry;
-  }
-  return ok(record);
-};
-
-export const loadSchemaTables = async (
-  schemaPath: string,
-  exportName?: string,
-) => {
+export const loadSchemaTables = async (schemaPath: string) => {
   const [importError, mod] = await importModule(schemaPath);
   if (importError || !mod) {
     return err(
@@ -209,23 +163,34 @@ export const loadSchemaTables = async (
     );
   }
 
-  const key = exportName ?? "tables";
+  const exportedValue = Reflect.get(mod, "default");
 
-  // Check if the named export exists; if not, fall back to default
-  const exportedValue =
-    key in mod ? Reflect.get(mod, key) : Reflect.get(mod, "default");
-
-  if (exportedValue === undefined) {
+  if (!isObject(exportedValue)) {
     return err(
-      "NotFoundError",
-      `Schema module does not export ${key} or a default export with tables`,
+      "ValidationError",
+      "Schema module must have a default export of an Orm instance",
     );
   }
 
-  const [tableError, tables] = toTableRecord(exportedValue);
-  if (tableError) {
-    return err("ValidationError", tableError.message);
+  const rawTables = Reflect.get(exportedValue, "rawTables");
+
+  if (!isObject(rawTables)) {
+    return err(
+      "ValidationError",
+      "Schema module must have a default export of an Orm instance",
+    );
   }
 
-  return ok(tables);
+  const record: Record<string, Table> = {};
+  for (const [key, entry] of Object.entries(rawTables)) {
+    if (!isTableLike(entry)) {
+      return err(
+        "ValidationError",
+        `Schema export field ${key} is not a Table instance`,
+      );
+    }
+    record[key] = entry;
+  }
+
+  return ok(record);
 };
