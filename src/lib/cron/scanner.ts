@@ -239,7 +239,7 @@ export class Scanner {
       ch = this.peek(content);
     }
 
-    if (ch) {
+    if (ch && ch !== ",") {
       return err<CronScannerError>(
         "CronExpressionError",
         `Invalid step expression '${content}' for field '${field}'`,
