@@ -1,6 +1,6 @@
 import { err, ok } from "../errors/index.js";
 
-enum ComponentEnum {
+export enum ComponentEnum {
   Any = "any",
   Range = "range",
   Step = "step",
@@ -156,8 +156,8 @@ export class Scanner {
           break;
         }
         case "-": {
-          this.current += 1;
           currentCh = content.charAt(this.current);
+          this.current += 1;
           if (this.isDigit(currentCh)) {
             const [error, _] = this.handleRange(component);
             if (error) err<CronScannerError>(error.type, error.message);
@@ -318,7 +318,9 @@ export class Scanner {
     }
 
     if (this.match(content, "/")) {
-      this.handleStep(component);
+      const [error, _] = this.handleStep(component);
+      if (error) return err<CronScannerError>(error.type, error.message);
+
       return ok(true);
     }
 
