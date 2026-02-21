@@ -10,23 +10,6 @@ const toInternalErr = (error: unknown) =>
     error instanceof Error ? error.message : String(error),
   );
 
-const asRecord = (value: unknown) => {
-  if (typeof value === "object" && value !== null) {
-    return value;
-  }
-  return null;
-};
-
-const readString = (value: unknown) => {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (typeof value === "number") {
-    return String(value);
-  }
-  return "";
-};
-
 export const ensureMigrationsTable = async (
   orm: Orm<Record<string, Table>>,
   tableName: string,
@@ -59,41 +42,18 @@ export const getAppliedMigrations = async (
     return err("ValidationError", error.message);
   }
 
-  const [queryError, rows] = await mightThrow(orm.sql`
-      SELECT version, name, applied_at
+  const [queryError, rows] = await mightThrow(
+    orm.sql<AppliedMigration[]>`
+      SELECT version, name, applied_at AS "appliedAt"
       FROM ${orm.sql(safeTableName)}
       ORDER BY version ASC
-    `);
+    `,
+  );
   if (queryError) {
     return toInternalErr(queryError);
   }
 
-  const list: AppliedMigration[] = [];
-
-  if (!Array.isArray(rows)) {
-    return ok(list);
-  }
-
-  for (const row of rows) {
-    const record = asRecord(row);
-    if (!record) {
-      continue;
-    }
-
-    const version = readString(Reflect.get(record, "version"));
-    const name = readString(Reflect.get(record, "name"));
-    const appliedAt = readString(
-      Reflect.get(record, "applied_at") ?? Reflect.get(record, "appliedAt"),
-    );
-
-    if (version.length === 0 || name.length === 0) {
-      continue;
-    }
-
-    list.push({ version, name, appliedAt });
-  }
-
-  return ok(list);
+  return ok(rows ?? []);
 };
 
 export const recordMigration = async (

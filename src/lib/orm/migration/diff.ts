@@ -6,6 +6,22 @@ import type {
 } from "./snapshot.js";
 import type { TableDiffOperation } from "./types.js";
 
+const defaultValuesEqual = (a: unknown, b: unknown): boolean => {
+  if (a === b) return true;
+  if (typeof a !== "object" || a === null) return false;
+  if (typeof b !== "object" || b === null) return false;
+
+  const ao = a as Record<string, unknown>;
+  const bo = b as Record<string, unknown>;
+  const aKeys = Object.keys(ao).sort();
+  const bKeys = Object.keys(bo).sort();
+
+  return (
+    aKeys.length === bKeys.length &&
+    aKeys.every((k) => defaultValuesEqual(ao[k], bo[k]))
+  );
+};
+
 const columnsEqual = (a: ColumnSnapshot, b: ColumnSnapshot): boolean => {
   return (
     a.name === b.name &&
@@ -14,7 +30,7 @@ const columnsEqual = (a: ColumnSnapshot, b: ColumnSnapshot): boolean => {
     a.notNull === b.notNull &&
     a.unique === b.unique &&
     a.hasDefault === b.hasDefault &&
-    JSON.stringify(a.defaultValue) === JSON.stringify(b.defaultValue)
+    defaultValuesEqual(a.defaultValue, b.defaultValue)
   );
 };
 

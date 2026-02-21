@@ -12,6 +12,7 @@ import {
 import type { ColumnKind, ColumnMeta, ColumnValue } from "../column/types.js";
 import type { Orm } from "../core/index.js";
 import type { OrmDialect } from "../core/types.js";
+import type { Dialect } from "../dialect/types.js";
 import { Table } from "../table/index.js";
 import { toSqlIdentifier, toSqlIdentifierList } from "./sql.js";
 
@@ -213,44 +214,16 @@ const quoteValue = (dialect: OrmDialect, kind: ColumnKind, value: unknown) => {
 const toMsg = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
-const sqlType = (dialect: OrmDialect, kind: ColumnKind) => {
-  if (dialect === "postgres") {
-    if (kind === "number") return "INTEGER";
-    if (kind === "string") return "TEXT";
-    if (kind === "boolean") return "BOOLEAN";
-    if (kind === "date") return "TIMESTAMP";
-    if (kind === "json") return "JSON";
-    if (kind === "jsonb") return "JSONB";
-    return "UUID";
-  }
-
-  if (dialect === "mysql") {
-    if (kind === "number") return "INT";
-    if (kind === "string") return "VARCHAR(255)";
-    if (kind === "boolean") return "BOOLEAN";
-    if (kind === "date") return "DATETIME";
-    if (kind === "json" || kind === "jsonb") return "JSON";
-    return "CHAR(36)";
-  }
-
-  if (kind === "number") return "INTEGER";
-  if (kind === "string") return "TEXT";
-  if (kind === "boolean") return "INTEGER";
-  if (kind === "date") return "INTEGER";
-  if (kind === "json" || kind === "jsonb") return "TEXT";
-  return "TEXT";
-};
-
-const buildColumnDefinition = (dialect: OrmDialect, column: AnyColumn) => {
+const buildColumnDefinition = (dialect: Dialect, column: AnyColumn) => {
   const parts: string[] = [column.sqlName];
 
   if (column.meta.primaryKey && column.columnKind === "number") {
-    if (dialect === "postgres") {
+    if (dialect.name === "postgres") {
       parts.push("BIGSERIAL PRIMARY KEY");
       return ok(parts.join(" "));
     }
 
-    if (dialect === "mysql") {
+    if (dialect.name === "mysql") {
       parts.push("BIGINT AUTO_INCREMENT PRIMARY KEY");
       return ok(parts.join(" "));
     }
@@ -259,7 +232,7 @@ const buildColumnDefinition = (dialect: OrmDialect, column: AnyColumn) => {
     return ok(parts.join(" "));
   }
 
-  parts.push(sqlType(dialect, column.columnKind));
+  parts.push(dialect.types[column.columnKind] ?? "TEXT");
 
   if (column.meta.primaryKey) {
     parts.push("PRIMARY KEY");
@@ -275,7 +248,7 @@ const buildColumnDefinition = (dialect: OrmDialect, column: AnyColumn) => {
 
   if (column.meta.hasDefault && column.defaultValue !== undefined) {
     const [quoteError, quotedValue] = quoteValue(
-      dialect,
+      dialect.name,
       column.columnKind,
       column.defaultValue,
     );
@@ -411,7 +384,7 @@ export class SchemaBuilder {
     }
 
     const [definitionError, definition] = buildColumnDefinition(
-      this.dialect,
+      this.orm.getDialect(),
       column,
     );
     if (definitionError || !definition) {
@@ -492,7 +465,7 @@ export class SchemaBuilder {
 
     if (this.dialect === "mysql") {
       const [definitionError, definition] = buildColumnDefinition(
-        this.dialect,
+        this.orm.getDialect(),
         column,
       );
       if (definitionError || !definition) {
@@ -517,7 +490,7 @@ export class SchemaBuilder {
     const runAlterStatements = async (
       executeStatement: (statement: string) => Promise<unknown>,
     ) => {
-      const typeSql = sqlType(this.dialect, column.columnKind);
+      const typeSql = this.orm.getDialect().types[column.columnKind] ?? "TEXT";
       const [typeError] = await mightThrow(
         executeStatement(
           `ALTER TABLE ${safeTableName} ALTER COLUMN ${safeColumnName} TYPE ${typeSql}`,

@@ -208,6 +208,12 @@ export class TableClient<T extends Table> {
     return value;
   }
 
+  private normalizeRows(rows: Record<string, unknown>[]) {
+    this.convertBooleanValues(rows);
+    this.convertDateValues(rows);
+    this.mapColumnNames(rows);
+  }
+
   private convertDateValues(rows: Record<string, unknown>[]) {
     for (const row of rows) {
       for (const [_key, column] of Object.entries(this.table.columns)) {
@@ -397,13 +403,9 @@ export class TableClient<T extends Table> {
             this.sql`${this.sql(sqlColumnName)} = ${inValues[0]}`,
           );
         } else {
-          // Build IN clause: col IN (val1, val2, ...)
-          let inClause = this
-            .sql`${this.sql(sqlColumnName)} IN (${inValues[0]}`;
-          for (let i = 1; i < inValues.length; i++) {
-            inClause = this.sql`${inClause}, ${inValues[i]}`;
-          }
-          conditions.push(this.sql`${inClause})`);
+          conditions.push(
+            this.sql`${this.sql(sqlColumnName)} IN ${this.sql(inValues)}`,
+          );
         }
       }
 
@@ -737,9 +739,7 @@ export class TableClient<T extends Table> {
       );
     }
 
-    this.convertBooleanValues(rows);
-    this.convertDateValues(rows);
-    this.mapColumnNames(rows);
+    this.normalizeRows(rows);
 
     const [includeError, includedRows] = await this.loadIncludedRelations(
       rows,
@@ -794,9 +794,7 @@ export class TableClient<T extends Table> {
     }
 
     const rows = [row];
-    this.convertBooleanValues(rows);
-    this.convertDateValues(rows);
-    this.mapColumnNames(rows);
+    this.normalizeRows(rows);
 
     const [includeError, includedRows] = await this.loadIncludedRelations(
       rows,
@@ -852,9 +850,7 @@ export class TableClient<T extends Table> {
       return ok(null);
     }
 
-    this.convertBooleanValues([result]);
-    this.convertDateValues([result]);
-    this.mapColumnNames([result]);
+    this.normalizeRows([result]);
 
     const [includeError, includedRows] = await this.loadIncludedRelations(
       [result],
@@ -994,9 +990,7 @@ export class TableClient<T extends Table> {
       }
     }
 
-    this.convertBooleanValues(results);
-    this.convertDateValues(results);
-    this.mapColumnNames(results);
+    this.normalizeRows(results);
 
     const [result] = results;
     if (!result) {
@@ -1213,9 +1207,7 @@ export class TableClient<T extends Table> {
       return err("NotFoundError", "update did not find a row");
     }
 
-    this.convertBooleanValues(results);
-    this.convertDateValues(results);
-    this.mapColumnNames(results);
+    this.normalizeRows(results);
 
     const [result] = results;
     if (!result) {
@@ -1336,9 +1328,7 @@ export class TableClient<T extends Table> {
       return err("NotFoundError", "delete did not find a row");
     }
 
-    this.convertBooleanValues(results);
-    this.convertDateValues(results);
-    this.mapColumnNames(results);
+    this.normalizeRows(results);
 
     const [result] = results;
     if (!result) {
