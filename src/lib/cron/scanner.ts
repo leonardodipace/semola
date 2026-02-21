@@ -58,6 +58,19 @@ class Token {
 
     return `Token{${header}, ${body}}`;
   }
+
+  public equals(other: Token) {
+    if (!other) return false;
+
+    const isComponentEqual = this.component === other.getComponent();
+    const isTokenTypeEqual = this.type === other.getTokenType();
+    const isTokenValueEqual = this.value === other.getTokenValue();
+    const isFieldEqual = this.field === other.getField();
+
+    return (
+      isComponentEqual && isTokenTypeEqual && isTokenValueEqual && isFieldEqual
+    );
+  }
 }
 
 function report(msg: string, expression: string) {
