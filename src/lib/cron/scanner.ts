@@ -36,6 +36,22 @@ class Token {
     this.field = field;
   }
 
+  public getComponent() {
+    return this.component;
+  }
+
+  public getTokenType() {
+    return this.type;
+  }
+
+  public getTokenValue() {
+    return this.value;
+  }
+
+  public getField() {
+    return this.field;
+  }
+
   public toString() {
     const header = `component="${this.component}", type=${this.type}`;
     const body = `field="${this.field}", value=${this.value}`;
