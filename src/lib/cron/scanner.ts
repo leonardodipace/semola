@@ -185,7 +185,7 @@ export class Scanner {
           } else {
             return err<CronScannerError>(
               "CronExpressionError",
-              `Invalid cron expression: '${this.expression}' in field '${field}'`,
+              `Invalid cron expression '${this.expression}' in field '${field}'`,
             );
           }
 
@@ -237,6 +237,13 @@ export class Scanner {
     while (ch && this.isDigit(ch)) {
       this.current += 1;
       ch = this.peek(content);
+    }
+
+    if (ch) {
+      return err<CronScannerError>(
+        "CronExpressionError",
+        `Invalid step expression '${content}' for field '${field}'`,
+      );
     }
 
     const tokenContent = content.substring(this.start, this.current);
