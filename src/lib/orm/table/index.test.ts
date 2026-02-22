@@ -7,7 +7,7 @@ import {
   test,
 } from "bun:test";
 import { err, ok } from "../../errors/index.js";
-import { boolean, date, number, string } from "../column/index.js";
+import { boolean, date, json, number, string } from "../column/index.js";
 import { Orm } from "../index.js";
 import { many, one } from "../relations/index.js";
 import { Table } from "./index.js";
@@ -1850,6 +1850,71 @@ describe("Table - number coercion", () => {
     expect(err).toBeNull();
     expect(typeof item?.id).toBe("number");
     expect(typeof item?.score).toBe("number");
+  });
+});
+
+type Meta = { count: number; label: string };
+
+const jsonOrm = new Orm({
+  url: ":memory:",
+  tables: {
+    docs: new Table("test_json_docs", {
+      id: number("id").primaryKey(),
+      meta: json<Meta>("meta").notNull(),
+      tags: json("tags"), // untyped, should be unknown
+    }),
+  },
+});
+
+describe("Table - json column generic types", () => {
+  beforeAll(async () => {
+    await jsonOrm.sql`CREATE TABLE test_json_docs (id INTEGER PRIMARY KEY AUTOINCREMENT, meta TEXT NOT NULL, tags TEXT)`;
+    await jsonOrm.sql`INSERT INTO test_json_docs (meta, tags) VALUES ('{"count":1,"label":"a"}', '["x"]')`;
+  });
+
+  afterAll(async () => {
+    await jsonOrm.sql`DROP TABLE IF EXISTS test_json_docs`;
+    await jsonOrm.close();
+  });
+
+  // Type-only tests: these don't execute at runtime, they just verify
+  // that TypeScript accepts/rejects the correct shapes at compile time.
+
+  test("create input accepts correctly shaped json value", () => {
+    // No @ts-expect-error — must compile cleanly
+    void (async () =>
+      jsonOrm.tables.docs.create({ meta: { count: 2, label: "b" } }));
+  });
+
+  test("create input rejects wrong shape for typed json column", () => {
+    void (async () =>
+      jsonOrm.tables.docs.create({
+        // @ts-expect-error - count must be number, not string
+        meta: { count: "oops", label: "b" },
+      }));
+  });
+
+  test("create input rejects non-object for typed json column", () => {
+    void (async () =>
+      jsonOrm.tables.docs.create({
+        // @ts-expect-error - string is not assignable to Meta
+        meta: "bad",
+      }));
+  });
+
+  test("findMany result is typed as Meta for json<Meta> column", async () => {
+    const [error, docs] = await jsonOrm.tables.docs.findMany();
+    expect(error).toBeNull();
+    // Compile-time: meta is Meta | null (not unknown), so .count/.label are accessible
+    void (docs?.[0]?.meta satisfies Meta | null | undefined);
+  });
+
+  test("findMany result is unknown for untyped json column", () => {
+    void (async () => {
+      const [, docs] = await jsonOrm.tables.docs.findMany();
+      // @ts-expect-error - unknown | null, property access requires a cast
+      void docs?.[0]?.tags?.length;
+    });
   });
 });
 

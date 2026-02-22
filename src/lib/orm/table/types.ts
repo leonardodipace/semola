@@ -1,5 +1,5 @@
 import type { Column } from "../column/index.js";
-import type { ColumnKind, ColumnMeta, ColumnValue } from "../column/types.js";
+import type { ColumnKind, ColumnMeta } from "../column/types.js";
 import type { IncludeOptions } from "../relations/types.js";
 import type { Table } from "./index.js";
 
@@ -39,8 +39,12 @@ type Prettify<T> = { [K in keyof T]: T[K] } & {};
 export type InferTableType<T extends Table> =
   T extends Table<infer Cols>
     ? Prettify<{
-        [K in keyof Cols]: Cols[K] extends Column<infer Kind, infer Meta>
-          ? ColumnValue<Kind> | (IsNullable<Meta> extends true ? null : never)
+        [K in keyof Cols]: Cols[K] extends Column<
+          infer _Kind,
+          infer Meta,
+          infer Value
+        >
+          ? Value | (IsNullable<Meta> extends true ? null : never)
           : never;
       }>
     : never;
@@ -116,17 +120,19 @@ export type CreateInput<T extends Table> =
     ? Prettify<
         {
           [K in CreateRequiredColumns<Cols>]: Cols[K] extends Column<
-            infer Kind,
-            ColumnMeta
+            infer _Kind,
+            ColumnMeta,
+            infer Value
           >
-            ? ColumnValue<Kind>
+            ? Value
             : never;
         } & {
           [K in CreateOptionalColumns<Cols>]?: Cols[K] extends Column<
-            infer Kind,
-            infer Meta
+            infer _Kind,
+            infer Meta,
+            infer Value
           >
-            ? ColumnValue<Kind> | (IsNullable<Meta> extends true ? null : never)
+            ? Value | (IsNullable<Meta> extends true ? null : never)
             : never;
         }
       >
@@ -135,8 +141,12 @@ export type CreateInput<T extends Table> =
 export type UpdateInput<T extends Table> =
   T extends Table<infer Cols>
     ? Prettify<{
-        [K in keyof Cols]?: Cols[K] extends Column<infer Kind, infer Meta>
-          ? ColumnValue<Kind> | (IsNullable<Meta> extends true ? null : never)
+        [K in keyof Cols]?: Cols[K] extends Column<
+          infer _Kind,
+          infer Meta,
+          infer Value
+        >
+          ? Value | (IsNullable<Meta> extends true ? null : never)
           : never;
       }>
     : never;

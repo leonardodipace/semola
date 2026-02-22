@@ -45,9 +45,12 @@ export type UpdateMeta<
   unique: Key extends "unique" ? Value : Meta["unique"];
 };
 
-export type ColumnOptions<Kind extends ColumnKind> = {
+export type ColumnOptions<
+  Kind extends ColumnKind,
+  Value = ColumnValue<Kind>,
+> = {
   primaryKey: boolean;
   notNull: boolean;
   unique: boolean;
-  defaultValue?: ColumnValue<Kind>;
+  defaultValue?: Value;
 };

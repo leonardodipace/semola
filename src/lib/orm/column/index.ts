@@ -25,27 +25,28 @@ const defaultOptions = {
 export class Column<
   Kind extends ColumnKind,
   Meta extends ColumnMeta = DefaultColumnMeta,
+  Value = ColumnValue<Kind>,
 > {
   private readonly _sqlName: string;
   private readonly kind: Kind;
-  private readonly options: ColumnOptions<Kind>;
+  private readonly options: ColumnOptions<Kind, Value>;
 
   public constructor(
     sqlName: string,
     kind: Kind,
-    options: ColumnOptions<Kind> = defaultOptions,
+    options: ColumnOptions<Kind, Value> = defaultOptions,
   ) {
     this._sqlName = sqlName;
     this.kind = kind;
     this.options = options;
   }
 
-  public static create<Kind extends ColumnKind, Meta extends ColumnMeta>(
-    sqlName: string,
-    kind: Kind,
-    options: ColumnOptions<Kind>,
-  ) {
-    return new Column<Kind, Meta>(sqlName, kind, options);
+  public static create<
+    Kind extends ColumnKind,
+    Meta extends ColumnMeta,
+    Value = ColumnValue<Kind>,
+  >(sqlName: string, kind: Kind, options: ColumnOptions<Kind, Value>) {
+    return new Column<Kind, Meta, Value>(sqlName, kind, options);
   }
 
   public get sqlName() {
@@ -85,16 +86,16 @@ export class Column<
     return this.withOptions<UpdateMeta<Meta, "unique", true>>({ unique: true });
   }
 
-  public default(value: ColumnValue<Kind>) {
+  public default(value: Value) {
     return this.withOptions<UpdateMeta<Meta, "hasDefault", true>>({
       defaultValue: value,
     });
   }
 
   private withOptions<NewMeta extends ColumnMeta>(
-    options: Partial<ColumnOptions<Kind>>,
+    options: Partial<ColumnOptions<Kind, Value>>,
   ) {
-    return Column.create<Kind, NewMeta>(this._sqlName, this.kind, {
+    return Column.create<Kind, NewMeta, Value>(this._sqlName, this.kind, {
       ...this.options,
       ...options,
     });
@@ -118,12 +119,12 @@ export const date = (sqlName: string) => {
 };
 
 // Postgres-specific column types
-export const json = (sqlName: string) => {
-  return new Column<"json", DefaultColumnMeta>(sqlName, "json");
+export const json = <T = unknown>(sqlName: string) => {
+  return new Column<"json", DefaultColumnMeta, T>(sqlName, "json");
 };
 
-export const jsonb = (sqlName: string) => {
-  return new Column<"jsonb", DefaultColumnMeta>(sqlName, "jsonb");
+export const jsonb = <T = unknown>(sqlName: string) => {
+  return new Column<"jsonb", DefaultColumnMeta, T>(sqlName, "jsonb");
 };
 
 export const uuid = (sqlName: string) => {
