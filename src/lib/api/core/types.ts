@@ -119,7 +119,7 @@ export type Context<
     query: InferInput<TReq["query"]>;
     headers: InferInput<TReq["headers"]>;
     cookies: InferInput<TReq["cookies"]>;
-    params: InferInput<TReq["params"]>;
+    params: InferOutput<TReq["params"]>;
   };
   json: <S extends ExtractStatusCodesOrAny<TRes>>(
     status: S,
