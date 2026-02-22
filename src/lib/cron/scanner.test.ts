@@ -109,6 +109,18 @@ describe("Cron Scanner", () => {
         "Invalid number of fields for '* * * * * * * *'. Expected 5 or 6 fields but got 8 field(s)",
       );
     });
+
+    test("should generate CronExpressionError for reading an invalid symbol", () => {
+      const [err, tokens] = new Scanner("t * * * *").scan();
+
+      expect(err).not.toBeNull();
+      expect(tokens).toBeNull();
+
+      expect(err?.type).toEqual("CronExpressionError");
+      expect(err?.message).toEqual(
+        "Invalid cron expression 't * * * *' in field 'minute'",
+      );
+    });
   });
 
   describe("Number tokens", () => {
