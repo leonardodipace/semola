@@ -156,8 +156,8 @@ export class Scanner {
         case "-": {
           currentCh = this.advance(content);
           if (this.isDigit(currentCh)) {
-            const [error, _] = this.handleRange(component);
-            if (error) err<CronScannerError>(error.type, error.message);
+            const [error, _] = this.handleRangeWithStep(component);
+            if (error) return err<CronScannerError>(error.type, error.message);
           } else {
             return err<CronScannerError>(
               "CronExpressionError",
@@ -258,6 +258,36 @@ export class Scanner {
 
     this.addToken(tokenContent, ComponentEnum.Step, Number(value), field);
     return ok(true);
+  }
+
+  private handleRangeWithStep(component: ComponentType) {
+    const { field, content } = component;
+    let ch = this.peek(content);
+    this.start = this.current - 1;
+
+    while (ch && this.isDigit(ch)) {
+      this.current += 1;
+      ch = this.peek(content);
+    }
+
+    if (!ch) {
+      return err<CronScannerError>(
+        "CronExpressionError",
+        `Invalid range expression '${content}' for field '${field}'`,
+      );
+    }
+
+    if (this.match(content, "/")) {
+      const [error, _] = this.handleStep(component);
+      if (error) return err<CronScannerError>(error.type, error.message);
+
+      return ok(true);
+    }
+
+    return err<CronScannerError>(
+      "CronExpressionError",
+      `Invalid range expression '${content}' for field '${field}'`,
+    );
   }
 
   private handleNumber(component: ComponentType) {
