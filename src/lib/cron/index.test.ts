@@ -657,6 +657,248 @@ describe("Cron", () => {
     });
   });
 
+  describe("expression parsing - bugs", () => {
+    // BUG 1: single-value-with-step inside a list ignores the step
+    // FIX NEEDED: handleList else branch only does values[n]=1.
+    // It should loop from n to max with step, like handleStepSingle does.
+    test("single-value-with-step in list should expand from start to max", () => {
+      const cron = new Cron({
+        name: "list-step-bug",
+        schedule: "10/5,30 * * * *",
+        handler: () => Promise.resolve(),
+      });
+
+      // Expected: "10/5" expands to {10,15,20,25,30,35,40,45,50,55}; "30" is already covered
+      // Actual (bug): only {10,30} are set - step is discarded, only the start value is marked
+      expect(cron.matches(new Date(2025, 0, 1, 0, 10, 0))).toBe(true);
+      expect(cron.matches(new Date(2025, 0, 1, 0, 15, 0))).toBe(true); // fails: missing stepped values
+      expect(cron.matches(new Date(2025, 0, 1, 0, 25, 0))).toBe(true); // fails
+      expect(cron.matches(new Date(2025, 0, 1, 0, 55, 0))).toBe(true); // fails
+      expect(cron.matches(new Date(2025, 0, 1, 0, 11, 0))).toBe(false);
+    });
+
+    test("single-value-with-step as first item in a list should expand from start to max", () => {
+      const cron = new Cron({
+        name: "list-step-only-bug",
+        schedule: "5/15,0 * * * *",
+        handler: () => Promise.resolve(),
+      });
+
+      // Expected: "5/15" expands to {5,20,35,50}; "0" adds 0 -> {0,5,20,35,50}
+      // Actual (bug): only {0,5} are set - step is discarded
+      expect(cron.matches(new Date(2025, 0, 1, 0, 0, 0))).toBe(true);
+      expect(cron.matches(new Date(2025, 0, 1, 0, 5, 0))).toBe(true);
+      expect(cron.matches(new Date(2025, 0, 1, 0, 20, 0))).toBe(true); // fails: missing stepped values
+      expect(cron.matches(new Date(2025, 0, 1, 0, 35, 0))).toBe(true); // fails
+      expect(cron.matches(new Date(2025, 0, 1, 0, 50, 0))).toBe(true); // fails
+      expect(cron.matches(new Date(2025, 0, 1, 0, 10, 0))).toBe(false);
+    });
+
+    // BUG 2: scientific notation is silently accepted as a valid number
+    // FIX NEEDED: handleNumber (and related methods) must validate that the
+    // string is a pure digit sequence before calling Number(), not just check isInteger.
+    // Number("1e1") === 10 and Number.isInteger(10) === true, so no rejection occurs.
+    test("scientific notation in minute field should be rejected", () => {
+      // Expected: throw - "1e1" is not valid cron syntax
+      // Actual (bug): accepted as minute 10
+      expect(() => {
+        new Cron({
+          name: "sci-notation-minute",
+          schedule: "1e1 * * * *",
+          handler: () => Promise.resolve(),
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("scientific notation in day field should be rejected", () => {
+      // Expected: throw - "1e1" is not valid cron syntax
+      // Actual (bug): accepted as day 10
+      expect(() => {
+        new Cron({
+          name: "sci-notation-day",
+          schedule: "0 0 1e1 * *",
+          handler: () => Promise.resolve(),
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    // BUG 3 & 4: empty list items are accepted when the field's min is 0
+    // FIX NEEDED: handleList must reject empty items before parsing.
+    // Number("") === 0, Number.isInteger(0) === true, 0 >= min(0) -> values[0] = 1 silently.
+    test("lone comma in minute field should be rejected", () => {
+      // Expected: throw - "," contains no valid items
+      // Actual (bug): accepted, sets minute 0
+      expect(() => {
+        new Cron({
+          name: "lone-comma",
+          schedule: ", * * * *",
+          handler: () => Promise.resolve(),
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("trailing comma in minute list should be rejected", () => {
+      // Expected: throw - "0,30," has an empty trailing item
+      // Actual (bug): accepted, empty item resolves to 0 (minute 0 is already set anyway)
+      expect(() => {
+        new Cron({
+          name: "trailing-comma",
+          schedule: "0,30, * * * *",
+          handler: () => Promise.resolve(),
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("leading comma in minute list should be rejected", () => {
+      // Expected: throw - ",0" has an empty leading item
+      // Actual (bug): accepted, empty item resolves to 0 (same as the explicit 0)
+      expect(() => {
+        new Cron({
+          name: "leading-comma",
+          schedule: ",0 * * * *",
+          handler: () => Promise.resolve(),
+        });
+      }).toThrow("Invalid cron expression");
+    });
+  });
+
+  describe("expression parsing - edge cases", () => {
+    test("degenerate range (start === end) sets exactly one value", () => {
+      const cron = new Cron({
+        name: "degenerate-range",
+        schedule: "5-5 * * * *",
+        handler: () => Promise.resolve(),
+      });
+
+      expect(cron.matches(new Date(2025, 0, 1, 0, 5, 0))).toBe(true);
+      expect(cron.matches(new Date(2025, 0, 1, 0, 4, 0))).toBe(false);
+      expect(cron.matches(new Date(2025, 0, 1, 0, 6, 0))).toBe(false);
+    });
+
+    test("step of 1 (*/1) matches every minute", () => {
+      const cron = new Cron({
+        name: "step-one",
+        schedule: "*/1 * * * *",
+        handler: () => Promise.resolve(),
+      });
+
+      for (let m = 0; m <= 59; m++) {
+        expect(cron.matches(new Date(2025, 0, 1, 0, m, 0))).toBe(true);
+      }
+    });
+
+    test("range-with-step where step exceeds range width sets only start value", () => {
+      const cron = new Cron({
+        name: "step-exceeds-range",
+        schedule: "10-15/10 * * * *",
+        handler: () => Promise.resolve(),
+      });
+
+      // 10-15/10: only 10 is set (10+10=20 > 15)
+      expect(cron.matches(new Date(2025, 0, 1, 0, 10, 0))).toBe(true);
+      expect(cron.matches(new Date(2025, 0, 1, 0, 11, 0))).toBe(false);
+      expect(cron.matches(new Date(2025, 0, 1, 0, 15, 0))).toBe(false);
+    });
+
+    test("step larger than field width (*/60) sets only minute 0", () => {
+      const cron = new Cron({
+        name: "step-large",
+        schedule: "*/60 * * * *",
+        handler: () => Promise.resolve(),
+      });
+
+      expect(cron.matches(new Date(2025, 0, 1, 0, 0, 0))).toBe(true);
+      expect(cron.matches(new Date(2025, 0, 1, 0, 1, 0))).toBe(false);
+      expect(cron.matches(new Date(2025, 0, 1, 0, 59, 0))).toBe(false);
+    });
+
+    test("range-with-step inside a list is applied correctly", () => {
+      // "10-30/5,45" -> {10,15,20,25,30,45}
+      const cron = new Cron({
+        name: "range-step-in-list",
+        schedule: "10-30/5,45 * * * *",
+        handler: () => Promise.resolve(),
+      });
+
+      expect(cron.matches(new Date(2025, 0, 1, 0, 10, 0))).toBe(true);
+      expect(cron.matches(new Date(2025, 0, 1, 0, 15, 0))).toBe(true);
+      expect(cron.matches(new Date(2025, 0, 1, 0, 20, 0))).toBe(true);
+      expect(cron.matches(new Date(2025, 0, 1, 0, 25, 0))).toBe(true);
+      expect(cron.matches(new Date(2025, 0, 1, 0, 30, 0))).toBe(true);
+      expect(cron.matches(new Date(2025, 0, 1, 0, 45, 0))).toBe(true);
+      expect(cron.matches(new Date(2025, 0, 1, 0, 35, 0))).toBe(false); // gap between steps
+      expect(cron.matches(new Date(2025, 0, 1, 0, 50, 0))).toBe(false); // not in list
+    });
+
+    test("full minute range 0-59 matches all minutes", () => {
+      const cron = new Cron({
+        name: "full-minute-range",
+        schedule: "0-59 * * * *",
+        handler: () => Promise.resolve(),
+      });
+
+      for (let m = 0; m <= 59; m++) {
+        expect(cron.matches(new Date(2025, 0, 1, 0, m, 0))).toBe(true);
+      }
+    });
+
+    test("full month range 1-12 matches all months", () => {
+      const cron = new Cron({
+        name: "full-month-range",
+        schedule: "0 0 1 1-12 *",
+        handler: () => Promise.resolve(),
+      });
+
+      for (let mon = 0; mon <= 11; mon++) {
+        expect(cron.matches(new Date(2025, mon, 1, 0, 0, 0))).toBe(true);
+      }
+    });
+
+    test("zero-length range (0-0) sets only minute 0", () => {
+      const cron = new Cron({
+        name: "zero-range",
+        schedule: "0-0 * * * *",
+        handler: () => Promise.resolve(),
+      });
+
+      expect(cron.matches(new Date(2025, 0, 1, 0, 0, 0))).toBe(true);
+      expect(cron.matches(new Date(2025, 0, 1, 0, 1, 0))).toBe(false);
+    });
+
+    test("inverted range inside a list is rejected", () => {
+      expect(() => {
+        new Cron({
+          name: "inverted-range-in-list",
+          schedule: "30-10,50 * * * *",
+          handler: () => Promise.resolve(),
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("6-field expression checks second and does not match wrong second", () => {
+      // "30 0 0 1 1 *" = second 30, minute 0, hour 0, day 1, month 1 (January), any weekday
+      const cron = new Cron({
+        name: "six-field-second-check",
+        schedule: "30 0 0 1 1 *",
+        handler: () => Promise.resolve(),
+      });
+
+      expect(cron.matches(new Date(2025, 0, 1, 0, 0, 30))).toBe(true); // correct second
+      expect(cron.matches(new Date(2025, 0, 1, 0, 0, 0))).toBe(false); // wrong second
+      expect(cron.matches(new Date(2025, 0, 1, 0, 0, 31))).toBe(false); // wrong second
+    });
+
+    test("dayOfWeek 7 is rejected (current behavior documents max=6 limit)", () => {
+      expect(() => {
+        new Cron({
+          name: "dow-seven",
+          schedule: "0 0 * * 7",
+          handler: () => Promise.resolve(),
+        });
+      }).toThrow("Invalid cron expression");
+    });
+  });
+
   describe("state transitions", () => {
     test("should maintain status correctly through transitions", () => {
       const cron = new Cron({
