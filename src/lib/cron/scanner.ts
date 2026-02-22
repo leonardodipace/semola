@@ -108,7 +108,7 @@ export class Scanner {
     if (!hasMinLen && !hasMaxLen) {
       return err<CronScannerError>(
         "CronLengthError",
-        `Invalid number of fields for ${this.expression}. Expected 5 or 6 fields but got ${fields.length} field(s)`,
+        `Invalid number of fields for '${this.expression}'. Expected 5 or 6 fields but got ${fields.length} field(s)`,
       );
     }
 
