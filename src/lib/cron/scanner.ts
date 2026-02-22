@@ -24,6 +24,8 @@ export type CronScannerError =
   | "CronLengthError"
   | "CronExpressionError";
 
+const MAX_DIGIT = 2;
+
 export class Token {
   private readonly type: ComponentEnum;
   private readonly component: string;
@@ -231,10 +233,21 @@ export class Scanner {
 
   private handleStep(component: ComponentType) {
     const { field, content } = component;
+    const slashIdx = this.current - 1;
     let ch = this.peek(content);
+    let consumedNumber = 0;
 
     while (ch && this.isDigit(ch)) {
-      this.current += 1;
+      consumedNumber += 1;
+
+      if (consumedNumber > MAX_DIGIT) {
+        return err<CronScannerError>(
+          "CronExpressionError",
+          `Too many digits for '${content}' in field '${field}'`,
+        );
+      }
+
+      this.advance(content);
       ch = this.peek(content);
     }
 
@@ -246,7 +259,6 @@ export class Scanner {
     }
 
     const tokenContent = content.substring(this.start, this.current);
-    const slashIdx = tokenContent.indexOf("/");
     const value = tokenContent.slice(slashIdx + 1);
 
     if (value.length === 0) {
@@ -263,9 +275,19 @@ export class Scanner {
   private handleRangeWithStep(component: ComponentType) {
     const { field, content } = component;
     let ch = this.peek(content);
+    let consumedNumber = 0;
 
     while (ch && this.isDigit(ch)) {
-      this.current += 1;
+      consumedNumber += 1;
+
+      if (consumedNumber > MAX_DIGIT) {
+        return err<CronScannerError>(
+          "CronExpressionError",
+          `Too many digits for '${content}' in field '${field}'`,
+        );
+      }
+
+      this.advance(content);
       ch = this.peek(content);
     }
 
@@ -292,25 +314,26 @@ export class Scanner {
   private handleNumber(component: ComponentType) {
     const { field, content } = component;
     let ch = this.peek(content);
+    let consumedNumber = 1;
     this.start = this.current - 1;
 
     while (ch && this.isDigit(ch)) {
-      this.current += 1;
+      consumedNumber += 1;
+
+      if (consumedNumber > MAX_DIGIT) {
+        return err<CronScannerError>(
+          "CronExpressionError",
+          `Too many digits for '${content}' in field '${field}'`,
+        );
+      }
+
+      this.advance(content);
       ch = this.peek(content);
     }
 
     if (!ch) {
       // Reached the end of the component
       const item = content.substring(this.start);
-
-      if (item.length > 2) {
-        const reason = `Number '${item}' have too many digits for field 'minute'.`;
-        const expectedLen = `Expected 1 or 2 but got ${item.length} digit(s)`;
-        return err<CronScannerError>(
-          "CronExpressionError",
-          `${reason} ${expectedLen}`,
-        );
-      }
 
       this.addToken(item, ComponentEnum.Number, Number(item), field);
       return ok(true);
@@ -345,6 +368,7 @@ export class Scanner {
   private handleRange(component: ComponentType) {
     const { field, content } = component;
     let ch = this.peek(content);
+    let consumedNumber = 0;
 
     if (!ch) {
       return err<CronScannerError>(
@@ -354,15 +378,23 @@ export class Scanner {
     }
 
     while (ch && this.isDigit(ch)) {
-      this.current += 1;
+      consumedNumber += 1;
+
+      if (consumedNumber > MAX_DIGIT) {
+        return err<CronScannerError>(
+          "CronExpressionError",
+          `Too many digits for '${content}' in field '${field}'`,
+        );
+      }
+
+      this.advance(content);
       ch = this.peek(content);
     }
 
     if (!ch) {
       // Reached the end of the component
-      const tokenContent = content.substring(this.start);
-      this.addToken(tokenContent, ComponentEnum.Range, tokenContent, field);
-
+      const item = content.substring(this.start);
+      this.addToken(item, ComponentEnum.Range, item, field);
       return ok(true);
     }
 
