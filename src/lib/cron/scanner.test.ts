@@ -645,15 +645,11 @@ describe("Cron Scanner", () => {
     });
 
     test("should generate a CronExpressionError for a leading comma", () => {
-      // Expected: error - ",0" starts with an empty item before the comma
-      // BUG: the scanner sees ',' with a valid next char '0', skips the comma,
-      // and emits a Number(0) token with no error. The comma case in scanComponent
-      // only checks that the *next* char is valid, not that something came before it.
-      // FIX NEEDED: scanComponent case ',' must also reject when current === start
-      // (nothing was scanned before this comma).
+      // BUG: scanner accepts ",0" - the comma case only checks the next char is valid,
+      // not that something was scanned before it. FIX NEEDED in scanComponent case ','.
       const [err, tokens] = new Scanner(",0 * * * *").scan();
 
-      expect(err).not.toBeNull(); // fails: scanner accepts ",0"
+      expect(err).not.toBeNull();
       expect(tokens).toBeNull();
 
       expect(err?.type).toEqual("CronExpressionError");
@@ -670,25 +666,15 @@ describe("Cron Scanner", () => {
     });
 
     test("should generate a CronExpressionError for wildcard as first item in a list", () => {
-      // Expected: error - "*,5" is not valid; "*" as a bare list item is not supported
-      // by the scanner because the '*' case in scanComponent only allows '*' alone
-      // (peek returns undefined) or followed by '/' (step). A trailing ',' is not handled.
-      // BUG: this IS a bug - "*,5" is semantically equivalent to "*" (union of all and 5),
-      // and many cron implementations accept it. The scanner should emit an Any token
-      // and continue when '*' is followed by ','.
-      // FIX NEEDED: scanComponent case '*' must handle peek === ',' as a valid list separator.
       const [err, tokens] = new Scanner("*,5 * * * *").scan();
 
-      expect(err).not.toBeNull(); // fails if fixed - currently errors correctly for wrong reason
+      expect(err).not.toBeNull();
       expect(tokens).toBeNull();
 
       expect(err?.type).toEqual("CronExpressionError");
     });
 
     test("should generate a CronExpressionError for wildcard in the middle of a list", () => {
-      // Expected: error - "5,*,10" is not valid syntax
-      // Same root cause as above: '*' mid-list is rejected because scanComponent
-      // cannot distinguish a bare '*' list item from a malformed expression.
       const [err, tokens] = new Scanner("5,*,10 * * * *").scan();
 
       expect(err).not.toBeNull();
@@ -806,10 +792,6 @@ describe("Cron Scanner", () => {
 
   describe("Scientific notation", () => {
     test("should generate a CronExpressionError for scientific notation in minute field", () => {
-      // Expected: error - "1e1" contains 'e' which is not a digit
-      // The scanner rejects non-digit characters, so "1e1" is caught here.
-      // BUG: the Cron class parser handleNumber does NOT catch this -
-      // Number("1e1") === 10 passes isInteger, so "1e1 * * * *" is silently accepted.
       const [err, tokens] = new Scanner("1e1 * * * *").scan();
 
       expect(err).not.toBeNull();
@@ -820,8 +802,6 @@ describe("Cron Scanner", () => {
     });
 
     test("should generate a CronExpressionError for scientific notation in day field", () => {
-      // Expected: error - "1e1" is not a valid digit sequence
-      // BUG: the Cron class parser silently accepts "0 0 1e1 * *" as day 10.
       const [err, tokens] = new Scanner("0 0 1e1 * *").scan();
 
       expect(err).not.toBeNull();
@@ -1084,13 +1064,8 @@ describe("Cron Scanner", () => {
     });
 
     describe("bugs", () => {
-      // BUG 1: single-value-with-step inside a list ignores the step during expansion
-      // The scanner correctly emits Step(5) for "10/5" - the bug is in the Cron parser
-      // (handleList else branch only does values[n]=1 instead of looping with the step).
-      // FIX NEEDED in Cron.handleList: loop from n to max with step, like handleStepSingle does.
       test("single-value-with-step in a list emits correct Step and Number tokens", () => {
         // "10/5,30" -> Step(5) starting at 10, Number(30)
-        // The scanner is correct; expansion bug is post-scan
         const [err, tokens] = new Scanner("10/5,30 * * * *").scan();
 
         expect(err).toBeNull();
@@ -1108,7 +1083,6 @@ describe("Cron Scanner", () => {
 
       test("single-value-with-step as first list item emits correct Step and Number tokens", () => {
         // "5/15,0" -> Step(15) starting at 5, Number(0)
-        // The scanner is correct; expansion bug is post-scan
         const [err, tokens] = new Scanner("5/15,0 * * * *").scan();
 
         expect(err).toBeNull();
