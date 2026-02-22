@@ -7,6 +7,10 @@
     "semola": "./dist/cli/index.js"
   },
   "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
     "./errors": {
       "import": "./dist/lib/errors/index.js",
       "types": "./dist/lib/errors/index.d.ts"
