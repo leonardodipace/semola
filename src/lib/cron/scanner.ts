@@ -263,7 +263,6 @@ export class Scanner {
   private handleRangeWithStep(component: ComponentType) {
     const { field, content } = component;
     let ch = this.peek(content);
-    this.start = this.current - 1;
 
     while (ch && this.isDigit(ch)) {
       this.current += 1;
