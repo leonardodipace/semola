@@ -126,7 +126,6 @@ export class Scanner {
       this.current = 0;
       this.start = 0;
       const [error, _] = this.scanComponent(component);
-
       if (error) return err<CronScannerError>(error.type, error.message);
     }
 
@@ -142,7 +141,7 @@ export class Scanner {
         case "*": {
           if (this.match(content, "/")) {
             const [error, _] = this.handleStep(component);
-            if (error) err<CronScannerError>(error.type, error.message);
+            if (error) return err<CronScannerError>(error.type, error.message);
           } else if (!this.peek(content)) {
             this.addToken("*", ComponentEnum.Any, "*", field);
           } else {
