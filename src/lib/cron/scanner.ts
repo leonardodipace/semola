@@ -302,8 +302,17 @@ export class Scanner {
     if (!ch) {
       // Reached the end of the component
       const item = content.substring(this.start);
-      this.addToken(item, ComponentEnum.Number, Number(item), field);
 
+      if (item.length > 2) {
+        const reason = `Number '${item}' have too many digits for field 'minute'.`;
+        const expectedLen = `Expected 1 or 2 but got ${item.length} digit(s)`;
+        return err<CronScannerError>(
+          "CronExpressionError",
+          `${reason} ${expectedLen}`,
+        );
+      }
+
+      this.addToken(item, ComponentEnum.Number, Number(item), field);
       return ok(true);
     }
 
