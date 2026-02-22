@@ -320,7 +320,7 @@ export class Scanner {
       return ok(true);
     }
 
-    if (!this.isDigit(ch)) {
+    if (!this.isDigit(ch) && ch !== ",") {
       return err<CronScannerError>(
         "CronExpressionError",
         `Invalid number '${content}' for field '${field}'`,
