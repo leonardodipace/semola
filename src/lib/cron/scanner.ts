@@ -247,7 +247,7 @@ export class Scanner {
     }
 
     const tokenContent = content.substring(this.start, this.current);
-    const value = tokenContent.slice(slashIdx + 1, this.current);
+    const value = content.slice(slashIdx + 1, this.current);
 
     if (value.length === 0) {
       return err<CronScannerError>(
