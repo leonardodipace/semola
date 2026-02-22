@@ -115,10 +115,10 @@ export type Context<
 > = {
   raw: Request;
   req: {
-    body: InferInput<TReq["body"]>;
-    query: InferInput<TReq["query"]>;
-    headers: InferInput<TReq["headers"]>;
-    cookies: InferInput<TReq["cookies"]>;
+    body: InferOutput<TReq["body"]>;
+    query: InferOutput<TReq["query"]>;
+    headers: InferOutput<TReq["headers"]>;
+    cookies: InferOutput<TReq["cookies"]>;
     params: InferOutput<TReq["params"]>;
   };
   json: <S extends ExtractStatusCodesOrAny<TRes>>(
