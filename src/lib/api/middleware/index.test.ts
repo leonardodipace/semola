@@ -62,6 +62,22 @@ describe("Middleware", () => {
     expect(mw.options.request?.cookies).toBe(schemas.cookies);
   });
 
+  test("should support handlers returning nothing (void/undefined)", () => {
+    const handler = () => undefined;
+    const mw = new Middleware({ handler });
+
+    const result = mw.options.handler({} as any);
+    expect(result).toBeUndefined();
+  });
+
+  test("should support async handlers returning nothing", async () => {
+    const handler = async () => undefined;
+    const mw = new Middleware({ handler });
+
+    const result = await mw.options.handler({} as any);
+    expect(result).toBeUndefined();
+  });
+
   test("should handle multiple response status codes", () => {
     const responseSchemas = {
       200: z.string(),
