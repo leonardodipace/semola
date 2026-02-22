@@ -446,4 +446,202 @@ describe("Cron Scanner", () => {
       );
     });
   });
+
+  describe("List tokens", () => {
+    test("should generate a list with numbers", () => {
+      const [err, tokens] = new Scanner("10,20,30 2 3 4 5").scan();
+
+      expect(err).toBeNull();
+      expect(tokens).toBeArray();
+      expect(tokens?.length).toEqual(7);
+
+      expect(
+        tokens?.[0]?.equals(
+          new Token("10", ComponentEnum.Number, 10, "minute"),
+        ),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[1]?.equals(
+          new Token("20", ComponentEnum.Number, 20, "minute"),
+        ),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[2]?.equals(
+          new Token("30", ComponentEnum.Number, 30, "minute"),
+        ),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[3]?.equals(new Token("2", ComponentEnum.Number, 2, "hour")),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[4]?.equals(new Token("3", ComponentEnum.Number, 3, "day")),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[5]?.equals(new Token("4", ComponentEnum.Number, 4, "month")),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[6]?.equals(new Token("5", ComponentEnum.Number, 5, "weekday")),
+      ).toBeTrue();
+    });
+
+    test("should generate a list with numbers and range expressions", () => {
+      const [err, tokens] = new Scanner("10,20-10,30-40 2 3 4 5").scan();
+
+      expect(err).toBeNull();
+      expect(tokens).toBeArray();
+      expect(tokens?.length).toEqual(7);
+
+      expect(
+        tokens?.[0]?.equals(
+          new Token("10", ComponentEnum.Number, 10, "minute"),
+        ),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[1]?.equals(
+          new Token("20-10", ComponentEnum.Range, "20-10", "minute"),
+        ),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[2]?.equals(
+          new Token("30-40", ComponentEnum.Range, "30-40", "minute"),
+        ),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[3]?.equals(new Token("2", ComponentEnum.Number, 2, "hour")),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[4]?.equals(new Token("3", ComponentEnum.Number, 3, "day")),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[5]?.equals(new Token("4", ComponentEnum.Number, 4, "month")),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[6]?.equals(new Token("5", ComponentEnum.Number, 5, "weekday")),
+      ).toBeTrue();
+    });
+
+    test("should generate a list with numbers, range and step expressions", () => {
+      const [err, tokens] = new Scanner("10,20-10,30-40/20,*/3 2 3 4 5").scan();
+
+      expect(err).toBeNull();
+      expect(tokens).toBeArray();
+      expect(tokens?.length).toEqual(8);
+
+      expect(
+        tokens?.[0]?.equals(
+          new Token("10", ComponentEnum.Number, 10, "minute"),
+        ),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[1]?.equals(
+          new Token("20-10", ComponentEnum.Range, "20-10", "minute"),
+        ),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[2]?.equals(
+          new Token("30-40/20", ComponentEnum.Step, 20, "minute"),
+        ),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[3]?.equals(new Token("*/3", ComponentEnum.Step, 3, "minute")),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[4]?.equals(new Token("2", ComponentEnum.Number, 2, "hour")),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[5]?.equals(new Token("3", ComponentEnum.Number, 3, "day")),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[6]?.equals(new Token("4", ComponentEnum.Number, 4, "month")),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[7]?.equals(new Token("5", ComponentEnum.Number, 5, "weekday")),
+      ).toBeTrue();
+    });
+
+    test("should generate a list with numbers and step expression variants", () => {
+      const [err, tokens] = new Scanner("10,20/10,-40/20 2 3 4 5").scan();
+
+      expect(err).toBeNull();
+      expect(tokens).toBeArray();
+      expect(tokens?.length).toEqual(7);
+
+      expect(
+        tokens?.[0]?.equals(
+          new Token("10", ComponentEnum.Number, 10, "minute"),
+        ),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[1]?.equals(
+          new Token("20/10", ComponentEnum.Step, 10, "minute"),
+        ),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[2]?.equals(
+          new Token("-40/20", ComponentEnum.Step, 20, "minute"),
+        ),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[3]?.equals(new Token("2", ComponentEnum.Number, 2, "hour")),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[4]?.equals(new Token("3", ComponentEnum.Number, 3, "day")),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[5]?.equals(new Token("4", ComponentEnum.Number, 4, "month")),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[6]?.equals(new Token("5", ComponentEnum.Number, 5, "weekday")),
+      ).toBeTrue();
+    });
+
+    test("should generate a CronExpressionError for invalid list syntax", () => {
+      const [err, tokens] = new Scanner("10,20, 2 3 4 5").scan();
+
+      expect(err).not.toBeNull();
+      expect(tokens).toBeNull();
+
+      expect(err?.type).toEqual("CronExpressionError");
+      expect(err?.message).toEqual(
+        "Invalid list expression '10,20,' for field 'minute'",
+      );
+    });
+
+    test("should generate a CronExpressionError for invalid symbols inside a list", () => {
+      const [err, tokens] = new Scanner("10,a20, 2 3 4 5").scan();
+
+      expect(err).not.toBeNull();
+      expect(tokens).toBeNull();
+
+      expect(err?.type).toEqual("CronExpressionError");
+      expect(err?.message).toEqual(
+        "Invalid cron expression '10,a20, 2 3 4 5' in field 'minute'",
+      );
+    });
+  });
 });
