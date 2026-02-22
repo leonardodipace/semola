@@ -221,7 +221,7 @@ describe("Cron Scanner", () => {
       ).toBeTrue();
     });
 
-    test("should generate a 'step' token with just the end point of its range", () => {
+    test("should generate a 'step' token with just the ending point of its range", () => {
       const [err, tokens] = new Scanner("-6/1 * * * *").scan();
 
       expect(err).toBeNull();
@@ -343,6 +343,94 @@ describe("Cron Scanner", () => {
       expect(err?.type).toEqual("CronExpressionError");
       expect(err?.message).toEqual(
         "Invalid step expression '*/2-4' for field 'minute'",
+      );
+    });
+  });
+
+  describe("Range tokens", () => {
+    test("should generate a valid 'range' token", () => {
+      const [error, tokens] = new Scanner("1-5 * * * *").scan();
+
+      expect(error).toBeNull();
+      expect(tokens).toBeArray();
+      expect(tokens?.length).toEqual(5);
+      expect(
+        tokens?.[0]?.equals(
+          new Token("1-5", ComponentEnum.Range, "1-5", "minute"),
+        ),
+      ).toBeTrue();
+    });
+
+    test("should generate a valid 'range' token with large numbers", () => {
+      const [error, tokens] = new Scanner("1000000-5000000 * * * *").scan();
+
+      expect(error).toBeNull();
+      expect(tokens).toBeArray();
+      expect(tokens?.length).toEqual(5);
+      expect(
+        tokens?.[0]?.equals(
+          new Token(
+            "1000000-5000000",
+            ComponentEnum.Range,
+            "1000000-5000000",
+            "minute",
+          ),
+        ),
+      ).toBeTrue();
+    });
+
+    test("should generate CronExpressionError for invalid symbols", () => {
+      const [err, tokens] = new Scanner("100-5a0 * * * *").scan();
+
+      expect(tokens).toBeNull();
+      expect(err).not.toBeNull();
+      expect(err?.type).toEqual("CronExpressionError");
+      expect(err?.message).toEqual(
+        "Invalid range expression '100-5a0' for field 'minute'",
+      );
+    });
+
+    test("should generate CronExpressionError for missing the starting point", () => {
+      const [err, tokens] = new Scanner("-50 * * * *").scan();
+
+      expect(tokens).toBeNull();
+      expect(err).not.toBeNull();
+      expect(err?.type).toEqual("CronExpressionError");
+      expect(err?.message).toEqual(
+        "Invalid range expression '-50' for field 'minute'",
+      );
+    });
+
+    test("should generate CronExpressionError for missing the ending point", () => {
+      const [err, tokens] = new Scanner("10- * * * *").scan();
+
+      expect(tokens).toBeNull();
+      expect(err).not.toBeNull();
+      expect(err?.type).toEqual("CronExpressionError");
+      expect(err?.message).toEqual(
+        "Invalid range expression '10-' for field 'minute'",
+      );
+    });
+
+    test("should generate CronExpressionError for multiple hyphen", () => {
+      const [err, tokens] = new Scanner("10--1 * * * *").scan();
+
+      expect(tokens).toBeNull();
+      expect(err).not.toBeNull();
+      expect(err?.type).toEqual("CronExpressionError");
+      expect(err?.message).toEqual(
+        "Invalid range expression '10--1' for field 'minute'",
+      );
+    });
+
+    test("should generate CronExpressionError for multiple consecutive hyphen", () => {
+      const [err, tokens] = new Scanner("10-3-1 * * * *").scan();
+
+      expect(tokens).toBeNull();
+      expect(err).not.toBeNull();
+      expect(err?.type).toEqual("CronExpressionError");
+      expect(err?.message).toEqual(
+        "Invalid range expression '10-3-1' for field 'minute'",
       );
     });
   });
