@@ -215,6 +215,7 @@ export class TableClient<T extends Table> {
   private normalizeRows(rows: Record<string, unknown>[]) {
     this.convertBooleanValues(rows);
     this.convertDateValues(rows);
+    this.convertNumberValues(rows);
     this.mapColumnNames(rows);
   }
 
@@ -539,6 +540,27 @@ export class TableClient<T extends Table> {
 
         if (column.columnKind === "boolean") {
           row[sqlColumnName] = this.dialect.convertBooleanValue(value);
+        }
+      }
+    }
+  }
+
+  private convertNumberValues(rows: Record<string, unknown>[]) {
+    for (const row of rows) {
+      for (const [_key, column] of Object.entries(this.table.columns)) {
+        if (column.columnKind !== "number") {
+          continue;
+        }
+
+        const sqlColumnName = column.sqlName;
+        const value = row[sqlColumnName];
+
+        if (typeof value === "string") {
+          const parsed = Number(value);
+
+          if (!Number.isNaN(parsed)) {
+            row[sqlColumnName] = parsed;
+          }
         }
       }
     }

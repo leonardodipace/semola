@@ -1804,6 +1804,55 @@ describe("Orm - transaction method", () => {
   });
 });
 
+describe("Table - number coercion", () => {
+  const numTable = new Table("test_num_coerce", {
+    id: number("id").primaryKey(),
+    score: number("score").notNull(),
+  });
+
+  const numOrm = new Orm({
+    url: ":memory:",
+    tables: { items: numTable },
+  });
+
+  beforeAll(async () => {
+    await numOrm.sql`DROP TABLE IF EXISTS test_num_coerce`;
+    await numOrm.sql`
+      CREATE TABLE test_num_coerce (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        score INTEGER NOT NULL
+      )
+    `;
+    // Insert a row; SQLite returns integers natively, but we verify type
+    await numOrm.sql`INSERT INTO test_num_coerce (score) VALUES (42)`;
+  });
+
+  afterAll(async () => {
+    await numOrm.sql`DROP TABLE IF EXISTS test_num_coerce`;
+    await numOrm.close();
+  });
+
+  test("number columns are returned as number type", async () => {
+    const [err, items] = await numOrm.tables.items.findMany();
+
+    expect(err).toBeNull();
+    expect(items?.length).toBe(1);
+    expect(typeof items?.[0]?.id).toBe("number");
+    expect(typeof items?.[0]?.score).toBe("number");
+    expect(items?.[0]?.score).toBe(42);
+  });
+
+  test("findUnique returns number columns as number type", async () => {
+    const [err, item] = await numOrm.tables.items.findUnique({
+      where: { id: 1 },
+    });
+
+    expect(err).toBeNull();
+    expect(typeof item?.id).toBe("number");
+    expect(typeof item?.score).toBe("number");
+  });
+});
+
 afterAll(async () => {
   await orm.sql`DROP TABLE IF EXISTS test_posts`;
   await orm.sql`DROP TABLE IF EXISTS test_users`;
