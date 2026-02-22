@@ -1,5 +1,5 @@
 import { err, mightThrow, mightThrowSync, ok } from "../errors/index.js";
-import type { CacheOptions } from "./types.js";
+import type { CacheError, CacheOptions } from "./types.js";
 
 export class Cache<T> {
   private options: CacheOptions<T>;
@@ -14,7 +14,7 @@ export class Cache<T> {
 
   public async get(key: string) {
     if (!this.isEnabled) {
-      return err("NotFoundError", `Key ${key} not found`);
+      return this.fail("NotFoundError", `Key ${key} not found`);
     }
 
     const resolvedKey = this.resolveKey(key);
@@ -28,7 +28,7 @@ export class Cache<T> {
     }
 
     if (value === null || value === undefined) {
-      return err("NotFoundError", `Key ${key} not found`);
+      return this.fail("NotFoundError", `Key ${key} not found`);
     }
 
     const [deserializeErr, deserialized] = mightThrowSync<T>(() =>
@@ -113,14 +113,10 @@ export class Cache<T> {
     return ok(data);
   }
 
-  private fail<E extends "CacheError" | "InvalidTTLError">(
-    type: E,
-    message: string,
-  ) {
-    const result = err(type, message);
-    const [cacheErr] = result;
-    this.options.onError?.(cacheErr);
-    return result;
+  private fail<E extends CacheError>(type: E, message: string) {
+    this.options.onError?.({ type, message });
+
+    return err(type, message);
   }
 
   private get isEnabled() {
