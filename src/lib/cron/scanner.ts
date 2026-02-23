@@ -1,16 +1,9 @@
 import { err, ok } from "../errors/index.js";
 
-export enum ComponentEnum {
-  Any = "any",
-  Range = "range",
-  Step = "step",
-  Number = "number",
-}
-
-enum FieldAmountEnum {
-  Min = 5,
-  Max = 6,
-}
+const FieldAmount = {
+  Min: 5,
+  Max: 6,
+} as const;
 
 type TokenValueType = string | number;
 type CronFieldType = "second" | "minute" | "hour" | "day" | "month" | "weekday";
@@ -19,13 +12,15 @@ type ComponentType = {
   field: CronFieldType;
 };
 
+type TokenType = "any" | "range" | "step" | "number";
+
 export type CronScannerError =
   | "EmptyCronExpressionError"
   | "CronLengthError"
   | "CronExpressionError";
 
 export class Token {
-  private readonly type: ComponentEnum;
+  private readonly type: TokenType;
   private readonly component: string;
   private readonly value: TokenValueType;
 
@@ -33,7 +28,7 @@ export class Token {
 
   public constructor(
     component: string,
-    type: ComponentEnum,
+    type: TokenType,
     value: TokenValueType,
     field: CronFieldType,
   ) {
@@ -102,8 +97,8 @@ export class Scanner {
     }
 
     const fields = this.expression.trim().split(/\s+/);
-    const hasMinLen = fields.length === FieldAmountEnum.Min;
-    const hasMaxLen = fields.length === FieldAmountEnum.Max;
+    const hasMinLen = fields.length === FieldAmount.Min;
+    const hasMaxLen = fields.length === FieldAmount.Max;
 
     if (!hasMinLen && !hasMaxLen) {
       return err<CronScannerError>(
@@ -143,7 +138,7 @@ export class Scanner {
             const [error, _] = this.handleStep(component);
             if (error) return err<CronScannerError>(error.type, error.message);
           } else if (!this.peek(content)) {
-            this.addToken("*", ComponentEnum.Any, "*", field);
+            this.addToken("*", "any", "*", field);
           } else {
             return err<CronScannerError>(
               "CronExpressionError",
@@ -200,7 +195,7 @@ export class Scanner {
 
   private addToken(
     component: string,
-    type: ComponentEnum,
+    type: TokenType,
     value: TokenValueType,
     field: CronFieldType,
   ) {
@@ -209,7 +204,7 @@ export class Scanner {
   }
 
   private advance(content: string) {
-    let currentCh = content.charAt(this.current);
+    const currentCh = content.charAt(this.current);
     this.current += 1;
 
     return currentCh;
@@ -256,7 +251,7 @@ export class Scanner {
       );
     }
 
-    this.addToken(tokenContent, ComponentEnum.Step, Number(value), field);
+    this.addToken(tokenContent, "step", Number(value), field);
     return ok(true);
   }
 
@@ -302,7 +297,7 @@ export class Scanner {
     if (!ch) {
       // Reached the end of the component
       const item = content.substring(this.start);
-      this.addToken(item, ComponentEnum.Number, Number(item), field);
+      this.addToken(item, "number", Number(item), field);
       return ok(true);
     }
 
@@ -328,7 +323,7 @@ export class Scanner {
     }
 
     const item = content.substring(this.start, this.current);
-    this.addToken(item, ComponentEnum.Number, Number(item), field);
+    this.addToken(item, "number", Number(item), field);
     return ok(true);
   }
 
@@ -351,7 +346,7 @@ export class Scanner {
     if (!ch) {
       // Reached the end of the component
       const tokenContent = content.substring(this.start);
-      this.addToken(tokenContent, ComponentEnum.Range, tokenContent, field);
+      this.addToken(tokenContent, "range", tokenContent, field);
 
       return ok(true);
     }
@@ -371,7 +366,7 @@ export class Scanner {
     }
 
     const tokenContent = content.substring(this.start, this.current);
-    this.addToken(tokenContent, ComponentEnum.Range, tokenContent, field);
+    this.addToken(tokenContent, "range", tokenContent, field);
     return ok(true);
   }
 
@@ -390,7 +385,7 @@ export class Scanner {
     ] as const;
     const components = [];
     let offset = 1;
-    if (fields.length === FieldAmountEnum.Max) offset = 0;
+    if (fields.length === FieldAmount.Max) offset = 0;
 
     for (let idx = 0; idx < fields.length; idx++) {
       const fieldName = fieldNames[idx + offset];
