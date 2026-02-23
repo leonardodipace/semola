@@ -2,6 +2,16 @@
 
 A lightweight, type-safe REST API framework built on Bun's native routing with automatic validation and OpenAPI spec generation.
 
+## Requirements
+
+**Bun Runtime Required:** This API framework is built specifically for the Bun runtime and uses Bun-native APIs including `Bun.serve()`, `Bun.CookieMap`, and optimized routing. You must have Bun installed to use this framework.
+
+Install Bun:
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
 ## Import
 
 ```typescript
@@ -33,7 +43,7 @@ Defines a route with type-safe request/response validation using Standard Schema
 import { z } from "zod";
 
 api.defineRoute({
-  path: "/users/{id}",
+  path: "/users/:id",
   method: "GET",
   summary: "Get user by ID",
   operationId: "getUserById",
@@ -54,14 +64,13 @@ api.defineRoute({
     }),
   },
   handler: async (c) => {
-    // c.request.params.id is typed as string (validated UUID)
-    const user = await getUser(c.request.params.id);
-    
+    // c.req.params.id is typed as string (validated UUID)
+    const user = await getUser(c.req.params.id);
+
     if (!user) {
       return c.json(404, { message: "User not found" });
     }
-    
-    // Response is validated against schema before being sent
+
     return c.json(200, user);
   },
 });
@@ -69,29 +78,110 @@ api.defineRoute({
 
 ### `api.getOpenApiSpec()`
 
-Generates an OpenAPI 3.0.3 specification from defined routes.
+Generates an OpenAPI 3.1.0 specification from defined routes.
 
 ```typescript
 const spec = await api.getOpenApiSpec();
 // Returns OpenAPI spec object ready for Swagger UI, Redoc, etc.
 ```
 
-### `api.listen(port, callback?)`
+#### OpenAPI 3.1.0 Benefits
+
+This framework generates OpenAPI 3.1.0 specifications, which provide several advantages over 3.0:
+
+- **Full JSON Schema Compatibility**: Uses standard JSON Schema Draft 2020-12, removing the need for OpenAPI-specific schema extensions
+- **Better Null Handling**: Uses standard JSON Schema type unions instead of the custom `nullable` keyword
+- **Modern Features**: Support for tuple validation, conditional schemas (if/then/else), and `$ref` with sibling keywords
+- **Improved Type Safety**: More precise `exclusiveMinimum`/`exclusiveMaximum` as numbers rather than booleans
+
+The generated spec is compatible with modern OpenAPI tooling including Swagger UI, Redoc, and OpenAPI Generator.
+
+#### Schema Reuse in OpenAPI
+
+To optimize your OpenAPI specification and reduce redundancy, you can define reusable schemas using the `.meta({ id: "SchemaName" })` method. Schemas with an ID are extracted to `components.schemas` and referenced using `$ref` instead of being inlined everywhere they're used.
+
+**With Zod:**
+
+```typescript
+import { z } from "zod";
+
+// Define a reusable schema with an ID
+const UserSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  email: z.string().email(),
+}).meta({ id: "User" });
+
+const ErrorResponse = z.object({
+  error: z.string(),
+  message: z.string(),
+}).meta({ id: "ErrorResponse" });
+
+// Use across multiple routes
+api.defineRoute({
+  path: "/users",
+  method: "POST",
+  request: { body: UserSchema },
+  response: { 201: UserSchema, 400: ErrorResponse },
+  handler: async (c) => { /* ... */ },
+});
+
+api.defineRoute({
+  path: "/users/:id",
+  method: "GET",
+  response: { 200: UserSchema, 404: ErrorResponse },
+  handler: async (c) => { /* ... */ },
+});
+
+// Result: UserSchema and ErrorResponse are defined once in components.schemas
+// and referenced as { "$ref": "#/components/schemas/User" } everywhere
+```
+
+**With Valibot:**
+
+```typescript
+import * as v from "valibot";
+
+// Valibot uses metadata in the schema pipeline
+const UserSchema = v.pipe(
+  v.object({
+    id: v.pipe(v.string(), v.uuid()),
+    name: v.string(),
+    email: v.pipe(v.string(), v.email()),
+  }),
+  v.metadata({ id: "User" })
+);
+```
+
+**With ArkType:**
+
+```typescript
+import { type } from "arktype";
+
+// ArkType uses describe() with id metadata
+const UserSchema = type({
+  id: "string.uuid",
+  name: "string",
+  email: "string.email",
+}).describe("User");
+```
+
+**Benefits:**
+- **Smaller spec size**: Schema defined once, referenced multiple times
+- **Better maintainability**: Update schema in one place
+- **Improved readability**: Cleaner OpenAPI specifications
+- **Backward compatible**: Schemas without `.meta({ id })` are inlined as before
+
+**Note:** Query parameters, headers, cookies, and path parameters are always inlined (OpenAPI requirement), regardless of whether they have an ID.
+
+### `api.serve(port, callback?)`
 
 Starts the server on the specified port.
 
 ```typescript
-api.listen(3000, () => {
+api.serve(3000, () => {
   console.log("Server running on http://localhost:3000");
 });
-```
-
-### `api.close()`
-
-Stops the server.
-
-```typescript
-api.close();
 ```
 
 ## Handler Context
@@ -99,14 +189,16 @@ api.close();
 The handler receives a context object with type-safe request data and response methods:
 
 ### Request Data
-- `c.request.body` - Validated request body
-- `c.request.params` - Validated path parameters
-- `c.request.query` - Validated query parameters
-- `c.request.headers` - Validated headers
-- `c.request.cookies` - Validated cookies
+
+- `c.req.body` - Validated request body
+- `c.req.params` - Validated path parameters
+- `c.req.query` - Validated query parameters
+- `c.req.headers` - Validated headers
+- `c.req.cookies` - Validated cookies
 - `c.raw` - Underlying Request object
 
 ### Response Methods
+
 - `c.json(status, data)` - JSON response with validation
 - `c.text(status, text)` - Plain text response
 - `c.html(status, html)` - HTML response
@@ -115,9 +207,10 @@ The handler receives a context object with type-safe request data and response m
 ## Features
 
 - **Full type safety**: Request/response types inferred from schemas
-- **Standard Schema support**: Works with Zod, Valibot, ArkType, and other Standard Schema libraries
-- **Automatic validation**: Request validation (400 on error), response validation (500 on error)
-- **OpenAPI generation**: Automatic OpenAPI 3.0.3 spec from route definitions
+- **Standard Schema support**: Works with Zod, Valibot, ArkType, and other Standard Schema v1 libraries
+- **Automatic validation**: Request validation (400 on error)
+- **OpenAPI generation**: Automatic OpenAPI 3.1.0 spec from route definitions
+- **Schema reuse**: Define schemas once with `.meta({ id })` and reference them across routes
 - **Bun-native routing**: Leverages Bun.serve's SIMD-accelerated routing
 - **Result pattern**: Uses `[error, data]` tuples internally for error handling
 
@@ -127,21 +220,21 @@ The handler receives a context object with type-safe request data and response m
 import { z } from "zod";
 import { Api } from "semola/api";
 
-// Define schemas
+// Define reusable schemas with IDs for OpenAPI optimization
 const CreateUserSchema = z.object({
   name: z.string().min(1),
-  email: z.string().email(),
-});
+  email: z.email(),
+}).meta({ id: "CreateUserRequest" });
 
 const UserSchema = z.object({
   id: z.uuid(),
   name: z.string(),
   email: z.email(),
-});
+}).meta({ id: "User" });
 
 const ErrorSchema = z.object({
   message: z.string(),
-});
+}).meta({ id: "ErrorResponse" });
 
 // Create API
 const api = new Api({
@@ -167,15 +260,15 @@ api.defineRoute({
     400: ErrorSchema,
   },
   handler: async (c) => {
-    // c.request.body is typed as { name: string; email: string }
-    const user = await createUser(c.request.body);
-    
+    // c.req.body is typed as { name: string; email: string }
+    const user = await createUser(c.req.body);
+
     return c.json(201, user);
   },
 });
 
 api.defineRoute({
-  path: "/users/{id}",
+  path: "/users/:id",
   method: "GET",
   summary: "Get user by ID",
   tags: ["Users"],
@@ -189,12 +282,12 @@ api.defineRoute({
     404: ErrorSchema,
   },
   handler: async (c) => {
-    const user = await findUser(c.request.params.id);
-    
+    const user = await findUser(c.req.params.id);
+
     if (!user) {
       return c.json(404, { message: "User not found" });
     }
-    
+
     return c.json(200, user);
   },
 });
@@ -206,8 +299,8 @@ api.defineRoute({
   tags: ["Users"],
   request: {
     query: z.object({
-      page: z.string().transform((val) => parseInt(val, 10)).optional(),
-      limit: z.string().transform((val) => parseInt(val, 10)).optional(),
+      page: z.coerce.number().optional(),
+      limit: z.coerce.number().optional(),
     }),
   },
   response: {
@@ -217,21 +310,23 @@ api.defineRoute({
     }),
   },
   handler: async (c) => {
-    const page = c.request.query.page ?? 1;
-    const limit = c.request.query.limit ?? 10;
-    
+    const page = c.req.query.page ?? 1;
+    const limit = c.req.query.limit ?? 10;
+
     const { users, total } = await listUsers(page, limit);
-    
+
     return c.json(200, { users, total });
   },
 });
 
 // Generate OpenAPI spec (optional)
+// Note: UserSchema, CreateUserSchema, and ErrorSchema are defined once 
+// in components.schemas and referenced everywhere via $ref
 const spec = await api.getOpenApiSpec();
 console.log(JSON.stringify(spec, null, 2));
 
 // Start server
-api.listen(3000, () => {
+api.serve(3000, () => {
   console.log("Server running on http://localhost:3000");
 });
 ```
@@ -241,18 +336,12 @@ api.listen(3000, () => {
 All request fields are validated before reaching your handler:
 
 - **Body**: JSON request body (validates Content-Type)
-- **Params**: Path parameters (e.g., `/users/{id}`)
+- **Params**: Path parameters (e.g., `/users/:id`)
 - **Query**: Query string (supports arrays like `?tags=a&tags=b`)
 - **Headers**: HTTP headers
 - **Cookies**: Parsed from Cookie header
 
 Invalid requests receive **400 Bad Request** with detailed error messages.
-
-## Response Validation
-
-All responses are validated before being sent. This prevents accidentally sending malformed data that doesn't match your API contract.
-
-Invalid responses trigger **500 Internal Server Error**, signaling a server-side bug that needs fixing.
 
 ## Middlewares
 
@@ -274,18 +363,18 @@ const authMiddleware = new Middleware({
     401: z.object({ error: z.string() }),
   },
   handler: async (c) => {
-    const token = c.request.headers.authorization;
-    
+    const token = c.req.headers.authorization;
+
     if (!token || !token.startsWith("Bearer ")) {
       return c.json(401, { error: "Unauthorized" });
     }
-    
+
     const user = await validateToken(token.slice(7));
-    
+
     if (!user) {
       return c.json(401, { error: "Invalid token" });
     }
-    
+
     // Return data to extend the context
     return { user };
   },
@@ -312,7 +401,7 @@ api.defineRoute({
   handler: async (c) => {
     // Access middleware data via c.get()
     const user = c.get("user");
-    
+
     return c.json(200, {
       id: user.id,
       name: user.name,
@@ -323,7 +412,7 @@ api.defineRoute({
 
 #### Global Middlewares
 
-Apply middlewares to all routes:
+Apply middlewares to all routes by passing them to the API constructor:
 
 ```typescript
 // Logging middleware
@@ -331,15 +420,17 @@ const loggingMiddleware = new Middleware({
   handler: async (c) => {
     const start = Date.now();
     console.log(`${c.raw.method} ${c.raw.url}`);
-    
+
     return {
       requestStartTime: start,
     };
   },
 });
 
-// Apply globally
-api.use(loggingMiddleware);
+// Apply globally via constructor
+const api = new Api({
+  middlewares: [loggingMiddleware] as const,
+});
 
 // Now all routes will have logging
 api.defineRoute({
@@ -351,7 +442,7 @@ api.defineRoute({
   handler: async (c) => {
     const startTime = c.get("requestStartTime");
     const users = await getUsers();
-    
+
     console.log(`Request took ${Date.now() - startTime}ms`);
     return c.json(200, users);
   },
@@ -371,12 +462,12 @@ const rateLimitMiddleware = new Middleware({
   },
   handler: async (c) => {
     const ip = c.raw.headers.get("x-forwarded-for");
-    
+
     if (await isRateLimited(ip)) {
       // Return Response - handler won't execute
       return c.json(429, { error: "Too many requests" });
     }
-    
+
     // Return data - continue to next middleware/handler
     return { ip };
   },
@@ -411,7 +502,7 @@ api.defineRoute({
     // Access data from both middlewares
     const requestId = c.get("requestId");
     const user = c.get("user");
-    
+
     console.log(`Request ${requestId} by user ${user.id}`);
     return c.json(200, { message: "Success" });
   },
@@ -423,8 +514,10 @@ api.defineRoute({
 Global middlewares run first, then route-specific middlewares:
 
 ```typescript
-// Global: runs on all routes
-api.use(loggingMiddleware);
+// Global: runs on all routes (defined in constructor)
+const api = new Api({
+  middlewares: [loggingMiddleware] as const,
+});
 
 // Route-specific: runs only on this route (after logging)
 api.defineRoute({
@@ -438,7 +531,7 @@ api.defineRoute({
     // Has access to data from all three middlewares
     const startTime = c.get("requestStartTime");
     const user = c.get("user");
-    
+
     return c.json(200, { data: "Admin data" });
   },
 });
@@ -446,7 +539,14 @@ api.defineRoute({
 
 ### Middleware Schemas
 
-Middlewares can define request and response schemas that merge with route schemas:
+Middlewares can define request and response schemas that are validated independently.
+
+**Schema Validation Behavior:**
+
+- Each middleware validates its request data against its own schema before executing
+- Route validates its request data against its own schema after all middlewares complete
+- All schemas must pass validation - there is no merging or replacement, each validates independently
+- Different properties (body vs. query vs. headers) from different middlewares and routes are all validated
 
 ```typescript
 const apiKeyMiddleware = new Middleware({
@@ -459,12 +559,12 @@ const apiKeyMiddleware = new Middleware({
     403: z.object({ error: z.string() }),
   },
   handler: async (c) => {
-    const apiKey = c.request.headers["x-api-key"];
-    
+    const apiKey = c.req.headers["x-api-key"];
+
     if (!isValidApiKey(apiKey)) {
       return c.json(403, { error: "Invalid API key" });
     }
-    
+
     return { apiKeyValid: true };
   },
 });
@@ -484,8 +584,8 @@ api.defineRoute({
   },
   handler: async (c) => {
     // Both x-api-key (from middleware) and accept-language (from route) are validated
-    const lang = c.request.headers["accept-language"];
-    
+    const lang = c.req.headers["accept-language"];
+
     return c.json(200, { data: ["item1", "item2"] });
   },
 });
@@ -503,11 +603,11 @@ const createRoleMiddleware = (requiredRole: string) => {
     },
     handler: async (c) => {
       const user = c.get("user"); // From authMiddleware
-      
+
       if (user.role !== requiredRole) {
         return c.json(403, { error: "Forbidden" });
       }
-      
+
       return {};
     },
   });
@@ -559,7 +659,7 @@ const corsMiddleware = new Middleware({
 const transactionMiddleware = new Middleware({
   handler: async (c) => {
     const tx = await db.beginTransaction();
-    
+
     return { transaction: tx };
   },
 });
@@ -580,12 +680,12 @@ api.defineRoute({
   },
   handler: async (c) => {
     const tx = c.get("transaction");
-    
+
     try {
-      await debit(tx, c.request.body.from, c.request.body.amount);
-      await credit(tx, c.request.body.to, c.request.body.amount);
+      await debit(tx, c.req.body.from, c.req.body.amount);
+      await credit(tx, c.req.body.to, c.req.body.amount);
       await tx.commit();
-      
+
       return c.json(200, { success: true });
     } catch (error) {
       await tx.rollback();
@@ -634,11 +734,125 @@ api.defineRoute({
   },
   handler: async (c) => {
     // TypeScript infers these types automatically:
-    const userId = c.get("userId");       // string
-    const isAdmin = c.get("isAdmin");     // boolean
+    const userId = c.get("userId"); // string
+    const isAdmin = c.get("isAdmin"); // boolean
     const permissions = c.get("permissions"); // string[]
-    
+
     return c.json(200, { ok: true });
   },
 });
 ```
+
+## Performance Benchmarks
+
+Semola API is built on Bun's native `Bun.serve()` router and consistently ranks among the fastest API frameworks for Bun.
+
+### Summary
+
+Average requests per second across all endpoints:
+
+| Framework  | Avg Req/Sec | Latency Avg (ms) |  vs Semola   |
+| :--------- | ----------: | ---------------: | :----------: |
+| **Semola** |  **41,057** |         **1.94** | **baseline** |
+| Elysia     |      37,278 |             2.20 | 1.1x slower  |
+| Hono       |      35,736 |             2.34 | 1.1x slower  |
+| Fastify    |      24,963 |             3.60 | 1.6x slower  |
+| Express    |      15,352 |             6.21 | 2.7x slower  |
+| NestJS     |      12,907 |             7.40 | 3.2x slower  |
+
+_Higher is better for req/sec, lower is better for latency._
+
+### Overhead vs Raw Bun.serve()
+
+Semola adds type-safe routing, request validation, and OpenAPI generation on top of `Bun.serve()` with minimal overhead:
+
+| Endpoint        | Raw Bun (req/s) | Semola (req/s) | Overhead |
+| :-------------- | --------------: | -------------: | -------: |
+| GET /text       |       46,096.00 |      44,764.80 |      ~3% |
+| GET /json       |       45,884.80 |      46,620.80 |      ~0% |
+| GET /params/:id |       43,990.40 |      41,104.00 |      ~7% |
+| POST /users     |       36,124.81 |      31,737.60 |     ~12% |
+| **Average**     |   **43,024.00** |  **41,056.80** |  **~5%** |
+
+Routes without schema validation (text, JSON) run at near-native speed. The overhead on validated routes (params, POST) comes from Zod schema validation, which applies equally to any framework using it.
+
+### Per-Endpoint Results
+
+#### GET /text
+
+| Framework  |   Req/Sec | Latency Avg (ms) | Latency P99 (ms) | Throughput (MB/s) |
+| :--------- | --------: | ---------------: | ---------------: | ----------------: |
+| **Semola** | 44,764.80 |             1.66 |             6.00 |              5.46 |
+| Elysia     | 44,425.60 |             1.65 |             6.00 |              5.42 |
+| Hono       | 40,444.81 |             1.89 |             7.00 |              4.94 |
+| Fastify    | 25,723.20 |             3.37 |             9.00 |              3.16 |
+| Express    | 18,641.60 |             4.85 |            11.00 |              3.41 |
+| NestJS     | 12,861.60 |             7.27 |            14.00 |              2.35 |
+
+#### GET /json
+
+| Framework  |   Req/Sec | Latency Avg (ms) | Latency P99 (ms) | Throughput (MB/s) |
+| :--------- | --------: | ---------------: | ---------------: | ----------------: |
+| **Semola** | 46,620.80 |             1.51 |             5.00 |              6.58 |
+| Elysia     | 39,203.20 |             1.97 |             6.00 |              5.01 |
+| Hono       | 35,958.40 |             2.29 |             7.00 |              4.59 |
+| Fastify    | 28,763.20 |             2.92 |             7.00 |              4.09 |
+| Express    | 15,504.00 |             5.95 |            13.00 |              3.16 |
+| NestJS     | 14,562.40 |             6.41 |            12.00 |              2.97 |
+
+#### GET /params/:id
+
+| Framework  |   Req/Sec | Latency Avg (ms) | Latency P99 (ms) | Throughput (MB/s) |
+| :--------- | --------: | ---------------: | ---------------: | ----------------: |
+| **Semola** | 41,104.00 |             1.86 |             6.00 |              5.21 |
+| Elysia     | 36,081.60 |             2.24 |             7.00 |              4.09 |
+| Hono       | 35,497.60 |             2.44 |             7.00 |              4.03 |
+| Fastify    | 26,984.00 |             3.16 |             8.00 |              3.45 |
+| Express    | 15,500.80 |             5.97 |            12.00 |              2.93 |
+| NestJS     | 13,762.40 |             6.78 |            13.00 |              2.60 |
+
+#### POST /users
+
+| Framework  |   Req/Sec | Latency Avg (ms) | Latency P99 (ms) | Throughput (MB/s) |
+| :--------- | --------: | ---------------: | ---------------: | ----------------: |
+| **Semola** | 31,737.60 |             2.71 |             7.00 |              4.42 |
+| Hono       | 31,041.60 |             2.74 |             7.00 |              3.91 |
+| Elysia     | 29,400.00 |             2.93 |             7.00 |              3.70 |
+| Fastify    | 18,382.41 |             4.96 |            11.00 |              2.58 |
+| Express    | 11,760.80 |             8.05 |            17.00 |              2.38 |
+| NestJS     | 10,442.40 |             9.12 |            19.00 |              2.16 |
+
+### Environment
+
+- **CPU**: Intel i9-11900H @ 2.50GHz (8 cores, 16 threads)
+- **RAM**: 32 GB
+- **OS**: Linux (WSL2)
+- **Runtime**: Bun 1.3.6
+
+#### Framework Versions
+
+| Framework | Version |
+| :-------- | :------ |
+| Semola    | 0.5.0   |
+| Elysia    | 1.4.22  |
+| Hono      | 4.11.8  |
+| Fastify   | 5.7.4   |
+| Express   | 5.2.1   |
+| NestJS    | 11.1.13 |
+
+### Methodology
+
+- **Tool**: [autocannon](https://github.com/mcollina/autocannon) v8.0.0
+- **Connections**: 100 concurrent
+- **Duration**: 5 seconds per endpoint
+- **Endpoints tested**:
+  - `GET /text` - plain text serialization
+  - `GET /json` - JSON serialization
+  - `GET /params/:id` (id=42) - path parameter parsing and validation
+  - `POST /users` (JSON body) - body parsing and validation
+- **Validation**: all frameworks use the same Zod schemas for request validation
+- **Execution**: all servers start in parallel on separate ports (3000-3006), each endpoint is benchmarked sequentially
+- **Summary calculation**: arithmetic mean of `requests.average` across all 4 endpoints
+- **Latency**: reported from autocannon's `latency.average` and `latency.p99`
+
+Results may vary depending on hardware, OS, background processes, and thermal conditions.

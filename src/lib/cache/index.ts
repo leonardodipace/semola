@@ -1,83 +1,158 @@
 import { err, mightThrow, mightThrowSync, ok } from "../errors/index.js";
-import type { CacheOptions } from "./types.js";
+import type { CacheError, CacheOptions } from "./types.js";
 
 export class Cache<T> {
-  private options: CacheOptions;
+  private options: CacheOptions<T>;
+  private serialize: (value: T) => string;
+  private deserialize: (raw: string) => T;
 
-  public constructor(options: CacheOptions) {
+  public constructor(options: CacheOptions<T>) {
     this.options = options;
+    this.serialize = options.serializer ?? JSON.stringify;
+    this.deserialize = options.deserializer ?? ((raw) => JSON.parse(raw));
   }
 
   public async get(key: string) {
-    const [error, value] = await mightThrow(this.options.redis.get(key));
-
-    if (error) {
-      return err("CacheError", `Unable to get value for key ${key}`);
+    if (!this.isEnabled) {
+      return this.fail("NotFoundError", `Key ${key} not found`);
     }
 
-    if (!value) {
-      return err("NotFoundError", `Key ${key} not found`);
-    }
+    const resolvedKey = this.resolveKey(key);
 
-    const [parseError, parsed] = mightThrowSync<T>(() => JSON.parse(value));
-
-    if (parseError) {
-      return err("CacheError", `Unable to parse value for key ${key}`);
-    }
-
-    return ok(parsed);
-  }
-
-  public async set(key: string, value: T) {
-    const [stringifyError, stringified] = mightThrowSync(() =>
-      JSON.stringify(value),
+    const [error, value] = await mightThrow(
+      this.options.redis.get(resolvedKey),
     );
 
-    if (stringifyError) {
-      return err("CacheError", `Unable to stringify value for key ${key}`);
+    if (error) {
+      return this.fail("CacheError", `Unable to get value for key ${key}`);
     }
 
-    if (!stringified) {
-      return err("CacheError", `Unable to stringify value for key ${key}`);
+    if (value === null || value === undefined) {
+      return this.fail("NotFoundError", `Key ${key} not found`);
     }
 
-    if (!this.isTTLValid()) {
-      return err(
-        "InvalidTTLError",
-        `Unable to save records with ttl equal to ${this.options.ttl}`,
+    const [deserializeErr, deserialized] = mightThrowSync<T>(() =>
+      this.deserialize(value),
+    );
+
+    if (deserializeErr) {
+      return this.fail(
+        "CacheError",
+        `Unable to deserialize value for key ${key}`,
       );
     }
 
-    const [setError] = await mightThrow(
-      this.options.ttl
-        ? this.options.redis.set(key, stringified, "PX", this.options.ttl)
-        : this.options.redis.set(key, stringified),
+    return ok(deserialized);
+  }
+
+  public async set(key: string, value: T) {
+    if (!this.isEnabled) {
+      return ok(value);
+    }
+
+    const [serializeErr, serialized] = mightThrowSync(() =>
+      this.serialize(value),
     );
 
+    if (serializeErr) {
+      return this.fail(
+        "CacheError",
+        `Unable to serialize value for key ${key}`,
+      );
+    }
+
+    if (serialized === null || serialized === undefined) {
+      return this.fail(
+        "CacheError",
+        `Unable to serialize value for key ${key}`,
+      );
+    }
+
+    const [ttlErr, ttl] = mightThrowSync(() => this.resolveTTL(key, value));
+
+    if (ttlErr) {
+      return this.fail(
+        "InvalidTTLError",
+        `Unable to resolve ttl for key ${key}`,
+      );
+    }
+
+    if (!this.isTTLValid(ttl)) {
+      return this.fail(
+        "InvalidTTLError",
+        `Unable to save records with ttl equal to ${ttl}`,
+      );
+    }
+
+    const resolvedKey = this.resolveKey(key);
+
+    const setPromise = this.getSetPromise(resolvedKey, serialized, ttl);
+
+    const [setError] = await mightThrow(setPromise);
+
     if (setError) {
-      return err("CacheError", `Unable to set value for key ${key}`);
+      return this.fail("CacheError", `Unable to set value for key ${key}`);
     }
 
     return ok(value);
   }
 
   public async delete(key: string) {
-    const [error, data] = await mightThrow(this.options.redis.del(key));
+    if (!this.isEnabled) {
+      return ok(0);
+    }
+
+    const resolvedKey = this.resolveKey(key);
+
+    const [error, data] = await mightThrow(this.options.redis.del(resolvedKey));
 
     if (error) {
-      return err("CacheError", `Unable to delete key ${key}`);
+      return this.fail("CacheError", `Unable to delete key ${key}`);
     }
 
     return ok(data);
   }
 
-  private isTTLValid() {
-    const { ttl } = this.options;
+  private fail<E extends CacheError>(type: E, message: string) {
+    this.options.onError?.({ type, message });
 
+    return err(type, message);
+  }
+
+  private get isEnabled() {
+    return this.options.enabled !== false;
+  }
+
+  private resolveKey(key: string) {
+    if (this.options.prefix) {
+      return `${this.options.prefix}:${key}`;
+    }
+
+    return key;
+  }
+
+  private resolveTTL(key: string, value: T) {
+    if (typeof this.options.ttl === "function") {
+      return this.options.ttl(key, value);
+    }
+
+    return this.options.ttl;
+  }
+
+  private getSetPromise(
+    key: string,
+    value: string,
+    ttl: number | undefined | null,
+  ) {
+    if (ttl === undefined || ttl === null) {
+      return this.options.redis.set(key, value);
+    }
+
+    return this.options.redis.set(key, value, "PX", ttl);
+  }
+
+  private isTTLValid(ttl: number | undefined | null) {
     if (ttl === undefined || ttl === null) return true;
-
-    // ttl is now set to a numeric value insted of not being provided
-    // inside the options.
 
     if (!Number.isFinite(ttl)) return false;
 
