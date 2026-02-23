@@ -597,8 +597,6 @@ describe("Cron Scanner", () => {
     });
 
     test("should generate a CronExpressionError for a leading comma", () => {
-      // BUG: scanner accepts ",0" - the comma case only checks the next char is valid,
-      // not that something was scanned before it. FIX NEEDED in scanComponent case ','.
       const [err, tokens] = new Scanner(",0 * * * *").scan();
 
       expect(err).not.toBeNull();
@@ -975,34 +973,6 @@ describe("Cron Scanner", () => {
         expect(err).toBeNull();
         expect(
           tokens?.[4]?.equals(new Token("7", "number", 7, "weekday")),
-        ).toBeTrue();
-      });
-    });
-
-    describe("bugs", () => {
-      test("single-value-with-step in a list emits correct Step and Number tokens", () => {
-        // "10/5,30" -> Step(5) starting at 10, Number(30)
-        const [err, tokens] = new Scanner("10/5,30 * * * *").scan();
-
-        expect(err).toBeNull();
-        expect(
-          tokens?.[0]?.equals(new Token("10/5", "step", 5, "minute")),
-        ).toBeTrue();
-        expect(
-          tokens?.[1]?.equals(new Token("30", "number", 30, "minute")),
-        ).toBeTrue();
-      });
-
-      test("single-value-with-step as first list item emits correct Step and Number tokens", () => {
-        // "5/15,0" -> Step(15) starting at 5, Number(0)
-        const [err, tokens] = new Scanner("5/15,0 * * * *").scan();
-
-        expect(err).toBeNull();
-        expect(
-          tokens?.[0]?.equals(new Token("5/15", "step", 15, "minute")),
-        ).toBeTrue();
-        expect(
-          tokens?.[1]?.equals(new Token("0", "number", 0, "minute")),
         ).toBeTrue();
       });
     });

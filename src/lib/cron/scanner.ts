@@ -162,6 +162,13 @@ export class Scanner {
           break;
         }
         case ",": {
+          if (this.current === 1 && this.start === 0) {
+            return err<CronScannerError>(
+              "CronExpressionError",
+              `Invalid list expression '${content}' for field '${field}'`,
+            );
+          }
+
           const next = this.peek(content);
           if (!next || next === ",") {
             return err<CronScannerError>(
