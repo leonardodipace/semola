@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ComponentEnum, Scanner, Token } from "./scanner.js";
+import { Scanner, Token } from "./scanner.js";
 
 describe("Cron Scanner", () => {
   describe("Simple expression", () => {
@@ -25,27 +25,25 @@ describe("Cron Scanner", () => {
       expect(tokens?.length).toEqual(6);
 
       expect(
-        tokens?.[0]?.equals(new Token("*", ComponentEnum.Any, "*", "second")),
+        tokens?.[0]?.equals(new Token("*", "any", "*", "second")),
       ).toBeTrue();
 
       expect(
-        tokens?.[1]?.equals(new Token("*", ComponentEnum.Any, "*", "minute")),
+        tokens?.[1]?.equals(new Token("*", "any", "*", "minute")),
       ).toBeTrue();
 
       expect(
-        tokens?.[2]?.equals(new Token("*", ComponentEnum.Any, "*", "hour")),
+        tokens?.[2]?.equals(new Token("*", "any", "*", "hour")),
+      ).toBeTrue();
+
+      expect(tokens?.[3]?.equals(new Token("*", "any", "*", "day"))).toBeTrue();
+
+      expect(
+        tokens?.[4]?.equals(new Token("*", "any", "*", "month")),
       ).toBeTrue();
 
       expect(
-        tokens?.[3]?.equals(new Token("*", ComponentEnum.Any, "*", "day")),
-      ).toBeTrue();
-
-      expect(
-        tokens?.[4]?.equals(new Token("*", ComponentEnum.Any, "*", "month")),
-      ).toBeTrue();
-
-      expect(
-        tokens?.[5]?.equals(new Token("*", ComponentEnum.Any, "*", "weekday")),
+        tokens?.[5]?.equals(new Token("*", "any", "*", "weekday")),
       ).toBeTrue();
     });
 
@@ -57,27 +55,27 @@ describe("Cron Scanner", () => {
       expect(tokens?.length).toEqual(6);
 
       expect(
-        tokens?.[0]?.equals(new Token("1", ComponentEnum.Number, 1, "second")),
+        tokens?.[0]?.equals(new Token("1", "number", 1, "second")),
       ).toBeTrue();
 
       expect(
-        tokens?.[1]?.equals(new Token("2", ComponentEnum.Number, 2, "minute")),
+        tokens?.[1]?.equals(new Token("2", "number", 2, "minute")),
       ).toBeTrue();
 
       expect(
-        tokens?.[2]?.equals(new Token("3", ComponentEnum.Number, 3, "hour")),
+        tokens?.[2]?.equals(new Token("3", "number", 3, "hour")),
       ).toBeTrue();
 
       expect(
-        tokens?.[3]?.equals(new Token("4", ComponentEnum.Number, 4, "day")),
+        tokens?.[3]?.equals(new Token("4", "number", 4, "day")),
       ).toBeTrue();
 
       expect(
-        tokens?.[4]?.equals(new Token("5", ComponentEnum.Number, 5, "month")),
+        tokens?.[4]?.equals(new Token("5", "number", 5, "month")),
       ).toBeTrue();
 
       expect(
-        tokens?.[5]?.equals(new Token("6", ComponentEnum.Number, 6, "weekday")),
+        tokens?.[5]?.equals(new Token("6", "number", 6, "weekday")),
       ).toBeTrue();
     });
 
@@ -131,9 +129,7 @@ describe("Cron Scanner", () => {
       expect(tokens).toBeArray();
       expect(tokens?.length).toEqual(5);
       expect(
-        tokens?.[0]?.equals(
-          new Token("10", ComponentEnum.Number, 10, "minute"),
-        ),
+        tokens?.[0]?.equals(new Token("10", "number", 10, "minute")),
       ).toBeTrue();
     });
 
@@ -145,7 +141,7 @@ describe("Cron Scanner", () => {
       expect(tokens?.length).toEqual(5);
       expect(
         tokens?.[0]?.equals(
-          new Token("10000000", ComponentEnum.Number, 10_000_000, "minute"),
+          new Token("10000000", "number", 10_000_000, "minute"),
         ),
       ).toBeTrue();
     });
@@ -157,19 +153,15 @@ describe("Cron Scanner", () => {
       expect(tokens).toBeArray();
       expect(tokens?.length).toEqual(5);
       expect(
-        tokens?.[0]?.equals(
-          new Token("10", ComponentEnum.Number, 10, "minute"),
-        ),
+        tokens?.[0]?.equals(new Token("10", "number", 10, "minute")),
       ).toBeTrue();
 
       expect(
-        tokens?.[2]?.equals(new Token("20", ComponentEnum.Number, 20, "day")),
+        tokens?.[2]?.equals(new Token("20", "number", 20, "day")),
       ).toBeTrue();
 
       expect(
-        tokens?.[4]?.equals(
-          new Token("30", ComponentEnum.Number, 30, "weekday"),
-        ),
+        tokens?.[4]?.equals(new Token("30", "number", 30, "weekday")),
       ).toBeTrue();
     });
 
@@ -203,7 +195,7 @@ describe("Cron Scanner", () => {
       expect(tokens?.length).toEqual(5);
 
       expect(
-        tokens?.[0]?.equals(new Token("*/1", ComponentEnum.Step, 1, "minute")),
+        tokens?.[0]?.equals(new Token("*/1", "step", 1, "minute")),
       ).toBeTrue();
     });
 
@@ -215,9 +207,7 @@ describe("Cron Scanner", () => {
       expect(tokens?.length).toEqual(5);
 
       expect(
-        tokens?.[0]?.equals(
-          new Token("2-6/1", ComponentEnum.Step, 1, "minute"),
-        ),
+        tokens?.[0]?.equals(new Token("2-6/1", "step", 1, "minute")),
       ).toBeTrue();
     });
 
@@ -229,7 +219,7 @@ describe("Cron Scanner", () => {
       expect(tokens?.length).toEqual(5);
 
       expect(
-        tokens?.[0]?.equals(new Token("6/1", ComponentEnum.Step, 1, "minute")),
+        tokens?.[0]?.equals(new Token("6/1", "step", 1, "minute")),
       ).toBeTrue();
     });
 
@@ -241,7 +231,7 @@ describe("Cron Scanner", () => {
       expect(tokens?.length).toEqual(5);
 
       expect(
-        tokens?.[0]?.equals(new Token("-6/1", ComponentEnum.Step, 1, "minute")),
+        tokens?.[0]?.equals(new Token("-6/1", "step", 1, "minute")),
       ).toBeTrue();
     });
 
@@ -253,9 +243,7 @@ describe("Cron Scanner", () => {
       expect(tokens?.length).toEqual(5);
 
       expect(
-        tokens?.[0]?.equals(
-          new Token("0001-007/0001", ComponentEnum.Step, 1, "minute"),
-        ),
+        tokens?.[0]?.equals(new Token("0001-007/0001", "step", 1, "minute")),
       ).toBeTrue();
     });
 
@@ -282,12 +270,7 @@ describe("Cron Scanner", () => {
 
       expect(
         tokens?.[0]?.equals(
-          new Token(
-            "11232324512-134414512/1233",
-            ComponentEnum.Step,
-            1233,
-            "minute",
-          ),
+          new Token("11232324512-134414512/1233", "step", 1233, "minute"),
         ),
       ).toBeTrue();
     });
@@ -367,9 +350,7 @@ describe("Cron Scanner", () => {
       expect(tokens).toBeArray();
       expect(tokens?.length).toEqual(5);
       expect(
-        tokens?.[0]?.equals(
-          new Token("1-5", ComponentEnum.Range, "1-5", "minute"),
-        ),
+        tokens?.[0]?.equals(new Token("1-5", "range", "1-5", "minute")),
       ).toBeTrue();
     });
 
@@ -381,12 +362,7 @@ describe("Cron Scanner", () => {
       expect(tokens?.length).toEqual(5);
       expect(
         tokens?.[0]?.equals(
-          new Token(
-            "1000000-5000000",
-            ComponentEnum.Range,
-            "1000000-5000000",
-            "minute",
-          ),
+          new Token("1000000-5000000", "range", "1000000-5000000", "minute"),
         ),
       ).toBeTrue();
     });
@@ -456,37 +432,31 @@ describe("Cron Scanner", () => {
       expect(tokens?.length).toEqual(7);
 
       expect(
-        tokens?.[0]?.equals(
-          new Token("10", ComponentEnum.Number, 10, "minute"),
-        ),
+        tokens?.[0]?.equals(new Token("10", "number", 10, "minute")),
       ).toBeTrue();
 
       expect(
-        tokens?.[1]?.equals(
-          new Token("20", ComponentEnum.Number, 20, "minute"),
-        ),
+        tokens?.[1]?.equals(new Token("20", "number", 20, "minute")),
       ).toBeTrue();
 
       expect(
-        tokens?.[2]?.equals(
-          new Token("30", ComponentEnum.Number, 30, "minute"),
-        ),
+        tokens?.[2]?.equals(new Token("30", "number", 30, "minute")),
       ).toBeTrue();
 
       expect(
-        tokens?.[3]?.equals(new Token("2", ComponentEnum.Number, 2, "hour")),
+        tokens?.[3]?.equals(new Token("2", "number", 2, "hour")),
       ).toBeTrue();
 
       expect(
-        tokens?.[4]?.equals(new Token("3", ComponentEnum.Number, 3, "day")),
+        tokens?.[4]?.equals(new Token("3", "number", 3, "day")),
       ).toBeTrue();
 
       expect(
-        tokens?.[5]?.equals(new Token("4", ComponentEnum.Number, 4, "month")),
+        tokens?.[5]?.equals(new Token("4", "number", 4, "month")),
       ).toBeTrue();
 
       expect(
-        tokens?.[6]?.equals(new Token("5", ComponentEnum.Number, 5, "weekday")),
+        tokens?.[6]?.equals(new Token("5", "number", 5, "weekday")),
       ).toBeTrue();
     });
 
@@ -498,37 +468,31 @@ describe("Cron Scanner", () => {
       expect(tokens?.length).toEqual(7);
 
       expect(
-        tokens?.[0]?.equals(
-          new Token("10", ComponentEnum.Number, 10, "minute"),
-        ),
+        tokens?.[0]?.equals(new Token("10", "number", 10, "minute")),
       ).toBeTrue();
 
       expect(
-        tokens?.[1]?.equals(
-          new Token("20-10", ComponentEnum.Range, "20-10", "minute"),
-        ),
+        tokens?.[1]?.equals(new Token("20-10", "range", "20-10", "minute")),
       ).toBeTrue();
 
       expect(
-        tokens?.[2]?.equals(
-          new Token("30-40", ComponentEnum.Range, "30-40", "minute"),
-        ),
+        tokens?.[2]?.equals(new Token("30-40", "range", "30-40", "minute")),
       ).toBeTrue();
 
       expect(
-        tokens?.[3]?.equals(new Token("2", ComponentEnum.Number, 2, "hour")),
+        tokens?.[3]?.equals(new Token("2", "number", 2, "hour")),
       ).toBeTrue();
 
       expect(
-        tokens?.[4]?.equals(new Token("3", ComponentEnum.Number, 3, "day")),
+        tokens?.[4]?.equals(new Token("3", "number", 3, "day")),
       ).toBeTrue();
 
       expect(
-        tokens?.[5]?.equals(new Token("4", ComponentEnum.Number, 4, "month")),
+        tokens?.[5]?.equals(new Token("4", "number", 4, "month")),
       ).toBeTrue();
 
       expect(
-        tokens?.[6]?.equals(new Token("5", ComponentEnum.Number, 5, "weekday")),
+        tokens?.[6]?.equals(new Token("5", "number", 5, "weekday")),
       ).toBeTrue();
     });
 
@@ -540,41 +504,35 @@ describe("Cron Scanner", () => {
       expect(tokens?.length).toEqual(8);
 
       expect(
-        tokens?.[0]?.equals(
-          new Token("10", ComponentEnum.Number, 10, "minute"),
-        ),
+        tokens?.[0]?.equals(new Token("10", "number", 10, "minute")),
       ).toBeTrue();
 
       expect(
-        tokens?.[1]?.equals(
-          new Token("20-10", ComponentEnum.Range, "20-10", "minute"),
-        ),
+        tokens?.[1]?.equals(new Token("20-10", "range", "20-10", "minute")),
       ).toBeTrue();
 
       expect(
-        tokens?.[2]?.equals(
-          new Token("30-40/20", ComponentEnum.Step, 20, "minute"),
-        ),
+        tokens?.[2]?.equals(new Token("30-40/20", "step", 20, "minute")),
       ).toBeTrue();
 
       expect(
-        tokens?.[3]?.equals(new Token("*/3", ComponentEnum.Step, 3, "minute")),
+        tokens?.[3]?.equals(new Token("*/3", "step", 3, "minute")),
       ).toBeTrue();
 
       expect(
-        tokens?.[4]?.equals(new Token("2", ComponentEnum.Number, 2, "hour")),
+        tokens?.[4]?.equals(new Token("2", "number", 2, "hour")),
       ).toBeTrue();
 
       expect(
-        tokens?.[5]?.equals(new Token("3", ComponentEnum.Number, 3, "day")),
+        tokens?.[5]?.equals(new Token("3", "number", 3, "day")),
       ).toBeTrue();
 
       expect(
-        tokens?.[6]?.equals(new Token("4", ComponentEnum.Number, 4, "month")),
+        tokens?.[6]?.equals(new Token("4", "number", 4, "month")),
       ).toBeTrue();
 
       expect(
-        tokens?.[7]?.equals(new Token("5", ComponentEnum.Number, 5, "weekday")),
+        tokens?.[7]?.equals(new Token("5", "number", 5, "weekday")),
       ).toBeTrue();
     });
 
@@ -586,37 +544,31 @@ describe("Cron Scanner", () => {
       expect(tokens?.length).toEqual(7);
 
       expect(
-        tokens?.[0]?.equals(
-          new Token("10", ComponentEnum.Number, 10, "minute"),
-        ),
+        tokens?.[0]?.equals(new Token("10", "number", 10, "minute")),
       ).toBeTrue();
 
       expect(
-        tokens?.[1]?.equals(
-          new Token("20/10", ComponentEnum.Step, 10, "minute"),
-        ),
+        tokens?.[1]?.equals(new Token("20/10", "step", 10, "minute")),
       ).toBeTrue();
 
       expect(
-        tokens?.[2]?.equals(
-          new Token("-40/20", ComponentEnum.Step, 20, "minute"),
-        ),
+        tokens?.[2]?.equals(new Token("-40/20", "step", 20, "minute")),
       ).toBeTrue();
 
       expect(
-        tokens?.[3]?.equals(new Token("2", ComponentEnum.Number, 2, "hour")),
+        tokens?.[3]?.equals(new Token("2", "number", 2, "hour")),
       ).toBeTrue();
 
       expect(
-        tokens?.[4]?.equals(new Token("3", ComponentEnum.Number, 3, "day")),
+        tokens?.[4]?.equals(new Token("3", "number", 3, "day")),
       ).toBeTrue();
 
       expect(
-        tokens?.[5]?.equals(new Token("4", ComponentEnum.Number, 4, "month")),
+        tokens?.[5]?.equals(new Token("4", "number", 4, "month")),
       ).toBeTrue();
 
       expect(
-        tokens?.[6]?.equals(new Token("5", ComponentEnum.Number, 5, "weekday")),
+        tokens?.[6]?.equals(new Token("5", "number", 5, "weekday")),
       ).toBeTrue();
     });
 
@@ -822,14 +774,10 @@ describe("Cron Scanner", () => {
         expect(tokens?.length).toEqual(6); // 2 minute tokens + 4 wildcards
 
         expect(
-          tokens?.[0]?.equals(
-            new Token("*/10", ComponentEnum.Step, 10, "minute"),
-          ),
+          tokens?.[0]?.equals(new Token("*/10", "step", 10, "minute")),
         ).toBeTrue();
         expect(
-          tokens?.[1]?.equals(
-            new Token("30", ComponentEnum.Number, 30, "minute"),
-          ),
+          tokens?.[1]?.equals(new Token("30", "number", 30, "minute")),
         ).toBeTrue();
       });
 
@@ -841,12 +789,10 @@ describe("Cron Scanner", () => {
         expect(tokens?.length).toEqual(5);
 
         expect(
-          tokens?.[0]?.equals(
-            new Token("0", ComponentEnum.Number, 0, "minute"),
-          ),
+          tokens?.[0]?.equals(new Token("0", "number", 0, "minute")),
         ).toBeTrue();
         expect(
-          tokens?.[1]?.equals(new Token("*/6", ComponentEnum.Step, 6, "hour")),
+          tokens?.[1]?.equals(new Token("*/6", "step", 6, "hour")),
         ).toBeTrue();
       });
 
@@ -866,10 +812,10 @@ describe("Cron Scanner", () => {
         expect(tokens?.length).toEqual(5);
 
         expect(
-          tokens?.[2]?.equals(new Token("15", ComponentEnum.Number, 15, "day")),
+          tokens?.[2]?.equals(new Token("15", "number", 15, "day")),
         ).toBeTrue();
         expect(
-          tokens?.[3]?.equals(new Token("6", ComponentEnum.Number, 6, "month")),
+          tokens?.[3]?.equals(new Token("6", "number", 6, "month")),
         ).toBeTrue();
       });
 
@@ -878,7 +824,7 @@ describe("Cron Scanner", () => {
 
         expect(err).toBeNull();
         expect(
-          tokens?.[2]?.equals(new Token("31", ComponentEnum.Number, 31, "day")),
+          tokens?.[2]?.equals(new Token("31", "number", 31, "day")),
         ).toBeTrue();
       });
 
@@ -887,9 +833,7 @@ describe("Cron Scanner", () => {
 
         expect(err).toBeNull();
         expect(
-          tokens?.[3]?.equals(
-            new Token("12", ComponentEnum.Number, 12, "month"),
-          ),
+          tokens?.[3]?.equals(new Token("12", "number", 12, "month")),
         ).toBeTrue();
       });
 
@@ -898,7 +842,7 @@ describe("Cron Scanner", () => {
 
         expect(err).toBeNull();
         expect(
-          tokens?.[3]?.equals(new Token("1", ComponentEnum.Number, 1, "month")),
+          tokens?.[3]?.equals(new Token("1", "number", 1, "month")),
         ).toBeTrue();
       });
 
@@ -907,10 +851,10 @@ describe("Cron Scanner", () => {
 
         expect(err).toBeNull();
         expect(
-          tokens?.[2]?.equals(new Token("29", ComponentEnum.Number, 29, "day")),
+          tokens?.[2]?.equals(new Token("29", "number", 29, "day")),
         ).toBeTrue();
         expect(
-          tokens?.[3]?.equals(new Token("2", ComponentEnum.Number, 2, "month")),
+          tokens?.[3]?.equals(new Token("2", "number", 2, "month")),
         ).toBeTrue();
       });
     });
@@ -921,9 +865,7 @@ describe("Cron Scanner", () => {
 
         expect(err).toBeNull();
         expect(
-          tokens?.[0]?.equals(
-            new Token("5-5", ComponentEnum.Range, "5-5", "minute"),
-          ),
+          tokens?.[0]?.equals(new Token("5-5", "range", "5-5", "minute")),
         ).toBeTrue();
       });
 
@@ -932,9 +874,7 @@ describe("Cron Scanner", () => {
 
         expect(err).toBeNull();
         expect(
-          tokens?.[0]?.equals(
-            new Token("*/1", ComponentEnum.Step, 1, "minute"),
-          ),
+          tokens?.[0]?.equals(new Token("*/1", "step", 1, "minute")),
         ).toBeTrue();
       });
 
@@ -944,9 +884,7 @@ describe("Cron Scanner", () => {
 
         expect(err).toBeNull();
         expect(
-          tokens?.[0]?.equals(
-            new Token("10-15/10", ComponentEnum.Step, 10, "minute"),
-          ),
+          tokens?.[0]?.equals(new Token("10-15/10", "step", 10, "minute")),
         ).toBeTrue();
       });
 
@@ -956,9 +894,7 @@ describe("Cron Scanner", () => {
 
         expect(err).toBeNull();
         expect(
-          tokens?.[0]?.equals(
-            new Token("*/60", ComponentEnum.Step, 60, "minute"),
-          ),
+          tokens?.[0]?.equals(new Token("*/60", "step", 60, "minute")),
         ).toBeTrue();
       });
 
@@ -970,14 +906,10 @@ describe("Cron Scanner", () => {
         expect(tokens?.length).toEqual(6); // 2 minute tokens + 4 wildcards
 
         expect(
-          tokens?.[0]?.equals(
-            new Token("10-30/5", ComponentEnum.Step, 5, "minute"),
-          ),
+          tokens?.[0]?.equals(new Token("10-30/5", "step", 5, "minute")),
         ).toBeTrue();
         expect(
-          tokens?.[1]?.equals(
-            new Token("45", ComponentEnum.Number, 45, "minute"),
-          ),
+          tokens?.[1]?.equals(new Token("45", "number", 45, "minute")),
         ).toBeTrue();
       });
 
@@ -986,9 +918,7 @@ describe("Cron Scanner", () => {
 
         expect(err).toBeNull();
         expect(
-          tokens?.[0]?.equals(
-            new Token("0-59", ComponentEnum.Range, "0-59", "minute"),
-          ),
+          tokens?.[0]?.equals(new Token("0-59", "range", "0-59", "minute")),
         ).toBeTrue();
       });
 
@@ -997,9 +927,7 @@ describe("Cron Scanner", () => {
 
         expect(err).toBeNull();
         expect(
-          tokens?.[3]?.equals(
-            new Token("1-12", ComponentEnum.Range, "1-12", "month"),
-          ),
+          tokens?.[3]?.equals(new Token("1-12", "range", "1-12", "month")),
         ).toBeTrue();
       });
 
@@ -1008,9 +936,7 @@ describe("Cron Scanner", () => {
 
         expect(err).toBeNull();
         expect(
-          tokens?.[0]?.equals(
-            new Token("0-0", ComponentEnum.Range, "0-0", "minute"),
-          ),
+          tokens?.[0]?.equals(new Token("0-0", "range", "0-0", "minute")),
         ).toBeTrue();
       });
 
@@ -1020,14 +946,10 @@ describe("Cron Scanner", () => {
 
         expect(err).toBeNull();
         expect(
-          tokens?.[0]?.equals(
-            new Token("30-10", ComponentEnum.Range, "30-10", "minute"),
-          ),
+          tokens?.[0]?.equals(new Token("30-10", "range", "30-10", "minute")),
         ).toBeTrue();
         expect(
-          tokens?.[1]?.equals(
-            new Token("50", ComponentEnum.Number, 50, "minute"),
-          ),
+          tokens?.[1]?.equals(new Token("50", "number", 50, "minute")),
         ).toBeTrue();
       });
 
@@ -1039,14 +961,10 @@ describe("Cron Scanner", () => {
         expect(tokens?.length).toEqual(6);
 
         expect(
-          tokens?.[0]?.equals(
-            new Token("30", ComponentEnum.Number, 30, "second"),
-          ),
+          tokens?.[0]?.equals(new Token("30", "number", 30, "second")),
         ).toBeTrue();
         expect(
-          tokens?.[1]?.equals(
-            new Token("0", ComponentEnum.Number, 0, "minute"),
-          ),
+          tokens?.[1]?.equals(new Token("0", "number", 0, "minute")),
         ).toBeTrue();
       });
 
@@ -1056,9 +974,7 @@ describe("Cron Scanner", () => {
 
         expect(err).toBeNull();
         expect(
-          tokens?.[4]?.equals(
-            new Token("7", ComponentEnum.Number, 7, "weekday"),
-          ),
+          tokens?.[4]?.equals(new Token("7", "number", 7, "weekday")),
         ).toBeTrue();
       });
     });
@@ -1070,14 +986,10 @@ describe("Cron Scanner", () => {
 
         expect(err).toBeNull();
         expect(
-          tokens?.[0]?.equals(
-            new Token("10/5", ComponentEnum.Step, 5, "minute"),
-          ),
+          tokens?.[0]?.equals(new Token("10/5", "step", 5, "minute")),
         ).toBeTrue();
         expect(
-          tokens?.[1]?.equals(
-            new Token("30", ComponentEnum.Number, 30, "minute"),
-          ),
+          tokens?.[1]?.equals(new Token("30", "number", 30, "minute")),
         ).toBeTrue();
       });
 
@@ -1087,14 +999,10 @@ describe("Cron Scanner", () => {
 
         expect(err).toBeNull();
         expect(
-          tokens?.[0]?.equals(
-            new Token("5/15", ComponentEnum.Step, 15, "minute"),
-          ),
+          tokens?.[0]?.equals(new Token("5/15", "step", 15, "minute")),
         ).toBeTrue();
         expect(
-          tokens?.[1]?.equals(
-            new Token("0", ComponentEnum.Number, 0, "minute"),
-          ),
+          tokens?.[1]?.equals(new Token("0", "number", 0, "minute")),
         ).toBeTrue();
       });
     });
