@@ -618,19 +618,37 @@ describe("Cron Scanner", () => {
     test("should generate a CronExpressionError for wildcard as first item in a list", () => {
       const [err, tokens] = new Scanner("*,5 * * * *").scan();
 
-      expect(err).not.toBeNull();
-      expect(tokens).toBeNull();
+      expect(err).toBeNull();
+      expect(tokens).toBeArray();
+      expect(tokens?.length).toEqual(6);
 
-      expect(err?.type).toEqual("CronExpressionError");
+      expect(
+        tokens?.[0]?.equals(new Token("*", "any", "*", "minute")),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[1]?.equals(new Token("5", "number", 5, "minute")),
+      ).toBeTrue();
     });
 
     test("should generate a CronExpressionError for wildcard in the middle of a list", () => {
       const [err, tokens] = new Scanner("5,*,10 * * * *").scan();
 
-      expect(err).not.toBeNull();
-      expect(tokens).toBeNull();
+      expect(err).toBeNull();
+      expect(tokens).toBeArray();
+      expect(tokens?.length).toEqual(7);
 
-      expect(err?.type).toEqual("CronExpressionError");
+      expect(
+        tokens?.[0]?.equals(new Token("5", "number", 5, "minute")),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[1]?.equals(new Token("*", "any", "*", "minute")),
+      ).toBeTrue();
+
+      expect(
+        tokens?.[2]?.equals(new Token("10", "number", 10, "minute")),
+      ).toBeTrue();
     });
   });
 
