@@ -1,6 +1,10 @@
 import { err, mightThrow, mightThrowSync, ok } from "../../errors/index.js";
 import type { Column } from "../column/index.js";
-import type { ColumnKind, ColumnMeta } from "../column/types.js";
+import type {
+  ColumnKind,
+  ColumnMeta,
+  OnDeleteAction,
+} from "../column/types.js";
 import type { OrmDialect } from "../core/types.js";
 import type { Table } from "../table/index.js";
 
@@ -12,6 +16,8 @@ export type ColumnSnapshot = {
   unique: boolean;
   hasDefault: boolean;
   defaultValue?: unknown;
+  references?: { tableName: string; columnName: string };
+  onDelete?: OnDeleteAction;
 };
 
 export type TableSnapshot = {
@@ -25,10 +31,8 @@ export type SchemaSnapshot = {
   tables: Record<string, TableSnapshot>;
 };
 
-const serializeColumn = (
-  column: Column<ColumnKind, ColumnMeta>,
-): ColumnSnapshot => {
-  return {
+const serializeColumn = (column: Column<ColumnKind, ColumnMeta>) => {
+  const snapshot: ColumnSnapshot = {
     name: column.sqlName,
     type: column.columnKind,
     primaryKey: column.meta.primaryKey,
@@ -37,36 +41,50 @@ const serializeColumn = (
     hasDefault: column.meta.hasDefault,
     defaultValue: column.defaultValue,
   };
+
+  if (column.foreignKeyRef) {
+    snapshot.references = column.foreignKeyRef;
+  }
+
+  if (column.onDeleteAction) {
+    snapshot.onDelete = column.onDeleteAction;
+  }
+
+  return snapshot;
 };
 
-const serializeTable = (table: Table): TableSnapshot => {
+const serializeTable = (table: Table) => {
   const columns: Record<string, ColumnSnapshot> = {};
 
   for (const [key, column] of Object.entries(table.columns)) {
     columns[key] = serializeColumn(column);
   }
 
-  return {
+  const snapshot: TableSnapshot = {
     name: table.sqlName,
     columns,
   };
+
+  return snapshot;
 };
 
 export const createSnapshot = (
   tables: Record<string, Table>,
   dialect: OrmDialect,
-): SchemaSnapshot => {
+) => {
   const tablesSnapshot: Record<string, TableSnapshot> = {};
 
   for (const [key, table] of Object.entries(tables)) {
     tablesSnapshot[key] = serializeTable(table);
   }
 
-  return {
+  const snapshot: SchemaSnapshot = {
     version: 1,
     dialect,
     tables: tablesSnapshot,
   };
+
+  return snapshot;
 };
 
 export const writeSnapshot = async (

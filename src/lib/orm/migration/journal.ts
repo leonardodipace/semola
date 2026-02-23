@@ -12,11 +12,13 @@ export type Journal = {
   entries: JournalEntry[];
 };
 
-const createEmptyJournal = (): Journal => {
-  return {
+const createEmptyJournal = () => {
+  const journal: Journal = {
     version: 1,
     entries: [],
   };
+
+  return journal;
 };
 
 export const readJournal = async (filePath: string) => {
@@ -69,26 +71,28 @@ export const writeJournal = async (filePath: string, journal: Journal) => {
   return ok(journal);
 };
 
-export const addJournalEntry = (
-  journal: Journal,
-  entry: JournalEntry,
-): Journal => {
-  return {
+export const addJournalEntry = (journal: Journal, entry: JournalEntry) => {
+  const newJournal: Journal = {
     ...journal,
     entries: [...journal.entries, entry],
   };
+
+  return newJournal;
 };
 
-export const removeLastJournalEntry = (journal: Journal): Journal => {
-  return {
+export const removeLastJournalEntry = (journal: Journal) => {
+  const newJournal: Journal = {
     ...journal,
     entries: journal.entries.slice(0, -1),
   };
+
+  return newJournal;
 };
 
-export const getLastEntry = (journal: Journal): JournalEntry | null => {
+export const getLastEntry = (journal: Journal) => {
   if (journal.entries.length === 0) {
     return null;
   }
+
   return journal.entries[journal.entries.length - 1] ?? null;
 };

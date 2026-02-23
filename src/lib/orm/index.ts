@@ -17,6 +17,8 @@ export type {
   ColumnOptions,
   ColumnValue,
   DefaultColumnMeta,
+  ForeignKeyRef,
+  OnDeleteAction,
 } from "./column/types.js";
 export { Orm } from "./core/index.js";
 // Export types from core

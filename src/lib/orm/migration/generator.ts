@@ -48,6 +48,14 @@ const renderColumnSnapshot = (column: ColumnSnapshot, builder = "t") => {
     code = `${code}.default(${valueToCode(column.defaultValue)})`;
   }
 
+  if (column.references) {
+    code = `${code}.references(${JSON.stringify(column.references.tableName)}, ${JSON.stringify(column.references.columnName)})`;
+  }
+
+  if (column.onDelete) {
+    code = `${code}.onDelete(${JSON.stringify(column.onDelete)})`;
+  }
+
   return `${code};`;
 };
 

@@ -4,6 +4,7 @@ import type {
   ColumnOptions,
   ColumnValue,
   DefaultColumnMeta,
+  OnDeleteAction,
   UpdateMeta,
 } from "./types.js";
 
@@ -13,6 +14,8 @@ export type {
   ColumnOptions,
   ColumnValue,
   DefaultColumnMeta,
+  ForeignKeyRef,
+  OnDeleteAction,
   UpdateMeta,
 } from "./types.js";
 
@@ -68,6 +71,22 @@ export class Column<
 
   public get defaultValue() {
     return this.options.defaultValue;
+  }
+
+  public get foreignKeyRef() {
+    return this.options.references;
+  }
+
+  public get onDeleteAction() {
+    return this.options.onDelete;
+  }
+
+  public references(tableName: string, columnName: string) {
+    return this.withOptions<Meta>({ references: { tableName, columnName } });
+  }
+
+  public onDelete(action: OnDeleteAction) {
+    return this.withOptions<Meta>({ onDelete: action });
   }
 
   public primaryKey() {

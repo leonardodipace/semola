@@ -7,6 +7,13 @@ export type ColumnKind =
   | "jsonb"
   | "uuid";
 
+export type OnDeleteAction = "cascade" | "set null" | "restrict" | "no action";
+
+export type ForeignKeyRef = {
+  tableName: string;
+  columnName: string;
+};
+
 export type ColumnValue<Kind extends ColumnKind> = Kind extends "number"
   ? number
   : Kind extends "string"
@@ -53,4 +60,6 @@ export type ColumnOptions<
   notNull: boolean;
   unique: boolean;
   defaultValue?: Value;
+  references?: ForeignKeyRef;
+  onDelete?: OnDeleteAction;
 };

@@ -22,7 +22,16 @@ const defaultValuesEqual = (a: unknown, b: unknown): boolean => {
   );
 };
 
-const columnsEqual = (a: ColumnSnapshot, b: ColumnSnapshot): boolean => {
+const foreignKeyRefsEqual = (
+  a: ColumnSnapshot["references"],
+  b: ColumnSnapshot["references"],
+) => {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.tableName === b.tableName && a.columnName === b.columnName;
+};
+
+const columnsEqual = (a: ColumnSnapshot, b: ColumnSnapshot) => {
   return (
     a.name === b.name &&
     a.type === b.type &&
@@ -30,7 +39,9 @@ const columnsEqual = (a: ColumnSnapshot, b: ColumnSnapshot): boolean => {
     a.notNull === b.notNull &&
     a.unique === b.unique &&
     a.hasDefault === b.hasDefault &&
-    defaultValuesEqual(a.defaultValue, b.defaultValue)
+    defaultValuesEqual(a.defaultValue, b.defaultValue) &&
+    foreignKeyRefsEqual(a.references, b.references) &&
+    a.onDelete === b.onDelete
   );
 };
 
@@ -38,7 +49,7 @@ const diffTable = (
   tableName: string,
   oldTable: TableSnapshot | undefined,
   newTable: TableSnapshot | undefined,
-): TableDiffOperation[] => {
+) => {
   const operations: TableDiffOperation[] = [];
 
   // Table was removed
@@ -122,7 +133,7 @@ const diffTable = (
 export const diffSnapshots = (
   oldSnapshot: SchemaSnapshot | null,
   newSnapshot: SchemaSnapshot,
-): TableDiffOperation[] => {
+) => {
   const operations: TableDiffOperation[] = [];
 
   if (!oldSnapshot) {

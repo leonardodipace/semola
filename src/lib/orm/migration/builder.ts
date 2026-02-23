@@ -9,7 +9,12 @@ import {
   string,
   uuid,
 } from "../column/index.js";
-import type { ColumnKind, ColumnMeta, ColumnValue } from "../column/types.js";
+import type {
+  ColumnKind,
+  ColumnMeta,
+  ColumnValue,
+  OnDeleteAction,
+} from "../column/types.js";
 import type { Orm } from "../core/index.js";
 import type { OrmDialect } from "../core/types.js";
 import type { Dialect } from "../dialect/types.js";
@@ -51,6 +56,18 @@ class ColumnBuilder<Kind extends ColumnKind> {
 
   public default(value: ColumnValue<Kind>) {
     this.value = this.value.default(value);
+    this.onChange(this.value);
+    return this;
+  }
+
+  public references(tableName: string, columnName: string) {
+    this.value = this.value.references(tableName, columnName);
+    this.onChange(this.value);
+    return this;
+  }
+
+  public onDelete(action: OnDeleteAction) {
+    this.value = this.value.onDelete(action);
     this.onChange(this.value);
     return this;
   }
@@ -261,6 +278,15 @@ const buildColumnDefinition = (
     }
 
     parts.push(`DEFAULT ${quotedValue}`);
+  }
+
+  if (column.foreignKeyRef) {
+    const ref = column.foreignKeyRef;
+    let fkClause = `REFERENCES ${ref.tableName}(${ref.columnName})`;
+    if (column.onDeleteAction) {
+      fkClause += ` ON DELETE ${column.onDeleteAction.toUpperCase()}`;
+    }
+    parts.push(fkClause);
   }
 
   return ok(parts.join(" "));
@@ -673,6 +699,99 @@ export class SchemaBuilder {
     );
     if (dropError) {
       return err("InternalServerError", toMsg(dropError));
+    }
+
+    return ok(true);
+  }
+
+  public async addForeignKey(
+    tableName: string,
+    columnName: string,
+    refTable: string,
+    refColumn: string,
+    onDelete?: OnDeleteAction,
+  ) {
+    if (this.dialect === "sqlite") {
+      return err(
+        "ValidationError",
+        "addForeignKey is not supported for sqlite",
+      );
+    }
+
+    const [tableError, safeTableName] = toSqlIdentifier(
+      tableName,
+      "table name",
+    );
+    if (tableError) {
+      return err("ValidationError", tableError.message);
+    }
+    const [columnError, safeColumnName] = toSqlIdentifier(
+      columnName,
+      "column name",
+    );
+    if (columnError) {
+      return err("ValidationError", columnError.message);
+    }
+    const [refTableError, safeRefTable] = toSqlIdentifier(
+      refTable,
+      "table name",
+    );
+    if (refTableError) {
+      return err("ValidationError", refTableError.message);
+    }
+    const [refColumnError, safeRefColumn] = toSqlIdentifier(
+      refColumn,
+      "column name",
+    );
+    if (refColumnError) {
+      return err("ValidationError", refColumnError.message);
+    }
+
+    const constraintName = `fk_${safeTableName}_${safeColumnName}`;
+    let sql = `ALTER TABLE ${safeTableName} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${safeColumnName}) REFERENCES ${safeRefTable}(${safeRefColumn})`;
+    if (onDelete) {
+      sql += ` ON DELETE ${onDelete.toUpperCase()}`;
+    }
+
+    const [executeError] = await mightThrow(this.execute(sql));
+    if (executeError) {
+      return err("InternalServerError", toMsg(executeError));
+    }
+
+    return ok(true);
+  }
+
+  public async dropForeignKey(tableName: string, constraintName: string) {
+    if (this.dialect === "sqlite") {
+      return err(
+        "ValidationError",
+        "dropForeignKey is not supported for sqlite",
+      );
+    }
+
+    const [tableError, safeTableName] = toSqlIdentifier(
+      tableName,
+      "table name",
+    );
+    if (tableError) {
+      return err("ValidationError", tableError.message);
+    }
+    const [constraintError, safeConstraintName] = toSqlIdentifier(
+      constraintName,
+      "constraint name",
+    );
+    if (constraintError) {
+      return err("ValidationError", constraintError.message);
+    }
+
+    const dropSql =
+      this.dialect === "mysql"
+        ? `ALTER TABLE ${safeTableName} DROP FOREIGN KEY ${safeConstraintName}`
+        : `ALTER TABLE ${safeTableName} DROP CONSTRAINT ${safeConstraintName}`;
+
+    const [executeError] = await mightThrow(this.execute(dropSql));
+    if (executeError) {
+      return err("InternalServerError", toMsg(executeError));
     }
 
     return ok(true);

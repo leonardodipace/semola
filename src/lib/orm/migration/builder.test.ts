@@ -266,6 +266,120 @@ describe("SchemaBuilder", () => {
     await orm.close();
   });
 
+  test("createTable with FK column creates REFERENCES constraint", async () => {
+    const orm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: {},
+    });
+
+    const schema = new SchemaBuilder(orm, "sqlite");
+
+    await schema.createTable("users", (t) => {
+      t.number("id").primaryKey();
+      t.string("name").notNull();
+    });
+
+    await schema.createTable("posts", (t) => {
+      t.number("id").primaryKey();
+      t.number("author_id")
+        .notNull()
+        .references("users", "id")
+        .onDelete("cascade");
+    });
+
+    expect(await tableExists(orm, "posts")).toBe(true);
+
+    const info = await orm.sql.unsafe("PRAGMA foreign_key_list('posts')");
+    expect(Array.isArray(info)).toBe(true);
+    const fk = (info as Record<string, unknown>[]).find(
+      (row) => row.table === "users" && row.to === "id",
+    );
+    expect(fk).toBeDefined();
+    expect(fk?.on_delete).toBe("CASCADE");
+
+    await orm.close();
+  });
+
+  test("addForeignKey returns error for sqlite", async () => {
+    const orm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: {},
+    });
+
+    const schema = new SchemaBuilder(orm, "sqlite");
+
+    const [error] = await schema.addForeignKey(
+      "posts",
+      "author_id",
+      "users",
+      "id",
+      "cascade",
+    );
+
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain(
+      "addForeignKey is not supported for sqlite",
+    );
+
+    await orm.close();
+  });
+
+  test("dropForeignKey returns error for sqlite", async () => {
+    const orm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: {},
+    });
+
+    const schema = new SchemaBuilder(orm, "sqlite");
+
+    const [error] = await schema.dropForeignKey("posts", "fk_posts_author_id");
+
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain(
+      "dropForeignKey is not supported for sqlite",
+    );
+
+    await orm.close();
+  });
+
+  test("ColumnBuilder .references() and .onDelete() chain correctly", async () => {
+    const orm = new Orm({
+      url: ":memory:",
+      dialect: "sqlite",
+      tables: {},
+    });
+
+    const schema = new SchemaBuilder(orm, "sqlite");
+
+    await schema.createTable("categories", (t) => {
+      t.number("id").primaryKey();
+    });
+
+    // onDelete without references should still create the column (FK clause omitted)
+    await schema.createTable("items", (t) => {
+      t.number("id").primaryKey();
+      t.number("category_id")
+        .notNull()
+        .references("categories", "id")
+        .onDelete("restrict");
+    });
+
+    expect(await tableExists(orm, "items")).toBe(true);
+
+    const fkList = await orm.sql.unsafe("PRAGMA foreign_key_list('items')");
+    expect(Array.isArray(fkList)).toBe(true);
+    const fk = (fkList as Record<string, unknown>[]).find(
+      (row) => row.table === "categories",
+    );
+    expect(fk).toBeDefined();
+    expect(fk?.on_delete).toBe("RESTRICT");
+
+    await orm.close();
+  });
+
   test("dropIndex throws for MySQL without tableName", async () => {
     const orm = new Orm({
       url: ":memory:",

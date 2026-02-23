@@ -97,6 +97,16 @@ export class PostgresDialect implements Dialect {
           );
           parts.push(`DEFAULT ${defaultValue}`);
         }
+
+        // Foreign key reference
+        if (column.foreignKeyRef) {
+          const ref = column.foreignKeyRef;
+          let fkClause = `REFERENCES ${this.quoteIdentifier(ref.tableName)}(${this.quoteIdentifier(ref.columnName)})`;
+          if (column.onDeleteAction) {
+            fkClause += ` ON DELETE ${column.onDeleteAction.toUpperCase()}`;
+          }
+          parts.push(fkClause);
+        }
       }
 
       columnDefs.push(parts.join(" "));
