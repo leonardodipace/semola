@@ -8,13 +8,11 @@ const isObject = (value: unknown) => {
   return typeof value === "object" && value !== null;
 };
 
-const isDialect = (
-  value: unknown,
-): value is "sqlite" | "mysql" | "postgres" => {
+const isDialect = (value: unknown) => {
   return value === "sqlite" || value === "mysql" || value === "postgres";
 };
 
-const isTableLike = (value: unknown): value is Table => {
+const isTableLike = (value: unknown) => {
   if (!isObject(value)) {
     return false;
   }
@@ -84,7 +82,7 @@ const validateConfig = (value: unknown) => {
 
   return ok({
     orm: {
-      dialect,
+      dialect: dialect as "sqlite" | "mysql" | "postgres",
       url,
       schema: {
         path,
@@ -189,7 +187,7 @@ export const loadSchemaTables = async (schemaPath: string) => {
         `Schema export field ${key} is not a Table instance`,
       );
     }
-    record[key] = entry;
+    record[key] = entry as Table;
   }
 
   return ok(record);

@@ -306,30 +306,16 @@ const normalizeColumn = (build: (t: TableBuilder) => unknown) => {
   }
 
   const values = Object.values(tableBuilder.columns);
+  const [firstValue] = values;
 
-  if (values.length === 0) {
+  if (!firstValue || values.length !== 1) {
     return err(
       "ValidationError",
       "Expected exactly one column in migration operation",
     );
   }
 
-  if (values.length > 1) {
-    return err(
-      "ValidationError",
-      "Expected exactly one column in migration operation",
-    );
-  }
-
-  const column = values[0];
-  if (!column) {
-    return err(
-      "ValidationError",
-      "Expected exactly one column in migration operation",
-    );
-  }
-
-  return ok(column);
+  return ok(firstValue);
 };
 
 export class SchemaBuilder {
@@ -572,23 +558,14 @@ export class SchemaBuilder {
 
     if (typeof savepoint === "function") {
       const [savepointError] = await mightThrow(
-        Promise.resolve(
-          savepoint.call(this.sql, async (sp: Bun.SQL) => {
-            const [alterError] = await runAlterStatements(async (statement) => {
-              await sp.unsafe(statement);
-            });
-
-            if (alterError) {
-              return err("InternalServerError", alterError.message);
-            }
-
-            return ok(true);
-          }),
-        ),
+        savepoint.call(this.sql, async (sp: Bun.SQL) => {
+          const [alterError] = await runAlterStatements((s) => sp.unsafe(s));
+          if (alterError) throw new Error(alterError.message);
+        }),
       );
 
       if (savepointError) {
-        return err("InternalServerError", "Failed to create savepoint");
+        return err("InternalServerError", toMsg(savepointError));
       }
 
       return ok(true);
@@ -669,13 +646,14 @@ export class SchemaBuilder {
     if (indexError) {
       return err("ValidationError", indexError.message);
     }
-    if (this.dialect === "mysql" && !tableName) {
-      return err(
-        "ValidationError",
-        "tableName is required for DROP INDEX on mysql",
-      );
-    }
-    if (this.dialect === "mysql" && tableName) {
+
+    if (this.dialect === "mysql") {
+      if (!tableName) {
+        return err(
+          "ValidationError",
+          "tableName is required for DROP INDEX on mysql",
+        );
+      }
       const [tableError, safeTableName] = toSqlIdentifier(
         tableName,
         "table name",
@@ -683,14 +661,12 @@ export class SchemaBuilder {
       if (tableError) {
         return err("ValidationError", tableError.message);
       }
-
-      const [dropOnTableError] = await mightThrow(
+      const [dropError] = await mightThrow(
         this.execute(`DROP INDEX ${safeIndexName} ON ${safeTableName}`),
       );
-      if (dropOnTableError) {
-        return err("InternalServerError", toMsg(dropOnTableError));
+      if (dropError) {
+        return err("InternalServerError", toMsg(dropError));
       }
-
       return ok(true);
     }
 

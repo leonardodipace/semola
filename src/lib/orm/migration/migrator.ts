@@ -23,6 +23,9 @@ import {
 } from "./state.js";
 import type { MigrationCreateOptions, MigrationStatus } from "./types.js";
 
+const toMsg = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
 const slugify = (value: string) => {
   const lowered = value.trim().toLowerCase();
   const parts: string[] = [];
@@ -125,13 +128,16 @@ const runInTransaction = async (
   );
 
   if (error) {
-    return err(
-      "InternalServerError",
-      error instanceof Error ? error.message : String(error),
-    );
+    return err("InternalServerError", toMsg(error));
   }
 
   return ok(undefined);
+};
+
+const loadJournal = async (path: string) => {
+  const [error, data] = await readJournal(path);
+  if (error) return err("InternalServerError", toMsg(error));
+  return ok(data ?? { version: 1, entries: [] });
 };
 
 export const createMigration = async (
@@ -151,7 +157,7 @@ export const createMigration = async (
   if (migrationsDirError) {
     return err(
       "InternalServerError",
-      `Failed to create migration directories: ${migrationsDirError instanceof Error ? migrationsDirError.message : String(migrationsDirError)}`,
+      `Failed to create migrations directory: ${toMsg(migrationsDirError)}`,
     );
   }
 
@@ -161,7 +167,7 @@ export const createMigration = async (
   if (metaDirError) {
     return err(
       "InternalServerError",
-      `Failed to create migration directories: ${metaDirError instanceof Error ? metaDirError.message : String(metaDirError)}`,
+      `Failed to create meta directory: ${toMsg(metaDirError)}`,
     );
   }
 
@@ -177,18 +183,12 @@ export const createMigration = async (
   );
 
   // Read journal to find last snapshot
-  const [journalError, journalData] = await readJournal(
+  const [journalError, journal] = await loadJournal(
     resolve(metaDir, "_journal.json"),
   );
   if (journalError) {
-    return err(
-      "InternalServerError",
-      journalError instanceof Error
-        ? journalError.message
-        : String(journalError),
-    );
+    return err(journalError.type, journalError.message);
   }
-  const journal = journalData ?? { version: 1, entries: [] };
   const lastEntry = getLastEntry(journal);
 
   // Read last snapshot if it exists
@@ -198,12 +198,7 @@ export const createMigration = async (
       resolve(metaDir, `${lastEntry.version}_snapshot.json`),
     );
     if (snapshotError) {
-      return err(
-        "InternalServerError",
-        snapshotError instanceof Error
-          ? snapshotError.message
-          : String(snapshotError),
-      );
+      return err("InternalServerError", toMsg(snapshotError));
     }
     lastSnapshot = snapshot;
   }
@@ -240,12 +235,7 @@ export const createMigration = async (
   if (snapshotResult[0]) {
     // Rollback: delete migration file
     await mightThrow(unlink(filePath));
-    return err(
-      "InternalServerError",
-      snapshotResult[0] instanceof Error
-        ? snapshotResult[0].message
-        : String(snapshotResult[0]),
-    );
+    return err("InternalServerError", toMsg(snapshotResult[0]));
   }
 
   // Update journal with rollback on failure
@@ -263,12 +253,7 @@ export const createMigration = async (
     // Rollback: delete both snapshot and migration file
     await mightThrow(unlink(snapshotPath));
     await mightThrow(unlink(filePath));
-    return err(
-      "InternalServerError",
-      journalResult[0] instanceof Error
-        ? journalResult[0].message
-        : String(journalResult[0]),
-    );
+    return err("InternalServerError", toMsg(journalResult[0]));
   }
 
   return ok(filePath);
@@ -396,12 +381,7 @@ export const rollbackMigration = async (options: MigrationRuntimeOptions) => {
 
   const [migrationError, migration] = await loadMigration(file);
   if (migrationError) {
-    return err(
-      "InternalServerError",
-      migrationError instanceof Error
-        ? migrationError.message
-        : String(migrationError),
-    );
+    return err("InternalServerError", toMsg(migrationError));
   }
   if (!migration) {
     return err("InternalServerError", "Failed to load migration");
@@ -435,18 +415,12 @@ export const rollbackMigration = async (options: MigrationRuntimeOptions) => {
 
   // Update journal
   const metaDir = resolve(runtime.migrationsDir, "meta");
-  const [journalError, journalResult] = await readJournal(
+  const [journalError, journal] = await loadJournal(
     resolve(metaDir, "_journal.json"),
   );
   if (journalError) {
-    return err(
-      "InternalServerError",
-      journalError instanceof Error
-        ? journalError.message
-        : String(journalError),
-    );
+    return err(journalError.type, journalError.message);
   }
-  const journal = journalResult ?? { version: 1, entries: [] };
   const updatedJournal = removeLastJournalEntry(journal);
   const writeJournalResult = await writeJournal(
     resolve(metaDir, "_journal.json"),
@@ -455,11 +429,7 @@ export const rollbackMigration = async (options: MigrationRuntimeOptions) => {
   if (writeJournalResult[0]) {
     return err(
       "InternalServerError",
-      `Failed to update journal after rollback: ${
-        writeJournalResult[0] instanceof Error
-          ? writeJournalResult[0].message
-          : String(writeJournalResult[0])
-      }`,
+      `Failed to update journal after rollback: ${toMsg(writeJournalResult[0])}`,
     );
   }
 

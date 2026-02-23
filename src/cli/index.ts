@@ -7,6 +7,7 @@ import {
   createMigration,
   rollbackMigration,
 } from "../lib/orm/migration/migrator.js";
+import type { Table } from "../lib/orm/table/index.js";
 import { loadSchemaTables, loadSemolaConfig } from "./config.js";
 
 const printLine = (value: string) => {
@@ -23,6 +24,14 @@ const printUsage = () => {
   printLine("  bunx semola orm migrations create <name>");
   printLine("  bunx semola orm migrations apply");
   printLine("  bunx semola orm migrations rollback");
+};
+
+const withOrm = async (
+  orm: Orm<Record<string, Table>>,
+  fn: () => Promise<void>,
+) => {
+  await fn();
+  await orm.close();
 };
 
 const run = async () => {
@@ -61,76 +70,68 @@ const run = async () => {
     migrationTable: "semola_migrations",
   };
 
-  if (command === "create") {
-    const name = args[3];
+  await withOrm(orm, async () => {
+    if (command === "create") {
+      const name = args[3];
 
-    if (!name) {
-      printError("Missing migration name");
-      orm.close();
+      if (!name) {
+        printError("Missing migration name");
+        return;
+      }
+
+      const [createError, filePath] = await createMigration({
+        ...migrationOptions,
+        name,
+        tables,
+      });
+
+      if (createError) {
+        printError(createError.message);
+        return;
+      }
+
+      printLine(`Created migration: ${filePath}`);
       return;
     }
 
-    const [createError, filePath] = await createMigration({
-      ...migrationOptions,
-      name,
-      tables,
-    });
+    if (command === "apply") {
+      const [error, applied] = await applyMigrations(migrationOptions);
 
-    if (createError) {
-      printError(createError.message);
-      orm.close();
+      if (error) {
+        printError(error.message);
+        return;
+      }
+
+      if (applied?.length === 0) {
+        printLine("No pending migrations");
+        return;
+      }
+
+      printLine(`Applied migrations: ${applied?.join(", ")}`);
       return;
     }
 
-    printLine(`Created migration: ${filePath}`);
-    orm.close();
-    return;
-  }
+    if (command === "rollback") {
+      const [rollbackError, rolledBack] =
+        await rollbackMigration(migrationOptions);
 
-  if (command === "apply") {
-    const [error, applied] = await applyMigrations(migrationOptions);
+      if (rollbackError) {
+        printError(rollbackError.message);
+        return;
+      }
 
-    if (error) {
-      printError(error.message);
-      orm.close();
+      if (!rolledBack) {
+        printLine("No applied migrations to rollback");
+        return;
+      }
+
+      printLine(`Rolled back migration: ${rolledBack}`);
       return;
     }
 
-    if (applied?.length === 0) {
-      printLine("No pending migrations");
-      orm.close();
-      return;
-    }
-
-    printLine(`Applied migrations: ${applied?.join(", ")}`);
-    orm.close();
-    return;
-  }
-
-  if (command === "rollback") {
-    const [rollbackError, rolledBack] =
-      await rollbackMigration(migrationOptions);
-
-    if (rollbackError) {
-      printError(rollbackError.message);
-      orm.close();
-      return;
-    }
-
-    if (!rolledBack) {
-      printLine("No applied migrations to rollback");
-      orm.close();
-      return;
-    }
-
-    printLine(`Rolled back migration: ${rolledBack}`);
-    orm.close();
-    return;
-  }
-
-  printError(`Unknown command: ${command}`);
-  printUsage();
-  orm.close();
+    printError(`Unknown command: ${command}`);
+    printUsage();
+  });
 };
 
 void run();

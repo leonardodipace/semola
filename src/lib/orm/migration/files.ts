@@ -3,12 +3,13 @@ import { pathToFileURL } from "node:url";
 import { err, mightThrow, ok } from "../../errors/index.js";
 import type { MigrationDefinition, MigrationFile } from "./types.js";
 
+const toMsg = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
 const migrationRegex =
   /^(\d{14}(?:\d{6})?)_([a-zA-Z0-9_-]+)\.(ts|js|mts|mjs|cts|cjs)$/;
 
-const isMigrationDefinition = (
-  value: unknown,
-): value is MigrationDefinition => {
+const isMigrationDefinition = (value: unknown) => {
   if (typeof value !== "object" || value === null) {
     return false;
   }
@@ -26,10 +27,7 @@ export const scanMigrationFiles = async (dirPath: string) => {
     readdir(dirPath, { withFileTypes: true }),
   );
   if (error) {
-    return err(
-      "InternalServerError",
-      error instanceof Error ? error.message : String(error),
-    );
+    return err("InternalServerError", toMsg(error));
   }
   if (!entries) {
     return ok([]);
@@ -79,10 +77,7 @@ export const loadMigration = async (file: MigrationFile) => {
     import(`${moduleUrl}?cache=${Date.now()}`),
   );
   if (importError) {
-    return err(
-      "InternalServerError",
-      importError instanceof Error ? importError.message : String(importError),
-    );
+    return err("InternalServerError", toMsg(importError));
   }
 
   if (!mod) {
@@ -98,11 +93,13 @@ export const loadMigration = async (file: MigrationFile) => {
     );
   }
 
+  const def = definition as MigrationDefinition;
+
   return ok({
     version: file.version,
     name: file.name,
     filePath: file.filePath,
-    up: definition.up,
-    down: definition.down,
+    up: def.up,
+    down: def.down,
   });
 };

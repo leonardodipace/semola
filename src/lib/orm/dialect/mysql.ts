@@ -2,6 +2,7 @@ import { err, ok } from "../../errors/index.js";
 import type { Column } from "../column/index.js";
 import type { ColumnKind, ColumnMeta } from "../column/types.js";
 import type { Table } from "../table/index.js";
+import { buildColumnDef } from "./shared.js";
 import type { ColumnTypeMapping, Dialect } from "./types.js";
 
 // MySQL dialect implementation.
@@ -60,64 +61,21 @@ export class MysqlDialect implements Dialect {
     Columns extends Record<string, Column<ColumnKind, ColumnMeta>>,
   >(table: Table<Columns>) {
     const columnDefs: string[] = [];
-    const constraints: string[] = [];
 
     for (const [_key, column] of Object.entries(table.columns)) {
-      const parts: string[] = [this.quoteIdentifier(column.sqlName)];
-
-      // For primary keys, use BIGINT AUTO_INCREMENT (MySQL best practice)
-      if (column.meta.primaryKey && column.columnKind === "number") {
-        parts.push("BIGINT AUTO_INCREMENT PRIMARY KEY");
-      } else {
-        const sqlType = this.types[column.columnKind];
-        if (!sqlType) {
-          return err(
-            "UnsupportedType",
-            `Unsupported column type: ${column.columnKind}`,
-          );
-        }
-        parts.push(sqlType);
-
-        // Primary key (non-auto-incrementing)
-        if (column.meta.primaryKey) {
-          parts.push("PRIMARY KEY");
-        }
-
-        // Not null
-        if (column.meta.notNull && !column.meta.primaryKey) {
-          parts.push("NOT NULL");
-        }
-
-        // Unique
-        if (column.meta.unique && !column.meta.primaryKey) {
-          parts.push("UNIQUE");
-        }
-
-        if (column.meta.hasDefault && column.defaultValue !== undefined) {
-          const defaultValue = this.formatDefaultValue(
-            column.columnKind,
-            column.defaultValue,
-          );
-          parts.push(`DEFAULT ${defaultValue}`);
-        }
-
-        // Foreign key reference
-        if (column.foreignKeyRef) {
-          const ref = column.foreignKeyRef;
-          let fkClause = `REFERENCES ${this.quoteIdentifier(ref.tableName)}(${this.quoteIdentifier(ref.columnName)})`;
-          if (column.onDeleteAction) {
-            fkClause += ` ON DELETE ${column.onDeleteAction.toUpperCase()}`;
-          }
-          parts.push(fkClause);
-        }
-      }
-
-      columnDefs.push(parts.join(" "));
+      const [error, def] = buildColumnDef(
+        column,
+        this.types,
+        (s) => this.quoteIdentifier(s),
+        (kind, value) => this.formatDefaultValue(kind, value),
+        "BIGINT AUTO_INCREMENT",
+      );
+      if (error) return err(error.type, error.message);
+      columnDefs.push(def);
     }
 
-    const allDefs = [...columnDefs, ...constraints].join(", ");
     return ok(
-      `CREATE TABLE IF NOT EXISTS ${this.quoteIdentifier(table.sqlName)} (${allDefs})`,
+      `CREATE TABLE IF NOT EXISTS ${this.quoteIdentifier(table.sqlName)} (${columnDefs.join(", ")})`,
     );
   }
 

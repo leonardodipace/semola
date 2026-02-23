@@ -2,6 +2,7 @@ import { err, ok } from "../../errors/index.js";
 import type { Column } from "../column/index.js";
 import type { ColumnKind, ColumnMeta } from "../column/types.js";
 import type { Table } from "../table/index.js";
+import { buildColumnDef } from "./shared.js";
 import type { ColumnTypeMapping, Dialect } from "./types.js";
 
 // SQLite dialect implementation.
@@ -56,60 +57,21 @@ export class SqliteDialect implements Dialect {
     Columns extends Record<string, Column<ColumnKind, ColumnMeta>>,
   >(table: Table<Columns>) {
     const columnDefs: string[] = [];
-    const constraints: string[] = [];
 
     for (const [_key, column] of Object.entries(table.columns)) {
-      const sqlType = this.types[column.columnKind];
-      if (!sqlType) {
-        return err(
-          "UnsupportedType",
-          `Unsupported column type: ${column.columnKind}`,
-        );
-      }
-      const parts: string[] = [this.quoteIdentifier(column.sqlName), sqlType];
-
-      // Primary key
-      if (column.meta.primaryKey) {
-        parts.push("PRIMARY KEY");
-      }
-
-      // Not null
-      if (column.meta.notNull && !column.meta.primaryKey) {
-        // PRIMARY KEY implies NOT NULL in SQLite
-        parts.push("NOT NULL");
-      }
-
-      // Unique
-      if (column.meta.unique && !column.meta.primaryKey) {
-        // PRIMARY KEY implies UNIQUE in SQLite
-        parts.push("UNIQUE");
-      }
-
-      // Default value (if hasDefault is true)
-      if (column.meta.hasDefault && column.defaultValue !== undefined) {
-        const defaultValue = this.formatDefaultValue(
-          column.columnKind,
-          column.defaultValue,
-        );
-        parts.push(`DEFAULT ${defaultValue}`);
-      }
-
-      // Foreign key reference
-      if (column.foreignKeyRef) {
-        const ref = column.foreignKeyRef;
-        let fkClause = `REFERENCES ${this.quoteIdentifier(ref.tableName)}(${this.quoteIdentifier(ref.columnName)})`;
-        if (column.onDeleteAction) {
-          fkClause += ` ON DELETE ${column.onDeleteAction.toUpperCase()}`;
-        }
-        parts.push(fkClause);
-      }
-
-      columnDefs.push(parts.join(" "));
+      const [error, def] = buildColumnDef(
+        column,
+        this.types,
+        (s) => this.quoteIdentifier(s),
+        (kind, value) => this.formatDefaultValue(kind, value),
+        null,
+      );
+      if (error) return err(error.type, error.message);
+      columnDefs.push(def);
     }
 
-    const allDefs = [...columnDefs, ...constraints].join(", ");
     return ok(
-      `CREATE TABLE IF NOT EXISTS ${this.quoteIdentifier(table.sqlName)} (${allDefs})`,
+      `CREATE TABLE IF NOT EXISTS ${this.quoteIdentifier(table.sqlName)} (${columnDefs.join(", ")})`,
     );
   }
 

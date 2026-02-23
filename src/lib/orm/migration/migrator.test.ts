@@ -568,7 +568,7 @@ describe("Migration runtime functions", () => {
 
     // Verify error is returned
     expect(error).not.toBeNull();
-    expect(error?.message).toContain("Failed to create migration directories");
+    expect(error?.message).toContain("Failed to create meta directory");
 
     // Verify no migration file was created (compensating rollback)
     expect(filePath).toBeNull();
@@ -663,7 +663,7 @@ describe("Migration runtime functions", () => {
     // Verify error is returned
     expect(error).not.toBeNull();
     expect(error?.type).toBe("InternalServerError");
-    expect(error?.message).toContain("Failed to create migration directories");
+    expect(error?.message).toContain("Failed to create migrations directory");
 
     // Verify no file path returned
     expect(filePath).toBeNull();

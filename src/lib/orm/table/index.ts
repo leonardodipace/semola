@@ -53,6 +53,9 @@ type AnyColumnFilter =
 
 type AnyWhereClause = Record<string, AnyColumnFilter>;
 
+const toErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
 export class Table<
   Columns extends Record<string, Column<ColumnKind, ColumnMeta>> = Record<
     string,
@@ -106,14 +109,8 @@ export class TableClient<T extends Table> {
   // Check if the actual database connection is MySQL (not just the dialect setting)
   // This allows testing with SQLite + dialect="mysql" without requiring MySQL transaction syntax
   private isActualMysql() {
-    // Check URL patterns to detect actual database type
-    // SQLite uses :memory: or file paths (ending in .db, .sqlite, or no protocol)
-    // MySQL uses mysql:// protocol
-    // Postgres uses postgres:// or postgresql:// protocol
-
     const url = this.connectionUrl.toLowerCase();
 
-    // If it's :memory: or a file path, it's SQLite
     if (
       url === ":memory:" ||
       url.endsWith(".db") ||
@@ -123,47 +120,14 @@ export class TableClient<T extends Table> {
       return false;
     }
 
-    // If it starts with mysql://, it's real MySQL
-    if (url.startsWith("mysql://")) {
-      return true;
-    }
-
-    // Otherwise, not MySQL
-    return false;
+    return url.startsWith("mysql://");
   }
 
   private validateColumnName(key: string) {
-    const columnNames = Object.keys(this.table.columns);
-
-    if (!columnNames.includes(key)) {
+    if (!Object.keys(this.table.columns).includes(key)) {
       return err("ValidationError", `Invalid column: ${key}`);
     }
-
     return ok(undefined);
-  }
-
-  private toErrorMessage(error: unknown) {
-    if (error instanceof Error) {
-      return error.message;
-    }
-
-    return String(error);
-  }
-
-  private normalizeTupleError(
-    error: unknown,
-    fallbackType = "InternalServerError",
-  ) {
-    if (typeof error === "object" && error !== null) {
-      const type = Reflect.get(error, "type");
-      const message = Reflect.get(error, "message");
-
-      if (typeof type === "string" && typeof message === "string") {
-        return { type, message };
-      }
-    }
-
-    return { type: fallbackType, message: this.toErrorMessage(error) };
   }
 
   private normalizeDateValue(value: unknown) {
@@ -236,29 +200,22 @@ export class TableClient<T extends Table> {
     if (value instanceof Date) {
       return value.getTime();
     }
-
     return value;
   }
 
   private extractUniqueSelector(where: WhereClause<T>, operation: string) {
     const whereEntries: [string, unknown][] = Object.entries(where);
+    const [firstEntry] = whereEntries;
 
-    if (whereEntries.length !== 1) {
+    if (!firstEntry || whereEntries.length !== 1) {
       return err(
         "ValidationError",
         `${operation} requires a unique selector with exactly one column`,
       );
     }
 
-    const [entry] = whereEntries;
-    if (!entry) {
-      return err(
-        "ValidationError",
-        `${operation} requires a unique selector with exactly one column`,
-      );
-    }
+    const [key, rawValue] = firstEntry;
 
-    const [key, rawValue] = entry;
     const [nameError] = this.validateColumnName(key);
     if (nameError) {
       return err(nameError.type, nameError.message);
@@ -276,13 +233,12 @@ export class TableClient<T extends Table> {
       );
     }
 
-    let value = rawValue;
+    let value: unknown = rawValue;
 
     if (this.isFilterObject(rawValue)) {
-      const filters = rawValue;
-      const filterKeys = Object.keys(filters);
+      const filters = rawValue as Record<string, unknown>;
 
-      if (filterKeys.length !== 1 || !("equals" in filters)) {
+      if (Object.keys(filters).length !== 1 || !("equals" in filters)) {
         return err(
           "ValidationError",
           `${operation} unique selector must use a direct value or { equals: value }`,
@@ -316,11 +272,10 @@ export class TableClient<T extends Table> {
         return { key, sqlName: column.sqlName, kind: column.columnKind };
       }
     }
-
     return null;
   }
 
-  private isFilterObject(value: unknown): value is Record<string, unknown> {
+  private isFilterObject(value: unknown) {
     return (
       typeof value === "object" &&
       value !== null &&
@@ -346,7 +301,6 @@ export class TableClient<T extends Table> {
     }
 
     const column = this.table.columns[key];
-
     if (!column) {
       return err("ValidationError", `Invalid column: ${key}`);
     }
@@ -355,12 +309,10 @@ export class TableClient<T extends Table> {
       return ok(this.sql`${this.sql(sqlColumnName)} IS NULL`);
     }
 
-    // Check if value is a filter object (has operator properties)
     if (this.isFilterObject(value)) {
-      const filters = value;
+      const filters = value as Record<string, unknown>;
       const conditions: unknown[] = [];
 
-      // Equality operator
       if ("equals" in filters) {
         const equalsValue = this.normalizeDateForStorage(
           column,
@@ -369,7 +321,6 @@ export class TableClient<T extends Table> {
         conditions.push(this.sql`${this.sql(sqlColumnName)} = ${equalsValue}`);
       }
 
-      // String operators (case-insensitive, works across all databases)
       if ("contains" in filters && typeof filters.contains === "string") {
         const searchValue = this.escapeLikePattern(filters.contains);
         conditions.push(
@@ -378,7 +329,6 @@ export class TableClient<T extends Table> {
         );
       }
 
-      // Number/Date comparison operators
       if ("gt" in filters) {
         const gtValue = this.normalizeDateForStorage(column, filters.gt);
         conditions.push(this.sql`${this.sql(sqlColumnName)} > ${gtValue}`);
@@ -396,7 +346,6 @@ export class TableClient<T extends Table> {
         conditions.push(this.sql`${this.sql(sqlColumnName)} <= ${lteValue}`);
       }
 
-      // Handle 'in' operator
       if ("in" in filters && Array.isArray(filters.in)) {
         const inValues = filters.in.map((entry) =>
           this.normalizeDateForStorage(column, entry),
@@ -414,7 +363,6 @@ export class TableClient<T extends Table> {
         }
       }
 
-      // Combine multiple operators with AND
       if (conditions.length === 0) {
         return err(
           "ValidationError",
@@ -422,18 +370,13 @@ export class TableClient<T extends Table> {
         );
       }
 
-      const [firstCondition] = conditions;
-
-      let combined = firstCondition;
-
-      for (let i = 1; i < conditions.length; i++) {
-        combined = this.sql`${combined} AND ${conditions[i]}`;
-      }
+      const combined = conditions.reduce(
+        (acc, cond) => this.sql`${acc} AND ${cond}`,
+      );
 
       return ok(combined);
     }
 
-    // Direct equality
     const normalizedValue = this.normalizeDateForStorage(column, value);
     return ok(this.sql`${this.sql(sqlColumnName)} = ${normalizedValue}`);
   }
@@ -449,7 +392,6 @@ export class TableClient<T extends Table> {
       return ok(null);
     }
 
-    // Validate all column names first
     for (const [key] of whereEntries) {
       const [nameError] = this.validateColumnName(key);
       if (nameError) {
@@ -457,44 +399,23 @@ export class TableClient<T extends Table> {
       }
     }
 
-    // Build the first condition
-    const [firstEntry] = whereEntries;
-
-    if (!firstEntry) {
-      return ok(null);
-    }
-
-    const [firstKey, firstValue] = firstEntry;
-
-    const [firstConditionError, firstCondition] = this.buildCondition(
-      firstKey,
-      firstValue,
-    );
-    if (firstConditionError || !firstCondition) {
-      return err(
-        firstConditionError?.type ?? "ValidationError",
-        firstConditionError?.message ?? `Invalid column: ${firstKey}`,
-      );
-    }
-
-    let whereClause = firstCondition;
-
-    // Add remaining conditions with AND
-    for (let i = 1; i < whereEntries.length; i++) {
-      const [key, value] = whereEntries[i] ?? [];
-      if (!key) continue;
-      const [conditionError, condition] = this.buildCondition(key, value);
-      if (conditionError || !condition) {
+    const conditions: unknown[] = [];
+    for (const [key, value] of whereEntries) {
+      const [condError, cond] = this.buildCondition(key, value);
+      if (condError || !cond) {
         return err(
-          conditionError?.type ?? "ValidationError",
-          conditionError?.message ?? `Invalid column: ${key}`,
+          condError?.type ?? "ValidationError",
+          condError?.message ?? `Invalid column: ${key}`,
         );
       }
-
-      whereClause = this.sql`${whereClause} AND ${condition}`;
+      conditions.push(cond);
     }
 
-    return ok(whereClause);
+    const combined = conditions.reduce(
+      (acc, cond) => this.sql`${acc} AND ${cond}`,
+    );
+
+    return ok(combined);
   }
 
   private buildPagination(skip: number, take: number | undefined) {
@@ -517,7 +438,6 @@ export class TableClient<T extends Table> {
         return this.sql`LIMIT ALL OFFSET ${skip}`;
       }
       if (this.dialect.name === "mysql") {
-        // For MySQL without LIMIT, use max uint64 as numeric literal
         return this.sql`LIMIT 18446744073709551615 OFFSET ${skip}`;
       }
     }
@@ -557,7 +477,6 @@ export class TableClient<T extends Table> {
 
         if (typeof value === "string") {
           const parsed = Number(value);
-
           if (!Number.isNaN(parsed)) {
             row[sqlColumnName] = parsed;
           }
@@ -572,13 +491,24 @@ export class TableClient<T extends Table> {
       for (const [key, column] of Object.entries(this.table.columns)) {
         const sqlColumnName = column.sqlName;
 
-        // If SQL name differs from TS key, map it
         if (sqlColumnName !== key && sqlColumnName in row) {
           row[key] = row[sqlColumnName];
           delete row[sqlColumnName];
         }
       }
     }
+  }
+
+  // Fetch related records by a set of FK values using a concrete (non-generic) client.
+  // Typed concretely to break the circular type inference between findMany ↔ loadIncludedRelations.
+  private async fetchRelated(
+    client: TableClient<Table>,
+    where: AnyWhereClause,
+  ): Promise<
+    | readonly [{ type: string; message: string }, null]
+    | readonly [null, Record<string, unknown>[]]
+  > {
+    return client.findMany({ where });
   }
 
   private async loadIncludedRelations<
@@ -592,7 +522,6 @@ export class TableClient<T extends Table> {
       return ok(rows);
     }
 
-    // Iterate over includes and check if relation exists in table
     for (const [relationName, shouldInclude] of Object.entries(include)) {
       if (!shouldInclude) continue;
 
@@ -614,7 +543,6 @@ export class TableClient<T extends Table> {
 
       if (relation.type === "one") {
         // one() relation: parent has FK pointing to child
-        // Use TypeScript key directly since rows are already mapped
         const fkKey = relation.fkColumn;
 
         const relatedPk = relatedClient.getPrimaryKeyColumn();
@@ -632,22 +560,16 @@ export class TableClient<T extends Table> {
         }
 
         const fkValues = this.collectRelationValues(rows, fkKey);
-
         if (fkValues.length === 0) continue;
 
-        const oneWhere = {
-          [relatedPk.key]: { in: fkValues },
-        } as AnyWhereClause;
-
-        const [relatedError, relatedRecords] = await relatedClient.findMany({
-          where: oneWhere,
-        });
+        const [relatedError, relatedRecords] = await this.fetchRelated(
+          relatedClient,
+          { [relatedPk.key]: { in: fkValues } } as AnyWhereClause,
+        );
         if (relatedError) {
-          const normalizedError = this.normalizeTupleError(relatedError);
-          return err(normalizedError.type, normalizedError.message);
+          return err(relatedError.type, relatedError.message);
         }
 
-        // Build map for quick lookup
         const relatedMap = new Map<unknown, unknown>();
         for (const record of relatedRecords) {
           if (typeof record !== "object" || record === null) continue;
@@ -656,7 +578,6 @@ export class TableClient<T extends Table> {
           relatedMap.set(this.normalizeRelationKey(value), record);
         }
 
-        // Attach loaded relations to rows
         for (const row of rows) {
           const fkValue = row[fkKey];
           row[relationName] =
@@ -666,7 +587,6 @@ export class TableClient<T extends Table> {
         }
       } else if (relation.type === "many") {
         // many() relation: child has FK pointing to parent
-        // Use TypeScript key directly since records are already mapped
         const fkKey = relation.fkColumn;
 
         const parentPk = this.getPrimaryKeyColumn();
@@ -684,24 +604,17 @@ export class TableClient<T extends Table> {
         }
 
         const parentIds = this.collectRelationValues(rows, parentPk.key);
-
         if (parentIds.length === 0) continue;
 
-        const manyWhere = {
-          [relation.fkColumn]: { in: parentIds },
-        } as AnyWhereClause;
-
-        const [relatedError, relatedRecords] = await relatedClient.findMany({
-          where: manyWhere,
-        });
+        const [relatedError, relatedRecords] = await this.fetchRelated(
+          relatedClient,
+          { [relation.fkColumn]: { in: parentIds } } as AnyWhereClause,
+        );
         if (relatedError) {
-          const normalizedError = this.normalizeTupleError(relatedError);
-          return err(normalizedError.type, normalizedError.message);
+          return err(relatedError.type, relatedError.message);
         }
 
-        // Group related records by their FK value
         const relatedMap = new Map<unknown, unknown[]>();
-
         for (const record of relatedRecords) {
           const fkValue = Reflect.get(record, fkKey);
           const normalizedFkValue = this.normalizeRelationKey(fkValue);
@@ -710,12 +623,9 @@ export class TableClient<T extends Table> {
             relatedMap.set(normalizedFkValue, []);
           }
 
-          const match = relatedMap.get(normalizedFkValue);
-
-          if (match) match.push(record);
+          relatedMap.get(normalizedFkValue)?.push(record);
         }
 
-        // Attach loaded relations to rows
         for (const row of rows) {
           const parentId = row[parentPk.key];
           row[relationName] =
@@ -761,7 +671,7 @@ export class TableClient<T extends Table> {
     if (queryError || !rows) {
       return err(
         "InternalServerError",
-        `Failed to fetch rows: ${this.toErrorMessage(queryError)}`,
+        `Failed to fetch rows: ${toErrorMessage(queryError)}`,
       );
     }
 
@@ -810,7 +720,7 @@ export class TableClient<T extends Table> {
     if (queryError || !queryRows) {
       return err(
         "InternalServerError",
-        `Failed to fetch row: ${this.toErrorMessage(queryError)}`,
+        `Failed to fetch row: ${toErrorMessage(queryError)}`,
       );
     }
 
@@ -867,7 +777,7 @@ export class TableClient<T extends Table> {
     if (queryError || !results) {
       return err(
         "InternalServerError",
-        `Failed to fetch row: ${this.toErrorMessage(queryError)}`,
+        `Failed to fetch row: ${toErrorMessage(queryError)}`,
       );
     }
 
@@ -911,7 +821,7 @@ export class TableClient<T extends Table> {
     if (queryError || !rows) {
       return err(
         "InternalServerError",
-        `Failed to count rows: ${this.toErrorMessage(queryError)}`,
+        `Failed to count rows: ${toErrorMessage(queryError)}`,
       );
     }
 
@@ -935,8 +845,7 @@ export class TableClient<T extends Table> {
         return err("ValidationError", `Invalid column: ${key}`);
       }
 
-      const sqlColumnName = column.sqlName;
-      sqlData[sqlColumnName] = this.normalizeDateForStorage(column, value);
+      sqlData[column.sqlName] = this.normalizeDateForStorage(column, value);
     }
 
     let results: InferTableType<T>[];
@@ -949,10 +858,11 @@ export class TableClient<T extends Table> {
       if (insertError) {
         return err(
           "InternalServerError",
-          `Failed to create row: ${this.toErrorMessage(insertError)}`,
+          `Failed to create row: ${toErrorMessage(insertError)}`,
         );
       }
-      results = [];
+
+      results = await this.readLastInsertedRows(data, 1);
     } else {
       const [insertError, inserted] = await mightThrow(
         this.sql<
@@ -962,82 +872,10 @@ export class TableClient<T extends Table> {
       if (insertError || !inserted) {
         return err(
           "InternalServerError",
-          `Failed to create row: ${this.toErrorMessage(insertError)}`,
+          `Failed to create row: ${toErrorMessage(insertError)}`,
         );
       }
       results = inserted;
-    }
-
-    if (this.dialect.name === "mysql") {
-      const primaryKey = this.getPrimaryKeyColumn();
-
-      if (primaryKey && primaryKey.kind !== "boolean") {
-        if (this.isActualMysql()) {
-          const [readError, readResults] = await mightThrow(
-            this.sql<InferTableType<T>[]>`
-              SELECT * FROM ${this.sql(this.table.sqlName)}
-              WHERE ${this.sql(primaryKey.sqlName)} = LAST_INSERT_ID()
-              LIMIT 1
-            `,
-          );
-          if (readError || !readResults) {
-            return err(
-              "InternalServerError",
-              `Failed to load created row: ${this.toErrorMessage(readError)}`,
-            );
-          }
-          results = readResults;
-        } else {
-          const [readError, readResults] = await mightThrow(
-            this.sql<InferTableType<T>[]>`
-              SELECT * FROM ${this.sql(this.table.sqlName)}
-              WHERE ${this.sql(primaryKey.sqlName)} = last_insert_rowid()
-              LIMIT 1
-            `,
-          );
-          if (readError || !readResults) {
-            return err(
-              "InternalServerError",
-              `Failed to load created row: ${this.toErrorMessage(readError)}`,
-            );
-          }
-          results = readResults;
-        }
-      }
-
-      if (results.length === 0) {
-        for (const [key, column] of Object.entries(this.table.columns)) {
-          if (!column.meta.primaryKey && !column.meta.unique) {
-            continue;
-          }
-
-          const value = Reflect.get(data, key);
-          if (value === undefined) {
-            continue;
-          }
-
-          const normalizedValue = this.normalizeDateForStorage(column, value);
-          const [readError, readResults] = await mightThrow(
-            this.sql<InferTableType<T>[]>`
-              SELECT * FROM ${this.sql(this.table.sqlName)}
-              WHERE ${this.sql(column.sqlName)} = ${normalizedValue}
-              LIMIT 1
-            `,
-          );
-          if (readError || !readResults) {
-            return err(
-              "InternalServerError",
-              `Failed to load created row: ${this.toErrorMessage(readError)}`,
-            );
-          }
-
-          results = readResults;
-
-          if (results.length > 0) {
-            break;
-          }
-        }
-      }
     }
 
     this.normalizeRows(results);
@@ -1055,7 +893,6 @@ export class TableClient<T extends Table> {
       return ok([] as InferTableType<T>[]);
     }
 
-    // Build validated data array
     const sqlDataArray: Record<string, unknown>[] = [];
 
     for (const item of data) {
@@ -1067,13 +904,11 @@ export class TableClient<T extends Table> {
 
       for (const [key, value] of Object.entries(item)) {
         const [nameError] = this.validateColumnName(key);
-
         if (nameError) {
           return err(nameError.type, nameError.message);
         }
 
         const column = this.table.columns[key];
-
         if (!column) {
           return err("ValidationError", `Invalid column: ${key}`);
         }
@@ -1087,7 +922,6 @@ export class TableClient<T extends Table> {
     let results: InferTableType<T>[] = [];
 
     if (this.dialect.name === "mysql") {
-      // MySQL doesn't support RETURNING, so insert then query
       const [insertError] = await mightThrow(
         this
           .sql`INSERT INTO ${this.sql(this.table.sqlName)} ${this.sql(sqlDataArray)}`,
@@ -1096,14 +930,12 @@ export class TableClient<T extends Table> {
       if (insertError) {
         return err(
           "InternalServerError",
-          `Failed to create rows: ${this.toErrorMessage(insertError)}`,
+          `Failed to create rows: ${toErrorMessage(insertError)}`,
         );
       }
 
-      // Query inserted rows by primary key range
       results = await this.queryInsertedRows(sqlDataArray.length);
     } else {
-      // SQLite/Postgres: Use bulk insert with RETURNING
       const [insertError, inserted] = await mightThrow(
         this.sql<InferTableType<T>[]>`
           INSERT INTO ${this.sql(this.table.sqlName)} ${this.sql(sqlDataArray)}
@@ -1114,7 +946,7 @@ export class TableClient<T extends Table> {
       if (insertError || !inserted) {
         return err(
           "InternalServerError",
-          `Failed to create rows: ${this.toErrorMessage(insertError)}`,
+          `Failed to create rows: ${toErrorMessage(insertError)}`,
         );
       }
 
@@ -1125,6 +957,7 @@ export class TableClient<T extends Table> {
     return ok(results);
   }
 
+  // Read the last N inserted rows by primary key range (MySQL workaround for RETURNING)
   private async queryInsertedRows(count: number) {
     const primaryKey = this.getPrimaryKeyColumn();
 
@@ -1141,7 +974,6 @@ export class TableClient<T extends Table> {
       startId = Number(insertId) - count + 1;
       endId = Number(insertId);
     } else {
-      // SQLite with MySQL dialect
       const [{ lastId }] = await this.sql`SELECT last_insert_rowid() as lastId`;
       startId = Number(lastId) - count + 1;
       endId = Number(lastId);
@@ -1151,12 +983,67 @@ export class TableClient<T extends Table> {
       return [] as InferTableType<T>[];
     }
 
-    const rows = await this.sql<InferTableType<T>[]>`
+    return this.sql<InferTableType<T>[]>`
       SELECT * FROM ${this.sql(this.table.sqlName)}
       WHERE ${this.sql(primaryKey.sqlName)} BETWEEN ${startId} AND ${endId}
     `;
+  }
 
-    return rows;
+  // Read the just-inserted row by last insert ID, falling back to unique column lookup.
+  // MySQL workaround since INSERT doesn't support RETURNING.
+  private async readLastInsertedRows(
+    data: CreateInput<T>,
+    _count: number,
+  ): Promise<InferTableType<T>[]> {
+    const primaryKey = this.getPrimaryKeyColumn();
+
+    if (primaryKey && primaryKey.kind !== "boolean") {
+      const idFn = this.isActualMysql()
+        ? this.sql`SELECT LAST_INSERT_ID() as id`
+        : this.sql`SELECT last_insert_rowid() as id`;
+
+      const [idError, idRows] = await mightThrow(idFn);
+      if (!idError && idRows?.[0]) {
+        const lastId = Number(idRows[0].id);
+        const [readError, readResults] = await mightThrow(
+          this.sql<InferTableType<T>[]>`
+            SELECT * FROM ${this.sql(this.table.sqlName)}
+            WHERE ${this.sql(primaryKey.sqlName)} = ${lastId}
+            LIMIT 1
+          `,
+        );
+        if (!readError && readResults?.length) {
+          return readResults;
+        }
+      }
+    }
+
+    // Fallback: search by a unique/pk column present in the input data
+    for (const [key, column] of Object.entries(this.table.columns)) {
+      if (!column.meta.primaryKey && !column.meta.unique) {
+        continue;
+      }
+
+      const value = Reflect.get(data, key);
+      if (value === undefined) {
+        continue;
+      }
+
+      const normalizedValue = this.normalizeDateForStorage(column, value);
+      const [readError, readResults] = await mightThrow(
+        this.sql<InferTableType<T>[]>`
+          SELECT * FROM ${this.sql(this.table.sqlName)}
+          WHERE ${this.sql(column.sqlName)} = ${normalizedValue}
+          LIMIT 1
+        `,
+      );
+
+      if (!readError && readResults?.length) {
+        return readResults;
+      }
+    }
+
+    return [];
   }
 
   public async upsert(options: UpsertOptions<T>) {
@@ -1177,6 +1064,29 @@ export class TableClient<T extends Table> {
     }
 
     return this.create(options.create);
+  }
+
+  private async readRowByPk(pkSqlName: string, pkValue: unknown) {
+    return mightThrow(
+      this.sql<InferTableType<T>[]>`
+        SELECT * FROM ${this.sql(this.table.sqlName)}
+        WHERE ${this.sql(pkSqlName)} = ${pkValue}
+        LIMIT 1
+      `,
+    );
+  }
+
+  private async readRowBySelector(
+    selectorSqlName: string,
+    selectorValue: unknown,
+  ) {
+    return mightThrow(
+      this.sql<InferTableType<T>[]>`
+        SELECT * FROM ${this.sql(this.table.sqlName)}
+        WHERE ${this.sql(selectorSqlName)} = ${selectorValue}
+        LIMIT 1
+      `,
+    );
   }
 
   public async update(options: UpdateOptions<T>) {
@@ -1226,14 +1136,13 @@ export class TableClient<T extends Table> {
         return err("ValidationError", `Invalid column: ${key}`);
       }
 
-      const sqlColumnName = column.sqlName;
-      sqlData[sqlColumnName] = this.normalizeDateForStorage(column, value);
+      sqlData[column.sqlName] = this.normalizeDateForStorage(column, value);
     }
 
-    const hasReturning = this.dialect.name !== "mysql";
     let results: InferTableType<T>[] = [];
 
-    if (hasReturning) {
+    if (this.dialect.name !== "mysql") {
+      // RETURNING path (SQLite, Postgres)
       const [updateError, updateResults] = await mightThrow(
         this.sql<InferTableType<T>[]>`
           UPDATE ${this.sql(this.table.sqlName)}
@@ -1245,11 +1154,12 @@ export class TableClient<T extends Table> {
       if (updateError || !updateResults) {
         return err(
           "InternalServerError",
-          `Failed to update row: ${this.toErrorMessage(updateError)}`,
+          `Failed to update row: ${toErrorMessage(updateError)}`,
         );
       }
       results = updateResults;
     } else if (this.isActualMysql()) {
+      // Real MySQL: SELECT FOR UPDATE + UPDATE + re-read by PK
       const [txError, txResult] = await mightThrow(
         this.sql.begin(async (tx) => {
           const existingRows = await tx<InferTableType<T>[]>`
@@ -1260,8 +1170,7 @@ export class TableClient<T extends Table> {
 
           const [existing] = existingRows;
           if (!existing) {
-            const empty: InferTableType<T>[] = [];
-            return empty;
+            return [] as InferTableType<T>[];
           }
 
           await tx`
@@ -1273,7 +1182,7 @@ export class TableClient<T extends Table> {
           const primaryKey = this.getPrimaryKeyColumn();
           if (primaryKey && primaryKey.kind !== "boolean") {
             const pkValue = existing[primaryKey.sqlName];
-            return await tx<InferTableType<T>[]>`
+            return tx<InferTableType<T>[]>`
               SELECT * FROM ${this.sql(this.table.sqlName)}
               WHERE ${this.sql(primaryKey.sqlName)} = ${pkValue}
               LIMIT 1
@@ -1289,7 +1198,7 @@ export class TableClient<T extends Table> {
                 )
               : uniqueSelector.value;
 
-          return await tx<InferTableType<T>[]>`
+          return tx<InferTableType<T>[]>`
             SELECT * FROM ${this.sql(this.table.sqlName)}
             WHERE ${this.sql(selectorColumn.sqlName)} = ${updatedSelectorValue}
             LIMIT 1
@@ -1299,12 +1208,13 @@ export class TableClient<T extends Table> {
       if (txError || !txResult) {
         return err(
           "InternalServerError",
-          `Failed to update row: ${this.toErrorMessage(txError)}`,
+          `Failed to update row: ${toErrorMessage(txError)}`,
         );
       }
-
       results = txResult;
     } else {
+      // MySQL dialect with SQLite connection (test environment)
+      // SELECT then UPDATE then re-read
       const [existingError, existingRows] = await mightThrow(
         this.sql<InferTableType<T>[]>`
           SELECT * FROM ${this.sql(this.table.sqlName)}
@@ -1315,7 +1225,7 @@ export class TableClient<T extends Table> {
       if (existingError || !existingRows) {
         return err(
           "InternalServerError",
-          `Failed to load row for update: ${this.toErrorMessage(existingError)}`,
+          `Failed to load row for update: ${toErrorMessage(existingError)}`,
         );
       }
 
@@ -1334,24 +1244,21 @@ export class TableClient<T extends Table> {
       if (writeError) {
         return err(
           "InternalServerError",
-          `Failed to update row: ${this.toErrorMessage(writeError)}`,
+          `Failed to update row: ${toErrorMessage(writeError)}`,
         );
       }
 
       const primaryKey = this.getPrimaryKeyColumn();
       if (primaryKey && primaryKey.kind !== "boolean") {
         const pkValue = existing[primaryKey.sqlName];
-        const [readError, readResults] = await mightThrow(
-          this.sql<InferTableType<T>[]>`
-            SELECT * FROM ${this.sql(this.table.sqlName)}
-            WHERE ${this.sql(primaryKey.sqlName)} = ${pkValue}
-            LIMIT 1
-          `,
+        const [readError, readResults] = await this.readRowByPk(
+          primaryKey.sqlName,
+          pkValue,
         );
         if (readError || !readResults) {
           return err(
             "InternalServerError",
-            `Failed to load updated row: ${this.toErrorMessage(readError)}`,
+            `Failed to load updated row: ${toErrorMessage(readError)}`,
           );
         }
         results = readResults;
@@ -1365,17 +1272,14 @@ export class TableClient<T extends Table> {
               )
             : uniqueSelector.value;
 
-        const [readError, readResults] = await mightThrow(
-          this.sql<InferTableType<T>[]>`
-            SELECT * FROM ${this.sql(this.table.sqlName)}
-            WHERE ${this.sql(selectorColumn.sqlName)} = ${updatedSelectorValue}
-            LIMIT 1
-          `,
+        const [readError, readResults] = await this.readRowBySelector(
+          selectorColumn.sqlName,
+          updatedSelectorValue,
         );
         if (readError || !readResults) {
           return err(
             "InternalServerError",
-            `Failed to load updated row: ${this.toErrorMessage(readError)}`,
+            `Failed to load updated row: ${toErrorMessage(readError)}`,
           );
         }
         results = readResults;
@@ -1423,10 +1327,10 @@ export class TableClient<T extends Table> {
       );
     }
 
-    const hasReturning = this.dialect.name !== "mysql";
     let results: InferTableType<T>[] = [];
 
-    if (hasReturning) {
+    if (this.dialect.name !== "mysql") {
+      // RETURNING path (SQLite, Postgres)
       const [deleteError, deletedRows] = await mightThrow(
         this.sql<InferTableType<T>[]>`
           DELETE FROM ${this.sql(this.table.sqlName)}
@@ -1437,11 +1341,12 @@ export class TableClient<T extends Table> {
       if (deleteError || !deletedRows) {
         return err(
           "InternalServerError",
-          `Failed to delete row: ${this.toErrorMessage(deleteError)}`,
+          `Failed to delete row: ${toErrorMessage(deleteError)}`,
         );
       }
       results = deletedRows;
     } else if (this.isActualMysql()) {
+      // Real MySQL: SELECT FOR UPDATE + DELETE (no RETURNING)
       const [txError, txResult] = await mightThrow(
         this.sql.begin(async (tx) => {
           const existingRows = await tx<InferTableType<T>[]>`
@@ -1451,8 +1356,7 @@ export class TableClient<T extends Table> {
           `;
 
           if (existingRows.length === 0) {
-            const empty: InferTableType<T>[] = [];
-            return empty;
+            return [] as InferTableType<T>[];
           }
 
           await tx`
@@ -1466,11 +1370,13 @@ export class TableClient<T extends Table> {
       if (txError || !txResult) {
         return err(
           "InternalServerError",
-          `Failed to delete row: ${this.toErrorMessage(txError)}`,
+          `Failed to delete row: ${toErrorMessage(txError)}`,
         );
       }
       results = txResult;
     } else {
+      // MySQL dialect with SQLite connection (test environment)
+      // SELECT then DELETE
       const [existingError, existingRows] = await mightThrow(
         this.sql<InferTableType<T>[]>`
           SELECT * FROM ${this.sql(this.table.sqlName)}
@@ -1480,7 +1386,7 @@ export class TableClient<T extends Table> {
       if (existingError || !existingRows) {
         return err(
           "InternalServerError",
-          `Failed to load row for delete: ${this.toErrorMessage(existingError)}`,
+          `Failed to load row for delete: ${toErrorMessage(existingError)}`,
         );
       }
 
@@ -1498,7 +1404,7 @@ export class TableClient<T extends Table> {
       if (deleteError) {
         return err(
           "InternalServerError",
-          `Failed to delete row: ${this.toErrorMessage(deleteError)}`,
+          `Failed to delete row: ${toErrorMessage(deleteError)}`,
         );
       }
     }
