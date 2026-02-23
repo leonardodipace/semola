@@ -134,10 +134,11 @@ export class Scanner {
 
       switch (currentCh) {
         case "*": {
+          const ch = this.peek(content);
           if (this.match(content, "/")) {
             const [error, _] = this.handleStep(component);
             if (error) return err<CronScannerError>(error.type, error.message);
-          } else if (!this.peek(content)) {
+          } else if (!ch || ch === ",") {
             this.addToken("*", "any", "*", field);
           } else {
             return err<CronScannerError>(
