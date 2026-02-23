@@ -1,8 +1,8 @@
 import { err, ok } from "../errors/index.js";
 
 const FieldAmount = {
-  Min: 5,
-  Max: 6,
+  min: 5,
+  max: 6,
 } as const;
 
 type TokenValueType = string | number;
@@ -97,8 +97,8 @@ export class Scanner {
     }
 
     const fields = this.expression.trim().split(/\s+/);
-    const hasMinLen = fields.length === FieldAmount.Min;
-    const hasMaxLen = fields.length === FieldAmount.Max;
+    const hasMinLen = fields.length === FieldAmount.min;
+    const hasMaxLen = fields.length === FieldAmount.max;
 
     if (!hasMinLen && !hasMaxLen) {
       return err<CronScannerError>(
@@ -393,7 +393,7 @@ export class Scanner {
     ] as const;
     const components = [];
     let offset = 1;
-    if (fields.length === FieldAmount.Max) offset = 0;
+    if (fields.length === FieldAmount.max) offset = 0;
 
     for (let idx = 0; idx < fields.length; idx++) {
       const fieldName = fieldNames[idx + offset];
