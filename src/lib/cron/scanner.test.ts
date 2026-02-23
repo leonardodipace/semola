@@ -615,7 +615,7 @@ describe("Cron Scanner", () => {
       expect(err?.type).toEqual("CronExpressionError");
     });
 
-    test("should generate a CronExpressionError for wildcard as first item in a list", () => {
+    test("should generate a list with a wildcard as the first item in a list", () => {
       const [err, tokens] = new Scanner("*,5 * * * *").scan();
 
       expect(err).toBeNull();
@@ -631,7 +631,7 @@ describe("Cron Scanner", () => {
       ).toBeTrue();
     });
 
-    test("should generate a CronExpressionError for wildcard in the middle of a list", () => {
+    test("should generate a list with a wildcard in the middle of a list", () => {
       const [err, tokens] = new Scanner("5,*,10 * * * *").scan();
 
       expect(err).toBeNull();
