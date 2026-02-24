@@ -186,7 +186,7 @@ describe("Cron", () => {
       }).toThrow("Invalid cron expression");
     });
 
-    test("inverted range inside a list passes scanner", () => {
+    test("inverted range with step inside a list passes scanner", () => {
       const handler = () => Promise.resolve();
 
       expect(() => {
@@ -198,13 +198,37 @@ describe("Cron", () => {
       }).toThrow("Invalid cron expression");
     });
 
-    test("wildcard-with-step = 0 passes scanner", () => {
+    test("inverted range inside a list passes scanner", () => {
+      const handler = () => Promise.resolve();
+
+      expect(() => {
+        new Cron({
+          name: "invalid-job",
+          schedule: "30-10 * * * *",
+          handler,
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("wildcard-with-step = 0 should fail", () => {
       const handler = () => Promise.resolve();
 
       expect(() => {
         new Cron({
           name: "invalid-job",
           schedule: "*/0,30 * * * *",
+          handler,
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("should reject an out-of-bounds step range in minute field (2-70/5)", () => {
+      const handler = () => Promise.resolve();
+
+      expect(() => {
+        new Cron({
+          name: "invalid-job",
+          schedule: "2-70/5 * * * *",
           handler,
         });
       }).toThrow("Invalid cron expression");
