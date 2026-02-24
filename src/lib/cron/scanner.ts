@@ -1,6 +1,6 @@
 import { err, ok } from "../errors/index.js";
 
-const FieldAmount = {
+export const FieldAmount = {
   min: 5,
   max: 6,
 } as const;

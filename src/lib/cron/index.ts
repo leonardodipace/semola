@@ -1,4 +1,5 @@
 import { mightThrow } from "../errors/index.js";
+import { FieldAmount, Scanner, Token } from "./scanner.js";
 import type { CronOptions, CronStatus } from "./types.js";
 
 const RETRY_DELAY_MS = 60 * 60 * 1000; // 1 hour
@@ -48,78 +49,19 @@ export class Cron {
   private timeoutId: NodeJS.Timeout | null = null;
 
   // Array-based storage using 1-indexed slots (0 = don't run, 1 = run)
-  private second = Array(CronSecondRange.max + 1).fill(0); // 0-59
-  private minute = Array(CronMinuteRange.max + 1).fill(0); // 0-59
-  private hour = Array(CronHourRange.max + 1).fill(0); // 0-23
-  private day = Array(CronDayRange.max + 1).fill(0); // indices 1-31 (0 unused)
-  private month = Array(CronMonthRange.max + 1).fill(0); // indices 1-12 (0 unused)
-  private dayOfWeek = Array(CronDayOfWeekRange.max + 1).fill(0); // 0-6
-  private hasSeconds = false;
+  private second = Array<number>(CronSecondRange.max + 1).fill(0); // 0-59
+  private minute = Array<number>(CronMinuteRange.max + 1).fill(0); // 0-59
+  private hour = Array<number>(CronHourRange.max + 1).fill(0); // 0-23
+  private day = Array<number>(CronDayRange.max + 1).fill(0); // indices 1-31 (0 unused)
+  private month = Array<number>(CronMonthRange.max + 1).fill(0); // indices 1-12 (0 unused)
+  private dayOfWeek = Array<number>(CronDayOfWeekRange.max + 1).fill(0); // 0-6
+  private hasSeconds;
 
   // Fill all values from min to max with 1
   private fillRange(values: number[], min: number, max: number) {
     for (let i = min; i <= max; i++) {
       values[i] = 1;
     }
-  }
-
-  private handleList(part: string, values: number[], min: number, max: number) {
-    // Split comma-separated list into individual items
-    const items = part.split(",");
-
-    for (const item of items) {
-      // Check for optional step suffix (e.g., "1-5/2")
-      const [rangePart, stepStr] = item.split("/");
-      const step = stepStr ? Number(stepStr) : 1;
-
-      if (stepStr) {
-        // Validate step is a positive integer
-        if (!Number.isInteger(step)) return false;
-        if (step <= 0) return false;
-      }
-
-      if (rangePart === "*") {
-        // Wildcard with step: expand across full range
-        for (let i = min; i <= max; i += step) {
-          values[i] = 1;
-        }
-
-        continue;
-      }
-
-      if (rangePart?.includes("-")) {
-        // Handle range format: "start-end" or "start-end/step"
-        const [startStr, endStr] = rangePart.split("-");
-
-        if (!startStr || !endStr) return false;
-
-        const start = Number(startStr);
-        const end = Number(endStr);
-
-        // Validate range boundaries are integers within bounds
-        if (!Number.isInteger(start)) return false;
-        if (!Number.isInteger(end)) return false;
-        if (start < min) return false;
-        if (end > max) return false;
-        if (start > end) return false;
-
-        // Mark all values in range with step increment
-        for (let i = start; i <= end; i += step) {
-          values[i] = 1;
-        }
-      } else {
-        // Handle single value format
-        const n = Number(rangePart);
-
-        if (!Number.isInteger(n)) return false;
-        if (n < min) return false;
-        if (n > max) return false;
-
-        values[n] = 1;
-      }
-    }
-
-    return true;
   }
 
   private handleStep(part: string, values: number[], min: number, max: number) {
@@ -166,7 +108,11 @@ export class Cron {
     if (!startStr) return false;
     if (!endStr) return false;
 
-    const start = Number(startStr);
+    let start = min;
+    if (startStr.length > 0) {
+      start = Number(startStr);
+    }
+
     const end = Number(endStr);
 
     // Validate range boundaries are integers within bounds
@@ -259,9 +205,13 @@ export class Cron {
 
     // Resolve alias or use raw expression
     const expr = this.resolveAlias(options.schedule);
+    const [error, tokens] = new Scanner(expr).scan();
+    if (error) throw new Error(`${error.type}: ${error.message}`);
+
+    this.hasSeconds = expr.length === FieldAmount.max;
 
     // Parse and validate the cron expression
-    if (!this.parse(expr)) {
+    if (!this.parse(tokens)) {
       throw new Error("Invalid cron expression");
     }
   }
@@ -271,12 +221,7 @@ export class Cron {
     return ALIASES[schedule] || schedule;
   }
 
-  private parse(expr: string) {
-    // Split expression into space-separated parts
-    const parts = expr.trim().split(/\s+/);
-
-    if (parts.length !== 5 && parts.length !== 6) return false;
-
+  private parse(tokens: Token[]) {
     // Reset arrays
     this.second.fill(0);
     this.minute.fill(0);
@@ -285,95 +230,111 @@ export class Cron {
     this.month.fill(0);
     this.dayOfWeek.fill(0);
 
-    const fiveFieldSchema = [
-      this.minute,
-      this.hour,
-      this.day,
-      this.month,
-      this.dayOfWeek,
-    ];
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
+      if (!token) return false;
 
-    const sixFieldSchema = [
-      this.second,
-      this.minute,
-      this.hour,
-      this.day,
-      this.month,
-      this.dayOfWeek,
-    ];
+      switch (token.getField()) {
+        case "second": {
+          const success = this.handleField(
+            token,
+            this.second,
+            CronSecondRange.min,
+            CronSecondRange.max,
+          );
 
-    const fiveFieldBounds = [
-      [0, 59],
-      [0, 23],
-      [1, 31],
-      [1, 12],
-      [0, 6],
-    ];
+          if (!success) return false;
+          break;
+        }
+        case "minute": {
+          const success = this.handleField(
+            token,
+            this.minute,
+            CronMinuteRange.min,
+            CronMinuteRange.max,
+          );
 
-    const sixFieldBounds = [
-      [0, 59],
-      [0, 59],
-      [0, 23],
-      [1, 31],
-      [1, 12],
-      [0, 6],
-    ];
+          if (!success) return false;
+          break;
+        }
+        case "hour": {
+          const success = this.handleField(
+            token,
+            this.hour,
+            CronHourRange.min,
+            CronHourRange.max,
+          );
 
-    this.hasSeconds = parts.length === 6;
+          if (!success) return false;
+          break;
+        }
+        case "day": {
+          const success = this.handleField(
+            token,
+            this.day,
+            CronDayRange.min,
+            CronDayRange.max,
+          );
 
-    const fields = this.hasSeconds ? sixFieldSchema : fiveFieldSchema;
-    const bounds = this.hasSeconds ? sixFieldBounds : fiveFieldBounds;
+          if (!success) return false;
+          break;
+        }
+        case "month": {
+          const success = this.handleField(
+            token,
+            this.month,
+            CronMonthRange.min,
+            CronMonthRange.max,
+          );
 
-    // Process each field of the cron expression
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i];
+          if (!success) return false;
+          break;
+        }
+        case "weekday": {
+          const success = this.handleField(
+            token,
+            this.dayOfWeek,
+            CronDayOfWeekRange.min,
+            CronDayOfWeekRange.max,
+          );
 
-      if (!part) return false;
-
-      const values = fields[i];
-      const bound = bounds[i];
-
-      if (!bound) return false;
-      if (bound.length !== 2) return false;
-      if (!values) return false;
-      if (typeof bound[0] !== "number") return false;
-      if (typeof bound[1] !== "number") return false;
-
-      const min = bound[0];
-      const max = bound[1];
-
-      if (part === "*") {
-        // Wildcard: enable all values in range
-        this.fillRange(values, min, max);
-        continue;
+          if (!success) return false;
+          break;
+        }
+        default:
+          return false;
       }
-
-      if (part.includes(",")) {
-        // List: handle comma-separated values
-        if (!this.handleList(part, values, min, max)) return false;
-
-        continue;
-      }
-
-      if (part.includes("/")) {
-        // Step: handle step notation
-        if (!this.handleStep(part, values, min, max)) return false;
-
-        continue;
-      }
-
-      if (part.includes("-")) {
-        // Range: handle range notation
-        if (!this.handleRange(part, values, min, max)) return false;
-
-        continue;
-      }
-
-      // Single number: handle plain integer
-      if (!this.handleNumber(part, values, min, max)) return false;
     }
 
     return true;
+  }
+
+  private handleField(token: Token, field: number[], min: number, max: number) {
+    let success = true;
+    switch (token.getTokenType()) {
+      case "any": {
+        this.fillRange(field, min, max);
+        break;
+      }
+      case "number": {
+        success = this.handleNumber(token.getComponent(), field, min, max);
+        break;
+      }
+      case "range": {
+        const component = token.getComponent();
+        success = this.handleRange(component, field, min, max);
+        break;
+      }
+      case "step": {
+        const component = token.getComponent();
+        success = this.handleStep(component, field, min, max);
+        break;
+      }
+      default:
+        return false;
+    }
+
+    return success;
   }
 
   public matches(date: Date) {

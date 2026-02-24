@@ -49,7 +49,7 @@ describe("Cron", () => {
           schedule: "invalid",
           handler,
         });
-      }).toThrow("Invalid cron expression");
+      }).toThrow("CronLengthError");
     });
 
     test("should throw error for cron expression with wrong field count", () => {
@@ -61,7 +61,7 @@ describe("Cron", () => {
           schedule: "0 0 * *",
           handler,
         });
-      }).toThrow("Invalid cron expression");
+      }).toThrow("CronLengthError");
     });
   });
 
