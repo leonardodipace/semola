@@ -105,11 +105,10 @@ export class Cron {
     // Split range into start and end values
     const [startStr, endStr] = range.split("-");
 
-    if (!startStr) return false;
     if (!endStr) return false;
 
     let start = min;
-    if (startStr.length > 0) {
+    if (startStr && startStr.length > 0) {
       start = Number(startStr);
     }
 
