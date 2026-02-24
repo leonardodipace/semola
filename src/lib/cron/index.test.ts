@@ -65,6 +65,152 @@ describe("Cron", () => {
     });
   });
 
+  describe("parsing", () => {
+    test("should throw error for cron expression with a very large number", () => {
+      const handler = () => Promise.resolve();
+
+      expect(() => {
+        new Cron({
+          name: "invalid-job",
+          schedule: "10000000 0 * * *",
+          handler,
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("should reject an out-of-bounds step range in second (100)", () => {
+      const handler = () => Promise.resolve();
+
+      expect(() => {
+        new Cron({
+          name: "invalid-job",
+          schedule: "100 * * * * *",
+          handler,
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("should reject an out-of-bounds step range in minute field (50-70/5)", () => {
+      const handler = () => Promise.resolve();
+
+      expect(() => {
+        new Cron({
+          name: "invalid-job",
+          schedule: "* 50-70/5  * * * *",
+          handler,
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("should accept a step range in minute field without the starting value", () => {
+      const handler = () => Promise.resolve();
+
+      const cron = new Cron({
+        name: "invalid-job",
+        schedule: "* -10/5  * * * *",
+        handler,
+      });
+
+      expect(cron).toBeDefined();
+    });
+
+    test("should accept a step range in minute field without the final value", () => {
+      const handler = () => Promise.resolve();
+
+      const cron = new Cron({
+        name: "invalid-job",
+        schedule: "* 10/5  * * * *",
+        handler,
+      });
+
+      expect(cron).toBeDefined();
+    });
+
+    test("should reject an out-of-bounds step range in minute field (-70/5)", () => {
+      const handler = () => Promise.resolve();
+
+      expect(() => {
+        new Cron({
+          name: "invalid-job",
+          schedule: "* -70/5  * * * *",
+          handler,
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("should reject an out-of-bounds step range in minute field (-70/5)", () => {
+      const handler = () => Promise.resolve();
+
+      expect(() => {
+        new Cron({
+          name: "invalid-job",
+          schedule: "* -70/5  * * * *",
+          handler,
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("should reject an out-of-bounds step range in day of the week field (7)", () => {
+      const handler = () => Promise.resolve();
+
+      expect(() => {
+        new Cron({
+          name: "invalid-job",
+          schedule: "0 0 * * 7",
+          handler,
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("should reject an out-of-bounds list value in hour field (1,15,40)", () => {
+      const handler = () => Promise.resolve();
+
+      expect(() => {
+        new Cron({
+          name: "invalid-job",
+          schedule: "0 1,15,40 * * *",
+          handler,
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("should reject an out-of-bounds range value in day field (1-33)", () => {
+      const handler = () => Promise.resolve();
+
+      expect(() => {
+        new Cron({
+          name: "invalid-job",
+          schedule: "0 * 1-33 * *",
+          handler,
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("inverted range inside a list passes scanner", () => {
+      const handler = () => Promise.resolve();
+
+      expect(() => {
+        new Cron({
+          name: "invalid-job",
+          schedule: "30-10/5 * * * *",
+          handler,
+        });
+      }).toThrow("Invalid cron expression");
+    });
+
+    test("wildcard-with-step = 0 passes scanner", () => {
+      const handler = () => Promise.resolve();
+
+      expect(() => {
+        new Cron({
+          name: "invalid-job",
+          schedule: "*/0,30 * * * *",
+          handler,
+        });
+      }).toThrow("Invalid cron expression");
+    });
+  });
+
   describe("lifecycle methods", () => {
     test("should start and stop a cron job", () => {
       const handler = () => Promise.resolve();

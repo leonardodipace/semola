@@ -730,12 +730,6 @@ describe("Cron Scanner", () => {
       expect(err).toBeNull();
     });
 
-    test("should reject an out-of-bounds step range in seconds field (50-70/5)", () => {
-      // Tokenization succeeds; out-of-bounds is a semantic check not done by the scanner
-      const [err] = new Scanner("50-70/5 * * * * *").scan();
-      expect(err).toBeNull();
-    });
-
     test("should accept a 6-field expression with seconds", () => {
       const [err] = new Scanner("* * * * * *").scan();
       expect(err).toBeNull();
@@ -810,12 +804,6 @@ describe("Cron Scanner", () => {
         expect(
           tokens?.[1]?.equals(new Token("*/6", "step", 6, "hour")),
         ).toBeTrue();
-      });
-
-      test("wildcard-with-step=0 passes scanner (semantic rejection is post-scan)", () => {
-        // The scanner accepts */0 - step=0 invalidity is a semantic check, not tokenization
-        const [err] = new Scanner("*/0,30 * * * *").scan();
-        expect(err).toBeNull();
       });
     });
 
@@ -953,19 +941,6 @@ describe("Cron Scanner", () => {
         expect(err).toBeNull();
         expect(
           tokens?.[0]?.equals(new Token("0-0", "range", "0-0", "minute")),
-        ).toBeTrue();
-      });
-
-      test("inverted range inside a list passes scanner (semantic rejection is post-scan)", () => {
-        // The scanner accepts 30-10 as a Range token; start > end is a semantic check
-        const [err, tokens] = new Scanner("30-10,50 * * * *").scan();
-
-        expect(err).toBeNull();
-        expect(
-          tokens?.[0]?.equals(new Token("30-10", "range", "30-10", "minute")),
-        ).toBeTrue();
-        expect(
-          tokens?.[1]?.equals(new Token("50", "number", 50, "minute")),
         ).toBeTrue();
       });
 
