@@ -138,13 +138,13 @@ describe("Cron", () => {
       }).toThrow("Invalid cron expression");
     });
 
-    test("should reject an out-of-bounds step range in minute field (-70/5)", () => {
+    test("should reject an out-of-bounds step range in minute field (70/5)", () => {
       const handler = () => Promise.resolve();
 
       expect(() => {
         new Cron({
           name: "invalid-job",
-          schedule: "* -70/5  * * * *",
+          schedule: "* 70/5  * * * *",
           handler,
         });
       }).toThrow("Invalid cron expression");
