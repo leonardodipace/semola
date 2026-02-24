@@ -12,18 +12,48 @@ const ALIASES: Record<string, string> = {
   "@minutely": "* * * * *",
 };
 
+const CronSecondRange = {
+  min: 0,
+  max: 59,
+} as const;
+
+const CronMinuteRange = {
+  min: 0,
+  max: 59,
+} as const;
+
+const CronHourRange = {
+  min: 0,
+  max: 23,
+} as const;
+
+const CronDayRange = {
+  min: 1,
+  max: 31,
+} as const;
+
+const CronMonthRange = {
+  min: 1,
+  max: 12,
+} as const;
+
+const CronDayOfWeekRange = {
+  min: 0,
+  max: 6,
+} as const;
+
 export class Cron {
   private options: CronOptions;
   private status: CronStatus = "idle";
   private timeoutId: NodeJS.Timeout | null = null;
 
   // Array-based storage using 1-indexed slots (0 = don't run, 1 = run)
-  private second = Array(60).fill(0); // 0-59
-  private minute = Array(60).fill(0); // 0-59
-  private hour = Array(24).fill(0); // 0-23
-  private day = Array(32).fill(0); // indices 1-31 (0 unused)
-  private month = Array(13).fill(0); // indices 1-12 (0 unused)
-  private dayOfWeek = Array(7).fill(0); // 0-6
+  private second = Array(CronSecondRange.max + 1).fill(0); // 0-59
+  private minute = Array(CronMinuteRange.max + 1).fill(0); // 0-59
+  private hour = Array(CronHourRange.max + 1).fill(0); // 0-23
+  private day = Array(CronDayRange.max + 1).fill(0); // indices 1-31 (0 unused)
+  private month = Array(CronMonthRange.max + 1).fill(0); // indices 1-12 (0 unused)
+  private dayOfWeek = Array(CronDayOfWeekRange.max + 1).fill(0); // 0-6
   private hasSeconds = false;
 
   // Fill all values from min to max with 1
