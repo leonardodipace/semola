@@ -78,7 +78,7 @@ describe("Cron", () => {
       }).toThrow("Invalid cron expression");
     });
 
-    test("should reject an out-of-bounds step range in second (100)", () => {
+    test("should reject an out-of-bounds number in second (100)", () => {
       const handler = () => Promise.resolve();
 
       expect(() => {
