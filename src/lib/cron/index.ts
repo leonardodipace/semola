@@ -360,7 +360,7 @@ export class Cron {
           if (error) {
             return err<CronParsingError>(
               error.type,
-              `${error.message} in field ${token.getField()}`,
+              `${error.message} in field '${token.getField()}'`,
             );
           }
 
@@ -377,7 +377,7 @@ export class Cron {
           if (error) {
             return err<CronParsingError>(
               error.type,
-              `${error.message} in field ${token.getField()}`,
+              `${error.message} in field '${token.getField()}'`,
             );
           }
 
@@ -394,7 +394,7 @@ export class Cron {
           if (error) {
             return err<CronParsingError>(
               error.type,
-              `${error.message} in field ${token.getField()}`,
+              `${error.message} in field '${token.getField()}'`,
             );
           }
 
@@ -411,7 +411,7 @@ export class Cron {
           if (error) {
             return err<CronParsingError>(
               error.type,
-              `${error.message} in field ${token.getField()}`,
+              `${error.message} in field '${token.getField()}'`,
             );
           }
 
@@ -428,7 +428,7 @@ export class Cron {
           if (error) {
             return err<CronParsingError>(
               error.type,
-              `${error.message} in field ${token.getField()}`,
+              `${error.message} in field '${token.getField()}'`,
             );
           }
 
@@ -445,7 +445,7 @@ export class Cron {
           if (error) {
             return err<CronParsingError>(
               error.type,
-              `${error.message} in field ${token.getField()}`,
+              `${error.message} in field '${token.getField()}'`,
             );
           }
 
