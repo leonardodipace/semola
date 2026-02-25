@@ -1,4 +1,5 @@
 import { err, ok } from "../errors/index.js";
+import { CronScannerError } from "./types.js";
 
 export const FieldAmount = {
   min: 5,
@@ -13,11 +14,6 @@ type ComponentType = {
 };
 
 type TokenType = "any" | "range" | "step" | "number";
-
-export type CronScannerError =
-  | "EmptyCronExpressionError"
-  | "CronLengthError"
-  | "CronExpressionError";
 
 export class Token {
   private readonly type: TokenType;
