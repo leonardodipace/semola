@@ -1,6 +1,6 @@
-import { mightThrow } from "../errors/index.js";
+import { err, mightThrow, ok } from "../errors/index.js";
 import { FieldAmount, Scanner, Token } from "./scanner.js";
-import type { CronOptions, CronStatus } from "./types.js";
+import type { CronOptions, CronParsingError, CronStatus } from "./types.js";
 
 const RETRY_DELAY_MS = 60 * 60 * 1000; // 1 hour
 
@@ -68,14 +68,33 @@ export class Cron {
     // Split step format into range and step components
     const [rangePart, stepStr] = part.split("/");
 
-    if (!rangePart) return false;
-    if (!stepStr) return false;
+    if (!rangePart) {
+      return err<CronParsingError>(
+        "InvalidValueError",
+        `'${rangePart}' is empty`,
+      );
+    }
+
+    if (!stepStr) {
+      return err<CronParsingError>(
+        "InvalidValueError",
+        `'${stepStr}' is empty`,
+      );
+    }
 
     const step = Number(stepStr);
 
     // Validate step is a positive integer
-    if (!Number.isInteger(step)) return false;
-    if (step <= 0) return false;
+    if (!Number.isInteger(step)) {
+      return err<CronParsingError>(
+        "InvalidValueError",
+        `'${step}' is not a valid number`,
+      );
+    }
+
+    if (step <= 0) {
+      return err<CronParsingError>("OutOfBoundError", `Expected ${step} > 0`);
+    }
 
     if (rangePart === "*") {
       // Wildcard with step: apply step across entire range
@@ -83,7 +102,7 @@ export class Cron {
         values[i] = 1;
       }
 
-      return true;
+      return ok(true);
     }
 
     if (rangePart.includes("-")) {
@@ -105,7 +124,9 @@ export class Cron {
     // Split range into start and end values
     const [startStr, endStr] = range.split("-");
 
-    if (!endStr) return false;
+    if (!endStr) {
+      return err<CronParsingError>("InvalidValueError", `'${endStr}' is empty`);
+    }
 
     let start = min;
     if (startStr && startStr.length > 0) {
@@ -115,18 +136,47 @@ export class Cron {
     const end = Number(endStr);
 
     // Validate range boundaries are integers within bounds
-    if (!Number.isInteger(start)) return false;
-    if (!Number.isInteger(end)) return false;
-    if (start < min) return false;
-    if (end > max) return false;
-    if (start > end) return false;
+    if (!Number.isInteger(start)) {
+      return err<CronParsingError>(
+        "InvalidValueError",
+        `'${start}' is not a valid number`,
+      );
+    }
+
+    if (!Number.isInteger(end)) {
+      return err<CronParsingError>(
+        "InvalidValueError",
+        `'${end}' is not a valid number`,
+      );
+    }
+
+    if (start < min) {
+      return err<CronParsingError>(
+        "OutOfBoundError",
+        `Expected ${start} >= ${min}`,
+      );
+    }
+
+    if (end > max) {
+      return err<CronParsingError>(
+        "OutOfBoundError",
+        `Expected ${end} <= ${max}`,
+      );
+    }
+
+    if (start > end) {
+      return err<CronParsingError>(
+        "OutOfBoundError",
+        `Expected ${start} <= ${end}`,
+      );
+    }
 
     // Apply step through range
     for (let i = start; i <= end; i += step) {
       values[i] = 1;
     }
 
-    return true;
+    return ok(true);
   }
 
   private handleStepSingle(
@@ -139,16 +189,33 @@ export class Cron {
     const start = Number(value);
 
     // Validate starting value is an integer within bounds
-    if (!Number.isInteger(start)) return false;
-    if (start < min) return false;
-    if (start > max) return false;
+    if (!Number.isInteger(start)) {
+      return err<CronParsingError>(
+        "InvalidValueError",
+        `'${start}' is not a valid number`,
+      );
+    }
+
+    if (start < min) {
+      return err<CronParsingError>(
+        "OutOfBoundError",
+        `Expected ${start} >= ${min}`,
+      );
+    }
+
+    if (start > max) {
+      return err<CronParsingError>(
+        "OutOfBoundError",
+        `Expected ${start} <= ${max}`,
+      );
+    }
 
     // Apply step from start to end of range
     for (let i = start; i <= max; i += step) {
       values[i] = 1;
     }
 
-    return true;
+    return ok(true);
   }
 
   private handleRange(
@@ -160,25 +227,62 @@ export class Cron {
     // Split range into start and end values
     const [startStr, endStr] = part.split("-");
 
-    if (!startStr) return false;
-    if (!endStr) return false;
+    if (!startStr) {
+      return err<CronParsingError>(
+        "InvalidValueError",
+        `'${startStr}' is empty`,
+      );
+    }
+
+    if (!endStr) {
+      return err<CronParsingError>("InvalidValueError", `'${endStr}' is empty`);
+    }
 
     const start = Number(startStr);
     const end = Number(endStr);
 
     // Validate range boundaries are integers within bounds
-    if (!Number.isInteger(start)) return false;
-    if (!Number.isInteger(end)) return false;
-    if (start < min) return false;
-    if (end > max) return false;
-    if (start > end) return false;
+    if (!Number.isInteger(start)) {
+      return err<CronParsingError>(
+        "InvalidValueError",
+        `'${start}' is not a valid number`,
+      );
+    }
+
+    if (!Number.isInteger(end)) {
+      return err<CronParsingError>(
+        "InvalidValueError",
+        `'${end}' is not a valid number`,
+      );
+    }
+
+    if (start < min) {
+      return err<CronParsingError>(
+        "OutOfBoundError",
+        `Expected ${start} >= ${min}`,
+      );
+    }
+
+    if (end > max) {
+      return err<CronParsingError>(
+        "OutOfBoundError",
+        `Expected ${end} <= ${max}`,
+      );
+    }
+
+    if (start > end) {
+      return err<CronParsingError>(
+        "OutOfBoundError",
+        `Expected ${start} <= ${end}`,
+      );
+    }
 
     // Mark all values in the range
     for (let i = start; i <= end; i++) {
       values[i] = 1;
     }
 
-    return true;
+    return ok(true);
   }
 
   private handleNumber(
@@ -190,13 +294,29 @@ export class Cron {
     const n = Number(value);
 
     // Validate value is an integer within bounds
-    if (!Number.isInteger(n)) return false;
-    if (n < min) return false;
-    if (n > max) return false;
+    if (!Number.isInteger(n)) {
+      return err<CronParsingError>(
+        "InvalidValueError",
+        `'${value}' is not a valid number`,
+      );
+    }
+
+    if (n < min) {
+      return err<CronParsingError>(
+        "OutOfBoundError",
+        `Expected ${n} >= ${min}`,
+      );
+    }
+    if (n > max) {
+      return err<CronParsingError>(
+        "OutOfBoundError",
+        `Expected ${n} <= ${max}`,
+      );
+    }
 
     values[n] = 1;
 
-    return true;
+    return ok(true);
   }
 
   public constructor(options: CronOptions) {
@@ -227,105 +347,157 @@ export class Cron {
 
       switch (token.getField()) {
         case "second": {
-          const success = this.handleField(
+          const [error, _] = this.handleField(
             token,
             this.second,
             CronSecondRange.min,
             CronSecondRange.max,
           );
 
-          if (!success) return false;
+          if (error) {
+            return err<CronParsingError>(
+              error.type,
+              `${error.message} in field ${token.getField()}`,
+            );
+          }
+
           break;
         }
         case "minute": {
-          const success = this.handleField(
+          const [error, _] = this.handleField(
             token,
             this.minute,
             CronMinuteRange.min,
             CronMinuteRange.max,
           );
 
-          if (!success) return false;
+          if (error) {
+            return err<CronParsingError>(
+              error.type,
+              `${error.message} in field ${token.getField()}`,
+            );
+          }
+
           break;
         }
         case "hour": {
-          const success = this.handleField(
+          const [error, _] = this.handleField(
             token,
             this.hour,
             CronHourRange.min,
             CronHourRange.max,
           );
 
-          if (!success) return false;
+          if (error) {
+            return err<CronParsingError>(
+              error.type,
+              `${error.message} in field ${token.getField()}`,
+            );
+          }
+
           break;
         }
         case "day": {
-          const success = this.handleField(
+          const [error, _] = this.handleField(
             token,
             this.day,
             CronDayRange.min,
             CronDayRange.max,
           );
 
-          if (!success) return false;
+          if (error) {
+            return err<CronParsingError>(
+              error.type,
+              `${error.message} in field ${token.getField()}`,
+            );
+          }
+
           break;
         }
         case "month": {
-          const success = this.handleField(
+          const [error, _] = this.handleField(
             token,
             this.month,
             CronMonthRange.min,
             CronMonthRange.max,
           );
 
-          if (!success) return false;
+          if (error) {
+            return err<CronParsingError>(
+              error.type,
+              `${error.message} in field ${token.getField()}`,
+            );
+          }
+
           break;
         }
         case "weekday": {
-          const success = this.handleField(
+          const [error, _] = this.handleField(
             token,
             this.dayOfWeek,
             CronDayOfWeekRange.min,
             CronDayOfWeekRange.max,
           );
 
-          if (!success) return false;
+          if (error) {
+            return err<CronParsingError>(
+              error.type,
+              `${error.message} in field ${token.getField()}`,
+            );
+          }
+
           break;
         }
         default:
-          return false;
+          return err<CronParsingError>(
+            "InvalidValueError",
+            `Invalid field '${token.getField()}'`,
+          );
       }
     }
 
-    return true;
+    return ok(true);
   }
 
   private handleField(token: Token, field: number[], min: number, max: number) {
-    let success = true;
     switch (token.getTokenType()) {
       case "any": {
         this.fillRange(field, min, max);
         break;
       }
       case "number": {
-        success = this.handleNumber(token.getComponent(), field, min, max);
+        const [error, _] = this.handleNumber(
+          token.getComponent(),
+          field,
+          min,
+          max,
+        );
+        if (error) return err<CronParsingError>(error.type, error.message);
+
         break;
       }
       case "range": {
         const component = token.getComponent();
-        success = this.handleRange(component, field, min, max);
+        const [error, _] = this.handleRange(component, field, min, max);
+        if (error) return err<CronParsingError>(error.type, error.message);
+
         break;
       }
       case "step": {
         const component = token.getComponent();
-        success = this.handleStep(component, field, min, max);
+        const [error, _] = this.handleStep(component, field, min, max);
+        if (error) return err<CronParsingError>(error.type, error.message);
+
         break;
       }
       default:
-        return false;
+        return err<CronParsingError>(
+          "InvalidValueError",
+          `Invalid token type '${token.getTokenType()}'`,
+        );
     }
 
-    return success;
+    return ok(true);
   }
 
   public matches(date: Date) {

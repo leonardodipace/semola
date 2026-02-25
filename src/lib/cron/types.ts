@@ -13,6 +13,8 @@ export type CronScannerError =
   | "CronLengthError"
   | "CronExpressionError";
 
+export type CronParsingError = "InvalidValueError" | "OutOfBoundError";
+
 export type CronOptions = {
   name: string;
   schedule: CronAlias | (string & {});
