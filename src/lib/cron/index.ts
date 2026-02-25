@@ -328,10 +328,11 @@ export class Cron {
     if (error) throw new Error(`${error.type}: ${error.message}`);
 
     this.hasSeconds = expr.length === FieldAmount.max;
+    const [parsingError, _] = this.parse(tokens);
 
     // Parse and validate the cron expression
-    if (!this.parse(tokens)) {
-      throw new Error("Invalid cron expression");
+    if (parsingError) {
+      throw new Error(`${parsingError.type}: ${parsingError.message}`);
     }
   }
 
@@ -343,7 +344,9 @@ export class Cron {
   private parse(tokens: Token[]) {
     for (let i = 0; i < tokens.length; i++) {
       const token = tokens[i];
-      if (!token) return false;
+      if (!token) {
+        return err<CronParsingError>("InvalidValueError", "Undefined token");
+      }
 
       switch (token.getField()) {
         case "second": {
