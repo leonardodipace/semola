@@ -221,14 +221,6 @@ export class Cron {
   }
 
   private parse(tokens: Token[]) {
-    // Reset arrays
-    this.second.fill(0);
-    this.minute.fill(0);
-    this.hour.fill(0);
-    this.day.fill(0);
-    this.month.fill(0);
-    this.dayOfWeek.fill(0);
-
     for (let i = 0; i < tokens.length; i++) {
       const token = tokens[i];
       if (!token) return false;
