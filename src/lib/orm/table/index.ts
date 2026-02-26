@@ -124,7 +124,7 @@ export class TableClient<T extends Table> {
   }
 
   private validateColumnName(key: string) {
-    if (!Object.keys(this.table.columns).includes(key)) {
+    if (!(key in this.table.columns)) {
       return err("ValidationError", `Invalid column: ${key}`);
     }
     return ok(undefined);
@@ -136,11 +136,7 @@ export class TableClient<T extends Table> {
     }
 
     if (typeof value === "number") {
-      const date = new Date(value);
-      if (!Number.isNaN(date.getTime())) {
-        return date;
-      }
-      return value;
+      return new Date(value);
     }
 
     if (typeof value === "string") {
@@ -263,14 +259,6 @@ export class TableClient<T extends Table> {
     });
   }
 
-  public getSqlColumnName(key: string) {
-    const column = this.table.columns[key];
-    if (!column) {
-      return err("ValidationError", `Invalid column: ${key}`);
-    }
-    return ok(column.sqlName);
-  }
-
   private getPrimaryKeyColumn() {
     for (const [key, column] of Object.entries(this.table.columns)) {
       if (column.meta.primaryKey) {
@@ -297,18 +285,11 @@ export class TableClient<T extends Table> {
   }
 
   private buildCondition(key: string, value: unknown) {
-    const [columnNameError, sqlColumnName] = this.getSqlColumnName(key);
-    if (columnNameError || !sqlColumnName) {
-      return err(
-        columnNameError?.type ?? "ValidationError",
-        columnNameError?.message ?? `Invalid column: ${key}`,
-      );
-    }
-
     const column = this.table.columns[key];
     if (!column) {
       return err("ValidationError", `Invalid column: ${key}`);
     }
+    const sqlColumnName = column.sqlName;
 
     if (value === null) {
       return ok(this.sql`${this.sql(sqlColumnName)} IS NULL`);
@@ -478,12 +459,13 @@ export class TableClient<T extends Table> {
 
   private async loadIncludedRelations<
     Inc extends Record<string, boolean> | undefined = undefined,
-  >(
-    rows: WithIncluded<InferTableType<T>, T, Inc>[],
-    include?: Inc,
-    getTableClient?: (relation: Relation) => TableClient<Table> | undefined,
-  ) {
-    if (!include || !this.relations || !getTableClient || rows.length === 0) {
+  >(rows: WithIncluded<InferTableType<T>, T, Inc>[], include?: Inc) {
+    if (
+      !include ||
+      !this.relations ||
+      !this.getTableClient ||
+      rows.length === 0
+    ) {
       return ok(rows);
     }
 
@@ -498,7 +480,7 @@ export class TableClient<T extends Table> {
         );
       }
 
-      const relatedClient = getTableClient(relation);
+      const relatedClient = this.getTableClient(relation);
       if (!relatedClient) {
         return err(
           "ValidationError",
@@ -645,7 +627,6 @@ export class TableClient<T extends Table> {
     const [includeError, includedRows] = await this.loadIncludedRelations(
       rows,
       options?.include,
-      this.getTableClient,
     );
     if (includeError) {
       return err(includeError.type, includeError.message);
