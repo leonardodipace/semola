@@ -28,6 +28,10 @@ export interface Dialect {
     | readonly [{ type: string; message: string }, null]
     | readonly [null, string];
 
+  // SQL expression to auto-generate a UUID (e.g. "gen_random_uuid()").
+  // null if the dialect has no built-in UUID function.
+  readonly uuidFunction: string | null;
+
   // Convert a raw database value for a boolean column to a JavaScript boolean.
   // SQLite stores booleans as 0/1, while Postgres/MySQL support native booleans.
   convertBooleanValue(value: unknown): boolean;

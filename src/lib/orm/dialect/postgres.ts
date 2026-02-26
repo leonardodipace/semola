@@ -8,6 +8,7 @@ import type { ColumnTypeMapping, Dialect } from "./types.js";
 // Uses $1, $2, $3 placeholder syntax and BIGSERIAL for auto-incrementing primary keys.
 export class PostgresDialect implements Dialect {
   public readonly name = "postgres";
+  public readonly uuidFunction = "gen_random_uuid()";
 
   public readonly types: ColumnTypeMapping = {
     number: "INTEGER",
@@ -55,6 +56,7 @@ export class PostgresDialect implements Dialect {
       (s) => this.quoteIdentifier(s),
       (kind, value) => this.formatDefaultValue(kind, value),
       "BIGSERIAL",
+      this.uuidFunction,
     );
   }
 

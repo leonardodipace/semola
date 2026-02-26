@@ -11,12 +11,14 @@ export const escapeStringSingleQuote = (value: string) =>
 // Builds the SQL column definition parts shared across all dialects.
 // numberPkType is the SQL type for auto-incrementing number PKs (e.g. "BIGSERIAL", "BIGINT AUTO_INCREMENT").
 // For SQLite, pass null to use plain "INTEGER PRIMARY KEY".
+// uuidFunction is the SQL expression for auto-generating UUIDs (e.g. "gen_random_uuid()"), or null if unsupported.
 export const buildColumnDef = (
   column: Column<ColumnKind, ColumnMeta>,
   types: ColumnTypeMapping,
   quoteId: (s: string) => string,
   formatDefault: (kind: ColumnKind, value: unknown) => string,
   numberPkType: string | null,
+  uuidFunction: string | null,
 ) => {
   const parts: string[] = [quoteId(column.sqlName)];
 
@@ -46,6 +48,12 @@ export const buildColumnDef = (
     parts.push(
       `DEFAULT ${formatDefault(column.columnKind, column.defaultValue)}`,
     );
+  } else if (
+    column.columnKind === "uuid" &&
+    column.meta.primaryKey &&
+    uuidFunction
+  ) {
+    parts.push(`DEFAULT ${uuidFunction}`);
   }
 
   if (column.foreignKeyRef) {
@@ -66,6 +74,7 @@ export const buildCreateTableSql = (
   quoteId: (s: string) => string,
   formatDefault: (kind: ColumnKind, value: unknown) => string,
   numberPkType: string | null,
+  uuidFunction: string | null,
 ) => {
   const columnDefs: string[] = [];
 
@@ -76,6 +85,7 @@ export const buildCreateTableSql = (
       quoteId,
       formatDefault,
       numberPkType,
+      uuidFunction,
     );
     if (error) return err(error.type, error.message);
     columnDefs.push(def);

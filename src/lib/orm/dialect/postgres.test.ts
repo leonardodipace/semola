@@ -52,7 +52,7 @@ describe("PostgresDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain('"uuid" UUID PRIMARY KEY');
+    expect(sql).toContain('"uuid" UUID PRIMARY KEY DEFAULT gen_random_uuid()');
     expect(sql).toContain('"name" TEXT NOT NULL');
   });
 
@@ -79,7 +79,7 @@ describe("PostgresDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain('"id" UUID PRIMARY KEY');
+    expect(sql).toContain('"id" UUID PRIMARY KEY DEFAULT gen_random_uuid()');
     expect(sql).toContain('"user_id" UUID NOT NULL');
     expect(sql).toContain('"token" TEXT NOT NULL');
   });

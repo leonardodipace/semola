@@ -55,7 +55,7 @@ describe("MysqlDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("`uuid` CHAR(36) PRIMARY KEY");
+    expect(sql).toContain("`uuid` CHAR(36) PRIMARY KEY DEFAULT (UUID())");
     expect(sql).toContain("`name` VARCHAR(255) NOT NULL");
   });
 
@@ -82,7 +82,7 @@ describe("MysqlDialect - CREATE TABLE", () => {
 
     const [error, sql] = dialect.buildCreateTable(table);
     expect(error).toBeNull();
-    expect(sql).toContain("`id` CHAR(36) PRIMARY KEY");
+    expect(sql).toContain("`id` CHAR(36) PRIMARY KEY DEFAULT (UUID())");
     expect(sql).toContain("`user_id` CHAR(36) NOT NULL");
     expect(sql).toContain("`token` VARCHAR(255) NOT NULL");
   });

@@ -7,6 +7,7 @@ import type { ColumnTypeMapping, Dialect } from "./types.js";
 // Fully implements all query building and type conversion for SQLite databases.
 export class SqliteDialect implements Dialect {
   public readonly name = "sqlite";
+  public readonly uuidFunction = null;
 
   public readonly types: ColumnTypeMapping = {
     number: "INTEGER",
@@ -54,6 +55,7 @@ export class SqliteDialect implements Dialect {
       (s) => this.quoteIdentifier(s),
       (kind, value) => this.formatDefaultValue(kind, value),
       null,
+      this.uuidFunction,
     );
   }
 

@@ -8,6 +8,7 @@ import type { ColumnTypeMapping, Dialect } from "./types.js";
 // Uses ? placeholder syntax and BIGINT AUTO_INCREMENT for auto-incrementing primary keys.
 export class MysqlDialect implements Dialect {
   public readonly name = "mysql";
+  public readonly uuidFunction = "(UUID())";
 
   public readonly types: ColumnTypeMapping = {
     number: "INT",
@@ -62,6 +63,7 @@ export class MysqlDialect implements Dialect {
       (s) => this.quoteIdentifier(s),
       (kind, value) => this.formatDefaultValue(kind, value),
       "BIGINT AUTO_INCREMENT",
+      this.uuidFunction,
     );
   }
 
