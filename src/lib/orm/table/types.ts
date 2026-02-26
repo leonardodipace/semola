@@ -82,7 +82,7 @@ export type BooleanFilter = {
 };
 
 // Map column kind to its filter type
-type ColumnFilter<Kind extends ColumnKind> = Kind extends "string"
+type ColumnFilter<Kind extends ColumnKind> = Kind extends "string" | "uuid"
   ? string | null | StringFilter
   : Kind extends "number"
     ? number | null | NumberFilter

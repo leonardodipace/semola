@@ -7,7 +7,7 @@ import {
   test,
 } from "bun:test";
 import { err, ok } from "../../errors/index.js";
-import { boolean, date, json, number, string } from "../column/index.js";
+import { boolean, date, json, number, string, uuid } from "../column/index.js";
 import { Orm } from "../index.js";
 import { many, one } from "../relations/index.js";
 import { Table } from "./index.js";
@@ -1915,6 +1915,112 @@ describe("Table - json column generic types", () => {
       // @ts-expect-error - unknown | null, property access requires a cast
       void docs?.[0]?.tags?.length;
     });
+  });
+});
+
+const uuidTable = new Table("test_uuid_items", {
+  id: uuid("id").primaryKey(),
+  name: string("name").notNull(),
+});
+
+const uuidOrm = new Orm({
+  url: ":memory:",
+  tables: { items: uuidTable },
+});
+
+describe("Table - uuid column", () => {
+  const testId = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
+  const otherId = "b1ffcd00-ad1c-5fg9-cc7e-7cc0ce491b22";
+
+  beforeAll(async () => {
+    await uuidOrm.sql`
+      CREATE TABLE test_uuid_items (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL
+      )
+    `;
+    await uuidOrm.sql`INSERT INTO test_uuid_items (id, name) VALUES (${testId}, 'alpha')`;
+    await uuidOrm.sql`INSERT INTO test_uuid_items (id, name) VALUES (${otherId}, 'beta')`;
+  });
+
+  afterAll(async () => {
+    await uuidOrm.sql`DROP TABLE IF EXISTS test_uuid_items`;
+    await uuidOrm.close();
+  });
+
+  // Runtime: where clause with string uuid value works
+  test("findMany filters by uuid string", async () => {
+    const [error, items] = await uuidOrm.tables.items.findMany({
+      where: { id: testId },
+    });
+    expect(error).toBeNull();
+    expect(items?.length).toBe(1);
+    expect(items?.[0]?.id).toBe(testId);
+  });
+
+  test("findUnique finds by uuid string", async () => {
+    const [error, item] = await uuidOrm.tables.items.findUnique({
+      where: { id: testId },
+    });
+    expect(error).toBeNull();
+    expect(item?.id).toBe(testId);
+    expect(item?.name).toBe("alpha");
+  });
+
+  test("update filters by uuid string", async () => {
+    const [error, updated] = await uuidOrm.tables.items.update({
+      where: { id: testId },
+      data: { name: "alpha-updated" },
+    });
+    expect(error).toBeNull();
+    expect(updated?.name).toBe("alpha-updated");
+  });
+
+  test("delete filters by uuid string", async () => {
+    const [deleteError, deleted] = await uuidOrm.tables.items.delete({
+      where: { id: otherId },
+    });
+    expect(deleteError).toBeNull();
+    expect(deleted?.id).toBe(otherId);
+
+    const [findError, items] = await uuidOrm.tables.items.findMany();
+    expect(findError).toBeNull();
+    expect(items?.length).toBe(1);
+  });
+
+  // Type-only: uuid where clause accepts string and StringFilter, not boolean/number
+  test("uuid where clause accepts string values", () => {
+    // No @ts-expect-error — must compile cleanly
+    void (() =>
+      uuidOrm.tables.items.findMany({ where: { id: "some-uuid" } }));
+  });
+
+  test("uuid where clause accepts StringFilter", () => {
+    void (() =>
+      uuidOrm.tables.items.findMany({
+        where: { id: { equals: "some-uuid" } },
+      }));
+  });
+
+  test("uuid where clause rejects boolean", () => {
+    void (() =>
+      uuidOrm.tables.items.findMany({
+        // @ts-expect-error - boolean is not assignable to uuid where clause
+        where: { id: true },
+      }));
+  });
+
+  test("uuid where clause rejects number", () => {
+    void (() =>
+      uuidOrm.tables.items.findMany({
+        // @ts-expect-error - number is not assignable to uuid where clause
+        where: { id: 42 },
+      }));
+  });
+
+  test("create input treats uuid primary key as optional", () => {
+    // No @ts-expect-error — omitting uuid pk must compile cleanly
+    void (() => uuidOrm.tables.items.create({ name: "gamma" }));
   });
 });
 
