@@ -1,8 +1,6 @@
-import { err, ok } from "../../errors/index.js";
-import type { Column } from "../column/index.js";
-import type { ColumnKind, ColumnMeta } from "../column/types.js";
+import type { ColumnKind } from "../column/types.js";
 import type { Table } from "../table/index.js";
-import { buildColumnDef } from "./shared.js";
+import { buildCreateTableSql } from "./shared.js";
 import type { ColumnTypeMapping, Dialect } from "./types.js";
 
 // MySQL dialect implementation.
@@ -57,25 +55,13 @@ export class MysqlDialect implements Dialect {
     return `'${this.escapeString(String(value))}'`;
   }
 
-  public buildCreateTable<
-    Columns extends Record<string, Column<ColumnKind, ColumnMeta>>,
-  >(table: Table<Columns>) {
-    const columnDefs: string[] = [];
-
-    for (const [_key, column] of Object.entries(table.columns)) {
-      const [error, def] = buildColumnDef(
-        column,
-        this.types,
-        (s) => this.quoteIdentifier(s),
-        (kind, value) => this.formatDefaultValue(kind, value),
-        "BIGINT AUTO_INCREMENT",
-      );
-      if (error) return err(error.type, error.message);
-      columnDefs.push(def);
-    }
-
-    return ok(
-      `CREATE TABLE IF NOT EXISTS ${this.quoteIdentifier(table.sqlName)} (${columnDefs.join(", ")})`,
+  public buildCreateTable(table: Table) {
+    return buildCreateTableSql(
+      table,
+      this.types,
+      (s) => this.quoteIdentifier(s),
+      (kind, value) => this.formatDefaultValue(kind, value),
+      "BIGINT AUTO_INCREMENT",
     );
   }
 

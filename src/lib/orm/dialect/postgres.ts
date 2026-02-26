@@ -1,8 +1,6 @@
-import { err, ok } from "../../errors/index.js";
-import type { Column } from "../column/index.js";
-import type { ColumnKind, ColumnMeta } from "../column/types.js";
+import type { ColumnKind } from "../column/types.js";
 import type { Table } from "../table/index.js";
-import { buildColumnDef } from "./shared.js";
+import { buildCreateTableSql, escapeStringSingleQuote } from "./shared.js";
 import type { ColumnTypeMapping, Dialect } from "./types.js";
 
 // PostgreSQL dialect implementation.
@@ -21,10 +19,6 @@ export class PostgresDialect implements Dialect {
     uuid: "UUID",
   };
 
-  private escapeString(value: string) {
-    return value.replace(/'/g, "''");
-  }
-
   private quoteIdentifier(identifier: string) {
     return `"${identifier.replace(/"/g, '""')}"`;
   }
@@ -40,39 +34,27 @@ export class PostgresDialect implements Dialect {
 
     if (kind === "date") {
       if (value instanceof Date) {
-        return `'${this.escapeString(value.toISOString())}'`;
+        return `'${escapeStringSingleQuote(value.toISOString())}'`;
       }
-      return `'${this.escapeString(String(value))}'`;
+      return `'${escapeStringSingleQuote(String(value))}'`;
     }
 
     if (kind === "json" || kind === "jsonb") {
       const jsonValue =
         typeof value === "string" ? value : (JSON.stringify(value) ?? "null");
-      return `'${this.escapeString(jsonValue)}'`;
+      return `'${escapeStringSingleQuote(jsonValue)}'`;
     }
 
-    return `'${this.escapeString(String(value))}'`;
+    return `'${escapeStringSingleQuote(String(value))}'`;
   }
 
-  public buildCreateTable<
-    Columns extends Record<string, Column<ColumnKind, ColumnMeta>>,
-  >(table: Table<Columns>) {
-    const columnDefs: string[] = [];
-
-    for (const [_key, column] of Object.entries(table.columns)) {
-      const [error, def] = buildColumnDef(
-        column,
-        this.types,
-        (s) => this.quoteIdentifier(s),
-        (kind, value) => this.formatDefaultValue(kind, value),
-        "BIGSERIAL",
-      );
-      if (error) return err(error.type, error.message);
-      columnDefs.push(def);
-    }
-
-    return ok(
-      `CREATE TABLE IF NOT EXISTS ${this.quoteIdentifier(table.sqlName)} (${columnDefs.join(", ")})`,
+  public buildCreateTable(table: Table) {
+    return buildCreateTableSql(
+      table,
+      this.types,
+      (s) => this.quoteIdentifier(s),
+      (kind, value) => this.formatDefaultValue(kind, value),
+      "BIGSERIAL",
     );
   }
 

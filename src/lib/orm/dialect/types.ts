@@ -1,5 +1,3 @@
-import type { Column } from "../column/index.js";
-import type { ColumnKind, ColumnMeta } from "../column/types.js";
 import type { Table } from "../table/index.js";
 
 // Maps column types to database-specific SQL types.
@@ -24,10 +22,8 @@ export interface Dialect {
 
   // Build a CREATE TABLE statement for the given table definition.
   // Returns [error, null] on unsupported column type or [null, sql] on success.
-  buildCreateTable<
-    Columns extends Record<string, Column<ColumnKind, ColumnMeta>>,
-  >(
-    table: Table<Columns>,
+  buildCreateTable(
+    table: Table,
   ):
     | readonly [{ type: string; message: string }, null]
     | readonly [null, string];

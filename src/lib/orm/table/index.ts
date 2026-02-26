@@ -177,21 +177,26 @@ export class TableClient<T extends Table> {
   }
 
   private normalizeRows(rows: Record<string, unknown>[]) {
-    this.convertBooleanValues(rows);
-    this.convertDateValues(rows);
-    this.convertNumberValues(rows);
+    this.normalizeRowValues(rows);
     this.mapColumnNames(rows);
   }
 
-  private convertDateValues(rows: Record<string, unknown>[]) {
+  // Single pass over rows × columns for all type normalization.
+  private normalizeRowValues(rows: Record<string, unknown>[]) {
     for (const row of rows) {
       for (const [_key, column] of Object.entries(this.table.columns)) {
-        if (column.columnKind !== "date") {
-          continue;
+        const name = column.sqlName;
+        if (column.columnKind === "boolean") {
+          row[name] = this.dialect.convertBooleanValue(row[name]);
+        } else if (column.columnKind === "date") {
+          row[name] = this.normalizeDateValue(row[name]);
+        } else if (
+          column.columnKind === "number" &&
+          typeof row[name] === "string"
+        ) {
+          const parsed = Number(row[name]);
+          if (!Number.isNaN(parsed)) row[name] = parsed;
         }
-
-        const sqlColumnName = column.sqlName;
-        row[sqlColumnName] = this.normalizeDateValue(row[sqlColumnName]);
       }
     }
   }
@@ -392,13 +397,6 @@ export class TableClient<T extends Table> {
       return ok(null);
     }
 
-    for (const [key] of whereEntries) {
-      const [nameError] = this.validateColumnName(key);
-      if (nameError) {
-        return err(nameError.type, nameError.message);
-      }
-    }
-
     const conditions: unknown[] = [];
     for (const [key, value] of whereEntries) {
       const [condError, cond] = this.buildCondition(key, value);
@@ -450,39 +448,6 @@ export class TableClient<T extends Table> {
     key: string,
   ): unknown[] {
     return [...new Set(rows.map((row) => row[key]).filter((v) => v != null))];
-  }
-
-  private convertBooleanValues(rows: Record<string, unknown>[]) {
-    for (const row of rows) {
-      for (const [_key, column] of Object.entries(this.table.columns)) {
-        const sqlColumnName = column.sqlName;
-        const value = row[sqlColumnName];
-
-        if (column.columnKind === "boolean") {
-          row[sqlColumnName] = this.dialect.convertBooleanValue(value);
-        }
-      }
-    }
-  }
-
-  private convertNumberValues(rows: Record<string, unknown>[]) {
-    for (const row of rows) {
-      for (const [_key, column] of Object.entries(this.table.columns)) {
-        if (column.columnKind !== "number") {
-          continue;
-        }
-
-        const sqlColumnName = column.sqlName;
-        const value = row[sqlColumnName];
-
-        if (typeof value === "string") {
-          const parsed = Number(value);
-          if (!Number.isNaN(parsed)) {
-            row[sqlColumnName] = parsed;
-          }
-        }
-      }
-    }
   }
 
   // Map SQL column names back to TypeScript property names
@@ -682,11 +647,8 @@ export class TableClient<T extends Table> {
       options?.include,
       this.getTableClient,
     );
-    if (includeError || !includedRows) {
-      return err(
-        includeError?.type ?? "InternalServerError",
-        includeError?.message ?? "Failed to load included relations",
-      );
+    if (includeError) {
+      return err(includeError.type, includeError.message);
     }
 
     return ok(includedRows);
@@ -695,56 +657,9 @@ export class TableClient<T extends Table> {
   public async findFirst<
     Inc extends Record<string, boolean> | undefined = undefined,
   >(options?: FindFirstOptions<T> & { include?: Inc }) {
-    const [whereError, whereClause] = this.buildWhereClause(options?.where);
-    if (whereError) {
-      return err(whereError.type, whereError.message);
-    }
-
-    let sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
-      SELECT * FROM ${this.sql(this.table.sqlName)}
-    `;
-
-    if (whereClause) {
-      sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
-        ${sql}
-        WHERE ${whereClause}
-      `;
-    }
-
-    sql = this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
-      ${sql}
-      LIMIT 1
-    `;
-
-    const [queryError, queryRows] = await mightThrow(sql);
-    if (queryError || !queryRows) {
-      return err(
-        "InternalServerError",
-        `Failed to fetch row: ${toErrorMessage(queryError)}`,
-      );
-    }
-
-    const [row] = queryRows;
-    if (!row) {
-      return ok(null);
-    }
-
-    const rows = [row];
-    this.normalizeRows(rows);
-
-    const [includeError, includedRows] = await this.loadIncludedRelations(
-      rows,
-      options?.include,
-      this.getTableClient,
-    );
-    if (includeError || !includedRows) {
-      return err(
-        includeError?.type ?? "InternalServerError",
-        includeError?.message ?? "Failed to load included relations",
-      );
-    }
-
-    return ok(includedRows[0] ?? null);
+    const [error, rows] = await this.findMany<Inc>({ ...options, take: 1 });
+    if (error) return err(error.type, error.message);
+    return ok(rows?.[0] ?? null);
   }
 
   public async findUnique<
@@ -758,50 +673,7 @@ export class TableClient<T extends Table> {
       return err(uniqueError.type, uniqueError.message);
     }
 
-    const [whereError, whereClause] = this.buildWhereClause(options.where);
-    if (whereError) {
-      return err(whereError.type, whereError.message);
-    }
-
-    if (!whereClause) {
-      return err("ValidationError", "findUnique requires a where clause");
-    }
-
-    const [queryError, results] = await mightThrow(
-      this.sql<WithIncluded<InferTableType<T>, T, Inc>[]>`
-        SELECT * FROM ${this.sql(this.table.sqlName)}
-        WHERE ${whereClause}
-        LIMIT 1
-      `,
-    );
-    if (queryError || !results) {
-      return err(
-        "InternalServerError",
-        `Failed to fetch row: ${toErrorMessage(queryError)}`,
-      );
-    }
-
-    const result = results[0];
-    if (!result) {
-      return ok(null);
-    }
-
-    this.normalizeRows([result]);
-
-    const [includeError, includedRows] = await this.loadIncludedRelations(
-      [result],
-      options?.include,
-      this.getTableClient,
-    );
-    if (includeError || !includedRows) {
-      return err(
-        includeError?.type ?? "InternalServerError",
-        includeError?.message ?? "Failed to load included relations",
-      );
-    }
-
-    const [included] = includedRows;
-    return ok(included ?? null);
+    return this.findFirst<Inc>(options);
   }
 
   public async count(options?: CountOptions<T>) {
@@ -828,25 +700,28 @@ export class TableClient<T extends Table> {
     return ok(Number(rows[0]?.count ?? 0));
   }
 
+  // Maps TypeScript field names to SQL column names, normalizing date values.
+  private toSqlData(data: Record<string, unknown>) {
+    const sqlData: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(data)) {
+      const [nameError] = this.validateColumnName(key);
+      if (nameError) return err(nameError.type, nameError.message);
+      const column = this.table.columns[key];
+      if (!column) return err("ValidationError", `Invalid column: ${key}`);
+      sqlData[column.sqlName] = this.normalizeDateForStorage(column, value);
+    }
+    return ok(sqlData);
+  }
+
   public async create(data: CreateInput<T>) {
     if (Object.keys(data).length === 0) {
       return err("ValidationError", "create requires at least one field");
     }
 
-    const sqlData: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(data)) {
-      const [nameError] = this.validateColumnName(key);
-      if (nameError) {
-        return err(nameError.type, nameError.message);
-      }
-
-      const column = this.table.columns[key];
-      if (!column) {
-        return err("ValidationError", `Invalid column: ${key}`);
-      }
-
-      sqlData[column.sqlName] = this.normalizeDateForStorage(column, value);
-    }
+    const [sqlDataError, sqlData] = this.toSqlData(
+      data as Record<string, unknown>,
+    );
+    if (sqlDataError) return err(sqlDataError.type, sqlDataError.message);
 
     let results: InferTableType<T>[];
 
@@ -862,7 +737,7 @@ export class TableClient<T extends Table> {
         );
       }
 
-      results = await this.readLastInsertedRows(data, 1);
+      results = await this.readLastInsertedRows(data);
     } else {
       const [insertError, inserted] = await mightThrow(
         this.sql<
@@ -900,21 +775,10 @@ export class TableClient<T extends Table> {
         return err("ValidationError", "createMany requires at least one field");
       }
 
-      const sqlData: Record<string, unknown> = {};
-
-      for (const [key, value] of Object.entries(item)) {
-        const [nameError] = this.validateColumnName(key);
-        if (nameError) {
-          return err(nameError.type, nameError.message);
-        }
-
-        const column = this.table.columns[key];
-        if (!column) {
-          return err("ValidationError", `Invalid column: ${key}`);
-        }
-
-        sqlData[column.sqlName] = this.normalizeDateForStorage(column, value);
-      }
+      const [sqlDataError, sqlData] = this.toSqlData(
+        item as Record<string, unknown>,
+      );
+      if (sqlDataError) return err(sqlDataError.type, sqlDataError.message);
 
       sqlDataArray.push(sqlData);
     }
@@ -993,7 +857,6 @@ export class TableClient<T extends Table> {
   // MySQL workaround since INSERT doesn't support RETURNING.
   private async readLastInsertedRows(
     data: CreateInput<T>,
-    _count: number,
   ): Promise<InferTableType<T>[]> {
     const primaryKey = this.getPrimaryKeyColumn();
 
@@ -1066,24 +929,11 @@ export class TableClient<T extends Table> {
     return this.create(options.create);
   }
 
-  private async readRowByPk(pkSqlName: string, pkValue: unknown) {
+  private async readRowByColumn(sqlColumnName: string, value: unknown) {
     return mightThrow(
       this.sql<InferTableType<T>[]>`
         SELECT * FROM ${this.sql(this.table.sqlName)}
-        WHERE ${this.sql(pkSqlName)} = ${pkValue}
-        LIMIT 1
-      `,
-    );
-  }
-
-  private async readRowBySelector(
-    selectorSqlName: string,
-    selectorValue: unknown,
-  ) {
-    return mightThrow(
-      this.sql<InferTableType<T>[]>`
-        SELECT * FROM ${this.sql(this.table.sqlName)}
-        WHERE ${this.sql(selectorSqlName)} = ${selectorValue}
+        WHERE ${this.sql(sqlColumnName)} = ${value}
         LIMIT 1
       `,
     );
@@ -1098,46 +948,29 @@ export class TableClient<T extends Table> {
       options.where,
       "update",
     );
-    if (selectorError || !uniqueSelector) {
-      return err(
-        selectorError?.type ?? "ValidationError",
-        selectorError?.message ?? "update requires a unique selector",
-      );
+    if (selectorError) {
+      return err(selectorError.type, selectorError.message);
     }
 
     const [whereError, whereClause] = this.buildCondition(
       uniqueSelector.key,
       uniqueSelector.value,
     );
-    if (whereError || !whereClause) {
-      return err(
-        whereError?.type ?? "ValidationError",
-        whereError?.message ?? "update requires a valid where clause",
-      );
+    if (whereError) {
+      return err(whereError.type, whereError.message);
     }
 
-    const dataEntries: [string, unknown][] = Object.entries(options.data);
-    if (dataEntries.length === 0) {
+    if (Object.keys(options.data).length === 0) {
       return err(
         "ValidationError",
         "update requires at least one field in data",
       );
     }
 
-    const sqlData: Record<string, unknown> = {};
-    for (const [key, value] of dataEntries) {
-      const [nameError] = this.validateColumnName(key);
-      if (nameError) {
-        return err(nameError.type, nameError.message);
-      }
-
-      const column = this.table.columns[key];
-      if (!column) {
-        return err("ValidationError", `Invalid column: ${key}`);
-      }
-
-      sqlData[column.sqlName] = this.normalizeDateForStorage(column, value);
-    }
+    const [sqlDataError, sqlData] = this.toSqlData(
+      options.data as Record<string, unknown>,
+    );
+    if (sqlDataError) return err(sqlDataError.type, sqlDataError.message);
 
     let results: InferTableType<T>[] = [];
 
@@ -1250,10 +1083,9 @@ export class TableClient<T extends Table> {
 
       const primaryKey = this.getPrimaryKeyColumn();
       if (primaryKey && primaryKey.kind !== "boolean") {
-        const pkValue = existing[primaryKey.sqlName];
-        const [readError, readResults] = await this.readRowByPk(
+        const [readError, readResults] = await this.readRowByColumn(
           primaryKey.sqlName,
-          pkValue,
+          existing[primaryKey.sqlName],
         );
         if (readError || !readResults) {
           return err(
@@ -1272,7 +1104,7 @@ export class TableClient<T extends Table> {
               )
             : uniqueSelector.value;
 
-        const [readError, readResults] = await this.readRowBySelector(
+        const [readError, readResults] = await this.readRowByColumn(
           selectorColumn.sqlName,
           updatedSelectorValue,
         );
@@ -1309,22 +1141,16 @@ export class TableClient<T extends Table> {
       options.where,
       "delete",
     );
-    if (selectorError || !uniqueSelector) {
-      return err(
-        selectorError?.type ?? "ValidationError",
-        selectorError?.message ?? "delete requires a unique selector",
-      );
+    if (selectorError) {
+      return err(selectorError.type, selectorError.message);
     }
 
     const [whereError, whereClause] = this.buildCondition(
       uniqueSelector.key,
       uniqueSelector.value,
     );
-    if (whereError || !whereClause) {
-      return err(
-        whereError?.type ?? "ValidationError",
-        whereError?.message ?? "delete requires a valid where clause",
-      );
+    if (whereError) {
+      return err(whereError.type, whereError.message);
     }
 
     let results: InferTableType<T>[] = [];

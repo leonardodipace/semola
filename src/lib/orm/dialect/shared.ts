@@ -1,7 +1,12 @@
 import { err, ok } from "../../errors/index.js";
 import type { Column } from "../column/index.js";
 import type { ColumnKind, ColumnMeta } from "../column/types.js";
+import type { Table } from "../table/index.js";
 import type { ColumnTypeMapping } from "./types.js";
+
+// Shared single-quote escape (SQLite and Postgres use the same rule).
+export const escapeStringSingleQuote = (value: string) =>
+  value.replace(/'/g, "''");
 
 // Builds the SQL column definition parts shared across all dialects.
 // numberPkType is the SQL type for auto-incrementing number PKs (e.g. "BIGSERIAL", "BIGINT AUTO_INCREMENT").
@@ -52,4 +57,31 @@ export const buildColumnDef = (
   }
 
   return ok(parts.join(" "));
+};
+
+// Builds a full CREATE TABLE IF NOT EXISTS statement, shared across all dialects.
+export const buildCreateTableSql = (
+  table: Table,
+  types: ColumnTypeMapping,
+  quoteId: (s: string) => string,
+  formatDefault: (kind: ColumnKind, value: unknown) => string,
+  numberPkType: string | null,
+) => {
+  const columnDefs: string[] = [];
+
+  for (const [_key, column] of Object.entries(table.columns)) {
+    const [error, def] = buildColumnDef(
+      column,
+      types,
+      quoteId,
+      formatDefault,
+      numberPkType,
+    );
+    if (error) return err(error.type, error.message);
+    columnDefs.push(def);
+  }
+
+  return ok(
+    `CREATE TABLE IF NOT EXISTS ${quoteId(table.sqlName)} (${columnDefs.join(", ")})`,
+  );
 };
