@@ -1,5 +1,5 @@
 import { err, ok } from "../errors/index.js";
-import { CronScannerError } from "./types.js";
+import type { CronScannerError } from "./types.js";
 
 export const FieldAmount = {
   min: 5,

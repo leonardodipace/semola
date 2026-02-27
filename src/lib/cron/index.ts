@@ -1,5 +1,5 @@
 import { err, mightThrow, ok } from "../errors/index.js";
-import { FieldAmount, Scanner, Token } from "./scanner.js";
+import { FieldAmount, Scanner, type Token } from "./scanner.js";
 import type { CronOptions, CronParsingError, CronStatus } from "./types.js";
 
 const RETRY_DELAY_MS = 60 * 60 * 1000; // 1 hour
