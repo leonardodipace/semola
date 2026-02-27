@@ -47,7 +47,7 @@ describe("Cron Scanner", () => {
       ).toBeTrue();
     });
 
-    test("should create an list of integer tokens", () => {
+    test("should create a list of integer tokens", () => {
       const [err, tokens] = new Scanner("1 2 3 4 5 6").scan();
 
       expect(err).toBeNull();
