@@ -3,10 +3,16 @@ import type { Context, RequestSchema, ResponseSchema } from "../core/types.js";
 export type MiddlewareHandler<
   TReq extends RequestSchema = RequestSchema,
   TRes extends ResponseSchema | undefined = undefined,
-  TExt extends Record<string, unknown> = Record<string, unknown>,
+  TExt extends Record<string, unknown> = Record<never, never>,
 > = (
   c: Context<TReq, TRes>,
-) => Response | TExt | Promise<Response | TExt> | Promise<void>;
+) =>
+  | Response
+  | TExt
+  | undefined
+  | Promise<Response | TExt | undefined>
+  | Promise<void>
+  | void;
 
 export type MiddlewareOptions<
   TReq extends RequestSchema = RequestSchema,
