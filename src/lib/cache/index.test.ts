@@ -610,7 +610,7 @@ describe("Cache", () => {
       ]);
     });
 
-    test("should not call onError on NotFoundError", async () => {
+    test("should call onError on NotFoundError", async () => {
       const redis = createMockRedis();
       const errors: { type: string; message: string }[] = [];
       const cache = new Cache<string>({
@@ -620,7 +620,9 @@ describe("Cache", () => {
 
       await cache.get("nonexistent");
 
-      expect(errors).toEqual([]);
+      expect(errors).toEqual([
+        { type: "NotFoundError", message: "Key nonexistent not found" },
+      ]);
     });
 
     test("should not call onError when no errors occur", async () => {
