@@ -56,6 +56,8 @@ export class Cron {
   private month = Array<number>(CronMonthRange.max + 1).fill(0); // indices 1-12 (0 unused)
   private dayOfWeek = Array<number>(CronDayOfWeekRange.max + 1).fill(0); // 0-6
   private hasSeconds;
+  private _dayWildcard = false;
+  private _dowWildcard = false;
 
   // Fill all values from min to max with 1
   private fillRange(values: number[], min: number, max: number) {
@@ -346,9 +348,12 @@ export class Cron {
   private parse(tokens: Token[]) {
     for (let i = 0; i < tokens.length; i++) {
       const token = tokens[i];
+
       if (!token) {
         return err<CronParsingError>("InvalidValueError", "Undefined token");
       }
+
+      const tokenType = token.getTokenType();
 
       switch (token.getField()) {
         case "second": {
@@ -403,6 +408,10 @@ export class Cron {
           break;
         }
         case "day": {
+          if (tokenType === "any") {
+            this._dayWildcard = true;
+          }
+
           const [error, _] = this.handleField(
             token,
             this.day,
@@ -437,6 +446,10 @@ export class Cron {
           break;
         }
         case "weekday": {
+          if (tokenType === "any") {
+            this._dowWildcard = true;
+          }
+
           const [error, _] = this.handleField(
             token,
             this.dayOfWeek,
@@ -518,18 +531,24 @@ export class Cron {
     const isSecondMatch = this.hasSeconds ? this.second[s] === 1 : true;
     const isMinuteMatch = this.minute[m] === 1;
     const isHourMatch = this.hour[h] === 1;
-    const isDayMatch = this.day[d] === 1;
     const isMonthMatch = this.month[mon + 1] === 1;
-    const isDayOfWeekMatch = this.dayOfWeek[dow] === 1;
 
-    // All conditions must match
+    // Standard cron: when both day-of-month and day-of-week are restricted (not *),
+    // fire if EITHER matches. When at least one is *, use AND (the wildcard is always 1).
+    let isDayOrDowMatch: boolean;
+
+    if (!this._dayWildcard && !this._dowWildcard) {
+      isDayOrDowMatch = this.day[d] === 1 || this.dayOfWeek[dow] === 1;
+    } else {
+      isDayOrDowMatch = this.day[d] === 1 && this.dayOfWeek[dow] === 1;
+    }
+
     return (
       isSecondMatch &&
       isMinuteMatch &&
       isHourMatch &&
-      isDayMatch &&
-      isMonthMatch &&
-      isDayOfWeekMatch
+      isDayOrDowMatch &&
+      isMonthMatch
     );
   }
 
@@ -546,8 +565,10 @@ export class Cron {
       date.setMinutes(date.getMinutes() + 1);
     }
 
-    // Search up to 366 days to cover yearly/leap-year schedules
-    const maxIterations = this.hasSeconds ? 366 * 24 * 3600 : 366 * 24 * 60;
+    // Search up to 4 years to cover leap-day schedules (next Feb 29 can be ~4 years away)
+    const maxIterations = this.hasSeconds
+      ? 366 * 4 * 24 * 3600
+      : 366 * 4 * 24 * 60;
 
     for (let i = 0; i < maxIterations; i++) {
       if (this.matches(date)) {
