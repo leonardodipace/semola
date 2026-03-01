@@ -48,6 +48,10 @@ export class I18n<
       this.getNestedValue(currentTranslations, key) ??
       this.getNestedValue(defaultTranslations, key);
 
+    if (typeof translation !== "string") {
+      return key;
+    }
+
     if (!translation) {
       return key;
     }
@@ -60,7 +64,17 @@ export class I18n<
     obj: Record<string, unknown> | undefined,
     path: string,
   ) {
-    return path.split(".").reduce((current: any, key) => current?.[key], obj);
+    return path.split(".").reduce((current: unknown, key: string) => {
+      if (typeof current !== "object") {
+        return undefined;
+      }
+
+      if (current === null) {
+        return undefined;
+      }
+
+      return (current as Record<string, unknown>)[key];
+    }, obj);
   }
 
   private substituteParams(template: string, params?: Record<string, unknown>) {

@@ -27,6 +27,7 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 | **🌍 i18n**          | Compile-time validated internationalization            | `semola/i18n`   |
 | **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`  |
 | **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors` |
+| **🗄️ ORM**           | Type-safe data layer with query APIs + migrations      | `semola/orm`    |
 
 ---
 
@@ -135,6 +136,65 @@ const [error, user] = await cache.get("user:123");
 if (!error) console.log(user);
 ```
 
+### Query a Database
+
+```typescript
+import { createOrm, createTable, string, uuid } from "semola/orm";
+
+const users = createTable("users", {
+  id: uuid("id").primaryKey(),
+  name: string("name").notNull(),
+  email: string("email").unique().notNull(),
+});
+
+const db = createOrm({
+  url: "sqlite::memory:",
+  tables: { users },
+});
+
+// Result-pattern query
+const [findErr, rows] = await db.users.findMany({
+  where: { name: { contains: "John" } },
+  take: 10,
+});
+
+if (findErr) {
+  console.error(findErr.type, findErr.message);
+}
+
+// Create record (result pattern)
+const [createErr, user] = await db.users.create({
+  data: {
+    name: "John Doe",
+    email: "john@example.com",
+  },
+});
+
+// Low-level SQL-style methods are also available
+const insertedRows = await db.users.insert({
+  data: {
+    name: "Jane Doe",
+    email: "jane@example.com",
+  },
+  returning: true,
+});
+
+console.log(rows, user, createErr, insertedRows);
+```
+
+### Run ORM Migrations
+
+```bash
+# create migration from schema diff
+semola orm migrations create add-users
+
+# apply pending migrations
+semola orm migrations apply
+
+# rollback last applied migration
+semola orm migrations rollback
+```
+
 ### Check Permissions
 
 ```typescript
@@ -238,6 +298,7 @@ _Higher is better for req/sec, lower is better for latency._
 - [i18n](./docs/i18n.md) - Type-safe internationalization
 - [Cache](./docs/cache.md) - Redis cache wrapper with TTL
 - [Errors](./docs/errors.md) - Result-based error handling
+- [ORM](./docs/orm.md) - Type-safe data layer, result-pattern DX, and migrations
 
 ---
 
