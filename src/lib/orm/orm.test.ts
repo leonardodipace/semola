@@ -16,6 +16,14 @@ const tasksTable = new Table("tasks", {
   title: string("title").notNull(),
 });
 
+const mappedUsersTable = new Table("mapped_users", {
+  id: uuid("id")
+    .primaryKey()
+    .defaultFn(() => crypto.randomUUID()),
+  firstName: string("first_name").notNull(),
+  lastName: string("last_name").notNull(),
+});
+
 async function setupUsers(db: {
   $raw: (
     strings: TemplateStringsArray,
@@ -33,6 +41,15 @@ async function setupUsersAndTasks(db: {
 }) {
   await db.$raw`CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL)`;
   await db.$raw`CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, assignee_id TEXT NOT NULL)`;
+}
+
+async function setupMappedUsers(db: {
+  $raw: (
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+  ) => Promise<unknown[]>;
+}) {
+  await db.$raw`CREATE TABLE mapped_users (id TEXT PRIMARY KEY, first_name TEXT NOT NULL, last_name TEXT NOT NULL)`;
 }
 
 describe("createOrm()", () => {
@@ -120,6 +137,22 @@ describe("createOrm()", () => {
 
     expect(err).toBeNull();
     expect(users).toEqual([{ id: "1", name: "Alice" }]);
+  });
+
+  test("findMany() maps sql column names back to js keys", async () => {
+    const db = createOrm({
+      url: "sqlite::memory:",
+      tables: { mappedUsers: mappedUsersTable },
+    });
+
+    await setupMappedUsers(db);
+
+    await db.$raw`INSERT INTO mapped_users (id, first_name, last_name) VALUES ('1', 'Alice', 'Smith')`;
+
+    const [findErr, users] = await db.mappedUsers.findMany();
+
+    expect(findErr).toBeNull();
+    expect(users).toEqual([{ id: "1", firstName: "Alice", lastName: "Smith" }]);
   });
 
   test("users.findMany() returns typed error object", async () => {
@@ -241,6 +274,32 @@ describe("createOrm()", () => {
     });
 
     expect(inserted).toEqual([{ id: "u1", name: "Alice" }]);
+  });
+
+  test("insert returning maps sql column names to js keys", async () => {
+    const db = createOrm({
+      url: "sqlite::memory:",
+      tables: { mappedUsers: mappedUsersTable },
+    });
+
+    await setupMappedUsers(db);
+
+    const inserted = await db.mappedUsers.insert({
+      data: {
+        id: "u1",
+        firstName: "Alice",
+        lastName: "Smith",
+      },
+      returning: true,
+    });
+
+    expect(inserted).toEqual([
+      {
+        id: "u1",
+        firstName: "Alice",
+        lastName: "Smith",
+      },
+    ]);
   });
 
   test("create() returns tuple with created row", async () => {
@@ -372,6 +431,30 @@ describe("createOrm()", () => {
     expect(updated).toEqual([{ id: "1", name: "Alicia" }]);
   });
 
+  test("update returning maps sql column names to js keys", async () => {
+    const db = createOrm({
+      url: "sqlite::memory:",
+      tables: { mappedUsers: mappedUsersTable },
+    });
+
+    await setupMappedUsers(db);
+    await db.$raw`INSERT INTO mapped_users (id, first_name, last_name) VALUES ('1', 'Alice', 'Smith')`;
+
+    const updated = await db.mappedUsers.update({
+      where: { id: "1" },
+      data: { firstName: "Alicia" },
+      returning: true,
+    });
+
+    expect(updated).toEqual([
+      {
+        id: "1",
+        firstName: "Alicia",
+        lastName: "Smith",
+      },
+    ]);
+  });
+
   test("delete removes matching rows", async () => {
     const db = createOrm({
       url: "sqlite::memory:",
@@ -426,6 +509,29 @@ describe("createOrm()", () => {
     });
 
     expect(deleted).toEqual([{ id: "1", name: "Alice" }]);
+  });
+
+  test("delete returning maps sql column names to js keys", async () => {
+    const db = createOrm({
+      url: "sqlite::memory:",
+      tables: { mappedUsers: mappedUsersTable },
+    });
+
+    await setupMappedUsers(db);
+    await db.$raw`INSERT INTO mapped_users (id, first_name, last_name) VALUES ('1', 'Alice', 'Smith')`;
+
+    const deleted = await db.mappedUsers.delete({
+      where: { id: "1" },
+      returning: true,
+    });
+
+    expect(deleted).toEqual([
+      {
+        id: "1",
+        firstName: "Alice",
+        lastName: "Smith",
+      },
+    ]);
   });
 });
 

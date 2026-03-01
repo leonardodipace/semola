@@ -98,6 +98,38 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
   relations: TRels,
   dialectAdapter: ReturnType<typeof getDialectAdapter>,
 ): TinyTableClient<T, TRels> {
+  const buildReturningColumns = () => {
+    const fragments: SQL.Query<unknown>[] = [];
+
+    for (const jsKey in table.columns) {
+      const col = table.columns[jsKey];
+
+      if (!col) {
+        continue;
+      }
+
+      fragments.push(sql`${sql(col.meta.sqlName)} AS ${sql(jsKey)}`);
+    }
+
+    if (fragments.length === 0) {
+      return sql`*`;
+    }
+
+    let joined = fragments[0];
+
+    for (let index = 1; index < fragments.length; index++) {
+      const fragment = fragments[index];
+
+      if (!fragment) {
+        continue;
+      }
+
+      joined = sql`${joined}, ${fragment}`;
+    }
+
+    return joined;
+  };
+
   const select = (input = {}) => {
     return serializeSelectInput(sql, table, relations, input, dialectAdapter);
   };
@@ -111,7 +143,7 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
 
     if (input.returning === true) {
       if (dialectAdapter.dialect !== "mysql") {
-        return sql`INSERT INTO ${sql(table.tableName)} ${sql(row)} RETURNING *`;
+        return sql`INSERT INTO ${sql(table.tableName)} ${sql(row)} RETURNING ${buildReturningColumns()}`;
       }
     }
 
@@ -129,7 +161,7 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
 
     if (input.returning === true) {
       if (dialectAdapter.dialect !== "mysql") {
-        return sql`UPDATE ${sql(table.tableName)} SET ${sql(row)} ${where} RETURNING *`;
+        return sql`UPDATE ${sql(table.tableName)} SET ${sql(row)} ${where} RETURNING ${buildReturningColumns()}`;
       }
     }
 
@@ -141,7 +173,7 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
 
     if (input.returning === true) {
       if (dialectAdapter.dialect !== "mysql") {
-        return sql`DELETE FROM ${sql(table.tableName)} ${where} RETURNING *`;
+        return sql`DELETE FROM ${sql(table.tableName)} ${where} RETURNING ${buildReturningColumns()}`;
       }
     }
 
@@ -206,7 +238,7 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
         return [createErr, null] as const;
       }
 
-      const first = rows[0];
+      const first = rows[0] ?? null;
 
       if (!first) {
         return err("InternalServerError", "Insert returned no rows");
@@ -233,7 +265,7 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
       }
 
       const [createErr, createdRows] = await toResult(
-        sql`INSERT INTO ${sql(table.tableName)} ${sql(rows)} RETURNING *`,
+        sql`INSERT INTO ${sql(table.tableName)} ${sql(rows)} RETURNING ${buildReturningColumns()}`,
       );
 
       if (createErr) {

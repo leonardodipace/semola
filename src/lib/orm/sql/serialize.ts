@@ -619,6 +619,43 @@ function buildJoinFromInclude<T extends ColDefs, TRels>(
   return joinClause;
 }
 
+function buildBaseSelectColumns<T extends ColDefs>(
+  sql: SQL | TransactionSQL,
+  table: Table<T>,
+) {
+  const fragments: SQL.Query<unknown>[] = [];
+
+  for (const jsKey in table.columns) {
+    const col = table.columns[jsKey];
+
+    if (!col) {
+      continue;
+    }
+
+    fragments.push(
+      sql`${sql(table.tableName)}.${sql(col.meta.sqlName)} AS ${sql(jsKey)}`,
+    );
+  }
+
+  if (fragments.length === 0) {
+    return sql`*`;
+  }
+
+  let joined = fragments[0];
+
+  for (let index = 1; index < fragments.length; index++) {
+    const fragment = fragments[index];
+
+    if (!fragment) {
+      continue;
+    }
+
+    joined = sql`${joined}, ${fragment}`;
+  }
+
+  return joined;
+}
+
 export function mapDataToSqlRow<T extends ColDefs>(
   table: Table<T>,
   data: Record<string, unknown>,
@@ -650,8 +687,9 @@ export function serializeSelectPlan<T extends ColDefs>(
   const where = buildWhereClause(sql, table, plan, dialectAdapter);
   const orderBy = buildOrderByClause(sql, table, plan);
   const limitOffset = buildLimitClause(sql, plan.page.limit, plan.page.offset);
+  const columns = buildBaseSelectColumns(sql, table);
 
-  return sql`SELECT * FROM ${sql(table.tableName)} ${joins} ${where} ${orderBy} ${limitOffset}`;
+  return sql`SELECT ${columns} FROM ${sql(table.tableName)} ${joins} ${where} ${orderBy} ${limitOffset}`;
 }
 
 export function serializeWhereInput<T extends ColDefs>(
@@ -674,6 +712,7 @@ export function serializeSelectInput<T extends ColDefs, TRels>(
   const where = buildWhereFromInput(sql, table, input.where, dialectAdapter);
   const orderBy = buildOrderByFromInput(sql, table, input.orderBy);
   const limitOffset = buildLimitClause(sql, input.limit, input.offset);
+  const columns = buildBaseSelectColumns(sql, table);
 
-  return sql`SELECT * FROM ${sql(table.tableName)} ${joins} ${where} ${orderBy} ${limitOffset}`;
+  return sql`SELECT ${columns} FROM ${sql(table.tableName)} ${joins} ${where} ${orderBy} ${limitOffset}`;
 }

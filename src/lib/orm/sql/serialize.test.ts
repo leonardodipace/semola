@@ -178,7 +178,8 @@ describe("serializeSelectPlan", () => {
 
     const all = sql.calls.flatMap((call) => call.strings).join(" ");
 
-    expect(all).toContain("SELECT * FROM");
+    expect(all).toContain("SELECT");
+    expect(all).not.toContain("SELECT * FROM");
     expect(all).toContain("LEFT JOIN");
     expect(all).toContain("WHERE");
     expect(all).toContain("ORDER BY");
@@ -259,7 +260,8 @@ describe("serializeSelectInput", () => {
 
     const all = sql.calls.flatMap((call) => call.strings).join(" ");
 
-    expect(all).toContain("SELECT * FROM");
+    expect(all).toContain("SELECT");
+    expect(all).not.toContain("SELECT * FROM");
     expect(all).toContain("LEFT JOIN");
     expect(all).toContain("WHERE");
     expect(all).toContain("ORDER BY");
