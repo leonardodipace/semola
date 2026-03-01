@@ -14,9 +14,9 @@ describe("listMigrations", () => {
     await Bun.write(join(migrationDir, "up.sql"), "SELECT 1;");
     await Bun.write(join(migrationDir, "down.sql"), "SELECT 1;");
 
-    const migrations = await listMigrations(migrationsDir);
+    const [, migrations] = await listMigrations(migrationsDir);
     expect(migrations).toHaveLength(1);
-    expect(migrations[0]?.id).toBe("20260228231146001");
-    expect(migrations[0]?.name).toBe("init");
+    expect(migrations?.[0]?.id).toBe("20260228231146001");
+    expect(migrations?.[0]?.name).toBe("init");
   });
 });

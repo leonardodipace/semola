@@ -27,8 +27,9 @@ async function loadPreviousSnapshot(
   migrationsDir: string,
   dialect: SchemaSnapshot["dialect"],
 ) {
-  const migrations = await listMigrations(migrationsDir);
-  const last = migrations[migrations.length - 1];
+  const [, migrations] = await listMigrations(migrationsDir);
+  const list = migrations ?? [];
+  const last = list[list.length - 1];
 
   if (!last) {
     return emptySnapshot(dialect);
@@ -40,18 +41,30 @@ async function loadPreviousSnapshot(
     return emptySnapshot(dialect);
   }
 
-  const content = await Bun.file(last.snapshotPath).text();
-  const [parseErr, parsed] = mightThrowSync(() => JSON.parse(content));
+  const [readErr, content] = await mightThrow(
+    Bun.file(last.snapshotPath).text(),
+  );
+
+  if (readErr) {
+    return emptySnapshot(dialect);
+  }
+
+  const [parseErr, parsed] = mightThrowSync(() => JSON.parse(content ?? ""));
 
   if (parseErr) {
     return emptySnapshot(dialect);
   }
 
-  if (!parsed?.dialect) {
+  if (!parsed?.dialect || !parsed?.tables) {
     return emptySnapshot(dialect);
   }
 
-  return parsed as SchemaSnapshot;
+  const snapshot: SchemaSnapshot = {
+    dialect: parsed.dialect,
+    tables: parsed.tables,
+  };
+
+  return snapshot;
 }
 
 export async function createMigration(input: { name: string; cwd?: string }) {
@@ -94,19 +107,14 @@ export async function createMigration(input: { name: string; cwd?: string }) {
   const baseId = nowMigrationId();
   const migrationName = toMigrationName(input.name);
 
-  const [uniqueDirErr, uniqueDir] = await mightThrow(
-    uniqueMigrationDirectoryPath(
-      config.orm.migrations.dir,
-      baseId,
-      migrationName,
-    ),
+  const [uniqueDirErr, uniqueDir] = await uniqueMigrationDirectoryPath(
+    config.orm.migrations.dir,
+    baseId,
+    migrationName,
   );
 
   if (uniqueDirErr) {
-    return err(
-      "MigrationError",
-      `Could not generate migration path: ${uniqueDirErr instanceof Error ? uniqueDirErr.message : String(uniqueDirErr)}`,
-    );
+    return err(uniqueDirErr.type, uniqueDirErr.message);
   }
 
   if (!uniqueDir) {

@@ -6,6 +6,8 @@ import { loadOrmFromSchema } from "./discover.js";
 import { listMigrations, relativeFromCwd } from "./files.js";
 import { markAppliedMigration, readMigrationState } from "./state-file.js";
 
+// NOTE: splits on all semicolons; breaks if semicolons appear inside SQL
+// string literals. Avoid semicolons in string literals in migration files.
 function splitStatements(sqlText: string) {
   const chunks = sqlText
     .split(";")
@@ -38,10 +40,27 @@ export async function applyMigrations(input: { cwd?: string }) {
 
   const sql = new SQL(orm.options.url);
 
-  const migrations = await listMigrations(config.orm.migrations.dir);
-  const state = await readMigrationState(config.orm.migrations.stateFile);
-  const appliedIds = new Set(state.applied.map((item) => item.id));
-  const pending = migrations.filter(
+  const [listErr, migrations] = await listMigrations(config.orm.migrations.dir);
+
+  if (listErr) {
+    return err(listErr.type, listErr.message);
+  }
+
+  const [stateErr, state] = await mightThrow(
+    readMigrationState(config.orm.migrations.stateFile),
+  );
+
+  if (stateErr) {
+    return err(
+      "MigrationError",
+      `Could not read migration state: ${stateErr instanceof Error ? stateErr.message : String(stateErr)}`,
+    );
+  }
+  const safeMigrations = migrations ?? [];
+  const safeState = state ?? { applied: [] };
+
+  const appliedIds = new Set(safeState.applied.map((item) => item.id));
+  const pending = safeMigrations.filter(
     (migration) => !appliedIds.has(migration.id),
   );
 
@@ -49,7 +68,7 @@ export async function applyMigrations(input: { cwd?: string }) {
     return ok({
       applied: 0,
       pending: 0,
-      total: migrations.length,
+      total: safeMigrations.length,
       configPathRelative: relativeFromCwd(cwd, config.configPath),
       stateFileRelative: relativeFromCwd(cwd, config.orm.migrations.stateFile),
     });
@@ -108,7 +127,7 @@ export async function applyMigrations(input: { cwd?: string }) {
   return ok({
     applied: pending.length,
     pending: 0,
-    total: migrations.length,
+    total: safeMigrations.length,
     appliedIds: pending.map((item) => item.id),
     configPathRelative: relativeFromCwd(cwd, config.configPath),
     stateFileRelative: relativeFromCwd(cwd, config.orm.migrations.stateFile),

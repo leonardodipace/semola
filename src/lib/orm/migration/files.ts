@@ -1,6 +1,6 @@
 import { mkdir, readdir, stat } from "node:fs/promises";
-import { basename, join, relative } from "node:path";
-import { mightThrow } from "../../errors/index.js";
+import { basename, join, relative, sep } from "node:path";
+import { err, mightThrow, ok } from "../../errors/index.js";
 import type { MigrationInfo } from "./types.js";
 
 export async function ensureMigrationsDirectory(migrationsDir: string) {
@@ -13,8 +13,17 @@ export async function listMigrations(migrationsDir: string) {
   );
 
   if (readdirErr) {
-    return [] as MigrationInfo[];
+    if (readdirErr instanceof Error) {
+      if (Reflect.get(readdirErr, "code") === "ENOENT") {
+        return ok<MigrationInfo[]>([]);
+      }
+
+      return err("MigrationError", readdirErr.message);
+    }
+
+    return err("MigrationError", String(readdirErr));
   }
+
   const migrationDirs = (entries ?? [])
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
@@ -43,7 +52,7 @@ export async function listMigrations(migrationsDir: string) {
     });
   }
 
-  return migrations;
+  return ok(migrations);
 }
 
 export function nowMigrationId() {
@@ -91,7 +100,19 @@ export async function uniqueMigrationDirectoryPath(
   while (true) {
     const dirPath = migrationDirectoryPath(migrationsDir, candidateId, name);
 
-    const [, stats] = await mightThrow(stat(dirPath));
+    const [statErr, stats] = await mightThrow(stat(dirPath));
+
+    if (statErr) {
+      if (statErr instanceof Error) {
+        if (Reflect.get(statErr, "code") === "ENOENT") {
+          // path doesn't exist - available
+        } else {
+          return err("MigrationError", statErr.message);
+        }
+      } else {
+        return err("MigrationError", String(statErr));
+      }
+    }
 
     let exists = false;
 
@@ -100,10 +121,10 @@ export async function uniqueMigrationDirectoryPath(
     }
 
     if (!exists) {
-      return {
+      return ok({
         migrationId: candidateId,
         migrationDir: dirPath,
-      };
+      });
     }
 
     attempt += 1;
@@ -114,7 +135,7 @@ export async function uniqueMigrationDirectoryPath(
 export function relativeFromCwd(cwd: string, absolutePath: string) {
   const rel = relative(cwd, absolutePath);
 
-  if (rel.startsWith("..")) {
+  if (rel === ".." || rel.startsWith(`..${sep}`)) {
     return absolutePath;
   }
 

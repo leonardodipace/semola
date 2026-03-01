@@ -86,9 +86,7 @@ export async function runSemolaCli(
       );
       return 0;
     }
-    io.log(
-      `Applied ${result.applied}/${result.pending} migrations successfully`,
-    );
+    io.log(`Applied ${result.applied}/${result.total} migrations successfully`);
     return 0;
   }
 

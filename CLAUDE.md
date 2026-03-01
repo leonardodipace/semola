@@ -25,6 +25,8 @@ Semola is a TypeScript utility kit providing modular packages for common develop
 - No `any` type
 - Infer types, avoid explicit return types
 - Use generics extensively
+- Prefer separate, clearly-named `if` guards over merged conditions - no inline `&&`/`||` between unrelated checks (e.g. check `instanceof` in its own `if`, then check `.code` inside that block)
+- No TypeScript type predicates (`value is Type` return annotations)
 
 ### Error Handling
 
@@ -66,3 +68,4 @@ bun pm version <major|minor|patch>   # Bump version for publishing
 
 - Don't create new docs in `/docs` unless necessary
 - Keep plans concise, sacrificing grammar for brevity
+- No em-dashes (—) in any code comments or documentation

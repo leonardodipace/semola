@@ -6,6 +6,8 @@ import { loadOrmFromSchema } from "./discover.js";
 import { listMigrations, relativeFromCwd } from "./files.js";
 import { readMigrationState, unmarkAppliedMigration } from "./state-file.js";
 
+// NOTE: splits on all semicolons; breaks if semicolons appear inside SQL
+// string literals. Avoid semicolons in string literals in migration files.
 function splitStatements(sqlText: string) {
   const chunks = sqlText
     .split(";")
@@ -38,9 +40,25 @@ export async function rollbackMigration(input: { cwd?: string }) {
 
   const sql = new SQL(orm.options.url);
 
-  const migrations = await listMigrations(config.orm.migrations.dir);
-  const state = await readMigrationState(config.orm.migrations.stateFile);
-  const last = state.applied[state.applied.length - 1];
+  const [listErr, migrations] = await listMigrations(config.orm.migrations.dir);
+
+  if (listErr) {
+    return err(listErr.type, listErr.message);
+  }
+
+  const [stateErr, state] = await mightThrow(
+    readMigrationState(config.orm.migrations.stateFile),
+  );
+
+  if (stateErr) {
+    return err(
+      "MigrationError",
+      `Could not read migration state: ${stateErr instanceof Error ? stateErr.message : String(stateErr)}`,
+    );
+  }
+
+  const safeState = state ?? { applied: [] };
+  const last = safeState.applied[safeState.applied.length - 1];
 
   if (!last) {
     return ok({
@@ -50,7 +68,7 @@ export async function rollbackMigration(input: { cwd?: string }) {
     });
   }
 
-  const migration = migrations.find((item) => item.id === last.id);
+  const migration = (migrations ?? []).find((item) => item.id === last.id);
 
   if (!migration) {
     return err(

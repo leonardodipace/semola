@@ -21,7 +21,7 @@ describe("semola CLI", () => {
     const { io, errors } = createIo();
     const code = await runSemolaCli(["orm"], io);
     expect(code).toBe(1);
-    expect(errors[0]).toContain("Usage:");
+    expect(errors.join("\n")).toContain("Usage:");
   });
 
   test("returns 1 for missing create name", async () => {
