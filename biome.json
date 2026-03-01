@@ -21,8 +21,7 @@
         "noBannedTypes": "off"
       },
       "suspicious": {
-        "noExplicitAny": "off",
-        "noConsole": "warn"
+        "noExplicitAny": "off"
       },
       "style": {
         "noInferrableTypes": "error",

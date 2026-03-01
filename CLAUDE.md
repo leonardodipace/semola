@@ -19,6 +19,7 @@ Semola is a TypeScript utility kit providing modular packages for common develop
 ### Simplicity First
 
 - Write minimal code, no over-engineering
+- Keep code breathing with blank lines between logical blocks
 - Explicit if-statements over ternaries for complex logic
 - No type assertions (`as`, `!`)
 - No `any` type

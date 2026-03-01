@@ -22,6 +22,7 @@ import type {
   OrmResultError,
   RelationDefs,
   ResultTuple,
+  TableRow,
   TinyTableClient,
   UpdateBuilderInput,
   UpdateManyInput,
@@ -89,36 +90,6 @@ function toResult<T>(promise: Promise<T>): Promise<ResultTuple<T>> {
       const normalized = toOrmError(errorValue);
       return err(normalized.type, normalized.message);
     });
-}
-
-function readCount(rows: unknown): number {
-  if (!Array.isArray(rows)) {
-    return 0;
-  }
-
-  const first = rows[0];
-
-  if (!isObject(first)) {
-    return 0;
-  }
-
-  const count = first.count;
-
-  if (typeof count === "number") {
-    return count;
-  }
-
-  if (typeof count === "string") {
-    const parsed = Number.parseInt(count, 10);
-
-    if (Number.isNaN(parsed)) {
-      return 0;
-    }
-
-    return parsed;
-  }
-
-  return 0;
 }
 
 function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
@@ -191,15 +162,6 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
     };
   };
 
-  const countByWhere = async (where: DeleteBuilderInput<T>["where"]) => {
-    const whereClause = serializeWhereInput(sql, table, where, dialectAdapter);
-
-    const rows =
-      await sql`SELECT COUNT(*) as count FROM ${sql(table.tableName)} ${whereClause}`;
-
-    return readCount(rows);
-  };
-
   return {
     select,
 
@@ -258,24 +220,40 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
         mapDataToSqlRow(table, item as Record<string, unknown>, dialectAdapter),
       );
 
-      const [createErr] = await toResult(
-        sql`INSERT INTO ${sql(table.tableName)} ${sql(rows)}`,
+      if (dialectAdapter.dialect === "mysql") {
+        const [createErr] = await toResult(
+          sql`INSERT INTO ${sql(table.tableName)} ${sql(rows)}`,
+        );
+
+        if (createErr) {
+          return [createErr, null] as const;
+        }
+
+        return ok({ count: rows.length, rows: [] });
+      }
+
+      const [createErr, createdRows] = await toResult(
+        sql`INSERT INTO ${sql(table.tableName)} ${sql(rows)} RETURNING *`,
       );
 
       if (createErr) {
         return [createErr, null] as const;
       }
 
-      return ok({ count: rows.length });
+      return ok({ count: createdRows.length, rows: createdRows });
     },
 
     update,
 
     async updateMany(input: UpdateManyInput<T>) {
-      let expectedCount = 0;
-
       if (dialectAdapter.dialect === "mysql") {
-        expectedCount = await countByWhere(input.where);
+        const [beforeUpdateErr, beforeRows] = await toResult(
+          select({ where: input.where }),
+        );
+
+        if (beforeUpdateErr) {
+          return [beforeUpdateErr, null] as const;
+        }
 
         const [updateErr] = await toResult(
           update({ where: input.where, data: input.data }),
@@ -285,7 +263,12 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
           return [updateErr, null] as const;
         }
 
-        return ok({ count: expectedCount });
+        const updatedRows = beforeRows.map((row: TableRow<T>) => ({
+          ...row,
+          ...input.data,
+        }));
+
+        return ok({ count: updatedRows.length, rows: updatedRows });
       }
 
       const [updateErr, rows] = await toResult(
@@ -296,16 +279,20 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
         return [updateErr, null] as const;
       }
 
-      return ok({ count: rows.length });
+      return ok({ count: rows.length, rows });
     },
 
     delete: deleteByWhere,
 
     async deleteMany(input: DeleteManyInput<T>) {
-      let expectedCount = 0;
-
       if (dialectAdapter.dialect === "mysql") {
-        expectedCount = await countByWhere(input.where);
+        const [beforeDeleteErr, rows] = await toResult(
+          select({ where: input.where }),
+        );
+
+        if (beforeDeleteErr) {
+          return [beforeDeleteErr, null] as const;
+        }
 
         const [deleteErr] = await toResult(
           deleteByWhere({ where: input.where }),
@@ -315,7 +302,7 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
           return [deleteErr, null] as const;
         }
 
-        return ok({ count: expectedCount });
+        return ok({ count: rows.length, rows });
       }
 
       const [deleteErr, rows] = await toResult(
@@ -326,7 +313,7 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
         return [deleteErr, null] as const;
       }
 
-      return ok({ count: rows.length });
+      return ok({ count: rows.length, rows });
     },
   };
 }

@@ -259,7 +259,7 @@ describe("createOrm()", () => {
     expect(created).toEqual({ id: "u1", name: "Alice" });
   });
 
-  test("createMany() returns inserted count", async () => {
+  test("createMany() returns inserted rows and count", async () => {
     const db = createOrm({
       url: "sqlite::memory:",
       tables: { users: usersTable },
@@ -275,7 +275,13 @@ describe("createOrm()", () => {
     });
 
     expect(createErr).toBeNull();
-    expect(result).toEqual({ count: 2 });
+    expect(result).toEqual({
+      count: 2,
+      rows: [
+        { id: "u1", name: "Alice" },
+        { id: "u2", name: "Bob" },
+      ],
+    });
   });
 
   test("insert returning preserves typed row inference", async () => {
@@ -323,7 +329,7 @@ describe("createOrm()", () => {
     expect(rows).toEqual([{ id: "1", name: "Alicia" }]);
   });
 
-  test("updateMany() returns updated count", async () => {
+  test("updateMany() returns updated rows and count", async () => {
     const db = createOrm({
       url: "sqlite::memory:",
       tables: { users: usersTable },
@@ -339,7 +345,13 @@ describe("createOrm()", () => {
     });
 
     expect(updateErr).toBeNull();
-    expect(result).toEqual({ count: 2 });
+    expect(result).toEqual({
+      count: 2,
+      rows: [
+        { id: "1", name: "Alicia" },
+        { id: "2", name: "Alicia" },
+      ],
+    });
   });
 
   test("update supports returning on sqlite", async () => {
@@ -375,7 +387,7 @@ describe("createOrm()", () => {
     expect(rows).toEqual([]);
   });
 
-  test("deleteMany() returns deleted count", async () => {
+  test("deleteMany() returns deleted rows and count", async () => {
     const db = createOrm({
       url: "sqlite::memory:",
       tables: { users: usersTable },
@@ -390,7 +402,13 @@ describe("createOrm()", () => {
     });
 
     expect(deleteErr).toBeNull();
-    expect(result).toEqual({ count: 2 });
+    expect(result).toEqual({
+      count: 2,
+      rows: [
+        { id: "1", name: "Alice" },
+        { id: "2", name: "Alice" },
+      ],
+    });
   });
 
   test("delete supports returning on sqlite", async () => {

@@ -80,7 +80,11 @@ describe("createMigration", () => {
       "",
     ].join("\n");
 
-    const ormModulePath = join(import.meta.dir, "..", "index.ts");
+    const ormModulePathTs = join(import.meta.dir, "..", "index.ts");
+    const ormModulePathJs = join(import.meta.dir, "..", "index.js");
+    const ormModulePath = (await Bun.file(ormModulePathTs).exists())
+      ? ormModulePathTs
+      : ormModulePathJs;
     const schemaContent = [
       `import { createOrm, createTable, uuid } from '${ormModulePath}';`,
       "",

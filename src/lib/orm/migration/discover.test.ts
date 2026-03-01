@@ -46,7 +46,11 @@ describe("loadOrmFromSchema", () => {
     await mkdir(join(cwd, "src", "db"), { recursive: true });
 
     const schemaPath = join(cwd, "src", "db", "index.ts");
-    const ormModulePath = join(import.meta.dir, "..", "index.ts");
+    const ormModulePathTs = join(import.meta.dir, "..", "index.ts");
+    const ormModulePathJs = join(import.meta.dir, "..", "index.js");
+    const ormModulePath = (await Bun.file(ormModulePathTs).exists())
+      ? ormModulePathTs
+      : ormModulePathJs;
 
     await Bun.write(
       schemaPath,

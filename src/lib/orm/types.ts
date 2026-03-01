@@ -313,7 +313,7 @@ export type TinyTableClient<T extends ColDefs, TRels> = {
 
   createMany: (
     input: CreateManyInput<T>,
-  ) => Promise<ResultTuple<{ count: number }>>;
+  ) => Promise<ResultTuple<{ count: number; rows: TableRow<T>[] }>>;
 
   update: <TReturning extends boolean | undefined = undefined>(
     input: UpdateBuilderInput<T> & { returning?: TReturning },
@@ -321,7 +321,7 @@ export type TinyTableClient<T extends ColDefs, TRels> = {
 
   updateMany: (
     input: UpdateManyInput<T>,
-  ) => Promise<ResultTuple<{ count: number }>>;
+  ) => Promise<ResultTuple<{ count: number; rows: TableRow<T>[] }>>;
 
   delete: <TReturning extends boolean | undefined = undefined>(
     input: DeleteBuilderInput<T> & { returning?: TReturning },
@@ -329,5 +329,5 @@ export type TinyTableClient<T extends ColDefs, TRels> = {
 
   deleteMany: (
     input: DeleteManyInput<T>,
-  ) => Promise<ResultTuple<{ count: number }>>;
+  ) => Promise<ResultTuple<{ count: number; rows: TableRow<T>[] }>>;
 };

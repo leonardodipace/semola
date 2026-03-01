@@ -72,6 +72,12 @@ Each table client exposes two styles:
 - `updateMany({ where, data })`
 - `deleteMany({ where })`
 
+Return shapes:
+
+- `createMany` -> `[error, { count, rows }]`
+- `updateMany` -> `[error, { count, rows }]`
+- `deleteMany` -> `[error, { count, rows }]`
+
 Error shape:
 
 ```typescript
@@ -97,6 +103,43 @@ if (err) {
 }
 
 console.log(users);
+
+const [createManyErr, createdMany] = await db.users.createMany({
+  data: [
+    { name: "Alice", email: "alice@example.com" },
+    { name: "Bob", email: "bob@example.com" },
+  ],
+});
+
+if (createManyErr) {
+  console.error(createManyErr.type, createManyErr.message);
+  return;
+}
+
+console.log(createdMany.count, createdMany.rows);
+
+const [updateManyErr, updatedMany] = await db.users.updateMany({
+  where: { active: true },
+  data: { active: false },
+});
+
+if (updateManyErr) {
+  console.error(updateManyErr.type, updateManyErr.message);
+  return;
+}
+
+console.log(updatedMany.count, updatedMany.rows);
+
+const [deleteManyErr, deletedMany] = await db.users.deleteMany({
+  where: { active: false },
+});
+
+if (deleteManyErr) {
+  console.error(deleteManyErr.type, deleteManyErr.message);
+  return;
+}
+
+console.log(deletedMany.count, deletedMany.rows);
 ```
 
 ### SQL-style methods
