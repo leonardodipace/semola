@@ -151,6 +151,16 @@ function buildWhereNode<T extends ColDefs>(where?: WhereInput<T>) {
       condition as Record<string, unknown>,
     );
 
+    if (predicates.length === 0) {
+      nodes.push({
+        kind: "predicate",
+        key: typedKey,
+        op: "eq",
+        value: condition,
+      });
+      continue;
+    }
+
     for (const predicate of predicates) {
       nodes.push(predicate);
     }
