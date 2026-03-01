@@ -970,4 +970,20 @@ describe("Cron Scanner", () => {
       });
     });
   });
+
+  describe("known bugs", () => {
+    test("wildcard mixed with values in a list is silently accepted instead of rejected", () => {
+      // "*" inside a list like "1,*" is semantically invalid - the wildcard makes
+      // all other list items redundant, and the scanner should reject it
+      const [err] = new Scanner("1,* * * * *").scan();
+
+      expect(err).not.toBeNull(); // FAILS: scanner currently accepts "1,*" without error
+    });
+
+    test("wildcard at end of list is silently accepted instead of rejected", () => {
+      const [err] = new Scanner("* * * * 1,*").scan();
+
+      expect(err).not.toBeNull(); // FAILS: scanner currently accepts "1,*" without error
+    });
+  });
 });
