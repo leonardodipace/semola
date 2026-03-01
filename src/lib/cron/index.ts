@@ -329,9 +329,10 @@ export class Cron {
 
     const fields = expr.trim().split(/\s+/);
     this.hasSeconds = fields.length === FieldAmount.max;
-    const [parsingError, _] = this.parse(tokens);
 
     // Parse and validate the cron expression
+    const [parsingError, _] = this.parse(tokens);
+
     if (parsingError) {
       throw new Error(`${parsingError.type}: ${parsingError.message}`);
     }
