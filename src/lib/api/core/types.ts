@@ -48,12 +48,20 @@ export type ExtractStatusCodes<T extends ResponseSchema> = keyof T & number;
 export type ExtractStatusCodesOrAny<T extends ResponseSchema | undefined> =
   T extends ResponseSchema ? ExtractStatusCodes<T> : number;
 
+export type ValidationOptions =
+  | boolean
+  | {
+      input?: boolean;
+      output?: boolean;
+    };
+
 export type ApiOptions<
   TMiddlewares extends readonly Middleware[] = readonly [],
 > = {
   prefix?: string;
   openapi?: OpenApiOptions;
   middlewares?: TMiddlewares;
+  validation?: ValidationOptions;
 };
 
 export type SecuritySchemeApiKey = {
