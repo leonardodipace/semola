@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
 import type { SQL } from "bun";
+import { describe, expect, test } from "bun:test";
 import { boolean as booleanCol, string, uuid } from "../column.js";
 import { postgresDialectAdapter } from "../dialect/postgres.js";
 import { sqliteDialectAdapter } from "../dialect/sqlite.js";
