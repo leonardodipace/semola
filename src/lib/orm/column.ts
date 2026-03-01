@@ -78,7 +78,7 @@ export class ColumnDef<
       hasDefault: true as const,
       defaultKind: "fn" as const,
       defaultValue: undefined,
-      defaultFn: fn as () => unknown,
+      defaultFn: fn,
     });
   }
 }

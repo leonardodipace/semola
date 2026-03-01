@@ -72,18 +72,29 @@ function buildUrlFromSqlOptions(sql: unknown) {
     return null;
   }
 
-  const username =
+  let username: string | null = null;
+
+  if (
     typeof optionsRecord.username === "string" &&
     optionsRecord.username.length > 0
-      ? optionsRecord.username
-      : null;
-  const password =
+  ) {
+    username = optionsRecord.username;
+  }
+
+  let password: string | null = null;
+
+  if (
     typeof optionsRecord.password === "string" &&
     optionsRecord.password.length > 0
-      ? optionsRecord.password
-      : null;
-  const port =
-    typeof optionsRecord.port === "number" ? optionsRecord.port : null;
+  ) {
+    password = optionsRecord.password;
+  }
+
+  let port: number | null = null;
+
+  if (typeof optionsRecord.port === "number") {
+    port = optionsRecord.port;
+  }
 
   let auth = "";
   if (username && password) {

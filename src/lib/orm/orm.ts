@@ -51,7 +51,11 @@ type OrmModels<
 function inferDialectFromUrl(url: string): Dialect {
   if (url.includes("mysql")) return "mysql";
 
-  if (url.includes("postgres") || url.includes("postgresql")) {
+  if (url.includes("postgres")) {
+    return "postgres";
+  }
+
+  if (url.includes("postgresql")) {
     return "postgres";
   }
 
@@ -111,11 +115,13 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
       fragments.push(sql`${sql(col.meta.sqlName)} AS ${sql(jsKey)}`);
     }
 
-    if (fragments.length === 0) {
+    const first = fragments[0];
+
+    if (!first) {
       return sql`*`;
     }
 
-    let joined = fragments[0];
+    let joined = first;
 
     for (let index = 1; index < fragments.length; index++) {
       const fragment = fragments[index];
@@ -207,11 +213,11 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
       );
 
       if (findErr) {
-        return [findErr, null] as const;
+        return err(findErr.type, findErr.message);
       }
 
       const first = rows[0] ?? null;
-      return [null, first] as const;
+      return ok(first);
     },
 
     async findUnique(input: FindUniqueInput<T>) {
@@ -220,11 +226,11 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
       );
 
       if (findErr) {
-        return [findErr, null] as const;
+        return err(findErr.type, findErr.message);
       }
 
       const first = rows[0] ?? null;
-      return [null, first] as const;
+      return ok(first);
     },
 
     insert,
@@ -235,7 +241,7 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
       );
 
       if (createErr) {
-        return [createErr, null] as const;
+        return err(createErr.type, createErr.message);
       }
 
       const first = rows[0] ?? null;
@@ -248,6 +254,10 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
     },
 
     async createMany(input: CreateManyInput<T>) {
+      if (input.data.length === 0) {
+        return ok({ count: 0, rows: [] });
+      }
+
       const rows = input.data.map((item) =>
         mapDataToSqlRow(table, item as Record<string, unknown>, dialectAdapter),
       );
@@ -258,7 +268,7 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
         );
 
         if (createErr) {
-          return [createErr, null] as const;
+          return err(createErr.type, createErr.message);
         }
 
         return ok({ count: rows.length, rows: [] });
@@ -269,7 +279,7 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
       );
 
       if (createErr) {
-        return [createErr, null] as const;
+        return err(createErr.type, createErr.message);
       }
 
       return ok({ count: createdRows.length, rows: createdRows });
@@ -284,7 +294,7 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
         );
 
         if (beforeUpdateErr) {
-          return [beforeUpdateErr, null] as const;
+          return err(beforeUpdateErr.type, beforeUpdateErr.message);
         }
 
         const [updateErr] = await toResult(
@@ -292,7 +302,7 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
         );
 
         if (updateErr) {
-          return [updateErr, null] as const;
+          return err(updateErr.type, updateErr.message);
         }
 
         const updatedRows = beforeRows.map((row: TableRow<T>) => ({
@@ -308,7 +318,7 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
       );
 
       if (updateErr) {
-        return [updateErr, null] as const;
+        return err(updateErr.type, updateErr.message);
       }
 
       return ok({ count: rows.length, rows });
@@ -323,7 +333,7 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
         );
 
         if (beforeDeleteErr) {
-          return [beforeDeleteErr, null] as const;
+          return err(beforeDeleteErr.type, beforeDeleteErr.message);
         }
 
         const [deleteErr] = await toResult(
@@ -331,7 +341,7 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
         );
 
         if (deleteErr) {
-          return [deleteErr, null] as const;
+          return err(deleteErr.type, deleteErr.message);
         }
 
         return ok({ count: rows.length, rows });
@@ -342,7 +352,7 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
       );
 
       if (deleteErr) {
-        return [deleteErr, null] as const;
+        return err(deleteErr.type, deleteErr.message);
       }
 
       return ok({ count: rows.length, rows });
@@ -413,7 +423,7 @@ export function createOrm<
     ...makeModels(sql),
 
     $transaction<T>(fn: (tx: ReturnType<typeof makeModels>) => Promise<T>) {
-      return sql.begin((tx) => fn(makeModels(tx)));
+      return toResult(sql.begin((tx) => fn(makeModels(tx))));
     },
 
     $raw(strings: TemplateStringsArray, ...values: unknown[]) {

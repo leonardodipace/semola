@@ -103,11 +103,13 @@ function buildOrderByClause<T extends ColDefs>(
     fragments.push(sql`${sql(col.meta.sqlName)} ASC`);
   }
 
-  if (fragments.length === 0) {
+  const firstOrderBy = fragments[0];
+
+  if (!firstOrderBy) {
     return sql``;
   }
 
-  let joined = fragments[0];
+  let joined = firstOrderBy;
 
   for (let index = 1; index < fragments.length; index++) {
     const fragment = fragments[index];
@@ -150,11 +152,13 @@ function buildOrderByFromInput<T extends ColDefs>(
     fragments.push(sql`${sql(col.meta.sqlName)} ASC`);
   }
 
-  if (fragments.length === 0) {
+  const firstFromInput = fragments[0];
+
+  if (!firstFromInput) {
     return sql``;
   }
 
-  let joined = fragments[0];
+  let joined = firstFromInput;
 
   for (let index = 1; index < fragments.length; index++) {
     const fragment = fragments[index];
@@ -255,6 +259,10 @@ function serializeWherePredicate<T extends ColDefs>(
       return null;
     }
 
+    if (predicate.value.length === 0) {
+      return null;
+    }
+
     const values: unknown[] = new Array(predicate.value.length);
 
     for (let index = 0; index < predicate.value.length; index++) {
@@ -273,6 +281,10 @@ function serializeWherePredicate<T extends ColDefs>(
 
   if (predicate.op === "not_in") {
     if (!Array.isArray(predicate.value)) {
+      return null;
+    }
+
+    if (predicate.value.length === 0) {
       return null;
     }
 
@@ -325,11 +337,13 @@ function serializeWhereNode<T extends ColDefs>(
     fragments.push(fragment);
   }
 
-  if (fragments.length === 0) {
+  const firstNode = fragments[0];
+
+  if (!firstNode) {
     return null;
   }
 
-  let joined = fragments[0];
+  let joined = firstNode;
 
   for (let index = 1; index < fragments.length; index++) {
     const fragment = fragments[index];
@@ -441,7 +455,11 @@ function buildWhereFromInput<T extends ColDefs>(
       fragments.push(sql`${column} <= ${serialized}`);
     }
 
-    if ("in" in condition && Array.isArray(condition.in)) {
+    if (
+      "in" in condition &&
+      Array.isArray(condition.in) &&
+      condition.in.length > 0
+    ) {
       const values: unknown[] = new Array(condition.in.length);
 
       for (let index = 0; index < condition.in.length; index++) {
@@ -454,7 +472,11 @@ function buildWhereFromInput<T extends ColDefs>(
       fragments.push(sql`${column} IN ${sql(values)}`);
     }
 
-    if ("notIn" in condition && Array.isArray(condition.notIn)) {
+    if (
+      "notIn" in condition &&
+      Array.isArray(condition.notIn) &&
+      condition.notIn.length > 0
+    ) {
       const values: unknown[] = new Array(condition.notIn.length);
 
       for (let index = 0; index < condition.notIn.length; index++) {
@@ -491,11 +513,13 @@ function buildWhereFromInput<T extends ColDefs>(
     }
   }
 
-  if (fragments.length === 0) {
+  const firstWhere = fragments[0];
+
+  if (!firstWhere) {
     return sql``;
   }
 
-  let joined = fragments[0];
+  let joined = firstWhere;
 
   for (let index = 1; index < fragments.length; index++) {
     const fragment = fragments[index];
@@ -637,11 +661,13 @@ function buildBaseSelectColumns<T extends ColDefs>(
     );
   }
 
-  if (fragments.length === 0) {
+  const firstCol = fragments[0];
+
+  if (!firstCol) {
     return sql`*`;
   }
 
-  let joined = fragments[0];
+  let joined = firstCol;
 
   for (let index = 1; index < fragments.length; index++) {
     const fragment = fragments[index];

@@ -56,12 +56,23 @@ export async function applyMigrations(input: { cwd?: string }) {
   }
 
   for (const migration of pending) {
-    const upSql = await Bun.file(migration.upPath).text();
+    const [readErr, upSql] = await mightThrow(
+      Bun.file(migration.upPath).text(),
+    );
+
+    if (readErr) {
+      return err(
+        "MigrationError",
+        `Could not read migration ${migration.id}: ${readErr instanceof Error ? readErr.message : String(readErr)}`,
+      );
+    }
+
+    const sqlText = upSql ?? "";
 
     if (config.orm.migrations.transactional) {
       const [txErr] = await mightThrow(
         sql.begin(async (tx) => {
-          await runStatements(tx, upSql);
+          await runStatements(tx, sqlText);
         }),
       );
 
@@ -72,7 +83,7 @@ export async function applyMigrations(input: { cwd?: string }) {
         );
       }
     } else {
-      const [stmtErr] = await mightThrow(runStatements(sql, upSql));
+      const [stmtErr] = await mightThrow(runStatements(sql, sqlText));
 
       if (stmtErr) {
         return err(
@@ -82,12 +93,21 @@ export async function applyMigrations(input: { cwd?: string }) {
       }
     }
 
-    await markAppliedMigration(config.orm.migrations.stateFile, migration.id);
+    const [markErr] = await mightThrow(
+      markAppliedMigration(config.orm.migrations.stateFile, migration.id),
+    );
+
+    if (markErr) {
+      return err(
+        "MigrationError",
+        `Could not update migration state: ${markErr instanceof Error ? markErr.message : String(markErr)}`,
+      );
+    }
   }
 
   return ok({
     applied: pending.length,
-    pending: pending.length,
+    pending: 0,
     total: migrations.length,
     appliedIds: pending.map((item) => item.id),
     configPathRelative: relativeFromCwd(cwd, config.configPath),

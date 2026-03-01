@@ -563,12 +563,13 @@ describe("$transaction()", () => {
 
     await setupUsers(db);
 
-    await expect(
-      db.$transaction(async (tx) => {
-        await tx.users.insert({ data: { name: "Alice" } });
-        throw new Error("fail");
-      }),
-    ).rejects.toThrow("fail");
+    const [txErr] = await db.$transaction(async (tx) => {
+      await tx.users.insert({ data: { name: "Alice" } });
+      throw new Error("fail");
+    });
+
+    expect(txErr).not.toBeNull();
+    expect(txErr?.message).toContain("fail");
 
     const rows = await db.users.select();
     expect(rows).toEqual([]);
@@ -628,7 +629,7 @@ describe("Orm class", () => {
 
   test("relations getter returns configured relations", () => {
     const relations = {
-      users: { tasks: { kind: "many" as const, table: () => usersTable } },
+      users: { tasks: many(() => usersTable) },
     };
     const orm = new Orm({
       url: "postgres://localhost/db",

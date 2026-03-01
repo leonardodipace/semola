@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { err, mightThrow, ok } from "../../errors/index.js";
+import { err, mightThrow, mightThrowSync, ok } from "../../errors/index.js";
 import { loadConfig } from "./config.js";
 import { diffSnapshots } from "./diff.js";
 import { buildSchemaSnapshot, loadOrmFromSchema } from "./discover.js";
@@ -41,13 +41,17 @@ async function loadPreviousSnapshot(
   }
 
   const content = await Bun.file(last.snapshotPath).text();
-  const parsed = JSON.parse(content) as SchemaSnapshot;
+  const [parseErr, parsed] = mightThrowSync(() => JSON.parse(content));
 
-  if (!parsed.dialect) {
+  if (parseErr) {
     return emptySnapshot(dialect);
   }
 
-  return parsed;
+  if (!parsed?.dialect) {
+    return emptySnapshot(dialect);
+  }
+
+  return parsed as SchemaSnapshot;
 }
 
 export async function createMigration(input: { name: string; cwd?: string }) {

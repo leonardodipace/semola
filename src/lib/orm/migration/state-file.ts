@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import { mightThrowSync } from "../../errors/index.js";
 import type { MigrationState } from "./types.js";
 
 const defaultState: MigrationState = {
@@ -17,12 +18,21 @@ export async function readMigrationState(statePath: string) {
     return defaultState;
   }
 
-  const parsed = JSON.parse(content) as MigrationState;
-  if (!parsed.applied || !Array.isArray(parsed.applied)) {
+  const [parseErr, parsed] = mightThrowSync(() => JSON.parse(content));
+
+  if (parseErr) {
     return defaultState;
   }
 
-  return parsed;
+  if (!parsed?.applied) {
+    return defaultState;
+  }
+
+  if (!Array.isArray(parsed.applied)) {
+    return defaultState;
+  }
+
+  return parsed as MigrationState;
 }
 
 export async function writeMigrationState(

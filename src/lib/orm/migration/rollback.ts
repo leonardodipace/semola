@@ -59,12 +59,23 @@ export async function rollbackMigration(input: { cwd?: string }) {
     );
   }
 
-  const downSql = await Bun.file(migration.downPath).text();
+  const [readErr, downSql] = await mightThrow(
+    Bun.file(migration.downPath).text(),
+  );
+
+  if (readErr) {
+    return err(
+      "MigrationError",
+      `Could not read migration file: ${readErr instanceof Error ? readErr.message : String(readErr)}`,
+    );
+  }
+
+  const sqlText = downSql ?? "";
 
   if (config.orm.migrations.transactional) {
     const [txErr] = await mightThrow(
       sql.begin(async (tx) => {
-        await runStatements(tx, downSql);
+        await runStatements(tx, sqlText);
       }),
     );
 
@@ -75,7 +86,7 @@ export async function rollbackMigration(input: { cwd?: string }) {
       );
     }
   } else {
-    const [stmtErr] = await mightThrow(runStatements(sql, downSql));
+    const [stmtErr] = await mightThrow(runStatements(sql, sqlText));
 
     if (stmtErr) {
       return err(
@@ -85,7 +96,16 @@ export async function rollbackMigration(input: { cwd?: string }) {
     }
   }
 
-  await unmarkAppliedMigration(config.orm.migrations.stateFile, migration.id);
+  const [unmarkErr] = await mightThrow(
+    unmarkAppliedMigration(config.orm.migrations.stateFile, migration.id),
+  );
+
+  if (unmarkErr) {
+    return err(
+      "MigrationError",
+      `Could not update migration state: ${unmarkErr instanceof Error ? unmarkErr.message : String(unmarkErr)}`,
+    );
+  }
 
   return ok({
     rolledBack: true as const,

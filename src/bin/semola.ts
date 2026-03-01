@@ -31,7 +31,12 @@ export async function runSemolaCli(
   argv = process.argv.slice(2),
   io = defaultIo,
 ) {
-  if (argv[0] !== "orm" || argv[1] !== "migrations") {
+  if (argv[0] !== "orm") {
+    io.error(usage());
+    return 1;
+  }
+
+  if (argv[1] !== "migrations") {
     io.error(usage());
     return 1;
   }
@@ -108,7 +113,12 @@ export async function runSemolaCli(
 }
 
 if (import.meta.main) {
-  runSemolaCli().then((code) => {
-    process.exit(code);
-  });
+  runSemolaCli()
+    .then((code) => {
+      process.exit(code);
+    })
+    .catch((error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    });
 }

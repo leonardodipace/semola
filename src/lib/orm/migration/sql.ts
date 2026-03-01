@@ -10,9 +10,10 @@ function quoteIdentifier(
   identifier: string,
 ) {
   if (dialect === "mysql") {
-    return `\`${identifier}\``;
+    return `\`${identifier.replaceAll("`", "``")}\``;
   }
-  return `"${identifier}"`;
+
+  return `"${identifier.replaceAll('"', '""')}"`;
 }
 
 function columnType(
@@ -83,7 +84,11 @@ function serializeDefaultValue(
     return "NULL";
   }
 
-  if (column.kind === "json" || column.kind === "jsonb") {
+  if (column.kind === "json") {
+    return quoteLiteral(JSON.stringify(value));
+  }
+
+  if (column.kind === "jsonb") {
     return quoteLiteral(JSON.stringify(value));
   }
 
@@ -98,7 +103,11 @@ function serializeDefaultValue(
   }
 
   if (column.kind === "number") {
-    if (typeof value !== "number" || Number.isNaN(value)) {
+    if (typeof value !== "number") {
+      return null;
+    }
+
+    if (Number.isNaN(value)) {
       return null;
     }
     return String(value);
@@ -112,7 +121,11 @@ function serializeDefaultValue(
     return quoteLiteral(value);
   }
 
-  if (typeof value === "number" || typeof value === "boolean") {
+  if (typeof value === "number") {
+    return String(value);
+  }
+
+  if (typeof value === "boolean") {
     return String(value);
   }
 

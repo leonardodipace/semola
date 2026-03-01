@@ -31,6 +31,7 @@ describe("Middleware", () => {
     };
     const mw = new Middleware({ handler });
 
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
     const result = await mw.options.handler({} as any);
     expect(result).toEqual({ data: "async-result" });
   });
@@ -39,6 +40,7 @@ describe("Middleware", () => {
     const handler = () => new Response("Unauthorized", { status: 401 });
     const mw = new Middleware({ handler });
 
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
     const result = mw.options.handler({} as any);
     expect(result).toBeInstanceOf(Response);
   });
@@ -66,6 +68,7 @@ describe("Middleware", () => {
     const handler = () => undefined;
     const mw = new Middleware({ handler });
 
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
     const result = mw.options.handler({} as any);
     expect(result).toBeUndefined();
   });
@@ -74,6 +77,7 @@ describe("Middleware", () => {
     const handler = async () => undefined;
     const mw = new Middleware({ handler });
 
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
     const result = await mw.options.handler({} as any);
     expect(result).toBeUndefined();
   });

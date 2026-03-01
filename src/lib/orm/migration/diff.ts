@@ -73,14 +73,34 @@ export function diffSnapshots(
       continue;
     }
 
-    for (const [columnKey, oldColumn] of Object.entries(oldTable.columns)) {
-      const newColumn = newTable.columns[columnKey];
-      if (!newColumn) {
+    const oldBySqlName = new Map(
+      Object.values(oldTable.columns).map((c) => [c.sqlName, c]),
+    );
+
+    const newBySqlName = new Map(
+      Object.values(newTable.columns).map((c) => [c.sqlName, c]),
+    );
+
+    for (const [sqlName, oldColumn] of oldBySqlName) {
+      if (!newBySqlName.has(sqlName)) {
         operations.push({
           kind: "drop-column",
           tableName: newTable.tableName,
           column: oldColumn,
         });
+      }
+    }
+
+    for (const [sqlName, newColumn] of newBySqlName) {
+      const oldColumn = oldBySqlName.get(sqlName);
+
+      if (!oldColumn) {
+        operations.push({
+          kind: "add-column",
+          tableName: newTable.tableName,
+          column: newColumn,
+        });
+
         continue;
       }
 
@@ -90,17 +110,7 @@ export function diffSnapshots(
           tableName: newTable.tableName,
           column: oldColumn,
         });
-        operations.push({
-          kind: "add-column",
-          tableName: newTable.tableName,
-          column: newColumn,
-        });
-      }
-    }
 
-    for (const [columnKey, newColumn] of Object.entries(newTable.columns)) {
-      const oldColumn = oldTable.columns[columnKey];
-      if (!oldColumn) {
         operations.push({
           kind: "add-column",
           tableName: newTable.tableName,

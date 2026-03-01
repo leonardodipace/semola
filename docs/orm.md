@@ -246,7 +246,7 @@ const count = await db.$raw`SELECT COUNT(*) as count FROM users`;
 
 ## Migrations
 
-Semola ORM migrations are schema-snapshot + SQL file based.
+Semola ORM migrations are schema-snapshot and SQL-file-based.
 
 ### Config
 

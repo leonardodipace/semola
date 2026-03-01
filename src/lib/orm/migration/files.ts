@@ -1,6 +1,6 @@
-import type { Dirent } from "node:fs";
 import { mkdir, readdir, stat } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, join, relative } from "node:path";
+import { mightThrow } from "../../errors/index.js";
 import type { MigrationInfo } from "./types.js";
 
 export async function ensureMigrationsDirectory(migrationsDir: string) {
@@ -8,16 +8,14 @@ export async function ensureMigrationsDirectory(migrationsDir: string) {
 }
 
 export async function listMigrations(migrationsDir: string) {
-  let entries: Dirent<string>[];
-  try {
-    entries = await readdir(migrationsDir, {
-      withFileTypes: true,
-      encoding: "utf8",
-    });
-  } catch {
+  const [readdirErr, entries] = await mightThrow(
+    readdir(migrationsDir, { withFileTypes: true, encoding: "utf8" }),
+  );
+
+  if (readdirErr) {
     return [] as MigrationInfo[];
   }
-  const migrationDirs = entries
+  const migrationDirs = (entries ?? [])
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort();
@@ -92,13 +90,15 @@ export async function uniqueMigrationDirectoryPath(
 
   while (true) {
     const dirPath = migrationDirectoryPath(migrationsDir, candidateId, name);
+
+    const [, stats] = await mightThrow(stat(dirPath));
+
     let exists = false;
-    try {
-      const stats = await stat(dirPath);
+
+    if (stats) {
       exists = stats.isDirectory();
-    } catch {
-      exists = false;
     }
+
     if (!exists) {
       return {
         migrationId: candidateId,
@@ -112,13 +112,15 @@ export async function uniqueMigrationDirectoryPath(
 }
 
 export function relativeFromCwd(cwd: string, absolutePath: string) {
-  if (!absolutePath.startsWith(cwd)) {
+  const rel = relative(cwd, absolutePath);
+
+  if (rel.startsWith("..")) {
     return absolutePath;
   }
 
-  const rel = absolutePath.slice(cwd.length + 1);
   if (!rel) {
     return basename(absolutePath);
   }
+
   return rel;
 }

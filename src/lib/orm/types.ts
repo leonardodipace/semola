@@ -118,11 +118,11 @@ export type WhereInput<T extends ColDefs> = {
 
 // UniqueWhereInput: only unique/PK columns, direct equality only (no filter operators)
 export type UniqueWhereInput<T extends ColDefs> = {
-  [K in keyof T as
-    | T[K]["meta"]["isPrimaryKey"]
-    | T[K]["meta"]["isUnique"] extends true
+  [K in keyof T as T[K]["meta"]["isPrimaryKey"] extends true
     ? K
-    : never]?: T[K] extends ColumnDef<ColumnKind, ColumnMetaBase, infer V>
+    : T[K]["meta"]["isUnique"] extends true
+      ? K
+      : never]?: T[K] extends ColumnDef<ColumnKind, ColumnMetaBase, infer V>
     ? V
     : never;
 };
