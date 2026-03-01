@@ -1,79 +1,88 @@
-import type { OrmDialect } from "../core/types.js";
-import type { Table } from "../table/index.js";
-import type { SchemaBuilder } from "./builder.js";
-import type { ColumnSnapshot, TableSnapshot } from "./snapshot.js";
+import type { Dialect } from "../types.js";
 
-export type MigrationDefinition = {
-  up: (t: SchemaBuilder) => void | Promise<void>;
-  down: (t: SchemaBuilder) => void | Promise<void>;
-};
-
-export type Migration = MigrationDefinition & {
-  version: string;
-  name: string;
-  filePath: string;
-};
-
-export type MigrationStatus = {
-  version: string;
-  name: string;
-  applied: boolean;
-  appliedAt: string | null;
-};
-
-export type AppliedMigration = {
-  version: string;
-  name: string;
-  appliedAt: string;
-};
-
-export type MigrationFile = {
-  version: string;
-  name: string;
-  filePath: string;
-};
-
-export type MigrationCreateOptions = {
-  name: string;
-  tables: Record<string, Table>;
-};
-
-export type SemolaMigrationConfig = {
+export type SemolaConfig = {
   orm: {
-    dialect: OrmDialect;
-    url: string;
-    schema: {
-      path: string;
-      exportName?: string;
+    schema: string;
+    migrations?: {
+      dir?: string;
+      stateFile?: string;
+      transactional?: boolean;
     };
   };
 };
 
-export type TableDiffOperation =
-  | {
-      type: "createTable";
-      tableSnapshot: TableSnapshot;
-    }
-  | {
-      type: "addColumn";
-      tableName: string;
-      columnSnapshot: ColumnSnapshot;
-    }
-  | {
-      type: "dropTable";
-      tableName: string;
-      tableSnapshot?: TableSnapshot;
-    }
-  | {
-      type: "dropColumn";
-      tableName: string;
-      columnName: string;
-      columnSnapshot?: ColumnSnapshot;
-    }
-  | {
-      type: "alterColumn";
-      tableName: string;
-      columnName: string;
-      oldColumn: ColumnSnapshot;
-      newColumn: ColumnSnapshot;
+export type ResolvedSemolaConfig = {
+  cwd: string;
+  configPath: string;
+  orm: {
+    schema: string;
+    migrations: {
+      dir: string;
+      stateFile: string;
+      transactional: boolean;
     };
+  };
+};
+
+export type ColumnSnapshot = {
+  key: string;
+  sqlName: string;
+  kind: "uuid" | "string" | "number" | "boolean" | "date" | "json" | "jsonb";
+  isPrimaryKey: boolean;
+  isNotNull: boolean;
+  isUnique: boolean;
+  hasDefault: boolean;
+  defaultKind?: "value" | "fn" | null;
+  defaultValue?: unknown;
+  referencesTable: string | null;
+  referencesColumn: string | null;
+  onDeleteAction: "CASCADE" | "RESTRICT" | "SET NULL" | null;
+};
+
+export type TableSnapshot = {
+  key: string;
+  tableName: string;
+  columns: Record<string, ColumnSnapshot>;
+};
+
+export type SchemaSnapshot = {
+  dialect: Dialect;
+  tables: Record<string, TableSnapshot>;
+};
+
+export type MigrationOperation =
+  | {
+      kind: "create-table";
+      table: TableSnapshot;
+    }
+  | {
+      kind: "drop-table";
+      table: TableSnapshot;
+    }
+  | {
+      kind: "add-column";
+      tableName: string;
+      column: ColumnSnapshot;
+    }
+  | {
+      kind: "drop-column";
+      tableName: string;
+      column: ColumnSnapshot;
+    };
+
+export type MigrationInfo = {
+  id: string;
+  name: string;
+  directoryName: string;
+  directoryPath: string;
+  upPath: string;
+  downPath: string;
+  snapshotPath: string;
+};
+
+export type MigrationState = {
+  applied: Array<{
+    id: string;
+    appliedAt: string;
+  }>;
+};

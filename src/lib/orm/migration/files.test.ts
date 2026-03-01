@@ -1,136 +1,22 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadMigration, scanMigrationFiles } from "./files.js";
+import { listMigrations } from "./files.js";
 
-const tempDirs: string[] = [];
+describe("listMigrations", () => {
+  test("returns migration directories from migrations folder", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "semola-files-"));
+    const migrationsDir = join(cwd, "migrations");
+    const migrationDir = join(migrationsDir, "20260228231146001_init");
 
-afterEach(async () => {
-  for (const dir of tempDirs) {
-    await rm(dir, { recursive: true, force: true });
-  }
-  tempDirs.length = 0;
-});
+    await mkdir(migrationDir, { recursive: true });
+    await Bun.write(join(migrationDir, "up.sql"), "SELECT 1;");
+    await Bun.write(join(migrationDir, "down.sql"), "SELECT 1;");
 
-const createTempDir = async () => {
-  const dir = await mkdtemp(join(tmpdir(), "semola-migration-files-"));
-  tempDirs.push(dir);
-  return dir;
-};
-
-describe("scanMigrationFiles", () => {
-  test("returns error tuple when directory does not exist", async () => {
-    const [error, files] = await scanMigrationFiles(
-      "/tmp/semola-not-existing-dir",
-    );
-    expect(error).toBeTruthy();
-    expect(files).toBeNull();
-  });
-
-  test("filters invalid names and sorts by version", async () => {
-    const dir = await createTempDir();
-
-    await Bun.write(join(dir, "README.md"), "ignore");
-    await Bun.write(join(dir, "bad_name.ts"), "ignore");
-    await Bun.write(join(dir, "20260216120100_second.ts"), "");
-    await Bun.write(join(dir, "20260216120000_first.ts"), "");
-
-    const [error, files] = await scanMigrationFiles(dir);
-
-    expect(error).toBeNull();
-    expect(files).toBeDefined();
-    expect(files?.length).toBe(2);
-    expect(files?.[0]?.version).toBe("20260216120000");
-    expect(files?.[0]?.name).toBe("first");
-    expect(files?.[1]?.version).toBe("20260216120100");
-    expect(files?.[1]?.name).toBe("second");
-  });
-
-  test("supports both legacy and extended versions and keeps lexical order", async () => {
-    const dir = await createTempDir();
-
-    await Bun.write(join(dir, "20260216120000_legacy.ts"), "");
-    await Bun.write(join(dir, "20260216120000123000_first.ts"), "");
-    await Bun.write(join(dir, "20260216120000123001_second.ts"), "");
-    await Bun.write(join(dir, "20260216120000123002_third.ts"), "");
-
-    const [error, files] = await scanMigrationFiles(dir);
-
-    expect(error).toBeNull();
-    expect(files).toBeDefined();
-    expect(files?.length).toBe(4);
-    expect(files?.[0]?.version).toBe("20260216120000");
-    expect(files?.[1]?.version).toBe("20260216120000123000");
-    expect(files?.[2]?.version).toBe("20260216120000123001");
-    expect(files?.[3]?.version).toBe("20260216120000123002");
-  });
-});
-
-describe("loadMigration", () => {
-  test("returns error tuple when migration import throws", async () => {
-    const dir = await createTempDir();
-    const filePath = join(dir, "20260216120000_missing.ts");
-
-    const [error, migration] = await loadMigration({
-      version: "20260216120000",
-      name: "missing",
-      filePath,
-    });
-
-    expect(error).not.toBeNull();
-    expect(error?.type).toBe("InternalServerError");
-    expect(migration).toBeNull();
-  });
-
-  test("loads migration with default export up/down", async () => {
-    const dir = await createTempDir();
-    const filePath = join(dir, "20260216120000_valid.ts");
-
-    await Bun.write(
-      filePath,
-      `export default {
-  up: async () => {},
-  down: async () => {},
-};
-`,
-    );
-
-    const [error, migration] = await loadMigration({
-      version: "20260216120000",
-      name: "valid",
-      filePath,
-    });
-
-    expect(error).toBeNull();
-    expect(migration).toBeDefined();
-    expect(migration?.version).toBe("20260216120000");
-    expect(migration?.name).toBe("valid");
-    expect(typeof migration?.up).toBe("function");
-    expect(typeof migration?.down).toBe("function");
-  });
-
-  test("returns error when default export does not match migration shape", async () => {
-    const dir = await createTempDir();
-    const filePath = join(dir, "20260216120000_invalid.ts");
-
-    await Bun.write(
-      filePath,
-      `export default {
-  up: async () => {},
-};
-`,
-    );
-
-    const [error] = await loadMigration({
-      version: "20260216120000",
-      name: "invalid",
-      filePath,
-    });
-
-    expect(error).not.toBeNull();
-    expect(error?.message).toContain(
-      "default export must be defineMigration({ up, down })",
-    );
+    const migrations = await listMigrations(migrationsDir);
+    expect(migrations).toHaveLength(1);
+    expect(migrations[0]?.id).toBe("20260228231146001");
+    expect(migrations[0]?.name).toBe("init");
   });
 });

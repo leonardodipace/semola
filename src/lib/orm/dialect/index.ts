@@ -1,4 +1,16 @@
-export { MysqlDialect } from "./mysql.js";
-export { PostgresDialect } from "./postgres.js";
-export { SqliteDialect } from "./sqlite.js";
-export type { ColumnTypeMapping, Dialect } from "./types.js";
+import type { Dialect, DialectAdapter } from "../types.js";
+import { mysqlDialectAdapter } from "./mysql.js";
+import { postgresDialectAdapter } from "./postgres.js";
+import { sqliteDialectAdapter } from "./sqlite.js";
+
+export function getDialectAdapter(dialect: Dialect): DialectAdapter {
+  if (dialect === "postgres") {
+    return postgresDialectAdapter;
+  }
+
+  if (dialect === "mysql") {
+    return mysqlDialectAdapter;
+  }
+
+  return sqliteDialectAdapter;
+}

@@ -1,213 +1,114 @@
-import { err, ok } from "../../errors/index.js";
-import type {
-  ColumnSnapshot,
-  SchemaSnapshot,
-  TableSnapshot,
-} from "./snapshot.js";
-import type { TableDiffOperation } from "./types.js";
+import type { MigrationOperation, SchemaSnapshot } from "./types.js";
 
-const defaultValuesEqual = (a: unknown, b: unknown): boolean => {
-  if (a === b) return true;
-  if (typeof a !== "object" || a === null) return false;
-  if (typeof b !== "object" || b === null) return false;
-
-  const ao = a as Record<string, unknown>;
-  const bo = b as Record<string, unknown>;
-  const aKeys = Object.keys(ao).sort();
-  const bKeys = Object.keys(bo).sort();
-
-  return (
-    aKeys.length === bKeys.length &&
-    aKeys.every((k) => defaultValuesEqual(ao[k], bo[k]))
-  );
-};
-
-const foreignKeyRefsEqual = (
-  a: ColumnSnapshot["references"],
-  b: ColumnSnapshot["references"],
-) => {
-  if (a === b) return true;
-  if (!a || !b) return false;
-  return a.tableName === b.tableName && a.columnName === b.columnName;
-};
-
-const columnsEqual = (a: ColumnSnapshot, b: ColumnSnapshot) => {
-  return (
-    a.name === b.name &&
-    a.type === b.type &&
-    a.primaryKey === b.primaryKey &&
-    a.notNull === b.notNull &&
-    a.unique === b.unique &&
-    a.hasDefault === b.hasDefault &&
-    defaultValuesEqual(a.defaultValue, b.defaultValue) &&
-    foreignKeyRefsEqual(a.references, b.references) &&
-    a.onDelete === b.onDelete
-  );
-};
-
-const diffTable = (
-  tableName: string,
-  oldTable: TableSnapshot | undefined,
-  newTable: TableSnapshot | undefined,
-) => {
-  const operations: TableDiffOperation[] = [];
-
-  // Table was removed
-  if (oldTable && !newTable) {
-    operations.push({
-      type: "dropTable",
-      tableName,
-      tableSnapshot: oldTable,
-    });
-    return operations;
+function stableValue(value: unknown) {
+  if (value === undefined) return "__undefined__";
+  if (value instanceof Date) return `date:${value.toISOString()}`;
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
   }
 
-  // Table was added
-  if (!oldTable && newTable) {
-    operations.push({
-      type: "createTable",
-      tableSnapshot: newTable,
-    });
-    return operations;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function defaultsEqual(
+  left: SchemaSnapshot["tables"][string]["columns"][string],
+  right: SchemaSnapshot["tables"][string]["columns"][string],
+) {
+  const leftKind = left.defaultKind ?? null;
+  const rightKind = right.defaultKind ?? null;
+  if (leftKind !== rightKind) {
+    return false;
   }
 
-  if (!oldTable || !newTable) {
-    return operations;
+  if (leftKind !== "value") {
+    return true;
   }
 
-  // Check for column changes
-  const oldColumns = new Set(Object.keys(oldTable.columns));
-  const newColumns = new Set(Object.keys(newTable.columns));
+  return stableValue(left.defaultValue) === stableValue(right.defaultValue);
+}
 
-  // Added columns
-  for (const colName of newColumns) {
-    if (!oldColumns.has(colName)) {
-      const column = newTable.columns[colName];
-      if (column) {
-        operations.push({
-          type: "addColumn",
-          tableName,
-          columnSnapshot: column,
-        });
-      }
+function columnsEqual(
+  left: SchemaSnapshot["tables"][string]["columns"][string],
+  right: SchemaSnapshot["tables"][string]["columns"][string],
+) {
+  if (left.sqlName !== right.sqlName) return false;
+  if (left.kind !== right.kind) return false;
+  if (left.isPrimaryKey !== right.isPrimaryKey) return false;
+  if (left.isNotNull !== right.isNotNull) return false;
+  if (left.isUnique !== right.isUnique) return false;
+  if (left.hasDefault !== right.hasDefault) return false;
+  if (!defaultsEqual(left, right)) return false;
+  if (left.referencesTable !== right.referencesTable) return false;
+  if (left.referencesColumn !== right.referencesColumn) return false;
+  if (left.onDeleteAction !== right.onDeleteAction) return false;
+  return true;
+}
+
+export function diffSnapshots(
+  previous: SchemaSnapshot,
+  current: SchemaSnapshot,
+) {
+  const operations: MigrationOperation[] = [];
+
+  for (const [tableKey, oldTable] of Object.entries(previous.tables)) {
+    const newTable = current.tables[tableKey];
+    if (!newTable) {
+      operations.push({ kind: "drop-table", table: oldTable });
     }
   }
 
-  // Removed columns
-  for (const colName of oldColumns) {
-    if (!newColumns.has(colName)) {
-      const column = oldTable.columns[colName];
-      if (!column) {
+  for (const [tableKey, newTable] of Object.entries(current.tables)) {
+    const oldTable = previous.tables[tableKey];
+    if (!oldTable) {
+      operations.push({ kind: "create-table", table: newTable });
+      continue;
+    }
+
+    for (const [columnKey, oldColumn] of Object.entries(oldTable.columns)) {
+      const newColumn = newTable.columns[columnKey];
+      if (!newColumn) {
+        operations.push({
+          kind: "drop-column",
+          tableName: newTable.tableName,
+          column: oldColumn,
+        });
         continue;
       }
-      operations.push({
-        type: "dropColumn",
-        tableName,
-        columnName: colName,
-        columnSnapshot: column,
-      });
-    }
-  }
 
-  // Modified columns
-  for (const colName of newColumns) {
-    if (oldColumns.has(colName)) {
-      const oldCol = oldTable.columns[colName];
-      const newCol = newTable.columns[colName];
-
-      if (oldCol && newCol && !columnsEqual(oldCol, newCol)) {
+      if (!columnsEqual(oldColumn, newColumn)) {
         operations.push({
-          type: "alterColumn",
-          tableName,
-          columnName: colName,
-          oldColumn: oldCol,
-          newColumn: newCol,
+          kind: "drop-column",
+          tableName: newTable.tableName,
+          column: oldColumn,
+        });
+        operations.push({
+          kind: "add-column",
+          tableName: newTable.tableName,
+          column: newColumn,
+        });
+      }
+    }
+
+    for (const [columnKey, newColumn] of Object.entries(newTable.columns)) {
+      const oldColumn = oldTable.columns[columnKey];
+      if (!oldColumn) {
+        operations.push({
+          kind: "add-column",
+          tableName: newTable.tableName,
+          column: newColumn,
         });
       }
     }
   }
 
   return operations;
-};
-
-export const diffSnapshots = (
-  oldSnapshot: SchemaSnapshot | null,
-  newSnapshot: SchemaSnapshot,
-) => {
-  const operations: TableDiffOperation[] = [];
-
-  if (!oldSnapshot) {
-    // No old snapshot, create all tables
-    for (const [_tableName, table] of Object.entries(newSnapshot.tables)) {
-      operations.push({
-        type: "createTable",
-        tableSnapshot: table,
-      });
-    }
-    return operations;
-  }
-
-  const oldTables = new Set(Object.keys(oldSnapshot.tables));
-  const newTables = new Set(Object.keys(newSnapshot.tables));
-
-  // Find all table names (union of old and new)
-  const allTables = new Set([...oldTables, ...newTables]);
-
-  for (const tableName of allTables) {
-    const oldTable = oldSnapshot.tables[tableName];
-    const newTable = newSnapshot.tables[tableName];
-    const tableOps = diffTable(tableName, oldTable, newTable);
-    operations.push(...tableOps);
-  }
-
-  return operations;
-};
-
-// Generate reverse operations for rollback
-export const reverseOperations = (operations: TableDiffOperation[]) => {
-  const reversed: TableDiffOperation[] = [];
-
-  for (const op of operations) {
-    if (op.type === "createTable") {
-      reversed.unshift({
-        type: "dropTable",
-        tableName: op.tableSnapshot.name,
-        tableSnapshot: op.tableSnapshot,
-      });
-    } else if (op.type === "dropTable") {
-      if (!op.tableSnapshot) {
-        return err("ValidationError", "missing snapshot for reverse");
-      }
-      reversed.unshift({
-        type: "createTable",
-        tableSnapshot: op.tableSnapshot,
-      });
-    } else if (op.type === "addColumn") {
-      reversed.unshift({
-        type: "dropColumn",
-        tableName: op.tableName,
-        columnName: op.columnSnapshot.name,
-        columnSnapshot: op.columnSnapshot,
-      });
-    } else if (op.type === "dropColumn") {
-      if (!op.columnSnapshot) {
-        return err("ValidationError", "missing snapshot for reverse");
-      }
-      reversed.unshift({
-        type: "addColumn",
-        tableName: op.tableName,
-        columnSnapshot: op.columnSnapshot,
-      });
-    } else if (op.type === "alterColumn") {
-      reversed.unshift({
-        type: "alterColumn",
-        tableName: op.tableName,
-        columnName: op.columnName,
-        oldColumn: op.newColumn,
-        newColumn: op.oldColumn,
-      });
-    }
-  }
-
-  return ok(reversed);
-};
+}

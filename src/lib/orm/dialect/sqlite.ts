@@ -1,73 +1,48 @@
-import type { ColumnKind } from "../column/types.js";
-import type { Table } from "../table/index.js";
-import { buildCreateTableSql, escapeStringSingleQuote } from "./shared.js";
-import type { ColumnTypeMapping, Dialect } from "./types.js";
+import type { DialectAdapter } from "../types.js";
 
-// SQLite dialect implementation.
-// Fully implements all query building and type conversion for SQLite databases.
-export class SqliteDialect implements Dialect {
-  public readonly name = "sqlite";
-  public readonly uuidFunction = null;
+function escapeLike(s: string) {
+  return s.replaceAll("%", "\\%").replaceAll("_", "\\_");
+}
 
-  public readonly types: ColumnTypeMapping = {
-    number: "INTEGER",
-    string: "TEXT",
-    boolean: "INTEGER", // SQLite stores booleans as 0/1
-    date: "INTEGER", // SQLite stores dates as milliseconds since epoch
-    json: "TEXT", // SQLite stores JSON as text
-    jsonb: "TEXT", // SQLite stores JSONB as text (no distinction)
-    uuid: "TEXT", // SQLite stores UUIDs as text
-  };
+export const sqliteDialectAdapter: DialectAdapter = {
+  dialect: "sqlite",
 
-  private quoteIdentifier(identifier: string) {
-    return `"${identifier.replace(/"/g, '""')}"`;
-  }
+  quoteIdentifier(identifier: string) {
+    return `"${identifier.replaceAll('"', '""')}"`;
+  },
 
-  private formatDefaultValue(kind: ColumnKind, value: unknown) {
-    if (kind === "number" && typeof value === "number") {
-      return String(value);
-    }
-
-    if (kind === "boolean" && typeof value === "boolean") {
-      return value ? "1" : "0";
-    }
-
+  serializeValue(kind, value) {
     if (kind === "date") {
       if (value instanceof Date) {
-        return String(value.getTime());
+        return value.toISOString();
       }
-      return String(value);
+
+      return value;
     }
 
     if (kind === "json" || kind === "jsonb") {
-      const jsonValue =
-        typeof value === "string" ? value : (JSON.stringify(value) ?? "null");
-      return `'${escapeStringSingleQuote(jsonValue)}'`;
+      return JSON.stringify(value);
     }
 
-    return `'${escapeStringSingleQuote(String(value))}'`;
-  }
-
-  public buildCreateTable(table: Table) {
-    return buildCreateTableSql(
-      table,
-      this.types,
-      (s) => this.quoteIdentifier(s),
-      (kind, value) => this.formatDefaultValue(kind, value),
-      null,
-      this.uuidFunction,
-    );
-  }
-
-  public convertBooleanValue(value: unknown) {
-    // SQLite stores booleans as 0/1
-    if (typeof value === "number") {
-      return value === 1;
+    if (kind === "boolean") {
+      if (value === true) return 1;
+      if (value === false) return 0;
     }
-    // Already a boolean
-    if (typeof value === "boolean") {
-      return value;
+
+    return value;
+  },
+
+  renderLikePattern(mode, value) {
+    const escaped = escapeLike(value);
+
+    if (mode === "startsWith") {
+      return `${escaped}%`;
     }
-    return false;
-  }
-}
+
+    if (mode === "endsWith") {
+      return `%${escaped}`;
+    }
+
+    return `%${escaped}%`;
+  },
+};

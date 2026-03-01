@@ -1,105 +1,124 @@
-import { readdir } from "node:fs/promises";
-import { pathToFileURL } from "node:url";
-import { err, mightThrow, ok } from "../../errors/index.js";
-import type { MigrationDefinition, MigrationFile } from "./types.js";
+import type { Dirent } from "node:fs";
+import { mkdir, readdir, stat } from "node:fs/promises";
+import { basename, join } from "node:path";
+import type { MigrationInfo } from "./types.js";
 
-const toMsg = (error: unknown) =>
-  error instanceof Error ? error.message : String(error);
+export async function ensureMigrationsDirectory(migrationsDir: string) {
+  await mkdir(migrationsDir, { recursive: true });
+}
 
-const migrationRegex =
-  /^(\d{14}(?:\d{6})?)_([a-zA-Z0-9_-]+)\.(ts|js|mts|mjs|cts|cjs)$/;
-
-const isMigrationDefinition = (value: unknown) => {
-  if (typeof value !== "object" || value === null) {
-    return false;
+export async function listMigrations(migrationsDir: string) {
+  let entries: Dirent<string>[];
+  try {
+    entries = await readdir(migrationsDir, {
+      withFileTypes: true,
+      encoding: "utf8",
+    });
+  } catch {
+    return [] as MigrationInfo[];
   }
+  const migrationDirs = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
 
-  const up = Reflect.get(value, "up");
-  const down = Reflect.get(value, "down");
+  const migrations: MigrationInfo[] = [];
 
-  return typeof up === "function" && typeof down === "function";
-};
-
-export const scanMigrationFiles = async (dirPath: string) => {
-  const files: MigrationFile[] = [];
-
-  const [error, entries] = await mightThrow(
-    readdir(dirPath, { withFileTypes: true }),
-  );
-  if (error) {
-    return err("InternalServerError", toMsg(error));
-  }
-  if (!entries) {
-    return ok([]);
-  }
-
-  for (const entry of entries) {
-    if (!("isFile" in entry) || typeof entry.isFile !== "function") {
+  for (const directoryName of migrationDirs) {
+    const splitIndex = directoryName.indexOf("_");
+    if (splitIndex < 0) {
       continue;
     }
 
-    if (!entry.isFile()) {
-      continue;
-    }
+    const id = directoryName.slice(0, splitIndex);
+    const name = directoryName.slice(splitIndex + 1);
+    const directoryPath = join(migrationsDir, directoryName);
 
-    const match = migrationRegex.exec(entry.name);
-    if (!match) {
-      continue;
-    }
-
-    const version = match[1];
-    const name = match[2];
-
-    if (!version || !name) {
-      continue;
-    }
-
-    files.push({
-      version,
+    migrations.push({
+      id,
       name,
-      filePath: `${dirPath}/${entry.name}`,
+      directoryName,
+      directoryPath,
+      upPath: join(directoryPath, "up.sql"),
+      downPath: join(directoryPath, "down.sql"),
+      snapshotPath: join(directoryPath, "snapshot.json"),
     });
   }
 
-  files.sort((left, right) => {
-    if (left.version < right.version) return -1;
-    if (left.version > right.version) return 1;
-    return 0;
-  });
+  return migrations;
+}
 
-  return ok(files);
-};
+export function nowMigrationId() {
+  const now = new Date();
+  const parts = [
+    now.getUTCFullYear().toString(),
+    String(now.getUTCMonth() + 1).padStart(2, "0"),
+    String(now.getUTCDate()).padStart(2, "0"),
+    String(now.getUTCHours()).padStart(2, "0"),
+    String(now.getUTCMinutes()).padStart(2, "0"),
+    String(now.getUTCSeconds()).padStart(2, "0"),
+    String(now.getUTCMilliseconds()).padStart(3, "0"),
+  ];
+  return parts.join("");
+}
 
-export const loadMigration = async (file: MigrationFile) => {
-  // Convert file path to file:// URL for dynamic import
-  const moduleUrl = pathToFileURL(file.filePath).href;
-  const [importError, mod] = await mightThrow(
-    import(`${moduleUrl}?cache=${Date.now()}`),
-  );
-  if (importError) {
-    return err("InternalServerError", toMsg(importError));
+export function toMigrationName(value: string) {
+  const name = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  if (!name) {
+    return "migration";
+  }
+  return name;
+}
+
+export function migrationDirectoryPath(
+  migrationsDir: string,
+  id: string,
+  name: string,
+) {
+  return join(migrationsDir, `${id}_${name}`);
+}
+
+export async function uniqueMigrationDirectoryPath(
+  migrationsDir: string,
+  id: string,
+  name: string,
+) {
+  let candidateId = id;
+  let attempt = 0;
+
+  while (true) {
+    const dirPath = migrationDirectoryPath(migrationsDir, candidateId, name);
+    let exists = false;
+    try {
+      const stats = await stat(dirPath);
+      exists = stats.isDirectory();
+    } catch {
+      exists = false;
+    }
+    if (!exists) {
+      return {
+        migrationId: candidateId,
+        migrationDir: dirPath,
+      };
+    }
+
+    attempt += 1;
+    candidateId = `${id}${String(attempt).padStart(2, "0")}`;
+  }
+}
+
+export function relativeFromCwd(cwd: string, absolutePath: string) {
+  if (!absolutePath.startsWith(cwd)) {
+    return absolutePath;
   }
 
-  if (!mod) {
-    return err("InternalServerError", "Failed to load migration module");
+  const rel = absolutePath.slice(cwd.length + 1);
+  if (!rel) {
+    return basename(absolutePath);
   }
-
-  const definition = Reflect.get(mod, "default");
-
-  if (!isMigrationDefinition(definition)) {
-    return err(
-      "ValidationError",
-      `Invalid migration file ${file.filePath}: default export must be defineMigration({ up, down })`,
-    );
-  }
-
-  const def = definition as MigrationDefinition;
-
-  return ok({
-    version: file.version,
-    name: file.name,
-    filePath: file.filePath,
-    up: def.up,
-    down: def.down,
-  });
-};
+  return rel;
+}
