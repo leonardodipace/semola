@@ -13,7 +13,7 @@ describe("Validation Module", () => {
     test("should format validation errors into a readable string", async () => {
       const schema = z.object({
         user: z.object({
-          email: z.string().email(),
+          email: z.email(),
         }),
         age: z.number(),
       });

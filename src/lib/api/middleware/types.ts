@@ -6,7 +6,13 @@ export type MiddlewareHandler<
   TExt extends Record<string, unknown> = Record<never, never>,
 > = (
   c: Context<TReq, TRes>,
-) => Response | TExt | undefined | Promise<Response | TExt | undefined>;
+) =>
+  | Response
+  | TExt
+  | undefined
+  | Promise<Response | TExt | undefined>
+  | Promise<void>
+  | void;
 
 export type MiddlewareOptions<
   TReq extends RequestSchema = RequestSchema,
