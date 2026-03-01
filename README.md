@@ -27,7 +27,7 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 | **🌍 i18n**          | Compile-time validated internationalization            | `semola/i18n`   |
 | **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`  |
 | **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors` |
-| **🗄️ ORM**           | Type-safe SQL ORM with relations & migrations          | `semola/orm`    |
+| **🗄️ ORM**           | Type-safe data layer with query APIs + migrations      | `semola/orm`    |
 
 ---
 
@@ -139,29 +139,60 @@ if (!error) console.log(user);
 ### Query a Database
 
 ```typescript
-import { Orm, Table, string, number } from "semola/orm";
+import { createOrm, createTable, string, uuid } from "semola/orm";
 
-const users = new Table("users", {
-  id: number().primaryKey(),
-  name: string().notNull(),
-  email: string().unique().notNull(),
+const users = createTable("users", {
+  id: uuid("id").primaryKey(),
+  name: string("name").notNull(),
+  email: string("email").unique().notNull(),
 });
 
-const orm = new Orm({
-  url: "sqlite://./app.db",
-  tables: [users],
+const db = createOrm({
+  url: "sqlite::memory:",
+  tables: { users },
 });
 
-// Create a user
-const [error, user] = await orm.tables.users.create({
-  name: "John Doe",
-  email: "john@example.com",
-});
-
-// Query with filters
-const [err, users] = await orm.tables.users.findMany({
+// Result-pattern query
+const [findErr, rows] = await db.users.findMany({
   where: { name: { contains: "John" } },
+  take: 10,
 });
+
+if (findErr) {
+  console.error(findErr.type, findErr.message);
+}
+
+// Create record (result pattern)
+const [createErr, user] = await db.users.create({
+  data: {
+    name: "John Doe",
+    email: "john@example.com",
+  },
+});
+
+// Low-level SQL-style methods are also available
+const insertedRows = await db.users.insert({
+  data: {
+    name: "Jane Doe",
+    email: "jane@example.com",
+  },
+  returning: true,
+});
+
+console.log(rows, user, createErr, insertedRows);
+```
+
+### Run ORM Migrations
+
+```bash
+# create migration from schema diff
+semola orm migrations create add-users
+
+# apply pending migrations
+semola orm migrations apply
+
+# rollback last applied migration
+semola orm migrations rollback
 ```
 
 ### Check Permissions
@@ -267,7 +298,7 @@ _Higher is better for req/sec, lower is better for latency._
 - [i18n](./docs/i18n.md) - Type-safe internationalization
 - [Cache](./docs/cache.md) - Redis cache wrapper with TTL
 - [Errors](./docs/errors.md) - Result-based error handling
-- [ORM](./docs/orm.md) - Type-safe SQL ORM with relations & migrations
+- [ORM](./docs/orm.md) - Type-safe data layer, result-pattern DX, and migrations
 
 ---
 
