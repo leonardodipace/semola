@@ -3,6 +3,7 @@
 Semola ORM is a type-safe data layer for Bun that combines expressive query APIs, result-pattern ergonomics, and built-in migration tooling.
 
 It provides:
+
 - Strong TypeScript inference from table definitions
 - Result-pattern CRUD methods (`[error, data]`)
 - SQL-style methods that map directly to Bun SQL execution
@@ -124,6 +125,7 @@ const inserted = await db.users.insert({
 ## Filters & pagination
 
 Supported `where` operators:
+
 - direct equality: `{ email: "a@b.com" }`
 - `equals`, `not`
 - `in`, `notIn`
@@ -132,6 +134,7 @@ Supported `where` operators:
 - `isNull`
 
 Pagination and sorting:
+
 - SQL-style: `limit`, `offset`, `orderBy`
 - Result-style: `take`, `skip`, `orderBy`
 
@@ -259,6 +262,7 @@ semola orm migrations rollback
 ## Type exports
 
 Useful exported types include:
+
 - `TableRow<T>`
 - `ResultTuple<T>`
 - `OrmResultError`
