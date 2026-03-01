@@ -327,7 +327,8 @@ export class Cron {
     const [error, tokens] = new Scanner(expr).scan();
     if (error) throw new Error(`${error.type}: ${error.message}`);
 
-    this.hasSeconds = expr.length === FieldAmount.max;
+    const fields = expr.trim().split(/\s+/);
+    this.hasSeconds = fields.length === FieldAmount.max;
     const [parsingError, _] = this.parse(tokens);
 
     // Parse and validate the cron expression
