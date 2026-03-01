@@ -510,4 +510,37 @@ describe("Cron", () => {
       expect(cron.getStatus()).toBe("idle");
     });
   });
+
+  describe("known bugs", () => {
+    test("matches uses OR semantics when both day-of-month and day-of-week are restricted", () => {
+      // "0 0 15 * 1" = midnight on the 15th of any month OR any Monday
+      const cron = new Cron({
+        name: "test",
+        schedule: "0 0 15 * 1",
+        handler: () => {},
+      });
+
+      // 2024-01-08 = Monday that is NOT the 15th - should match (it's Monday)
+      const mondayNot15th = new Date("2024-01-08T00:00:00");
+      expect(cron.matches(mondayNot15th)).toBe(true);
+
+      // 2024-02-15 = Thursday that IS the 15th - should match (it's the 15th)
+      const fifteenthNotMonday = new Date("2024-02-15T00:00:00");
+      expect(cron.matches(fifteenthNotMonday)).toBe(true);
+    });
+
+    test("getNextRun returns non-null for leap day schedule when next occurrence is beyond 366 days", () => {
+      // "0 0 29 2 *" = midnight on Feb 29 (leap day)
+      // Next Feb 29 from 2026-03-01 is 2028-02-29 (~730 days away, beyond 366-day limit)
+      const cron = new Cron({
+        name: "leap-day",
+        schedule: "0 0 29 2 *",
+        handler: () => {},
+      });
+
+      const next = cron.getNextRun();
+
+      expect(next).not.toBeNull();
+    });
+  });
 });
