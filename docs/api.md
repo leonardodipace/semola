@@ -32,6 +32,10 @@ const api = new Api({
     description: "A type-safe REST API",
     version: "1.0.0",
   },
+  validation: {
+    input: true,  // Validate request schemas (default: true)
+    output: true, // Validate response schemas (default: true)
+  },
 });
 ```
 
@@ -217,7 +221,9 @@ The handler receives a context object with type-safe request data and response m
 
 - **Full type safety**: Request/response types inferred from schemas
 - **Standard Schema support**: Works with Zod, Valibot, ArkType, and other Standard Schema v1 libraries
-- **Automatic validation**: Request validation (400 on error)
+- **Configurable validation**: Enable/disable input and output validation independently
+- **Automatic input validation**: Request validation (400 on error)
+- **Output validation**: Response validation against declared schema (400 on error)
 - **OpenAPI generation**: Automatic OpenAPI 3.1.0 spec from route definitions
 - **Schema reuse**: Define schemas once with `.meta({ id })` and reference them across routes
 - **Bun-native routing**: Leverages Bun.serve's SIMD-accelerated routing
@@ -357,6 +363,74 @@ All request fields are validated before reaching your handler:
 - **Cookies**: Parsed from Cookie header
 
 Invalid requests receive **400 Bad Request** with detailed error messages.
+
+## Validation Configuration
+
+You can control input and output validation independently via the `validation` option on the `Api` constructor.
+
+### Options
+
+| Value | Input validation | Output validation |
+| :---- | :--------------: | :---------------: |
+| `true` _(default)_ | ✅ | ✅ |
+| `false` | ❌ | ❌ |
+| `{ input: true, output: true }` | ✅ | ✅ |
+| `{ input: false }` | ❌ | ✅ |
+| `{ output: false }` | ✅ | ❌ |
+
+### Examples
+
+**Disable all validation** (useful for performance-critical internal services):
+
+```typescript
+const api = new Api({ validation: false });
+```
+
+**Disable only input validation:**
+
+```typescript
+const api = new Api({
+  validation: { input: false },
+});
+```
+
+**Disable only output validation:**
+
+```typescript
+const api = new Api({
+  validation: { output: false },
+});
+```
+
+### Output Validation
+
+When output validation is enabled (the default), the response produced by your handler is validated against the `response` schema you define on the route. If validation fails, the framework returns a **400 Bad Request** with a JSON error body:
+
+```json
+{ "message": "..." }
+```
+
+This catches bugs where your handler accidentally returns data that doesn't match the declared contract.
+
+```typescript
+const api = new Api(); // output validation on by default
+
+api.defineRoute({
+  path: "/users/:id",
+  method: "GET",
+  response: {
+    200: z.object({ id: z.string(), name: z.string() }),
+  },
+  handler: async (c) => {
+    const user = await getUser(c.req.params.id);
+
+    // If `user` doesn't match the schema above, a 400 is returned automatically
+    return c.json(200, user);
+  },
+});
+```
+
+Output validation only runs when a `response` schema is defined on the route. Routes without a `response` schema are unaffected.
 
 ## Middlewares
 
