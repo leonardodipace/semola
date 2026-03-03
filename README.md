@@ -140,18 +140,19 @@ if (!error) console.log(user);
 ```typescript
 import { Policy } from "semola/policy";
 
-const policy = new Policy();
+type User = { id: number; role: string };
 
-// Allow admins to edit any post
+const policy = new Policy<User>();
+
+// Allow admins to edit any resource
 policy.allow({
-  action: "update",
-  entity: "post",
+  action: ["create", "update", "delete"],
   conditions: { role: "admin" },
-  reason: "Admins can edit any post",
+  reason: "Admins have full access",
 });
 
 // Check if user can edit
-const result = policy.can("update", "post", { role: user.role });
+const result = policy.can("update", user);
 console.log(result.allowed); // true or false
 ```
 
