@@ -1,3 +1,4 @@
+import { mightThrow } from "../../errors/index.js";
 import type { Middleware } from "../middleware/index.js";
 import { generateOpenApiSpec } from "../openapi/index.js";
 import {
@@ -7,6 +8,7 @@ import {
   validateHeaders,
   validateParams,
   validateQuery,
+  validateSchema,
 } from "../validation/index.js";
 import type {
   ApiOptions,
@@ -15,6 +17,7 @@ import type {
   ResponseSchema,
   RouteConfig,
   ValidatedRequest,
+  ValidationOptions,
 } from "./types.js";
 
 // Shared defaults reused across requests to avoid per-request allocations
@@ -63,6 +66,12 @@ const shouldCreateBodyCache = (
   if (!hasMiddlewares) return false;
 
   return allMiddlewares.some((mw) => needsBodyCache(mw.options.request));
+};
+
+const resolveValidation = (v?: ValidationOptions) => {
+  if (v === undefined || v === true) return { input: true, output: true };
+  if (v === false) return { input: false, output: false };
+  return { input: v.input !== false, output: v.output !== false };
 };
 
 export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
@@ -183,11 +192,41 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     };
   }
 
+  private async validateResponseBody(
+    response: Response,
+    schema: ResponseSchema | undefined,
+  ) {
+    if (!schema) return response;
+
+    const statusSchema = schema[response.status];
+
+    if (!statusSchema) return response;
+
+    const contentType = response.headers.get("content-type") ?? "";
+
+    if (!contentType.includes("application/json")) return response;
+
+    const [parseError, body] = await mightThrow(response.clone().json());
+
+    if (parseError) {
+      return responseHelpers.json(400, { message: "Invalid response body" });
+    }
+
+    const [validationError] = await validateSchema(statusSchema, body);
+
+    if (validationError) {
+      return responseHelpers.json(400, { message: validationError.message });
+    }
+
+    return response;
+  }
+
   private buildBunRoutes() {
     const bunRoutes: MethodRoutes = {};
+    const validationConfig = resolveValidation(this.options.validation);
 
     for (const route of this.routes) {
-      const { path, method, handler, request, middlewares } = route;
+      const { path, method, handler, request, response, middlewares } = route;
 
       const fullPath = this.getFullPath(path);
 
@@ -202,8 +241,13 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
 
       const hasMiddlewares = allMiddlewares.length > 0;
       const hasRouteSchemas = hasSchemas(request);
+      const effectiveOutputValidation = validationConfig.output && !!response;
 
-      if (!hasMiddlewares && !hasRouteSchemas) {
+      if (
+        !hasMiddlewares &&
+        !(validationConfig.input && hasRouteSchemas) &&
+        !effectiveOutputValidation
+      ) {
         // Zero-allocation path for simple routes using prototype chain
         // Avoids object spread overhead by inheriting response helpers via prototype
         bunRoutes[fullPath][method] = (req: Bun.BunRequest) => {
@@ -219,21 +263,19 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
         bunRoutes[fullPath][method] = async (req: Bun.BunRequest) => {
           const extensions: Record<string, unknown> = {};
 
-          // Only create bodyCache if any schema has body validation
-          const bodyCache: BodyCache | undefined = shouldCreateBodyCache(
-            hasMiddlewares,
-            allMiddlewares,
-            request,
-          )
-            ? { parsed: false, value: undefined }
-            : undefined;
+          // Only create bodyCache if input validation is enabled and any schema has body validation
+          const bodyCache: BodyCache | undefined =
+            validationConfig.input &&
+            shouldCreateBodyCache(hasMiddlewares, allMiddlewares, request)
+              ? { parsed: false, value: undefined }
+              : undefined;
 
           for (const mw of allMiddlewares) {
             const { request: reqSchema, handler: mwHandler } = mw.options;
 
             let validated = defaultValidated;
 
-            if (hasSchemas(reqSchema)) {
+            if (validationConfig.input && hasSchemas(reqSchema)) {
               const result = await this.validateRequestSchema(
                 req,
                 reqSchema,
@@ -265,7 +307,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
 
           let routeValidated = defaultValidated;
 
-          if (hasRouteSchemas) {
+          if (validationConfig.input && hasRouteSchemas) {
             const result = await this.validateRequestSchema(
               req,
               request,
@@ -282,8 +324,15 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
           }
 
           const context = this.createContext(req, routeValidated, extensions);
+          const handlerResponse = await handler(
+            context as Parameters<typeof handler>[0],
+          );
 
-          return handler(context as Parameters<typeof handler>[0]);
+          if (effectiveOutputValidation) {
+            return this.validateResponseBody(handlerResponse, response);
+          }
+
+          return handlerResponse;
         };
       }
     }

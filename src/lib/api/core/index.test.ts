@@ -268,4 +268,137 @@ describe("Api Core", () => {
     const body = await res.json();
     expect(body).toEqual({ a: "hello", b: 42 });
   });
+
+  test("should skip input validation when validation is false", async () => {
+    const api = new Api({ validation: false });
+    const schema = z.object({ name: z.string() });
+
+    api.defineRoute({
+      path: "/user",
+      method: "POST",
+      request: { body: schema },
+      handler: (c) => c.json(200, { ok: true }),
+    });
+
+    api.serve(0, (s) => {
+      server = s;
+    });
+
+    // Invalid body should still pass since validation is disabled
+    const res = await fetch(`http://localhost:${server?.port}/user`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: 123 }),
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  test("should skip input validation when validation.input is false", async () => {
+    const api = new Api({ validation: { input: false } });
+    const schema = z.object({ name: z.string() });
+
+    api.defineRoute({
+      path: "/user",
+      method: "POST",
+      request: { body: schema },
+      handler: (c) => c.json(200, { ok: true }),
+    });
+
+    api.serve(0, (s) => {
+      server = s;
+    });
+
+    // Invalid body should still pass since input validation is disabled
+    const res = await fetch(`http://localhost:${server?.port}/user`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: 123 }),
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  test("should validate output and return 400 when response schema fails", async () => {
+    const api = new Api();
+    const responseSchema = z.object({ name: z.string() });
+
+    api.defineRoute({
+      path: "/user",
+      method: "GET",
+      response: { 200: responseSchema },
+      // Handler returns invalid output (name is a number, not string)
+      handler: (c) => c.json(200, { name: 123 } as unknown as { name: string }),
+    });
+
+    api.serve(0, (s) => {
+      server = s;
+    });
+
+    const res = await fetch(`http://localhost:${server?.port}/user`);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body).toHaveProperty("message");
+  });
+
+  test("should pass output validation when response schema succeeds", async () => {
+    const api = new Api();
+    const responseSchema = z.object({ name: z.string() });
+
+    api.defineRoute({
+      path: "/user",
+      method: "GET",
+      response: { 200: responseSchema },
+      handler: (c) => c.json(200, { name: "Alice" }),
+    });
+
+    api.serve(0, (s) => {
+      server = s;
+    });
+
+    const res = await fetch(`http://localhost:${server?.port}/user`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ name: "Alice" });
+  });
+
+  test("should skip output validation when validation.output is false", async () => {
+    const api = new Api({ validation: { output: false } });
+    const responseSchema = z.object({ name: z.string() });
+
+    api.defineRoute({
+      path: "/user",
+      method: "GET",
+      response: { 200: responseSchema },
+      // Handler returns invalid output
+      handler: (c) => c.json(200, { name: 123 } as unknown as { name: string }),
+    });
+
+    api.serve(0, (s) => {
+      server = s;
+    });
+
+    // Output validation is disabled, so the invalid response should pass through
+    const res = await fetch(`http://localhost:${server?.port}/user`);
+    expect(res.status).toBe(200);
+  });
+
+  test("should skip output validation when validation is false", async () => {
+    const api = new Api({ validation: false });
+    const responseSchema = z.object({ name: z.string() });
+
+    api.defineRoute({
+      path: "/user",
+      method: "GET",
+      response: { 200: responseSchema },
+      handler: (c) => c.json(200, { name: 123 } as unknown as { name: string }),
+    });
+
+    api.serve(0, (s) => {
+      server = s;
+    });
+
+    const res = await fetch(`http://localhost:${server?.port}/user`);
+    expect(res.status).toBe(200);
+  });
 });
