@@ -372,4 +372,45 @@ describe("Policy", () => {
       reason: "Admins cannot update their own published posts",
     });
   });
+
+  test("should allow an array of actions in allow()", () => {
+    const policy = new Policy<Post>();
+
+    policy.allow({
+      action: ["create", "update"],
+    });
+
+    const post: Post = {
+      id: 1,
+      title: "Post",
+      authorId: 1,
+      status: "draft",
+    };
+
+    expect(policy.can("create", post)).toMatchObject({ allowed: true });
+    expect(policy.can("update", post)).toMatchObject({ allowed: true });
+    expect(policy.can("delete", post)).toMatchObject({ allowed: false });
+  });
+
+  test("should allow an array of actions in forbid()", () => {
+    const policy = new Policy<Post>();
+
+    policy.allow({ action: "read" });
+
+    policy.forbid({
+      action: ["create", "delete"],
+    });
+
+    const post: Post = {
+      id: 1,
+      title: "Post",
+      authorId: 1,
+      status: "published",
+    };
+
+    expect(policy.can("read", post)).toMatchObject({ allowed: true });
+    expect(policy.can("create", post)).toMatchObject({ allowed: false });
+    expect(policy.can("update", post)).toMatchObject({ allowed: false });
+    expect(policy.can("delete", post)).toMatchObject({ allowed: false });
+  });
 });

@@ -13,21 +13,37 @@ export class Policy<
   private rules: Rule<TEntity>[] = [];
 
   public allow(params: AllowParams<TEntity>) {
-    this.rules.push({
-      action: params.action,
-      conditions: params.conditions,
-      inverted: false,
-      reason: params.reason,
-    });
+    const actions = this.toActions(params.action);
+
+    for (const action of actions) {
+      this.rules.push({
+        action,
+        conditions: params.conditions,
+        inverted: false,
+        reason: params.reason,
+      });
+    }
   }
 
   public forbid(params: ForbidParams<TEntity>) {
-    this.rules.push({
-      action: params.action,
-      conditions: params.conditions,
-      inverted: true,
-      reason: params.reason,
-    });
+    const actions = this.toActions(params.action);
+
+    for (const action of actions) {
+      this.rules.push({
+        action,
+        conditions: params.conditions,
+        inverted: true,
+        reason: params.reason,
+      });
+    }
+  }
+
+  private toActions(action: Action | Action[]) {
+    if (Array.isArray(action)) {
+      return action;
+    }
+
+    return [action];
   }
 
   public can(action: Action, object?: TEntity): CanResult {

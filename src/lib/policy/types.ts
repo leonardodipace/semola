@@ -10,13 +10,13 @@ export type Rule<T = Record<string, unknown>> = {
 };
 
 export type AllowParams<T = Record<string, unknown>> = {
-  action: Action;
+  action: Action | Action[];
   conditions?: Conditions<T>;
   reason?: string;
 };
 
 export type ForbidParams<T = Record<string, unknown>> = {
-  action: Action;
+  action: Action | Action[];
   conditions?: Conditions<T>;
   reason?: string;
 };
