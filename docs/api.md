@@ -33,7 +33,7 @@ const api = new Api({
     version: "1.0.0",
   },
   validation: {
-    input: true,  // Validate request schemas (default: true)
+    input: true, // Validate request schemas (default: true)
     output: true, // Validate response schemas (default: true)
   },
 });
@@ -370,13 +370,13 @@ You can control input and output validation independently via the `validation` o
 
 ### Options
 
-| Value | Input validation | Output validation |
-| :---- | :--------------: | :---------------: |
-| `true` _(default)_ | ✅ | ✅ |
-| `false` | ❌ | ❌ |
-| `{ input: true, output: true }` | ✅ | ✅ |
-| `{ input: false }` | ❌ | ✅ |
-| `{ output: false }` | ✅ | ❌ |
+| Value                           | Input validation | Output validation |
+| :------------------------------ | :--------------: | :---------------: |
+| `true` _(default)_              |        ✅        |        ✅         |
+| `false`                         |        ❌        |        ❌         |
+| `{ input: true, output: true }` |        ✅        |        ✅         |
+| `{ input: false }`              |        ❌        |        ✅         |
+| `{ output: false }`             |        ✅        |        ❌         |
 
 ### Examples
 
