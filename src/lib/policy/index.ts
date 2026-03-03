@@ -8,10 +8,12 @@ import type {
   Rule,
 } from "./types.js";
 
-export class Policy {
-  private rules: Rule[] = [];
+export class Policy<
+  TEntity extends Record<string, unknown> = Record<string, unknown>,
+> {
+  private rules: Rule<TEntity>[] = [];
 
-  public allow<T>(params: AllowParams<T>) {
+  public allow(params: AllowParams<TEntity>) {
     this.rules.push({
       action: params.action,
       entity: params.entity,
@@ -21,7 +23,7 @@ export class Policy {
     });
   }
 
-  public forbid<T>(params: ForbidParams<T>) {
+  public forbid(params: ForbidParams<TEntity>) {
     this.rules.push({
       action: params.action,
       entity: params.entity,
@@ -31,7 +33,7 @@ export class Policy {
     });
   }
 
-  public can<T>(action: Action, entity: Entity, object?: T): CanResult {
+  public can(action: Action, entity: Entity, object?: TEntity): CanResult {
     const filteredRules = this.rules
       .filter((rule) => rule.action === action)
       .filter((rule) => rule.entity === entity);
@@ -55,7 +57,7 @@ export class Policy {
     return { allowed: false };
   }
 
-  private matchesConditions<T>(object: T, conditions: Conditions<T>) {
+  private matchesConditions(object: TEntity, conditions: Conditions<TEntity>) {
     for (const key in conditions) {
       const matchesConditions = object[key] === conditions[key];
 

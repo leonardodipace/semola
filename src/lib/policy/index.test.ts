@@ -10,9 +10,9 @@ type Post = {
 
 describe("Policy", () => {
   test("should allow access when conditions match", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "read",
       entity: "Post",
       conditions: {
@@ -27,15 +27,15 @@ describe("Policy", () => {
       status: "published",
     };
 
-    expect(policy.can<Post>("read", "Post", post)).toMatchObject({
+    expect(policy.can("read", "Post", post)).toMatchObject({
       allowed: true,
     });
   });
 
   test("should deny access when conditions do not match", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "read",
       entity: "Post",
       conditions: {
@@ -50,15 +50,15 @@ describe("Policy", () => {
       status: "draft",
     };
 
-    expect(policy.can<Post>("read", "Post", post)).toMatchObject({
+    expect(policy.can("read", "Post", post)).toMatchObject({
       allowed: false,
     });
   });
 
   test("should forbid access when forbid conditions match", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.forbid<Post>({
+    policy.forbid({
       action: "update",
       entity: "Post",
       conditions: {
@@ -73,20 +73,20 @@ describe("Policy", () => {
       status: "published",
     };
 
-    expect(policy.can<Post>("update", "Post", post)).toMatchObject({
+    expect(policy.can("update", "Post", post)).toMatchObject({
       allowed: false,
     });
   });
 
   test("should allow access when forbid conditions do not match", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "update",
       entity: "Post",
     });
 
-    policy.forbid<Post>({
+    policy.forbid({
       action: "update",
       entity: "Post",
       conditions: {
@@ -101,15 +101,15 @@ describe("Policy", () => {
       status: "draft",
     };
 
-    expect(policy.can<Post>("update", "Post", post)).toMatchObject({
+    expect(policy.can("update", "Post", post)).toMatchObject({
       allowed: true,
     });
   });
 
   test("should work with multiple conditions", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "delete",
       entity: "Post",
       conditions: {
@@ -139,21 +139,21 @@ describe("Policy", () => {
       status: "published",
     };
 
-    expect(policy.can<Post>("delete", "Post", matchingPost)).toMatchObject({
+    expect(policy.can("delete", "Post", matchingPost)).toMatchObject({
       allowed: true,
     });
-    expect(policy.can<Post>("delete", "Post", nonMatchingPost1)).toMatchObject({
+    expect(policy.can("delete", "Post", nonMatchingPost1)).toMatchObject({
       allowed: false,
     });
-    expect(policy.can<Post>("delete", "Post", nonMatchingPost2)).toMatchObject({
+    expect(policy.can("delete", "Post", nonMatchingPost2)).toMatchObject({
       allowed: false,
     });
   });
 
   test("should allow access when no conditions are specified", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "read",
       entity: "Post",
     });
@@ -165,15 +165,15 @@ describe("Policy", () => {
       status: "published",
     };
 
-    expect(policy.can<Post>("read", "Post", post)).toMatchObject({
+    expect(policy.can("read", "Post", post)).toMatchObject({
       allowed: true,
     });
   });
 
   test("should deny access when no matching rule exists", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "read",
       entity: "Post",
     });
@@ -189,9 +189,9 @@ describe("Policy", () => {
       status: "published",
     };
 
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "read",
       entity: "Post",
       conditions: {
@@ -199,7 +199,7 @@ describe("Policy", () => {
       },
     });
 
-    policy.forbid<Post>({
+    policy.forbid({
       action: "update",
       entity: "Post",
       conditions: {
@@ -207,18 +207,18 @@ describe("Policy", () => {
       },
     });
 
-    expect(policy.can<Post>("read", "Post", post)).toMatchObject({
+    expect(policy.can("read", "Post", post)).toMatchObject({
       allowed: true,
     });
-    expect(policy.can<Post>("update", "Post", post)).toMatchObject({
+    expect(policy.can("update", "Post", post)).toMatchObject({
       allowed: false,
     });
   });
 
   test("should handle multiple rules with different actions", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "read",
       entity: "Post",
       conditions: {
@@ -226,7 +226,7 @@ describe("Policy", () => {
       },
     });
 
-    policy.allow<Post>({
+    policy.allow({
       action: "update",
       entity: "Post",
       conditions: {
@@ -248,22 +248,22 @@ describe("Policy", () => {
       status: "draft",
     };
 
-    expect(policy.can<Post>("read", "Post", publishedPost)).toMatchObject({
+    expect(policy.can("read", "Post", publishedPost)).toMatchObject({
       allowed: true,
     });
-    expect(policy.can<Post>("read", "Post", draftPost)).toMatchObject({
+    expect(policy.can("read", "Post", draftPost)).toMatchObject({
       allowed: false,
     });
-    expect(policy.can<Post>("update", "Post", publishedPost)).toMatchObject({
+    expect(policy.can("update", "Post", publishedPost)).toMatchObject({
       allowed: false,
     });
-    expect(policy.can<Post>("update", "Post", draftPost)).toMatchObject({
+    expect(policy.can("update", "Post", draftPost)).toMatchObject({
       allowed: true,
     });
   });
 
   test("should handle different entities", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
     policy.allow({
       action: "read",
@@ -281,9 +281,9 @@ describe("Policy", () => {
   });
 
   test("should return reason when forbid rule matches", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.forbid<Post>({
+    policy.forbid({
       action: "delete",
       entity: "Post",
       reason: "You cannot delete published posts",
@@ -299,7 +299,7 @@ describe("Policy", () => {
       status: "published",
     };
 
-    const result = policy.can<Post>("delete", "Post", post);
+    const result = policy.can("delete", "Post", post);
     expect(result).toMatchObject({
       allowed: false,
       reason: "You cannot delete published posts",
@@ -307,9 +307,9 @@ describe("Policy", () => {
   });
 
   test("should return reason when allow rule matches", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "read",
       entity: "Post",
       reason: "Public posts are visible to everyone",
@@ -325,7 +325,7 @@ describe("Policy", () => {
       status: "published",
     };
 
-    const result = policy.can<Post>("read", "Post", post);
+    const result = policy.can("read", "Post", post);
     expect(result).toMatchObject({
       allowed: true,
       reason: "Public posts are visible to everyone",
@@ -333,9 +333,9 @@ describe("Policy", () => {
   });
 
   test("should return undefined reason when no reason is provided", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "read",
       entity: "Post",
       conditions: {
@@ -350,15 +350,15 @@ describe("Policy", () => {
       status: "published",
     };
 
-    const result = policy.can<Post>("read", "Post", post);
+    const result = policy.can("read", "Post", post);
     expect(result).toMatchObject({ allowed: true });
     expect(result.reason).toBeUndefined();
   });
 
   test("should return undefined reason when no rule matches", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "read",
       entity: "Post",
       reason: "Some reason",
@@ -370,9 +370,9 @@ describe("Policy", () => {
   });
 
   test("should handle reason with multiple conditions", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.forbid<Post>({
+    policy.forbid({
       action: "update",
       entity: "Post",
       reason: "Admins cannot update their own published posts",
@@ -389,7 +389,7 @@ describe("Policy", () => {
       status: "published",
     };
 
-    const result = policy.can<Post>("update", "Post", post);
+    const result = policy.can("update", "Post", post);
     expect(result).toMatchObject({
       allowed: false,
       reason: "Admins cannot update their own published posts",
