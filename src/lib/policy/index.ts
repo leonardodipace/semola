@@ -70,9 +70,14 @@ export class Policy<
 
   private matchesConditions(object: TEntity, conditions: Conditions<TEntity>) {
     for (const key in conditions) {
-      const matchesConditions = object[key] === conditions[key];
+      const conditionValue = conditions[key];
+      const objectValue = object[key];
 
-      if (!matchesConditions) {
+      if (typeof conditionValue === "function") {
+        if (!conditionValue(objectValue)) {
+          return false;
+        }
+      } else if (objectValue !== conditionValue) {
         return false;
       }
     }

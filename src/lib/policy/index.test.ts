@@ -413,4 +413,69 @@ describe("Policy", () => {
     expect(policy.can("update", post)).toMatchObject({ allowed: false });
     expect(policy.can("delete", post)).toMatchObject({ allowed: false });
   });
+
+  test("should support predicate functions in conditions", () => {
+    const policy = new Policy<Post>();
+
+    policy.allow({
+      action: "read",
+      conditions: {
+        title: (v) => v.startsWith("Public"),
+      },
+    });
+
+    const visiblePost: Post = {
+      id: 1,
+      title: "Public Announcement",
+      authorId: 1,
+      status: "published",
+    };
+
+    const hiddenPost: Post = {
+      id: 2,
+      title: "Private Notes",
+      authorId: 1,
+      status: "published",
+    };
+
+    expect(policy.can("read", visiblePost)).toMatchObject({ allowed: true });
+    expect(policy.can("read", hiddenPost)).toMatchObject({ allowed: false });
+  });
+
+  test("should support mixing direct equality and predicate conditions", () => {
+    const policy = new Policy<Post>();
+
+    policy.allow({
+      action: "read",
+      conditions: {
+        status: "published",
+        authorId: (v) => v > 0,
+      },
+    });
+
+    const validPost: Post = {
+      id: 1,
+      title: "Post",
+      authorId: 5,
+      status: "published",
+    };
+
+    const invalidAuthor: Post = {
+      id: 2,
+      title: "Post",
+      authorId: 0,
+      status: "published",
+    };
+
+    const draftPost: Post = {
+      id: 3,
+      title: "Post",
+      authorId: 5,
+      status: "draft",
+    };
+
+    expect(policy.can("read", validPost)).toMatchObject({ allowed: true });
+    expect(policy.can("read", invalidAuthor)).toMatchObject({ allowed: false });
+    expect(policy.can("read", draftPost)).toMatchObject({ allowed: false });
+  });
 });
