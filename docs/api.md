@@ -106,16 +106,20 @@ To optimize your OpenAPI specification and reduce redundancy, you can define reu
 import { z } from "zod";
 
 // Define a reusable schema with an ID
-const UserSchema = z.object({
-  id: z.string().uuid(),
-  name: z.string(),
-  email: z.string().email(),
-}).meta({ id: "User" });
+const UserSchema = z
+  .object({
+    id: z.string().uuid(),
+    name: z.string(),
+    email: z.email(),
+  })
+  .meta({ id: "User" });
 
-const ErrorResponse = z.object({
-  error: z.string(),
-  message: z.string(),
-}).meta({ id: "ErrorResponse" });
+const ErrorResponse = z
+  .object({
+    error: z.string(),
+    message: z.string(),
+  })
+  .meta({ id: "ErrorResponse" });
 
 // Use across multiple routes
 api.defineRoute({
@@ -123,14 +127,18 @@ api.defineRoute({
   method: "POST",
   request: { body: UserSchema },
   response: { 201: UserSchema, 400: ErrorResponse },
-  handler: async (c) => { /* ... */ },
+  handler: async (c) => {
+    /* ... */
+  },
 });
 
 api.defineRoute({
   path: "/users/:id",
   method: "GET",
   response: { 200: UserSchema, 404: ErrorResponse },
-  handler: async (c) => { /* ... */ },
+  handler: async (c) => {
+    /* ... */
+  },
 });
 
 // Result: UserSchema and ErrorResponse are defined once in components.schemas
@@ -149,7 +157,7 @@ const UserSchema = v.pipe(
     name: v.string(),
     email: v.pipe(v.string(), v.email()),
   }),
-  v.metadata({ id: "User" })
+  v.metadata({ id: "User" }),
 );
 ```
 
@@ -167,6 +175,7 @@ const UserSchema = type({
 ```
 
 **Benefits:**
+
 - **Smaller spec size**: Schema defined once, referenced multiple times
 - **Better maintainability**: Update schema in one place
 - **Improved readability**: Cleaner OpenAPI specifications
@@ -221,20 +230,26 @@ import { z } from "zod";
 import { Api } from "semola/api";
 
 // Define reusable schemas with IDs for OpenAPI optimization
-const CreateUserSchema = z.object({
-  name: z.string().min(1),
-  email: z.email(),
-}).meta({ id: "CreateUserRequest" });
+const CreateUserSchema = z
+  .object({
+    name: z.string().min(1),
+    email: z.email(),
+  })
+  .meta({ id: "CreateUserRequest" });
 
-const UserSchema = z.object({
-  id: z.uuid(),
-  name: z.string(),
-  email: z.email(),
-}).meta({ id: "User" });
+const UserSchema = z
+  .object({
+    id: z.uuid(),
+    name: z.string(),
+    email: z.email(),
+  })
+  .meta({ id: "User" });
 
-const ErrorSchema = z.object({
-  message: z.string(),
-}).meta({ id: "ErrorResponse" });
+const ErrorSchema = z
+  .object({
+    message: z.string(),
+  })
+  .meta({ id: "ErrorResponse" });
 
 // Create API
 const api = new Api({
@@ -320,7 +335,7 @@ api.defineRoute({
 });
 
 // Generate OpenAPI spec (optional)
-// Note: UserSchema, CreateUserSchema, and ErrorSchema are defined once 
+// Note: UserSchema, CreateUserSchema, and ErrorSchema are defined once
 // in components.schemas and referenced everywhere via $ref
 const spec = await api.getOpenApiSpec();
 console.log(JSON.stringify(spec, null, 2));
