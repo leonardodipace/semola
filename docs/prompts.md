@@ -71,11 +71,7 @@ const environment = await select({
 ```typescript
 const tools = await multiselect({
   message: "Enable tools",
-  choices: [
-    { value: "lint" },
-    { value: "test" },
-    { value: "build" },
-  ],
+  choices: [{ value: "lint" }, { value: "test" }, { value: "build" }],
   min: 1,
 });
 ```
