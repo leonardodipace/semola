@@ -442,6 +442,42 @@ describe("Policy", () => {
     expect(policy.can("read", hiddenPost)).toMatchObject({ allowed: false });
   });
 
+  test("should match nested object conditions by value", () => {
+    type Post = {
+      id: number;
+      title: string;
+      status: string;
+      author: { id: number; name: string };
+    };
+
+    const policy = new Policy<Post>();
+
+    policy.allow({
+      action: "update",
+      conditions: {
+        author: { id: 1, name: "john" },
+      },
+    });
+
+    expect(
+      policy.can("update", {
+        id: 2,
+        title: "The Deep",
+        status: "published",
+        author: { id: 1, name: "john" },
+      }),
+    ).toMatchObject({ allowed: true });
+
+    expect(
+      policy.can("update", {
+        id: 2,
+        title: "The Deep",
+        status: "published",
+        author: { id: 2, name: "jane" },
+      }),
+    ).toMatchObject({ allowed: false });
+  });
+
   test("should support mixing direct equality and predicate conditions", () => {
     const policy = new Policy<Post>();
 
