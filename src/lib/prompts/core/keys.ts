@@ -1,0 +1,157 @@
+import type { Key } from "./types.js";
+
+const ESC = "\u001B";
+const CSI = "\u001B[";
+const ESC_BACKSPACE = `${ESC}\u007F`;
+
+const KNOWN_SEQUENCES = [
+  { sequence: "\u001B[1;2D", key: { name: "shift_left" } as const },
+  { sequence: "\u001B[1;2C", key: { name: "shift_right" } as const },
+  { sequence: "\u001B[1;5D", key: { name: "ctrl_left" } as const },
+  { sequence: "\u001B[1;5C", key: { name: "ctrl_right" } as const },
+  { sequence: "\u001B[3~", key: { name: "delete" } as const },
+  { sequence: "\u001B[A", key: { name: "up" } as const },
+  { sequence: "\u001B[B", key: { name: "down" } as const },
+  { sequence: "\u001B[C", key: { name: "right" } as const },
+  { sequence: "\u001B[D", key: { name: "left" } as const },
+] as const;
+
+const isControlChar = (char: string) => {
+  return char <= "\u001F" || char === "\u007F";
+};
+
+const isCsiFinalByte = (char: string) => {
+  if (!char) {
+    return false;
+  }
+
+  if (char >= "A" && char <= "Z") {
+    return true;
+  }
+
+  if (char >= "a" && char <= "z") {
+    return true;
+  }
+
+  if (char === "~") {
+    return true;
+  }
+
+  return false;
+};
+
+const readCsiLength = (
+  remaining: string,
+): {
+  length: number;
+} | null => {
+  if (!remaining.startsWith(CSI)) {
+    return null;
+  }
+
+  let index = CSI.length;
+
+  while (index < remaining.length) {
+    const char = remaining[index] ?? "";
+
+    if (isCsiFinalByte(char)) {
+      return {
+        length: index + 1,
+      };
+    }
+
+    index += 1;
+  }
+
+  return {
+    length: remaining.length,
+  };
+};
+
+export const parseKeys = (chunk: string) => {
+  const keys: Key[] = [];
+
+  let cursor = 0;
+
+  while (cursor < chunk.length) {
+    const remaining = chunk.slice(cursor);
+
+    if (remaining.startsWith(ESC_BACKSPACE)) {
+      keys.push({ name: "ctrl_backspace" });
+      cursor += 2;
+      continue;
+    }
+
+    const knownSequence = KNOWN_SEQUENCES.find((entry) =>
+      remaining.startsWith(entry.sequence),
+    );
+
+    if (knownSequence) {
+      keys.push(knownSequence.key);
+      cursor += knownSequence.sequence.length;
+      continue;
+    }
+
+    const csiLength = readCsiLength(remaining);
+
+    if (csiLength) {
+      cursor += csiLength.length;
+      continue;
+    }
+
+    const char = chunk[cursor] ?? "";
+
+    if (char === "\r" || char === "\n") {
+      keys.push({ name: "enter" });
+      cursor += 1;
+      continue;
+    }
+
+    if (char === "\u0003") {
+      keys.push({ name: "ctrl_c" });
+      cursor += 1;
+      continue;
+    }
+
+    if (char === "\u001B") {
+      if (cursor === chunk.length - 1) {
+        keys.push({ name: "escape" });
+      }
+
+      cursor += 1;
+      continue;
+    }
+
+    if (char === "\u0017") {
+      keys.push({ name: "ctrl_backspace" });
+      cursor += 1;
+      continue;
+    }
+
+    if (char === "\u007F") {
+      keys.push({ name: "backspace" });
+      cursor += 1;
+      continue;
+    }
+
+    if (char === "\t") {
+      keys.push({ name: "tab" });
+      cursor += 1;
+      continue;
+    }
+
+    if (char === " ") {
+      keys.push({ name: "space" });
+      cursor += 1;
+      continue;
+    }
+
+    if (!isControlChar(char)) {
+      keys.push({ name: "character", value: char });
+    }
+
+    cursor += 1;
+  }
+
+  return keys;
+};

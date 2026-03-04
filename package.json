@@ -31,6 +31,10 @@
     "./pubsub": {
       "import": "./dist/lib/pubsub/index.js",
       "types": "./dist/lib/pubsub/index.d.ts"
+    },
+    "./prompts": {
+      "import": "./dist/lib/prompts/index.js",
+      "types": "./dist/lib/prompts/index.d.ts"
     }
   },
   "files": [
