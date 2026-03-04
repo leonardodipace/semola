@@ -2,7 +2,6 @@ import type {
   Action,
   AllowParams,
   CanResult,
-  Conditions,
   ForbidParams,
   Rule,
 } from "./types.js";
@@ -57,7 +56,7 @@ export class Policy<
         };
       }
 
-      if (object && this.matchesConditions(object, rule.conditions)) {
+      if (object && this.deepMatch(object, rule.conditions)) {
         return {
           allowed: !rule.inverted,
           reason: rule.reason,
@@ -66,30 +65,6 @@ export class Policy<
     }
 
     return { allowed: false };
-  }
-
-  private matchesConditions(object: TEntity, conditions: Conditions<TEntity>) {
-    for (const key in conditions) {
-      const conditionValue = conditions[key];
-      const objectValue = object[key];
-
-      if (typeof conditionValue === "function") {
-        if (!conditionValue(objectValue)) {
-          return false;
-        }
-      } else if (
-        conditionValue !== null &&
-        typeof conditionValue === "object"
-      ) {
-        if (!this.deepMatch(objectValue, conditionValue)) {
-          return false;
-        }
-      } else if (objectValue !== conditionValue) {
-        return false;
-      }
-    }
-
-    return true;
   }
 
   private deepMatch(objectValue: unknown, conditionValue: object): boolean {
