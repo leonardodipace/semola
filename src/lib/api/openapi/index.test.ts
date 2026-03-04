@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { type as arktype } from "arktype";
+import * as v from "valibot";
 import { z } from "zod";
 import { Middleware } from "../middleware/index.js";
 import { generateOpenApiSpec } from "./index.js";
@@ -575,5 +577,401 @@ describe("OpenAPI Generation", () => {
         "application/json"
       ]?.schema,
     ).toEqual({ $ref: "#/components/schemas/User" });
+  });
+
+  test("should reuse component schema for array chained from a schema with id", async () => {
+    const UserSchema = z
+      .object({
+        id: z.string(),
+        firstName: z.string(),
+        lastName: z.string(),
+        email: z.string().email(),
+      })
+      .meta({ id: "User" });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/users",
+          method: "GET",
+          response: {
+            200: UserSchema.array(),
+          },
+          handler: () => {},
+        },
+      ],
+    });
+
+    const responseSchema =
+      spec.paths["/users"]?.get?.responses["200"]?.content?.["application/json"]
+        ?.schema;
+
+    expect(spec.components?.schemas?.User).toBeDefined();
+    expect(responseSchema).toMatchObject({
+      type: "array",
+      items: {
+        $ref: "#/components/schemas/User",
+      },
+    });
+    expect(JSON.stringify(responseSchema)).not.toContain("#/$defs/");
+  });
+
+  test("should reuse component schema for optional chained from a schema with id", async () => {
+    const UserSchema = z
+      .object({
+        id: z.string(),
+        name: z.string(),
+      })
+      .meta({ id: "User" });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/users/optional",
+          method: "GET",
+          response: {
+            200: UserSchema.optional(),
+          },
+          handler: () => {},
+        },
+      ],
+    });
+
+    const responseSchema =
+      spec.paths["/users/optional"]?.get?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema;
+    const responseSchemaText = JSON.stringify(responseSchema);
+
+    expect(spec.components?.schemas?.User).toBeDefined();
+    expect(responseSchemaText).toContain("#/components/schemas/User");
+    expect(responseSchemaText).not.toContain("#/$defs/");
+    expect(responseSchemaText).not.toContain('"$defs"');
+  });
+
+  test("should reuse component schema for nullable chained from a schema with id", async () => {
+    const UserSchema = z
+      .object({
+        id: z.string(),
+        name: z.string(),
+      })
+      .meta({ id: "User" });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/users/nullable",
+          method: "GET",
+          response: {
+            200: UserSchema.nullable(),
+          },
+          handler: () => {},
+        },
+      ],
+    });
+
+    const responseSchema =
+      spec.paths["/users/nullable"]?.get?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema;
+    const responseSchemaText = JSON.stringify(responseSchema);
+
+    expect(spec.components?.schemas?.User).toBeDefined();
+    expect(responseSchemaText).toContain("#/components/schemas/User");
+    expect(responseSchemaText).not.toContain("#/$defs/");
+    expect(responseSchemaText).not.toContain('"$defs"');
+  });
+
+  test("should generate OpenAPI from Valibot array schema", async () => {
+    const UserSchema = v.object({
+      id: v.string(),
+      name: v.string(),
+    });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/valibot/users",
+          method: "GET",
+          response: { 200: v.array(UserSchema) },
+          handler: () => {},
+        },
+      ],
+    });
+
+    const responseSchema =
+      spec.paths["/valibot/users"]?.get?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema;
+
+    expect(responseSchema).toMatchObject({
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          name: { type: "string" },
+        },
+      },
+    });
+  });
+
+  test("should generate OpenAPI from Valibot nullable schema", async () => {
+    const UserSchema = v.object({
+      id: v.string(),
+      name: v.string(),
+    });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/valibot/users/nullable",
+          method: "GET",
+          response: { 200: v.nullable(UserSchema) },
+          handler: () => {},
+        },
+      ],
+    });
+
+    const responseSchema =
+      spec.paths["/valibot/users/nullable"]?.get?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema;
+
+    expect(responseSchema).toMatchObject({
+      anyOf: expect.arrayContaining([
+        expect.objectContaining({ type: "null" }),
+        expect.objectContaining({
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            name: { type: "string" },
+          },
+        }),
+      ]),
+    });
+  });
+
+  test("should generate OpenAPI from Valibot optional schema", async () => {
+    const UserSchema = v.object({
+      id: v.string(),
+      name: v.string(),
+    });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/valibot/users/optional",
+          method: "GET",
+          response: { 200: v.optional(UserSchema) },
+          handler: () => {},
+        },
+      ],
+    });
+
+    const responseSchema =
+      spec.paths["/valibot/users/optional"]?.get?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema;
+    const responseSchemaText = JSON.stringify(responseSchema);
+
+    expect(responseSchemaText).toContain('"type":"object"');
+    expect(responseSchemaText).toContain('"id":{"type":"string"}');
+    expect(responseSchemaText).toContain('"name":{"type":"string"}');
+  });
+
+  test("should support reusing the same Valibot schema across operations", async () => {
+    const UserSchema = v.object({
+      id: v.string(),
+      name: v.string(),
+    });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/valibot/users",
+          method: "POST",
+          request: { body: UserSchema },
+          response: { 201: UserSchema },
+          handler: () => {},
+        },
+        {
+          path: "/valibot/users",
+          method: "GET",
+          response: { 200: v.array(UserSchema) },
+          handler: () => {},
+        },
+        {
+          path: "/valibot/users/:id",
+          method: "GET",
+          response: { 200: v.nullable(UserSchema) },
+          handler: () => {},
+        },
+      ],
+    });
+
+    const postRequestSchema =
+      spec.paths["/valibot/users"]?.post?.requestBody?.content[
+        "application/json"
+      ]?.schema;
+    const postResponseSchema =
+      spec.paths["/valibot/users"]?.post?.responses["201"]?.content?.[
+        "application/json"
+      ]?.schema;
+    const listResponseSchema =
+      spec.paths["/valibot/users"]?.get?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema;
+    const nullableResponseSchema =
+      spec.paths["/valibot/users/{id}"]?.get?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema;
+
+    expect(postRequestSchema).toMatchObject({
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        name: { type: "string" },
+      },
+    });
+    expect(postResponseSchema).toMatchObject({
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        name: { type: "string" },
+      },
+    });
+    expect(listResponseSchema).toMatchObject({
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          name: { type: "string" },
+        },
+      },
+    });
+    expect(nullableResponseSchema).toMatchObject({
+      anyOf: expect.arrayContaining([
+        expect.objectContaining({ type: "null" }),
+        expect.objectContaining({
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            name: { type: "string" },
+          },
+        }),
+      ]),
+    });
+  });
+
+  test("should generate OpenAPI from ArkType nullable schema", async () => {
+    const UserSchema = arktype({
+      id: "string",
+      name: "string",
+    }).or("null");
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/arktype/users/nullable",
+          method: "GET",
+          response: { 200: UserSchema },
+          handler: () => {},
+        },
+      ],
+    });
+
+    const responseSchema =
+      spec.paths["/arktype/users/nullable"]?.get?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema;
+
+    expect(responseSchema).toMatchObject({
+      anyOf: expect.arrayContaining([
+        expect.objectContaining({ type: "null" }),
+        expect.objectContaining({
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            name: { type: "string" },
+          },
+        }),
+      ]),
+    });
+  });
+
+  test("should generate OpenAPI from ArkType array schema", async () => {
+    const UserSchema = arktype({
+      id: "string",
+      name: "string",
+    }).array();
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/arktype/users",
+          method: "GET",
+          response: { 200: UserSchema },
+          handler: () => {},
+        },
+      ],
+    });
+
+    const responseSchema =
+      spec.paths["/arktype/users"]?.get?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema;
+
+    expect(responseSchema).toMatchObject({
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          name: { type: "string" },
+        },
+      },
+    });
+  });
+
+  test("should throw for ArkType optional union unsupported by JSON schema", async () => {
+    const UserSchema = arktype({
+      id: "string",
+      name: "string",
+    }).or("undefined");
+
+    await expect(
+      generateOpenApiSpec({
+        title: "API",
+        version: "1.0.0",
+        routes: [
+          {
+            path: "/arktype/users/optional",
+            method: "GET",
+            response: { 200: UserSchema },
+            handler: () => {},
+          },
+        ],
+      }),
+    ).rejects.toThrow();
   });
 });
