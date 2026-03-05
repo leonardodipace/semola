@@ -29,6 +29,7 @@ const insertAt = (value: string, at: number, character: string) => {
 
 const INVERSE = "\u001B[7m";
 const RESET = "\u001B[0m";
+const WHITESPACE = /\s/;
 const CURSOR_BLOCK = `${INVERSE} ${RESET}`;
 const paint = (
   color: "cyan" | "green" | "red" | "yellow" | "dim",
@@ -139,11 +140,11 @@ const deleteSelectedRange = (state: TextState) => {
 const findWordStart = (value: string, cursor: number) => {
   let index = cursor;
 
-  while (index > 0 && /\s/.test(value[index - 1] ?? "")) {
+  while (index > 0 && WHITESPACE.test(value[index - 1] ?? "")) {
     index -= 1;
   }
 
-  while (index > 0 && !/\s/.test(value[index - 1] ?? "")) {
+  while (index > 0 && !WHITESPACE.test(value[index - 1] ?? "")) {
     index -= 1;
   }
 
@@ -153,11 +154,11 @@ const findWordStart = (value: string, cursor: number) => {
 const findWordEnd = (value: string, cursor: number) => {
   let index = cursor;
 
-  while (index < value.length && /\s/.test(value[index] ?? "")) {
+  while (index < value.length && WHITESPACE.test(value[index] ?? "")) {
     index += 1;
   }
 
-  while (index < value.length && !/\s/.test(value[index] ?? "")) {
+  while (index < value.length && !WHITESPACE.test(value[index] ?? "")) {
     index += 1;
   }
 
@@ -298,12 +299,11 @@ export const input = async (options: InputOptions, runtime?: PromptRuntime) => {
     options,
     initialState: createTextState(initialValue),
     render: ({ options: currentOptions, state, errorMessage }) => {
-      const text =
-        state.value.length > 0
-          ? renderTextSelection(state)
-          : currentOptions.placeholder
-            ? `${CURSOR_BLOCK}${paint("dim", currentOptions.placeholder)}`
-            : renderTextSelection(state);
+      let text = renderTextSelection(state);
+
+      if (state.value.length === 0 && currentOptions.placeholder) {
+        text = `${CURSOR_BLOCK}${paint("dim", currentOptions.placeholder)}`;
+      }
 
       return addErrorLine(
         renderQuestionLine(currentOptions.message, text),
@@ -646,13 +646,11 @@ export const multiselect = async <TValue extends string>(
       return addErrorLine(lines.join("\n"), errorMessage);
     },
     complete: ({ options: currentOptions, value }) => {
-      const labels = value.map((selectedValue) => {
-        const selectedChoice = currentOptions.choices.find(
-          (choice) => choice.value === selectedValue,
-        );
+      const labelMap = new Map(
+        currentOptions.choices.map((choice) => [choice.value, choice.label]),
+      );
 
-        return selectedChoice?.label ?? selectedValue;
-      });
+      const labels = value.map((v) => labelMap.get(v) ?? v);
 
       return renderSuccessLine(currentOptions.message, labels.join(", "));
     },

@@ -6,7 +6,15 @@ const HIDE_CURSOR = "\u001B[?25l";
 const SHOW_CURSOR = "\u001B[?25h";
 
 const countLines = (text: string) => {
-  return text.split("\n").length;
+  let count = 1;
+
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "\n") {
+      count += 1;
+    }
+  }
+
+  return count;
 };
 
 export class NodePromptRuntime implements PromptRuntime {
