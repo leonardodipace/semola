@@ -15,6 +15,11 @@ export type KeyName =
   | "escape"
   | "ctrl_c"
   | "ctrl_backspace"
+  | "ctrl_a"
+  | "home"
+  | "end"
+  | "shift_ctrl_left"
+  | "shift_ctrl_right"
   | "tab";
 
 export type Key = {

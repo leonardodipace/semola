@@ -9,7 +9,11 @@ const KNOWN_SEQUENCES = [
   { sequence: "\u001B[1;2C", key: { name: "shift_right" } as const },
   { sequence: "\u001B[1;5D", key: { name: "ctrl_left" } as const },
   { sequence: "\u001B[1;5C", key: { name: "ctrl_right" } as const },
+  { sequence: "\u001B[1;6D", key: { name: "shift_ctrl_left" } as const },
+  { sequence: "\u001B[1;6C", key: { name: "shift_ctrl_right" } as const },
   { sequence: "\u001B[3~", key: { name: "delete" } as const },
+  { sequence: "\u001B[H", key: { name: "home" } as const },
+  { sequence: "\u001B[F", key: { name: "end" } as const },
   { sequence: "\u001B[A", key: { name: "up" } as const },
   { sequence: "\u001B[B", key: { name: "down" } as const },
   { sequence: "\u001B[C", key: { name: "right" } as const },
@@ -103,6 +107,12 @@ export const parseKeys = (chunk: string) => {
 
     if (char === "\r" || char === "\n") {
       keys.push({ name: "enter" });
+      cursor += 1;
+      continue;
+    }
+
+    if (char === "\u0001") {
+      keys.push({ name: "ctrl_a" });
       cursor += 1;
       continue;
     }

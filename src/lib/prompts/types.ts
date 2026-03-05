@@ -35,6 +35,7 @@ export type InputOptions = BasePromptOptions<string> & {
   defaultValue?: string;
   placeholder?: string;
   required?: boolean;
+  requiredMessage?: string;
 };
 
 export type PasswordOptions = InputOptions & {
@@ -51,6 +52,10 @@ export type NumberOptions = BasePromptOptions<number> & {
   defaultValue?: number;
   min?: number;
   max?: number;
+  requiredMessage?: string;
+  invalidMessage?: string;
+  minMessage?: string;
+  maxMessage?: string;
 };
 
 export type SelectChoice<TValue extends string> = {

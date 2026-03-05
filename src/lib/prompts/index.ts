@@ -69,13 +69,14 @@ const submitTextValue = (
   options: {
     defaultValue?: string;
     required?: boolean;
+    requiredMessage?: string;
   },
 ) => {
   const value =
     state.value.length > 0 ? state.value : (options.defaultValue ?? "");
 
   if (options.required && value.trim().length === 0) {
-    return { errorMessage: "A value is required" };
+    return { errorMessage: options.requiredMessage ?? "A value is required" };
   }
 
   return { value };
@@ -196,6 +197,30 @@ const textOnKey = (
     value?: string;
   },
 ) => {
+  if (key.name === "ctrl_a") {
+    return {
+      ...state,
+      cursor: state.value.length,
+      selectionAnchor: 0,
+    };
+  }
+
+  if (key.name === "home") {
+    return moveCursor(state, 0, false);
+  }
+
+  if (key.name === "end") {
+    return moveCursor(state, state.value.length, false);
+  }
+
+  if (key.name === "shift_ctrl_left") {
+    return moveCursor(state, findWordStart(state.value, state.cursor), true);
+  }
+
+  if (key.name === "shift_ctrl_right") {
+    return moveCursor(state, findWordEnd(state.value, state.cursor), true);
+  }
+
   if (key.name === "left") {
     return moveCursor(state, Math.max(state.cursor - 1, 0), false);
   }
@@ -373,7 +398,11 @@ export const confirm = async (
       );
     },
     complete: ({ options: currentOptions, value }) => {
-      return renderSuccessLine(currentOptions.message, value ? "Yes" : "No");
+      const label = value
+        ? (currentOptions.activeLabel ?? "Yes")
+        : (currentOptions.inactiveLabel ?? "No");
+
+      return renderSuccessLine(currentOptions.message, label);
     },
     onKey: (state, key) => {
       if (key.name === "left") {
@@ -449,24 +478,32 @@ export const number = async (
       const raw = state.value.trim();
 
       if (raw.length === 0) {
-        return { errorMessage: "A number is required" };
+        return {
+          errorMessage: options.requiredMessage ?? "A number is required",
+        };
       }
 
       const parsed = Number(raw);
 
       if (!Number.isFinite(parsed)) {
-        return { errorMessage: "Please enter a valid number" };
+        return {
+          errorMessage: options.invalidMessage ?? "Please enter a valid number",
+        };
       }
 
       if (options.min !== undefined && parsed < options.min) {
         return {
-          errorMessage: `Number must be greater than or equal to ${options.min}`,
+          errorMessage:
+            options.minMessage ??
+            `Number must be greater than or equal to ${options.min}`,
         };
       }
 
       if (options.max !== undefined && parsed > options.max) {
         return {
-          errorMessage: `Number must be lower than or equal to ${options.max}`,
+          errorMessage:
+            options.maxMessage ??
+            `Number must be lower than or equal to ${options.max}`,
         };
       }
 
@@ -635,8 +672,9 @@ export const multiselect = async <TValue extends string>(
         const checked = state.selected.has(choice.value) ? "◉" : "◯";
         const disabled = choice.disabled ? paint("yellow", " [disabled]") : "";
         const label = choice.label ?? choice.value;
+        const hint = choice.hint ? paint("dim", ` (${choice.hint})`) : "";
 
-        lines.push(`${pointer(active)} ${checked} ${label}${disabled}`);
+        lines.push(`${pointer(active)} ${checked} ${label}${hint}${disabled}`);
       }
 
       lines.push(
@@ -730,7 +768,9 @@ export const multiselect = async <TValue extends string>(
       };
     },
     onSubmit: (state) => {
-      const values = Array.from(state.selected.values());
+      const values = options.choices
+        .filter((choice) => state.selected.has(choice.value))
+        .map((choice) => choice.value);
 
       if (options.min !== undefined && values.length < options.min) {
         return {
