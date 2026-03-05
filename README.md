@@ -26,7 +26,7 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 | **🔐 Policy**        | Policy-based authorization with type-safe guards       | `semola/policy` |
 | **🌍 i18n**          | Compile-time validated internationalization            | `semola/i18n`   |
 | **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`  |
-| **⏰ Cron**          | In-memory cron scheduler for periodic task execution  | `semola/cron`   |
+| **⏰ Cron**          | In-memory cron scheduler for periodic task execution   | `semola/cron`   |
 | **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors` |
 
 ---
@@ -170,6 +170,7 @@ policy.allow({
 });
 
 // Check if user can edit
+const user: User = { id: 1, role: "admin" };
 const result = policy.can("update", user);
 console.log(result.allowed); // true or false
 ```
