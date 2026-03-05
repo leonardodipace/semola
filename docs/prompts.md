@@ -108,5 +108,5 @@ If interactive mode is unavailable, prompt functions return:
     message: "Interactive prompts require a TTY with raw mode support",
   },
   null,
-]
+];
 ```
