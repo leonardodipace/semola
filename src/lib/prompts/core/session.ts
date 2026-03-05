@@ -1,6 +1,5 @@
-import { mightThrow } from "../../errors/index.js";
+import { err, mightThrow, ok } from "../../errors/index.js";
 import type { BasePromptOptions } from "../types.js";
-import { PromptError } from "../types.js";
 import type { Key, PromptRuntime } from "./types.js";
 
 type SubmitResult<TValue> =
@@ -40,7 +39,7 @@ const resolveOutput = async <TValue>(
   value: TValue,
 ) => {
   if (!options.transform) {
-    return value;
+    return ok(value);
   }
 
   const [transformError, transformed] = await mightThrow(
@@ -48,13 +47,13 @@ const resolveOutput = async <TValue>(
   );
 
   if (transformError || transformed === null || transformed === undefined) {
-    throw new PromptError(
+    return err(
       "PromptIOError",
       "Prompt transform callback failed unexpectedly",
     );
   }
 
-  return transformed;
+  return ok(transformed);
 };
 
 const runValidation = async <TValue>(
@@ -62,7 +61,7 @@ const runValidation = async <TValue>(
   value: TValue,
 ) => {
   if (!options.validate) {
-    return null;
+    return ok(null);
   }
 
   const [validationError, validationMessage] = await mightThrow(
@@ -70,17 +69,14 @@ const runValidation = async <TValue>(
   );
 
   if (validationError) {
-    throw new PromptError(
-      "PromptIOError",
-      "Prompt validate callback failed unexpectedly",
-    );
+    return err("PromptIOError", "Prompt validate callback failed unexpectedly");
   }
 
   if (typeof validationMessage === "string" && validationMessage.length > 0) {
-    return validationMessage;
+    return ok(validationMessage);
   }
 
-  return null;
+  return ok(null);
 };
 
 const isCancelKey = (key: Key) => {
@@ -97,13 +93,17 @@ export const runPromptSession = async <
 >(
   params: SessionOptions<TState, TValue, TOptions>,
 ) => {
-  params.runtime.init();
+  const [initError] = params.runtime.init();
+
+  if (initError) {
+    return err(initError.type, initError.message);
+  }
 
   let state = params.initialState;
   let errorMessage: string | null = null;
 
   while (true) {
-    params.runtime.render(
+    const [renderError] = params.runtime.render(
       params.render({
         options: params.options,
         state,
@@ -111,17 +111,41 @@ export const runPromptSession = async <
       }),
     );
 
-    const key = await params.runtime.readKey();
+    if (renderError) {
+      return err(renderError.type, renderError.message);
+    }
+
+    const [readError, key] = await params.runtime.readKey();
+
+    if (readError || !key) {
+      return err(
+        readError?.type ?? "PromptIOError",
+        readError?.message ?? "Unable to read prompt input",
+      );
+    }
 
     if (isCancelKey(key)) {
-      params.runtime.close();
-      params.runtime.done(`✖ ${CANCEL_MESSAGE}`);
+      const [closeError] = params.runtime.close();
 
-      if (params.runtime.interrupt) {
-        params.runtime.interrupt(CANCEL_MESSAGE);
+      if (closeError) {
+        return err(closeError.type, closeError.message);
       }
 
-      throw new PromptError("PromptCancelledError", CANCEL_MESSAGE);
+      const [doneError] = params.runtime.done(`✖ ${CANCEL_MESSAGE}`);
+
+      if (doneError) {
+        return err(doneError.type, doneError.message);
+      }
+
+      if (params.runtime.interrupt) {
+        const [interruptError] = params.runtime.interrupt(CANCEL_MESSAGE);
+
+        if (interruptError) {
+          return err(interruptError.type, interruptError.message);
+        }
+      }
+
+      return err("PromptCancelledError", CANCEL_MESSAGE);
     }
 
     if (key.name !== "enter") {
@@ -139,22 +163,16 @@ export const runPromptSession = async <
 
     const rawValue = submitResult.value;
 
-    const [validationRunError, validationErrorMessage] = await mightThrow(
-      runValidation(params.options, rawValue),
+    const [validationRunError, validationErrorMessage] = await runValidation(
+      params.options,
+      rawValue,
     );
 
     if (validationRunError) {
       params.runtime.close();
       params.runtime.done(`✖ ${params.options.message}`);
 
-      if (validationRunError instanceof PromptError) {
-        throw validationRunError;
-      }
-
-      throw new PromptError(
-        "PromptIOError",
-        "Prompt validate callback failed unexpectedly",
-      );
+      return err(validationRunError.type, validationRunError.message);
     }
 
     if (validationErrorMessage) {
@@ -162,35 +180,30 @@ export const runPromptSession = async <
       continue;
     }
 
-    const [transformError, finalValue] = await mightThrow(
-      resolveOutput(params.options, rawValue),
+    const [transformError, finalValue] = await resolveOutput(
+      params.options,
+      rawValue,
     );
 
     if (transformError) {
       params.runtime.close();
       params.runtime.done(`✖ ${params.options.message}`);
-
-      if (transformError instanceof PromptError) {
-        throw transformError;
-      }
-
-      throw new PromptError(
-        "PromptIOError",
-        "Unable to transform prompt value",
-      );
+      return err(transformError.type, transformError.message);
     }
 
     if (finalValue === null) {
       params.runtime.close();
       params.runtime.done(`✖ ${params.options.message}`);
-      throw new PromptError(
-        "PromptIOError",
-        "Unable to transform prompt value",
-      );
+      return err("PromptIOError", "Unable to transform prompt value");
     }
 
-    params.runtime.close();
-    params.runtime.done(
+    const [closeError] = params.runtime.close();
+
+    if (closeError) {
+      return err(closeError.type, closeError.message);
+    }
+
+    const [doneError] = params.runtime.done(
       params.complete({
         options: params.options,
         state,
@@ -198,6 +211,10 @@ export const runPromptSession = async <
       }),
     );
 
-    return finalValue;
+    if (doneError) {
+      return err(doneError.type, doneError.message);
+    }
+
+    return ok(finalValue);
   }
 };

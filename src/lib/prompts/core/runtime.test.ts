@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { PromptError } from "../types.js";
+import { err } from "../../errors/index.js";
 import { createNodePromptRuntime, NodePromptRuntime } from "./runtime.js";
 
 class MockStdin extends EventEmitter {
@@ -54,7 +54,7 @@ describe("NodePromptRuntime", () => {
     expect(runtime.isInteractive()).toBe(false);
   });
 
-  test("init should throw environment error when not interactive", () => {
+  test("init should return environment error when not interactive", () => {
     const stdin = new MockStdin();
     const stdout = new MockStdout();
     stdout.isTTY = false;
@@ -64,11 +64,14 @@ describe("NodePromptRuntime", () => {
       stdout as unknown as NodeJS.WriteStream,
     );
 
-    expect(() => runtime.init()).toThrow(
-      new PromptError(
+    const [error, value] = runtime.init();
+
+    expect(value).toBeNull();
+    expect(error).toEqual(
+      err(
         "PromptEnvironmentError",
         "Interactive prompts require a TTY with raw mode support",
-      ),
+      )[0],
     );
   });
 
@@ -81,7 +84,9 @@ describe("NodePromptRuntime", () => {
       stdout as unknown as NodeJS.WriteStream,
     );
 
-    runtime.init();
+    const [initError] = runtime.init();
+
+    expect(initError).toBeNull();
 
     expect(stdin.rawModes).toEqual([true]);
     expect(stdin.encoding).toBe("utf8");
@@ -89,7 +94,9 @@ describe("NodePromptRuntime", () => {
     expect(stdin.listenerCount("data")).toBe(1);
     expect(stdout.writes[0]).toBe("\u001B[?25l");
 
-    runtime.close();
+    const [closeError] = runtime.close();
+
+    expect(closeError).toBeNull();
 
     expect(stdin.rawModes).toEqual([true, false]);
     expect(stdin.listenerCount("data")).toBe(0);
@@ -125,9 +132,11 @@ describe("NodePromptRuntime", () => {
 
     stdin.emit("data", "ab");
 
-    const keyA = await runtime.readKey();
-    const keyB = await runtime.readKey();
+    const [keyAError, keyA] = await runtime.readKey();
+    const [keyBError, keyB] = await runtime.readKey();
 
+    expect(keyAError).toBeNull();
+    expect(keyBError).toBeNull();
     expect(keyA).toEqual({ name: "character", value: "a" });
     expect(keyB).toEqual({ name: "character", value: "b" });
   });
@@ -146,7 +155,10 @@ describe("NodePromptRuntime", () => {
     const pending = runtime.readKey();
     stdin.emit("data", "\u001B[A");
 
-    await expect(pending).resolves.toEqual({ name: "up" });
+    const [readError, key] = await pending;
+
+    expect(readError).toBeNull();
+    expect(key).toEqual({ name: "up" });
   });
 
   test("render should clear and move cursor up for multi-line frames", () => {

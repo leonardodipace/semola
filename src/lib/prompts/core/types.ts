@@ -1,3 +1,9 @@
+import type { err, ok } from "../../errors/index.js";
+
+type PromptResultLike<T> =
+  | ReturnType<typeof err<string>>
+  | ReturnType<typeof ok<T>>;
+
 export type KeyName =
   | "character"
   | "enter"
@@ -29,10 +35,10 @@ export type Key = {
 
 export type PromptRuntime = {
   isInteractive: () => boolean;
-  init: () => void;
-  readKey: () => Promise<Key>;
-  render: (frame: string) => void;
-  done: (frame: string) => void;
-  close: () => void;
-  interrupt?: (message: string) => never | undefined;
+  init: () => PromptResultLike<void>;
+  readKey: () => Promise<PromptResultLike<Key>>;
+  render: (frame: string) => PromptResultLike<void>;
+  done: (frame: string) => PromptResultLike<void>;
+  close: () => PromptResultLike<void>;
+  interrupt?: (message: string) => PromptResultLike<undefined>;
 };

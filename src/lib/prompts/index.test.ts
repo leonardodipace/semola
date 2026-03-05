@@ -1,14 +1,22 @@
 import { describe, expect, test } from "bun:test";
+import { err, ok } from "../errors/index.js";
 import type { Key, PromptRuntime } from "./core/types.js";
 import {
-  confirm,
-  input,
-  multiselect,
-  number,
-  password,
-  select,
+  confirm as confirmPrompt,
+  input as inputPrompt,
+  multiselect as multiselectPrompt,
+  number as numberPrompt,
+  password as passwordPrompt,
+  select as selectPrompt,
 } from "./index.js";
-import { PromptError } from "./types.js";
+import type {
+  ConfirmOptions,
+  InputOptions,
+  MultiselectOptions,
+  NumberOptions,
+  PasswordOptions,
+  SelectOptions,
+} from "./types.js";
 
 const stripAnsi = (value: string) => {
   return Bun.stripANSI(value);
@@ -32,35 +40,84 @@ class MockPromptRuntime implements PromptRuntime {
 
   public init() {
     if (!this.interactive) {
-      throw new PromptError(
+      return err(
         "PromptEnvironmentError",
         "Interactive prompts require a TTY with raw mode support",
       );
     }
+
+    return ok(undefined);
   }
 
   public readKey() {
     const key = this.keys.shift();
 
     if (!key) {
-      throw new Error("No more mock keys available");
+      return Promise.resolve(
+        err("PromptIOError", "No more mock keys available"),
+      );
     }
 
-    return Promise.resolve(key);
+    return Promise.resolve(ok(key));
   }
 
   public render(frame: string) {
     this.frames.push(frame);
+    return ok(undefined);
   }
 
   public done(frame: string) {
     this.doneFrames.push(frame);
+    return ok(undefined);
   }
 
   public close() {
     this.closed = true;
+    return ok(undefined);
   }
 }
+
+const unwrap = <T>(
+  result: ReturnType<typeof err<string>> | ReturnType<typeof ok<T>>,
+) => {
+  const [resultError, data] = result;
+
+  if (resultError || data === null) {
+    throw new Error(resultError?.message ?? "Expected prompt success result");
+  }
+
+  return data;
+};
+
+const input = async (options: InputOptions, runtime?: PromptRuntime) => {
+  return unwrap(await inputPrompt(options, runtime));
+};
+
+const password = async (options: PasswordOptions, runtime?: PromptRuntime) => {
+  return unwrap(await passwordPrompt(options, runtime));
+};
+
+const confirm = async (options: ConfirmOptions, runtime?: PromptRuntime) => {
+  return unwrap(await confirmPrompt(options, runtime));
+};
+
+const number = async (options: NumberOptions, runtime?: PromptRuntime) => {
+  return unwrap(await numberPrompt(options, runtime));
+};
+
+const select = async <TValue extends string>(
+  options: SelectOptions<TValue>,
+  runtime?: PromptRuntime,
+) => {
+  return unwrap(await selectPrompt(options, runtime));
+};
+
+const multiselect = async <TValue extends string>(
+  options: MultiselectOptions<TValue>,
+  runtime?: PromptRuntime,
+) => {
+  return unwrap(await multiselectPrompt(options, runtime));
+};
 
 describe("prompts", () => {
   test("input should collect characters and submit", async () => {
@@ -195,19 +252,31 @@ describe("prompts", () => {
     expect(value).toEqual(["bun", "ts"]);
   });
 
-  test("should throw cancelled error on escape", async () => {
+  test("should return cancelled error on escape", async () => {
     const runtime = new MockPromptRuntime([{ name: "escape" }]);
 
-    await expect(input({ message: "Name" }, runtime)).rejects.toMatchObject({
+    const [resultError, value] = await inputPrompt(
+      { message: "Name" },
+      runtime,
+    );
+
+    expect(value).toBeNull();
+    expect(resultError).toMatchObject({
       type: "PromptCancelledError",
       message: "Interrupted, bye!",
     });
   });
 
-  test("should throw environment error when runtime is not interactive", async () => {
+  test("should return environment error when runtime is not interactive", async () => {
     const runtime = new MockPromptRuntime([], false);
 
-    await expect(input({ message: "Name" }, runtime)).rejects.toMatchObject({
+    const [resultError, value] = await inputPrompt(
+      { message: "Name" },
+      runtime,
+    );
+
+    expect(value).toBeNull();
+    expect(resultError).toMatchObject({
       type: "PromptEnvironmentError",
       message: "Interactive prompts require a TTY with raw mode support",
     });

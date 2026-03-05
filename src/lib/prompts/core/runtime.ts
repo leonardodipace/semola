@@ -1,4 +1,4 @@
-import { PromptError } from "../types.js";
+import { err, mightThrowSync, ok } from "../../errors/index.js";
 import { parseKeys } from "./keys.js";
 import type { Key, PromptRuntime } from "./types.js";
 
@@ -21,7 +21,9 @@ export class NodePromptRuntime implements PromptRuntime {
   private readonly stdin: NodeJS.ReadStream;
   private readonly stdout: NodeJS.WriteStream;
   private readonly queue: Key[] = [];
-  private readonly waiters: Array<(key: Key) => void> = [];
+  private readonly waiters: Array<
+    (result: ReturnType<typeof ok<Key>>) => void
+  > = [];
   private initialized = false;
   private previousLines = 0;
 
@@ -43,83 +45,125 @@ export class NodePromptRuntime implements PromptRuntime {
 
   public init() {
     if (!this.isInteractive()) {
-      throw new PromptError(
+      return err(
         "PromptEnvironmentError",
         "Interactive prompts require a TTY with raw mode support",
       );
     }
 
     if (this.initialized) {
-      return;
+      return ok(undefined);
+    }
+
+    const [initError] = mightThrowSync(() => {
+      this.stdin.setRawMode(true);
+      this.stdin.setEncoding("utf8");
+      this.stdin.resume();
+      this.stdin.on("data", this.onData);
+      this.stdout.write(HIDE_CURSOR);
+    });
+
+    if (initError) {
+      return err("PromptIOError", "Unable to initialize prompt runtime");
     }
 
     this.initialized = true;
-
-    this.stdin.setRawMode(true);
-    this.stdin.setEncoding("utf8");
-    this.stdin.resume();
-    this.stdin.on("data", this.onData);
-    this.stdout.write(HIDE_CURSOR);
+    return ok(undefined);
   }
 
   public readKey() {
     const queued = this.queue.shift();
 
     if (queued) {
-      return Promise.resolve(queued);
+      return Promise.resolve(ok(queued));
     }
 
-    return new Promise<Key>((resolve) => {
+    return new Promise<ReturnType<typeof ok<Key>>>((resolve) => {
       this.waiters.push(resolve);
     });
   }
 
   public render(frame: string) {
-    if (this.previousLines > 1) {
-      this.stdout.write(`\u001B[${this.previousLines - 1}A`);
+    const [renderError] = mightThrowSync(() => {
+      if (this.previousLines > 1) {
+        this.stdout.write(`\u001B[${this.previousLines - 1}A`);
+      }
+
+      this.stdout.write("\r\u001B[J");
+      this.stdout.write(frame);
+
+      this.previousLines = countLines(frame);
+    });
+
+    if (renderError) {
+      return err("PromptIOError", "Unable to render prompt frame");
     }
 
-    this.stdout.write("\r\u001B[J");
-    this.stdout.write(frame);
-
-    this.previousLines = countLines(frame);
+    return ok(undefined);
   }
 
   public done(frame: string) {
-    if (this.previousLines > 1) {
-      this.stdout.write(`\u001B[${this.previousLines - 1}A`);
+    const [doneError] = mightThrowSync(() => {
+      if (this.previousLines > 1) {
+        this.stdout.write(`\u001B[${this.previousLines - 1}A`);
+      }
+
+      this.stdout.write("\r\u001B[J");
+      this.stdout.write(`${frame}\n`);
+      this.previousLines = 0;
+    });
+
+    if (doneError) {
+      return err("PromptIOError", "Unable to finalize prompt frame");
     }
 
-    this.stdout.write("\r\u001B[J");
-    this.stdout.write(`${frame}\n`);
-    this.previousLines = 0;
+    return ok(undefined);
   }
 
   public close() {
     if (!this.initialized) {
-      return;
+      return ok(undefined);
     }
 
     this.initialized = false;
-    this.stdin.off("data", this.onData);
-    this.stdin.setRawMode(false);
-    this.stdout.write(SHOW_CURSOR);
+
+    const [closeError] = mightThrowSync(() => {
+      this.stdin.off("data", this.onData);
+      this.stdin.setRawMode(false);
+      this.stdout.write(SHOW_CURSOR);
+    });
+
+    if (closeError) {
+      return err("PromptIOError", "Unable to close prompt runtime");
+    }
+
+    return ok(undefined);
   }
 
-  public interrupt(_message: string): undefined {
-    this.close();
+  public interrupt(_message: string) {
+    const [closeError] = this.close();
+
+    if (closeError) {
+      return err(closeError.type, closeError.message);
+    }
+
     process.exit(0);
+    return ok(undefined);
   }
 
   private onData = (chunk: Buffer | string) => {
     const value = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-    const keys = parseKeys(value);
+    const [parseError, keys] = mightThrowSync(() => parseKeys(value));
+
+    if (parseError || !keys) {
+      return;
+    }
 
     for (const key of keys) {
       const waiter = this.waiters.shift();
 
       if (waiter) {
-        waiter(key);
+        waiter(ok(key));
       } else {
         this.queue.push(key);
       }

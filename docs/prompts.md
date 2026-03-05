@@ -17,7 +17,10 @@ import {
 
 ## API
 
-All prompt functions return the selected value directly.
+All prompt functions return result tuples using `ok/err` pattern:
+
+- success: `[null, value]`
+- failure: `[{ type, message }, null]`
 
 - `input(options)`
 - `password(options)`
@@ -37,26 +40,34 @@ All prompt functions return the selected value directly.
 ### Input
 
 ```typescript
-const name = await input({
+const [nameError, name] = await input({
   message: "Project name",
   required: true,
   validate: (value) => (value.length < 2 ? "Too short" : null),
 });
+
+if (nameError) {
+  console.error(nameError.type, nameError.message);
+}
 ```
 
 ### Confirm
 
 ```typescript
-const shouldDeploy = await confirm({
+const [confirmError, shouldDeploy] = await confirm({
   message: "Deploy now?",
   defaultValue: true,
 });
+
+if (confirmError) {
+  console.error(confirmError.type, confirmError.message);
+}
 ```
 
 ### Select
 
 ```typescript
-const environment = await select({
+const [environmentError, environment] = await select({
   message: "Choose environment",
   choices: [
     { value: "dev", label: "Development" },
@@ -64,30 +75,38 @@ const environment = await select({
     { value: "prod", label: "Production" },
   ],
 });
+
+if (environmentError) {
+  console.error(environmentError.type, environmentError.message);
+}
 ```
 
 ### Multiselect
 
 ```typescript
-const tools = await multiselect({
+const [toolsError, tools] = await multiselect({
   message: "Enable tools",
   choices: [{ value: "lint" }, { value: "test" }, { value: "build" }],
   min: 1,
 });
+
+if (toolsError) {
+  console.error(toolsError.type, toolsError.message);
+}
 ```
 
 ## Interactive-only behavior
 
 Prompts require a TTY with raw mode support.
 
-If interactive mode is unavailable, prompt functions throw a `PromptError`:
+If interactive mode is unavailable, prompt functions return:
 
 ```typescript
-try {
-  await input({ message: "Project name" });
-} catch (error) {
-  if (error instanceof PromptError) {
-    console.error(error.type, error.message);
-  }
-}
+[
+  {
+    type: "PromptEnvironmentError",
+    message: "Interactive prompts require a TTY with raw mode support",
+  },
+  null,
+]
 ```
