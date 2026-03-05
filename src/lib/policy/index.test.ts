@@ -8,6 +8,18 @@ type Post = {
   status: string;
 };
 
+type User = {
+  id: number;
+  name: string;
+  roles: string[];
+  age: number;
+  posts: Post[];
+  meta: {
+    createdAt: Date;
+    updatedAt: Date;
+  };
+};
+
 describe("Policy", () => {
   test("should allow access when conditions match", () => {
     const policy = new Policy<Post>();
@@ -476,6 +488,227 @@ describe("Policy", () => {
         author: { id: 2, name: "jane" },
       }),
     ).toMatchObject({ allowed: false });
+  });
+
+  describe("array conditions", () => {
+    test("should allow when array condition matches exactly", () => {
+      const policy = new Policy<User>();
+
+      policy.allow({ action: "read", conditions: { roles: ["admin"] } });
+
+      const user: User = {
+        id: 1,
+        name: "Alice",
+        roles: ["admin"],
+        age: 30,
+        posts: [],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      expect(policy.can("read", user)).toMatchObject({ allowed: true });
+    });
+
+    test("should deny when array elements do not match", () => {
+      const policy = new Policy<User>();
+
+      policy.allow({ action: "read", conditions: { roles: ["admin"] } });
+
+      const user: User = {
+        id: 1,
+        name: "Bob",
+        roles: ["guest"],
+        age: 25,
+        posts: [],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      expect(policy.can("read", user)).toMatchObject({ allowed: false });
+    });
+
+    test("should deny when actual array is a superset of condition array", () => {
+      const policy = new Policy<User>();
+
+      policy.allow({ action: "read", conditions: { roles: ["admin"] } });
+
+      const user: User = {
+        id: 1,
+        name: "Alice",
+        roles: ["admin", "editor"],
+        age: 30,
+        posts: [],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      expect(policy.can("read", user)).toMatchObject({ allowed: false });
+    });
+
+    test("should deny when condition is empty array but actual is not", () => {
+      const policy = new Policy<User>();
+
+      policy.allow({ action: "read", conditions: { roles: [] } });
+
+      const user: User = {
+        id: 1,
+        name: "Alice",
+        roles: ["admin"],
+        age: 30,
+        posts: [],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      expect(policy.can("read", user)).toMatchObject({ allowed: false });
+    });
+
+    test("should support predicate on array field", () => {
+      const policy = new Policy<User>();
+
+      policy.allow({
+        action: "read",
+        conditions: { roles: (roles) => roles.includes("admin") },
+      });
+
+      const admin: User = {
+        id: 1,
+        name: "Alice",
+        roles: ["admin", "editor"],
+        age: 30,
+        posts: [],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      const guest: User = {
+        id: 2,
+        name: "Bob",
+        roles: ["guest"],
+        age: 25,
+        posts: [],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      expect(policy.can("read", admin)).toMatchObject({ allowed: true });
+      expect(policy.can("read", guest)).toMatchObject({ allowed: false });
+    });
+
+    test("should match array of objects exactly", () => {
+      const policy = new Policy<User>();
+
+      const post: Post = {
+        id: 1,
+        title: "Hello",
+        authorId: 1,
+        status: "published",
+      };
+
+      policy.allow({ action: "delete", conditions: { posts: [post] } });
+
+      const userWithPost: User = {
+        id: 1,
+        name: "Alice",
+        roles: [],
+        age: 30,
+        posts: [post],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      const userWithDifferentPost: User = {
+        id: 2,
+        name: "Bob",
+        roles: [],
+        age: 25,
+        posts: [{ ...post, id: 2 }],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      expect(policy.can("delete", userWithPost)).toMatchObject({
+        allowed: true,
+      });
+      expect(policy.can("delete", userWithDifferentPost)).toMatchObject({
+        allowed: false,
+      });
+    });
+  });
+
+  describe("Date conditions", () => {
+    test("should allow when Date condition matches by reference", () => {
+      const policy = new Policy<User>();
+
+      const date = new Date("2024-01-01");
+
+      policy.allow({
+        action: "read",
+        conditions: { meta: { createdAt: date, updatedAt: date } },
+      });
+
+      const user: User = {
+        id: 1,
+        name: "Alice",
+        roles: [],
+        age: 30,
+        posts: [],
+        meta: { createdAt: date, updatedAt: date },
+      };
+
+      expect(policy.can("read", user)).toMatchObject({ allowed: true });
+    });
+
+    test("should deny when Date values differ", () => {
+      const policy = new Policy<User>();
+
+      const conditionDate = new Date("2024-01-01");
+      const actualDate = new Date("2025-01-01");
+
+      policy.allow({
+        action: "read",
+        conditions: {
+          meta: { createdAt: conditionDate, updatedAt: conditionDate },
+        },
+      });
+
+      const user: User = {
+        id: 1,
+        name: "Alice",
+        roles: [],
+        age: 30,
+        posts: [],
+        meta: { createdAt: actualDate, updatedAt: actualDate },
+      };
+
+      expect(policy.can("read", user)).toMatchObject({ allowed: false });
+    });
+
+    test("should support predicate on Date field inside nested object", () => {
+      const policy = new Policy<User>();
+
+      const cutoff = new Date("2024-06-01");
+
+      policy.allow({
+        action: "read",
+        conditions: {
+          meta: (m) => m.createdAt > cutoff,
+        },
+      });
+
+      const recentUser: User = {
+        id: 1,
+        name: "Alice",
+        roles: [],
+        age: 30,
+        posts: [],
+        meta: { createdAt: new Date("2024-12-01"), updatedAt: new Date() },
+      };
+
+      const oldUser: User = {
+        id: 2,
+        name: "Bob",
+        roles: [],
+        age: 25,
+        posts: [],
+        meta: { createdAt: new Date("2023-01-01"), updatedAt: new Date() },
+      };
+
+      expect(policy.can("read", recentUser)).toMatchObject({ allowed: true });
+      expect(policy.can("read", oldUser)).toMatchObject({ allowed: false });
+    });
   });
 
   test("should support mixing direct equality and predicate conditions", () => {
