@@ -308,4 +308,354 @@ describe("prompts", () => {
     const value = await input({ message: "Name" }, runtime);
     expect(value).toBe("hello Xworld!");
   });
+
+  test("input should use default value when submitted empty", async () => {
+    const runtime = new MockPromptRuntime([{ name: "enter" }]);
+
+    const value = await input(
+      { message: "Project", defaultValue: "semola" },
+      runtime,
+    );
+
+    expect(value).toBe("semola");
+  });
+
+  test("input should block required empty values", async () => {
+    const runtime = new MockPromptRuntime([
+      { name: "space" },
+      { name: "enter" },
+      { name: "character", value: "o" },
+      { name: "character", value: "k" },
+      { name: "enter" },
+    ]);
+
+    const value = await input(
+      {
+        message: "Tag",
+        required: true,
+      },
+      runtime,
+    );
+
+    expect(value).toBe(" ok");
+    const hasRequiredError = runtime.frames.some((frame) =>
+      frame.includes("A value is required"),
+    );
+    expect(hasRequiredError).toBe(true);
+  });
+
+  test("input should render placeholder when empty", async () => {
+    const runtime = new MockPromptRuntime([{ name: "enter" }]);
+
+    await input(
+      {
+        message: "Name",
+        placeholder: "Type your name",
+      },
+      runtime,
+    );
+
+    const firstFrame = stripAnsi(runtime.frames[0] ?? "");
+    expect(firstFrame).toContain("Type your name");
+  });
+
+  test("input should support home and end keys", async () => {
+    const runtime = new MockPromptRuntime([
+      { name: "character", value: "a" },
+      { name: "character", value: "b" },
+      { name: "character", value: "c" },
+      { name: "home" },
+      { name: "character", value: "X" },
+      { name: "end" },
+      { name: "character", value: "Y" },
+      { name: "enter" },
+    ]);
+
+    const value = await input({ message: "Name" }, runtime);
+    expect(value).toBe("XabcY");
+  });
+
+  test("input should select all with ctrl+a and replace", async () => {
+    const runtime = new MockPromptRuntime([
+      { name: "character", value: "h" },
+      { name: "character", value: "e" },
+      { name: "character", value: "l" },
+      { name: "character", value: "l" },
+      { name: "character", value: "o" },
+      { name: "ctrl_a" },
+      { name: "character", value: "A" },
+      { name: "enter" },
+    ]);
+
+    const value = await input({ message: "Name" }, runtime);
+    expect(value).toBe("A");
+  });
+
+  test("input should remove next character on delete", async () => {
+    const runtime = new MockPromptRuntime([
+      { name: "character", value: "a" },
+      { name: "character", value: "b" },
+      { name: "character", value: "c" },
+      { name: "character", value: "d" },
+      { name: "left" },
+      { name: "left" },
+      { name: "delete" },
+      { name: "enter" },
+    ]);
+
+    const value = await input({ message: "Name" }, runtime);
+    expect(value).toBe("abd");
+  });
+
+  test("input should replace shift+ctrl word selection", async () => {
+    const runtime = new MockPromptRuntime([
+      { name: "character", value: "h" },
+      { name: "character", value: "e" },
+      { name: "character", value: "l" },
+      { name: "character", value: "l" },
+      { name: "character", value: "o" },
+      { name: "space" },
+      { name: "character", value: "w" },
+      { name: "character", value: "o" },
+      { name: "character", value: "r" },
+      { name: "character", value: "l" },
+      { name: "character", value: "d" },
+      { name: "space" },
+      { name: "character", value: "a" },
+      { name: "character", value: "g" },
+      { name: "character", value: "a" },
+      { name: "character", value: "i" },
+      { name: "character", value: "n" },
+      { name: "shift_ctrl_left" },
+      { name: "character", value: "X" },
+      { name: "enter" },
+    ]);
+
+    const value = await input({ message: "Name" }, runtime);
+    expect(value).toBe("hello world X");
+  });
+
+  test("password should use custom mask", async () => {
+    const runtime = new MockPromptRuntime([
+      { name: "character", value: "a" },
+      { name: "character", value: "b" },
+      { name: "enter" },
+    ]);
+
+    const value = await password({ message: "Password", mask: "•" }, runtime);
+    expect(value).toBe("ab");
+    expect(runtime.frames.at(-1)).toContain("••");
+  });
+
+  test("confirm should respond to arrow keys and space", async () => {
+    const runtime = new MockPromptRuntime([
+      { name: "left" },
+      { name: "right" },
+      { name: "space" },
+      { name: "enter" },
+    ]);
+
+    const value = await confirm(
+      { message: "Continue?", defaultValue: false },
+      runtime,
+    );
+
+    expect(value).toBe(true);
+  });
+
+  test("confirm should render custom success labels", async () => {
+    const runtime = new MockPromptRuntime([
+      { name: "character", value: "n" },
+      { name: "enter" },
+    ]);
+
+    const value = await confirm(
+      {
+        message: "Deploy?",
+        activeLabel: "Ship it",
+        inactiveLabel: "Not yet",
+      },
+      runtime,
+    );
+
+    expect(value).toBe(false);
+    const done = stripAnsi(runtime.doneFrames.at(-1) ?? "");
+    expect(done).toContain("Not yet");
+  });
+
+  test("number should ignore unsupported characters", async () => {
+    const runtime = new MockPromptRuntime([
+      { name: "character", value: "1" },
+      { name: "character", value: "a" },
+      { name: "character", value: "2" },
+      { name: "enter" },
+    ]);
+
+    const value = await number({ message: "Count" }, runtime);
+    expect(value).toBe(12);
+  });
+
+  test("number should validate max boundary", async () => {
+    const runtime = new MockPromptRuntime([
+      { name: "character", value: "9" },
+      { name: "character", value: "9" },
+      { name: "enter" },
+      { name: "backspace" },
+      { name: "backspace" },
+      { name: "character", value: "1" },
+      { name: "character", value: "0" },
+      { name: "enter" },
+    ]);
+
+    const value = await number({ message: "Count", max: 10 }, runtime);
+    expect(value).toBe(10);
+    const hasValidationError = runtime.frames.some((frame) =>
+      frame.includes("lower than or equal to 10"),
+    );
+    expect(hasValidationError).toBe(true);
+  });
+
+  test("number should use required message when empty", async () => {
+    const runtime = new MockPromptRuntime([
+      { name: "enter" },
+      { name: "character", value: "7" },
+      { name: "enter" },
+    ]);
+
+    const value = await number(
+      {
+        message: "Retries",
+        requiredMessage: "Please enter retries",
+      },
+      runtime,
+    );
+
+    expect(value).toBe(7);
+    const hasValidationError = runtime.frames.some((frame) =>
+      frame.includes("Please enter retries"),
+    );
+    expect(hasValidationError).toBe(true);
+  });
+
+  test("select should skip disabled options and wrap", async () => {
+    const runtime = new MockPromptRuntime([{ name: "up" }, { name: "enter" }]);
+
+    const value = await select(
+      {
+        message: "Color",
+        choices: [
+          { value: "red", disabled: true },
+          { value: "blue" },
+          { value: "green", disabled: true },
+          { value: "yellow" },
+        ],
+      },
+      runtime,
+    );
+
+    expect(value).toBe("yellow");
+  });
+
+  test("select should fallback when default value is disabled", async () => {
+    const runtime = new MockPromptRuntime([{ name: "enter" }]);
+
+    const value = await select(
+      {
+        message: "Runtime",
+        defaultValue: "node",
+        choices: [{ value: "node", disabled: true }, { value: "bun" }],
+      },
+      runtime,
+    );
+
+    expect(value).toBe("bun");
+  });
+
+  test("multiselect should enforce min selections", async () => {
+    const runtime = new MockPromptRuntime([
+      { name: "enter" },
+      { name: "space" },
+      { name: "down" },
+      { name: "space" },
+      { name: "enter" },
+    ]);
+
+    const value = await multiselect(
+      {
+        message: "Tools",
+        choices: [{ value: "bun" }, { value: "biome" }, { value: "ts" }],
+        min: 2,
+      },
+      runtime,
+    );
+
+    expect(value).toEqual(["bun", "biome"]);
+    const hasValidationError = runtime.frames.some((frame) =>
+      frame.includes("Please select at least 2 options"),
+    );
+    expect(hasValidationError).toBe(true);
+  });
+
+  test("multiselect should enforce max selections", async () => {
+    const runtime = new MockPromptRuntime([
+      { name: "space" },
+      { name: "down" },
+      { name: "space" },
+      { name: "down" },
+      { name: "space" },
+      { name: "enter" },
+      { name: "space" },
+      { name: "enter" },
+    ]);
+
+    const value = await multiselect(
+      {
+        message: "Tools",
+        choices: [{ value: "bun" }, { value: "biome" }, { value: "ts" }],
+        max: 2,
+      },
+      runtime,
+    );
+
+    expect(value).toEqual(["bun", "biome"]);
+    const hasValidationError = runtime.frames.some((frame) =>
+      frame.includes("Please select at most 2 options"),
+    );
+    expect(hasValidationError).toBe(true);
+  });
+
+  test("multiselect should toggle all twice", async () => {
+    const runtime = new MockPromptRuntime([
+      { name: "character", value: "a" },
+      { name: "character", value: "a" },
+      { name: "down" },
+      { name: "space" },
+      { name: "enter" },
+    ]);
+
+    const value = await multiselect(
+      {
+        message: "Tools",
+        choices: [{ value: "bun" }, { value: "biome" }, { value: "ts" }],
+      },
+      runtime,
+    );
+
+    expect(value).toEqual(["biome"]);
+  });
+
+  test("multiselect should return values in choice order", async () => {
+    const runtime = new MockPromptRuntime([{ name: "enter" }]);
+
+    const value = await multiselect(
+      {
+        message: "Tools",
+        choices: [{ value: "bun" }, { value: "biome" }, { value: "ts" }],
+        defaultValue: ["ts", "bun"],
+      },
+      runtime,
+    );
+
+    expect(value).toEqual(["bun", "ts"]);
+  });
 });
