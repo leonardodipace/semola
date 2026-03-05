@@ -1,10 +1,4 @@
-import type {
-  Action,
-  AllowParams,
-  CanResult,
-  ForbidParams,
-  Rule,
-} from "./types.js";
+import type { Action, AllowParams, ForbidParams, Rule } from "./types.js";
 
 export class Policy<
   TEntity extends Record<string, unknown> = Record<string, unknown>,
@@ -45,20 +39,44 @@ export class Policy<
     return [action];
   }
 
-  public can(action: Action, object?: TEntity): CanResult {
+  public can(action: Action, object?: TEntity) {
     const filteredRules = this.rules.filter((rule) => rule.action === action);
 
     for (const rule of filteredRules) {
+      if (!rule.inverted) {
+        continue;
+      }
+
       if (!rule.conditions) {
         return {
-          allowed: !rule.inverted,
+          allowed: false,
           reason: rule.reason,
         };
       }
 
       if (object && this.deepMatch(object, rule.conditions)) {
         return {
-          allowed: !rule.inverted,
+          allowed: false,
+          reason: rule.reason,
+        };
+      }
+    }
+
+    for (const rule of filteredRules) {
+      if (rule.inverted) {
+        continue;
+      }
+
+      if (!rule.conditions) {
+        return {
+          allowed: true,
+          reason: rule.reason,
+        };
+      }
+
+      if (object && this.deepMatch(object, rule.conditions)) {
+        return {
+          allowed: true,
           reason: rule.reason,
         };
       }
@@ -67,7 +85,7 @@ export class Policy<
     return { allowed: false };
   }
 
-  private deepMatch(objectValue: unknown, conditionValue: object): boolean {
+  private deepMatch(objectValue: unknown, conditionValue: object) {
     if (typeof objectValue !== "object" || objectValue === null) {
       return false;
     }
@@ -83,7 +101,7 @@ export class Policy<
     return true;
   }
 
-  private matchValue(actual: unknown, condition: unknown): boolean {
+  private matchValue(actual: unknown, condition: unknown) {
     if (typeof condition === "function") {
       return condition(actual);
     }
@@ -103,7 +121,7 @@ export class Policy<
     return this.deepMatch(actual, condition);
   }
 
-  private matchArray(actual: unknown, condition: unknown[]): boolean {
+  private matchArray(actual: unknown, condition: unknown[]) {
     if (!Array.isArray(actual)) return false;
     if (actual.length !== condition.length) return false;
 

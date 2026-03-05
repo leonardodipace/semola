@@ -108,8 +108,18 @@ describe("Policy", () => {
       status: "draft",
     };
 
+    const publishedPost: Post = {
+      id: 2,
+      title: "Published Post",
+      authorId: 1,
+      status: "published",
+    };
+
     expect(policy.can("update", post)).toMatchObject({
       allowed: true,
+    });
+    expect(policy.can("update", publishedPost)).toMatchObject({
+      allowed: false,
     });
   });
 
