@@ -1,52 +1,82 @@
-import type {
-  Action,
-  AllowParams,
-  CanResult,
-  Conditions,
-  Entity,
-  ForbidParams,
-  Rule,
-} from "./types.js";
+import type { Action, AllowParams, ForbidParams, Rule } from "./types.js";
 
-export class Policy {
-  private rules: Rule[] = [];
+export class Policy<
+  TEntity extends Record<string, unknown> = Record<string, unknown>,
+> {
+  private rules: Rule<TEntity>[] = [];
 
-  public allow<T>(params: AllowParams<T>) {
-    this.rules.push({
-      action: params.action,
-      entity: params.entity,
-      conditions: params.conditions,
-      inverted: false,
-      reason: params.reason,
-    });
+  public allow(params: AllowParams<TEntity>) {
+    const actions = this.toActions(params.action);
+
+    for (const action of actions) {
+      this.rules.push({
+        action,
+        conditions: params.conditions,
+        inverted: false,
+        reason: params.reason,
+      });
+    }
   }
 
-  public forbid<T>(params: ForbidParams<T>) {
-    this.rules.push({
-      action: params.action,
-      entity: params.entity,
-      conditions: params.conditions,
-      inverted: true,
-      reason: params.reason,
-    });
+  public forbid(params: ForbidParams<TEntity>) {
+    const actions = this.toActions(params.action);
+
+    for (const action of actions) {
+      this.rules.push({
+        action,
+        conditions: params.conditions,
+        inverted: true,
+        reason: params.reason,
+      });
+    }
   }
 
-  public can<T>(action: Action, entity: Entity, object?: T): CanResult {
-    const filteredRules = this.rules
-      .filter((rule) => rule.action === action)
-      .filter((rule) => rule.entity === entity);
+  private toActions(action: Action | Action[]) {
+    if (Array.isArray(action)) {
+      return action;
+    }
+
+    return [action];
+  }
+
+  public can(action: Action, object?: TEntity) {
+    const filteredRules = this.rules.filter((rule) => rule.action === action);
 
     for (const rule of filteredRules) {
+      if (!rule.inverted) {
+        continue;
+      }
+
       if (!rule.conditions) {
         return {
-          allowed: !rule.inverted,
+          allowed: false,
           reason: rule.reason,
         };
       }
 
-      if (object && this.matchesConditions(object, rule.conditions)) {
+      if (object && this.deepMatch(object, rule.conditions)) {
         return {
-          allowed: !rule.inverted,
+          allowed: false,
+          reason: rule.reason,
+        };
+      }
+    }
+
+    for (const rule of filteredRules) {
+      if (rule.inverted) {
+        continue;
+      }
+
+      if (!rule.conditions) {
+        return {
+          allowed: true,
+          reason: rule.reason,
+        };
+      }
+
+      if (object && this.deepMatch(object, rule.conditions)) {
+        return {
+          allowed: true,
           reason: rule.reason,
         };
       }
@@ -55,11 +85,49 @@ export class Policy {
     return { allowed: false };
   }
 
-  private matchesConditions<T>(object: T, conditions: Conditions<T>) {
-    for (const key in conditions) {
-      const matchesConditions = object[key] === conditions[key];
+  private deepMatch(objectValue: unknown, conditionValue: object) {
+    if (typeof objectValue !== "object" || objectValue === null) {
+      return false;
+    }
 
-      if (!matchesConditions) {
+    for (const [key, nestedCondition] of Object.entries(conditionValue)) {
+      const nestedValue = Reflect.get(objectValue, key);
+
+      if (!this.matchValue(nestedValue, nestedCondition)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private matchValue(actual: unknown, condition: unknown) {
+    if (typeof condition === "function") {
+      return condition(actual);
+    }
+
+    if (Array.isArray(condition)) {
+      return this.matchArray(actual, condition);
+    }
+
+    if (typeof condition !== "object") return actual === condition;
+
+    if (condition === null) return actual === null;
+
+    const proto = Object.getPrototypeOf(condition);
+
+    if (proto !== Object.prototype && proto !== null)
+      return actual === condition;
+
+    return this.deepMatch(actual, condition);
+  }
+
+  private matchArray(actual: unknown, condition: unknown[]) {
+    if (!Array.isArray(actual)) return false;
+    if (actual.length !== condition.length) return false;
+
+    for (let i = 0; i < condition.length; i++) {
+      if (!this.matchValue(actual[i], condition[i])) {
         return false;
       }
     }
