@@ -25,6 +25,7 @@
         "useConst": "error",
         "useImportType": "error",
         "useFilenamingConvention": "error",
+        "noEnum": "error",
         "useConsistentMemberAccessibility": {
           "level": "error",
           "options": {
