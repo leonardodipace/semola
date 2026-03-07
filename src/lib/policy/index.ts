@@ -111,6 +111,7 @@ export class Policy<
     }
 
     if (typeof condition !== "object") return actual === condition;
+
     if (condition === null) return actual === null;
 
     const proto = Object.getPrototypeOf(condition);

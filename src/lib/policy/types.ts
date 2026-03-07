@@ -13,17 +13,15 @@ export type Rule<T = Record<string, unknown>> = {
   reason?: string;
 };
 
-export type AllowParams<T = Record<string, unknown>> = {
+type PolicyRuleParams<T = Record<string, unknown>> = {
   action: Action | Action[];
   conditions?: Conditions<T>;
   reason?: string;
 };
 
-export type ForbidParams<T = Record<string, unknown>> = {
-  action: Action | Action[];
-  conditions?: Conditions<T>;
-  reason?: string;
-};
+export type AllowParams<T = Record<string, unknown>> = PolicyRuleParams<T>;
+
+export type ForbidParams<T = Record<string, unknown>> = PolicyRuleParams<T>;
 
 export type CanResult = {
   allowed: boolean;
