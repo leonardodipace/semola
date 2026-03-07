@@ -477,7 +477,13 @@ export const number = async (
       }
 
       if (value === "-") {
-        if (state.cursor !== 0) return state;
+        let insertionIndex = state.cursor;
+
+        if (state.selectionAnchor !== null) {
+          insertionIndex = Math.min(state.selectionAnchor, state.cursor);
+        }
+
+        if (insertionIndex !== 0) return state;
         if (state.value.includes("-")) return state;
       }
 
