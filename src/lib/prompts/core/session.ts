@@ -169,8 +169,17 @@ export const runPromptSession = async <
     );
 
     if (validationRunError) {
-      params.runtime.close();
-      params.runtime.done(`✖ ${params.options.message}`);
+      const [closeErr] = params.runtime.close();
+
+      if (closeErr) {
+        return err(closeErr.type, closeErr.message);
+      }
+
+      const [doneErr] = params.runtime.done(`✖ ${params.options.message}`);
+
+      if (doneErr) {
+        return err(doneErr.type, doneErr.message);
+      }
 
       return err(validationRunError.type, validationRunError.message);
     }
@@ -186,14 +195,22 @@ export const runPromptSession = async <
     );
 
     if (transformError) {
-      params.runtime.close();
-      params.runtime.done(`✖ ${params.options.message}`);
+      const [closeErr] = params.runtime.close();
+
+      if (closeErr) {
+        return err(closeErr.type, closeErr.message);
+      }
+
+      const [doneErr] = params.runtime.done(`✖ ${params.options.message}`);
+
+      if (doneErr) {
+        return err(doneErr.type, doneErr.message);
+      }
+
       return err(transformError.type, transformError.message);
     }
 
     if (finalValue === null) {
-      params.runtime.close();
-      params.runtime.done(`✖ ${params.options.message}`);
       return err("PromptIOError", "Unable to transform prompt value");
     }
 
