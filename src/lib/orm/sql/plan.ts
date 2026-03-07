@@ -241,9 +241,7 @@ export type LikePredicateValue = {
   value: string;
 };
 
-export function isLikePredicateValue(
-  value: unknown,
-): value is LikePredicateValue {
+export function isLikePredicateValue(value: unknown): boolean {
   if (!isRecord(value)) {
     return false;
   }

@@ -14,7 +14,6 @@ import type {
   WhereNode,
   WherePredicate,
 } from "../types.js";
-import { isLikePredicateValue } from "./plan.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -242,13 +241,31 @@ function serializeWherePredicate<T extends ColDefs>(
   }
 
   if (predicate.op === "like") {
-    if (!isLikePredicateValue(predicate.value)) {
+    const likeValue = predicate.value;
+
+    if (!isRecord(likeValue)) {
+      return null;
+    }
+
+    if (typeof likeValue.mode !== "string") {
+      return null;
+    }
+
+    if (
+      likeValue.mode !== "startsWith" &&
+      likeValue.mode !== "endsWith" &&
+      likeValue.mode !== "contains"
+    ) {
+      return null;
+    }
+
+    if (typeof likeValue.value !== "string") {
       return null;
     }
 
     const pattern = dialectAdapter.renderLikePattern(
-      predicate.value.mode,
-      predicate.value.value,
+      likeValue.mode,
+      likeValue.value,
     );
 
     return sql`${column} LIKE ${pattern}`;
@@ -455,38 +472,38 @@ function buildWhereFromInput<T extends ColDefs>(
       fragments.push(sql`${column} <= ${serialized}`);
     }
 
-    if (
-      "in" in condition &&
-      Array.isArray(condition.in) &&
-      condition.in.length > 0
-    ) {
-      const values: unknown[] = new Array(condition.in.length);
+    if ("in" in condition) {
+      if (Array.isArray(condition.in)) {
+        if (condition.in.length > 0) {
+          const values: unknown[] = new Array(condition.in.length);
 
-      for (let index = 0; index < condition.in.length; index++) {
-        values[index] = dialectAdapter.serializeValue(
-          col.kind,
-          condition.in[index],
-        );
+          for (let index = 0; index < condition.in.length; index++) {
+            values[index] = dialectAdapter.serializeValue(
+              col.kind,
+              condition.in[index],
+            );
+          }
+
+          fragments.push(sql`${column} IN ${sql(values)}`);
+        }
       }
-
-      fragments.push(sql`${column} IN ${sql(values)}`);
     }
 
-    if (
-      "notIn" in condition &&
-      Array.isArray(condition.notIn) &&
-      condition.notIn.length > 0
-    ) {
-      const values: unknown[] = new Array(condition.notIn.length);
+    if ("notIn" in condition) {
+      if (Array.isArray(condition.notIn)) {
+        if (condition.notIn.length > 0) {
+          const values: unknown[] = new Array(condition.notIn.length);
 
-      for (let index = 0; index < condition.notIn.length; index++) {
-        values[index] = dialectAdapter.serializeValue(
-          col.kind,
-          condition.notIn[index],
-        );
+          for (let index = 0; index < condition.notIn.length; index++) {
+            values[index] = dialectAdapter.serializeValue(
+              col.kind,
+              condition.notIn[index],
+            );
+          }
+
+          fragments.push(sql`${column} NOT IN ${sql(values)}`);
+        }
       }
-
-      fragments.push(sql`${column} NOT IN ${sql(values)}`);
     }
 
     if ("equals" in condition) {

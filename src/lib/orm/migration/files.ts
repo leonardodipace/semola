@@ -132,6 +132,15 @@ export async function uniqueMigrationDirectoryPath(
   }
 }
 
+// NOTE: splits on all semicolons; breaks if semicolons appear inside SQL
+// string literals. Avoid semicolons in string literals in migration files.
+export function splitStatements(sqlText: string) {
+  return sqlText
+    .split(";")
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => chunk.length > 0);
+}
+
 export function relativeFromCwd(cwd: string, absolutePath: string) {
   const rel = relative(cwd, absolutePath);
 

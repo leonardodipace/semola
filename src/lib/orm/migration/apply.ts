@@ -3,18 +3,8 @@ import { SQL } from "bun";
 import { err, mightThrow, ok } from "../../errors/index.js";
 import { loadConfig } from "./config.js";
 import { loadOrmFromSchema } from "./discover.js";
-import { listMigrations, relativeFromCwd } from "./files.js";
+import { listMigrations, relativeFromCwd, splitStatements } from "./files.js";
 import { markAppliedMigration, readMigrationState } from "./state-file.js";
-
-// NOTE: splits on all semicolons; breaks if semicolons appear inside SQL
-// string literals. Avoid semicolons in string literals in migration files.
-function splitStatements(sqlText: string) {
-  const chunks = sqlText
-    .split(";")
-    .map((chunk) => chunk.trim())
-    .filter((chunk) => chunk.length > 0);
-  return chunks;
-}
 
 async function runStatements(
   runner: SqlType | TransactionSQL,

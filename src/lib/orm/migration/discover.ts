@@ -74,20 +74,18 @@ function buildUrlFromSqlOptions(sql: unknown) {
 
   let username: string | null = null;
 
-  if (
-    typeof optionsRecord.username === "string" &&
-    optionsRecord.username.length > 0
-  ) {
-    username = optionsRecord.username;
+  if (typeof optionsRecord.username === "string") {
+    if (optionsRecord.username.length > 0) {
+      username = optionsRecord.username;
+    }
   }
 
   let password: string | null = null;
 
-  if (
-    typeof optionsRecord.password === "string" &&
-    optionsRecord.password.length > 0
-  ) {
-    password = optionsRecord.password;
+  if (typeof optionsRecord.password === "string") {
+    if (optionsRecord.password.length > 0) {
+      password = optionsRecord.password;
+    }
   }
 
   let port: number | null = null;
