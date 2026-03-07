@@ -20,6 +20,7 @@ Semola is a TypeScript utility kit providing modular packages for common develop
 
 - Write minimal code, no over-engineering
 - Explicit if-statements over ternaries for complex logic
+- Prefer separate early returns over combined conditions — `if (a) return x; if (b) return x;` not `if (a || b) return x;`
 - No type assertions (`as`, `!`)
 - No `any` type
 - Infer types, avoid explicit return types
@@ -36,6 +37,10 @@ Semola is a TypeScript utility kit providing modular packages for common develop
 - Prefer inferred types over explicit return types
 - Heavy use of generics with constraints
 - Const type parameters for literal types
+- For object property narrowing after a guard, prefer `?.` over extracting a local `const` — `options.validate?.(value)` not `const v = options.validate; v(value)`
+- Use explicit discriminant properties for union narrowing; avoid `"flag" in obj` when all union members declare the property (the check is always true); value/truthiness checks (`obj.flag`) only work as discriminants when falsy values (`false`, `0`, `""`) are not valid states for that property
+- Array-level `as const` only; no per-entry `as const` on individual object literals inside the array
+- No em-dashes; use regular hyphens
 
 ### Testing
 
