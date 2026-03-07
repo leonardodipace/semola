@@ -1,6 +1,6 @@
 import type { err, ok } from "../../errors/index.js";
 
-type PromptResultLike<T> =
+export type PromptResultLike<T> =
   | ReturnType<typeof err<string>>
   | ReturnType<typeof ok<T>>;
 

@@ -35,6 +35,13 @@ All prompt functions return result tuples using `ok/err` pattern:
 - `validate?: (value) => string | null | undefined | Promise<...>`
 - `transform?: (value) => value | Promise<...>`
 
+Prompt-specific options (varies by type):
+
+- `required` - reject empty submissions (`input`, `password`)
+- `defaultValue` - pre-filled value shown at start (all prompts)
+- `choices` - array of selectable items (`select`, `multiselect`)
+- `min` / `max` - numeric bounds (`number`) or selection count bounds (`multiselect`)
+
 ## Examples
 
 ### Input
@@ -93,6 +100,28 @@ const [toolsError, tools] = await multiselect({
 if (toolsError) {
   console.error(toolsError.type, toolsError.message);
 }
+```
+
+### Transform
+
+```typescript
+const [portError, port] = await number({
+  message: "Port",
+  defaultValue: 3000,
+  transform: (value) => Math.floor(value),
+});
+```
+
+### Async validate
+
+```typescript
+const [nameError, name] = await input({
+  message: "Username",
+  validate: async (value) => {
+    const taken = await checkUsernameExists(value);
+    return taken ? "Username already taken" : null;
+  },
+});
 ```
 
 ## Interactive-only behavior

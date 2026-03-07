@@ -1,6 +1,6 @@
 import { err, mightThrowSync, ok } from "../../errors/index.js";
 import { parseKeys } from "./keys.js";
-import type { Key, PromptRuntime } from "./types.js";
+import type { Key, PromptResultLike, PromptRuntime } from "./types.js";
 
 const HIDE_CURSOR = "\u001B[?25l";
 const SHOW_CURSOR = "\u001B[?25h";
@@ -17,19 +17,32 @@ const countLines = (text: string) => {
   return count;
 };
 
+type StdinLike = {
+  isTTY?: boolean;
+  setRawMode: (mode: boolean) => void;
+  setEncoding: (encoding: BufferEncoding) => void;
+  resume: () => void;
+  on: (event: string, listener: (chunk: Buffer | string) => void) => unknown;
+  off: (event: string, listener: (chunk: Buffer | string) => void) => unknown;
+};
+
+type StdoutLike = {
+  isTTY?: boolean;
+  write: (chunk: string) => boolean;
+};
+
 export class NodePromptRuntime implements PromptRuntime {
-  private readonly stdin: NodeJS.ReadStream;
-  private readonly stdout: NodeJS.WriteStream;
+  private readonly stdin: StdinLike;
+  private readonly stdout: StdoutLike;
   private readonly queue: Key[] = [];
-  private readonly waiters: Array<
-    (result: ReturnType<typeof ok<Key>>) => void
-  > = [];
+  private readonly waiters: Array<(result: PromptResultLike<Key>) => void> = [];
   private initialized = false;
   private previousLines = 0;
+  private buffer = "";
 
   public constructor(
-    stdin: NodeJS.ReadStream = process.stdin,
-    stdout: NodeJS.WriteStream = process.stdout,
+    stdin: StdinLike = process.stdin,
+    stdout: StdoutLike = process.stdout,
   ) {
     this.stdin = stdin;
     this.stdout = stdout;
@@ -71,14 +84,14 @@ export class NodePromptRuntime implements PromptRuntime {
     return ok(undefined);
   }
 
-  public readKey() {
+  public readKey(): Promise<PromptResultLike<Key>> {
     const queued = this.queue.shift();
 
     if (queued) {
       return Promise.resolve(ok(queued));
     }
 
-    return new Promise<ReturnType<typeof ok<Key>>>((resolve) => {
+    return new Promise<PromptResultLike<Key>>((resolve) => {
       this.waiters.push(resolve);
     });
   }
@@ -140,26 +153,29 @@ export class NodePromptRuntime implements PromptRuntime {
     return ok(undefined);
   }
 
-  public interrupt(_message: string) {
-    const [closeError] = this.close();
-
-    if (closeError) {
-      return err(closeError.type, closeError.message);
-    }
-
+  public interrupt(_message: string): never {
+    this.close();
     process.exit(0);
-    return ok(undefined);
   }
 
   private onData = (chunk: Buffer | string) => {
     const value = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-    const [parseError, keys] = mightThrowSync(() => parseKeys(value));
+    const combined = `${this.buffer}${value}`;
+    this.buffer = "";
 
-    if (parseError || !keys) {
+    const [parseError, result] = mightThrowSync(() => parseKeys(combined));
+
+    if (parseError || !result) {
+      for (const waiter of this.waiters.splice(0)) {
+        waiter(err("PromptIOError", "Failed to parse input"));
+      }
+
       return;
     }
 
-    for (const key of keys) {
+    this.buffer = result.remaining;
+
+    for (const key of result.keys) {
       const waiter = this.waiters.shift();
 
       if (waiter) {

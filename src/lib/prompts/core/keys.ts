@@ -5,19 +5,19 @@ const CSI = "\u001B[";
 const ESC_BACKSPACE = `${ESC}\u007F`;
 
 const KNOWN_SEQUENCES = [
-  { sequence: "\u001B[1;2D", key: { name: "shift_left" } as const },
-  { sequence: "\u001B[1;2C", key: { name: "shift_right" } as const },
-  { sequence: "\u001B[1;5D", key: { name: "ctrl_left" } as const },
-  { sequence: "\u001B[1;5C", key: { name: "ctrl_right" } as const },
-  { sequence: "\u001B[1;6D", key: { name: "shift_ctrl_left" } as const },
-  { sequence: "\u001B[1;6C", key: { name: "shift_ctrl_right" } as const },
-  { sequence: "\u001B[3~", key: { name: "delete" } as const },
-  { sequence: "\u001B[H", key: { name: "home" } as const },
-  { sequence: "\u001B[F", key: { name: "end" } as const },
-  { sequence: "\u001B[A", key: { name: "up" } as const },
-  { sequence: "\u001B[B", key: { name: "down" } as const },
-  { sequence: "\u001B[C", key: { name: "right" } as const },
-  { sequence: "\u001B[D", key: { name: "left" } as const },
+  { sequence: "\u001B[1;2D", key: { name: "shift_left" } },
+  { sequence: "\u001B[1;2C", key: { name: "shift_right" } },
+  { sequence: "\u001B[1;5D", key: { name: "ctrl_left" } },
+  { sequence: "\u001B[1;5C", key: { name: "ctrl_right" } },
+  { sequence: "\u001B[1;6D", key: { name: "shift_ctrl_left" } },
+  { sequence: "\u001B[1;6C", key: { name: "shift_ctrl_right" } },
+  { sequence: "\u001B[3~", key: { name: "delete" } },
+  { sequence: "\u001B[H", key: { name: "home" } },
+  { sequence: "\u001B[F", key: { name: "end" } },
+  { sequence: "\u001B[A", key: { name: "up" } },
+  { sequence: "\u001B[B", key: { name: "down" } },
+  { sequence: "\u001B[C", key: { name: "right" } },
+  { sequence: "\u001B[D", key: { name: "left" } },
 ] as const;
 
 const isControlChar = (char: string) => {
@@ -44,11 +44,7 @@ const isCsiFinalByte = (char: string) => {
   return false;
 };
 
-const readCsiLength = (
-  remaining: string,
-): {
-  length: number;
-} | null => {
+const readCsiLength = (remaining: string) => {
   if (!remaining.startsWith(CSI)) {
     return null;
   }
@@ -59,17 +55,13 @@ const readCsiLength = (
     const char = remaining[index] ?? "";
 
     if (isCsiFinalByte(char)) {
-      return {
-        length: index + 1,
-      };
+      return { length: index + 1, incomplete: false };
     }
 
     index += 1;
   }
 
-  return {
-    length: remaining.length,
-  };
+  return { length: 0, incomplete: true };
 };
 
 export const parseKeys = (chunk: string) => {
@@ -99,6 +91,10 @@ export const parseKeys = (chunk: string) => {
     const csiLength = readCsiLength(remaining);
 
     if (csiLength) {
+      if (csiLength.incomplete) {
+        return { keys, remaining: chunk.slice(cursor) };
+      }
+
       cursor += csiLength.length;
       continue;
     }
@@ -163,5 +159,5 @@ export const parseKeys = (chunk: string) => {
     cursor += 1;
   }
 
-  return keys;
+  return { keys, remaining: "" };
 };

@@ -472,6 +472,15 @@ export const number = async (
         return state;
       }
 
+      if (value === "." && state.value.includes(".")) {
+        return state;
+      }
+
+      if (value === "-") {
+        if (state.cursor !== 0) return state;
+        if (state.value.includes("-")) return state;
+      }
+
       return next;
     },
     onSubmit: (state) => {

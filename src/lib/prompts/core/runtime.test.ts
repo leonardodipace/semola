@@ -46,10 +46,7 @@ describe("NodePromptRuntime", () => {
     const stdout = new MockStdout();
     stdin.isTTY = false;
 
-    const runtime = new NodePromptRuntime(
-      stdin as unknown as NodeJS.ReadStream,
-      stdout as unknown as NodeJS.WriteStream,
-    );
+    const runtime = new NodePromptRuntime(stdin, stdout);
 
     expect(runtime.isInteractive()).toBe(false);
   });
@@ -59,10 +56,7 @@ describe("NodePromptRuntime", () => {
     const stdout = new MockStdout();
     stdout.isTTY = false;
 
-    const runtime = new NodePromptRuntime(
-      stdin as unknown as NodeJS.ReadStream,
-      stdout as unknown as NodeJS.WriteStream,
-    );
+    const runtime = new NodePromptRuntime(stdin, stdout);
 
     const [error, value] = runtime.init();
 
@@ -79,10 +73,7 @@ describe("NodePromptRuntime", () => {
     const stdin = new MockStdin();
     const stdout = new MockStdout();
 
-    const runtime = new NodePromptRuntime(
-      stdin as unknown as NodeJS.ReadStream,
-      stdout as unknown as NodeJS.WriteStream,
-    );
+    const runtime = new NodePromptRuntime(stdin, stdout);
 
     const [initError] = runtime.init();
 
@@ -107,10 +98,7 @@ describe("NodePromptRuntime", () => {
     const stdin = new MockStdin();
     const stdout = new MockStdout();
 
-    const runtime = new NodePromptRuntime(
-      stdin as unknown as NodeJS.ReadStream,
-      stdout as unknown as NodeJS.WriteStream,
-    );
+    const runtime = new NodePromptRuntime(stdin, stdout);
 
     runtime.init();
     runtime.init();
@@ -123,10 +111,7 @@ describe("NodePromptRuntime", () => {
     const stdin = new MockStdin();
     const stdout = new MockStdout();
 
-    const runtime = new NodePromptRuntime(
-      stdin as unknown as NodeJS.ReadStream,
-      stdout as unknown as NodeJS.WriteStream,
-    );
+    const runtime = new NodePromptRuntime(stdin, stdout);
 
     runtime.init();
 
@@ -145,10 +130,7 @@ describe("NodePromptRuntime", () => {
     const stdin = new MockStdin();
     const stdout = new MockStdout();
 
-    const runtime = new NodePromptRuntime(
-      stdin as unknown as NodeJS.ReadStream,
-      stdout as unknown as NodeJS.WriteStream,
-    );
+    const runtime = new NodePromptRuntime(stdin, stdout);
 
     runtime.init();
 
@@ -165,10 +147,7 @@ describe("NodePromptRuntime", () => {
     const stdin = new MockStdin();
     const stdout = new MockStdout();
 
-    const runtime = new NodePromptRuntime(
-      stdin as unknown as NodeJS.ReadStream,
-      stdout as unknown as NodeJS.WriteStream,
-    );
+    const runtime = new NodePromptRuntime(stdin, stdout);
 
     runtime.init();
     runtime.render("line 1\nline 2");
@@ -184,10 +163,7 @@ describe("NodePromptRuntime", () => {
     const stdin = new MockStdin();
     const stdout = new MockStdout();
 
-    const runtime = new NodePromptRuntime(
-      stdin as unknown as NodeJS.ReadStream,
-      stdout as unknown as NodeJS.WriteStream,
-    );
+    const runtime = new NodePromptRuntime(stdin, stdout);
 
     runtime.init();
     runtime.render("line 1\nline 2");
@@ -203,10 +179,7 @@ describe("NodePromptRuntime", () => {
     const stdin = new MockStdin();
     const stdout = new MockStdout();
 
-    const runtime = new NodePromptRuntime(
-      stdin as unknown as NodeJS.ReadStream,
-      stdout as unknown as NodeJS.WriteStream,
-    );
+    const runtime = new NodePromptRuntime(stdin, stdout);
 
     runtime.init();
 
