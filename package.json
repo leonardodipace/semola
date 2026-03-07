@@ -32,6 +32,10 @@
       "import": "./dist/lib/pubsub/index.js",
       "types": "./dist/lib/pubsub/index.d.ts"
     },
+    "./cron": {
+      "import": "./dist/lib/cron/index.js",
+      "types": "./dist/lib/cron/index.d.ts"
+    },
     "./prompts": {
       "import": "./dist/lib/prompts/index.js",
       "types": "./dist/lib/prompts/index.d.ts"
@@ -59,6 +63,9 @@
     "redis",
     "pubsub",
     "caching",
+    "cron",
+    "scheduler",
+    "job-scheduler",
     "i18n",
     "internationalization",
     "authorization",
