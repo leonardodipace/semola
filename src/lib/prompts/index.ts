@@ -351,7 +351,7 @@ export const password = async (
 ) => {
   const promptRuntime = runtime ?? createNodePromptRuntime();
   const initialValue = options.defaultValue ?? "";
-  const mask = options.mask ?? "*";
+  const mask = options.mask || "*";
 
   return runPromptSession<TextState, string, PasswordOptions>({
     runtime: promptRuntime,
@@ -569,7 +569,7 @@ const findDefaultIndex = <TValue extends string>(
   choices: SelectOptions<TValue>["choices"],
   defaultValue: TValue | undefined,
 ) => {
-  if (!defaultValue) {
+  if (defaultValue === undefined) {
     return findFirstEnabledIndex(choices);
   }
 

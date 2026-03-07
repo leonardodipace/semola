@@ -128,12 +128,14 @@ export const runPromptSession = async <
     );
 
     if (renderError) {
+      params.runtime.close();
       return err(renderError.type, renderError.message);
     }
 
     const [readError, key] = await params.runtime.readKey();
 
     if (readError || !key) {
+      params.runtime.close();
       return err(
         readError?.type ?? "PromptIOError",
         readError?.message ?? "Unable to read prompt input",
