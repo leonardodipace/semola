@@ -102,6 +102,22 @@ export const runPromptSession = async <
   let state = params.initialState;
   let errorMessage: string | null = null;
 
+  const closeAndDone = (message: string) => {
+    const [closeErr] = params.runtime.close();
+
+    if (closeErr) {
+      return err(closeErr.type, closeErr.message);
+    }
+
+    const [doneErr] = params.runtime.done(message);
+
+    if (doneErr) {
+      return err(doneErr.type, doneErr.message);
+    }
+
+    return null;
+  };
+
   while (true) {
     const [renderError] = params.runtime.render(
       params.render({
@@ -169,16 +185,10 @@ export const runPromptSession = async <
     );
 
     if (validationRunError) {
-      const [closeErr] = params.runtime.close();
+      const closeDoneErr = closeAndDone(`✖ ${params.options.message}`);
 
-      if (closeErr) {
-        return err(closeErr.type, closeErr.message);
-      }
-
-      const [doneErr] = params.runtime.done(`✖ ${params.options.message}`);
-
-      if (doneErr) {
-        return err(doneErr.type, doneErr.message);
+      if (closeDoneErr) {
+        return closeDoneErr;
       }
 
       return err(validationRunError.type, validationRunError.message);
@@ -195,16 +205,10 @@ export const runPromptSession = async <
     );
 
     if (transformError) {
-      const [closeErr] = params.runtime.close();
+      const closeDoneErr = closeAndDone(`✖ ${params.options.message}`);
 
-      if (closeErr) {
-        return err(closeErr.type, closeErr.message);
-      }
-
-      const [doneErr] = params.runtime.done(`✖ ${params.options.message}`);
-
-      if (doneErr) {
-        return err(doneErr.type, doneErr.message);
+      if (closeDoneErr) {
+        return closeDoneErr;
       }
 
       return err(transformError.type, transformError.message);
@@ -214,13 +218,7 @@ export const runPromptSession = async <
       return err("PromptIOError", "Unable to transform prompt value");
     }
 
-    const [closeError] = params.runtime.close();
-
-    if (closeError) {
-      return err(closeError.type, closeError.message);
-    }
-
-    const [doneError] = params.runtime.done(
+    const closeDoneErr = closeAndDone(
       params.complete({
         options: params.options,
         state,
@@ -228,8 +226,8 @@ export const runPromptSession = async <
       }),
     );
 
-    if (doneError) {
-      return err(doneError.type, doneError.message);
+    if (closeDoneErr) {
+      return closeDoneErr;
     }
 
     return ok(finalValue);

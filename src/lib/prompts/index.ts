@@ -813,7 +813,6 @@ export type {
   MultiselectOptions,
   NumberOptions,
   PasswordOptions,
-  PromptError,
   PromptErrorType,
   SelectChoice,
   SelectOptions,

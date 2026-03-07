@@ -5,16 +5,6 @@ export type PromptErrorType =
   | "PromptIOError"
   | (string & {});
 
-export class PromptError extends Error {
-  public readonly type: PromptErrorType;
-
-  public constructor(type: PromptErrorType, message: string) {
-    super(message);
-    this.type = type;
-    this.name = "PromptError";
-  }
-}
-
 export type MaybePromise<T> = T | Promise<T>;
 
 export type Validate<TValue> =
