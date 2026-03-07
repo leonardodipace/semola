@@ -472,19 +472,17 @@ export const number = async (
         return state;
       }
 
-      if (value === "." && state.value.includes(".")) {
-        return state;
-      }
+      if (value === "." || value === "-") {
+        const collapsed = deleteSelectedRange(state);
 
-      if (value === "-") {
-        let insertionIndex = state.cursor;
-
-        if (state.selectionAnchor !== null) {
-          insertionIndex = Math.min(state.selectionAnchor, state.cursor);
+        if (value === "." && collapsed.value.includes(".")) {
+          return state;
         }
 
-        if (insertionIndex !== 0) return state;
-        if (state.value.includes("-")) return state;
+        if (value === "-") {
+          if (collapsed.cursor !== 0) return state;
+          if (collapsed.value.includes("-")) return state;
+        }
       }
 
       return next;
@@ -567,27 +565,31 @@ const findNextEnabledIndex = <TValue extends string>(
   return currentCursor;
 };
 
+const findDefaultIndex = <TValue extends string>(
+  choices: SelectOptions<TValue>["choices"],
+  defaultValue: TValue | undefined,
+) => {
+  if (!defaultValue) {
+    return findFirstEnabledIndex(choices);
+  }
+
+  const index = choices.findIndex(
+    (choice) => choice.value === defaultValue && !choice.disabled,
+  );
+
+  if (index >= 0) {
+    return index;
+  }
+
+  return findFirstEnabledIndex(choices);
+};
+
 export const select = async <TValue extends string>(
   options: SelectOptions<TValue>,
   runtime?: PromptRuntime,
 ) => {
   const promptRuntime = runtime ?? createNodePromptRuntime();
-
-  const initialCursor = (() => {
-    if (!options.defaultValue) {
-      return findFirstEnabledIndex(options.choices);
-    }
-
-    const defaultIndex = options.choices.findIndex(
-      (choice) => choice.value === options.defaultValue && !choice.disabled,
-    );
-
-    if (defaultIndex >= 0) {
-      return defaultIndex;
-    }
-
-    return findFirstEnabledIndex(options.choices);
-  })();
+  const initialCursor = findDefaultIndex(options.choices, options.defaultValue);
 
   return runPromptSession<{ cursor: number }, TValue, SelectOptions<TValue>>({
     runtime: promptRuntime,
