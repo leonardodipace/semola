@@ -320,7 +320,11 @@ describe("createOrm()", () => {
     const rows = await db.workItems.select({ include: { assignee: true } });
 
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ id: "w1", title: "Task One", assigneeId: "a1" });
+    expect(rows[0]).toMatchObject({
+      id: "w1",
+      title: "Task One",
+      assigneeId: "a1",
+    });
   });
 
   test("findMany() supports gt/gte/lt/lte/in/notIn/isNull operators", async () => {
@@ -365,7 +369,9 @@ describe("createOrm()", () => {
     await db.$raw`INSERT INTO users (id, name) VALUES ('2', 'Bob')`;
     await db.$raw`INSERT INTO users (id, name) VALUES ('3', 'Alicia')`;
 
-    const ends = await db.users.select({ where: { name: { endsWith: "ice" } } });
+    const ends = await db.users.select({
+      where: { name: { endsWith: "ice" } },
+    });
     expect(ends.map((r) => r.id).sort()).toEqual(["1"]);
 
     const contains = await db.users.select({
