@@ -26,6 +26,7 @@ import type {
   TinyTableClient,
   UpdateBuilderInput,
   UpdateManyInput,
+  WhereInput,
 } from "./types.js";
 
 type OrmOptions<
@@ -232,6 +233,33 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
     insert,
 
     async create(input: CreateInput<T>) {
+      if (dialectAdapter.dialect === "mysql") {
+        const [insertErr] = await toResult(insert({ data: input.data }));
+
+        if (insertErr) {
+          return err(insertErr.type, insertErr.message);
+        }
+
+        // MySQL has no RETURNING — re-fetch using inserted data as where clause
+        // InsertData<T> values are structurally compatible with WhereInput<T>
+        const whereInput = input.data as unknown as WhereInput<T>;
+        const [fetchErr, rows] = await toResult(
+          select({ where: whereInput, limit: 1 }),
+        );
+
+        if (fetchErr) {
+          return err(fetchErr.type, fetchErr.message);
+        }
+
+        const first = rows[0] ?? null;
+
+        if (!first) {
+          return err("InternalServerError", "Insert returned no rows");
+        }
+
+        return ok(first);
+      }
+
       const [createErr, rows] = await toResult(
         insert({ data: input.data, returning: true }),
       );
@@ -285,6 +313,49 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
 
     async updateMany(input: UpdateManyInput<T>) {
       if (dialectAdapter.dialect === "mysql") {
+        if (sql instanceof SQL) {
+          const [txErr, result] = await toResult(
+            sql.begin(async (tx) => {
+              const beforeRows = await serializeSelectInput(
+                tx,
+                table,
+                relations,
+                { where: input.where },
+                dialectAdapter,
+              );
+
+              const txWhere = serializeWhereInput(
+                tx,
+                table,
+                input.where,
+                dialectAdapter,
+              );
+              const txRow = mapDataToSqlRow(
+                table,
+                input.data as Record<string, unknown>,
+                dialectAdapter,
+              );
+
+              await tx`UPDATE ${tx(table.tableName)} SET ${tx(txRow)} ${txWhere}`;
+
+              // Server-side defaults/triggers not reflected — known MySQL limitation
+              const updatedRows = beforeRows.map((row: TableRow<T>) => ({
+                ...row,
+                ...input.data,
+              }));
+
+              return { count: updatedRows.length, rows: updatedRows };
+            }),
+          );
+
+          if (txErr) {
+            return err(txErr.type, txErr.message);
+          }
+
+          return ok(result);
+        }
+
+        // Already in a transaction: operations are already atomic
         const [beforeUpdateErr, beforeRows] = await toResult(
           select({ where: input.where }),
         );
@@ -324,6 +395,38 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
 
     async deleteMany(input: DeleteManyInput<T>) {
       if (dialectAdapter.dialect === "mysql") {
+        if (sql instanceof SQL) {
+          const [txErr, result] = await toResult(
+            sql.begin(async (tx) => {
+              const beforeRows = await serializeSelectInput(
+                tx,
+                table,
+                relations,
+                { where: input.where },
+                dialectAdapter,
+              );
+
+              const txWhere = serializeWhereInput(
+                tx,
+                table,
+                input.where,
+                dialectAdapter,
+              );
+
+              await tx`DELETE FROM ${tx(table.tableName)} ${txWhere}`;
+
+              return { count: beforeRows.length, rows: beforeRows };
+            }),
+          );
+
+          if (txErr) {
+            return err(txErr.type, txErr.message);
+          }
+
+          return ok(result);
+        }
+
+        // Already in a transaction: operations are already atomic
         const [beforeDeleteErr, rows] = await toResult(
           select({ where: input.where }),
         );
