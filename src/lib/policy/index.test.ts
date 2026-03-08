@@ -187,8 +187,8 @@ describe("Policy", () => {
 
   test("should work when comparing values referencing the same object in memory", () => {
     class Comment {
-      text: string;
-      userId: number;
+      public text: string;
+      public userId: number;
 
       public constructor(text: string, userId: number) {
         this.text = text;
