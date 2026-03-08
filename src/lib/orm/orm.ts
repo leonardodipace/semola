@@ -392,7 +392,7 @@ export function createOrm<
   const makeModels = (
     sqlOrTx: SQL | TransactionSQL,
   ): OrmModels<TTables, TRels> => {
-    const out: Partial<OrmModels<TTables, TRels>> = {};
+    const out: Record<string, TinyTableClient<ColDefs, RelationDefs>> = {};
 
     for (const key of Object.keys(options.tables)) {
       const table = options.tables[key];
@@ -402,17 +402,18 @@ export function createOrm<
       }
 
       const rels = options.relations?.[key as keyof TRels];
-      const relationDefs = (rels ?? {}) as RelationDefs;
+      const relationDefs: RelationDefs = rels ?? {};
 
-      out[key as keyof TTables] = createTableClient(
+      out[key] = createTableClient(
         sqlOrTx,
         table,
         relationDefs,
         dialectAdapter,
-      ) as OrmModels<TTables, TRels>[keyof TTables];
+      );
     }
 
-    return out as OrmModels<TTables, TRels>;
+    // TypeScript cannot verify the dynamic key-to-type mapping at compile time
+    return out as unknown as OrmModels<TTables, TRels>;
   };
 
   const client = {
