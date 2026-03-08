@@ -63,7 +63,7 @@ export class Policy<
         continue;
       }
 
-      if (!rule.conditions) {
+      if (!rule.conditions || Object.entries(rule.conditions).length === 0) {
         return { allowed: false, reason: rule.reason };
       }
 
@@ -79,7 +79,7 @@ export class Policy<
         continue;
       }
 
-      if (!rule.conditions) {
+      if (!rule.conditions || Object.entries(rule.conditions).length === 0) {
         return { allowed: true, reason: rule.reason };
       }
 

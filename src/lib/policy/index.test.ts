@@ -185,6 +185,49 @@ describe("Policy", () => {
     });
   });
 
+  test("should work when comparing values referencing the same object in memory", () => {
+    class Comment {
+      public text: string;
+      public userId: number;
+
+      public constructor(text: string, userId: number) {
+        this.text = text;
+        this.userId = userId;
+      }
+    }
+
+    type CommentToUser = {
+      id: number;
+      comments: Comment[];
+    };
+
+    const comments = [
+      new Comment("First comment", 1),
+      new Comment("Second comment", 1),
+      new Comment("Third comment", 1),
+    ];
+
+    const policy = new Policy<CommentToUser>();
+    policy.allow({
+      conditions: {
+        comments,
+      },
+      action: ["update", "create", "delete"],
+    });
+
+    expect(policy.can("update", { id: 1, comments })).toMatchObject({
+      allowed: true,
+    });
+
+    expect(policy.can("create", { id: 1, comments })).toMatchObject({
+      allowed: true,
+    });
+
+    expect(policy.can("delete", { id: 1, comments })).toMatchObject({
+      allowed: true,
+    });
+  });
+
   test("should deny access when no matching rule exists", () => {
     const policy = new Policy<Post>();
 
@@ -756,5 +799,111 @@ describe("Policy", () => {
     expect(policy.can("read", validPost)).toMatchObject({ allowed: true });
     expect(policy.can("read", invalidAuthor)).toMatchObject({ allowed: false });
     expect(policy.can("read", draftPost)).toMatchObject({ allowed: false });
+  });
+
+  describe("Empty condition object", () => {
+    test("should allow when condition is an empty object", () => {
+      const policy = new Policy<Post>();
+      policy.allow({
+        action: "update",
+        conditions: {},
+      });
+
+      expect(policy.can("update")).toMatchObject({ allowed: true });
+      expect(policy.can("create")).toMatchObject({ allowed: false });
+    });
+
+    test("should allow when multiple conditions are an empty object", () => {
+      const policy = new Policy<Post>();
+      policy.allow({
+        action: "update",
+        conditions: {},
+      });
+
+      policy.allow({
+        action: "create",
+        conditions: {},
+      });
+
+      expect(policy.can("update")).toMatchObject({ allowed: true });
+      expect(policy.can("create")).toMatchObject({ allowed: true });
+    });
+
+    test("should allow when mixing empty conditions with defined conditions", () => {
+      const post: Post = {
+        id: 100,
+        authorId: 1,
+        status: "draft",
+        title: "The Deep",
+      };
+
+      const policy = new Policy<Post>();
+      policy.allow({
+        action: "update",
+        conditions: {
+          authorId: 1,
+        },
+      });
+
+      policy.allow({
+        action: "create",
+        conditions: {},
+      });
+
+      expect(policy.can("update", post)).toMatchObject({ allowed: true });
+      expect(policy.can("create")).toMatchObject({ allowed: true });
+    });
+
+    test("should forbid when condition is an empty object", () => {
+      const policy = new Policy<Post>();
+      policy.forbid({
+        action: ["update", "create"],
+        conditions: {},
+      });
+
+      expect(policy.can("update")).toMatchObject({ allowed: false });
+      expect(policy.can("create")).toMatchObject({ allowed: false });
+    });
+
+    test("should forbid when multiple conditions are an empty object", () => {
+      const policy = new Policy<Post>();
+      policy.forbid({
+        action: ["update"],
+        conditions: {},
+      });
+
+      policy.forbid({
+        action: ["create"],
+        conditions: {},
+      });
+
+      expect(policy.can("update")).toMatchObject({ allowed: false });
+      expect(policy.can("create")).toMatchObject({ allowed: false });
+    });
+
+    test("should forbid when mixing empty conditions with defined conditions", () => {
+      const post: Post = {
+        id: 100,
+        authorId: 1,
+        status: "draft",
+        title: "The Deep",
+      };
+
+      const policy = new Policy<Post>();
+      policy.forbid({
+        action: ["update"],
+        conditions: {
+          authorId: 1,
+        },
+      });
+
+      policy.forbid({
+        action: ["create"],
+        conditions: {},
+      });
+
+      expect(policy.can("update", post)).toMatchObject({ allowed: false });
+      expect(policy.can("create")).toMatchObject({ allowed: false });
+    });
   });
 });
