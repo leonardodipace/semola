@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { string, uuid } from "./column.js";
+import { number, string, uuid } from "./column.js";
 import { createOrm, Orm } from "./orm.js";
-import { many } from "./relation.js";
+import { many, one } from "./relation.js";
 import { Table } from "./table.js";
 
 const usersTable = new Table("users", {
@@ -258,6 +258,132 @@ describe("createOrm()", () => {
     const result = await db.users.select({ include: { tasks: true } });
 
     expect(result).toHaveLength(1);
+  });
+
+  test("select() supports include joins filtering with column assertion", async () => {
+    const users = new Table("users", {
+      id: uuid("id").primaryKey(),
+      name: string("name").notNull(),
+    });
+
+    const tasks = new Table("tasks", {
+      id: uuid("id").primaryKey(),
+      title: string("title").notNull(),
+      assigneeId: uuid("assignee_id").notNull(),
+    });
+
+    const db = createOrm({
+      url: "sqlite::memory:",
+      tables: { users, tasks },
+      relations: {
+        users: { tasks: many(() => tasks) },
+      },
+    });
+
+    await setupUsersAndTasks(db);
+    await db.$raw`INSERT INTO users (id, name) VALUES ('1', 'Alice')`;
+    await db.$raw`INSERT INTO tasks (id, title, assignee_id) VALUES ('10', 'Task', '1')`;
+
+    const result = await db.users.select({ include: { tasks: true } });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ id: "1", name: "Alice" });
+  });
+
+  test("select() with one() relation applies join and returns main table columns", async () => {
+    const assignees = new Table("assignees", {
+      id: uuid("id").primaryKey(),
+      name: string("name").notNull(),
+    });
+
+    const workItems = new Table("work_items", {
+      id: uuid("id").primaryKey(),
+      assigneeId: uuid("assignee_id").notNull(),
+      title: string("title").notNull(),
+    });
+
+    const db = createOrm({
+      url: "sqlite::memory:",
+      tables: { workItems, assignees },
+      relations: {
+        workItems: {
+          assignee: one("assignee_id", () => assignees),
+        },
+      },
+    });
+
+    await db.$raw`CREATE TABLE assignees (id TEXT PRIMARY KEY, name TEXT NOT NULL)`;
+    await db.$raw`CREATE TABLE work_items (id TEXT PRIMARY KEY, assignee_id TEXT NOT NULL, title TEXT NOT NULL)`;
+    await db.$raw`INSERT INTO assignees VALUES ('a1', 'Alice')`;
+    await db.$raw`INSERT INTO work_items VALUES ('w1', 'a1', 'Task One')`;
+
+    const rows = await db.workItems.select({ include: { assignee: true } });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: "w1", title: "Task One", assigneeId: "a1" });
+  });
+
+  test("findMany() supports gt/gte/lt/lte/in/notIn/isNull operators", async () => {
+    const usersWithScore = new Table("users", {
+      id: uuid("id").primaryKey(),
+      name: string("name").notNull(),
+      score: number("score"),
+    });
+
+    const db = createOrm({
+      url: "sqlite::memory:",
+      tables: { users: usersWithScore },
+    });
+
+    await db.$raw`CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, score INTEGER)`;
+    await db.$raw`INSERT INTO users VALUES ('1', 'Alice', 90)`;
+    await db.$raw`INSERT INTO users VALUES ('2', 'Bob', 70)`;
+    await db.$raw`INSERT INTO users VALUES ('3', 'Carol', 80)`;
+
+    const [, gt80] = await db.users.findMany({ where: { score: { gt: 80 } } });
+    expect(gt80?.map((r) => r.id)).toEqual(["1"]);
+
+    const [, inList] = await db.users.findMany({
+      where: { score: { in: [70, 80] } },
+    });
+    expect(inList?.map((r) => r.id).sort()).toEqual(["2", "3"]);
+
+    const [, notAlice] = await db.users.findMany({
+      where: { name: { not: "Alice" } },
+    });
+    expect(notAlice?.map((r) => r.id).sort()).toEqual(["2", "3"]);
+  });
+
+  test("select() supports endsWith and contains string operators", async () => {
+    const db = createOrm({
+      url: "sqlite::memory:",
+      tables: { users: usersTable },
+    });
+
+    await setupUsers(db);
+    await db.$raw`INSERT INTO users (id, name) VALUES ('1', 'Alice')`;
+    await db.$raw`INSERT INTO users (id, name) VALUES ('2', 'Bob')`;
+    await db.$raw`INSERT INTO users (id, name) VALUES ('3', 'Alicia')`;
+
+    const ends = await db.users.select({ where: { name: { endsWith: "ice" } } });
+    expect(ends.map((r) => r.id).sort()).toEqual(["1"]);
+
+    const contains = await db.users.select({
+      where: { name: { contains: "li" } },
+    });
+    expect(contains.map((r) => r.id).sort()).toEqual(["1", "3"]);
+  });
+
+  test("findFirst() returns error tuple when query fails", async () => {
+    const db = createOrm({
+      url: "sqlite::memory:",
+      tables: { users: usersTable },
+    });
+
+    const [findErr, user] = await db.users.findFirst();
+
+    expect(user).toBeNull();
+    expect(findErr?.type).toBe("InternalServerError");
   });
 
   test("insert supports returning on sqlite", async () => {
