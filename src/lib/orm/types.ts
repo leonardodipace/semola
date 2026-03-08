@@ -271,6 +271,7 @@ export type SelectPlan<T extends ColDefs> = {
 
 export type DialectAdapter = {
   dialect: Dialect;
+  likeKeyword: "LIKE" | "ILIKE";
   quoteIdentifier: (identifier: string) => string;
   serializeValue: (
     kind: ColumnKind,

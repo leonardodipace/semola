@@ -129,10 +129,10 @@ describe(".default()", () => {
     expect(col.meta.hasDefault).toBe(true);
   });
 
-  test("stores wrapped value as defaultFn", () => {
+  test("stores value in defaultValue, not defaultFn", () => {
     const col = uuid("id").default("generated-id");
-    expect(col.meta.defaultFn).toBeFunction();
-    expect(col.meta.defaultFn?.()).toBe("generated-id");
+    expect(col.meta.defaultFn).toBeNull();
+    expect(col.meta.defaultValue).toBe("generated-id");
   });
 });
 

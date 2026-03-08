@@ -59,17 +59,19 @@ function buildLimitClause(
   limit?: number,
   offset?: number,
 ) {
-  let clause = sql``;
+  if (limit != null && offset != null) {
+    return sql`LIMIT ${limit} OFFSET ${offset}`;
+  }
 
   if (limit != null) {
-    clause = sql`${clause} LIMIT ${limit}`;
+    return sql`LIMIT ${limit}`;
   }
 
   if (offset != null) {
-    clause = sql`${clause} OFFSET ${offset}`;
+    return sql`OFFSET ${offset}`;
   }
 
-  return clause;
+  return sql``;
 }
 
 function buildOrderByClause<T extends ColDefs>(
@@ -256,6 +258,10 @@ function serializeWherePredicate<T extends ColDefs>(
 
     const pattern = dialectAdapter.renderLikePattern(mode, val);
 
+    if (dialectAdapter.likeKeyword === "ILIKE") {
+      return sql`${column} ILIKE ${pattern}`;
+    }
+
     return sql`${column} LIKE ${pattern}`;
   }
 
@@ -421,7 +427,12 @@ function buildWhereFromInput<T extends ColDefs>(
         "startsWith",
         String(Reflect.get(condition, "startsWith")),
       );
-      fragments.push(sql`${column} LIKE ${pattern}`);
+
+      if (dialectAdapter.likeKeyword === "ILIKE") {
+        fragments.push(sql`${column} ILIKE ${pattern}`);
+      } else {
+        fragments.push(sql`${column} LIKE ${pattern}`);
+      }
     }
 
     if (Reflect.has(condition, "endsWith")) {
@@ -429,7 +440,12 @@ function buildWhereFromInput<T extends ColDefs>(
         "endsWith",
         String(Reflect.get(condition, "endsWith")),
       );
-      fragments.push(sql`${column} LIKE ${pattern}`);
+
+      if (dialectAdapter.likeKeyword === "ILIKE") {
+        fragments.push(sql`${column} ILIKE ${pattern}`);
+      } else {
+        fragments.push(sql`${column} LIKE ${pattern}`);
+      }
     }
 
     if (Reflect.has(condition, "contains")) {
@@ -437,7 +453,12 @@ function buildWhereFromInput<T extends ColDefs>(
         "contains",
         String(Reflect.get(condition, "contains")),
       );
-      fragments.push(sql`${column} LIKE ${pattern}`);
+
+      if (dialectAdapter.likeKeyword === "ILIKE") {
+        fragments.push(sql`${column} ILIKE ${pattern}`);
+      } else {
+        fragments.push(sql`${column} LIKE ${pattern}`);
+      }
     }
 
     if (Reflect.has(condition, "gt")) {

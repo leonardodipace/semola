@@ -2,7 +2,34 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { listMigrations } from "./files.js";
+import { listMigrations, splitStatements } from "./files.js";
+
+describe("splitStatements", () => {
+  test("splits on semicolons", () => {
+    const result = splitStatements("SELECT 1; SELECT 2");
+    expect(result).toEqual(["SELECT 1", "SELECT 2"]);
+  });
+
+  test("handles semicolons inside single-quoted string literals", () => {
+    const result = splitStatements(
+      "INSERT INTO t (a) VALUES ('val;ue'); SELECT 1",
+    );
+    expect(result).toHaveLength(2);
+    expect(result[0]).toBe("INSERT INTO t (a) VALUES ('val;ue')");
+    expect(result[1]).toBe("SELECT 1");
+  });
+
+  test("handles semicolons inside double-quoted identifiers", () => {
+    const result = splitStatements('SELECT "col;name" FROM t; SELECT 1');
+    expect(result).toHaveLength(2);
+    expect(result[0]).toBe('SELECT "col;name" FROM t');
+  });
+
+  test("filters empty chunks", () => {
+    const result = splitStatements("SELECT 1;;SELECT 2");
+    expect(result).toEqual(["SELECT 1", "SELECT 2"]);
+  });
+});
 
 describe("listMigrations", () => {
   test("returns migration directories from migrations folder", async () => {

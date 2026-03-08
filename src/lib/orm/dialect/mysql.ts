@@ -6,6 +6,7 @@ function escapeLike(s: string) {
 
 export const mysqlDialectAdapter: DialectAdapter = {
   dialect: "mysql",
+  likeKeyword: "LIKE",
 
   quoteIdentifier(identifier: string) {
     return `\`${identifier.replaceAll("`", "``")}\``;

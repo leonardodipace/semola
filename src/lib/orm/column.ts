@@ -64,7 +64,7 @@ export class ColumnDef<
       hasDefault: true as const,
       defaultKind: "value" as const,
       defaultValue: value,
-      defaultFn: () => value,
+      defaultFn: null,
     });
   }
 

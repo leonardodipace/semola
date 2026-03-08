@@ -1,7 +1,9 @@
 import type { MigrationOperation, SchemaSnapshot } from "./types.js";
 
+const UNDEFINED_SENTINEL = Object.freeze({});
+
 function stableValue(value: unknown) {
-  if (value === undefined) return "__undefined__";
+  if (value === undefined) return UNDEFINED_SENTINEL;
   if (value instanceof Date) return `date:${value.toISOString()}`;
   if (
     value === null ||

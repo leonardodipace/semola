@@ -6,6 +6,7 @@ function escapeLike(s: string) {
 
 export const sqliteDialectAdapter: DialectAdapter = {
   dialect: "sqlite",
+  likeKeyword: "LIKE",
 
   quoteIdentifier(identifier: string) {
     return `"${identifier.replaceAll('"', '""')}"`;

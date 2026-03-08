@@ -6,6 +6,7 @@ function escapeLike(s: string) {
 
 export const postgresDialectAdapter: DialectAdapter = {
   dialect: "postgres",
+  likeKeyword: "ILIKE",
 
   quoteIdentifier(identifier: string) {
     return `"${identifier.replaceAll('"', '""')}"`;
