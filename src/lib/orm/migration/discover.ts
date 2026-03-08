@@ -16,39 +16,29 @@ type LoadedOrm = {
   >;
 };
 
-function isRecord(value: unknown) {
-  return Boolean(value) && typeof value === "object";
-}
-
-function isObjectLike(value: unknown) {
-  return (
-    Boolean(value) && (typeof value === "object" || typeof value === "function")
-  );
-}
-
 function isDialect(value: unknown) {
   return value === "postgres" || value === "mysql" || value === "sqlite";
 }
 
 function buildUrlFromSqlOptions(sql: unknown) {
-  if (!isObjectLike(sql)) {
+  if (typeof sql !== "object" && typeof sql !== "function") {
     return null;
   }
 
-  const sqlObject = sql as object;
-
-  const options = Reflect.get(sqlObject, "options");
-
-  if (!isRecord(options)) {
+  if (sql === null) {
     return null;
   }
 
-  const optionsRecord = options as Record<string, unknown>;
+  const options = Reflect.get(sql, "options");
 
-  const adapter = optionsRecord.adapter;
+  if (typeof options !== "object" || options === null) {
+    return null;
+  }
+
+  const adapter = Reflect.get(options, "adapter");
 
   if (adapter === "sqlite") {
-    const filename = optionsRecord.filename;
+    const filename = Reflect.get(options, "filename");
 
     if (typeof filename !== "string") {
       return null;
@@ -61,8 +51,8 @@ function buildUrlFromSqlOptions(sql: unknown) {
     return null;
   }
 
-  const hostname = optionsRecord.hostname;
-  const database = optionsRecord.database;
+  const hostname = Reflect.get(options, "hostname");
+  const database = Reflect.get(options, "database");
 
   if (typeof hostname !== "string") {
     return null;
@@ -74,27 +64,30 @@ function buildUrlFromSqlOptions(sql: unknown) {
 
   let username: string | null = null;
 
-  if (typeof optionsRecord.username === "string") {
-    if (optionsRecord.username.length > 0) {
-      username = optionsRecord.username;
-    }
+  const rawUsername = Reflect.get(options, "username");
+
+  if (typeof rawUsername === "string" && rawUsername.length > 0) {
+    username = rawUsername;
   }
 
   let password: string | null = null;
 
-  if (typeof optionsRecord.password === "string") {
-    if (optionsRecord.password.length > 0) {
-      password = optionsRecord.password;
-    }
+  const rawPassword = Reflect.get(options, "password");
+
+  if (typeof rawPassword === "string" && rawPassword.length > 0) {
+    password = rawPassword;
   }
 
   let port: number | null = null;
 
-  if (typeof optionsRecord.port === "number") {
-    port = optionsRecord.port;
+  const rawPort = Reflect.get(options, "port");
+
+  if (typeof rawPort === "number") {
+    port = rawPort;
   }
 
   let auth = "";
+
   if (username && password) {
     auth = `${encodeURIComponent(username)}:${encodeURIComponent(password)}@`;
   } else if (username) {
@@ -107,16 +100,17 @@ function buildUrlFromSqlOptions(sql: unknown) {
 }
 
 function isTableLike(value: unknown) {
-  if (!isRecord(value)) {
-    return false;
-  }
-  const table = value as Record<string, unknown>;
-
-  if (typeof table.tableName !== "string") {
+  if (typeof value !== "object" || value === null) {
     return false;
   }
 
-  if (!isRecord(table.columns)) {
+  if (typeof Reflect.get(value, "tableName") !== "string") {
+    return false;
+  }
+
+  const columns = Reflect.get(value, "columns");
+
+  if (typeof columns !== "object" || columns === null) {
     return false;
   }
 
@@ -124,16 +118,15 @@ function isTableLike(value: unknown) {
 }
 
 function isModelLike(value: unknown) {
-  if (!isRecord(value)) {
-    return false;
-  }
-  const model = value as Record<string, unknown>;
-
-  if (!isDialect(model.dialect)) {
+  if (typeof value !== "object" || value === null) {
     return false;
   }
 
-  if (!isTableLike(model.table)) {
+  if (!isDialect(Reflect.get(value, "dialect"))) {
+    return false;
+  }
+
+  if (!isTableLike(Reflect.get(value, "table"))) {
     return false;
   }
 
@@ -141,72 +134,88 @@ function isModelLike(value: unknown) {
 }
 
 function fromCreateOrmClient(value: unknown) {
-  if (!isRecord(value)) {
+  if (typeof value !== "object" || value === null) {
     return null;
   }
 
-  const client = value as Record<string, unknown>;
+  const metadata = Reflect.get(value, "__semolaOrm");
 
-  const metadata = Reflect.get(client as object, "__semolaOrm");
+  if (typeof metadata === "object" && metadata !== null) {
+    const maybeOptions = Reflect.get(metadata, "options");
 
-  if (isRecord(metadata)) {
-    const maybeOptions = metadata.options;
-    const maybeDialect = metadata.dialect;
-    const maybeTables = metadata.tables;
+    if (typeof maybeOptions !== "object" || maybeOptions === null) {
+      return null;
+    }
 
-    if (isRecord(maybeOptions)) {
-      if (typeof maybeOptions.url === "string") {
-        if (isDialect(maybeDialect)) {
-          if (isRecord(maybeTables)) {
-            let allTablesValid = true;
+    const url = Reflect.get(maybeOptions, "url");
 
-            for (const table of Object.values(maybeTables)) {
-              if (!isTableLike(table)) {
-                allTablesValid = false;
-                break;
-              }
-            }
+    if (typeof url !== "string") {
+      return null;
+    }
 
-            if (allTablesValid) {
-              return {
-                options: { url: maybeOptions.url },
-                dialect: maybeDialect,
-                tables: maybeTables as LoadedOrm["tables"],
-              } as LoadedOrm;
-            }
-          }
-        }
+    const maybeDialect = Reflect.get(metadata, "dialect");
+
+    if (!isDialect(maybeDialect)) {
+      return null;
+    }
+
+    const maybeTables = Reflect.get(metadata, "tables");
+
+    if (typeof maybeTables !== "object" || maybeTables === null) {
+      return null;
+    }
+
+    for (const table of Object.values(maybeTables as Record<string, unknown>)) {
+      if (!isTableLike(table)) {
+        return null;
       }
     }
+
+    const result: LoadedOrm = {
+      options: { url },
+      dialect: maybeDialect,
+      tables: maybeTables as LoadedOrm["tables"],
+    };
+
+    return result;
   }
 
   const tables: LoadedOrm["tables"] = {};
   let dialect: LoadedOrm["dialect"] | null = null;
   let url: string | null = null;
 
-  for (const [key, candidate] of Object.entries(client)) {
+  for (const [key, candidate] of Object.entries(
+    value as Record<string, unknown>,
+  )) {
     if (!isModelLike(candidate)) {
       continue;
     }
 
-    const model = candidate as {
-      table: {
-        tableName: string;
-        columns: Record<string, ColumnDef<ColumnKind, ColumnMetaBase, unknown>>;
-      };
-      dialect: LoadedOrm["dialect"];
-      sql: unknown;
-    };
+    if (typeof candidate !== "object" || candidate === null) {
+      continue;
+    }
 
-    if (dialect && dialect !== model.dialect) {
+    const modelDialect = Reflect.get(candidate, "dialect");
+    const modelTable = Reflect.get(candidate, "table");
+    const modelSql = Reflect.get(candidate, "sql");
+
+    if (
+      modelDialect !== "postgres" &&
+      modelDialect !== "mysql" &&
+      modelDialect !== "sqlite"
+    ) {
+      continue;
+    }
+
+    if (dialect && dialect !== modelDialect) {
       return null;
     }
 
-    dialect = model.dialect;
-    tables[key] = model.table;
+    dialect = modelDialect;
+    tables[key] = modelTable as LoadedOrm["tables"][string];
 
     if (!url) {
-      url = buildUrlFromSqlOptions(model.sql);
+      url = buildUrlFromSqlOptions(modelSql);
     }
   }
 
@@ -222,35 +231,31 @@ function fromCreateOrmClient(value: unknown) {
     return null;
   }
 
-  const orm: LoadedOrm = {
-    options: { url },
-    dialect,
-    tables,
-  };
-
-  return orm;
+  return { options: { url }, dialect, tables };
 }
 
 function isOrmLike(value: unknown) {
-  if (!isRecord(value)) {
-    return false;
-  }
-  const orm = value as Record<string, unknown>;
-
-  if (!isRecord(orm.options)) {
-    return false;
-  }
-  const options = orm.options as Record<string, unknown>;
-
-  if (typeof options.url !== "string") {
+  if (typeof value !== "object" || value === null) {
     return false;
   }
 
-  if (!isDialect(orm.dialect)) {
+  const options = Reflect.get(value, "options");
+
+  if (typeof options !== "object" || options === null) {
     return false;
   }
 
-  if (!isRecord(orm.tables)) {
+  if (typeof Reflect.get(options, "url") !== "string") {
+    return false;
+  }
+
+  if (!isDialect(Reflect.get(value, "dialect"))) {
+    return false;
+  }
+
+  const tables = Reflect.get(value, "tables");
+
+  if (typeof tables !== "object" || tables === null) {
     return false;
   }
 
@@ -279,6 +284,7 @@ export async function loadOrmFromSchema(schemaPath: string) {
     }
 
     const fromClient = fromCreateOrmClient(candidate);
+
     if (fromClient) {
       return ok(fromClient);
     }
@@ -324,6 +330,7 @@ export function buildSchemaSnapshot(orm: {
           if (column.meta.references) {
             const targetColumn = column.meta.references();
             const owner = owners.get(targetColumn);
+
             if (owner) {
               referencesTable = owner.tableName;
               referencesColumn = owner.sqlName;
