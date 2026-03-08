@@ -51,11 +51,11 @@ type OrmModels<
 function inferDialectFromUrl(url: string): Dialect {
   if (url.includes("mysql")) return "mysql";
 
-  if (url.includes("postgres")) {
+  if (url.includes("postgresql")) {
     return "postgres";
   }
 
-  if (url.includes("postgresql")) {
+  if (url.includes("postgres")) {
     return "postgres";
   }
 
