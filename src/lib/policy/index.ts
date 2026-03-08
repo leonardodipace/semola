@@ -42,47 +42,51 @@ export class Policy<
   public can(action: Action, object?: TEntity) {
     const filteredRules = this.rules.filter((rule) => rule.action === action);
 
-    for (const rule of filteredRules) {
+    const forbidResult = this.checkForbids(filteredRules, object);
+
+    if (forbidResult) {
+      return forbidResult;
+    }
+
+    const allowResult = this.checkAllows(filteredRules, object);
+
+    if (allowResult) {
+      return allowResult;
+    }
+
+    return { allowed: false, reason: undefined };
+  }
+
+  private checkForbids(rules: Rule<TEntity>[], object?: TEntity) {
+    for (const rule of rules) {
       if (!rule.inverted) {
         continue;
       }
 
       if (!rule.conditions) {
-        return {
-          allowed: false,
-          reason: rule.reason,
-        };
+        return { allowed: false, reason: rule.reason };
       }
 
       if (object && this.deepMatch(object, rule.conditions)) {
-        return {
-          allowed: false,
-          reason: rule.reason,
-        };
+        return { allowed: false, reason: rule.reason };
       }
     }
+  }
 
-    for (const rule of filteredRules) {
+  private checkAllows(rules: Rule<TEntity>[], object?: TEntity) {
+    for (const rule of rules) {
       if (rule.inverted) {
         continue;
       }
 
       if (!rule.conditions) {
-        return {
-          allowed: true,
-          reason: rule.reason,
-        };
+        return { allowed: true, reason: rule.reason };
       }
 
       if (object && this.deepMatch(object, rule.conditions)) {
-        return {
-          allowed: true,
-          reason: rule.reason,
-        };
+        return { allowed: true, reason: rule.reason };
       }
     }
-
-    return { allowed: false };
   }
 
   private deepMatch(objectValue: unknown, conditionValue: object) {
