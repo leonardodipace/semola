@@ -62,14 +62,14 @@ function inferDialectFromUrl(url: string): Dialect {
   return "sqlite";
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 function toOrmError(errorValue: unknown): OrmResultError {
-  if (isObject(errorValue)) {
-    const type = errorValue.type;
-    const message = errorValue.message;
+  if (errorValue instanceof Error) {
+    return { type: "InternalServerError", message: errorValue.message };
+  }
+
+  if (typeof errorValue === "object" && errorValue !== null) {
+    const type = Reflect.get(errorValue, "type");
+    const message = Reflect.get(errorValue, "message");
 
     if (typeof type === "string" && typeof message === "string") {
       return { type, message };
@@ -78,10 +78,6 @@ function toOrmError(errorValue: unknown): OrmResultError {
     if (typeof message === "string") {
       return { type: "InternalServerError", message };
     }
-  }
-
-  if (errorValue instanceof Error) {
-    return { type: "InternalServerError", message: errorValue.message };
   }
 
   return { type: "InternalServerError", message: "Unknown ORM error" };
