@@ -9,13 +9,9 @@ import type {
   WhereNode,
 } from "../types.js";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 function toOperatorPredicates<T extends ColDefs>(
   key: keyof T & string,
-  condition: Record<string, unknown>,
+  condition: object,
 ) {
   const predicates: Array<WhereNode<T>> = [];
 
@@ -26,7 +22,7 @@ function toOperatorPredicates<T extends ColDefs>(
       op: "like",
       value: {
         mode: "startsWith",
-        value: String(condition.startsWith),
+        value: String(Reflect.get(condition, "startsWith")),
       },
     });
   }
@@ -38,7 +34,7 @@ function toOperatorPredicates<T extends ColDefs>(
       op: "like",
       value: {
         mode: "endsWith",
-        value: String(condition.endsWith),
+        value: String(Reflect.get(condition, "endsWith")),
       },
     });
   }
@@ -50,13 +46,18 @@ function toOperatorPredicates<T extends ColDefs>(
       op: "like",
       value: {
         mode: "contains",
-        value: String(condition.contains),
+        value: String(Reflect.get(condition, "contains")),
       },
     });
   }
 
   if ("gt" in condition) {
-    predicates.push({ kind: "predicate", key, op: "gt", value: condition.gt });
+    predicates.push({
+      kind: "predicate",
+      key,
+      op: "gt",
+      value: Reflect.get(condition, "gt"),
+    });
   }
 
   if ("gte" in condition) {
@@ -64,12 +65,17 @@ function toOperatorPredicates<T extends ColDefs>(
       kind: "predicate",
       key,
       op: "gte",
-      value: condition.gte,
+      value: Reflect.get(condition, "gte"),
     });
   }
 
   if ("lt" in condition) {
-    predicates.push({ kind: "predicate", key, op: "lt", value: condition.lt });
+    predicates.push({
+      kind: "predicate",
+      key,
+      op: "lt",
+      value: Reflect.get(condition, "lt"),
+    });
   }
 
   if ("lte" in condition) {
@@ -77,12 +83,17 @@ function toOperatorPredicates<T extends ColDefs>(
       kind: "predicate",
       key,
       op: "lte",
-      value: condition.lte,
+      value: Reflect.get(condition, "lte"),
     });
   }
 
   if ("in" in condition) {
-    predicates.push({ kind: "predicate", key, op: "in", value: condition.in });
+    predicates.push({
+      kind: "predicate",
+      key,
+      op: "in",
+      value: Reflect.get(condition, "in"),
+    });
   }
 
   if ("notIn" in condition) {
@@ -90,7 +101,7 @@ function toOperatorPredicates<T extends ColDefs>(
       kind: "predicate",
       key,
       op: "not_in",
-      value: condition.notIn,
+      value: Reflect.get(condition, "notIn"),
     });
   }
 
@@ -99,7 +110,7 @@ function toOperatorPredicates<T extends ColDefs>(
       kind: "predicate",
       key,
       op: "eq",
-      value: condition.equals,
+      value: Reflect.get(condition, "equals"),
     });
   }
 
@@ -108,16 +119,18 @@ function toOperatorPredicates<T extends ColDefs>(
       kind: "predicate",
       key,
       op: "neq",
-      value: condition.not,
+      value: Reflect.get(condition, "not"),
     });
   }
 
   if ("isNull" in condition) {
-    if (condition.isNull === true) {
+    const isNull = Reflect.get(condition, "isNull");
+
+    if (isNull === true) {
       predicates.push({ kind: "predicate", key, op: "is_null" });
     }
 
-    if (condition.isNull === false) {
+    if (isNull === false) {
       predicates.push({ kind: "predicate", key, op: "is_not_null" });
     }
   }
@@ -135,7 +148,7 @@ function buildWhereNode<T extends ColDefs>(where?: WhereInput<T>) {
   for (const [key, condition] of Object.entries(where)) {
     const typedKey = key as keyof T & string;
 
-    if (!isRecord(condition)) {
+    if (typeof condition !== "object" || condition === null) {
       nodes.push({
         kind: "predicate",
         key: typedKey,
@@ -146,10 +159,7 @@ function buildWhereNode<T extends ColDefs>(where?: WhereInput<T>) {
       continue;
     }
 
-    const predicates = toOperatorPredicates(
-      typedKey,
-      condition as Record<string, unknown>,
-    );
+    const predicates = toOperatorPredicates(typedKey, condition);
 
     if (predicates.length === 0) {
       nodes.push({
@@ -242,23 +252,17 @@ export type LikePredicateValue = {
 };
 
 export function isLikePredicateValue(value: unknown): boolean {
-  if (!isRecord(value)) {
+  if (typeof value !== "object" || value === null) {
     return false;
   }
 
-  if (typeof value.mode !== "string") {
+  const mode = Reflect.get(value, "mode");
+
+  if (mode !== "startsWith" && mode !== "endsWith" && mode !== "contains") {
     return false;
   }
 
-  if (
-    value.mode !== "startsWith" &&
-    value.mode !== "endsWith" &&
-    value.mode !== "contains"
-  ) {
-    return false;
-  }
-
-  return typeof value.value === "string";
+  return typeof Reflect.get(value, "value") === "string";
 }
 
 export function isValueOperator(op: ClauseOperator) {

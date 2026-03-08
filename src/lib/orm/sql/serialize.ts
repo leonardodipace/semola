@@ -15,10 +15,6 @@ import type {
   WherePredicate,
 } from "../types.js";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 function getPrimaryKeyColumn(table: Table<ColDefs>) {
   for (const key in table.columns) {
     const col = table.columns[key];
@@ -243,30 +239,22 @@ function serializeWherePredicate<T extends ColDefs>(
   if (predicate.op === "like") {
     const likeValue = predicate.value;
 
-    if (!isRecord(likeValue)) {
+    if (typeof likeValue !== "object" || likeValue === null) {
       return null;
     }
 
-    if (typeof likeValue.mode !== "string") {
+    const mode = Reflect.get(likeValue, "mode");
+    const val = Reflect.get(likeValue, "value");
+
+    if (mode !== "startsWith" && mode !== "endsWith" && mode !== "contains") {
       return null;
     }
 
-    if (
-      likeValue.mode !== "startsWith" &&
-      likeValue.mode !== "endsWith" &&
-      likeValue.mode !== "contains"
-    ) {
+    if (typeof val !== "string") {
       return null;
     }
 
-    if (typeof likeValue.value !== "string") {
-      return null;
-    }
-
-    const pattern = dialectAdapter.renderLikePattern(
-      likeValue.mode,
-      likeValue.value,
-    );
+    const pattern = dialectAdapter.renderLikePattern(mode, val);
 
     return sql`${column} LIKE ${pattern}`;
   }
@@ -422,109 +410,123 @@ function buildWhereFromInput<T extends ColDefs>(
 
     const column = sql(col.meta.sqlName);
 
-    if (!isRecord(condition)) {
+    if (typeof condition !== "object" || condition === null) {
       const serialized = dialectAdapter.serializeValue(col.kind, condition);
       fragments.push(sql`${column} = ${serialized}`);
       continue;
     }
 
-    if ("startsWith" in condition) {
+    if (Reflect.has(condition, "startsWith")) {
       const pattern = dialectAdapter.renderLikePattern(
         "startsWith",
-        String(condition.startsWith),
+        String(Reflect.get(condition, "startsWith")),
       );
       fragments.push(sql`${column} LIKE ${pattern}`);
     }
 
-    if ("endsWith" in condition) {
+    if (Reflect.has(condition, "endsWith")) {
       const pattern = dialectAdapter.renderLikePattern(
         "endsWith",
-        String(condition.endsWith),
+        String(Reflect.get(condition, "endsWith")),
       );
       fragments.push(sql`${column} LIKE ${pattern}`);
     }
 
-    if ("contains" in condition) {
+    if (Reflect.has(condition, "contains")) {
       const pattern = dialectAdapter.renderLikePattern(
         "contains",
-        String(condition.contains),
+        String(Reflect.get(condition, "contains")),
       );
       fragments.push(sql`${column} LIKE ${pattern}`);
     }
 
-    if ("gt" in condition) {
-      const serialized = dialectAdapter.serializeValue(col.kind, condition.gt);
+    if (Reflect.has(condition, "gt")) {
+      const serialized = dialectAdapter.serializeValue(
+        col.kind,
+        Reflect.get(condition, "gt"),
+      );
       fragments.push(sql`${column} > ${serialized}`);
     }
 
-    if ("gte" in condition) {
-      const serialized = dialectAdapter.serializeValue(col.kind, condition.gte);
+    if (Reflect.has(condition, "gte")) {
+      const serialized = dialectAdapter.serializeValue(
+        col.kind,
+        Reflect.get(condition, "gte"),
+      );
       fragments.push(sql`${column} >= ${serialized}`);
     }
 
-    if ("lt" in condition) {
-      const serialized = dialectAdapter.serializeValue(col.kind, condition.lt);
+    if (Reflect.has(condition, "lt")) {
+      const serialized = dialectAdapter.serializeValue(
+        col.kind,
+        Reflect.get(condition, "lt"),
+      );
       fragments.push(sql`${column} < ${serialized}`);
     }
 
-    if ("lte" in condition) {
-      const serialized = dialectAdapter.serializeValue(col.kind, condition.lte);
+    if (Reflect.has(condition, "lte")) {
+      const serialized = dialectAdapter.serializeValue(
+        col.kind,
+        Reflect.get(condition, "lte"),
+      );
       fragments.push(sql`${column} <= ${serialized}`);
     }
 
-    if ("in" in condition) {
-      if (Array.isArray(condition.in)) {
-        if (condition.in.length > 0) {
-          const values: unknown[] = new Array(condition.in.length);
+    if (Reflect.has(condition, "in")) {
+      const inVal = Reflect.get(condition, "in");
 
-          for (let index = 0; index < condition.in.length; index++) {
-            values[index] = dialectAdapter.serializeValue(
-              col.kind,
-              condition.in[index],
-            );
-          }
+      if (Array.isArray(inVal) && inVal.length > 0) {
+        const values: unknown[] = new Array(inVal.length);
 
-          fragments.push(sql`${column} IN ${sql(values)}`);
+        for (let index = 0; index < inVal.length; index++) {
+          values[index] = dialectAdapter.serializeValue(col.kind, inVal[index]);
         }
+
+        fragments.push(sql`${column} IN ${sql(values)}`);
       }
     }
 
-    if ("notIn" in condition) {
-      if (Array.isArray(condition.notIn)) {
-        if (condition.notIn.length > 0) {
-          const values: unknown[] = new Array(condition.notIn.length);
+    if (Reflect.has(condition, "notIn")) {
+      const notInVal = Reflect.get(condition, "notIn");
 
-          for (let index = 0; index < condition.notIn.length; index++) {
-            values[index] = dialectAdapter.serializeValue(
-              col.kind,
-              condition.notIn[index],
-            );
-          }
+      if (Array.isArray(notInVal) && notInVal.length > 0) {
+        const values: unknown[] = new Array(notInVal.length);
 
-          fragments.push(sql`${column} NOT IN ${sql(values)}`);
+        for (let index = 0; index < notInVal.length; index++) {
+          values[index] = dialectAdapter.serializeValue(
+            col.kind,
+            notInVal[index],
+          );
         }
+
+        fragments.push(sql`${column} NOT IN ${sql(values)}`);
       }
     }
 
-    if ("equals" in condition) {
+    if (Reflect.has(condition, "equals")) {
       const serialized = dialectAdapter.serializeValue(
         col.kind,
-        condition.equals,
+        Reflect.get(condition, "equals"),
       );
       fragments.push(sql`${column} = ${serialized}`);
     }
 
-    if ("not" in condition) {
-      const serialized = dialectAdapter.serializeValue(col.kind, condition.not);
+    if (Reflect.has(condition, "not")) {
+      const serialized = dialectAdapter.serializeValue(
+        col.kind,
+        Reflect.get(condition, "not"),
+      );
       fragments.push(sql`${column} != ${serialized}`);
     }
 
-    if ("isNull" in condition) {
-      if (condition.isNull === true) {
+    if (Reflect.has(condition, "isNull")) {
+      const isNull = Reflect.get(condition, "isNull");
+
+      if (isNull === true) {
         fragments.push(sql`${column} IS NULL`);
       }
 
-      if (condition.isNull === false) {
+      if (isNull === false) {
         fragments.push(sql`${column} IS NOT NULL`);
       }
     }
