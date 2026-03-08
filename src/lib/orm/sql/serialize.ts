@@ -6,7 +6,6 @@ import type {
   ColumnKind,
   ColumnMetaBase,
   DialectAdapter,
-  OrderDirection,
   RelationDefs,
   SelectInput,
   SelectPlan,
@@ -14,6 +13,7 @@ import type {
   WhereNode,
   WherePredicate,
 } from "../types.js";
+import { buildSelectPlan, buildWhereNode } from "./plan.js";
 
 function getPrimaryKeyColumn(table: Table<ColDefs>) {
   for (const key in table.columns) {
@@ -107,55 +107,6 @@ function buildOrderByClause<T extends ColDefs>(
   }
 
   let joined = firstOrderBy;
-
-  for (let index = 1; index < fragments.length; index++) {
-    const fragment = fragments[index];
-
-    if (!fragment) {
-      continue;
-    }
-
-    joined = sql`${joined}, ${fragment}`;
-  }
-
-  return sql`ORDER BY ${joined}`;
-}
-
-function buildOrderByFromInput<T extends ColDefs>(
-  sql: SQL | TransactionSQL,
-  table: Table<T>,
-  orderBy?: Partial<Record<keyof T, OrderDirection>>,
-) {
-  if (!orderBy) {
-    return sql``;
-  }
-
-  const fragments: SQL.Query<unknown>[] = [];
-
-  for (const jsKey in orderBy) {
-    const direction = orderBy[jsKey as keyof T];
-
-    const col = table.columns[jsKey as keyof T];
-
-    if (!col) {
-      continue;
-    }
-
-    if (direction === "desc") {
-      fragments.push(sql`${sql(col.meta.sqlName)} DESC`);
-      continue;
-    }
-
-    fragments.push(sql`${sql(col.meta.sqlName)} ASC`);
-  }
-
-  const firstFromInput = fragments[0];
-
-  if (!firstFromInput) {
-    return sql``;
-  }
-
-  let joined = firstFromInput;
 
   for (let index = 1; index < fragments.length; index++) {
     const fragment = fragments[index];
@@ -374,17 +325,17 @@ function serializeWhereNode<T extends ColDefs>(
   return sql`(${joined})`;
 }
 
-function buildWhereClause<T extends ColDefs>(
+function buildWhereFragment<T extends ColDefs>(
   sql: SQL | TransactionSQL,
   table: Table<T>,
-  plan: SelectPlan<T>,
+  node: WhereNode<T> | undefined,
   dialectAdapter: DialectAdapter,
 ) {
-  if (!plan.where) {
+  if (!node) {
     return sql``;
   }
 
-  const fragment = serializeWhereNode(sql, table, plan.where, dialectAdapter);
+  const fragment = serializeWhereNode(sql, table, node, dialectAdapter);
 
   if (!fragment) {
     return sql``;
@@ -393,185 +344,13 @@ function buildWhereClause<T extends ColDefs>(
   return sql`WHERE ${fragment}`;
 }
 
-function buildWhereFromInput<T extends ColDefs>(
+function buildWhereClause<T extends ColDefs>(
   sql: SQL | TransactionSQL,
   table: Table<T>,
-  where: WhereInput<T> | undefined,
+  plan: SelectPlan<T>,
   dialectAdapter: DialectAdapter,
 ) {
-  if (!where) {
-    return sql``;
-  }
-
-  const fragments: SQL.Query<unknown>[] = [];
-
-  for (const jsKey in where) {
-    const condition = where[jsKey as keyof T];
-
-    const col = table.columns[jsKey as keyof T];
-
-    if (!col) {
-      continue;
-    }
-
-    const column = sql(col.meta.sqlName);
-
-    if (typeof condition !== "object" || condition === null) {
-      const serialized = dialectAdapter.serializeValue(col.kind, condition);
-      fragments.push(sql`${column} = ${serialized}`);
-      continue;
-    }
-
-    if (Reflect.has(condition, "startsWith")) {
-      const pattern = dialectAdapter.renderLikePattern(
-        "startsWith",
-        String(Reflect.get(condition, "startsWith")),
-      );
-
-      if (dialectAdapter.likeKeyword === "ILIKE") {
-        fragments.push(sql`${column} ILIKE ${pattern}`);
-      } else {
-        fragments.push(sql`${column} LIKE ${pattern}`);
-      }
-    }
-
-    if (Reflect.has(condition, "endsWith")) {
-      const pattern = dialectAdapter.renderLikePattern(
-        "endsWith",
-        String(Reflect.get(condition, "endsWith")),
-      );
-
-      if (dialectAdapter.likeKeyword === "ILIKE") {
-        fragments.push(sql`${column} ILIKE ${pattern}`);
-      } else {
-        fragments.push(sql`${column} LIKE ${pattern}`);
-      }
-    }
-
-    if (Reflect.has(condition, "contains")) {
-      const pattern = dialectAdapter.renderLikePattern(
-        "contains",
-        String(Reflect.get(condition, "contains")),
-      );
-
-      if (dialectAdapter.likeKeyword === "ILIKE") {
-        fragments.push(sql`${column} ILIKE ${pattern}`);
-      } else {
-        fragments.push(sql`${column} LIKE ${pattern}`);
-      }
-    }
-
-    if (Reflect.has(condition, "gt")) {
-      const serialized = dialectAdapter.serializeValue(
-        col.kind,
-        Reflect.get(condition, "gt"),
-      );
-      fragments.push(sql`${column} > ${serialized}`);
-    }
-
-    if (Reflect.has(condition, "gte")) {
-      const serialized = dialectAdapter.serializeValue(
-        col.kind,
-        Reflect.get(condition, "gte"),
-      );
-      fragments.push(sql`${column} >= ${serialized}`);
-    }
-
-    if (Reflect.has(condition, "lt")) {
-      const serialized = dialectAdapter.serializeValue(
-        col.kind,
-        Reflect.get(condition, "lt"),
-      );
-      fragments.push(sql`${column} < ${serialized}`);
-    }
-
-    if (Reflect.has(condition, "lte")) {
-      const serialized = dialectAdapter.serializeValue(
-        col.kind,
-        Reflect.get(condition, "lte"),
-      );
-      fragments.push(sql`${column} <= ${serialized}`);
-    }
-
-    if (Reflect.has(condition, "in")) {
-      const inVal = Reflect.get(condition, "in");
-
-      if (Array.isArray(inVal) && inVal.length > 0) {
-        const values: unknown[] = new Array(inVal.length);
-
-        for (let index = 0; index < inVal.length; index++) {
-          values[index] = dialectAdapter.serializeValue(col.kind, inVal[index]);
-        }
-
-        fragments.push(sql`${column} IN ${sql(values)}`);
-      }
-    }
-
-    if (Reflect.has(condition, "notIn")) {
-      const notInVal = Reflect.get(condition, "notIn");
-
-      if (Array.isArray(notInVal) && notInVal.length > 0) {
-        const values: unknown[] = new Array(notInVal.length);
-
-        for (let index = 0; index < notInVal.length; index++) {
-          values[index] = dialectAdapter.serializeValue(
-            col.kind,
-            notInVal[index],
-          );
-        }
-
-        fragments.push(sql`${column} NOT IN ${sql(values)}`);
-      }
-    }
-
-    if (Reflect.has(condition, "equals")) {
-      const serialized = dialectAdapter.serializeValue(
-        col.kind,
-        Reflect.get(condition, "equals"),
-      );
-      fragments.push(sql`${column} = ${serialized}`);
-    }
-
-    if (Reflect.has(condition, "not")) {
-      const serialized = dialectAdapter.serializeValue(
-        col.kind,
-        Reflect.get(condition, "not"),
-      );
-      fragments.push(sql`${column} != ${serialized}`);
-    }
-
-    if (Reflect.has(condition, "isNull")) {
-      const isNull = Reflect.get(condition, "isNull");
-
-      if (isNull === true) {
-        fragments.push(sql`${column} IS NULL`);
-      }
-
-      if (isNull === false) {
-        fragments.push(sql`${column} IS NOT NULL`);
-      }
-    }
-  }
-
-  const firstWhere = fragments[0];
-
-  if (!firstWhere) {
-    return sql``;
-  }
-
-  let joined = firstWhere;
-
-  for (let index = 1; index < fragments.length; index++) {
-    const fragment = fragments[index];
-
-    if (!fragment) {
-      continue;
-    }
-
-    joined = sql`${joined} AND ${fragment}`;
-  }
-
-  return sql`WHERE ${joined}`;
+  return buildWhereFragment(sql, table, plan.where, dialectAdapter);
 }
 
 export function serializeWherePlan<T extends ColDefs>(
@@ -602,58 +381,6 @@ function buildJoinClauses<T extends ColDefs>(
 
   for (const join of plan.joins) {
     const rel = relations[join.relationKey];
-
-    if (!rel) {
-      continue;
-    }
-
-    const target = rel.table();
-    const targetPk = getPrimaryKeyColumn(target);
-
-    if (!targetPk) {
-      continue;
-    }
-
-    if (rel.kind === "one") {
-      joinClause = sql`${joinClause} LEFT JOIN ${sql(target.tableName)} ON ${sql(table.tableName)}.${sql(rel.foreignKey)} = ${sql(target.tableName)}.${sql(targetPk.meta.sqlName)}`;
-      continue;
-    }
-
-    const foreignCol = findManyForeignKey(target, basePk);
-
-    if (!foreignCol) {
-      continue;
-    }
-
-    joinClause = sql`${joinClause} LEFT JOIN ${sql(target.tableName)} ON ${sql(target.tableName)}.${sql(foreignCol.meta.sqlName)} = ${sql(table.tableName)}.${sql(basePk.meta.sqlName)}`;
-  }
-
-  return joinClause;
-}
-
-function buildJoinFromInclude<T extends ColDefs, TRels>(
-  sql: SQL | TransactionSQL,
-  table: Table<T>,
-  relations: RelationDefs,
-  include?: { [K in keyof TRels]?: true },
-) {
-  if (!include) {
-    return sql``;
-  }
-
-  let joinClause = sql``;
-  const basePk = getPrimaryKeyColumn(table);
-
-  if (!basePk) {
-    return joinClause;
-  }
-
-  for (const relationKey in include) {
-    if (include[relationKey as keyof TRels] !== true) {
-      continue;
-    }
-
-    const rel = relations[relationKey];
 
     if (!rel) {
       continue;
@@ -764,7 +491,7 @@ export function serializeWhereInput<T extends ColDefs>(
   where: WhereInput<T> | undefined,
   dialectAdapter: DialectAdapter,
 ) {
-  return buildWhereFromInput(sql, table, where, dialectAdapter);
+  return buildWhereFragment(sql, table, buildWhereNode(where), dialectAdapter);
 }
 
 export function serializeSelectInput<T extends ColDefs, TRels>(
@@ -774,11 +501,11 @@ export function serializeSelectInput<T extends ColDefs, TRels>(
   input: SelectInput<T, TRels>,
   dialectAdapter: DialectAdapter,
 ) {
-  const joins = buildJoinFromInclude(sql, table, relations, input.include);
-  const where = buildWhereFromInput(sql, table, input.where, dialectAdapter);
-  const orderBy = buildOrderByFromInput(sql, table, input.orderBy);
-  const limitOffset = buildLimitClause(sql, input.limit, input.offset);
-  const columns = buildBaseSelectColumns(sql, table);
-
-  return sql`SELECT ${columns} FROM ${sql(table.tableName)} ${joins} ${where} ${orderBy} ${limitOffset}`;
+  return serializeSelectPlan(
+    sql,
+    table,
+    relations,
+    buildSelectPlan(input),
+    dialectAdapter,
+  );
 }

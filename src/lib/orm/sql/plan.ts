@@ -138,7 +138,7 @@ function toOperatorPredicates<T extends ColDefs>(
   return predicates;
 }
 
-function buildWhereNode<T extends ColDefs>(where?: WhereInput<T>) {
+export function buildWhereNode<T extends ColDefs>(where?: WhereInput<T>) {
   if (!where) {
     return undefined;
   }
