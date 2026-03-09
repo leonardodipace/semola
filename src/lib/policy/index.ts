@@ -106,10 +106,6 @@ export class Policy<
   }
 
   private matchValue(actual: unknown, condition: unknown) {
-    if (typeof condition === "function") {
-      return condition(actual);
-    }
-
     if (Array.isArray(condition)) {
       return this.matchArray(actual, condition);
     }
@@ -117,6 +113,12 @@ export class Policy<
     if (typeof condition !== "object") return actual === condition;
 
     if (condition === null) return actual === null;
+
+    if ("__isConditionHelper" in condition) {
+      if ("fn" in condition && typeof condition.fn === "function") {
+        return condition.fn(actual);
+      }
+    }
 
     const proto = Object.getPrototypeOf(condition);
 
@@ -139,3 +141,26 @@ export class Policy<
     return true;
   }
 }
+
+export type { ConditionHelper } from "./helpers.js";
+export {
+  and,
+  endsWith,
+  eq,
+  gt,
+  gte,
+  has,
+  hasAny,
+  hasLength,
+  includes,
+  isDefined,
+  isEmpty,
+  isNullish,
+  lt,
+  lte,
+  matches,
+  neq,
+  not,
+  or,
+  startsWith,
+} from "./helpers.js";
