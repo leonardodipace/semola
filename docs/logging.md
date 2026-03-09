@@ -253,4 +253,4 @@ effectLogger.info("Formatted with a custom class");
 
 ## Credits
 
-Huge thanks to [Python's logging facility](https://docs.python.org/3/library/logging.html) and [Effect](https://effect.website/docs/observability/logging/#log) for the inspiration and also for the API interface and organization.
+Huge thanks to [Python's logging facility](https://docs.python.org/3/library/logging.html) and [Effect logging functionalities](https://effect.website/docs/observability/logging/) for the inspiration and also for the API interface and organization.
