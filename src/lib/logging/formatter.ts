@@ -70,12 +70,15 @@ export function isoDateTimeFormat() {
 }
 
 export function isoDateFormat() {
-  return isoDateTimeFormat().split("T")[0];
+  const date = isoDateTimeFormat().split("T")[0];
+  if (!date) return "";
+
+  return date;
 }
 
 export function dmyFormat() {
   const isoDate = isoDateFormat();
-  if (!isoDate) return undefined;
+  if (!isoDate) return "";
 
   const info = isoDate.split("-");
 
@@ -84,7 +87,7 @@ export function dmyFormat() {
 
 export function mdyFormat() {
   const isoDate = isoDateFormat();
-  if (!isoDate) return undefined;
+  if (!isoDate) return "";
 
   const info = isoDate.split("-");
 
