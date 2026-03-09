@@ -234,7 +234,7 @@ class EffectFormatter extends Formatter {
     const { level, msg } = logData;
     const timestamp = this.dateFmt();
 
-    return `timestamp=${timestamp} level=${level.toUpperCase()} message=${msg}`;
+    return `timestamp=${timestamp} level=${level.toUpperCase()} message="${msg}"`;
   }
 }
 
