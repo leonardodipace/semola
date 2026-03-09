@@ -1,12 +1,12 @@
 import type { Formatter } from "./formatter.js";
 
-export enum LogLevel {
-  Debug = 10,
-  Info = 20,
-  Warning = 30,
-  Error = 40,
-  Critical = 50,
-}
+export const LogLevel = {
+  debug: 10,
+  info: 20,
+  warning: 30,
+  error: 40,
+  critical: 50,
+} as const;
 
 export type LogLevelType = keyof typeof LogLevel;
 
@@ -25,7 +25,7 @@ export type LogDataType = {
 };
 
 export type ProviderOptions = {
-  level?: LogLevel;
+  level?: LogLevelType;
   formatter?: Formatter;
 };
 

@@ -15,7 +15,7 @@ import {
 
 const PROVIDER_OPTION_DEFAULT: ProviderOptions = {
   formatter: undefined,
-  level: LogLevel.Debug,
+  level: "debug",
 } as const;
 
 const FILE_PROVIDER_OPTION_DEFAULT: FileProviderOptions = {
@@ -97,27 +97,27 @@ export class Logger extends AbstractLogger {
   }
 
   public debug(msg: LogMessageType) {
-    const data = this.createLogData("Debug", msg, this.prefix);
+    const data = this.createLogData("debug", msg, this.prefix);
     this.run(data);
   }
 
   public info(msg: LogMessageType) {
-    const data = this.createLogData("Info", msg, this.prefix);
+    const data = this.createLogData("info", msg, this.prefix);
     this.run(data);
   }
 
   public warning(msg: LogMessageType) {
-    const data = this.createLogData("Warning", msg, this.prefix);
+    const data = this.createLogData("warning", msg, this.prefix);
     this.run(data);
   }
 
   public error(msg: LogMessageType) {
-    const data = this.createLogData("Error", msg, this.prefix);
+    const data = this.createLogData("error", msg, this.prefix);
     this.run(data);
   }
 
   public critical(msg: LogMessageType) {
-    const data = this.createLogData("Critical", msg, this.prefix);
+    const data = this.createLogData("critical", msg, this.prefix);
     this.run(data);
   }
 
@@ -138,12 +138,12 @@ export abstract class LoggerProvider {
 
   public abstract execute(data: LogDataType): void;
 
-  public getLogLevel() {
+  public getLogLevel(): number {
     if (!this.options.level) {
-      return LogLevel.Debug;
+      return LogLevel["debug"];
     }
 
-    return this.options.level;
+    return LogLevel[this.options.level];
   }
 
   public setFormatter(formatter: Formatter) {
@@ -267,19 +267,19 @@ export class ConsoleProvider extends LoggerProvider {
     // biome-ignore-start lint/suspicious/noConsole: function used for the correct
     // functionality of the logger
     switch (userLevel) {
-      case LogLevel.Debug:
+      case LogLevel.debug:
         console.debug(msg);
         break;
-      case LogLevel.Info:
+      case LogLevel.info:
         console.info(msg);
         break;
-      case LogLevel.Warning:
+      case LogLevel.warning:
         console.warn(msg);
         break;
-      case LogLevel.Error:
+      case LogLevel.error:
         console.error(msg);
         break;
-      case LogLevel.Critical:
+      case LogLevel.critical:
         console.error(msg);
         break;
       default:
