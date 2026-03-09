@@ -13,7 +13,7 @@ describe("Validation Module", () => {
     test("should format validation errors into a readable string", async () => {
       const schema = z.object({
         user: z.object({
-          email: z.string().email(),
+          email: z.email(),
         }),
         age: z.number(),
       });
@@ -63,7 +63,7 @@ describe("Validation Module", () => {
 
       const [error, data] = await validateBody(req, z.string());
       expect(error).toBeNull();
-      expect(data).toBeTrue();
+      expect(data).toBeUndefined();
     });
 
     test("should cache parsed body and reuse on subsequent calls", async () => {

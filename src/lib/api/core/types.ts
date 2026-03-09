@@ -48,12 +48,20 @@ export type ExtractStatusCodes<T extends ResponseSchema> = keyof T & number;
 export type ExtractStatusCodesOrAny<T extends ResponseSchema | undefined> =
   T extends ResponseSchema ? ExtractStatusCodes<T> : number;
 
+export type ValidationOptions =
+  | boolean
+  | {
+      input?: boolean;
+      output?: boolean;
+    };
+
 export type ApiOptions<
   TMiddlewares extends readonly Middleware[] = readonly [],
 > = {
   prefix?: string;
   openapi?: OpenApiOptions;
   middlewares?: TMiddlewares;
+  validation?: ValidationOptions;
 };
 
 export type SecuritySchemeApiKey = {
@@ -115,11 +123,11 @@ export type Context<
 > = {
   raw: Request;
   req: {
-    body: InferInput<TReq["body"]>;
-    query: InferInput<TReq["query"]>;
-    headers: InferInput<TReq["headers"]>;
-    cookies: InferInput<TReq["cookies"]>;
-    params: InferInput<TReq["params"]>;
+    body: InferOutput<TReq["body"]>;
+    query: InferOutput<TReq["query"]>;
+    headers: InferOutput<TReq["headers"]>;
+    cookies: InferOutput<TReq["cookies"]>;
+    params: InferOutput<TReq["params"]>;
   };
   json: <S extends ExtractStatusCodesOrAny<TRes>>(
     status: S,
@@ -136,6 +144,14 @@ export type RouteHandler<
   TRes extends ResponseSchema | undefined = undefined,
   TExt extends Record<string, unknown> = Record<string, unknown>,
 > = (c: Context<TReq, TRes, TExt>) => Response | Promise<Response>;
+
+export type ValidatedRequest = {
+  body: unknown;
+  query: unknown;
+  headers: unknown;
+  cookies: unknown;
+  params: unknown;
+};
 
 export type MethodRoutes = Record<
   string,

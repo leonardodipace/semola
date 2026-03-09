@@ -28,6 +28,7 @@ export const validateSchema = async <T>(
 
 export type BodyCache = { parsed: boolean; value: unknown };
 
+// Body cache prevents re-parsing JSON when multiple middlewares validate the same body
 export const validateBody = async (
   req: Request,
   bodySchema?: StandardSchemaV1,
@@ -40,7 +41,7 @@ export const validateBody = async (
   const contentType = req.headers.get("content-type") ?? "";
 
   if (!contentType.includes("application/json")) {
-    return ok(true);
+    return ok(undefined);
   }
 
   if (bodyCache?.parsed) {
@@ -69,11 +70,24 @@ export const validateQuery = async (
     return ok(true);
   }
 
-  const url = new URL(req.url);
+  const qIndex = req.url.indexOf("?");
+
+  if (qIndex === -1) {
+    return validateSchema(querySchema, {});
+  }
+
+  // Handle both query strings and URL fragments
+  const hashIndex = req.url.indexOf("#", qIndex + 1);
+  const queryString =
+    hashIndex === -1
+      ? req.url.slice(qIndex + 1)
+      : req.url.slice(qIndex + 1, hashIndex);
+
+  const searchParams = new URLSearchParams(queryString);
   const queryParams: Record<string, string | string[]> = {};
 
-  for (const key of url.searchParams.keys()) {
-    const values = url.searchParams.getAll(key);
+  for (const key of searchParams.keys()) {
+    const values = searchParams.getAll(key);
     const [firstValue] = values;
 
     if (values.length === 1) {
@@ -97,7 +111,7 @@ export const validateHeaders = async (
   const headers: Record<string, string> = {};
 
   req.headers.forEach((value, key) => {
-    headers[key.toLowerCase()] = value;
+    headers[key] = value;
   });
 
   return validateSchema(headersSchema, headers);
@@ -111,6 +125,7 @@ export const validateCookies = async (
     return ok(true);
   }
 
+  // Use Bun's native CookieMap for efficient cookie parsing
   const cookieHeader = req.headers.get("cookie") ?? "";
   const cookieMap = new Bun.CookieMap(cookieHeader);
   const cookies = Object.fromEntries(cookieMap);
