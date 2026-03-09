@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Policy } from "./index.js";
+import { gt, has, Policy, startsWith } from "./index.js";
 
 type Post = {
   id: number;
@@ -479,13 +479,13 @@ describe("Policy", () => {
     expect(policy.can("delete", post)).toMatchObject({ allowed: false });
   });
 
-  test("should support predicate functions in conditions", () => {
+  test("should support helper functions in conditions", () => {
     const policy = new Policy<Post>();
 
     policy.allow({
       action: "read",
       conditions: {
-        title: (v) => v.startsWith("Public"),
+        title: startsWith("Public"),
       },
     });
 
@@ -612,12 +612,12 @@ describe("Policy", () => {
       expect(policy.can("read", user)).toMatchObject({ allowed: false });
     });
 
-    test("should support predicate on array field", () => {
+    test("should support helper on array field", () => {
       const policy = new Policy<User>();
 
       policy.allow({
         action: "read",
-        conditions: { roles: (roles) => roles.includes("admin") },
+        conditions: { roles: has("admin") },
       });
 
       const admin: User = {
@@ -729,7 +729,7 @@ describe("Policy", () => {
       expect(policy.can("read", user)).toMatchObject({ allowed: false });
     });
 
-    test("should support predicate on Date field inside nested object", () => {
+    test("should support helper on Date field inside nested object", () => {
       const policy = new Policy<User>();
 
       const cutoff = new Date("2024-06-01");
@@ -737,7 +737,7 @@ describe("Policy", () => {
       policy.allow({
         action: "read",
         conditions: {
-          meta: (m) => m.createdAt > cutoff,
+          meta: { createdAt: gt(cutoff) },
         },
       });
 
@@ -764,14 +764,14 @@ describe("Policy", () => {
     });
   });
 
-  test("should support mixing direct equality and predicate conditions", () => {
+  test("should support mixing direct equality and helper conditions", () => {
     const policy = new Policy<Post>();
 
     policy.allow({
       action: "read",
       conditions: {
         status: "published",
-        authorId: (v) => v > 0,
+        authorId: gt(0),
       },
     });
 
