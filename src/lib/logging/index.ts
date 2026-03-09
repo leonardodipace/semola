@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import type { Formatter } from "./formatter.js";
+import { BaseFormatter, type Formatter } from "./formatter.js";
 
 import {
   type FileProviderOptions,
@@ -14,7 +14,7 @@ import {
 } from "./types.js";
 
 const PROVIDER_OPTION_DEFAULT: ProviderOptions = {
-  formatter: undefined,
+  formatter: new BaseFormatter(),
   level: "debug",
 } as const;
 
