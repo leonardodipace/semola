@@ -20,8 +20,8 @@ const PROVIDER_OPTION_DEFAULT: ProviderOptions = {
 
 const FILE_PROVIDER_OPTION_DEFAULT: FileProviderOptions = {
   ...PROVIDER_OPTION_DEFAULT,
-  policy: undefined,
-};
+  policy: { type: "size" },
+} as const;
 
 const DEFAULT_MAX_SIZE = 4 * 1024; // 4KB
 const NON_ERROR_CALL_STACK_IDX = 4;
@@ -136,7 +136,11 @@ export abstract class LoggerProvider {
   protected options: ProviderOptions;
 
   public constructor(options: ProviderOptions = PROVIDER_OPTION_DEFAULT) {
-    this.options = options;
+    if (Object.entries(options).length === 0) {
+      this.options = PROVIDER_OPTION_DEFAULT;
+    } else {
+      this.options = options;
+    }
   }
 
   public abstract execute(data: LogDataType): void;
@@ -165,8 +169,17 @@ export class FileProvider extends LoggerProvider {
     file: string,
     options: FileProviderOptions = FILE_PROVIDER_OPTION_DEFAULT,
   ) {
-    super({ formatter: options.formatter, level: options.level });
-    this.policy = options.policy;
+    if (Object.entries(options).length === 0) {
+      super({
+        formatter: FILE_PROVIDER_OPTION_DEFAULT.formatter,
+        level: FILE_PROVIDER_OPTION_DEFAULT.level,
+      });
+      this.policy = { type: "size" };
+    } else {
+      super({ formatter: options.formatter, level: options.level });
+      this.policy = options.policy;
+    }
+
     this.filePath = file;
     this.counter = 0;
     this.file = this.createNewFileName();
