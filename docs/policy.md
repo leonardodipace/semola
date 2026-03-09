@@ -5,7 +5,7 @@ A type-safe policy-based authorization system for defining and enforcing access 
 ## Import
 
 ```typescript
-import { Policy } from "semola/policy";
+import { Policy, eq, gt, startsWith, has, and } from "semola/policy";
 ```
 
 ## API
@@ -44,11 +44,11 @@ policy.allow({
   action: ["create", "update"],
 });
 
-// Allow with a predicate function
+// Allow with a helper function
 policy.allow({
   action: "read",
   conditions: {
-    title: (v) => v.startsWith("Public"),
+    title: startsWith("Public"),
   },
 });
 ```
@@ -102,7 +102,7 @@ policy.can("delete");
 type Action = "read" | "create" | "update" | "delete" | (string & {});
 
 type Conditions<T> = {
-  [K in keyof T]?: T[K] | ((value: T[K]) => boolean);
+  [K in keyof T]?: T[K] | ConditionHelper<T[K]>;
 };
 
 type CanResult = {
@@ -116,12 +116,95 @@ type CanResult = {
 - **Type-safe conditions**: Conditions are validated against the entity type
 - **Flexible actions**: Built-in CRUD actions plus custom string actions
 - **Array actions**: Register multiple actions in a single `allow` or `forbid` call
-- **Predicate conditions**: Use functions for dynamic condition matching
+- **Helper functions**: Rich set of typed helpers for comparisons, strings, arrays, and null checks
+- **Composable logic**: Combine helpers with `and`, `or`, `not` for complex conditions
+- **Adapter-ready**: Each helper carries `operator` and `value` metadata for serialization
 - **Multiple conditions**: Rules can match multiple object properties (AND logic)
 - **Allow/Forbid semantics**: Explicit permission and denial rules
 - **Human-readable reasons**: Optional explanations for authorization decisions
 - **No match defaults to deny**: Conservative security model
 - **Zero dependencies**: Pure TypeScript implementation
+
+## Helpers
+
+Helper functions express conditions beyond simple equality. Each helper is type-safe and carries metadata (`operator`, `value`) for use in adapters.
+
+### Comparison
+
+| Helper       | Description           |
+| ------------ | --------------------- |
+| `eq(value)`  | Equal to              |
+| `neq(value)` | Not equal to          |
+| `gt(value)`  | Greater than          |
+| `gte(value)` | Greater than or equal |
+| `lt(value)`  | Less than             |
+| `lte(value)` | Less than or equal    |
+
+### Logic
+
+| Helper            | Description                    |
+| ----------------- | ------------------------------ |
+| `not(helper)`     | Negates a helper               |
+| `and(...helpers)` | All helpers must match         |
+| `or(...helpers)`  | At least one helper must match |
+
+### String
+
+| Helper                | Description               |
+| --------------------- | ------------------------- |
+| `startsWith(prefix)`  | String starts with prefix |
+| `endsWith(suffix)`    | String ends with suffix   |
+| `includes(substring)` | String contains substring |
+| `matches(pattern)`    | String matches a regex    |
+
+### Array
+
+| Helper          | Description                                       |
+| --------------- | ------------------------------------------------- |
+| `has(item)`     | Array contains item (or all items if array given) |
+| `hasAny(items)` | Array contains at least one item                  |
+| `hasLength(n)`  | Length equals `n`, or `{ min?, max? }` range      |
+| `isEmpty()`     | Array or string is empty                          |
+
+### Null / Undefined
+
+| Helper        | Description                        |
+| ------------- | ---------------------------------- |
+| `isDefined()` | Value is not `null` or `undefined` |
+| `isNullish()` | Value is `null` or `undefined`     |
+
+```typescript
+import { Policy, eq, gt, startsWith, has, and, not } from "semola/policy";
+
+type Post = {
+  id: number;
+  title: string;
+  authorId: number;
+  status: "draft" | "published";
+  tags: string[];
+};
+
+const policy = new Policy<Post>();
+
+// Exact value match
+policy.allow({ action: "read", conditions: { status: "published" } });
+
+// Helper conditions
+policy.allow({
+  action: "read",
+  conditions: { title: startsWith("Public") },
+});
+
+policy.allow({
+  action: "update",
+  conditions: { authorId: gt(0), status: not(eq("published")) },
+});
+
+policy.allow({
+  action: "read",
+  conditions: { tags: has("featured") },
+});
+```
 
 ## Usage Example
 

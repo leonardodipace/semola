@@ -156,23 +156,29 @@ cleanup.start();
 ### Check Permissions
 
 ```typescript
-import { Policy } from "semola/policy";
+import { Policy, eq, has } from "semola/policy";
 
-type User = { id: number; role: string };
+type User = { id: number; role: string; permissions: string[] };
 
 const policy = new Policy<User>();
 
-// Allow admins to edit any resource
+// Allow admins full access
 policy.allow({
   action: ["create", "update", "delete"],
-  conditions: { role: "admin" },
+  conditions: { role: eq("admin") },
   reason: "Admins have full access",
 });
 
-// Check if user can edit
-const user: User = { id: 1, role: "admin" };
+// Allow users with a specific permission
+policy.allow({
+  action: "read",
+  conditions: { permissions: has("posts:read") },
+});
+
+// Check if user can perform an action
+const user: User = { id: 1, role: "admin", permissions: [] };
 const result = policy.can("update", user);
-console.log(result.allowed); // true or false
+console.log(result.allowed); // true
 ```
 
 ### Internationalize Your App
