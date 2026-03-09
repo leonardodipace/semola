@@ -29,7 +29,11 @@ export const neq = <V>(value: V): ConditionHelper<V> => {
   };
 };
 
-export const gt = (
+export const gt: {
+  (value: Date): ConditionHelper<Date>;
+  (value: number): ConditionHelper<number>;
+  (value: string): ConditionHelper<string>;
+} = (
   value: string | number | Date,
 ): ConditionHelper<string | number | Date> => {
   const fn = (actual: string | number | Date) => actual > value;
@@ -42,7 +46,11 @@ export const gt = (
   };
 };
 
-export const gte = (
+export const gte: {
+  (value: Date): ConditionHelper<Date>;
+  (value: number): ConditionHelper<number>;
+  (value: string): ConditionHelper<string>;
+} = (
   value: string | number | Date,
 ): ConditionHelper<string | number | Date> => {
   const fn = (actual: string | number | Date) => actual >= value;
@@ -55,7 +63,11 @@ export const gte = (
   };
 };
 
-export const lt = (
+export const lt: {
+  (value: Date): ConditionHelper<Date>;
+  (value: number): ConditionHelper<number>;
+  (value: string): ConditionHelper<string>;
+} = (
   value: string | number | Date,
 ): ConditionHelper<string | number | Date> => {
   const fn = (actual: string | number | Date) => actual < value;
@@ -68,7 +80,11 @@ export const lt = (
   };
 };
 
-export const lte = (
+export const lte: {
+  (value: Date): ConditionHelper<Date>;
+  (value: number): ConditionHelper<number>;
+  (value: string): ConditionHelper<string>;
+} = (
   value: string | number | Date,
 ): ConditionHelper<string | number | Date> => {
   const fn = (actual: string | number | Date) => actual <= value;
@@ -150,7 +166,11 @@ export const includes = (substring: string): ConditionHelper<string> => {
 };
 
 export const matches = (pattern: RegExp): ConditionHelper<string> => {
-  const fn = (actual: string) => pattern.test(actual);
+  const fn = (actual: string) => {
+    pattern.lastIndex = 0;
+
+    return pattern.test(actual);
+  };
 
   return {
     [_brand]: fn,
