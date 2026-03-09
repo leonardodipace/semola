@@ -90,7 +90,10 @@ export class Logger extends AbstractLogger {
   private providers: LoggerProvider[];
   private prefix: string;
 
-  public constructor(prefix: string, providers: LoggerProvider[]) {
+  public constructor(
+    prefix: string,
+    providers: [LoggerProvider, ...LoggerProvider[]],
+  ) {
     super();
     this.prefix = prefix;
     this.providers = providers;
