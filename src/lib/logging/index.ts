@@ -26,12 +26,12 @@ const FILE_PROVIDER_OPTION_DEFAULT: FileProviderOptions = {
 const DEFAULT_MAX_SIZE = 4 * 1024; // 4KB
 const NON_ERROR_CALL_STACK_IDX = 4;
 
-enum DurationUnit {
-  Hour = 1000 * 60 * 60,
-  Day = 1000 * 60 * 60 * 24,
-  Week = 1000 * 60 * 60 * 24 * 7,
-  Month = 1000 * 60 * 60 * 24 * 7 * 4,
-}
+const DurationUnit = {
+  hour: 1000 * 60 * 60,
+  day: 1000 * 60 * 60 * 24,
+  week: 1000 * 60 * 60 * 24 * 7,
+  month: 1000 * 60 * 60 * 24 * 7 * 4,
+} as const;
 
 class StackData {
   private stack = "";
@@ -140,7 +140,7 @@ export abstract class LoggerProvider {
 
   public getLogLevel(): number {
     if (!this.options.level) {
-      return LogLevel["debug"];
+      return LogLevel.debug;
     }
 
     return LogLevel[this.options.level];
@@ -211,13 +211,13 @@ export class FileProvider extends LoggerProvider {
 
         switch (instant) {
           case "hour":
-            return Math.floor(diffMs / DurationUnit.Hour) >= duration;
+            return Math.floor(diffMs / DurationUnit.hour) >= duration;
           case "day":
-            return Math.floor(diffMs / DurationUnit.Day) >= duration;
+            return Math.floor(diffMs / DurationUnit.day) >= duration;
           case "week":
-            return Math.floor(diffMs / DurationUnit.Week) >= duration;
+            return Math.floor(diffMs / DurationUnit.week) >= duration;
           case "month":
-            return Math.floor(diffMs / DurationUnit.Month) >= duration;
+            return Math.floor(diffMs / DurationUnit.month) >= duration;
         }
       }
     }
