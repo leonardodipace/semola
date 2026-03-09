@@ -35,7 +35,7 @@ policy.allow({
   action: "read",
   reason: "Public posts are visible to everyone",
   conditions: {
-    status: "published",
+    status: eq("published"),
   },
 });
 
@@ -63,7 +63,7 @@ policy.forbid({
   action: "update",
   reason: "Published posts cannot be modified",
   conditions: {
-    status: "published",
+    status: eq("published"),
   },
 });
 
@@ -102,7 +102,7 @@ policy.can("delete");
 type Action = "read" | "create" | "update" | "delete" | (string & {});
 
 type Conditions<T> = {
-  [K in keyof T]?: T[K] | ConditionHelper<T[K]>;
+  [K in keyof T]?: ConditionHelper<T[K]>;
 };
 
 type CanResult = {
@@ -186,8 +186,7 @@ type Post = {
 
 const policy = new Policy<Post>();
 
-// Exact value match
-policy.allow({ action: "read", conditions: { status: "published" } });
+policy.allow({ action: "read", conditions: { status: eq("published") } });
 
 // Helper conditions
 policy.allow({
@@ -209,7 +208,7 @@ policy.allow({
 ## Usage Example
 
 ```typescript
-import { Policy } from "semola/policy";
+import { Policy, eq } from "semola/policy";
 
 type Post = {
   id: number;
@@ -225,7 +224,7 @@ policy.allow({
   action: "read",
   reason: "Published posts are publicly accessible",
   conditions: {
-    status: "published",
+    status: eq("published"),
   },
 });
 
@@ -233,7 +232,7 @@ policy.allow({
   action: "update",
   reason: "Draft posts can be edited",
   conditions: {
-    status: "draft",
+    status: eq("draft"),
   },
 });
 
@@ -241,7 +240,7 @@ policy.forbid({
   action: "delete",
   reason: "Published posts cannot be deleted",
   conditions: {
-    status: "published",
+    status: eq("published"),
   },
 });
 
