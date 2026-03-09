@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { BaseFormatter, type Formatter } from "./formatter.js";
+import { BaseFormatter } from "./formatter.js";
 
 import {
   type FileProviderOptions,
@@ -159,10 +159,6 @@ export abstract class LoggerProvider {
     }
 
     return LogLevel[this.options.level];
-  }
-
-  public setFormatter(formatter: Formatter) {
-    this.options.formatter = formatter;
   }
 }
 
