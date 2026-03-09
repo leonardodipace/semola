@@ -174,7 +174,7 @@ export class FileProvider extends LoggerProvider {
         formatter: FILE_PROVIDER_OPTION_DEFAULT.formatter,
         level: FILE_PROVIDER_OPTION_DEFAULT.level,
       });
-      this.policy = { type: "size" };
+      this.policy = FILE_PROVIDER_OPTION_DEFAULT.policy;
     } else {
       super({ formatter: options.formatter, level: options.level });
       this.policy = options.policy;
