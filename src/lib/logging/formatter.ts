@@ -83,7 +83,6 @@ export function dmyFormat() {
 }
 
 export function mdyFormat() {
-  const date = new Date();
   const isoDate = isoDateFormat();
   if (!isoDate) return undefined;
 
