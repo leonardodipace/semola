@@ -2,7 +2,6 @@ const _brand = Symbol("conditionHelper");
 
 export type ConditionHelper<V> = {
   readonly [_brand]: (actual: V) => boolean;
-  __isConditionHelper: true;
   operator: string;
   value: unknown;
   fn: (actual: V) => boolean;
@@ -13,7 +12,6 @@ export const eq = <V>(value: V): ConditionHelper<V> => {
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "eq",
     value,
     fn,
@@ -25,7 +23,6 @@ export const neq = <V>(value: V): ConditionHelper<V> => {
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "neq",
     value,
     fn,
@@ -39,7 +36,6 @@ export const gt = (
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "gt",
     value,
     fn,
@@ -53,7 +49,6 @@ export const gte = (
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "gte",
     value,
     fn,
@@ -67,7 +62,6 @@ export const lt = (
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "lt",
     value,
     fn,
@@ -81,7 +75,6 @@ export const lte = (
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "lte",
     value,
     fn,
@@ -93,7 +86,6 @@ export const not = <V>(inner: ConditionHelper<V>): ConditionHelper<V> => {
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "not",
     value: inner,
     fn,
@@ -107,7 +99,6 @@ export const and = <V>(
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "and",
     value: helpers,
     fn,
@@ -119,7 +110,6 @@ export const or = <V>(...helpers: ConditionHelper<V>[]): ConditionHelper<V> => {
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "or",
     value: helpers,
     fn,
@@ -131,7 +121,6 @@ export const startsWith = (prefix: string): ConditionHelper<string> => {
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "startsWith",
     value: prefix,
     fn,
@@ -143,7 +132,6 @@ export const endsWith = (suffix: string): ConditionHelper<string> => {
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "endsWith",
     value: suffix,
     fn,
@@ -155,7 +143,6 @@ export const includes = (substring: string): ConditionHelper<string> => {
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "includes",
     value: substring,
     fn,
@@ -167,7 +154,6 @@ export const matches = (pattern: RegExp): ConditionHelper<string> => {
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "matches",
     value: pattern,
     fn,
@@ -185,7 +171,6 @@ export const has = <V>(items: V | V[]): ConditionHelper<V[]> => {
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "has",
     value: items,
     fn,
@@ -197,7 +182,6 @@ export const hasAny = <V>(items: V[]): ConditionHelper<V[]> => {
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "hasAny",
     value: items,
     fn,
@@ -229,7 +213,6 @@ export const hasLength = (
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "hasLength",
     value: length,
     fn,
@@ -241,7 +224,6 @@ export const isEmpty = (): ConditionHelper<string | unknown[]> => {
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "isEmpty",
     value: undefined,
     fn,
@@ -253,7 +235,6 @@ export const isDefined = (): ConditionHelper<unknown> => {
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "isDefined",
     value: undefined,
     fn,
@@ -265,7 +246,6 @@ export const isNullish = (): ConditionHelper<unknown> => {
 
   return {
     [_brand]: fn,
-    __isConditionHelper: true,
     operator: "isNullish",
     value: undefined,
     fn,

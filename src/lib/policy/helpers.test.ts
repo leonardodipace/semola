@@ -34,7 +34,6 @@ describe("eq", () => {
   test("carries correct metadata", () => {
     const helper = eq(42);
 
-    expect(helper.__isConditionHelper).toBe(true);
     expect(helper.operator).toBe("eq");
     expect(helper.value).toBe(42);
   });

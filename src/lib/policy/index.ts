@@ -106,39 +106,15 @@ export class Policy<
   }
 
   private matchValue(actual: unknown, condition: unknown) {
-    if (Array.isArray(condition)) {
-      return this.matchArray(actual, condition);
+    if (typeof condition !== "object" || condition === null) {
+      return false;
     }
 
-    if (typeof condition !== "object") return actual === condition;
-
-    if (condition === null) return actual === null;
-
-    if ("__isConditionHelper" in condition) {
-      if ("fn" in condition && typeof condition.fn === "function") {
-        return condition.fn(actual);
-      }
+    if ("fn" in condition && typeof condition.fn === "function") {
+      return condition.fn(actual);
     }
-
-    const proto = Object.getPrototypeOf(condition);
-
-    if (proto !== Object.prototype && proto !== null)
-      return actual === condition;
 
     return this.deepMatch(actual, condition);
-  }
-
-  private matchArray(actual: unknown, condition: unknown[]) {
-    if (!Array.isArray(actual)) return false;
-    if (actual.length !== condition.length) return false;
-
-    for (let i = 0; i < condition.length; i++) {
-      if (!this.matchValue(actual[i], condition[i])) {
-        return false;
-      }
-    }
-
-    return true;
   }
 }
 

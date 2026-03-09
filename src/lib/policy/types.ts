@@ -4,8 +4,8 @@ export type Action = "read" | "create" | "update" | "delete" | (string & {});
 
 export type ConditionValue<V> =
   V extends Record<string, unknown>
-    ? V | ConditionHelper<V> | Conditions<V>
-    : V | ConditionHelper<V>;
+    ? ConditionHelper<V> | Conditions<V>
+    : ConditionHelper<V>;
 
 export type Conditions<T = Record<string, unknown>> = {
   [K in keyof T]?: ConditionValue<T[K]>;
