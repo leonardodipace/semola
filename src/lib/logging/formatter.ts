@@ -1,13 +1,13 @@
 import type { DateFmtFnType, LogDataType } from "./types.js";
 
-export abstract class Formatter<Input = LogDataType, Output = string> {
+export abstract class Formatter {
   protected dateFmt: DateFmtFnType;
 
   public constructor(dateFmt: DateFmtFnType) {
     this.dateFmt = dateFmt;
   }
 
-  public abstract format(logData: Input): Output;
+  public abstract format(logData: LogDataType): string;
 }
 
 export class BaseFormatter extends Formatter {
