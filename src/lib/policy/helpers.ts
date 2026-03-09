@@ -11,7 +11,13 @@ export type ConditionHelper<V> = {
 export const eq = <V>(value: V): ConditionHelper<V> => {
   const fn = (actual: V) => actual === value;
 
-  return { [_brand]: fn, __isConditionHelper: true, operator: "eq", value, fn };
+  return {
+    [_brand]: fn,
+    __isConditionHelper: true,
+    operator: "eq",
+    value,
+    fn,
+  };
 };
 
 export const neq = <V>(value: V): ConditionHelper<V> => {
@@ -31,7 +37,13 @@ export const gt = (
 ): ConditionHelper<string | number | Date> => {
   const fn = (actual: string | number | Date) => actual > value;
 
-  return { [_brand]: fn, __isConditionHelper: true, operator: "gt", value, fn };
+  return {
+    [_brand]: fn,
+    __isConditionHelper: true,
+    operator: "gt",
+    value,
+    fn,
+  };
 };
 
 export const gte = (
@@ -53,7 +65,13 @@ export const lt = (
 ): ConditionHelper<string | number | Date> => {
   const fn = (actual: string | number | Date) => actual < value;
 
-  return { [_brand]: fn, __isConditionHelper: true, operator: "lt", value, fn };
+  return {
+    [_brand]: fn,
+    __isConditionHelper: true,
+    operator: "lt",
+    value,
+    fn,
+  };
 };
 
 export const lte = (
