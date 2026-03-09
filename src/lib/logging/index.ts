@@ -141,6 +141,14 @@ export abstract class LoggerProvider {
     } else {
       this.options = options;
     }
+
+    if (!this.options.formatter) {
+      this.options.formatter = PROVIDER_OPTION_DEFAULT.formatter;
+    }
+
+    if (!this.options.level) {
+      this.options.level = PROVIDER_OPTION_DEFAULT.level;
+    }
   }
 
   public abstract execute(data: LogDataType): void;
@@ -177,6 +185,11 @@ export class FileProvider extends LoggerProvider {
       this.policy = FILE_PROVIDER_OPTION_DEFAULT.policy;
     } else {
       super({ formatter: options.formatter, level: options.level });
+    }
+
+    if (!options.policy) {
+      this.policy = FILE_PROVIDER_OPTION_DEFAULT.policy;
+    } else {
       this.policy = options.policy;
     }
 
