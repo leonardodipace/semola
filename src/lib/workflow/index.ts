@@ -40,10 +40,8 @@ const envelopeDeserialize = (raw: string) => {
     return undefined;
   }
 
-  for (const [key, value] of Object.entries(parsed)) {
-    if (key === "value") {
-      return value;
-    }
+  if ("value" in parsed) {
+    return parsed.value;
   }
 
   return undefined;
@@ -340,7 +338,7 @@ class WorkflowDefinition<TInput, TResult> {
   private async createExecution(executionId: string, input: TInput) {
     const [serializeError, serializedInput] = this.serializeInput(input);
 
-    if (serializeError || !serializedInput) {
+    if (serializeError) {
       return err(
         "WorkflowSerializationError",
         `Unable to serialize workflow input for ${executionId}`,
@@ -498,7 +496,7 @@ class WorkflowDefinition<TInput, TResult> {
     const [serializeResultError, serializedResult] =
       this.serializeResult(result);
 
-    if (serializeResultError || !serializedResult) {
+    if (serializeResultError) {
       const failedAt = now();
 
       await this.setMeta(executionId, "status", "failed");
@@ -672,47 +670,63 @@ class WorkflowDefinition<TInput, TResult> {
     return ok(parsed);
   }
 
-  private serializeInput(input: TInput) {
-    const serializer = this.options.serializeInput ?? envelopeSerialize;
-
+  private runSerializer<T>(
+    value: T,
+    serializer: (v: T) => string,
+    label: string,
+  ) {
     const [serializeError, serialized] = mightThrowSync(() =>
-      serializer(input),
+      serializer(value),
     );
 
     if (serializeError) {
       return err(
         "WorkflowSerializationError",
-        `Unable to serialize workflow input: ${toErrorMessage(serializeError)}`,
+        `Unable to serialize ${label}: ${toErrorMessage(serializeError)}`,
       );
     }
 
     if (typeof serialized !== "string") {
       return err(
         "WorkflowSerializationError",
-        "Input serializer must return a string",
+        `${label} serializer must return a string`,
       );
     }
 
     return ok(serialized);
   }
 
-  private deserializeInput(raw: string) {
-    const deserialize =
-      this.options.deserializeInput ??
-      ((value: string) => {
-        return envelopeDeserialize(value) as TInput;
-      });
-
-    const [deserializeError, value] = mightThrowSync(() => deserialize(raw));
+  private runDeserializer<T>(
+    raw: string,
+    deserializer: (v: string) => T,
+    label: string,
+  ) {
+    const [deserializeError, value] = mightThrowSync(() => deserializer(raw));
 
     if (deserializeError) {
       return err(
         "WorkflowSerializationError",
-        `Unable to deserialize workflow input: ${toErrorMessage(deserializeError)}`,
+        `Unable to deserialize ${label}: ${toErrorMessage(deserializeError)}`,
       );
     }
 
     return ok(value);
+  }
+
+  private serializeInput(input: TInput) {
+    return this.runSerializer(
+      input,
+      this.options.serializeInput ?? envelopeSerialize,
+      "workflow input",
+    );
+  }
+
+  private deserializeInput(raw: string) {
+    const deserializer =
+      this.options.deserializeInput ??
+      ((value: string) => envelopeDeserialize(value) as TInput);
+
+    return this.runDeserializer(raw, deserializer, "workflow input");
   }
 
   private serializeResult(result: TResult | null) {
@@ -720,89 +734,35 @@ class WorkflowDefinition<TInput, TResult> {
       return ok(envelopeSerialize(null));
     }
 
-    const serializer = this.options.serializeResult ?? envelopeSerialize;
-
-    const [serializeError, serialized] = mightThrowSync(() =>
-      serializer(result),
+    return this.runSerializer(
+      result,
+      this.options.serializeResult ?? envelopeSerialize,
+      "workflow result",
     );
-
-    if (serializeError) {
-      return err(
-        "WorkflowSerializationError",
-        `Unable to serialize workflow result: ${toErrorMessage(serializeError)}`,
-      );
-    }
-
-    if (typeof serialized !== "string") {
-      return err(
-        "WorkflowSerializationError",
-        "Result serializer must return a string",
-      );
-    }
-
-    return ok(serialized);
   }
 
   private deserializeResult(raw: string) {
-    const deserialize =
+    const deserializer =
       this.options.deserializeResult ??
-      ((value: string) => {
-        return envelopeDeserialize(value) as TResult;
-      });
+      ((value: string) => envelopeDeserialize(value) as TResult);
 
-    const [deserializeError, value] = mightThrowSync(() => deserialize(raw));
-
-    if (deserializeError) {
-      return err(
-        "WorkflowSerializationError",
-        `Unable to deserialize workflow result: ${toErrorMessage(deserializeError)}`,
-      );
-    }
-
-    return ok(value);
+    return this.runDeserializer(raw, deserializer, "workflow result");
   }
 
   private serializeStepOutput(output: unknown) {
-    const serializer = this.options.serializeStepOutput ?? envelopeSerialize;
-
-    const [serializeError, serialized] = mightThrowSync(() =>
-      serializer(output),
+    return this.runSerializer(
+      output,
+      this.options.serializeStepOutput ?? envelopeSerialize,
+      "step output",
     );
-
-    if (serializeError) {
-      return err(
-        "WorkflowSerializationError",
-        `Unable to serialize step output: ${toErrorMessage(serializeError)}`,
-      );
-    }
-
-    if (typeof serialized !== "string") {
-      return err(
-        "WorkflowSerializationError",
-        "Step serializer must return a string",
-      );
-    }
-
-    return ok(serialized);
   }
 
   private deserializeStepOutput(raw: string) {
-    const deserialize =
+    const deserializer =
       this.options.deserializeStepOutput ??
-      ((value: string) => {
-        return envelopeDeserialize(value);
-      });
+      ((value: string) => envelopeDeserialize(value));
 
-    const [deserializeError, value] = mightThrowSync(() => deserialize(raw));
-
-    if (deserializeError) {
-      return err(
-        "WorkflowSerializationError",
-        `Unable to deserialize step output: ${toErrorMessage(deserializeError)}`,
-      );
-    }
-
-    return ok(value);
+    return this.runDeserializer(raw, deserializer, "step output");
   }
 
   private async readInput(executionId: string) {
@@ -845,7 +805,7 @@ class WorkflowDefinition<TInput, TResult> {
   ) {
     const [serializeError, serializedOutput] = this.serializeStepOutput(output);
 
-    if (serializeError || !serializedOutput) {
+    if (serializeError) {
       return err(
         "WorkflowSerializationError",
         `Unable to serialize step ${stepName} output`,
@@ -955,20 +915,14 @@ class WorkflowDefinition<TInput, TResult> {
       );
     }
 
-    let outputRaw: string | null = null;
-
-    for (const [key, value] of Object.entries(parsed)) {
-      if (key === "output" && typeof value === "string") {
-        outputRaw = value;
-      }
-    }
-
-    if (!outputRaw) {
+    if (typeof parsed.output !== "string") {
       return err(
         "WorkflowStateError",
         `Invalid step output for ${stepName} in execution ${executionId}`,
       );
     }
+
+    const outputRaw = parsed.output;
 
     const [deserializeError, value] = this.deserializeStepOutput(outputRaw);
 
@@ -1051,20 +1005,14 @@ class WorkflowDefinition<TInput, TResult> {
         );
       }
 
-      let completedAt: number | null = null;
-
-      for (const [key, value] of Object.entries(parsed)) {
-        if (key === "completedAt" && typeof value === "number") {
-          completedAt = value;
-        }
-      }
-
-      if (completedAt === null) {
+      if (typeof parsed.completedAt !== "number") {
         return err(
           "WorkflowStateError",
           `Invalid step payload for ${stepName} in execution ${executionId}`,
         );
       }
+
+      const completedAt = parsed.completedAt;
 
       steps.push({
         name: stepName,
