@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { BaseFormatter } from "./formatter.js";
 
+import { mightThrowSync } from "../errors/index.js";
 import {
   type FileProviderOptions,
   type LogDataType,
@@ -200,10 +201,23 @@ export class FileProvider extends LoggerProvider {
     if (level > userLevel) return;
 
     let { msg } = data;
-    if (this.options.formatter) {
-      msg = this.options.formatter.format(data);
-    } else if (this.isJSONFile()) {
-      msg = JSON.stringify({ message: msg });
+    const [error, _] = mightThrowSync(() => {
+      const { formatter } = this.options;
+      if (formatter) {
+        msg = formatter.format(data);
+      } else if (this.isJSONFile()) {
+        msg = JSON.stringify({ message: msg });
+      }
+    });
+
+    if (error && error instanceof Error) {
+      const { formatter } = this.options;
+      if (formatter) {
+        const errorMsg = formatter.formatError(data, error);
+        appendFileSync(this.file, `${errorMsg}\n`);
+      } else {
+        appendFileSync(this.file, `${error}\n`);
+      }
     }
 
     if (this.canRollFile()) {
@@ -211,6 +225,7 @@ export class FileProvider extends LoggerProvider {
       this.file = this.createNewFileName();
     }
 
+    if (error) return;
     appendFileSync(this.file, `${msg}\n`);
   }
 
@@ -283,14 +298,28 @@ export class ConsoleProvider extends LoggerProvider {
     if (level > userLevel) return;
 
     let { msg } = data;
-    if (this.options.formatter) {
-      msg = this.options.formatter.format(data);
-    } else if (typeof msg === "object") {
-      msg = JSON.stringify(msg);
-    }
+    const [error, _] = mightThrowSync(() => {
+      const { formatter } = this.options;
+      if (formatter) {
+        msg = formatter.format(data);
+      } else if (typeof msg === "object") {
+        msg = JSON.stringify(msg);
+      }
+    });
 
     // biome-ignore-start lint/suspicious/noConsole: function used for the correct
     // functionality of the logger
+    if (error && error instanceof Error) {
+      const { formatter } = this.options;
+      if (formatter) {
+        console.error(formatter.formatError(data, error));
+      } else {
+        console.error(error);
+      }
+
+      return;
+    }
+
     switch (userLevel) {
       case LogLevel.debug:
         console.debug(msg);
