@@ -41,6 +41,7 @@ const [startError, started] = await onboardUser.start({
 Each step persists its output in Redis using the step name as key.
 
 If a workflow crashes after one or more completed steps:
+
 - calling `resume(executionId)` reruns the handler
 - completed steps are loaded from Redis and skipped
 - execution continues from the first unfinished step
