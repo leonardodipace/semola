@@ -8,6 +8,7 @@ export abstract class Formatter {
   }
 
   public abstract format(logData: LogDataType): string;
+  public abstract formatError(logData: LogDataType, error: Error): string;
 }
 
 export class BaseFormatter extends Formatter {
@@ -33,6 +34,31 @@ export class BaseFormatter extends Formatter {
     }
 
     return `${timestamp}  ${header} : ${msg}`;
+  }
+
+  public formatError(logData: LogDataType, error: Error): string {
+    let { prefix, fileName, row, column, method } = logData;
+    const timestamp = this.dateFmt();
+
+    const fileData = `${prefix}/${fileName}:${row}:${column}`;
+    let errorMsg = `Error name="${error.name}" Error message="${error.message}"`;
+    let header = "[ERROR]";
+
+    if (method) {
+      header = `${header}\t[${method}]\t[${fileData}]`;
+    } else {
+      header = `${header}\t[${fileData}]`;
+    }
+
+    if (error.cause) {
+      errorMsg = `${errorMsg}\n\tError cause="${error.cause}"`;
+    }
+
+    if (error.stack) {
+      errorMsg = `${errorMsg}\n\tStack trace="${error.stack}"`;
+    }
+
+    return `${timestamp}  ${header} : ${errorMsg}`;
   }
 }
 
@@ -61,6 +87,41 @@ export class JSONFormatter extends Formatter {
       position,
       msg,
     };
+
+    return JSON.stringify(data);
+  }
+
+  public formatError(logData: LogDataType, error: Error): string {
+    let { prefix, fileName, row, column, method } = logData;
+    const timestamp = this.dateFmt();
+    let errorMsg: Record<string, unknown> = {
+      errorName: error.name,
+      errorMessage: error.message,
+    };
+    let position: Record<string, string | undefined> = {};
+
+    if (method) {
+      position = { method };
+    }
+
+    position = { ...position, fileName, row, column };
+
+    if (error.cause) {
+      errorMsg = { ...errorMsg, errorCause: error.cause };
+    }
+
+    if (error.stack) {
+      errorMsg = { ...errorMsg, stackTrace: error.stack };
+    }
+
+    const data = {
+      timestamp,
+      level: "ERROR",
+      prefix,
+      position,
+      msg: errorMsg,
+    };
+
     return JSON.stringify(data);
   }
 }
