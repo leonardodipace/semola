@@ -138,7 +138,7 @@ export abstract class LoggerProvider {
 
   public constructor(options: ProviderOptions = PROVIDER_OPTION_DEFAULT) {
     if (Object.entries(options).length === 0) {
-      this.options = PROVIDER_OPTION_DEFAULT;
+      this.options = { ...PROVIDER_OPTION_DEFAULT };
     } else {
       this.options = options;
     }
