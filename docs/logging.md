@@ -14,13 +14,13 @@ import { Logger } from "semola/logging";
 
 Create a logger instance with a prefix and with at least one provider.
 In the following example, the `logger` instance will format and print all
-your the messages on the console.
+your messages on the console.
 
 ```typescript
 // log.ts
 const logger = new Logger("database", [new ConsoleProvider()]);
 
-logger.debug("A debugf");
+logger.debug("A debug");
 logger.info("An info");
 logger.warning("A warning");
 logger.error("An error");
@@ -38,7 +38,7 @@ logger.critical("A critical");
 
 ## Provider
 
-Providers are classes that enable the use of different logging strategies. The module provide the two most common approches:
+Providers are classes that enable the use of different logging strategies. The module provide the two most common approaches:
 
 - **console**: All your logs are redirected on the console. This strategy is implemented inside the `ConsoleProvider` class;
 - **file**: All your logs are saved inside a file and it support both plain text and structured data format, like JSON. This strategy is implemented inside the `FileProvider` class.
@@ -111,7 +111,7 @@ logger.critical("A critical");
 2026-03-09T15:23:05.512Z  [CRITICAL]	[database/test.ts:11:8] : A critical
 ```
 
-All created files will follow this simple patter: `<filename>.<number>.<ext>` where the second component its a number created by an internal counter.
+All created files will follow this simple patter: `<filename>.<number>.<ext>` where the second component it's a number created by an internal counter.
 
 **Rolling Policies**
 
@@ -135,7 +135,7 @@ Note that `InstantType = "hour" | "day" | "week" | "month"`
 
 ### Create a new provider
 
-If you need to create a custom provider, you can easly do that by extending your class with the `LoggerProvider` class. `LoggerProvider` is an abstract class and all its subclasses must override the abstract method `execute(data: LogDataType): void` and call its constructor by passing a formatter and the logging level. The `LoggerProvider` class expose the following public method:
+If you need to create a custom provider, you can easily do that by extending your class with the `LoggerProvider` class. `LoggerProvider` is an abstract class and all its subclasses must override the abstract method `execute(data: LogDataType): void` and call its constructor by passing a formatter and the logging level. The `LoggerProvider` class expose the following public method:
 
 - `getLogLevel(): number` - Return the current logging level expressed as a number. This can be used to filter messages based on their level.
 
@@ -174,7 +174,7 @@ The following table show what type of metadata are stored inside a `LogDataType`
 
 For instance, this is how a message is formatted by default.
 
-```
+```text
 <timestamp>  [<level>]       [<method>]  [<prefix>/<fileName>:<row>:<column>] : <msg>
 ```
 
@@ -207,14 +207,14 @@ jsonLogger.info("Formatted as a JSON object");
 
 // Print:
 // 2026-03-09T20:10:40.072Z  [INFO]        [database/test.ts:16:14] : Formatted as a string
-// {"timestamp":"2026-03-09T20:10:40.076Z","level":"INFO","prefix":"database","position":{"fileName":"test.ts","row":"17" "column":"12"},"msg":"Formatted as a JSON object"}
+// {"timestamp":"2026-03-09T20:10:40.076Z","level":"INFO","prefix":"database","position":{"fileName":"test.ts","row":"17","column":"12"},"msg":"Formatted as a JSON object"}
 ```
 
 . Here a list of all the pre-built date formatting functions:
 
 - `isoDateTimeFormat(): string` - Return a date as a string value formatted with the ISO format;
 - `isoDateFormat(): string` - Return a date as a string value formatted with the ISO format with only the date component;
-- `dmyFormat(): string` - Return a date as a string value with the `yyy-mm-dd` format;
+- `dmyFormat(): string` - Return a date as a string value with the `dd-mm-yyyy` format;
 - `mdyFormat(): string` - Return a date as a string value with the `mm-dd-yyyy` format.
 
 ### Create a new formatter
