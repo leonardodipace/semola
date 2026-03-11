@@ -5,9 +5,14 @@ class MockRedisClient {
   private hashes = new Map<string, Map<string, string>>();
   private strings = new Map<string, string>();
   private failCommands = new Set<string>();
+  private hsetCallsBeforeFail: number | null = null;
 
   public setCommandFailure(command: "hset" | "hget" | "set" | "get" | "del") {
     this.failCommands.add(command);
+  }
+
+  public failHsetAfterNCalls(n: number) {
+    this.hsetCallsBeforeFail = n;
   }
 
   public seedHashField(key: string, field: string, value: string) {
@@ -21,6 +26,14 @@ class MockRedisClient {
   public async hset(key: string, field: string, value: string) {
     if (this.failCommands.has("hset")) {
       throw new Error("hset failed");
+    }
+
+    if (this.hsetCallsBeforeFail !== null) {
+      if (this.hsetCallsBeforeFail <= 0) {
+        throw new Error("hset failed");
+      }
+
+      this.hsetCallsBeforeFail--;
     }
 
     if (!this.hashes.has(key)) {
@@ -712,5 +725,346 @@ describe("workflow", () => {
         expect(data).toBeNull();
       });
     }
+  });
+
+  describe("execute hset failure matrix", () => {
+    // createExecution writes 10 fields; execute() writes "status":"running" as the 11th
+    test("fails when hset fails during running status write", async () => {
+      const redis = createRedis() as MockRedisClient & Bun.RedisClient;
+      redis.failHsetAfterNCalls(10);
+
+      const workflow = createWorkflowWithEchoResult("hset-running-fail", redis);
+
+      const [error, data] = await workflow.start({ id: 1 });
+
+      expect(error?.type).toBe("WorkflowError");
+      expect(data).toBeNull();
+    });
+
+    // 10 createExecution + 2 running writes + 1 result = 13; 14th is "status":"completed"
+    test("fails when hset fails during completed status write", async () => {
+      const redis = createRedis() as MockRedisClient & Bun.RedisClient;
+      redis.failHsetAfterNCalls(13);
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "hset-completed-fail",
+        redis,
+        handler: async () => "done",
+      });
+
+      const [error, data] = await workflow.start({ id: 1 });
+
+      expect(error?.type).toBe("WorkflowError");
+      expect(data).toBeNull();
+    });
+  });
+
+  describe("cancel edge cases", () => {
+    test("returns not found for unknown execution", async () => {
+      const redis = createRedis();
+      const workflow = createWorkflowWithEchoResult("cancel-unknown", redis);
+
+      const [error, data] = await workflow.cancel("nonexistent");
+
+      expect(error).toEqual({
+        type: "WorkflowNotFoundError",
+        message: "Workflow execution nonexistent not found",
+      });
+      expect(data).toBeNull();
+    });
+
+    test("succeeds silently when cancelling already-cancelled execution", async () => {
+      const redis = createRedis();
+      let shouldFail = true;
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "cancel-twice",
+        redis,
+        handler: async ({ step }) => {
+          await step("one", async () => {
+            if (shouldFail) {
+              shouldFail = false;
+              throw new Error("fail");
+            }
+
+            return "ok";
+          });
+
+          return "done";
+        },
+      });
+
+      await workflow.start({ id: 1 }, { executionId: "cancel-twice-1" });
+      const [firstCancelError] = await workflow.cancel("cancel-twice-1");
+      const [secondCancelError, secondCancelData] =
+        await workflow.cancel("cancel-twice-1");
+
+      expect(firstCancelError).toBeNull();
+      expect(secondCancelError).toBeNull();
+      expect(secondCancelData).toBeNull();
+    });
+  });
+
+  describe("resume edge cases", () => {
+    test("returns not found for unknown execution", async () => {
+      const redis = createRedis();
+      const workflow = createWorkflowWithEchoResult("resume-unknown", redis);
+
+      const [error, data] = await workflow.resume("nonexistent");
+
+      expect(error).toEqual({
+        type: "WorkflowNotFoundError",
+        message: "Workflow execution nonexistent not found",
+      });
+      expect(data).toBeNull();
+    });
+  });
+
+  describe("run edge cases", () => {
+    test("returns WorkflowExecutionError when handler throws", async () => {
+      const redis = createRedis();
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "run-fail",
+        redis,
+        handler: async () => {
+          throw new Error("handler crashed");
+        },
+      });
+
+      const [error, result] = await workflow.run({ id: 1 });
+
+      expect(error?.type).toBe("WorkflowExecutionError");
+      expect(error?.message.includes("handler crashed")).toBe(true);
+      expect(result).toBeNull();
+    });
+
+    test("returns WorkflowCancelledError when cancelled during execution", async () => {
+      const redis = createRedis();
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "run-cancel",
+        redis,
+        handler: async ({ executionId, step }) => {
+          await step("cancel-self", async () => {
+            await workflow.cancel(executionId);
+            return "ok";
+          });
+
+          await step("detect-cancel", async () => "ok");
+
+          return "done";
+        },
+      });
+
+      const [error, result] = await workflow.run({ id: 1 });
+
+      expect(error?.type).toBe("WorkflowCancelledError");
+      expect(result).toBeNull();
+    });
+  });
+
+  describe("get on terminal states", () => {
+    test("returns error message and failedAt on failed workflow", async () => {
+      const redis = createRedis();
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "get-failed",
+        redis,
+        handler: async () => {
+          throw new Error("something went wrong");
+        },
+      });
+
+      await workflow.start({ id: 1 }, { executionId: "get-failed-1" });
+
+      const [error, execution] = await workflow.get("get-failed-1");
+
+      expect(error).toBeNull();
+      expect(execution?.status).toBe("failed");
+      expect(execution?.error).toBe("something went wrong");
+      expect(typeof execution?.failedAt).toBe("number");
+      expect(execution?.completedAt).toBeNull();
+      expect(execution?.cancelledAt).toBeNull();
+    });
+
+    test("returns cancelledAt on cancelled workflow", async () => {
+      const redis = createRedis();
+      let shouldFail = true;
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "get-cancelled",
+        redis,
+        handler: async ({ step }) => {
+          await step("one", async () => {
+            if (shouldFail) {
+              shouldFail = false;
+              throw new Error("fail");
+            }
+
+            return "ok";
+          });
+
+          return "done";
+        },
+      });
+
+      await workflow.start({ id: 1 }, { executionId: "get-cancelled-1" });
+      await workflow.cancel("get-cancelled-1");
+
+      const [error, execution] = await workflow.get("get-cancelled-1");
+
+      expect(error).toBeNull();
+      expect(execution?.status).toBe("cancelled");
+      expect(typeof execution?.cancelledAt).toBe("number");
+      expect(execution?.completedAt).toBeNull();
+    });
+  });
+
+  describe("falsy step output values", () => {
+    const cases = [
+      ["null", null],
+      ["zero", 0],
+      ["false", false],
+      ["empty string", ""],
+    ] as const;
+
+    for (const [label, value] of cases) {
+      test(`caches ${label} step output and does not re-run on resume`, async () => {
+        const redis = createRedis();
+        let stepRuns = 0;
+        let shouldFailWorkflow = true;
+
+        const workflow = defineWorkflow<{ id: number }, unknown>({
+          name: `falsy-${label}`,
+          redis,
+          handler: async ({ step }) => {
+            const result = await step("produce", async () => {
+              stepRuns++;
+              return value;
+            });
+
+            if (shouldFailWorkflow) {
+              shouldFailWorkflow = false;
+              throw new Error("fail after step");
+            }
+
+            return result;
+          },
+        });
+
+        const executionId = `falsy-${label}-exec`;
+
+        const [startError] = await workflow.start({ id: 1 }, { executionId });
+
+        expect(startError).not.toBeNull();
+        expect(stepRuns).toBe(1);
+
+        const [resumeError, resumeData] = await workflow.resume(executionId);
+        const [getError, execution] = await workflow.get(executionId);
+
+        expect(resumeError).toBeNull();
+        expect(resumeData?.status).toBe("completed");
+        expect(getError).toBeNull();
+        expect(execution?.result).toStrictEqual(value);
+        expect(stepRuns).toBe(1);
+      });
+    }
+  });
+
+  describe("custom step output serializers", () => {
+    test("uses serializeStepOutput and deserializeStepOutput on resume", async () => {
+      const redis = createRedis();
+      let serializeCalled = 0;
+      let deserializeCalled = 0;
+      let shouldFail = true;
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "step-serializers",
+        redis,
+        serializeStepOutput: (value) => {
+          serializeCalled++;
+          return `custom:${JSON.stringify(value)}`;
+        },
+        deserializeStepOutput: (raw) => {
+          deserializeCalled++;
+          return JSON.parse(raw.replace("custom:", ""));
+        },
+        handler: async ({ step }) => {
+          const result = await step("compute", async () => ({ value: 42 }));
+
+          if (shouldFail) {
+            shouldFail = false;
+            throw new Error("fail after step");
+          }
+
+          return `value:${(result as { value: number }).value}`;
+        },
+      });
+
+      await workflow.start({ id: 1 }, { executionId: "step-ser-1" });
+
+      expect(serializeCalled).toBe(1);
+      expect(deserializeCalled).toBe(0);
+
+      const [resumeError] = await workflow.resume("step-ser-1");
+
+      expect(resumeError).toBeNull();
+      expect(serializeCalled).toBe(1);
+      expect(deserializeCalled).toBe(1);
+    });
+  });
+
+  describe("result deserializer", () => {
+    test("returns serialization error when result deserializer throws", async () => {
+      const redis = createRedis();
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "deser-result-error",
+        redis,
+        serializeResult: () => "custom-format",
+        deserializeResult: () => {
+          throw new Error("cannot deserialize");
+        },
+        handler: async () => "done",
+      });
+
+      await workflow.start({ id: 1 }, { executionId: "deser-1" });
+
+      const [error, data] = await workflow.get("deser-1");
+
+      expect(error?.type).toBe("WorkflowSerializationError");
+      expect(data).toBeNull();
+    });
+  });
+
+  describe("abort signal", () => {
+    test("signal is aborted when step detects cancellation", async () => {
+      const redis = createRedis();
+      let signalAborted = false;
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "abort-signal",
+        redis,
+        handler: async ({ executionId, step, signal }) => {
+          signal.addEventListener("abort", () => {
+            signalAborted = true;
+          });
+
+          await step("cancel-self", async () => {
+            await workflow.cancel(executionId);
+            return "ok";
+          });
+
+          await step("detect-cancel", async () => "ok");
+
+          return "done";
+        },
+      });
+
+      await workflow.run({ id: 1 });
+
+      expect(signalAborted).toBe(true);
+    });
   });
 });
