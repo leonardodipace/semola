@@ -78,8 +78,16 @@ describe("generateCode", () => {
     const code = generateCode([usersTable], "postgres");
 
     expect(code).toContain('const usersTable = createTable("users", {');
-    expect(code).toContain('id: uuid("id").primaryKey().notNull(),');
+    expect(code).toContain('id: uuid("id").primaryKey(),');
     expect(code).toContain('email: string("email").notNull().unique(),');
+  });
+
+  test("emits default chains when raw defaults are recognized", () => {
+    const code = generateCode([usersTable], "postgres");
+
+    expect(code).toContain(
+      'createdAt: date("created_at").defaultFn(() => new Date()),',
+    );
   });
 
   test("converts snake_case to camelCase for JS keys", () => {
@@ -165,5 +173,30 @@ describe("generateCode", () => {
 
     expect(code).toContain("const userProfilesTable = createTable(");
     expect(code).toContain("userProfiles: userProfilesTable,");
+  });
+
+  test("maps uuid primary key DB defaults to defaultFn", () => {
+    const tableWithUuidDefault: IntrospectedTable = {
+      name: "users",
+      columns: [
+        {
+          sqlName: "id",
+          kind: "uuid",
+          nullable: false,
+          primaryKey: true,
+          unique: false,
+          rawDefault: "gen_random_uuid()",
+          references: null,
+          unknownDbType: null,
+        },
+      ],
+    };
+
+    const code = generateCode([tableWithUuidDefault], "postgres");
+
+    expect(code).toContain(
+      'id: uuid("id").primaryKey().defaultFn(() => crypto.randomUUID()),',
+    );
+    expect(code).not.toContain('id: uuid("id").primaryKey().notNull(),');
   });
 });

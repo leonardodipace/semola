@@ -7,6 +7,119 @@ function toCamelCase(sqlName: string) {
   );
 }
 
+function stripWrappingParens(value: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed.startsWith("(") || !trimmed.endsWith(")")) {
+    return trimmed;
+  }
+
+  return trimmed.slice(1, -1).trim();
+}
+
+function parseStringLiteral(input: string) {
+  const trimmed = input.trim();
+
+  if (!trimmed.startsWith("'")) {
+    return null;
+  }
+
+  let out = "";
+  let index = 1;
+
+  while (index < trimmed.length) {
+    const char = trimmed[index];
+
+    if (char === "'") {
+      const next = trimmed[index + 1];
+
+      if (next === "'") {
+        out += "'";
+        index += 2;
+        continue;
+      }
+
+      const rest = trimmed.slice(index + 1).trim();
+      if (rest.length === 0 || rest.startsWith("::")) {
+        return out;
+      }
+
+      return null;
+    }
+
+    out += char;
+    index++;
+  }
+
+  return null;
+}
+
+function mapRawDefaultToChain(col: IntrospectedColumn) {
+  const rawDefault = col.rawDefault;
+
+  if (!rawDefault) {
+    return null;
+  }
+
+  const raw = rawDefault.trim();
+  const lower = raw.toLowerCase();
+  const unwrapped = stripWrappingParens(raw);
+  const unwrappedLower = unwrapped.toLowerCase();
+
+  if (col.kind === "uuid") {
+    if (
+      unwrappedLower.includes("gen_random_uuid()") ||
+      unwrappedLower.includes("uuid_generate_v4()") ||
+      unwrappedLower === "uuid()"
+    ) {
+      return "defaultFn(() => crypto.randomUUID())";
+    }
+  }
+
+  if (col.kind === "date") {
+    if (
+      unwrappedLower === "now()" ||
+      unwrappedLower === "current_timestamp" ||
+      unwrappedLower === "current_timestamp()" ||
+      unwrappedLower === "datetime('now')"
+    ) {
+      return "defaultFn(() => new Date())";
+    }
+  }
+
+  const parsedString = parseStringLiteral(raw);
+  if (parsedString !== null) {
+    return `default(${JSON.stringify(parsedString)})`;
+  }
+
+  if (col.kind === "boolean") {
+    if (
+      lower === "true" ||
+      lower === "false" ||
+      unwrappedLower === "true" ||
+      unwrappedLower === "false"
+    ) {
+      return `default(${unwrappedLower})`;
+    }
+
+    if (unwrapped === "1") {
+      return "default(true)";
+    }
+
+    if (unwrapped === "0") {
+      return "default(false)";
+    }
+  }
+
+  if (col.kind === "number") {
+    if (/^-?\d+(\.\d+)?$/.test(unwrapped)) {
+      return `default(${unwrapped})`;
+    }
+  }
+
+  return null;
+}
+
 function buildColumnCall(col: IntrospectedColumn): string {
   const parts: string[] = [`${col.kind}("${col.sqlName}")`];
 
@@ -14,7 +127,12 @@ function buildColumnCall(col: IntrospectedColumn): string {
     parts.push("primaryKey()");
   }
 
-  if (!col.nullable) {
+  const defaultChain = mapRawDefaultToChain(col);
+  if (defaultChain) {
+    parts.push(defaultChain);
+  }
+
+  if (!col.nullable && !col.primaryKey) {
     parts.push("notNull()");
   }
 
