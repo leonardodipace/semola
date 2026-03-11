@@ -3,6 +3,7 @@ import type {
   StandardSchemaV1,
 } from "@standard-schema/spec";
 import type { OpenAPIV3_1 } from "openapi-types";
+import type { GenericSchema as ValibotSchema } from "valibot";
 import type { RequestSchema, ResponseSchema } from "../core/types.js";
 import type { Middleware } from "../middleware/index.js";
 import type {
@@ -36,14 +37,35 @@ type OpenApiGeneratorOptions = {
   globalMiddlewares?: readonly Middleware[];
 };
 
-const toOpenAPISchema = (
+const toOpenAPISchema = async (
   schema: StandardSchemaV1,
   io: "input" | "output" = "input",
-) => ({
-  schema: (schema as unknown as StandardJSONSchemaV1)["~standard"].jsonSchema[
-    io
-  ]({ target: "draft-2020-12" }),
-});
+) => {
+  const standardSchema = schema as unknown as StandardJSONSchemaV1;
+  const standardProps = standardSchema["~standard"];
+  const jsonSchemaApi = standardProps.jsonSchema;
+
+  if (jsonSchemaApi?.[io]) {
+    return {
+      schema: jsonSchemaApi[io]({ target: "draft-2020-12" }),
+    };
+  }
+
+  if (standardProps.vendor === "valibot") {
+    const { toJsonSchema } = await import("@valibot/to-json-schema");
+
+    return {
+      schema: toJsonSchema(schema as unknown as ValibotSchema, {
+        target: "draft-2020-12",
+        typeMode: io,
+      }),
+    };
+  }
+
+  throw new Error(
+    "OpenAPI generation requires a schema with ~standard.jsonSchema support (or valibot support via @valibot/to-json-schema).",
+  );
+};
 
 const getSchemaDescription = (schema: StandardSchemaV1) => {
   const metadata = schema["~standard"];
@@ -113,48 +135,132 @@ type JsonSchema = {
   [key: string]: unknown;
 };
 
+const schemaRegistry = new WeakMap<object, string>();
+
+export const namedSchema = <T extends StandardSchemaV1>(
+  id: string,
+  schema: T,
+): T => {
+  schemaRegistry.set(schema as object, id);
+  return schema;
+};
+
+const defsPrefix = "#/$defs/";
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+};
+
+const normalizeSchemaForOpenApi = (
+  schema: unknown,
+  collectedDefs: Record<string, unknown>,
+): unknown => {
+  if (Array.isArray(schema)) {
+    return schema.map((item) => normalizeSchemaForOpenApi(item, collectedDefs));
+  }
+
+  if (!isRecord(schema)) {
+    return schema;
+  }
+
+  const normalized: Record<string, unknown> = {};
+
+  for (const key in schema) {
+    const value = schema[key];
+
+    if (key === "$schema") {
+      continue;
+    }
+
+    if (key === "$defs" && isRecord(value)) {
+      for (const defName in value) {
+        const normalizedDef = normalizeSchemaForOpenApi(
+          value[defName],
+          collectedDefs,
+        );
+
+        if (isRecord(normalizedDef)) {
+          const cleanDef = { ...normalizedDef };
+          delete cleanDef.id;
+          collectedDefs[defName] = cleanDef;
+          continue;
+        }
+
+        collectedDefs[defName] = normalizedDef;
+      }
+
+      continue;
+    }
+
+    const normalizedValue = normalizeSchemaForOpenApi(value, collectedDefs);
+
+    if (
+      key === "$ref" &&
+      typeof normalizedValue === "string" &&
+      normalizedValue.startsWith(defsPrefix)
+    ) {
+      normalized[key] =
+        `#/components/schemas/${normalizedValue.slice(defsPrefix.length)}`;
+
+      continue;
+    }
+
+    normalized[key] = normalizedValue;
+  }
+
+  return normalized;
+};
+
 const convertSchemaToOpenApi = async (
   schema: StandardSchemaV1,
   io: "input" | "output" = "input",
 ) => {
-  const result = toOpenAPISchema(schema, io);
+  const result = await toOpenAPISchema(schema, io);
   const { schema: jsonSchema } = result as {
     schema: JsonSchema;
     components?: OpenAPIV3_1.ComponentsObject;
   };
 
-  // Check if schema has an id (from .meta({ id: "..." }))
-  const schemaId = jsonSchema.id;
+  const componentSchemas: Record<string, unknown> = {};
+  const normalizedSchema = normalizeSchemaForOpenApi(
+    jsonSchema,
+    componentSchemas,
+  );
 
-  if (schemaId && typeof schemaId === "string") {
-    // Extract to components and return a reference
-    const schemaWithoutId = { ...jsonSchema };
-    delete schemaWithoutId.id;
-    delete schemaWithoutId.$schema;
+  if (!isRecord(normalizedSchema)) {
+    return {
+      schema: normalizedSchema,
+      components:
+        Object.keys(componentSchemas).length > 0
+          ? ({ schemas: componentSchemas } as OpenAPIV3_1.ComponentsObject)
+          : undefined,
+    };
+  }
+
+  const schemaId = schemaRegistry.get(schema as object);
+
+  if (schemaId) {
+    componentSchemas[schemaId] = normalizedSchema;
 
     return {
       schema: { $ref: `#/components/schemas/${schemaId}` },
-      components: {
-        schemas: {
-          [schemaId]: schemaWithoutId,
-        },
-      } as OpenAPIV3_1.ComponentsObject,
+      components:
+        Object.keys(componentSchemas).length > 0
+          ? ({ schemas: componentSchemas } as OpenAPIV3_1.ComponentsObject)
+          : undefined,
     };
   }
 
-  // Remove $schema from inline schemas
-  if (jsonSchema.$schema) {
-    const schemaWithoutMeta = { ...jsonSchema };
-    delete schemaWithoutMeta.$schema;
-    return {
-      schema: schemaWithoutMeta,
-      components: undefined,
-    };
-  }
+  // Strip any stray top-level `id` property (e.g. from unsupported Zod .meta())
+  const inlineSchema = { ...normalizedSchema };
+  delete inlineSchema.id;
 
-  return result as {
-    schema: JsonSchema;
-    components?: OpenAPIV3_1.ComponentsObject;
+  return {
+    schema: inlineSchema,
+    components:
+      Object.keys(componentSchemas).length > 0
+        ? ({ schemas: componentSchemas } as OpenAPIV3_1.ComponentsObject)
+        : undefined,
   };
 };
 
@@ -163,7 +269,7 @@ const convertSchemaToInlineOpenApi = async (
   schema: StandardSchemaV1,
   io: "input" | "output" = "input",
 ) => {
-  const result = toOpenAPISchema(schema, io);
+  const result = await toOpenAPISchema(schema, io);
   const { schema: jsonSchema } = result as {
     schema: JsonSchema;
     components?: OpenAPIV3_1.ComponentsObject;

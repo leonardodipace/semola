@@ -15,7 +15,7 @@ curl -fsSL https://bun.sh/install | bash
 ## Import
 
 ```typescript
-import { Api } from "semola/api";
+import { Api, namedSchema } from "semola/api";
 ```
 
 ## API
@@ -102,28 +102,23 @@ The generated spec is compatible with modern OpenAPI tooling including Swagger U
 
 #### Schema Reuse in OpenAPI
 
-To optimize your OpenAPI specification and reduce redundancy, you can define reusable schemas using the `.meta({ id: "SchemaName" })` method. Schemas with an ID are extracted to `components.schemas` and referenced using `$ref` instead of being inlined everywhere they're used.
-
-**With Zod:**
+To optimize your OpenAPI specification and reduce redundancy, you can wrap any schema with `namedSchema(id, schema)`. Named schemas are extracted to `components.schemas` and referenced using `$ref` instead of being inlined everywhere they're used. This works with Zod, Valibot, ArkType, and any other Standard Schema library.
 
 ```typescript
+import { namedSchema } from "semola/api";
+import * as v from "valibot";
 import { z } from "zod";
 
-// Define a reusable schema with an ID
-const UserSchema = z
-  .object({
-    id: z.string().uuid(),
-    name: z.string(),
-    email: z.email(),
-  })
-  .meta({ id: "User" });
+// Works with any Standard Schema library
+const UserSchema = namedSchema(
+  "User",
+  z.object({ id: z.string().uuid(), name: z.string(), email: z.string() }),
+);
 
-const ErrorResponse = z
-  .object({
-    error: z.string(),
-    message: z.string(),
-  })
-  .meta({ id: "ErrorResponse" });
+const ErrorResponse = namedSchema(
+  "ErrorResponse",
+  v.object({ error: v.string(), message: v.string() }),
+);
 
 // Use across multiple routes
 api.defineRoute({
@@ -149,33 +144,10 @@ api.defineRoute({
 // and referenced as { "$ref": "#/components/schemas/User" } everywhere
 ```
 
-**With Valibot:**
+You can also name wrapper schemas such as arrays:
 
 ```typescript
-import * as v from "valibot";
-
-// Valibot uses metadata in the schema pipeline
-const UserSchema = v.pipe(
-  v.object({
-    id: v.pipe(v.string(), v.uuid()),
-    name: v.string(),
-    email: v.pipe(v.string(), v.email()),
-  }),
-  v.metadata({ id: "User" }),
-);
-```
-
-**With ArkType:**
-
-```typescript
-import { type } from "arktype";
-
-// ArkType uses describe() with id metadata
-const UserSchema = type({
-  id: "string.uuid",
-  name: "string",
-  email: "string.email",
-}).describe("User");
+const UserListSchema = namedSchema("UserList", v.array(UserSchema));
 ```
 
 **Benefits:**
@@ -183,9 +155,9 @@ const UserSchema = type({
 - **Smaller spec size**: Schema defined once, referenced multiple times
 - **Better maintainability**: Update schema in one place
 - **Improved readability**: Cleaner OpenAPI specifications
-- **Backward compatible**: Schemas without `.meta({ id })` are inlined as before
+- **Library-agnostic**: Works identically with Zod, Valibot, ArkType, and any Standard Schema library
 
-**Note:** Query parameters, headers, cookies, and path parameters are always inlined (OpenAPI requirement), regardless of whether they have an ID.
+**Note:** Query parameters, headers, cookies, and path parameters are always inlined (OpenAPI requirement), regardless of whether they are named.
 
 ### `api.serve(port, callback?)`
 
@@ -225,7 +197,7 @@ The handler receives a context object with type-safe request data and response m
 - **Automatic input validation**: Request validation (400 on error)
 - **Output validation**: Response validation against declared schema (400 on error)
 - **OpenAPI generation**: Automatic OpenAPI 3.1.0 spec from route definitions
-- **Schema reuse**: Define schemas once with `.meta({ id })` and reference them across routes
+- **Schema reuse**: Define schemas once with `namedSchema()` and reference them across routes
 - **Bun-native routing**: Leverages Bun.serve's SIMD-accelerated routing
 - **Result pattern**: Uses `[error, data]` tuples internally for error handling
 
@@ -233,29 +205,23 @@ The handler receives a context object with type-safe request data and response m
 
 ```typescript
 import { z } from "zod";
-import { Api } from "semola/api";
+import { Api, namedSchema } from "semola/api";
 
 // Define reusable schemas with IDs for OpenAPI optimization
-const CreateUserSchema = z
-  .object({
-    name: z.string().min(1),
-    email: z.email(),
-  })
-  .meta({ id: "CreateUserRequest" });
+const CreateUserSchema = namedSchema(
+  "CreateUserRequest",
+  z.object({ name: z.string().min(1), email: z.string() }),
+);
 
-const UserSchema = z
-  .object({
-    id: z.uuid(),
-    name: z.string(),
-    email: z.email(),
-  })
-  .meta({ id: "User" });
+const UserSchema = namedSchema(
+  "User",
+  z.object({ id: z.string(), name: z.string(), email: z.string() }),
+);
 
-const ErrorSchema = z
-  .object({
-    message: z.string(),
-  })
-  .meta({ id: "ErrorResponse" });
+const ErrorSchema = namedSchema(
+  "ErrorResponse",
+  z.object({ message: z.string() }),
+);
 
 // Create API
 const api = new Api({

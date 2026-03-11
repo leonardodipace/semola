@@ -244,7 +244,7 @@ _Higher is better for req/sec, lower is better for latency._
 - 🔒 **Type safety that actually works**: From request validation to response serialization, TypeScript catches errors before they hit production.
 - 📄 **Documentation writes itself**: Auto-generated OpenAPI specs from your code. No more stale docs.
 - 🚫 **Error handling reimagined**: No more try-catch spaghetti. Clean result tuples that compose beautifully.
-- ⚡ **Schema validation freedom**: Use Zod, Valibot, ArkType, or any Standard Schema library. Your choice.
+- ⚡ **Schema validation freedom**: Use Zod, Valibot, ArkType, or any Standard Schema library - including `namedSchema()` for library-agnostic OpenAPI schema reuse.
 - 🔋 **Batteries included**: Everything you need in one cohesive toolkit. No 50 dependencies to audit.
 
 ---
