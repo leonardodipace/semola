@@ -128,6 +128,65 @@ describe("generateCode", () => {
     expect(code).toContain('.onDelete("CASCADE")');
   });
 
+  test("emits one() and many() relations in createOrm", () => {
+    const code = generateCode([usersTable, postsTable], "postgres");
+
+    expect(code).toContain("many, one");
+    expect(code).toContain("relations: {");
+    expect(code).toContain("users: {");
+    expect(code).toContain("posts: many(() => postsTable),");
+    expect(code).toContain("posts: {");
+    expect(code).toContain('user: one("user_id", () => usersTable),');
+  });
+
+  test("emits unique many() relation keys for repeated foreign keys", () => {
+    const commentsTable: IntrospectedTable = {
+      name: "comments",
+      columns: [
+        {
+          sqlName: "id",
+          kind: "uuid",
+          nullable: false,
+          primaryKey: true,
+          unique: false,
+          rawDefault: null,
+          arrayElementKind: null,
+          references: null,
+          unknownDbType: null,
+        },
+        {
+          sqlName: "author_id",
+          kind: "uuid",
+          nullable: false,
+          primaryKey: false,
+          unique: false,
+          rawDefault: null,
+          arrayElementKind: null,
+          references: { table: "users", column: "id", onDelete: null },
+          unknownDbType: null,
+        },
+        {
+          sqlName: "reviewer_id",
+          kind: "uuid",
+          nullable: false,
+          primaryKey: false,
+          unique: false,
+          rawDefault: null,
+          arrayElementKind: null,
+          references: { table: "users", column: "id", onDelete: null },
+          unknownDbType: null,
+        },
+      ],
+    };
+
+    const code = generateCode([usersTable, commentsTable], "postgres");
+
+    expect(code).toContain("comments: many(() => commentsTable),");
+    expect(code).toContain("commentsByReviewerId: many(() => commentsTable),");
+    expect(code).toContain('author: one("author_id", () => usersTable),');
+    expect(code).toContain('reviewer: one("reviewer_id", () => usersTable),');
+  });
+
   test("emits createOrm with correct dialect and tables", () => {
     const code = generateCode([usersTable, postsTable], "postgres");
 

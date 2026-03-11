@@ -7,6 +7,17 @@ function toCamelCase(sqlName: string) {
   );
 }
 
+function toPascalCase(sqlName: string) {
+  const camel = toCamelCase(sqlName);
+  const first = camel[0];
+
+  if (!first) {
+    return camel;
+  }
+
+  return `${first.toUpperCase()}${camel.slice(1)}`;
+}
+
 function toTypeLiteral(value: string) {
   return JSON.stringify(value);
 }
@@ -371,6 +382,144 @@ function toVarName(tableName: string) {
   return `${camel}Table`;
 }
 
+function findTableByName(tables: IntrospectedTable[], tableName: string) {
+  for (const table of tables) {
+    if (table.name === tableName) {
+      return table;
+    }
+  }
+
+  return null;
+}
+
+function toOneRelationBaseName(sqlName: string) {
+  if (sqlName.endsWith("_id") && sqlName.length > 3) {
+    return sqlName.slice(0, -3);
+  }
+
+  return sqlName;
+}
+
+function toUniqueRelationKey(
+  baseKey: string,
+  used: Set<string>,
+  suffix: string,
+) {
+  if (!used.has(baseKey)) {
+    used.add(baseKey);
+    return baseKey;
+  }
+
+  const suffixed = `${baseKey}By${toPascalCase(suffix)}`;
+
+  if (!used.has(suffixed)) {
+    used.add(suffixed);
+    return suffixed;
+  }
+
+  let index = 2;
+
+  while (used.has(`${suffixed}${index}`)) {
+    index++;
+  }
+
+  const indexed = `${suffixed}${index}`;
+  used.add(indexed);
+  return indexed;
+}
+
+function buildRelationEntriesForTable(
+  table: IntrospectedTable,
+  tables: IntrospectedTable[],
+) {
+  const used = new Set<string>();
+  const entries: string[] = [];
+
+  for (const col of table.columns) {
+    if (!col.references) {
+      continue;
+    }
+
+    const targetTable = findTableByName(tables, col.references.table);
+
+    if (!targetTable) {
+      continue;
+    }
+
+    const oneKeyBase = toCamelCase(toOneRelationBaseName(col.sqlName));
+    const oneKey = toUniqueRelationKey(oneKeyBase, used, col.sqlName);
+
+    entries.push(
+      `      ${oneKey}: one("${col.sqlName}", () => ${toVarName(targetTable.name)}),`,
+    );
+  }
+
+  for (const sourceTable of tables) {
+    for (const sourceCol of sourceTable.columns) {
+      if (!sourceCol.references) {
+        continue;
+      }
+
+      if (sourceCol.references.table !== table.name) {
+        continue;
+      }
+
+      const manyKeyBase = toCamelCase(sourceTable.name);
+      const manyKey = toUniqueRelationKey(manyKeyBase, used, sourceCol.sqlName);
+
+      entries.push(
+        `      ${manyKey}: many(() => ${toVarName(sourceTable.name)}),`,
+      );
+    }
+  }
+
+  return entries;
+}
+
+function hasAnyRelations(tables: IntrospectedTable[]) {
+  for (const table of tables) {
+    for (const col of table.columns) {
+      if (col.references) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function buildRelationsConfig(tables: IntrospectedTable[]) {
+  const lines: string[] = [];
+
+  for (const table of tables) {
+    const relationEntries = buildRelationEntriesForTable(table, tables);
+
+    if (relationEntries.length === 0) {
+      continue;
+    }
+
+    if (lines.length === 0) {
+      lines.push("  relations: {");
+    }
+
+    lines.push(`    ${toCamelCase(table.name)}: {`);
+
+    for (const relationEntry of relationEntries) {
+      lines.push(relationEntry);
+    }
+
+    lines.push("    },");
+  }
+
+  if (lines.length === 0) {
+    return null;
+  }
+
+  lines.push("  },");
+
+  return lines.join("\n");
+}
+
 function buildTableBlock(table: IntrospectedTable): string {
   const varName = toVarName(table.name);
   const lines: string[] = [];
@@ -397,12 +546,14 @@ export function generateCode(
 ): string {
   const kinds = collectImports(tables);
   const hasEnums = hasEnumColumns(tables);
+  const hasRelations = hasAnyRelations(tables);
 
   const kindImports = [
     "createOrm",
     "createTable",
     ...kinds,
     ...(hasEnums ? ["enumeration"] : []),
+    ...(hasRelations ? ["many", "one"] : []),
   ].join(", ");
 
   const sections: string[] = [];
@@ -417,6 +568,8 @@ export function generateCode(
     .map((t) => `  ${toCamelCase(t.name)}: ${toVarName(t.name)},`)
     .join("\n");
 
+  const relationsBlock = buildRelationsConfig(tables);
+
   sections.push(
     "",
     `export const orm = createOrm({`,
@@ -425,6 +578,7 @@ export function generateCode(
     `  tables: {`,
     tableEntries,
     `  },`,
+    ...(relationsBlock ? [relationsBlock] : []),
     `});`,
   );
 
