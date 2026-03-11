@@ -1,5 +1,4 @@
 export { Api } from "./core/index.js";
-// Export types from core
 export type {
   ApiOptions,
   Context,
@@ -19,11 +18,11 @@ export type {
   SecuritySchemeOpenIdConnect,
 } from "./core/types.js";
 export { Middleware } from "./middleware/index.js";
-
-// Export types from middleware
 export type {
   InferMiddlewareExtension,
   MergeMiddlewareExtensions,
   MiddlewareHandler,
   MiddlewareOptions,
 } from "./middleware/types.js";
+
+export { namedSchema } from "./openapi/index.js";

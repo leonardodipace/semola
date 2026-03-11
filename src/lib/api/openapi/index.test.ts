@@ -3,7 +3,7 @@ import { type as arktype } from "arktype";
 import * as v from "valibot";
 import { z } from "zod";
 import { Middleware } from "../middleware/index.js";
-import { generateOpenApiSpec } from "./index.js";
+import { generateOpenApiSpec, namedSchema } from "./index.js";
 
 describe("OpenAPI Generation", () => {
   test("should generate a valid base spec with info", async () => {
@@ -427,12 +427,13 @@ describe("OpenAPI Generation", () => {
   });
 
   test("should extract schemas with id to components and use $ref", async () => {
-    const UserSchema = z
-      .object({
+    const UserSchema = namedSchema(
+      "User",
+      z.object({
         id: z.string(),
         name: z.string(),
-      })
-      .meta({ id: "User" });
+      }),
+    );
 
     const spec = await generateOpenApiSpec({
       title: "API",
@@ -515,12 +516,13 @@ describe("OpenAPI Generation", () => {
   });
 
   test("should reuse the same schema across multiple operations", async () => {
-    const UserSchema = z
-      .object({
+    const UserSchema = namedSchema(
+      "User",
+      z.object({
         id: z.string(),
         name: z.string(),
-      })
-      .meta({ id: "User" });
+      }),
+    );
 
     const spec = await generateOpenApiSpec({
       title: "API",
@@ -579,15 +581,14 @@ describe("OpenAPI Generation", () => {
     ).toEqual({ $ref: "#/components/schemas/User" });
   });
 
-  test("should reuse component schema for array chained from a schema with id", async () => {
-    const UserSchema = z
-      .object({
-        id: z.string(),
-        firstName: z.string(),
-        lastName: z.string(),
-        email: z.string().email(),
-      })
-      .meta({ id: "User" });
+  test("should extract named Zod array schema with namedSchema() to components", async () => {
+    const UserSchema = z.object({
+      id: z.string(),
+      firstName: z.string(),
+      lastName: z.string(),
+    });
+
+    const UserListSchema = namedSchema("UserList", UserSchema.array());
 
     const spec = await generateOpenApiSpec({
       title: "API",
@@ -596,9 +597,7 @@ describe("OpenAPI Generation", () => {
         {
           path: "/users",
           method: "GET",
-          response: {
-            200: UserSchema.array(),
-          },
+          response: { 200: UserListSchema },
           handler: () => {},
         },
       ],
@@ -608,23 +607,19 @@ describe("OpenAPI Generation", () => {
       spec.paths["/users"]?.get?.responses["200"]?.content?.["application/json"]
         ?.schema;
 
-    expect(spec.components?.schemas?.User).toBeDefined();
-    expect(responseSchema).toMatchObject({
+    expect(spec.components?.schemas?.UserList).toMatchObject({
       type: "array",
-      items: {
-        $ref: "#/components/schemas/User",
-      },
+      items: { type: "object" },
     });
-    expect(JSON.stringify(responseSchema)).not.toContain("#/$defs/");
+    expect(responseSchema).toEqual({ $ref: "#/components/schemas/UserList" });
   });
 
-  test("should reuse component schema for optional chained from a schema with id", async () => {
-    const UserSchema = z
-      .object({
-        id: z.string(),
-        name: z.string(),
-      })
-      .meta({ id: "User" });
+  test("should extract named Zod optional schema with namedSchema() to components", async () => {
+    const UserSchema = z.object({ id: z.string(), name: z.string() });
+    const OptionalUserSchema = namedSchema(
+      "OptionalUser",
+      UserSchema.optional(),
+    );
 
     const spec = await generateOpenApiSpec({
       title: "API",
@@ -633,9 +628,7 @@ describe("OpenAPI Generation", () => {
         {
           path: "/users/optional",
           method: "GET",
-          response: {
-            200: UserSchema.optional(),
-          },
+          response: { 200: OptionalUserSchema },
           handler: () => {},
         },
       ],
@@ -645,21 +638,19 @@ describe("OpenAPI Generation", () => {
       spec.paths["/users/optional"]?.get?.responses["200"]?.content?.[
         "application/json"
       ]?.schema;
-    const responseSchemaText = JSON.stringify(responseSchema);
 
-    expect(spec.components?.schemas?.User).toBeDefined();
-    expect(responseSchemaText).toContain("#/components/schemas/User");
-    expect(responseSchemaText).not.toContain("#/$defs/");
-    expect(responseSchemaText).not.toContain('"$defs"');
+    expect(spec.components?.schemas?.OptionalUser).toBeDefined();
+    expect(responseSchema).toEqual({
+      $ref: "#/components/schemas/OptionalUser",
+    });
   });
 
-  test("should reuse component schema for nullable chained from a schema with id", async () => {
-    const UserSchema = z
-      .object({
-        id: z.string(),
-        name: z.string(),
-      })
-      .meta({ id: "User" });
+  test("should extract named Zod nullable schema with namedSchema() to components", async () => {
+    const UserSchema = z.object({ id: z.string(), name: z.string() });
+    const NullableUserSchema = namedSchema(
+      "NullableUser",
+      UserSchema.nullable(),
+    );
 
     const spec = await generateOpenApiSpec({
       title: "API",
@@ -668,9 +659,7 @@ describe("OpenAPI Generation", () => {
         {
           path: "/users/nullable",
           method: "GET",
-          response: {
-            200: UserSchema.nullable(),
-          },
+          response: { 200: NullableUserSchema },
           handler: () => {},
         },
       ],
@@ -680,12 +669,11 @@ describe("OpenAPI Generation", () => {
       spec.paths["/users/nullable"]?.get?.responses["200"]?.content?.[
         "application/json"
       ]?.schema;
-    const responseSchemaText = JSON.stringify(responseSchema);
 
-    expect(spec.components?.schemas?.User).toBeDefined();
-    expect(responseSchemaText).toContain("#/components/schemas/User");
-    expect(responseSchemaText).not.toContain("#/$defs/");
-    expect(responseSchemaText).not.toContain('"$defs"');
+    expect(spec.components?.schemas?.NullableUser).toBeDefined();
+    expect(responseSchema).toEqual({
+      $ref: "#/components/schemas/NullableUser",
+    });
   });
 
   test("should generate OpenAPI from Valibot array schema", async () => {
@@ -973,5 +961,160 @@ describe("OpenAPI Generation", () => {
         ],
       }),
     ).rejects.toThrow();
+  });
+
+  test("should extract Valibot schema with namedSchema() to components and use $ref", async () => {
+    const UserSchema = namedSchema(
+      "User",
+      v.object({ id: v.string(), name: v.string() }),
+    );
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/users",
+          method: "POST",
+          request: { body: UserSchema },
+          response: { 201: UserSchema },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas?.User).toMatchObject({
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        name: { type: "string" },
+      },
+    });
+
+    const requestSchema =
+      spec.paths["/users"]?.post?.requestBody?.content["application/json"]
+        ?.schema;
+    expect(requestSchema).toEqual({ $ref: "#/components/schemas/User" });
+
+    const responseSchema =
+      spec.paths["/users"]?.post?.responses["201"]?.content?.[
+        "application/json"
+      ]?.schema;
+    expect(responseSchema).toEqual({ $ref: "#/components/schemas/User" });
+  });
+
+  test("should reuse Valibot namedSchema across multiple operations", async () => {
+    const UserSchema = namedSchema(
+      "User",
+      v.object({ id: v.string(), name: v.string() }),
+    );
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/users",
+          method: "POST",
+          request: { body: UserSchema },
+          response: { 201: UserSchema },
+          handler: () => {},
+        },
+        {
+          path: "/users/:id",
+          method: "GET",
+          response: { 200: UserSchema },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas?.User).toBeDefined();
+    expect(Object.keys(spec.components?.schemas ?? {}).length).toBe(1);
+
+    expect(
+      spec.paths["/users"]?.post?.requestBody?.content["application/json"]
+        ?.schema,
+    ).toEqual({ $ref: "#/components/schemas/User" });
+    expect(
+      spec.paths["/users"]?.post?.responses["201"]?.content?.[
+        "application/json"
+      ]?.schema,
+    ).toEqual({ $ref: "#/components/schemas/User" });
+    expect(
+      spec.paths["/users/{id}"]?.get?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema,
+    ).toEqual({ $ref: "#/components/schemas/User" });
+  });
+
+  test("should extract named array schema with namedSchema() to components", async () => {
+    const UserListSchema = namedSchema(
+      "UserList",
+      v.array(v.object({ id: v.string(), name: v.string() })),
+    );
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/users",
+          method: "GET",
+          response: { 200: UserListSchema },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas?.UserList).toMatchObject({
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          name: { type: "string" },
+        },
+      },
+    });
+
+    const responseSchema =
+      spec.paths["/users"]?.get?.responses["200"]?.content?.["application/json"]
+        ?.schema;
+    expect(responseSchema).toEqual({ $ref: "#/components/schemas/UserList" });
+  });
+
+  test("should extract ArkType schema with namedSchema() to components and use $ref", async () => {
+    const UserSchema = namedSchema(
+      "User",
+      arktype({ id: "string", name: "string" }),
+    );
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/arktype/users",
+          method: "GET",
+          response: { 200: UserSchema },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas?.User).toMatchObject({
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        name: { type: "string" },
+      },
+    });
+
+    const responseSchema =
+      spec.paths["/arktype/users"]?.get?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema;
+    expect(responseSchema).toEqual({ $ref: "#/components/schemas/User" });
   });
 });

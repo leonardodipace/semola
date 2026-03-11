@@ -135,6 +135,16 @@ type JsonSchema = {
   [key: string]: unknown;
 };
 
+const schemaRegistry = new WeakMap<object, string>();
+
+export const namedSchema = <T extends StandardSchemaV1>(
+  id: string,
+  schema: T,
+): T => {
+  schemaRegistry.set(schema as object, id);
+  return schema;
+};
+
 const defsPrefix = "#/$defs/";
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
@@ -227,15 +237,10 @@ const convertSchemaToOpenApi = async (
     };
   }
 
-  // Check if schema has an id (from .meta({ id: "..." }))
-  const schemaId = normalizedSchema.id;
+  const schemaId = schemaRegistry.get(schema as object);
 
-  if (schemaId && typeof schemaId === "string") {
-    // Extract to components and return a reference
-    const schemaWithoutId = { ...normalizedSchema };
-    delete schemaWithoutId.id;
-
-    componentSchemas[schemaId] = schemaWithoutId;
+  if (schemaId) {
+    componentSchemas[schemaId] = normalizedSchema;
 
     return {
       schema: { $ref: `#/components/schemas/${schemaId}` },
@@ -246,8 +251,12 @@ const convertSchemaToOpenApi = async (
     };
   }
 
+  // Strip any stray top-level `id` property (e.g. from unsupported Zod .meta())
+  const inlineSchema = { ...normalizedSchema };
+  delete inlineSchema.id;
+
   return {
-    schema: normalizedSchema,
+    schema: inlineSchema,
     components:
       Object.keys(componentSchemas).length > 0
         ? ({ schemas: componentSchemas } as OpenAPIV3_1.ComponentsObject)
