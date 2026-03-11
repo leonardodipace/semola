@@ -92,8 +92,12 @@ class WorkflowDefinition<TInput, TResult> {
   public async run(input: TInput, options?: WorkflowStartOptions) {
     const [startError, startData] = await this.start(input, options);
 
-    if (startError || !startData) {
+    if (startError) {
       return err(startError.type, startError.message);
+    }
+
+    if (!startData) {
+      return err("WorkflowError", "Unexpected empty start result");
     }
 
     if (startData.status === "cancelled") {
@@ -112,8 +116,12 @@ class WorkflowDefinition<TInput, TResult> {
 
     const [getError, execution] = await this.get(startData.executionId);
 
-    if (getError || !execution) {
+    if (getError) {
       return err(getError.type, getError.message);
+    }
+
+    if (!execution) {
+      return err("WorkflowError", "Unexpected empty execution");
     }
 
     if (execution.result === null) {
@@ -129,8 +137,15 @@ class WorkflowDefinition<TInput, TResult> {
   public async resume(executionId: string) {
     const [getError, execution] = await this.get(executionId);
 
-    if (getError || !execution) {
+    if (getError) {
       return err(getError.type, getError.message);
+    }
+
+    if (!execution) {
+      return err(
+        "WorkflowNotFoundError",
+        `Workflow execution ${executionId} not found`,
+      );
     }
 
     if (execution.status === "completed") {
@@ -266,8 +281,15 @@ class WorkflowDefinition<TInput, TResult> {
   public async cancel(executionId: string) {
     const [getError, execution] = await this.get(executionId);
 
-    if (getError || !execution) {
+    if (getError) {
       return err(getError.type, getError.message);
+    }
+
+    if (!execution) {
+      return err(
+        "WorkflowNotFoundError",
+        `Workflow execution ${executionId} not found`,
+      );
     }
 
     if (execution.status === "completed") {
@@ -360,9 +382,7 @@ class WorkflowDefinition<TInput, TResult> {
       ["steps", "[]"],
     ];
 
-    for (const field of fields) {
-      const [name, value] = field;
-
+    for (const [name, value] of fields) {
       const [writeError] = await this.setMeta(executionId, name, value);
 
       if (writeError) {
@@ -377,14 +397,34 @@ class WorkflowDefinition<TInput, TResult> {
     const token = crypto.randomUUID();
 
     const [lockError] = await this.acquireLock(executionId, token);
+
     if (lockError) {
       return err(lockError.type, lockError.message);
     }
 
     const timestamp = now();
 
-    await this.setMeta(executionId, "status", "running");
-    await this.setMeta(executionId, "updatedAt", String(timestamp));
+    const [runningStatusError] = await this.setMeta(
+      executionId,
+      "status",
+      "running",
+    );
+
+    if (runningStatusError) {
+      await this.releaseLock(executionId, token);
+      return err(runningStatusError.type, runningStatusError.message);
+    }
+
+    const [runningUpdatedAtError] = await this.setMeta(
+      executionId,
+      "updatedAt",
+      String(timestamp),
+    );
+
+    if (runningUpdatedAtError) {
+      await this.releaseLock(executionId, token);
+      return err(runningUpdatedAtError.type, runningUpdatedAtError.message);
+    }
 
     const controller = new AbortController();
 
@@ -411,12 +451,8 @@ class WorkflowDefinition<TInput, TResult> {
         name,
       );
 
-      if (readError || !cachedStep) {
-        const message = readError
-          ? readError.message
-          : `Unable to read step ${name}`;
-
-        return Promise.reject(new Error(message));
+      if (readError) {
+        return Promise.reject(new Error(readError.message));
       }
 
       if (cachedStep.found) {
@@ -465,9 +501,42 @@ class WorkflowDefinition<TInput, TResult> {
     if (cancelled) {
       const cancelledAt = now();
 
-      await this.setMeta(executionId, "status", "cancelled");
-      await this.setMeta(executionId, "updatedAt", String(cancelledAt));
-      await this.setMeta(executionId, "cancelledAt", String(cancelledAt));
+      const [cancelledStatusError] = await this.setMeta(
+        executionId,
+        "status",
+        "cancelled",
+      );
+
+      if (cancelledStatusError) {
+        await this.releaseLock(executionId, token);
+        return err(cancelledStatusError.type, cancelledStatusError.message);
+      }
+
+      const [cancelledUpdatedAtError] = await this.setMeta(
+        executionId,
+        "updatedAt",
+        String(cancelledAt),
+      );
+
+      if (cancelledUpdatedAtError) {
+        await this.releaseLock(executionId, token);
+        return err(
+          cancelledUpdatedAtError.type,
+          cancelledUpdatedAtError.message,
+        );
+      }
+
+      const [cancelledAtError] = await this.setMeta(
+        executionId,
+        "cancelledAt",
+        String(cancelledAt),
+      );
+
+      if (cancelledAtError) {
+        await this.releaseLock(executionId, token);
+        return err(cancelledAtError.type, cancelledAtError.message);
+      }
+
       await this.releaseLock(executionId, token);
 
       const response: WorkflowStartResult = {
@@ -481,10 +550,50 @@ class WorkflowDefinition<TInput, TResult> {
     if (handlerError) {
       const failedAt = now();
 
-      await this.setMeta(executionId, "status", "failed");
-      await this.setMeta(executionId, "error", toErrorMessage(handlerError));
-      await this.setMeta(executionId, "updatedAt", String(failedAt));
-      await this.setMeta(executionId, "failedAt", String(failedAt));
+      const [failedStatusError] = await this.setMeta(
+        executionId,
+        "status",
+        "failed",
+      );
+
+      if (failedStatusError) {
+        await this.releaseLock(executionId, token);
+        return err(failedStatusError.type, failedStatusError.message);
+      }
+
+      const [failedMessageError] = await this.setMeta(
+        executionId,
+        "error",
+        toErrorMessage(handlerError),
+      );
+
+      if (failedMessageError) {
+        await this.releaseLock(executionId, token);
+        return err(failedMessageError.type, failedMessageError.message);
+      }
+
+      const [failedUpdatedAtError] = await this.setMeta(
+        executionId,
+        "updatedAt",
+        String(failedAt),
+      );
+
+      if (failedUpdatedAtError) {
+        await this.releaseLock(executionId, token);
+        return err(failedUpdatedAtError.type, failedUpdatedAtError.message);
+      }
+
+      const [failedAtError] = await this.setMeta(
+        executionId,
+        "failedAt",
+        String(failedAt),
+      );
+
+      if (failedAtError) {
+        await this.releaseLock(executionId, token);
+        return err(failedAtError.type, failedAtError.message);
+      }
+
       await this.releaseLock(executionId, token);
 
       return err(
@@ -499,16 +608,50 @@ class WorkflowDefinition<TInput, TResult> {
     if (serializeResultError) {
       const failedAt = now();
 
-      await this.setMeta(executionId, "status", "failed");
-      await this.setMeta(
+      const [failedStatusError] = await this.setMeta(
+        executionId,
+        "status",
+        "failed",
+      );
+
+      if (failedStatusError) {
+        await this.releaseLock(executionId, token);
+        return err(failedStatusError.type, failedStatusError.message);
+      }
+
+      const [failedMessageError] = await this.setMeta(
         executionId,
         "error",
-        serializeResultError
-          ? serializeResultError.message
-          : `Unable to serialize result for ${executionId}`,
+        serializeResultError.message,
       );
-      await this.setMeta(executionId, "updatedAt", String(failedAt));
-      await this.setMeta(executionId, "failedAt", String(failedAt));
+
+      if (failedMessageError) {
+        await this.releaseLock(executionId, token);
+        return err(failedMessageError.type, failedMessageError.message);
+      }
+
+      const [failedUpdatedAtError] = await this.setMeta(
+        executionId,
+        "updatedAt",
+        String(failedAt),
+      );
+
+      if (failedUpdatedAtError) {
+        await this.releaseLock(executionId, token);
+        return err(failedUpdatedAtError.type, failedUpdatedAtError.message);
+      }
+
+      const [failedAtError] = await this.setMeta(
+        executionId,
+        "failedAt",
+        String(failedAt),
+      );
+
+      if (failedAtError) {
+        await this.releaseLock(executionId, token);
+        return err(failedAtError.type, failedAtError.message);
+      }
+
       await this.releaseLock(executionId, token);
 
       return err(
@@ -519,11 +662,64 @@ class WorkflowDefinition<TInput, TResult> {
 
     const completedAt = now();
 
-    await this.setMeta(executionId, "result", serializedResult);
-    await this.setMeta(executionId, "status", "completed");
-    await this.setMeta(executionId, "error", "");
-    await this.setMeta(executionId, "updatedAt", String(completedAt));
-    await this.setMeta(executionId, "completedAt", String(completedAt));
+    const [completedResultError] = await this.setMeta(
+      executionId,
+      "result",
+      serializedResult,
+    );
+
+    if (completedResultError) {
+      await this.releaseLock(executionId, token);
+      return err(completedResultError.type, completedResultError.message);
+    }
+
+    const [completedStatusError] = await this.setMeta(
+      executionId,
+      "status",
+      "completed",
+    );
+
+    if (completedStatusError) {
+      await this.releaseLock(executionId, token);
+      return err(completedStatusError.type, completedStatusError.message);
+    }
+
+    const [completedClearErrorError] = await this.setMeta(
+      executionId,
+      "error",
+      "",
+    );
+
+    if (completedClearErrorError) {
+      await this.releaseLock(executionId, token);
+      return err(
+        completedClearErrorError.type,
+        completedClearErrorError.message,
+      );
+    }
+
+    const [completedUpdatedAtError] = await this.setMeta(
+      executionId,
+      "updatedAt",
+      String(completedAt),
+    );
+
+    if (completedUpdatedAtError) {
+      await this.releaseLock(executionId, token);
+      return err(completedUpdatedAtError.type, completedUpdatedAtError.message);
+    }
+
+    const [completedAtError] = await this.setMeta(
+      executionId,
+      "completedAt",
+      String(completedAt),
+    );
+
+    if (completedAtError) {
+      await this.releaseLock(executionId, token);
+      return err(completedAtError.type, completedAtError.message);
+    }
+
     await this.releaseLock(executionId, token);
 
     const response: WorkflowStartResult = {
