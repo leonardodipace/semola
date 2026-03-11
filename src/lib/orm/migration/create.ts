@@ -1,6 +1,5 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { err, mightThrow, mightThrowSync, ok } from "../../errors/index.js";
 import { loadConfig } from "./config.js";
 import { diffSnapshots } from "./diff.js";
 import { buildSchemaSnapshot, loadOrmFromSchema } from "./discover.js";
@@ -23,12 +22,48 @@ function emptySnapshot(dialect: "postgres" | "mysql" | "sqlite") {
   return snapshot;
 }
 
+function parseSnapshot(content: string, dialect: SchemaSnapshot["dialect"]) {
+  try {
+    const parsed = JSON.parse(content);
+
+    if (typeof parsed !== "object") {
+      return emptySnapshot(dialect);
+    }
+
+    if (parsed === null) {
+      return emptySnapshot(dialect);
+    }
+
+    if (
+      parsed.dialect !== "postgres" &&
+      parsed.dialect !== "mysql" &&
+      parsed.dialect !== "sqlite"
+    ) {
+      return emptySnapshot(dialect);
+    }
+
+    if (typeof parsed.tables !== "object") {
+      return emptySnapshot(dialect);
+    }
+
+    if (parsed.tables === null) {
+      return emptySnapshot(dialect);
+    }
+
+    return {
+      dialect: parsed.dialect,
+      tables: parsed.tables,
+    };
+  } catch {
+    return emptySnapshot(dialect);
+  }
+}
+
 async function loadPreviousSnapshot(
   migrationsDir: string,
   dialect: SchemaSnapshot["dialect"],
 ) {
-  const [, migrations] = await listMigrations(migrationsDir);
-  const list = migrations ?? [];
+  const list = await listMigrations(migrationsDir);
   const last = list[list.length - 1];
 
   if (!last) {
@@ -41,42 +76,15 @@ async function loadPreviousSnapshot(
     return emptySnapshot(dialect);
   }
 
-  const [readErr, content] = await mightThrow(
-    Bun.file(last.snapshotPath).text(),
-  );
-
-  if (readErr) {
-    return emptySnapshot(dialect);
-  }
-
-  const [parseErr, parsed] = mightThrowSync(() => JSON.parse(content ?? ""));
-
-  if (parseErr) {
-    return emptySnapshot(dialect);
-  }
-
-  if (!parsed?.dialect || !parsed?.tables) {
-    return emptySnapshot(dialect);
-  }
-
-  const snapshot: SchemaSnapshot = {
-    dialect: parsed.dialect,
-    tables: parsed.tables,
-  };
-
-  return snapshot;
+  const content = await Bun.file(last.snapshotPath).text();
+  return parseSnapshot(content, dialect);
 }
 
 export async function createMigration(input: { name: string; cwd?: string }) {
   const cwd = input.cwd ?? process.cwd();
 
-  const [configErr, config] = await loadConfig(cwd);
-
-  if (configErr) return err(configErr.type, configErr.message);
-
-  const [ormErr, orm] = await loadOrmFromSchema(config.orm.schema);
-
-  if (ormErr) return err(ormErr.type, ormErr.message);
+  const config = await loadConfig(cwd);
+  const orm = await loadOrmFromSchema(config.orm.schema);
 
   const currentSnapshot = buildSchemaSnapshot(orm);
   const previousSnapshot = await loadPreviousSnapshot(
@@ -86,51 +94,27 @@ export async function createMigration(input: { name: string; cwd?: string }) {
   const operations = diffSnapshots(previousSnapshot, currentSnapshot);
 
   if (operations.length === 0) {
-    return ok({
+    return {
       created: false as const,
       message: "No schema changes detected; migration not created",
       operationsCount: 0,
-    });
+    };
   }
 
-  const [ensureErr] = await mightThrow(
-    ensureMigrationsDirectory(config.orm.migrations.dir),
-  );
-
-  if (ensureErr) {
-    return err(
-      "MigrationError",
-      `Could not create migrations directory: ${ensureErr instanceof Error ? ensureErr.message : String(ensureErr)}`,
-    );
-  }
+  await ensureMigrationsDirectory(config.orm.migrations.dir);
 
   const baseId = nowMigrationId();
   const migrationName = toMigrationName(input.name);
 
-  const [uniqueDirErr, uniqueDir] = await uniqueMigrationDirectoryPath(
+  const uniqueDir = await uniqueMigrationDirectoryPath(
     config.orm.migrations.dir,
     baseId,
     migrationName,
   );
 
-  if (uniqueDirErr) {
-    return err(uniqueDirErr.type, uniqueDirErr.message);
-  }
-
-  if (!uniqueDir) {
-    return err("MigrationError", "Could not generate migration path");
-  }
-
   const { migrationId, migrationDir } = uniqueDir;
 
-  const [mkdirErr] = await mightThrow(mkdir(migrationDir, { recursive: true }));
-
-  if (mkdirErr) {
-    return err(
-      "MigrationError",
-      `Could not create migration directory: ${mkdirErr instanceof Error ? mkdirErr.message : String(mkdirErr)}`,
-    );
-  }
+  await mkdir(migrationDir, { recursive: true });
 
   const upSql = buildUpSql(currentSnapshot.dialect, operations);
   const downSql = buildDownSql(currentSnapshot.dialect, operations);
@@ -139,22 +123,13 @@ export async function createMigration(input: { name: string; cwd?: string }) {
   const downPath = join(migrationDir, "down.sql");
   const snapshotPath = join(migrationDir, "snapshot.json");
 
-  const [writeErr] = await mightThrow(
-    Promise.all([
-      Bun.write(upPath, upSql),
-      Bun.write(downPath, downSql),
-      Bun.write(snapshotPath, `${JSON.stringify(currentSnapshot, null, 2)}\n`),
-    ]),
-  );
+  await Promise.all([
+    Bun.write(upPath, upSql),
+    Bun.write(downPath, downSql),
+    Bun.write(snapshotPath, `${JSON.stringify(currentSnapshot, null, 2)}\n`),
+  ]);
 
-  if (writeErr) {
-    return err(
-      "MigrationError",
-      `Could not write migration files: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}`,
-    );
-  }
-
-  return ok({
+  return {
     created: true as const,
     migrationId,
     migrationName,
@@ -165,5 +140,5 @@ export async function createMigration(input: { name: string; cwd?: string }) {
     downPathRelative: relativeFromCwd(cwd, downPath),
     configPathRelative: relativeFromCwd(cwd, config.configPath),
     schemaPathRelative: relativeFromCwd(cwd, config.orm.schema),
-  });
+  };
 }

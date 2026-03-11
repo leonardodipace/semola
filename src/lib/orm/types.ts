@@ -1,5 +1,4 @@
 import type { SQL } from "bun";
-import type { CommonError } from "../errors/types.js";
 import type { ColumnDef } from "./column.js";
 import type { Table } from "./table.js";
 
@@ -285,38 +284,23 @@ export type DialectAdapter = {
   ) => string;
 };
 
-export type OrmResultError = {
-  type: CommonError;
-  message: string;
-};
-
-export type ResultTuple<T> =
-  | readonly [null, T]
-  | readonly [OrmResultError, null];
-
 export type TinyTableClient<T extends ColDefs, TRels> = {
   select: (input?: SelectInput<T, TRels>) => SQL.Query<TableRow<T>[]>;
-  findMany: (
-    input?: FindManyInput<T, TRels>,
-  ) => Promise<ResultTuple<TableRow<T>[]>>;
+  findMany: (input?: FindManyInput<T, TRels>) => Promise<TableRow<T>[]>;
 
-  findFirst: (
-    input?: FindFirstInput<T, TRels>,
-  ) => Promise<ResultTuple<TableRow<T> | null>>;
+  findFirst: (input?: FindFirstInput<T, TRels>) => Promise<TableRow<T> | null>;
 
-  findUnique: (
-    input: FindUniqueInput<T>,
-  ) => Promise<ResultTuple<TableRow<T> | null>>;
+  findUnique: (input: FindUniqueInput<T>) => Promise<TableRow<T> | null>;
 
   insert: <TReturning extends boolean | undefined = undefined>(
     input: InsertInput<T> & { returning?: TReturning },
   ) => SQL.Query<TReturning extends true ? TableRow<T>[] : unknown>;
 
-  create: (input: CreateInput<T>) => Promise<ResultTuple<TableRow<T>>>;
+  create: (input: CreateInput<T>) => Promise<TableRow<T>>;
 
   createMany: (
     input: CreateManyInput<T>,
-  ) => Promise<ResultTuple<{ count: number; rows: TableRow<T>[] }>>;
+  ) => Promise<{ count: number; rows: TableRow<T>[] }>;
 
   update: <TReturning extends boolean | undefined = undefined>(
     input: UpdateBuilderInput<T> & { returning?: TReturning },
@@ -324,7 +308,7 @@ export type TinyTableClient<T extends ColDefs, TRels> = {
 
   updateMany: (
     input: UpdateManyInput<T>,
-  ) => Promise<ResultTuple<{ count: number; rows: TableRow<T>[] }>>;
+  ) => Promise<{ count: number; rows: TableRow<T>[] }>;
 
   delete: <TReturning extends boolean | undefined = undefined>(
     input: DeleteBuilderInput<T> & { returning?: TReturning },
@@ -332,5 +316,5 @@ export type TinyTableClient<T extends ColDefs, TRels> = {
 
   deleteMany: (
     input: DeleteManyInput<T>,
-  ) => Promise<ResultTuple<{ count: number; rows: TableRow<T>[] }>>;
+  ) => Promise<{ count: number; rows: TableRow<T>[] }>;
 };

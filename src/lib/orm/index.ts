@@ -27,8 +27,6 @@ export type {
   InsertInput,
   JoinNode,
   OrderDirection,
-  OrmResultError,
-  ResultTuple,
   SelectInput,
   SelectPlan,
   TableRow,

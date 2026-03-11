@@ -1,6 +1,5 @@
 import type { SQL as SqlType, TransactionSQL } from "bun";
 import { SQL } from "bun";
-import { err, mightThrow, ok } from "../../errors/index.js";
 import { loadConfig } from "./config.js";
 import { loadOrmFromSchema } from "./discover.js";
 import { listMigrations, relativeFromCwd, splitStatements } from "./files.js";
@@ -17,108 +16,71 @@ async function runStatements(
   }
 }
 
+async function runRollbackSql(
+  sql: SQL,
+  sqlText: string,
+  transactional: boolean,
+) {
+  if (transactional) {
+    await sql.begin(async (tx) => {
+      await runStatements(tx, sqlText);
+    });
+    return;
+  }
+
+  await runStatements(sql, sqlText);
+}
+
+async function readState(stateFilePath: string) {
+  const state = await readMigrationState(stateFilePath);
+
+  if (!state) {
+    return { applied: [] };
+  }
+
+  return state;
+}
+
 export async function rollbackMigration(input: { cwd?: string }) {
   const cwd = input.cwd ?? process.cwd();
 
-  const [configErr, config] = await loadConfig(cwd);
-
-  if (configErr) return err(configErr.type, configErr.message);
-
-  const [ormErr, orm] = await loadOrmFromSchema(config.orm.schema);
-
-  if (ormErr) return err(ormErr.type, ormErr.message);
+  const config = await loadConfig(cwd);
+  const orm = await loadOrmFromSchema(config.orm.schema);
 
   const sql = new SQL(orm.options.url);
 
-  const [listErr, migrations] = await listMigrations(config.orm.migrations.dir);
+  try {
+    const migrations = await listMigrations(config.orm.migrations.dir);
+    const state = await readState(config.orm.migrations.stateFile);
 
-  if (listErr) {
-    return err(listErr.type, listErr.message);
-  }
+    const last = state.applied[state.applied.length - 1];
 
-  const [stateErr, state] = await mightThrow(
-    readMigrationState(config.orm.migrations.stateFile),
-  );
+    if (!last) {
+      return {
+        rolledBack: false as const,
+        message: "No applied migrations found",
+        configPathRelative: relativeFromCwd(cwd, config.configPath),
+      };
+    }
 
-  if (stateErr) {
-    return err(
-      "MigrationError",
-      `Could not read migration state: ${stateErr instanceof Error ? stateErr.message : String(stateErr)}`,
-    );
-  }
+    const migration = migrations.find((item) => item.id === last.id);
 
-  const safeState = state ?? { applied: [] };
-  const last = safeState.applied[safeState.applied.length - 1];
+    if (!migration) {
+      throw new Error(`Could not find migration directory for id ${last.id}`);
+    }
 
-  if (!last) {
-    return ok({
-      rolledBack: false as const,
-      message: "No applied migrations found",
+    const sqlText = await Bun.file(migration.downPath).text();
+
+    await runRollbackSql(sql, sqlText, config.orm.migrations.transactional);
+    await unmarkAppliedMigration(config.orm.migrations.stateFile, migration.id);
+
+    return {
+      rolledBack: true as const,
+      migrationId: migration.id,
+      migrationName: migration.name,
       configPathRelative: relativeFromCwd(cwd, config.configPath),
-    });
+    };
+  } finally {
+    await sql.close();
   }
-
-  const migration = (migrations ?? []).find((item) => item.id === last.id);
-
-  if (!migration) {
-    return err(
-      "MigrationError",
-      `Could not find migration directory for id ${last.id}`,
-    );
-  }
-
-  const [readErr, downSql] = await mightThrow(
-    Bun.file(migration.downPath).text(),
-  );
-
-  if (readErr) {
-    return err(
-      "MigrationError",
-      `Could not read migration file: ${readErr instanceof Error ? readErr.message : String(readErr)}`,
-    );
-  }
-
-  const sqlText = downSql ?? "";
-
-  if (config.orm.migrations.transactional) {
-    const [txErr] = await mightThrow(
-      sql.begin(async (tx) => {
-        await runStatements(tx, sqlText);
-      }),
-    );
-
-    if (txErr) {
-      return err(
-        "MigrationError",
-        `Rollback of ${migration.id} failed: ${txErr instanceof Error ? txErr.message : String(txErr)}`,
-      );
-    }
-  } else {
-    const [stmtErr] = await mightThrow(runStatements(sql, sqlText));
-
-    if (stmtErr) {
-      return err(
-        "MigrationError",
-        `Rollback of ${migration.id} failed: ${stmtErr instanceof Error ? stmtErr.message : String(stmtErr)}`,
-      );
-    }
-  }
-
-  const [unmarkErr] = await mightThrow(
-    unmarkAppliedMigration(config.orm.migrations.stateFile, migration.id),
-  );
-
-  if (unmarkErr) {
-    return err(
-      "MigrationError",
-      `Could not update migration state: ${unmarkErr instanceof Error ? unmarkErr.message : String(unmarkErr)}`,
-    );
-  }
-
-  return ok({
-    rolledBack: true as const,
-    migrationId: migration.id,
-    migrationName: migration.name,
-    configPathRelative: relativeFromCwd(cwd, config.configPath),
-  });
 }

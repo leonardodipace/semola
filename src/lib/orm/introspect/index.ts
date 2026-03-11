@@ -1,5 +1,4 @@
 import type { SQL } from "bun";
-import { err } from "../../errors/index.js";
 import type { Dialect } from "../types.js";
 import { introspectMysql } from "./mysql.js";
 import { introspectPostgres } from "./postgres.js";
@@ -18,22 +17,55 @@ export async function introspectSchema(
   options?: { schema?: string },
 ) {
   if (dialect === "postgres") {
-    return introspectPostgres(sql, options?.schema ?? "public");
+    const [error, data] = await introspectPostgres(
+      sql,
+      options?.schema ?? "public",
+    );
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (data === null) {
+      throw new Error("Introspection returned no data");
+    }
+
+    return data;
   }
 
   if (dialect === "sqlite") {
-    return introspectSqlite(sql);
+    const [error, data] = await introspectSqlite(sql);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (data === null) {
+      throw new Error("Introspection returned no data");
+    }
+
+    return data;
   }
 
   if (dialect === "mysql") {
     const schema = options?.schema;
 
     if (!schema) {
-      return err("IntrospectError", "schema name is required for MySQL");
+      throw new Error("schema name is required for MySQL");
     }
 
-    return introspectMysql(sql, schema);
+    const [error, data] = await introspectMysql(sql, schema);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (data === null) {
+      throw new Error("Introspection returned no data");
+    }
+
+    return data;
   }
 
-  return err("IntrospectError", `unknown dialect: ${dialect}`);
+  throw new Error(`unknown dialect: ${dialect}`);
 }

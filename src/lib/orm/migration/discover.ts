@@ -1,5 +1,4 @@
 import { pathToFileURL } from "node:url";
-import { err, mightThrow, ok } from "../../errors/index.js";
 import type { ColumnDef } from "../column.js";
 import type { ColumnKind, ColumnMetaBase } from "../types.js";
 import type { SchemaSnapshot } from "./types.js";
@@ -265,13 +264,7 @@ function isOrmLike(value: unknown) {
 export async function loadOrmFromSchema(schemaPath: string) {
   const schemaUrl = pathToFileURL(schemaPath).href;
 
-  const [importErr, mod] = await mightThrow(
-    import(`${schemaUrl}?t=${Date.now()}`),
-  );
-
-  if (importErr) {
-    return err("SchemaError", `Could not load schema module: ${schemaPath}`);
-  }
+  const mod = await import(`${schemaUrl}?t=${Date.now()}`);
 
   const candidates = [
     (mod as Record<string, unknown>).default,
@@ -280,18 +273,17 @@ export async function loadOrmFromSchema(schemaPath: string) {
 
   for (const candidate of candidates) {
     if (isOrmLike(candidate)) {
-      return ok(candidate as LoadedOrm);
+      return candidate as LoadedOrm;
     }
 
     const fromClient = fromCreateOrmClient(candidate);
 
     if (fromClient) {
-      return ok(fromClient);
+      return fromClient;
     }
   }
 
-  return err(
-    "SchemaError",
+  throw new Error(
     `Could not find an Orm instance in schema module: ${schemaPath}`,
   );
 }

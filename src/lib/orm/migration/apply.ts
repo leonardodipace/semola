@@ -1,6 +1,5 @@
 import type { SQL as SqlType, TransactionSQL } from "bun";
 import { SQL } from "bun";
-import { err, mightThrow, ok } from "../../errors/index.js";
 import { loadConfig } from "./config.js";
 import { loadOrmFromSchema } from "./discover.js";
 import { listMigrations, relativeFromCwd, splitStatements } from "./files.js";
@@ -17,109 +16,78 @@ async function runStatements(
   }
 }
 
+async function readState(stateFilePath: string) {
+  const state = await readMigrationState(stateFilePath);
+
+  if (!state) {
+    return { applied: [] };
+  }
+
+  return state;
+}
+
+async function runMigrationSql(
+  sql: SQL,
+  sqlText: string,
+  transactional: boolean,
+) {
+  if (transactional) {
+    await sql.begin(async (tx) => {
+      await runStatements(tx, sqlText);
+    });
+    return;
+  }
+
+  await runStatements(sql, sqlText);
+}
+
 export async function applyMigrations(input: { cwd?: string }) {
   const cwd = input.cwd ?? process.cwd();
 
-  const [configErr, config] = await loadConfig(cwd);
-
-  if (configErr) return err(configErr.type, configErr.message);
-
-  const [ormErr, orm] = await loadOrmFromSchema(config.orm.schema);
-
-  if (ormErr) return err(ormErr.type, ormErr.message);
+  const config = await loadConfig(cwd);
+  const orm = await loadOrmFromSchema(config.orm.schema);
 
   const sql = new SQL(orm.options.url);
 
-  const [listErr, migrations] = await listMigrations(config.orm.migrations.dir);
+  try {
+    const migrations = await listMigrations(config.orm.migrations.dir);
+    const state = await readState(config.orm.migrations.stateFile);
 
-  if (listErr) {
-    return err(listErr.type, listErr.message);
-  }
-
-  const [stateErr, state] = await mightThrow(
-    readMigrationState(config.orm.migrations.stateFile),
-  );
-
-  if (stateErr) {
-    return err(
-      "MigrationError",
-      `Could not read migration state: ${stateErr instanceof Error ? stateErr.message : String(stateErr)}`,
+    const appliedIds = new Set(state.applied.map((item) => item.id));
+    const pending = migrations.filter(
+      (migration) => !appliedIds.has(migration.id),
     );
-  }
-  const safeMigrations = migrations ?? [];
-  const safeState = state ?? { applied: [] };
 
-  const appliedIds = new Set(safeState.applied.map((item) => item.id));
-  const pending = safeMigrations.filter(
-    (migration) => !appliedIds.has(migration.id),
-  );
+    if (pending.length === 0) {
+      return {
+        applied: 0,
+        pending: 0,
+        total: migrations.length,
+        configPathRelative: relativeFromCwd(cwd, config.configPath),
+        stateFileRelative: relativeFromCwd(
+          cwd,
+          config.orm.migrations.stateFile,
+        ),
+      };
+    }
 
-  if (pending.length === 0) {
-    return ok({
-      applied: 0,
+    for (const migration of pending) {
+      const sqlText = await Bun.file(migration.upPath).text();
+
+      await runMigrationSql(sql, sqlText, config.orm.migrations.transactional);
+
+      await markAppliedMigration(config.orm.migrations.stateFile, migration.id);
+    }
+
+    return {
+      applied: pending.length,
       pending: 0,
-      total: safeMigrations.length,
+      total: migrations.length,
+      appliedIds: pending.map((item) => item.id),
       configPathRelative: relativeFromCwd(cwd, config.configPath),
       stateFileRelative: relativeFromCwd(cwd, config.orm.migrations.stateFile),
-    });
+    };
+  } finally {
+    await sql.close();
   }
-
-  for (const migration of pending) {
-    const [readErr, upSql] = await mightThrow(
-      Bun.file(migration.upPath).text(),
-    );
-
-    if (readErr) {
-      return err(
-        "MigrationError",
-        `Could not read migration ${migration.id}: ${readErr instanceof Error ? readErr.message : String(readErr)}`,
-      );
-    }
-
-    const sqlText = upSql ?? "";
-
-    if (config.orm.migrations.transactional) {
-      const [txErr] = await mightThrow(
-        sql.begin(async (tx) => {
-          await runStatements(tx, sqlText);
-        }),
-      );
-
-      if (txErr) {
-        return err(
-          "MigrationError",
-          `Migration ${migration.id} failed: ${txErr instanceof Error ? txErr.message : String(txErr)}`,
-        );
-      }
-    } else {
-      const [stmtErr] = await mightThrow(runStatements(sql, sqlText));
-
-      if (stmtErr) {
-        return err(
-          "MigrationError",
-          `Migration ${migration.id} failed: ${stmtErr instanceof Error ? stmtErr.message : String(stmtErr)}`,
-        );
-      }
-    }
-
-    const [markErr] = await mightThrow(
-      markAppliedMigration(config.orm.migrations.stateFile, migration.id),
-    );
-
-    if (markErr) {
-      return err(
-        "MigrationError",
-        `Could not update migration state: ${markErr instanceof Error ? markErr.message : String(markErr)}`,
-      );
-    }
-  }
-
-  return ok({
-    applied: pending.length,
-    pending: 0,
-    total: safeMigrations.length,
-    appliedIds: pending.map((item) => item.id),
-    configPathRelative: relativeFromCwd(cwd, config.configPath),
-    stateFileRelative: relativeFromCwd(cwd, config.orm.migrations.stateFile),
-  });
 }

@@ -1,6 +1,5 @@
 import { mkdir, readdir, stat } from "node:fs/promises";
 import { basename, join, relative, sep } from "node:path";
-import { err, mightThrow, ok } from "../../errors/index.js";
 import type { MigrationInfo } from "./types.js";
 
 export async function ensureMigrationsDirectory(migrationsDir: string) {
@@ -8,23 +7,24 @@ export async function ensureMigrationsDirectory(migrationsDir: string) {
 }
 
 export async function listMigrations(migrationsDir: string) {
-  const [readdirErr, entries] = await mightThrow(
-    readdir(migrationsDir, { withFileTypes: true, encoding: "utf8" }),
-  );
+  let entries: Array<{ isDirectory: () => boolean; name: string }> = [];
 
-  if (readdirErr) {
-    if (readdirErr instanceof Error) {
-      if (Reflect.get(readdirErr, "code") === "ENOENT") {
-        return ok<MigrationInfo[]>([]);
-      }
+  try {
+    const dirEntries = await readdir(migrationsDir, {
+      withFileTypes: true,
+      encoding: "utf8",
+    });
 
-      return err("MigrationError", readdirErr.message);
+    entries = dirEntries;
+  } catch (error) {
+    if (error instanceof Error && Reflect.get(error, "code") === "ENOENT") {
+      return [];
     }
 
-    return err("MigrationError", String(readdirErr));
+    throw error;
   }
 
-  const migrationDirs = (entries ?? [])
+  const migrationDirs = entries
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort();
@@ -52,7 +52,7 @@ export async function listMigrations(migrationsDir: string) {
     });
   }
 
-  return ok(migrations);
+  return migrations;
 }
 
 export function nowMigrationId() {
@@ -100,17 +100,15 @@ export async function uniqueMigrationDirectoryPath(
   while (true) {
     const dirPath = migrationDirectoryPath(migrationsDir, candidateId, name);
 
-    const [statErr, stats] = await mightThrow(stat(dirPath));
+    let stats: { isDirectory: () => boolean } | null = null;
 
-    if (statErr) {
-      if (statErr instanceof Error) {
-        if (Reflect.get(statErr, "code") === "ENOENT") {
-          // path doesn't exist - available
-        } else {
-          return err("MigrationError", statErr.message);
-        }
+    try {
+      stats = await stat(dirPath);
+    } catch (error) {
+      if (error instanceof Error && Reflect.get(error, "code") === "ENOENT") {
+        stats = null;
       } else {
-        return err("MigrationError", String(statErr));
+        throw error;
       }
     }
 
@@ -121,10 +119,10 @@ export async function uniqueMigrationDirectoryPath(
     }
 
     if (!exists) {
-      return ok({
+      return {
         migrationId: candidateId,
         migrationDir: dirPath,
-      });
+      };
     }
 
     attempt += 1;

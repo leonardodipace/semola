@@ -24,9 +24,8 @@ describe("loadOrmFromSchema", () => {
       ].join("\n"),
     );
 
-    const [error, orm] = await loadOrmFromSchema(schemaPath);
-    expect(error).toBeNull();
-    expect(orm?.options.url).toBe("sqlite::memory:");
+    const orm = await loadOrmFromSchema(schemaPath);
+    expect(orm.options.url).toBe("sqlite::memory:");
   });
 
   test("returns error when no orm-like export exists", async () => {
@@ -35,10 +34,9 @@ describe("loadOrmFromSchema", () => {
 
     await Bun.write(schemaPath, "export default { value: 1 };\n");
 
-    const [error, result] = await loadOrmFromSchema(schemaPath);
-
-    expect(result).toBeNull();
-    expect(error?.message).toContain("Could not find an Orm instance");
+    await expect(loadOrmFromSchema(schemaPath)).rejects.toThrow(
+      "Could not find an Orm instance",
+    );
   });
 
   test("loads ORM from createOrm client export", async () => {
@@ -69,11 +67,10 @@ describe("loadOrmFromSchema", () => {
       ].join("\n"),
     );
 
-    const [error, orm] = await loadOrmFromSchema(schemaPath);
-    expect(error).toBeNull();
-    expect(orm?.dialect).toBe("sqlite");
-    expect(Object.keys(orm?.tables ?? {})).toContain("users");
-    expect(orm?.options.url).toBe("sqlite::memory:");
+    const orm = await loadOrmFromSchema(schemaPath);
+    expect(orm.dialect).toBe("sqlite");
+    expect(Object.keys(orm.tables)).toContain("users");
+    expect(orm.options.url).toBe("sqlite::memory:");
   });
 });
 

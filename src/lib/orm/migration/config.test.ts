@@ -33,23 +33,21 @@ describe("loadConfig", () => {
       ].join("\n"),
     );
 
-    const [error, result] = await loadConfig(cwd);
+    const result = await loadConfig(cwd);
 
-    expect(error).toBeNull();
-    expect(result?.orm.schema).toBe(join(cwd, "src", "db", "index.ts"));
-    expect(result?.orm.migrations.dir).toBe(join(cwd, "migrations"));
-    expect(result?.orm.migrations.stateFile).toBe(
+    expect(result.orm.schema).toBe(join(cwd, "src", "db", "index.ts"));
+    expect(result.orm.migrations.dir).toBe(join(cwd, "migrations"));
+    expect(result.orm.migrations.stateFile).toBe(
       join(cwd, ".semola-migrations.json"),
     );
-    expect(result?.orm.migrations.transactional).toBe(true);
+    expect(result.orm.migrations.transactional).toBe(true);
   });
 
   test("returns error when config is missing", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "semola-config-missing-"));
 
-    const [error, result] = await loadConfig(cwd);
-
-    expect(result).toBeNull();
-    expect(error?.message).toContain("Could not find semola.config.ts");
+    await expect(loadConfig(cwd)).rejects.toThrow(
+      "Could not find semola.config.ts",
+    );
   });
 });

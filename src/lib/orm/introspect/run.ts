@@ -1,6 +1,5 @@
 import { relative, resolve } from "node:path";
 import { SQL } from "bun";
-import { err, mightThrow, ok } from "../../errors/index.js";
 import { loadConfig } from "../migration/config.js";
 import type { Dialect } from "../types.js";
 import { generateCode } from "./codegen.js";
@@ -20,7 +19,7 @@ function inferDialect(url: string): Dialect {
   return "sqlite";
 }
 
-function isDialect(value: string): value is Dialect {
+function isDialect(value: string) {
   return value === "postgres" || value === "mysql" || value === "sqlite";
 }
 
@@ -36,89 +35,115 @@ function parseSchemaFromUrl(url: string) {
 
 const defaultOutput = "orm.generated.ts";
 
-export async function runIntrospect(options: IntrospectOptions = {}) {
-  const cwd = options.cwd ?? process.cwd();
+async function resolveConfig(cwd: string) {
+  try {
+    const config = await loadConfig(cwd);
+    return config;
+  } catch {
+    return null;
+  }
+}
 
-  const [configErr, config] = await loadConfig(cwd);
-
+function resolveDbUrl(
+  options: IntrospectOptions,
+  config: Awaited<ReturnType<typeof resolveConfig>>,
+) {
   const dbUrl =
     options.url ??
-    (!configErr ? config.orm.introspect.url : null) ??
+    config?.orm.introspect.url ??
     process.env.DATABASE_URL ??
     null;
 
   if (!dbUrl) {
-    return err(
-      "IntrospectError",
+    throw new Error(
       "No database URL found. Pass --url <url> or set DATABASE_URL.",
     );
   }
 
-  const rawDialect =
-    options.dialect ??
-    (!configErr ? config.orm.introspect.dialect : null) ??
-    null;
+  return dbUrl;
+}
 
-  let dialect: Dialect;
+function resolveDialect(
+  options: IntrospectOptions,
+  config: Awaited<ReturnType<typeof resolveConfig>>,
+  dbUrl: string,
+): Dialect {
+  const rawDialect = options.dialect ?? config?.orm.introspect.dialect ?? null;
 
-  if (rawDialect) {
-    if (!isDialect(rawDialect)) {
-      return err(
-        "IntrospectError",
-        `Invalid dialect: "${rawDialect}". Must be postgres, mysql, or sqlite.`,
-      );
-    }
-    dialect = rawDialect;
-  } else {
-    dialect = inferDialect(dbUrl);
+  if (!rawDialect) {
+    return inferDialect(dbUrl);
   }
 
-  const outputPath =
-    options.output ??
-    (!configErr ? config.orm.introspect.output : null) ??
-    resolve(cwd, defaultOutput);
-
-  let dbSchema = options.schema ?? null;
-
-  if (!dbSchema && dialect === "mysql") {
-    dbSchema = parseSchemaFromUrl(dbUrl);
-
-    if (!dbSchema) {
-      return err(
-        "IntrospectError",
-        "Could not determine MySQL schema from URL. Pass --schema <name>.",
-      );
-    }
-  }
-
-  const sql = new SQL({ url: dbUrl });
-
-  const [introspectErr, tables] = await introspectSchema(sql, dialect, {
-    schema: dbSchema ?? undefined,
-  });
-
-  await mightThrow(sql.close());
-
-  if (introspectErr) {
-    return err(introspectErr.type, introspectErr.message);
-  }
-
-  const code = generateCode(tables ?? [], dialect);
-
-  const [writeErr] = await mightThrow(Bun.write(outputPath, code));
-
-  if (writeErr) {
-    return err(
-      "IntrospectError",
-      `Failed to write output: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}`,
+  if (!isDialect(rawDialect)) {
+    throw new Error(
+      `Invalid dialect: "${rawDialect}". Must be postgres, mysql, or sqlite.`,
     );
   }
 
-  const configNote = !configErr ? config.configPath : null;
+  return rawDialect;
+}
 
-  return ok({
-    configPathRelative: configNote ? relative(cwd, configNote) : null,
-    outputPathRelative: relative(cwd, outputPath),
-    tableCount: (tables ?? []).length,
-  });
+function resolveOutputPath(
+  options: IntrospectOptions,
+  config: Awaited<ReturnType<typeof resolveConfig>>,
+  cwd: string,
+) {
+  return (
+    options.output ??
+    config?.orm.introspect.output ??
+    resolve(cwd, defaultOutput)
+  );
+}
+
+function resolveSchema(
+  options: IntrospectOptions,
+  dialect: Dialect,
+  dbUrl: string,
+) {
+  if (options.schema) {
+    return options.schema;
+  }
+
+  if (dialect !== "mysql") {
+    return null;
+  }
+
+  const inferredSchema = parseSchemaFromUrl(dbUrl);
+
+  if (!inferredSchema) {
+    throw new Error(
+      "Could not determine MySQL schema from URL. Pass --schema <name>.",
+    );
+  }
+
+  return inferredSchema;
+}
+
+export async function runIntrospect(options: IntrospectOptions = {}) {
+  const cwd = options.cwd ?? process.cwd();
+
+  const config = await resolveConfig(cwd);
+  const dbUrl = resolveDbUrl(options, config);
+  const dialect = resolveDialect(options, config, dbUrl);
+  const outputPath = resolveOutputPath(options, config, cwd);
+  const dbSchema = resolveSchema(options, dialect, dbUrl);
+
+  const sql = new SQL({ url: dbUrl });
+
+  try {
+    const tables = await introspectSchema(sql, dialect, {
+      schema: dbSchema ?? undefined,
+    });
+
+    const code = generateCode(tables, dialect);
+    await Bun.write(outputPath, code);
+
+    return {
+      configPathRelative: config ? relative(cwd, config.configPath) : null,
+      outputPathRelative: relative(cwd, outputPath),
+      tableCount: tables.length,
+    };
+  } finally {
+    await sql.close();
+  }
 }

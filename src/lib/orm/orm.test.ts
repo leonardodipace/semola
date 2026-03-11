@@ -124,7 +124,7 @@ describe("createOrm()", () => {
     expect(name).toBe("Alice");
   });
 
-  test("users.findMany() returns result tuple", async () => {
+  test("users.findMany() returns rows", async () => {
     const db = createOrm({
       url: "sqlite::memory:",
       tables: { users: usersTable },
@@ -133,9 +133,8 @@ describe("createOrm()", () => {
     await setupUsers(db);
     await db.$raw`INSERT INTO users (id, name) VALUES ('1', 'Alice')`;
 
-    const [err, users] = await db.users.findMany();
+    const users = await db.users.findMany();
 
-    expect(err).toBeNull();
     expect(users).toEqual([{ id: "1", name: "Alice" }]);
   });
 
@@ -149,25 +148,18 @@ describe("createOrm()", () => {
 
     await db.$raw`INSERT INTO mapped_users (id, first_name, last_name) VALUES ('1', 'Alice', 'Smith')`;
 
-    const [findErr, users] = await db.mappedUsers.findMany();
+    const users = await db.mappedUsers.findMany();
 
-    expect(findErr).toBeNull();
     expect(users).toEqual([{ id: "1", firstName: "Alice", lastName: "Smith" }]);
   });
 
-  test("users.findMany() returns typed error object", async () => {
+  test("users.findMany() throws when query fails", async () => {
     const db = createOrm({
       url: "sqlite::memory:",
       tables: { users: usersTable },
     });
 
-    const [findErr, users] = await db.users.findMany();
-
-    expect(users).toBeNull();
-    expect(findErr).toEqual({
-      type: "InternalServerError",
-      message: "no such table: users",
-    });
+    await expect(db.users.findMany()).rejects.toThrow("no such table: users");
   });
 
   test("users.findFirst() returns first row or null", async () => {
@@ -178,20 +170,18 @@ describe("createOrm()", () => {
 
     await setupUsers(db);
 
-    const [emptyErr, emptyUser] = await db.users.findFirst({
+    const emptyUser = await db.users.findFirst({
       where: { id: "missing" },
     });
 
-    expect(emptyErr).toBeNull();
     expect(emptyUser).toBeNull();
 
     await db.$raw`INSERT INTO users (id, name) VALUES ('1', 'Alice')`;
 
-    const [firstErr, firstUser] = await db.users.findFirst({
+    const firstUser = await db.users.findFirst({
       where: { id: "1" },
     });
 
-    expect(firstErr).toBeNull();
     expect(firstUser).toEqual({ id: "1", name: "Alice" });
   });
 
@@ -204,9 +194,8 @@ describe("createOrm()", () => {
     await setupUsers(db);
     await db.$raw`INSERT INTO users (id, name) VALUES ('1', 'Alice')`;
 
-    const [findErr, user] = await db.users.findUnique({ where: { id: "1" } });
+    const user = await db.users.findUnique({ where: { id: "1" } });
 
-    expect(findErr).toBeNull();
     expect(user).toEqual({ id: "1", name: "Alice" });
   });
 
@@ -344,18 +333,18 @@ describe("createOrm()", () => {
     await db.$raw`INSERT INTO users VALUES ('2', 'Bob', 70)`;
     await db.$raw`INSERT INTO users VALUES ('3', 'Carol', 80)`;
 
-    const [, gt80] = await db.users.findMany({ where: { score: { gt: 80 } } });
-    expect(gt80?.map((r) => r.id)).toEqual(["1"]);
+    const gt80 = await db.users.findMany({ where: { score: { gt: 80 } } });
+    expect(gt80.map((r) => r.id)).toEqual(["1"]);
 
-    const [, inList] = await db.users.findMany({
+    const inList = await db.users.findMany({
       where: { score: { in: [70, 80] } },
     });
-    expect(inList?.map((r) => r.id).sort()).toEqual(["2", "3"]);
+    expect(inList.map((r) => r.id).sort()).toEqual(["2", "3"]);
 
-    const [, notAlice] = await db.users.findMany({
+    const notAlice = await db.users.findMany({
       where: { name: { not: "Alice" } },
     });
-    expect(notAlice?.map((r) => r.id).sort()).toEqual(["2", "3"]);
+    expect(notAlice.map((r) => r.id).sort()).toEqual(["2", "3"]);
   });
 
   test("select() supports endsWith and contains string operators", async () => {
@@ -380,16 +369,13 @@ describe("createOrm()", () => {
     expect(contains.map((r) => r.id).sort()).toEqual(["1", "3"]);
   });
 
-  test("findFirst() returns error tuple when query fails", async () => {
+  test("findFirst() throws when query fails", async () => {
     const db = createOrm({
       url: "sqlite::memory:",
       tables: { users: usersTable },
     });
 
-    const [findErr, user] = await db.users.findFirst();
-
-    expect(user).toBeNull();
-    expect(findErr?.type).toBe("InternalServerError");
+    await expect(db.users.findFirst()).rejects.toThrow("no such table: users");
   });
 
   test("insert supports returning on sqlite", async () => {
@@ -434,7 +420,7 @@ describe("createOrm()", () => {
     ]);
   });
 
-  test("create() returns tuple with created row", async () => {
+  test("create() returns created row", async () => {
     const db = createOrm({
       url: "sqlite::memory:",
       tables: { users: usersTable },
@@ -442,11 +428,10 @@ describe("createOrm()", () => {
 
     await setupUsers(db);
 
-    const [createErr, created] = await db.users.create({
+    const created = await db.users.create({
       data: { id: "u1", name: "Alice" },
     });
 
-    expect(createErr).toBeNull();
     expect(created).toEqual({ id: "u1", name: "Alice" });
   });
 
@@ -458,14 +443,13 @@ describe("createOrm()", () => {
 
     await setupUsers(db);
 
-    const [createErr, result] = await db.users.createMany({
+    const result = await db.users.createMany({
       data: [
         { id: "u1", name: "Alice" },
         { id: "u2", name: "Bob" },
       ],
     });
 
-    expect(createErr).toBeNull();
     expect(result).toEqual({
       count: 2,
       rows: [
@@ -530,12 +514,11 @@ describe("createOrm()", () => {
     await db.$raw`INSERT INTO users (id, name) VALUES ('1', 'Alice')`;
     await db.$raw`INSERT INTO users (id, name) VALUES ('2', 'Alice')`;
 
-    const [updateErr, result] = await db.users.updateMany({
+    const result = await db.users.updateMany({
       where: { name: "Alice" },
       data: { name: "Alicia" },
     });
 
-    expect(updateErr).toBeNull();
     expect(result).toEqual({
       count: 2,
       rows: [
@@ -612,11 +595,10 @@ describe("createOrm()", () => {
     await db.$raw`INSERT INTO users (id, name) VALUES ('1', 'Alice')`;
     await db.$raw`INSERT INTO users (id, name) VALUES ('2', 'Alice')`;
 
-    const [deleteErr, result] = await db.users.deleteMany({
+    const result = await db.users.deleteMany({
       where: { name: "Alice" },
     });
 
-    expect(deleteErr).toBeNull();
     expect(result).toEqual({
       count: 2,
       rows: [
@@ -695,13 +677,12 @@ describe("$transaction()", () => {
 
     await setupUsers(db);
 
-    const [txErr] = await db.$transaction(async (tx) => {
-      await tx.users.insert({ data: { name: "Alice" } });
-      throw new Error("fail");
-    });
-
-    expect(txErr).not.toBeNull();
-    expect(txErr?.message).toContain("fail");
+    await expect(
+      db.$transaction(async (tx) => {
+        await tx.users.insert({ data: { name: "Alice" } });
+        throw new Error("fail");
+      }),
+    ).rejects.toThrow("fail");
 
     const rows = await db.users.select();
     expect(rows).toEqual([]);

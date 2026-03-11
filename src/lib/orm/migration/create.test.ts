@@ -52,11 +52,10 @@ describe("createMigration", () => {
       await Bun.write(join(cwd, "semola.config.ts"), configContent);
       await Bun.write(join(cwd, "src", "db", "schema.ts"), schemaContent);
 
-      const [error, result] = await createMigration({ name: "init", cwd });
-      expect(error).toBeNull();
-      expect(result?.created).toBe(true);
+      const result = await createMigration({ name: "init", cwd });
+      expect(result.created).toBe(true);
 
-      if (!result?.created) {
+      if (!result.created) {
         return;
       }
 
@@ -114,11 +113,10 @@ describe("createMigration", () => {
       await Bun.write(join(cwd, "semola.config.ts"), configContent);
       await Bun.write(join(cwd, "src", "db", "schema.ts"), schemaContent);
 
-      const [error, result] = await createMigration({ name: "add_users", cwd });
-      expect(error).toBeNull();
-      expect(result?.created).toBe(true);
+      const result = await createMigration({ name: "add_users", cwd });
+      expect(result.created).toBe(true);
 
-      if (!result?.created) {
+      if (!result.created) {
         return;
       }
 

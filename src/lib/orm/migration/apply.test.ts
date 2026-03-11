@@ -36,11 +36,10 @@ describe("applyMigrations", () => {
   test("returns no pending when migrations folder is empty", async () => {
     const cwd = await setupProject();
 
-    const [error, result] = await applyMigrations({ cwd });
+    const result = await applyMigrations({ cwd });
 
-    expect(error).toBeNull();
-    expect(result?.pending).toBe(0);
-    expect(result?.total).toBe(0);
+    expect(result.pending).toBe(0);
+    expect(result.total).toBe(0);
   });
 
   test("applies pending migration and writes state file", async () => {
@@ -57,10 +56,9 @@ describe("applyMigrations", () => {
       "DROP TABLE IF EXISTS users;\n",
     );
 
-    const [error, result] = await applyMigrations({ cwd });
-    expect(error).toBeNull();
-    expect(result?.applied).toBe(1);
-    expect(result?.total).toBe(1);
+    const result = await applyMigrations({ cwd });
+    expect(result.applied).toBe(1);
+    expect(result.total).toBe(1);
 
     const stateFile = join(cwd, ".semola-migrations.json");
     const exists = await Bun.file(stateFile).exists();

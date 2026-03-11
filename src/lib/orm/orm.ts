@@ -1,6 +1,6 @@
 import type { TransactionSQL } from "bun";
 import { SQL } from "bun";
-import { err, ok } from "../errors/index.js";
+import { mightThrow } from "../errors/index.js";
 import { getDialectAdapter } from "./dialect/index.js";
 import { parsePostgresArrayLiteral } from "./sql/parse-array.js";
 import {
@@ -20,9 +20,7 @@ import type {
   FindManyInput,
   FindUniqueInput,
   InsertInput,
-  OrmResultError,
   RelationDefs,
-  ResultTuple,
   TableRow,
   TinyTableClient,
   UpdateBuilderInput,
@@ -64,34 +62,34 @@ function inferDialectFromUrl(url: string): Dialect {
   return "sqlite";
 }
 
-function toOrmError(errorValue: unknown): OrmResultError {
+function toOrmErrorMessage(errorValue: unknown) {
   if (errorValue instanceof Error) {
-    return { type: "InternalServerError", message: errorValue.message };
+    return errorValue.message;
   }
 
   if (typeof errorValue === "object" && errorValue !== null) {
-    const type = Reflect.get(errorValue, "type");
     const message = Reflect.get(errorValue, "message");
 
-    if (typeof type === "string" && typeof message === "string") {
-      return { type, message };
-    }
-
     if (typeof message === "string") {
-      return { type: "InternalServerError", message };
+      return message;
     }
   }
 
-  return { type: "InternalServerError", message: "Unknown ORM error" };
+  return "Unknown ORM error";
 }
 
-function toResult<T>(promise: Promise<T>): Promise<ResultTuple<T>> {
-  return promise
-    .then((data) => ok(data))
-    .catch((errorValue) => {
-      const normalized = toOrmError(errorValue);
-      return err(normalized.type, normalized.message);
-    });
+async function executeOrThrow<T>(promise: Promise<T>) {
+  const [error, data] = await mightThrow(promise);
+
+  if (error !== null) {
+    throw new Error(toOrmErrorMessage(error));
+  }
+
+  if (data === null) {
+    throw new Error("ORM operation returned no data");
+  }
+
+  return data;
 }
 
 function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
@@ -254,97 +252,70 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
     select,
 
     async findMany(input) {
-      const [findErr, rows] = await toResult(
-        select(mapFindInputToSelect(input)),
-      );
-
-      if (findErr) {
-        return err(findErr.type, findErr.message);
-      }
-
-      return ok(normalizeRows(rows));
+      const rows = await executeOrThrow(select(mapFindInputToSelect(input)));
+      return normalizeRows(rows);
     },
 
     async findFirst(input?: FindFirstInput<T, TRels>) {
-      const [findErr, rows] = await toResult(
+      const rows = await executeOrThrow(
         select({ ...mapFindInputToSelect(input), limit: 1 }),
       );
 
-      if (findErr) {
-        return err(findErr.type, findErr.message);
-      }
-
       const normalizedRows = normalizeRows(rows);
       const first = normalizedRows[0] ?? null;
-      return ok(first);
+      return first;
     },
 
     async findUnique(input: FindUniqueInput<T>) {
-      const [findErr, rows] = await toResult(
+      const rows = await executeOrThrow(
         select({ where: input.where, limit: 1 }),
       );
 
-      if (findErr) {
-        return err(findErr.type, findErr.message);
-      }
-
       const normalizedRows = normalizeRows(rows);
       const first = normalizedRows[0] ?? null;
-      return ok(first);
+      return first;
     },
 
     insert,
 
     async create(input: CreateInput<T>) {
       if (dialectAdapter.dialect === "mysql") {
-        const [insertErr] = await toResult(insert({ data: input.data }));
-
-        if (insertErr) {
-          return err(insertErr.type, insertErr.message);
-        }
+        await executeOrThrow(insert({ data: input.data }));
 
         // MySQL has no RETURNING — re-fetch using inserted data as where clause
         // InsertData<T> values are structurally compatible with WhereInput<T>
         const whereInput = input.data as unknown as WhereInput<T>;
-        const [fetchErr, rows] = await toResult(
+        const rows = await executeOrThrow(
           select({ where: whereInput, limit: 1 }),
         );
-
-        if (fetchErr) {
-          return err(fetchErr.type, fetchErr.message);
-        }
 
         const normalizedRows = normalizeRows(rows);
         const first = normalizedRows[0] ?? null;
 
         if (!first) {
-          return err("InternalServerError", "Insert returned no rows");
+          throw new Error("Insert returned no rows");
         }
 
-        return ok(first);
+        return first;
       }
 
-      const [createErr, rows] = await toResult(
+      const rows = await executeOrThrow(
         insert({ data: input.data, returning: true }),
       );
-
-      if (createErr) {
-        return err(createErr.type, createErr.message);
-      }
 
       const normalizedRows = normalizeRows(rows);
       const first = normalizedRows[0] ?? null;
 
       if (!first) {
-        return err("InternalServerError", "Insert returned no rows");
+        throw new Error("Insert returned no rows");
       }
 
-      return ok(first);
+      return first;
     },
 
     async createMany(input: CreateManyInput<T>) {
       if (input.data.length === 0) {
-        return ok({ count: 0, rows: [] });
+        return { count: 0, rows: [] };
       }
 
       const rows = input.data.map((item) =>
@@ -352,28 +323,20 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
       );
 
       if (dialectAdapter.dialect === "mysql") {
-        const [createErr] = await toResult(
+        await executeOrThrow(
           sql`INSERT INTO ${sql(table.tableName)} ${sql(rows)}`,
         );
 
-        if (createErr) {
-          return err(createErr.type, createErr.message);
-        }
-
-        return ok({ count: rows.length, rows: [] });
+        return { count: rows.length, rows: [] };
       }
 
-      const [createErr, createdRows] = await toResult(
+      const createdRows = await executeOrThrow(
         sql`INSERT INTO ${sql(table.tableName)} ${sql(rows)} RETURNING ${buildReturningColumns()}`,
       );
 
-      if (createErr) {
-        return err(createErr.type, createErr.message);
-      }
-
       const normalizedRows = normalizeRows(createdRows);
 
-      return ok({ count: normalizedRows.length, rows: normalizedRows });
+      return { count: normalizedRows.length, rows: normalizedRows };
     },
 
     update,
@@ -381,7 +344,7 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
     async updateMany(input: UpdateManyInput<T>) {
       if (dialectAdapter.dialect === "mysql") {
         if (sql instanceof SQL) {
-          const [txErr, result] = await toResult(
+          const result = await executeOrThrow(
             sql.begin(async (tx) => {
               const beforeRows = await serializeSelectInput(
                 tx,
@@ -415,49 +378,29 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
             }),
           );
 
-          if (txErr) {
-            return err(txErr.type, txErr.message);
-          }
-
-          return ok(result);
+          return result;
         }
 
         // Already in a transaction: operations are already atomic
-        const [beforeUpdateErr, beforeRows] = await toResult(
-          select({ where: input.where }),
-        );
+        const beforeRows = await executeOrThrow(select({ where: input.where }));
 
-        if (beforeUpdateErr) {
-          return err(beforeUpdateErr.type, beforeUpdateErr.message);
-        }
-
-        const [updateErr] = await toResult(
-          update({ where: input.where, data: input.data }),
-        );
-
-        if (updateErr) {
-          return err(updateErr.type, updateErr.message);
-        }
+        await executeOrThrow(update({ where: input.where, data: input.data }));
 
         const updatedRows = beforeRows.map((row: TableRow<T>) => ({
           ...row,
           ...input.data,
         }));
 
-        return ok({ count: updatedRows.length, rows: updatedRows });
+        return { count: updatedRows.length, rows: updatedRows };
       }
 
-      const [updateErr, rows] = await toResult(
+      const rows = await executeOrThrow(
         update({ where: input.where, data: input.data, returning: true }),
       );
 
-      if (updateErr) {
-        return err(updateErr.type, updateErr.message);
-      }
-
       const normalizedRows = normalizeRows(rows);
 
-      return ok({ count: normalizedRows.length, rows: normalizedRows });
+      return { count: normalizedRows.length, rows: normalizedRows };
     },
 
     delete: deleteByWhere,
@@ -465,7 +408,7 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
     async deleteMany(input: DeleteManyInput<T>) {
       if (dialectAdapter.dialect === "mysql") {
         if (sql instanceof SQL) {
-          const [txErr, result] = await toResult(
+          const result = await executeOrThrow(
             sql.begin(async (tx) => {
               const beforeRows = await serializeSelectInput(
                 tx,
@@ -488,44 +431,24 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
             }),
           );
 
-          if (txErr) {
-            return err(txErr.type, txErr.message);
-          }
-
-          return ok(result);
+          return result;
         }
 
         // Already in a transaction: operations are already atomic
-        const [beforeDeleteErr, rows] = await toResult(
-          select({ where: input.where }),
-        );
+        const rows = await executeOrThrow(select({ where: input.where }));
 
-        if (beforeDeleteErr) {
-          return err(beforeDeleteErr.type, beforeDeleteErr.message);
-        }
+        await executeOrThrow(deleteByWhere({ where: input.where }));
 
-        const [deleteErr] = await toResult(
-          deleteByWhere({ where: input.where }),
-        );
-
-        if (deleteErr) {
-          return err(deleteErr.type, deleteErr.message);
-        }
-
-        return ok({ count: rows.length, rows });
+        return { count: rows.length, rows };
       }
 
-      const [deleteErr, rows] = await toResult(
+      const rows = await executeOrThrow(
         deleteByWhere({ where: input.where, returning: true }),
       );
 
-      if (deleteErr) {
-        return err(deleteErr.type, deleteErr.message);
-      }
-
       const normalizedRows = normalizeRows(rows);
 
-      return ok({ count: normalizedRows.length, rows: normalizedRows });
+      return { count: normalizedRows.length, rows: normalizedRows };
     },
   };
 }
@@ -594,7 +517,7 @@ export function createOrm<
     ...makeModels(sql),
 
     $transaction<T>(fn: (tx: ReturnType<typeof makeModels>) => Promise<T>) {
-      return toResult(sql.begin((tx) => fn(makeModels(tx))));
+      return sql.begin((tx) => fn(makeModels(tx)));
     },
 
     $raw(strings: TemplateStringsArray, ...values: unknown[]) {

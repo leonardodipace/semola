@@ -23,144 +23,184 @@ type CliIo = {
   cwd: string;
 };
 
+type IntrospectArgs = {
+  output?: string;
+  schema?: string;
+  url?: string;
+  dialect?: string;
+};
+
 const defaultIo: CliIo = {
   log: (message) => console.log(message),
   error: (message) => console.error(message),
   cwd: process.cwd(),
 };
 
+function parseIntrospectArgs(argv: string[]): IntrospectArgs {
+  const args: IntrospectArgs = {};
+
+  for (let index = 2; index < argv.length; index++) {
+    const flag = argv[index];
+    const value = argv[index + 1];
+
+    if (!value) {
+      continue;
+    }
+
+    if (flag === "--output") {
+      args.output = value;
+      index++;
+      continue;
+    }
+
+    if (flag === "--schema") {
+      args.schema = value;
+      index++;
+      continue;
+    }
+
+    if (flag === "--url") {
+      args.url = value;
+      index++;
+      continue;
+    }
+
+    if (flag === "--dialect") {
+      args.dialect = value;
+      index++;
+    }
+  }
+
+  return args;
+}
+
+async function runIntrospectCommand(argv: string[], io: CliIo) {
+  const args = parseIntrospectArgs(argv);
+  const data = await runIntrospect({
+    cwd: io.cwd,
+    output: args.output,
+    schema: args.schema,
+    url: args.url,
+    dialect: args.dialect,
+  });
+
+  if (data.configPathRelative) {
+    io.log(`Loaded config from ${data.configPathRelative}`);
+  }
+
+  io.log(
+    `Introspected ${data.tableCount} tables -> ${data.outputPathRelative}`,
+  );
+}
+
+function readMigrationName(argv: string[]) {
+  const migrationName = argv[3];
+
+  if (!migrationName) {
+    throw new Error("Missing migration name");
+  }
+
+  return migrationName;
+}
+
+async function runCreateMigrationCommand(argv: string[], io: CliIo) {
+  const result = await createMigration({
+    name: readMigrationName(argv),
+    cwd: io.cwd,
+  });
+
+  if (!result.created) {
+    io.log(result.message);
+    return;
+  }
+
+  io.log(`Loaded config from ${result.configPathRelative}`);
+  io.log(`Loaded schema from ${result.schemaPathRelative}`);
+  io.log(`Diff detected ${result.operationsCount} operations`);
+  io.log(`Created ${result.upPathRelative}`);
+  io.log(`Created ${result.downPathRelative}`);
+}
+
+async function runApplyMigrationsCommand(io: CliIo) {
+  const result = await applyMigrations({ cwd: io.cwd });
+
+  io.log(`Loaded config from ${result.configPathRelative}`);
+
+  if (result.pending === 0) {
+    io.log(
+      `No pending migrations (${result.total} total, state: ${result.stateFileRelative})`,
+    );
+    return;
+  }
+
+  io.log(`Applied ${result.applied}/${result.total} migrations successfully`);
+}
+
+async function runRollbackCommand(io: CliIo) {
+  const result = await rollbackMigration({ cwd: io.cwd });
+
+  io.log(`Loaded config from ${result.configPathRelative}`);
+
+  if (!result.rolledBack) {
+    io.log(result.message);
+    return;
+  }
+
+  io.log(`Rolled back ${result.migrationId}_${result.migrationName}`);
+}
+
+async function runMigrationsCommand(argv: string[], io: CliIo) {
+  const action = argv[2];
+
+  if (action === "create") {
+    await runCreateMigrationCommand(argv, io);
+    return;
+  }
+
+  if (action === "apply") {
+    await runApplyMigrationsCommand(io);
+    return;
+  }
+
+  if (action === "rollback") {
+    await runRollbackCommand(io);
+    return;
+  }
+
+  throw new Error(usage());
+}
+
 export async function runSemolaCli(
   argv = process.argv.slice(2),
   io = defaultIo,
 ) {
-  if (argv[0] !== "orm") {
-    io.error(usage());
-    return 1;
-  }
-
-  if (argv[1] === "introspect") {
-    let output: string | undefined;
-    let schema: string | undefined;
-    let url: string | undefined;
-    let dialect: string | undefined;
-
-    for (let i = 2; i < argv.length; i++) {
-      if (argv[i] === "--output" && argv[i + 1]) {
-        output = argv[i + 1];
-        i++;
-      }
-
-      if (argv[i] === "--schema" && argv[i + 1]) {
-        schema = argv[i + 1];
-        i++;
-      }
-
-      if (argv[i] === "--url" && argv[i + 1]) {
-        url = argv[i + 1];
-        i++;
-      }
-
-      if (argv[i] === "--dialect" && argv[i + 1]) {
-        dialect = argv[i + 1];
-        i++;
-      }
+  try {
+    if (argv[0] !== "orm") {
+      throw new Error(usage());
     }
 
-    const [error, data] = await runIntrospect({
-      cwd: io.cwd,
-      output,
-      schema,
-      url,
-      dialect,
-    });
-
-    if (error) {
-      io.error(error.message);
-      return 1;
+    if (argv[1] === "introspect") {
+      await runIntrospectCommand(argv, io);
+      return 0;
     }
 
-    if (data.configPathRelative) {
-      io.log(`Loaded config from ${data.configPathRelative}`);
+    if (argv[1] === "migrations") {
+      await runMigrationsCommand(argv, io);
+      return 0;
     }
 
-    io.log(
-      `Introspected ${data.tableCount} tables → ${data.outputPathRelative}`,
-    );
-    return 0;
-  }
+    throw new Error(usage());
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
 
-  if (argv[1] !== "migrations") {
-    io.error(usage());
-    return 1;
-  }
+    io.error(message);
 
-  const action = argv[2];
-  if (action === "create") {
-    const migrationName = argv[3];
-    if (!migrationName) {
-      io.error("Missing migration name");
+    if (message === "Missing migration name") {
       io.error(usage());
-      return 1;
     }
 
-    const [error, result] = await createMigration({
-      name: migrationName,
-      cwd: io.cwd,
-    });
-    if (error) {
-      io.error(error.message);
-      return 1;
-    }
-
-    if (!result.created) {
-      io.log(result.message);
-      return 0;
-    }
-
-    io.log(`Loaded config from ${result.configPathRelative}`);
-    io.log(`Loaded schema from ${result.schemaPathRelative}`);
-    io.log(`Diff detected ${result.operationsCount} operations`);
-    io.log(`Created ${result.upPathRelative}`);
-    io.log(`Created ${result.downPathRelative}`);
-    return 0;
+    return 1;
   }
-
-  if (action === "apply") {
-    const [error, result] = await applyMigrations({ cwd: io.cwd });
-    if (error) {
-      io.error(error.message);
-      return 1;
-    }
-
-    io.log(`Loaded config from ${result.configPathRelative}`);
-    if (result.pending === 0) {
-      io.log(
-        `No pending migrations (${result.total} total, state: ${result.stateFileRelative})`,
-      );
-      return 0;
-    }
-    io.log(`Applied ${result.applied}/${result.total} migrations successfully`);
-    return 0;
-  }
-
-  if (action === "rollback") {
-    const [error, result] = await rollbackMigration({ cwd: io.cwd });
-    if (error) {
-      io.error(error.message);
-      return 1;
-    }
-
-    io.log(`Loaded config from ${result.configPathRelative}`);
-    if (!result.rolledBack) {
-      io.log(result.message);
-      return 0;
-    }
-    io.log(`Rolled back ${result.migrationId}_${result.migrationName}`);
-    return 0;
-  }
-
-  io.error(usage());
-  return 1;
 }
 
 if (import.meta.main) {

@@ -36,14 +36,13 @@ describe("rollbackMigration", () => {
   test("returns message when no applied migrations exist", async () => {
     const cwd = await setupProject();
 
-    const [error, result] = await rollbackMigration({ cwd });
+    const result = await rollbackMigration({ cwd });
 
-    expect(error).toBeNull();
-    expect(result?.rolledBack).toBe(false);
-    if (result?.rolledBack) {
+    expect(result.rolledBack).toBe(false);
+    if (result.rolledBack) {
       return;
     }
-    expect(result?.message).toContain("No applied migrations found");
+    expect(result.message).toContain("No applied migrations found");
   });
 
   test("rolls back last applied migration and updates state", async () => {
@@ -73,10 +72,9 @@ describe("rollbackMigration", () => {
       ),
     );
 
-    const [error, result] = await rollbackMigration({ cwd });
-    expect(error).toBeNull();
-    expect(result?.rolledBack).toBe(true);
-    if (!result?.rolledBack) {
+    const result = await rollbackMigration({ cwd });
+    expect(result.rolledBack).toBe(true);
+    if (!result.rolledBack) {
       return;
     }
     expect(result.migrationId).toBe("20260228231146001");
