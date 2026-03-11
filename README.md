@@ -26,6 +26,7 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 | **🔐 Policy**        | Policy-based authorization with type-safe guards       | `semola/policy` |
 | **🌍 i18n**          | Compile-time validated internationalization            | `semola/i18n`   |
 | **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`  |
+| **⏰ Cron**          | In-memory cron scheduler for periodic task execution   | `semola/cron`   |
 | **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors` |
 
 ---
@@ -135,23 +136,42 @@ const [error, user] = await cache.get("user:123");
 if (!error) console.log(user);
 ```
 
+### Schedule Recurring Tasks
+
+```typescript
+import { Cron } from "semola/cron";
+
+const cleanup = new Cron({
+  name: "daily-cleanup",
+  schedule: "0 0 * * *", // Daily at midnight
+  handler: async () => {
+    await deleteOldLogs();
+    await archiveInactiveUsers();
+  },
+});
+
+cleanup.start();
+```
+
 ### Check Permissions
 
 ```typescript
 import { Policy } from "semola/policy";
 
-const policy = new Policy();
+type User = { id: number; role: string };
 
-// Allow admins to edit any post
+const policy = new Policy<User>();
+
+// Allow admins to edit any resource
 policy.allow({
-  action: "update",
-  entity: "post",
+  action: ["create", "update", "delete"],
   conditions: { role: "admin" },
-  reason: "Admins can edit any post",
+  reason: "Admins have full access",
 });
 
 // Check if user can edit
-const result = policy.can("update", "post", { role: user.role });
+const user: User = { id: 1, role: "admin" };
+const result = policy.can("update", user);
 console.log(result.allowed); // true or false
 ```
 
@@ -234,6 +254,7 @@ _Higher is better for req/sec, lower is better for latency._
 - [API Framework](./docs/api.md) - Type-safe REST API framework with OpenAPI
 - [Queue](./docs/queue.md) - Redis-backed job queue with timeouts & concurrency
 - [PubSub](./docs/pubsub.md) - Type-safe Redis pub/sub
+- [Cron](./docs/cron.md) - In-memory cron scheduler for periodic task execution
 - [Policy](./docs/policy.md) - Policy-based authorization
 - [i18n](./docs/i18n.md) - Type-safe internationalization
 - [Cache](./docs/cache.md) - Redis cache wrapper with TTL
