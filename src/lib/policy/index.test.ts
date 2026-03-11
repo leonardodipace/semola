@@ -8,13 +8,24 @@ type Post = {
   status: string;
 };
 
+type User = {
+  id: number;
+  name: string;
+  roles: string[];
+  age: number;
+  posts: Post[];
+  meta: {
+    createdAt: Date;
+    updatedAt: Date;
+  };
+};
+
 describe("Policy", () => {
   test("should allow access when conditions match", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "read",
-      entity: "Post",
       conditions: {
         status: "published",
       },
@@ -27,17 +38,16 @@ describe("Policy", () => {
       status: "published",
     };
 
-    expect(policy.can<Post>("read", "Post", post)).toMatchObject({
+    expect(policy.can("read", post)).toMatchObject({
       allowed: true,
     });
   });
 
   test("should deny access when conditions do not match", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "read",
-      entity: "Post",
       conditions: {
         status: "published",
       },
@@ -50,17 +60,16 @@ describe("Policy", () => {
       status: "draft",
     };
 
-    expect(policy.can<Post>("read", "Post", post)).toMatchObject({
+    expect(policy.can("read", post)).toMatchObject({
       allowed: false,
     });
   });
 
   test("should forbid access when forbid conditions match", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.forbid<Post>({
+    policy.forbid({
       action: "update",
-      entity: "Post",
       conditions: {
         status: "published",
       },
@@ -73,22 +82,20 @@ describe("Policy", () => {
       status: "published",
     };
 
-    expect(policy.can<Post>("update", "Post", post)).toMatchObject({
+    expect(policy.can("update", post)).toMatchObject({
       allowed: false,
     });
   });
 
   test("should allow access when forbid conditions do not match", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "update",
-      entity: "Post",
     });
 
-    policy.forbid<Post>({
+    policy.forbid({
       action: "update",
-      entity: "Post",
       conditions: {
         status: "published",
       },
@@ -101,17 +108,26 @@ describe("Policy", () => {
       status: "draft",
     };
 
-    expect(policy.can<Post>("update", "Post", post)).toMatchObject({
+    const publishedPost: Post = {
+      id: 2,
+      title: "Published Post",
+      authorId: 1,
+      status: "published",
+    };
+
+    expect(policy.can("update", post)).toMatchObject({
       allowed: true,
+    });
+    expect(policy.can("update", publishedPost)).toMatchObject({
+      allowed: false,
     });
   });
 
   test("should work with multiple conditions", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "delete",
-      entity: "Post",
       conditions: {
         authorId: 1,
         status: "draft",
@@ -139,23 +155,22 @@ describe("Policy", () => {
       status: "published",
     };
 
-    expect(policy.can<Post>("delete", "Post", matchingPost)).toMatchObject({
+    expect(policy.can("delete", matchingPost)).toMatchObject({
       allowed: true,
     });
-    expect(policy.can<Post>("delete", "Post", nonMatchingPost1)).toMatchObject({
+    expect(policy.can("delete", nonMatchingPost1)).toMatchObject({
       allowed: false,
     });
-    expect(policy.can<Post>("delete", "Post", nonMatchingPost2)).toMatchObject({
+    expect(policy.can("delete", nonMatchingPost2)).toMatchObject({
       allowed: false,
     });
   });
 
   test("should allow access when no conditions are specified", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "read",
-      entity: "Post",
     });
 
     const post: Post = {
@@ -165,20 +180,62 @@ describe("Policy", () => {
       status: "published",
     };
 
-    expect(policy.can<Post>("read", "Post", post)).toMatchObject({
+    expect(policy.can("read", post)).toMatchObject({
+      allowed: true,
+    });
+  });
+
+  test("should work when comparing values referencing the same object in memory", () => {
+    class Comment {
+      public text: string;
+      public userId: number;
+
+      public constructor(text: string, userId: number) {
+        this.text = text;
+        this.userId = userId;
+      }
+    }
+
+    type CommentToUser = {
+      id: number;
+      comments: Comment[];
+    };
+
+    const comments = [
+      new Comment("First comment", 1),
+      new Comment("Second comment", 1),
+      new Comment("Third comment", 1),
+    ];
+
+    const policy = new Policy<CommentToUser>();
+    policy.allow({
+      conditions: {
+        comments,
+      },
+      action: ["update", "create", "delete"],
+    });
+
+    expect(policy.can("update", { id: 1, comments })).toMatchObject({
+      allowed: true,
+    });
+
+    expect(policy.can("create", { id: 1, comments })).toMatchObject({
+      allowed: true,
+    });
+
+    expect(policy.can("delete", { id: 1, comments })).toMatchObject({
       allowed: true,
     });
   });
 
   test("should deny access when no matching rule exists", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "read",
-      entity: "Post",
     });
 
-    expect(policy.can("delete", "Post")).toMatchObject({ allowed: false });
+    expect(policy.can("delete")).toMatchObject({ allowed: false });
   });
 
   test("should handle the example from requirements", () => {
@@ -189,46 +246,42 @@ describe("Policy", () => {
       status: "published",
     };
 
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "read",
-      entity: "Post",
       conditions: {
         status: "published",
       },
     });
 
-    policy.forbid<Post>({
+    policy.forbid({
       action: "update",
-      entity: "Post",
       conditions: {
         status: "published",
       },
     });
 
-    expect(policy.can<Post>("read", "Post", post)).toMatchObject({
+    expect(policy.can("read", post)).toMatchObject({
       allowed: true,
     });
-    expect(policy.can<Post>("update", "Post", post)).toMatchObject({
+    expect(policy.can("update", post)).toMatchObject({
       allowed: false,
     });
   });
 
   test("should handle multiple rules with different actions", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "read",
-      entity: "Post",
       conditions: {
         status: "published",
       },
     });
 
-    policy.allow<Post>({
+    policy.allow({
       action: "update",
-      entity: "Post",
       conditions: {
         status: "draft",
       },
@@ -248,44 +301,37 @@ describe("Policy", () => {
       status: "draft",
     };
 
-    expect(policy.can<Post>("read", "Post", publishedPost)).toMatchObject({
+    expect(policy.can("read", publishedPost)).toMatchObject({
       allowed: true,
     });
-    expect(policy.can<Post>("read", "Post", draftPost)).toMatchObject({
+    expect(policy.can("read", draftPost)).toMatchObject({
       allowed: false,
     });
-    expect(policy.can<Post>("update", "Post", publishedPost)).toMatchObject({
+    expect(policy.can("update", publishedPost)).toMatchObject({
       allowed: false,
     });
-    expect(policy.can<Post>("update", "Post", draftPost)).toMatchObject({
+    expect(policy.can("update", draftPost)).toMatchObject({
       allowed: true,
     });
   });
 
-  test("should handle different entities", () => {
-    const policy = new Policy();
+  test("should use separate policies per entity type", () => {
+    type Comment = { id: number; body: string };
 
-    policy.allow({
-      action: "read",
-      entity: "Post",
-    });
+    const postPolicy = new Policy<Post>();
+    const commentPolicy = new Policy<Comment>();
 
-    policy.allow({
-      action: "read",
-      entity: "Comment",
-    });
+    postPolicy.allow({ action: "read" });
 
-    expect(policy.can("read", "Post")).toMatchObject({ allowed: true });
-    expect(policy.can("read", "Comment")).toMatchObject({ allowed: true });
-    expect(policy.can("read", "User")).toMatchObject({ allowed: false });
+    expect(postPolicy.can("read")).toMatchObject({ allowed: true });
+    expect(commentPolicy.can("read")).toMatchObject({ allowed: false });
   });
 
   test("should return reason when forbid rule matches", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.forbid<Post>({
+    policy.forbid({
       action: "delete",
-      entity: "Post",
       reason: "You cannot delete published posts",
       conditions: {
         status: "published",
@@ -299,7 +345,7 @@ describe("Policy", () => {
       status: "published",
     };
 
-    const result = policy.can<Post>("delete", "Post", post);
+    const result = policy.can("delete", post);
     expect(result).toMatchObject({
       allowed: false,
       reason: "You cannot delete published posts",
@@ -307,11 +353,10 @@ describe("Policy", () => {
   });
 
   test("should return reason when allow rule matches", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "read",
-      entity: "Post",
       reason: "Public posts are visible to everyone",
       conditions: {
         status: "published",
@@ -325,7 +370,7 @@ describe("Policy", () => {
       status: "published",
     };
 
-    const result = policy.can<Post>("read", "Post", post);
+    const result = policy.can("read", post);
     expect(result).toMatchObject({
       allowed: true,
       reason: "Public posts are visible to everyone",
@@ -333,11 +378,10 @@ describe("Policy", () => {
   });
 
   test("should return undefined reason when no reason is provided", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "read",
-      entity: "Post",
       conditions: {
         status: "published",
       },
@@ -350,31 +394,29 @@ describe("Policy", () => {
       status: "published",
     };
 
-    const result = policy.can<Post>("read", "Post", post);
+    const result = policy.can("read", post);
     expect(result).toMatchObject({ allowed: true });
     expect(result.reason).toBeUndefined();
   });
 
   test("should return undefined reason when no rule matches", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.allow<Post>({
+    policy.allow({
       action: "read",
-      entity: "Post",
       reason: "Some reason",
     });
 
-    const result = policy.can("delete", "Post");
+    const result = policy.can("delete");
     expect(result).toMatchObject({ allowed: false });
     expect(result.reason).toBeUndefined();
   });
 
   test("should handle reason with multiple conditions", () => {
-    const policy = new Policy();
+    const policy = new Policy<Post>();
 
-    policy.forbid<Post>({
+    policy.forbid({
       action: "update",
-      entity: "Post",
       reason: "Admins cannot update their own published posts",
       conditions: {
         authorId: 1,
@@ -389,10 +431,479 @@ describe("Policy", () => {
       status: "published",
     };
 
-    const result = policy.can<Post>("update", "Post", post);
+    const result = policy.can("update", post);
     expect(result).toMatchObject({
       allowed: false,
       reason: "Admins cannot update their own published posts",
+    });
+  });
+
+  test("should allow an array of actions in allow()", () => {
+    const policy = new Policy<Post>();
+
+    policy.allow({
+      action: ["create", "update"],
+    });
+
+    const post: Post = {
+      id: 1,
+      title: "Post",
+      authorId: 1,
+      status: "draft",
+    };
+
+    expect(policy.can("create", post)).toMatchObject({ allowed: true });
+    expect(policy.can("update", post)).toMatchObject({ allowed: true });
+    expect(policy.can("delete", post)).toMatchObject({ allowed: false });
+  });
+
+  test("should allow an array of actions in forbid()", () => {
+    const policy = new Policy<Post>();
+
+    policy.allow({ action: "read" });
+
+    policy.forbid({
+      action: ["create", "delete"],
+    });
+
+    const post: Post = {
+      id: 1,
+      title: "Post",
+      authorId: 1,
+      status: "published",
+    };
+
+    expect(policy.can("read", post)).toMatchObject({ allowed: true });
+    expect(policy.can("create", post)).toMatchObject({ allowed: false });
+    expect(policy.can("update", post)).toMatchObject({ allowed: false });
+    expect(policy.can("delete", post)).toMatchObject({ allowed: false });
+  });
+
+  test("should support predicate functions in conditions", () => {
+    const policy = new Policy<Post>();
+
+    policy.allow({
+      action: "read",
+      conditions: {
+        title: (v) => v.startsWith("Public"),
+      },
+    });
+
+    const visiblePost: Post = {
+      id: 1,
+      title: "Public Announcement",
+      authorId: 1,
+      status: "published",
+    };
+
+    const hiddenPost: Post = {
+      id: 2,
+      title: "Private Notes",
+      authorId: 1,
+      status: "published",
+    };
+
+    expect(policy.can("read", visiblePost)).toMatchObject({ allowed: true });
+    expect(policy.can("read", hiddenPost)).toMatchObject({ allowed: false });
+  });
+
+  test("should match nested object conditions by value", () => {
+    type Post = {
+      id: number;
+      title: string;
+      status: string;
+      author: { id: number; name: string };
+    };
+
+    const policy = new Policy<Post>();
+
+    policy.allow({
+      action: "update",
+      conditions: {
+        author: { id: 1, name: "john" },
+      },
+    });
+
+    expect(
+      policy.can("update", {
+        id: 2,
+        title: "The Deep",
+        status: "published",
+        author: { id: 1, name: "john" },
+      }),
+    ).toMatchObject({ allowed: true });
+
+    expect(
+      policy.can("update", {
+        id: 2,
+        title: "The Deep",
+        status: "published",
+        author: { id: 2, name: "jane" },
+      }),
+    ).toMatchObject({ allowed: false });
+  });
+
+  describe("array conditions", () => {
+    test("should allow when array condition matches exactly", () => {
+      const policy = new Policy<User>();
+
+      policy.allow({ action: "read", conditions: { roles: ["admin"] } });
+
+      const user: User = {
+        id: 1,
+        name: "Alice",
+        roles: ["admin"],
+        age: 30,
+        posts: [],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      expect(policy.can("read", user)).toMatchObject({ allowed: true });
+    });
+
+    test("should deny when array elements do not match", () => {
+      const policy = new Policy<User>();
+
+      policy.allow({ action: "read", conditions: { roles: ["admin"] } });
+
+      const user: User = {
+        id: 1,
+        name: "Bob",
+        roles: ["guest"],
+        age: 25,
+        posts: [],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      expect(policy.can("read", user)).toMatchObject({ allowed: false });
+    });
+
+    test("should deny when actual array is a superset of condition array", () => {
+      const policy = new Policy<User>();
+
+      policy.allow({ action: "read", conditions: { roles: ["admin"] } });
+
+      const user: User = {
+        id: 1,
+        name: "Alice",
+        roles: ["admin", "editor"],
+        age: 30,
+        posts: [],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      expect(policy.can("read", user)).toMatchObject({ allowed: false });
+    });
+
+    test("should deny when condition is empty array but actual is not", () => {
+      const policy = new Policy<User>();
+
+      policy.allow({ action: "read", conditions: { roles: [] } });
+
+      const user: User = {
+        id: 1,
+        name: "Alice",
+        roles: ["admin"],
+        age: 30,
+        posts: [],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      expect(policy.can("read", user)).toMatchObject({ allowed: false });
+    });
+
+    test("should support predicate on array field", () => {
+      const policy = new Policy<User>();
+
+      policy.allow({
+        action: "read",
+        conditions: { roles: (roles) => roles.includes("admin") },
+      });
+
+      const admin: User = {
+        id: 1,
+        name: "Alice",
+        roles: ["admin", "editor"],
+        age: 30,
+        posts: [],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      const guest: User = {
+        id: 2,
+        name: "Bob",
+        roles: ["guest"],
+        age: 25,
+        posts: [],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      expect(policy.can("read", admin)).toMatchObject({ allowed: true });
+      expect(policy.can("read", guest)).toMatchObject({ allowed: false });
+    });
+
+    test("should match array of objects exactly", () => {
+      const policy = new Policy<User>();
+
+      const post: Post = {
+        id: 1,
+        title: "Hello",
+        authorId: 1,
+        status: "published",
+      };
+
+      policy.allow({ action: "delete", conditions: { posts: [post] } });
+
+      const userWithPost: User = {
+        id: 1,
+        name: "Alice",
+        roles: [],
+        age: 30,
+        posts: [post],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      const userWithDifferentPost: User = {
+        id: 2,
+        name: "Bob",
+        roles: [],
+        age: 25,
+        posts: [{ ...post, id: 2 }],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      expect(policy.can("delete", userWithPost)).toMatchObject({
+        allowed: true,
+      });
+      expect(policy.can("delete", userWithDifferentPost)).toMatchObject({
+        allowed: false,
+      });
+    });
+  });
+
+  describe("Date conditions", () => {
+    test("should allow when Date condition matches by reference", () => {
+      const policy = new Policy<User>();
+
+      const date = new Date("2024-01-01");
+
+      policy.allow({
+        action: "read",
+        conditions: { meta: { createdAt: date, updatedAt: date } },
+      });
+
+      const user: User = {
+        id: 1,
+        name: "Alice",
+        roles: [],
+        age: 30,
+        posts: [],
+        meta: { createdAt: date, updatedAt: date },
+      };
+
+      expect(policy.can("read", user)).toMatchObject({ allowed: true });
+    });
+
+    test("should deny when Date values differ", () => {
+      const policy = new Policy<User>();
+
+      const conditionDate = new Date("2024-01-01");
+      const actualDate = new Date("2025-01-01");
+
+      policy.allow({
+        action: "read",
+        conditions: {
+          meta: { createdAt: conditionDate, updatedAt: conditionDate },
+        },
+      });
+
+      const user: User = {
+        id: 1,
+        name: "Alice",
+        roles: [],
+        age: 30,
+        posts: [],
+        meta: { createdAt: actualDate, updatedAt: actualDate },
+      };
+
+      expect(policy.can("read", user)).toMatchObject({ allowed: false });
+    });
+
+    test("should support predicate on Date field inside nested object", () => {
+      const policy = new Policy<User>();
+
+      const cutoff = new Date("2024-06-01");
+
+      policy.allow({
+        action: "read",
+        conditions: {
+          meta: (m) => m.createdAt > cutoff,
+        },
+      });
+
+      const recentUser: User = {
+        id: 1,
+        name: "Alice",
+        roles: [],
+        age: 30,
+        posts: [],
+        meta: { createdAt: new Date("2024-12-01"), updatedAt: new Date() },
+      };
+
+      const oldUser: User = {
+        id: 2,
+        name: "Bob",
+        roles: [],
+        age: 25,
+        posts: [],
+        meta: { createdAt: new Date("2023-01-01"), updatedAt: new Date() },
+      };
+
+      expect(policy.can("read", recentUser)).toMatchObject({ allowed: true });
+      expect(policy.can("read", oldUser)).toMatchObject({ allowed: false });
+    });
+  });
+
+  test("should support mixing direct equality and predicate conditions", () => {
+    const policy = new Policy<Post>();
+
+    policy.allow({
+      action: "read",
+      conditions: {
+        status: "published",
+        authorId: (v) => v > 0,
+      },
+    });
+
+    const validPost: Post = {
+      id: 1,
+      title: "Post",
+      authorId: 5,
+      status: "published",
+    };
+
+    const invalidAuthor: Post = {
+      id: 2,
+      title: "Post",
+      authorId: 0,
+      status: "published",
+    };
+
+    const draftPost: Post = {
+      id: 3,
+      title: "Post",
+      authorId: 5,
+      status: "draft",
+    };
+
+    expect(policy.can("read", validPost)).toMatchObject({ allowed: true });
+    expect(policy.can("read", invalidAuthor)).toMatchObject({ allowed: false });
+    expect(policy.can("read", draftPost)).toMatchObject({ allowed: false });
+  });
+
+  describe("Empty condition object", () => {
+    test("should allow when condition is an empty object", () => {
+      const policy = new Policy<Post>();
+      policy.allow({
+        action: "update",
+        conditions: {},
+      });
+
+      expect(policy.can("update")).toMatchObject({ allowed: true });
+      expect(policy.can("create")).toMatchObject({ allowed: false });
+    });
+
+    test("should allow when multiple conditions are an empty object", () => {
+      const policy = new Policy<Post>();
+      policy.allow({
+        action: "update",
+        conditions: {},
+      });
+
+      policy.allow({
+        action: "create",
+        conditions: {},
+      });
+
+      expect(policy.can("update")).toMatchObject({ allowed: true });
+      expect(policy.can("create")).toMatchObject({ allowed: true });
+    });
+
+    test("should allow when mixing empty conditions with defined conditions", () => {
+      const post: Post = {
+        id: 100,
+        authorId: 1,
+        status: "draft",
+        title: "The Deep",
+      };
+
+      const policy = new Policy<Post>();
+      policy.allow({
+        action: "update",
+        conditions: {
+          authorId: 1,
+        },
+      });
+
+      policy.allow({
+        action: "create",
+        conditions: {},
+      });
+
+      expect(policy.can("update", post)).toMatchObject({ allowed: true });
+      expect(policy.can("create")).toMatchObject({ allowed: true });
+    });
+
+    test("should forbid when condition is an empty object", () => {
+      const policy = new Policy<Post>();
+      policy.forbid({
+        action: ["update", "create"],
+        conditions: {},
+      });
+
+      expect(policy.can("update")).toMatchObject({ allowed: false });
+      expect(policy.can("create")).toMatchObject({ allowed: false });
+    });
+
+    test("should forbid when multiple conditions are an empty object", () => {
+      const policy = new Policy<Post>();
+      policy.forbid({
+        action: ["update"],
+        conditions: {},
+      });
+
+      policy.forbid({
+        action: ["create"],
+        conditions: {},
+      });
+
+      expect(policy.can("update")).toMatchObject({ allowed: false });
+      expect(policy.can("create")).toMatchObject({ allowed: false });
+    });
+
+    test("should forbid when mixing empty conditions with defined conditions", () => {
+      const post: Post = {
+        id: 100,
+        authorId: 1,
+        status: "draft",
+        title: "The Deep",
+      };
+
+      const policy = new Policy<Post>();
+      policy.forbid({
+        action: ["update"],
+        conditions: {
+          authorId: 1,
+        },
+      });
+
+      policy.forbid({
+        action: ["create"],
+        conditions: {},
+      });
+
+      expect(policy.can("update", post)).toMatchObject({ allowed: false });
+      expect(policy.can("create")).toMatchObject({ allowed: false });
     });
   });
 });
