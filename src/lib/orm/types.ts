@@ -143,7 +143,11 @@ export type WhereFilter<V> = {
   lte?: V;
 };
 
-export type ManyRelation<TTable> = { kind: "many"; table: () => TTable };
+export type ManyRelation<TTable> = {
+  kind: "many";
+  table: () => TTable;
+  foreignKey?: string;
+};
 export type OneRelation<TTable> = {
   kind: "one";
   foreignKey: string;

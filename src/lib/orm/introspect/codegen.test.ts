@@ -134,7 +134,7 @@ describe("generateCode", () => {
     expect(code).toContain("many, one");
     expect(code).toContain("relations: {");
     expect(code).toContain("users: {");
-    expect(code).toContain("posts: many(() => postsTable),");
+    expect(code).toContain('posts: many(() => postsTable, "user_id"),');
     expect(code).toContain("posts: {");
     expect(code).toContain('user: one("user_id", () => usersTable),');
   });
@@ -181,8 +181,10 @@ describe("generateCode", () => {
 
     const code = generateCode([usersTable, commentsTable], "postgres");
 
-    expect(code).toContain("comments: many(() => commentsTable),");
-    expect(code).toContain("commentsByReviewerId: many(() => commentsTable),");
+    expect(code).toContain('comments: many(() => commentsTable, "author_id"),');
+    expect(code).toContain(
+      'commentsByReviewerId: many(() => commentsTable, "reviewer_id"),',
+    );
     expect(code).toContain('author: one("author_id", () => usersTable),');
     expect(code).toContain('reviewer: one("reviewer_id", () => usersTable),');
   });

@@ -398,13 +398,21 @@ function buildJoinClauses<T extends ColDefs>(
       continue;
     }
 
-    const foreignCol = findManyForeignKey(target, basePk);
+    let foreignSqlName = rel.foreignKey;
 
-    if (!foreignCol) {
+    if (!foreignSqlName) {
+      const foreignCol = findManyForeignKey(target, basePk);
+
+      if (foreignCol) {
+        foreignSqlName = foreignCol.meta.sqlName;
+      }
+    }
+
+    if (!foreignSqlName) {
       continue;
     }
 
-    joinClause = sql`${joinClause} LEFT JOIN ${sql(target.tableName)} ON ${sql(target.tableName)}.${sql(foreignCol.meta.sqlName)} = ${sql(table.tableName)}.${sql(basePk.meta.sqlName)}`;
+    joinClause = sql`${joinClause} LEFT JOIN ${sql(target.tableName)} ON ${sql(target.tableName)}.${sql(foreignSqlName)} = ${sql(table.tableName)}.${sql(basePk.meta.sqlName)}`;
   }
 
   return joinClause;

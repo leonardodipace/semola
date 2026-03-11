@@ -347,6 +347,145 @@ describe("createOrm()", () => {
     expect(notAlice.map((r) => r.id).sort()).toEqual(["2", "3"]);
   });
 
+  test("findMany() hydrates many() include via inverse one() relation", async () => {
+    const users = new Table("users", {
+      id: uuid("id").primaryKey(),
+      name: string("name").notNull(),
+    });
+
+    const tasks = new Table("tasks", {
+      id: uuid("id").primaryKey(),
+      title: string("title").notNull(),
+      assigneeId: uuid("assignee_id").notNull(),
+    });
+
+    const db = createOrm({
+      url: "sqlite::memory:",
+      tables: { users, tasks },
+      relations: {
+        users: { tasks: many(() => tasks) },
+        tasks: { assignee: one("assignee_id", () => users) },
+      },
+    });
+
+    await setupUsersAndTasks(db);
+    await db.$raw`INSERT INTO users (id, name) VALUES ('1', 'Alice')`;
+    await db.$raw`INSERT INTO users (id, name) VALUES ('2', 'Bob')`;
+    await db.$raw`INSERT INTO tasks (id, title, assignee_id) VALUES ('10', 'Task A', '1')`;
+    await db.$raw`INSERT INTO tasks (id, title, assignee_id) VALUES ('11', 'Task B', '1')`;
+    await db.$raw`INSERT INTO tasks (id, title, assignee_id) VALUES ('12', 'Task C', '2')`;
+
+    const rows = await db.users.findMany({
+      orderBy: { id: "asc" },
+      include: { tasks: true },
+    });
+
+    expect(rows).toHaveLength(2);
+
+    const alice = rows[0];
+    const bob = rows[1];
+
+    if (!alice) {
+      expect(alice).toBeDefined();
+      return;
+    }
+
+    if (!bob) {
+      expect(bob).toBeDefined();
+      return;
+    }
+
+    const aliceTasks = Reflect.get(alice, "tasks");
+    const bobTasks = Reflect.get(bob, "tasks");
+
+    expect(Array.isArray(aliceTasks)).toBe(true);
+    expect(Array.isArray(bobTasks)).toBe(true);
+
+    if (!Array.isArray(aliceTasks)) {
+      expect(aliceTasks).toBeArray();
+      return;
+    }
+
+    if (!Array.isArray(bobTasks)) {
+      expect(bobTasks).toBeArray();
+      return;
+    }
+
+    const aliceTaskIds = aliceTasks.map((task) => {
+      if (typeof task !== "object" || task === null) {
+        return null;
+      }
+
+      const id = Reflect.get(task, "id");
+
+      if (typeof id !== "string") {
+        return null;
+      }
+
+      return id;
+    });
+
+    const bobTaskIds = bobTasks.map((task) => {
+      if (typeof task !== "object" || task === null) {
+        return null;
+      }
+
+      const id = Reflect.get(task, "id");
+
+      if (typeof id !== "string") {
+        return null;
+      }
+
+      return id;
+    });
+
+    expect(aliceTaskIds.sort()).toEqual(["10", "11"]);
+    expect(bobTaskIds.sort()).toEqual(["12"]);
+  });
+
+  test("findMany() hydrates one() include", async () => {
+    const assignees = new Table("assignees", {
+      id: uuid("id").primaryKey(),
+      name: string("name").notNull(),
+    });
+
+    const workItems = new Table("work_items", {
+      id: uuid("id").primaryKey(),
+      assigneeId: uuid("assignee_id").notNull(),
+      title: string("title").notNull(),
+    });
+
+    const db = createOrm({
+      url: "sqlite::memory:",
+      tables: { workItems, assignees },
+      relations: {
+        workItems: {
+          assignee: one("assignee_id", () => assignees),
+        },
+      },
+    });
+
+    await db.$raw`CREATE TABLE assignees (id TEXT PRIMARY KEY, name TEXT NOT NULL)`;
+    await db.$raw`CREATE TABLE work_items (id TEXT PRIMARY KEY, assignee_id TEXT NOT NULL, title TEXT NOT NULL)`;
+    await db.$raw`INSERT INTO assignees VALUES ('a1', 'Alice')`;
+    await db.$raw`INSERT INTO work_items VALUES ('w1', 'a1', 'Task One')`;
+
+    const rows = await db.workItems.findMany({ include: { assignee: true } });
+
+    expect(rows).toHaveLength(1);
+
+    const first = rows[0];
+
+    if (!first) {
+      expect(first).toBeDefined();
+      return;
+    }
+
+    const assignee = Reflect.get(first, "assignee");
+
+    expect(assignee).toMatchObject({ id: "a1", name: "Alice" });
+  });
+
   test("select() supports endsWith and contains string operators", async () => {
     const db = createOrm({
       url: "sqlite::memory:",

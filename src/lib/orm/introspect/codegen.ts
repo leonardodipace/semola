@@ -468,7 +468,7 @@ function buildRelationEntriesForTable(
       const manyKey = toUniqueRelationKey(manyKeyBase, used, sourceCol.sqlName);
 
       entries.push(
-        `      ${manyKey}: many(() => ${toVarName(sourceTable.name)}),`,
+        `      ${manyKey}: many(() => ${toVarName(sourceTable.name)}, "${sourceCol.sqlName}"),`,
       );
     }
   }

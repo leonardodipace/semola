@@ -11,6 +11,8 @@ import {
 import type { Table } from "./table.js";
 import type {
   ColDefs,
+  ColumnKind,
+  ColumnMetaBase,
   CreateInput,
   CreateManyInput,
   DeleteBuilderInput,
@@ -27,6 +29,165 @@ import type {
   UpdateManyInput,
   WhereInput,
 } from "./types.js";
+
+type AnyColumnDef = {
+  kind: ColumnKind;
+  meta: ColumnMetaBase;
+};
+
+function getPrimaryKeyColumn(table: Table<ColDefs>) {
+  for (const jsKey in table.columns) {
+    const col = table.columns[jsKey];
+
+    if (!col) {
+      continue;
+    }
+
+    if (col.meta.isPrimaryKey) {
+      return { jsKey, col };
+    }
+  }
+
+  return null;
+}
+
+function findColumnBySqlName(table: Table<ColDefs>, sqlName: string) {
+  for (const jsKey in table.columns) {
+    const col = table.columns[jsKey];
+
+    if (!col) {
+      continue;
+    }
+
+    if (col.meta.sqlName === sqlName) {
+      return { jsKey, col };
+    }
+  }
+
+  return null;
+}
+
+function findTableKeyByValue(
+  tables: Record<string, Table<ColDefs>>,
+  targetTable: Table<ColDefs>,
+) {
+  for (const tableKey in tables) {
+    const table = tables[tableKey];
+
+    if (!table) {
+      continue;
+    }
+
+    if (table === targetTable) {
+      return tableKey;
+    }
+  }
+
+  return null;
+}
+
+function findManyForeignKeyByReference(
+  sourceTable: Table<ColDefs>,
+  sourcePk: AnyColumnDef,
+) {
+  for (const key in sourceTable.columns) {
+    const col = sourceTable.columns[key];
+
+    if (!col) {
+      continue;
+    }
+
+    if (!col.meta.references) {
+      continue;
+    }
+
+    const referenced = col.meta.references();
+
+    if (referenced === sourcePk) {
+      return col.meta.sqlName;
+    }
+  }
+
+  return null;
+}
+
+function inferManyForeignKeyFromInverse(
+  sourceTable: Table<ColDefs>,
+  targetTable: Table<ColDefs>,
+  allRelations: Partial<Record<string, RelationDefs>>,
+  allTables: Record<string, Table<ColDefs>>,
+) {
+  const targetTableKey = findTableKeyByValue(allTables, targetTable);
+
+  if (!targetTableKey) {
+    return null;
+  }
+
+  const targetRels = allRelations[targetTableKey];
+
+  if (!targetRels) {
+    return null;
+  }
+
+  for (const relKey in targetRels) {
+    const rel = targetRels[relKey];
+
+    if (!rel) {
+      continue;
+    }
+
+    if (rel.kind !== "one") {
+      continue;
+    }
+
+    if (rel.table() !== sourceTable) {
+      continue;
+    }
+
+    return rel.foreignKey;
+  }
+
+  return null;
+}
+
+function buildSelectColumns(
+  sql: SQL | TransactionSQL,
+  table: Table<ColDefs>,
+): SQL.Query<unknown> {
+  const fragments: SQL.Query<unknown>[] = [];
+
+  for (const jsKey in table.columns) {
+    const col = table.columns[jsKey];
+
+    if (!col) {
+      continue;
+    }
+
+    fragments.push(
+      sql`${sql(table.tableName)}.${sql(col.meta.sqlName)} AS ${sql(jsKey)}`,
+    );
+  }
+
+  const first = fragments[0];
+
+  if (!first) {
+    return sql`*`;
+  }
+
+  let joined = first;
+
+  for (let index = 1; index < fragments.length; index++) {
+    const fragment = fragments[index];
+
+    if (!fragment) {
+      continue;
+    }
+
+    joined = sql`${joined}, ${fragment}`;
+  }
+
+  return joined;
+}
 
 type OrmOptions<
   TTables extends Record<string, Table<ColDefs>>,
@@ -97,6 +258,8 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
   table: Table<T>,
   relations: TRels,
   dialectAdapter: ReturnType<typeof getDialectAdapter>,
+  allTables: Record<string, Table<ColDefs>>,
+  allRelations: Partial<Record<string, RelationDefs>>,
 ): TinyTableClient<T, TRels> {
   const normalizeRow = (row: TableRow<T>) => {
     if (dialectAdapter.dialect !== "postgres") {
@@ -148,6 +311,275 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
 
   const normalizeRows = (rows: TableRow<T>[]) => {
     return rows.map((row) => normalizeRow(row));
+  };
+
+  const normalizeRowsForTable = (
+    targetTable: Table<ColDefs>,
+    rows: Record<string, unknown>[],
+  ) => {
+    if (dialectAdapter.dialect !== "postgres") {
+      return rows;
+    }
+
+    return rows.map((row) => {
+      let normalized: Record<string, unknown> | null = null;
+
+      for (const jsKey in targetTable.columns) {
+        const col = targetTable.columns[jsKey];
+
+        if (!col) {
+          continue;
+        }
+
+        if (!col.meta.isSqlArray) {
+          continue;
+        }
+
+        const value = Reflect.get(row, jsKey);
+
+        if (Array.isArray(value)) {
+          continue;
+        }
+
+        if (typeof value !== "string") {
+          continue;
+        }
+
+        const parsed = parsePostgresArrayLiteral(value);
+
+        if (!parsed) {
+          continue;
+        }
+
+        if (!normalized) {
+          normalized = { ...row };
+        }
+
+        normalized[jsKey] = parsed;
+      }
+
+      if (!normalized) {
+        return row;
+      }
+
+      return normalized;
+    });
+  };
+
+  const selectWhereIn = async (
+    targetTable: Table<ColDefs>,
+    sqlColumnName: string,
+    values: unknown[],
+  ) => {
+    if (values.length === 0) {
+      return [];
+    }
+
+    const columns = buildSelectColumns(sql, targetTable);
+    const rows = await executeOrThrow(
+      sql`SELECT ${columns} FROM ${sql(targetTable.tableName)} WHERE ${sql(targetTable.tableName)}.${sql(sqlColumnName)} IN ${sql(values)}`,
+    );
+
+    return normalizeRowsForTable(
+      targetTable,
+      rows as Record<string, unknown>[],
+    );
+  };
+
+  const hydrateIncludedRelations = async (
+    rows: TableRow<T>[],
+    include: FindManyInput<T, TRels>["include"] | undefined,
+  ) => {
+    if (!include) {
+      return rows;
+    }
+
+    const basePk = getPrimaryKeyColumn(table as unknown as Table<ColDefs>);
+
+    if (!basePk) {
+      return rows;
+    }
+
+    for (const [relationKey, enabled] of Object.entries(include)) {
+      if (enabled !== true) {
+        continue;
+      }
+
+      const relation = relations[relationKey as keyof TRels];
+
+      if (!relation) {
+        continue;
+      }
+
+      const targetTable = relation.table();
+      const targetPk = getPrimaryKeyColumn(targetTable);
+
+      if (relation.kind === "one") {
+        if (!targetPk) {
+          for (const row of rows) {
+            Reflect.set(row as Record<string, unknown>, relationKey, null);
+          }
+
+          continue;
+        }
+
+        const sourceFk = findColumnBySqlName(
+          table as unknown as Table<ColDefs>,
+          relation.foreignKey,
+        );
+
+        if (!sourceFk) {
+          for (const row of rows) {
+            Reflect.set(row as Record<string, unknown>, relationKey, null);
+          }
+
+          continue;
+        }
+
+        const fkValues: unknown[] = [];
+
+        for (const row of rows) {
+          const value = Reflect.get(
+            row as Record<string, unknown>,
+            sourceFk.jsKey,
+          );
+
+          if (value === null || value === undefined) {
+            continue;
+          }
+
+          fkValues.push(value);
+        }
+
+        const targetRows = await selectWhereIn(
+          targetTable,
+          targetPk.col.meta.sqlName,
+          fkValues,
+        );
+
+        const byPk = new Map<unknown, Record<string, unknown>>();
+
+        for (const targetRow of targetRows) {
+          const key = Reflect.get(targetRow, targetPk.jsKey);
+
+          if (key === null || key === undefined) {
+            continue;
+          }
+
+          byPk.set(key, targetRow);
+        }
+
+        for (const row of rows) {
+          const sourceKey = Reflect.get(
+            row as Record<string, unknown>,
+            sourceFk.jsKey,
+          );
+
+          if (sourceKey === null || sourceKey === undefined) {
+            Reflect.set(row as Record<string, unknown>, relationKey, null);
+            continue;
+          }
+
+          Reflect.set(
+            row as Record<string, unknown>,
+            relationKey,
+            byPk.get(sourceKey) ?? null,
+          );
+        }
+
+        continue;
+      }
+
+      let foreignKeySqlName: string | null | undefined = relation.foreignKey;
+
+      if (!foreignKeySqlName) {
+        foreignKeySqlName = findManyForeignKeyByReference(
+          targetTable,
+          basePk.col,
+        );
+      }
+
+      if (!foreignKeySqlName) {
+        foreignKeySqlName = inferManyForeignKeyFromInverse(
+          table as unknown as Table<ColDefs>,
+          targetTable,
+          allRelations,
+          allTables,
+        );
+      }
+
+      if (!foreignKeySqlName) {
+        for (const row of rows) {
+          Reflect.set(row as Record<string, unknown>, relationKey, []);
+        }
+
+        continue;
+      }
+
+      const targetFk = findColumnBySqlName(targetTable, foreignKeySqlName);
+
+      if (!targetFk) {
+        for (const row of rows) {
+          Reflect.set(row as Record<string, unknown>, relationKey, []);
+        }
+
+        continue;
+      }
+
+      const baseIds: unknown[] = [];
+
+      for (const row of rows) {
+        const id = Reflect.get(row as Record<string, unknown>, basePk.jsKey);
+
+        if (id === null || id === undefined) {
+          continue;
+        }
+
+        baseIds.push(id);
+      }
+
+      const targetRows = await selectWhereIn(
+        targetTable,
+        targetFk.col.meta.sqlName,
+        baseIds,
+      );
+
+      const grouped = new Map<unknown, Record<string, unknown>[]>();
+
+      for (const targetRow of targetRows) {
+        const sourceId = Reflect.get(targetRow, targetFk.jsKey);
+
+        if (sourceId === null || sourceId === undefined) {
+          continue;
+        }
+
+        const existing = grouped.get(sourceId);
+
+        if (!existing) {
+          grouped.set(sourceId, [targetRow]);
+          continue;
+        }
+
+        existing.push(targetRow);
+      }
+
+      for (const row of rows) {
+        const id = Reflect.get(row as Record<string, unknown>, basePk.jsKey);
+
+        if (id === null || id === undefined) {
+          Reflect.set(row as Record<string, unknown>, relationKey, []);
+          continue;
+        }
+
+        Reflect.set(
+          row as Record<string, unknown>,
+          relationKey,
+          grouped.get(id) ?? [],
+        );
+      }
+    }
+
+    return rows;
   };
 
   const buildReturningColumns = () => {
@@ -253,7 +685,8 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
 
     async findMany(input) {
       const rows = await executeOrThrow(select(mapFindInputToSelect(input)));
-      return normalizeRows(rows);
+      const normalizedRows = normalizeRows(rows);
+      return hydrateIncludedRelations(normalizedRows, input?.include);
     },
 
     async findFirst(input?: FindFirstInput<T, TRels>) {
@@ -262,6 +695,11 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
       );
 
       const normalizedRows = normalizeRows(rows);
+
+      if (input?.include) {
+        await hydrateIncludedRelations(normalizedRows, input.include);
+      }
+
       const first = normalizedRows[0] ?? null;
       return first;
     },
@@ -506,6 +944,8 @@ export function createOrm<
         table,
         relationDefs,
         dialectAdapter,
+        options.tables as Record<string, Table<ColDefs>>,
+        (options.relations ?? {}) as Partial<Record<string, RelationDefs>>,
       );
     }
 
