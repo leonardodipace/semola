@@ -33,9 +33,7 @@ Semola is a TypeScript utility kit providing modular packages for common develop
 
 ### Error Handling
 
-- Result tuple pattern: `[error, data]` instead of throwing
-- Use `ok(data)` and `err(type, message)` helpers
-- Avoid try-catch blocks, use result tuples instead
+- Avoid try-catch blocks, use `mightThrow` and `mightThrowSync` instead
 
 ### TypeScript
 
