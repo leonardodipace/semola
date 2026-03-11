@@ -8,6 +8,11 @@ export type SemolaConfig = {
       stateFile?: string;
       transactional?: boolean;
     };
+    introspect?: {
+      output?: string;
+      url?: string;
+      dialect?: Dialect;
+    };
   };
 };
 
@@ -20,6 +25,11 @@ export type ResolvedSemolaConfig = {
       dir: string;
       stateFile: string;
       transactional: boolean;
+    };
+    introspect: {
+      output: string;
+      url: string | null;
+      dialect: Dialect | null;
     };
   };
 };

@@ -9,6 +9,7 @@ export function defineConfig(config: SemolaConfig) {
 
 const defaultMigrationDir = "migrations";
 const defaultStateFile = ".semola-migrations.json";
+const defaultIntrospectOutput = "orm.generated.ts";
 
 async function findConfigPath(cwd: string) {
   const candidates = [
@@ -68,6 +69,10 @@ export async function loadConfig(cwd = process.cwd()) {
   const migrationDir = loadedConfig.orm.migrations?.dir ?? defaultMigrationDir;
   const stateFile = loadedConfig.orm.migrations?.stateFile ?? defaultStateFile;
   const transactional = loadedConfig.orm.migrations?.transactional ?? true;
+  const introspectOutput =
+    loadedConfig.orm.introspect?.output ?? defaultIntrospectOutput;
+  const introspectUrl = loadedConfig.orm.introspect?.url ?? null;
+  const introspectDialect = loadedConfig.orm.introspect?.dialect ?? null;
 
   const resolved: ResolvedSemolaConfig = {
     cwd,
@@ -78,6 +83,11 @@ export async function loadConfig(cwd = process.cwd()) {
         dir: resolve(cwd, migrationDir),
         stateFile: resolve(cwd, stateFile),
         transactional,
+      },
+      introspect: {
+        output: resolve(cwd, introspectOutput),
+        url: introspectUrl,
+        dialect: introspectDialect,
       },
     },
   };

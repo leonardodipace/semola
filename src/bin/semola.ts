@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { runIntrospect } from "../lib/orm/introspect/run.js";
 import {
   applyMigrations,
   createMigration,
@@ -12,6 +13,7 @@ function usage() {
     "  semola orm migrations create <name>",
     "  semola orm migrations apply",
     "  semola orm migrations rollback",
+    "  semola orm introspect [--url <url>] [--dialect <dialect>] [--output <path>] [--schema <name>]",
   ].join("\n");
 }
 
@@ -34,6 +36,57 @@ export async function runSemolaCli(
   if (argv[0] !== "orm") {
     io.error(usage());
     return 1;
+  }
+
+  if (argv[1] === "introspect") {
+    let output: string | undefined;
+    let schema: string | undefined;
+    let url: string | undefined;
+    let dialect: string | undefined;
+
+    for (let i = 2; i < argv.length; i++) {
+      if (argv[i] === "--output" && argv[i + 1]) {
+        output = argv[i + 1];
+        i++;
+      }
+
+      if (argv[i] === "--schema" && argv[i + 1]) {
+        schema = argv[i + 1];
+        i++;
+      }
+
+      if (argv[i] === "--url" && argv[i + 1]) {
+        url = argv[i + 1];
+        i++;
+      }
+
+      if (argv[i] === "--dialect" && argv[i + 1]) {
+        dialect = argv[i + 1];
+        i++;
+      }
+    }
+
+    const [error, data] = await runIntrospect({
+      cwd: io.cwd,
+      output,
+      schema,
+      url,
+      dialect,
+    });
+
+    if (error) {
+      io.error(error.message);
+      return 1;
+    }
+
+    if (data.configPathRelative) {
+      io.log(`Loaded config from ${data.configPathRelative}`);
+    }
+
+    io.log(
+      `Introspected ${data.tableCount} tables → ${data.outputPathRelative}`,
+    );
+    return 0;
   }
 
   if (argv[1] !== "migrations") {
