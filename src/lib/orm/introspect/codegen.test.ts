@@ -12,6 +12,7 @@ const usersTable: IntrospectedTable = {
       primaryKey: true,
       unique: false,
       rawDefault: null,
+      arrayElementKind: null,
       references: null,
       unknownDbType: null,
     },
@@ -22,6 +23,7 @@ const usersTable: IntrospectedTable = {
       primaryKey: false,
       unique: true,
       rawDefault: null,
+      arrayElementKind: null,
       references: null,
       unknownDbType: null,
     },
@@ -32,6 +34,7 @@ const usersTable: IntrospectedTable = {
       primaryKey: false,
       unique: false,
       rawDefault: "now()",
+      arrayElementKind: null,
       references: null,
       unknownDbType: null,
     },
@@ -48,6 +51,7 @@ const postsTable: IntrospectedTable = {
       primaryKey: true,
       unique: false,
       rawDefault: null,
+      arrayElementKind: null,
       references: null,
       unknownDbType: null,
     },
@@ -58,6 +62,7 @@ const postsTable: IntrospectedTable = {
       primaryKey: false,
       unique: false,
       rawDefault: null,
+      arrayElementKind: null,
       references: { table: "users", column: "id", onDelete: "CASCADE" },
       unknownDbType: null,
     },
@@ -139,6 +144,7 @@ describe("generateCode", () => {
           primaryKey: false,
           unique: false,
           rawDefault: null,
+          arrayElementKind: null,
           references: null,
           unknownDbType: "bytea",
         },
@@ -163,6 +169,7 @@ describe("generateCode", () => {
           primaryKey: true,
           unique: false,
           rawDefault: null,
+          arrayElementKind: null,
           references: null,
           unknownDbType: null,
         },
@@ -186,6 +193,7 @@ describe("generateCode", () => {
           primaryKey: true,
           unique: false,
           rawDefault: "gen_random_uuid()",
+          arrayElementKind: null,
           references: null,
           unknownDbType: null,
         },
@@ -198,5 +206,30 @@ describe("generateCode", () => {
       'id: uuid("id").primaryKey().defaultFn(() => crypto.randomUUID()),',
     );
     expect(code).not.toContain('id: uuid("id").primaryKey().notNull(),');
+  });
+
+  test("maps postgres arrays to typed json array columns", () => {
+    const tableWithArray: IntrospectedTable = {
+      name: "organizations",
+      columns: [
+        {
+          sqlName: "auth_methods",
+          kind: "json",
+          nullable: true,
+          primaryKey: false,
+          unique: false,
+          rawDefault: "ARRAY['basic']::auth_method[]",
+          arrayElementKind: "string",
+          references: null,
+          unknownDbType: null,
+        },
+      ],
+    };
+
+    const code = generateCode([tableWithArray], "postgres");
+
+    expect(code).toContain(
+      'authMethods: json<string[]>("auth_methods").asArray().default(["basic"]),',
+    );
   });
 });

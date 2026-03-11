@@ -141,6 +141,22 @@ describe("introspectPostgres", () => {
     expect(cols[1]?.kind).toBe("jsonb");
   });
 
+  test("maps ARRAY columns to json kind with array element kind", async () => {
+    const sql = makeSql(
+      [["organizations"]],
+      [["auth_methods", "_auth_method", "ARRAY", "YES", null]],
+      [],
+      [],
+    );
+
+    const [, tables] = await introspectPostgres(sql);
+    const col = tables?.[0]?.columns[0];
+
+    expect(col?.kind).toBe("json");
+    expect(col?.arrayElementKind).toBe("string");
+    expect(col?.unknownDbType).toBeNull();
+  });
+
   test("records unknownDbType for unrecognized types", async () => {
     const sql = makeSql(
       [["t"]],

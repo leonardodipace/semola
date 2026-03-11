@@ -2,12 +2,13 @@ import type { SQL } from "bun";
 import { err, mightThrow, ok } from "../../errors/index.js";
 import type { ColumnKind } from "../types.js";
 import type {
+  IntrospectedArrayElementKind,
   IntrospectedColumn,
   IntrospectedTable,
   OnDeleteAction,
 } from "./types.js";
 
-function mapDbType(dbType: string): {
+function mapScalarDbType(dbType: string): {
   kind: ColumnKind;
   unknown: string | null;
 } {
@@ -79,6 +80,56 @@ function mapDbType(dbType: string): {
   }
 
   return { kind: "string", unknown: dbType };
+}
+
+function inferArrayElementKind(
+  udtName: string,
+): IntrospectedArrayElementKind | null {
+  const normalized = udtName.toLowerCase();
+
+  if (!normalized.startsWith("_")) {
+    return "string";
+  }
+
+  const elementDbType = normalized.slice(1);
+  const scalar = mapScalarDbType(elementDbType);
+
+  if (scalar.kind === "uuid") {
+    return "uuid";
+  }
+
+  if (scalar.kind === "number") {
+    return "number";
+  }
+
+  if (scalar.kind === "boolean") {
+    return "boolean";
+  }
+
+  return "string";
+}
+
+function mapDbType(
+  dataType: string,
+  udtName: string,
+): {
+  kind: ColumnKind;
+  unknown: string | null;
+  arrayElementKind: IntrospectedArrayElementKind | null;
+} {
+  if (dataType.toLowerCase() === "array") {
+    return {
+      kind: "json",
+      unknown: null,
+      arrayElementKind: inferArrayElementKind(udtName),
+    };
+  }
+
+  const effectiveType =
+    dataType === "USER-DEFINED" ? udtName.toLowerCase() : dataType;
+  const scalar = mapScalarDbType(effectiveType);
+
+  return { ...scalar, arrayElementKind: null };
 }
 
 function toOnDelete(rule: string): OnDeleteAction | null {
@@ -216,8 +267,10 @@ export async function introspectPostgres(sql: SQL, schema = "public") {
 
     const columns: IntrospectedColumn[] = safeColRows.map(
       ([columnName, udtName, dataType, isNullable, columnDefault]) => {
-        const effectiveType = dataType === "USER-DEFINED" ? udtName : dataType;
-        const { kind, unknown } = mapDbType(effectiveType);
+        const { kind, unknown, arrayElementKind } = mapDbType(
+          dataType,
+          udtName,
+        );
         const fk = fkMap.get(columnName);
 
         return {
@@ -227,6 +280,7 @@ export async function introspectPostgres(sql: SQL, schema = "public") {
           primaryKey: primaryKeys.has(columnName),
           unique: uniqueCols.has(columnName),
           rawDefault: columnDefault,
+          arrayElementKind,
           references: fk
             ? {
                 table: fk[0],

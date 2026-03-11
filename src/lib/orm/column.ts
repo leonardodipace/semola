@@ -22,6 +22,13 @@ export class ColumnDef<
     });
   }
 
+  public asArray() {
+    return new ColumnDef<K, TMeta & { isSqlArray: true }, TValue>(this.kind, {
+      ...this.meta,
+      isSqlArray: true as const,
+    });
+  }
+
   public notNull() {
     return new ColumnDef<K, TMeta & { isNotNull: true }, TValue>(this.kind, {
       ...this.meta,
@@ -88,6 +95,7 @@ export class ColumnDef<
 // { isPrimaryKey: boolean } & { isPrimaryKey: true } = { isPrimaryKey: true }
 // vs { isPrimaryKey: false } & { isPrimaryKey: true } = { isPrimaryKey: never }
 const defaultMeta: Omit<ColumnMetaBase, "sqlName"> = {
+  isSqlArray: false,
   isPrimaryKey: false,
   isNotNull: false,
   isUnique: false,

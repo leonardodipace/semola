@@ -149,6 +149,19 @@ describe(".defaultFn()", () => {
   });
 });
 
+describe(".asArray()", () => {
+  test("sets isSqlArray to true", () => {
+    const col = json<string[]>("auth_methods").asArray();
+    expect(col.meta.isSqlArray).toBe(true);
+  });
+
+  test("does not mutate the original", () => {
+    const original = json<string[]>("auth_methods");
+    original.asArray();
+    expect(original.meta.isSqlArray).toBe(false);
+  });
+});
+
 describe("chaining", () => {
   test("notNull + unique can be chained", () => {
     const col = string("email").notNull().unique();

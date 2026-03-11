@@ -31,6 +31,7 @@ export type ColDefs = Record<
 
 export type ColumnMetaBase = {
   sqlName: string;
+  isSqlArray: boolean;
   isPrimaryKey: boolean;
   isNotNull: boolean;
   isUnique: boolean;
@@ -44,6 +45,7 @@ export type ColumnMetaBase = {
 
 export type DefaultColumnMeta = {
   sqlName: string;
+  isSqlArray: false;
   isPrimaryKey: false;
   isNotNull: false;
   isUnique: false;

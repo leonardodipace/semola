@@ -140,6 +140,7 @@ export async function introspectSqlite(sql: SQL) {
           primaryKey: pk > 0,
           unique: false,
           rawDefault: dfltValue,
+          arrayElementKind: null,
           references: fk
             ? {
                 table: fk[0],

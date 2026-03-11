@@ -2,6 +2,7 @@ import type { TransactionSQL } from "bun";
 import { SQL } from "bun";
 import { err, ok } from "../errors/index.js";
 import { getDialectAdapter } from "./dialect/index.js";
+import { parsePostgresArrayLiteral } from "./sql/parse-array.js";
 import {
   mapDataToSqlRow,
   serializeSelectInput,
@@ -99,6 +100,58 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
   relations: TRels,
   dialectAdapter: ReturnType<typeof getDialectAdapter>,
 ): TinyTableClient<T, TRels> {
+  const normalizeRow = (row: TableRow<T>) => {
+    if (dialectAdapter.dialect !== "postgres") {
+      return row;
+    }
+
+    let normalized: Record<string, unknown> | null = null;
+
+    for (const jsKey in table.columns) {
+      const col = table.columns[jsKey];
+
+      if (!col) {
+        continue;
+      }
+
+      if (!col.meta.isSqlArray) {
+        continue;
+      }
+
+      const value = Reflect.get(row as Record<string, unknown>, jsKey);
+
+      if (Array.isArray(value)) {
+        continue;
+      }
+
+      if (typeof value !== "string") {
+        continue;
+      }
+
+      const parsed = parsePostgresArrayLiteral(value);
+
+      if (!parsed) {
+        continue;
+      }
+
+      if (!normalized) {
+        normalized = { ...row };
+      }
+
+      normalized[jsKey] = parsed;
+    }
+
+    if (!normalized) {
+      return row;
+    }
+
+    return normalized as TableRow<T>;
+  };
+
+  const normalizeRows = (rows: TableRow<T>[]) => {
+    return rows.map((row) => normalizeRow(row));
+  };
+
   const buildReturningColumns = () => {
     const fragments: SQL.Query<unknown>[] = [];
 
@@ -200,8 +253,16 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
   return {
     select,
 
-    findMany(input) {
-      return toResult(select(mapFindInputToSelect(input)));
+    async findMany(input) {
+      const [findErr, rows] = await toResult(
+        select(mapFindInputToSelect(input)),
+      );
+
+      if (findErr) {
+        return err(findErr.type, findErr.message);
+      }
+
+      return ok(normalizeRows(rows));
     },
 
     async findFirst(input?: FindFirstInput<T, TRels>) {
@@ -213,7 +274,8 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
         return err(findErr.type, findErr.message);
       }
 
-      const first = rows[0] ?? null;
+      const normalizedRows = normalizeRows(rows);
+      const first = normalizedRows[0] ?? null;
       return ok(first);
     },
 
@@ -226,7 +288,8 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
         return err(findErr.type, findErr.message);
       }
 
-      const first = rows[0] ?? null;
+      const normalizedRows = normalizeRows(rows);
+      const first = normalizedRows[0] ?? null;
       return ok(first);
     },
 
@@ -251,7 +314,8 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
           return err(fetchErr.type, fetchErr.message);
         }
 
-        const first = rows[0] ?? null;
+        const normalizedRows = normalizeRows(rows);
+        const first = normalizedRows[0] ?? null;
 
         if (!first) {
           return err("InternalServerError", "Insert returned no rows");
@@ -268,7 +332,8 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
         return err(createErr.type, createErr.message);
       }
 
-      const first = rows[0] ?? null;
+      const normalizedRows = normalizeRows(rows);
+      const first = normalizedRows[0] ?? null;
 
       if (!first) {
         return err("InternalServerError", "Insert returned no rows");
@@ -306,7 +371,9 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
         return err(createErr.type, createErr.message);
       }
 
-      return ok({ count: createdRows.length, rows: createdRows });
+      const normalizedRows = normalizeRows(createdRows);
+
+      return ok({ count: normalizedRows.length, rows: normalizedRows });
     },
 
     update,
@@ -388,7 +455,9 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
         return err(updateErr.type, updateErr.message);
       }
 
-      return ok({ count: rows.length, rows });
+      const normalizedRows = normalizeRows(rows);
+
+      return ok({ count: normalizedRows.length, rows: normalizedRows });
     },
 
     delete: deleteByWhere,
@@ -454,7 +523,9 @@ function createTableClient<T extends ColDefs, TRels extends RelationDefs>(
         return err(deleteErr.type, deleteErr.message);
       }
 
-      return ok({ count: rows.length, rows });
+      const normalizedRows = normalizeRows(rows);
+
+      return ok({ count: normalizedRows.length, rows: normalizedRows });
     },
   };
 }

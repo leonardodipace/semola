@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SQL } from "bun";
-import { boolean as booleanCol, string, uuid } from "../column.js";
+import { boolean as booleanCol, json, string, uuid } from "../column.js";
 import { postgresDialectAdapter } from "../dialect/postgres.js";
 import { sqliteDialectAdapter } from "../dialect/sqlite.js";
 import { many } from "../relation.js";
@@ -83,6 +83,21 @@ describe("mapDataToSqlRow", () => {
     );
 
     expect(row.enabled).toBe(1);
+  });
+
+  test("serializes postgres SQL arrays as array literals", () => {
+    const organizations = createTable("organizations", {
+      id: uuid("id").primaryKey(),
+      authMethods: json<string[]>("auth_methods").asArray(),
+    });
+
+    const row = mapDataToSqlRow(
+      organizations,
+      { authMethods: ["basic", "microsoft"] },
+      postgresDialectAdapter,
+    );
+
+    expect(row.auth_methods).toBe('{"basic","microsoft"}');
   });
 });
 

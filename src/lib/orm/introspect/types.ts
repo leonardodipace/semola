@@ -2,6 +2,12 @@ import type { ColumnKind } from "../types.js";
 
 export type OnDeleteAction = "CASCADE" | "RESTRICT" | "SET NULL";
 
+export type IntrospectedArrayElementKind =
+  | "uuid"
+  | "string"
+  | "number"
+  | "boolean";
+
 export type IntrospectedColumn = {
   sqlName: string;
   kind: ColumnKind;
@@ -9,6 +15,7 @@ export type IntrospectedColumn = {
   primaryKey: boolean;
   unique: boolean;
   rawDefault: string | null;
+  arrayElementKind?: IntrospectedArrayElementKind | null;
   references: {
     table: string;
     column: string;

@@ -173,6 +173,7 @@ export async function introspectMysql(sql: SQL, schema: string) {
           primaryKey: columnKey === "PRI",
           unique: columnKey === "UNI",
           rawDefault: columnDefault,
+          arrayElementKind: null,
           references: fk
             ? {
                 table: fk[0],
