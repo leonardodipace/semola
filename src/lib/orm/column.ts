@@ -23,7 +23,11 @@ export class ColumnDef<
   }
 
   public asArray() {
-    return new ColumnDef<K, TMeta & { isSqlArray: true }, TValue>(this.kind, {
+    return new ColumnDef<
+      K,
+      TMeta & { isSqlArray: true },
+      [TValue] extends [unknown[]] ? TValue : TValue[]
+    >(this.kind, {
       ...this.meta,
       isSqlArray: true as const,
     });
@@ -114,6 +118,20 @@ export function uuid(sqlName: string) {
 export function string(sqlName: string) {
   return new ColumnDef("string", { ...defaultMeta, sqlName });
 }
+
+export function enumeration<const TValues extends readonly string[]>(
+  sqlName: string,
+  values: TValues,
+) {
+  void values;
+
+  return new ColumnDef<"string", ColumnMetaBase, TValues[number]>("string", {
+    ...defaultMeta,
+    sqlName,
+  });
+}
+
+export { enumeration as enumColumn };
 
 export function number(sqlName: string) {
   return new ColumnDef("number", { ...defaultMeta, sqlName });

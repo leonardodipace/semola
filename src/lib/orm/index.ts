@@ -1,4 +1,14 @@
-export { boolean, date, json, jsonb, number, string, uuid } from "./column.js";
+export {
+  boolean,
+  date,
+  enumColumn,
+  enumeration,
+  json,
+  jsonb,
+  number,
+  string,
+  uuid,
+} from "./column.js";
 export { defineConfig } from "./migration/config.js";
 export { createOrm } from "./orm.js";
 export { many, one } from "./relation.js";

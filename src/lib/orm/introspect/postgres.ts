@@ -112,24 +112,55 @@ function inferArrayElementKind(
 function mapDbType(
   dataType: string,
   udtName: string,
+  enumTypes: Set<string>,
 ): {
   kind: ColumnKind;
   unknown: string | null;
   arrayElementKind: IntrospectedArrayElementKind | null;
+  enumValues: string[] | null;
 } {
   if (dataType.toLowerCase() === "array") {
+    const normalized = udtName.toLowerCase();
+    const elementDbType = normalized.startsWith("_")
+      ? normalized.slice(1)
+      : normalized;
+
+    const scalar = mapScalarDbType(elementDbType);
+    const isEnumArray = enumTypes.has(elementDbType);
+
+    let unknown: string | null = scalar.unknown;
+    if (isEnumArray) {
+      unknown = null;
+    }
+
     return {
-      kind: "json",
-      unknown: null,
+      kind: scalar.kind,
+      unknown,
       arrayElementKind: inferArrayElementKind(udtName),
+      enumValues: isEnumArray ? [] : null,
     };
   }
 
-  const effectiveType =
-    dataType === "USER-DEFINED" ? udtName.toLowerCase() : dataType;
+  const normalizedUdt = udtName.toLowerCase();
+  const isUserDefined = dataType === "USER-DEFINED";
+
+  if (isUserDefined && enumTypes.has(normalizedUdt)) {
+    return {
+      kind: "string",
+      unknown: null,
+      arrayElementKind: null,
+      enumValues: [],
+    };
+  }
+
+  const effectiveType = isUserDefined ? normalizedUdt : dataType;
   const scalar = mapScalarDbType(effectiveType);
 
-  return { ...scalar, arrayElementKind: null };
+  return {
+    ...scalar,
+    arrayElementKind: null,
+    enumValues: null,
+  };
 }
 
 function toOnDelete(rule: string): OnDeleteAction | null {
@@ -144,6 +175,41 @@ function toErrMsg(e: unknown) {
 }
 
 export async function introspectPostgres(sql: SQL, schema = "public") {
+  const [enumErr, enumRows] = await mightThrow(
+    sql`
+      SELECT
+        t.typname,
+        e.enumlabel
+      FROM pg_catalog.pg_type t
+      JOIN pg_catalog.pg_enum e
+        ON e.enumtypid = t.oid
+      JOIN pg_catalog.pg_namespace n
+        ON n.oid = t.typnamespace
+      WHERE n.nspname = ${schema}
+      ORDER BY t.typname, e.enumsortorder
+    `.values() as Promise<[string, string][]>,
+  );
+
+  if (enumErr) {
+    return err("IntrospectError", `Failed to list enums: ${toErrMsg(enumErr)}`);
+  }
+
+  const enumMap = new Map<string, string[]>();
+
+  for (const [typeName, enumLabel] of enumRows ?? []) {
+    const key = typeName.toLowerCase();
+    const labels = enumMap.get(key);
+
+    if (labels) {
+      labels.push(enumLabel);
+      continue;
+    }
+
+    enumMap.set(key, [enumLabel]);
+  }
+
+  const enumTypes = new Set(enumMap.keys());
+
   const [tablesErr, tableRows] = await mightThrow(
     sql`
       SELECT table_name
@@ -191,7 +257,8 @@ export async function introspectPostgres(sql: SQL, schema = "public") {
       sql`
         SELECT
           kcu.column_name,
-          tc.constraint_type
+          tc.constraint_type,
+          COUNT(*) OVER (PARTITION BY tc.constraint_name) AS constrained_columns
         FROM information_schema.table_constraints tc
         JOIN information_schema.key_column_usage kcu
           ON tc.constraint_name = kcu.constraint_name
@@ -199,7 +266,29 @@ export async function introspectPostgres(sql: SQL, schema = "public") {
         WHERE tc.table_schema = ${schema}
           AND tc.table_name = ${tableName}
           AND tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE')
-      `.values() as Promise<[string, string][]>,
+        UNION ALL
+        SELECT
+          a.attname AS column_name,
+          'UNIQUE' AS constraint_type,
+          1 AS constrained_columns
+        FROM pg_catalog.pg_index i
+        JOIN pg_catalog.pg_class t
+          ON t.oid = i.indrelid
+        JOIN pg_catalog.pg_namespace n
+          ON n.oid = t.relnamespace
+        JOIN LATERAL unnest(i.indkey::smallint[]) AS key(attnum)
+          ON TRUE
+        JOIN pg_catalog.pg_attribute a
+          ON a.attrelid = t.oid
+          AND a.attnum = key.attnum
+        WHERE n.nspname = ${schema}
+          AND t.relname = ${tableName}
+          AND i.indisunique = TRUE
+          AND i.indisprimary = FALSE
+          AND i.indexprs IS NULL
+          AND i.indpred IS NULL
+          AND i.indnkeyatts = 1
+      `.values() as Promise<[string, string, number][]>,
     );
 
     if (constraintErr) {
@@ -239,7 +328,9 @@ export async function introspectPostgres(sql: SQL, schema = "public") {
       );
     }
 
-    const safeConstraintRows = constraintRows ?? [];
+    const safeConstraintRows = (constraintRows ?? []) as Array<
+      [string, string, number?]
+    >;
     const safeFkRows = fkRows ?? [];
     const safeColRows = colRows ?? [];
 
@@ -251,7 +342,17 @@ export async function introspectPostgres(sql: SQL, schema = "public") {
 
     const uniqueCols = new Set(
       safeConstraintRows
-        .filter(([, constraintType]) => constraintType === "UNIQUE")
+        .filter(([, constraintType, constrainedColumns]) => {
+          if (constraintType !== "UNIQUE") {
+            return false;
+          }
+
+          if (constrainedColumns === undefined) {
+            return true;
+          }
+
+          return constrainedColumns === 1;
+        })
         .map(([columnName]) => columnName),
     );
 
@@ -267,15 +368,29 @@ export async function introspectPostgres(sql: SQL, schema = "public") {
 
     const columns: IntrospectedColumn[] = safeColRows.map(
       ([columnName, udtName, dataType, isNullable, columnDefault]) => {
-        const { kind, unknown, arrayElementKind } = mapDbType(
+        const { kind, unknown, arrayElementKind, enumValues } = mapDbType(
           dataType,
           udtName,
+          enumTypes,
         );
+
+        let resolvedEnumValues = enumValues;
+
+        if (resolvedEnumValues !== null) {
+          const enumTypeName =
+            dataType.toLowerCase() === "array"
+              ? udtName.toLowerCase().replace(/^_/, "")
+              : udtName.toLowerCase();
+
+          resolvedEnumValues = enumMap.get(enumTypeName) ?? [];
+        }
+
         const fk = fkMap.get(columnName);
 
         return {
           sqlName: columnName,
           kind,
+          enumValues: resolvedEnumValues,
           nullable: isNullable === "YES",
           primaryKey: primaryKeys.has(columnName),
           unique: uniqueCols.has(columnName),

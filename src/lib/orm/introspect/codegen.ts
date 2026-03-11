@@ -7,6 +7,14 @@ function toCamelCase(sqlName: string) {
   );
 }
 
+function toTypeLiteral(value: string) {
+  return JSON.stringify(value);
+}
+
+function buildEnumValues(values: string[]) {
+  return `[${values.map((value) => toTypeLiteral(value)).join(", ")}]`;
+}
+
 function stripWrappingParens(value: string) {
   const trimmed = value.trim();
 
@@ -209,27 +217,10 @@ function parseArrayDefaultValues(
   return out;
 }
 
-function elementKindToType(
-  elementKind: NonNullable<IntrospectedColumn["arrayElementKind"]>,
-) {
-  if (elementKind === "uuid") {
-    return "string";
-  }
-
-  if (elementKind === "number") {
-    return "number";
-  }
-
-  if (elementKind === "boolean") {
-    return "boolean";
-  }
-
-  return "string";
-}
-
 function buildColumnFactory(col: IntrospectedColumn) {
-  if (col.arrayElementKind) {
-    return `json<${elementKindToType(col.arrayElementKind)}[]>("${col.sqlName}")`;
+  if (col.enumValues && col.enumValues.length > 0) {
+    const enumValues = buildEnumValues(col.enumValues);
+    return `enumeration("${col.sqlName}", ${enumValues})`;
   }
 
   return `${col.kind}("${col.sqlName}")`;
@@ -357,6 +348,24 @@ function collectImports(tables: IntrospectedTable[]): ColumnKind[] {
   return Array.from(kinds).sort();
 }
 
+function hasEnumColumns(tables: IntrospectedTable[]) {
+  for (const table of tables) {
+    for (const col of table.columns) {
+      if (!col.enumValues) {
+        continue;
+      }
+
+      if (col.enumValues.length === 0) {
+        continue;
+      }
+
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function toVarName(tableName: string) {
   const camel = toCamelCase(tableName);
   return `${camel}Table`;
@@ -387,7 +396,14 @@ export function generateCode(
   dialect: Dialect,
 ): string {
   const kinds = collectImports(tables);
-  const kindImports = ["createOrm", "createTable", ...kinds].join(", ");
+  const hasEnums = hasEnumColumns(tables);
+
+  const kindImports = [
+    "createOrm",
+    "createTable",
+    ...kinds,
+    ...(hasEnums ? ["enumeration"] : []),
+  ].join(", ");
 
   const sections: string[] = [];
 

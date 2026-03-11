@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { boolean, date, json, jsonb, number, string, uuid } from "./column.js";
+import {
+  boolean,
+  date,
+  enumColumn,
+  enumeration,
+  json,
+  jsonb,
+  number,
+  string,
+  uuid,
+} from "./column.js";
 
 describe("uuid()", () => {
   test("stores sqlName", () => {
@@ -26,6 +36,34 @@ describe("uuid()", () => {
 describe("string()", () => {
   test("kind is string", () => {
     expect(string("name").kind).toBe("string");
+  });
+});
+
+describe("enumeration()", () => {
+  test("kind is string", () => {
+    expect(enumeration("status", ["active", "retired"]).kind).toBe("string");
+  });
+
+  test("stores sqlName", () => {
+    expect(enumeration("status", ["active", "retired"]).meta.sqlName).toBe(
+      "status",
+    );
+  });
+
+  test("keeps enum literal union type for defaults", () => {
+    const status = enumeration("status", ["active", "retired"]);
+    const withDefault = status.default("active");
+
+    expect(withDefault.meta.defaultValue).toBe("active");
+  });
+});
+
+describe("enumColumn() alias", () => {
+  test("still works for backwards compatibility", () => {
+    const col = enumColumn("status", ["active", "retired"]);
+
+    expect(col.kind).toBe("string");
+    expect(col.meta.sqlName).toBe("status");
   });
 });
 
@@ -151,12 +189,26 @@ describe(".defaultFn()", () => {
 
 describe(".asArray()", () => {
   test("sets isSqlArray to true", () => {
-    const col = json<string[]>("auth_methods").asArray();
+    const col = string("auth_methods").asArray();
     expect(col.meta.isSqlArray).toBe(true);
   });
 
+  test("supports mixed enum union members in array defaults", () => {
+    const authMethods = enumeration("auth_methods", [
+      "basic",
+      "microsoft",
+      "cognito",
+      "okta",
+    ]).asArray();
+
+    const withDefault = authMethods.default(["basic", "microsoft"]);
+
+    expect(withDefault.meta.hasDefault).toBe(true);
+    expect(withDefault.meta.defaultValue).toEqual(["basic", "microsoft"]);
+  });
+
   test("does not mutate the original", () => {
-    const original = json<string[]>("auth_methods");
+    const original = string("auth_methods");
     original.asArray();
     expect(original.meta.isSqlArray).toBe(false);
   });

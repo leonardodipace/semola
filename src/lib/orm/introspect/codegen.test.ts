@@ -8,6 +8,7 @@ const usersTable: IntrospectedTable = {
     {
       sqlName: "id",
       kind: "uuid",
+      enumValues: null,
       nullable: false,
       primaryKey: true,
       unique: false,
@@ -19,6 +20,7 @@ const usersTable: IntrospectedTable = {
     {
       sqlName: "email",
       kind: "string",
+      enumValues: null,
       nullable: false,
       primaryKey: false,
       unique: true,
@@ -30,6 +32,7 @@ const usersTable: IntrospectedTable = {
     {
       sqlName: "created_at",
       kind: "date",
+      enumValues: null,
       nullable: true,
       primaryKey: false,
       unique: false,
@@ -47,6 +50,7 @@ const postsTable: IntrospectedTable = {
     {
       sqlName: "id",
       kind: "uuid",
+      enumValues: null,
       nullable: false,
       primaryKey: true,
       unique: false,
@@ -58,6 +62,7 @@ const postsTable: IntrospectedTable = {
     {
       sqlName: "user_id",
       kind: "uuid",
+      enumValues: null,
       nullable: false,
       primaryKey: false,
       unique: false,
@@ -214,7 +219,8 @@ describe("generateCode", () => {
       columns: [
         {
           sqlName: "auth_methods",
-          kind: "json",
+          kind: "string",
+          enumValues: ["basic", "microsoft", "cognito", "okta"],
           nullable: true,
           primaryKey: false,
           unique: false,
@@ -229,7 +235,169 @@ describe("generateCode", () => {
     const code = generateCode([tableWithArray], "postgres");
 
     expect(code).toContain(
-      'authMethods: json<string[]>("auth_methods").asArray().default(["basic"]),',
+      'authMethods: enumeration("auth_methods", ["basic", "microsoft", "cognito", "okta"]).asArray().default(["basic"]),',
     );
+  });
+
+  test("parses array default with per-element cast (PostgreSQL canonical form)", () => {
+    const table: IntrospectedTable = {
+      name: "organizations",
+      columns: [
+        {
+          sqlName: "auth_methods",
+          kind: "string",
+          enumValues: ["basic", "microsoft"],
+          nullable: true,
+          primaryKey: false,
+          unique: false,
+          rawDefault: "ARRAY['basic'::auth_method]",
+          arrayElementKind: "string",
+          references: null,
+          unknownDbType: null,
+        },
+      ],
+    };
+
+    const code = generateCode([table], "postgres");
+
+    expect(code).toContain(
+      'authMethods: enumeration("auth_methods", ["basic", "microsoft"]).asArray().default(["basic"]),',
+    );
+  });
+
+  test("emits jsonb column correctly", () => {
+    const table: IntrospectedTable = {
+      name: "computer_actions",
+      columns: [
+        {
+          sqlName: "configuration",
+          kind: "jsonb",
+          nullable: false,
+          primaryKey: false,
+          unique: false,
+          rawDefault: null,
+          arrayElementKind: null,
+          references: null,
+          unknownDbType: null,
+        },
+      ],
+    };
+
+    const code = generateCode([table], "postgres");
+
+    expect(code).toContain('configuration: jsonb("configuration").notNull(),');
+    expect(code).toContain("jsonb");
+  });
+
+  test("handles underscore-prefixed table names (Prisma join tables)", () => {
+    const table: IntrospectedTable = {
+      name: "_RoleToUser",
+      columns: [
+        {
+          sqlName: "A",
+          kind: "string",
+          nullable: false,
+          primaryKey: true,
+          unique: false,
+          rawDefault: null,
+          arrayElementKind: null,
+          references: null,
+          unknownDbType: null,
+        },
+        {
+          sqlName: "B",
+          kind: "string",
+          nullable: false,
+          primaryKey: true,
+          unique: false,
+          rawDefault: null,
+          arrayElementKind: null,
+          references: null,
+          unknownDbType: null,
+        },
+      ],
+    };
+
+    const code = generateCode([table], "postgres");
+
+    expect(code).toContain(
+      'const _RoleToUserTable = createTable("_RoleToUser", {',
+    );
+    expect(code).toContain('A: string("A").primaryKey(),');
+    expect(code).toContain('B: string("B").primaryKey(),');
+    expect(code).toContain("_RoleToUser: _RoleToUserTable,");
+  });
+
+  test("emits array column with notNull when not nullable and no default", () => {
+    const table: IntrospectedTable = {
+      name: "schedules",
+      columns: [
+        {
+          sqlName: "rule",
+          kind: "string",
+          nullable: false,
+          primaryKey: false,
+          unique: false,
+          rawDefault: null,
+          arrayElementKind: "string",
+          references: null,
+          unknownDbType: null,
+        },
+      ],
+    };
+
+    const code = generateCode([table], "postgres");
+
+    expect(code).toContain('rule: string("rule").asArray().notNull(),');
+  });
+
+  test("parses enum column default with type cast suffix", () => {
+    const table: IntrospectedTable = {
+      name: "sites",
+      columns: [
+        {
+          sqlName: "status",
+          kind: "string",
+          enumValues: ["active", "retired"],
+          nullable: false,
+          primaryKey: false,
+          unique: false,
+          rawDefault: "'active'::site_status",
+          arrayElementKind: null,
+          references: null,
+          unknownDbType: null,
+        },
+      ],
+    };
+
+    const code = generateCode([table], "postgres");
+
+    expect(code).toContain(
+      'status: enumeration("status", ["active", "retired"]).default("active").notNull(),',
+    );
+  });
+
+  test("emits enumeration import when enum columns exist", () => {
+    const table: IntrospectedTable = {
+      name: "sites",
+      columns: [
+        {
+          sqlName: "status",
+          kind: "string",
+          enumValues: ["active", "retired"],
+          nullable: false,
+          primaryKey: false,
+          unique: false,
+          rawDefault: null,
+          arrayElementKind: null,
+          references: null,
+          unknownDbType: null,
+        },
+      ],
+    };
+
+    const code = generateCode([table], "postgres");
+
+    expect(code).toContain("enumeration");
   });
 });

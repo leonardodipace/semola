@@ -11,6 +11,7 @@ export type IntrospectedArrayElementKind =
 export type IntrospectedColumn = {
   sqlName: string;
   kind: ColumnKind;
+  enumValues?: string[] | null;
   nullable: boolean;
   primaryKey: boolean;
   unique: boolean;
