@@ -37,7 +37,7 @@ export class BaseFormatter extends Formatter {
   }
 
   public formatError(logData: LogDataType, error: Error): string {
-    let { prefix, fileName, row, column, method } = logData;
+    const { prefix, fileName, row, column, method } = logData;
     const timestamp = this.dateFmt();
 
     const fileData = `${prefix}/${fileName}:${row}:${column}`;
@@ -92,7 +92,7 @@ export class JSONFormatter extends Formatter {
   }
 
   public formatError(logData: LogDataType, error: Error): string {
-    let { prefix, fileName, row, column, method } = logData;
+    const { prefix, fileName, row, column, method } = logData;
     const timestamp = this.dateFmt();
     let errorMsg: Record<string, unknown> = {
       errorName: error.name,
