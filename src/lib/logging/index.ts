@@ -46,7 +46,7 @@ class StackData {
   }
 }
 
-abstract class AbstractLogger {
+export abstract class AbstractLogger {
   public abstract debug(msg: LogMessageType): void;
   public abstract info(msg: LogMessageType): void;
   public abstract warning(msg: LogMessageType): void;
