@@ -18,9 +18,9 @@ export type LogDataType = {
   prefix: string;
   level: LogLevelType;
   msg: LogMessageType;
-  fileName: string;
-  row: string;
-  column: string;
+  row?: string;
+  column?: string;
+  fileName?: string;
   method?: string;
 };
 

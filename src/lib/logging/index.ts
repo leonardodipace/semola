@@ -1,8 +1,7 @@
 import { appendFileSync, existsSync, statSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
-import { BaseFormatter } from "./formatter.js";
-
 import { mightThrowSync } from "../errors/index.js";
+import { BaseFormatter } from "./formatter.js";
 import {
   type FileProviderOptions,
   type LogDataType,
@@ -25,7 +24,7 @@ const FILE_PROVIDER_OPTION_DEFAULT: FileProviderOptions = {
 } as const;
 
 const DEFAULT_MAX_SIZE = 4 * 1024; // 4KB
-const NON_ERROR_CALL_STACK_IDX = 4;
+const NON_ERROR_CALL_STACK_IDX = 3;
 
 const DurationUnit = {
   hour: 1000 * 60 * 60,
@@ -34,16 +33,27 @@ const DurationUnit = {
   month: 1000 * 60 * 60 * 24 * 7 * 4,
 } as const;
 
-class StackData {
-  private stack = "";
+type StackTraceData = {
+  fileName: string | null;
+  column: number | null;
+  row: number | null;
+  functionCall: string | null;
+};
 
-  public constructor() {
-    Error.captureStackTrace(this);
-  }
+Error.prepareStackTrace = (_, stack) => {
+  return stack.map<StackTraceData>((callSite) => {
+    return {
+      fileName: callSite.getFileName(),
+      column: callSite.getColumnNumber(),
+      row: callSite.getLineNumber(),
+      functionCall: callSite.getFunctionName(),
+    };
+  });
+};
 
-  public getStack() {
-    return this.stack;
-  }
+function readStackData() {
+  const error = new Error();
+  return error.stack as unknown as StackTraceData[];
 }
 
 export abstract class AbstractLogger {
@@ -58,32 +68,33 @@ export abstract class AbstractLogger {
     msg: LogMessageType,
     prefix: string,
   ): LogDataType {
-    const stack = new StackData().getStack().split("\n");
-    const logCall = stack[NON_ERROR_CALL_STACK_IDX] || "";
+    const stack = readStackData();
+    const logCall = stack[NON_ERROR_CALL_STACK_IDX];
+    let logData: LogDataType = { level, msg, prefix };
 
-    const [path, row, column] = logCall
-      .trim()
-      .replace("(", "")
-      .replace(")", "")
-      .split(":");
-
-    const fileName = basename(path || "");
-    const pathData = path?.split(" ") || [];
-    let methodCall: string | undefined;
-
-    if (pathData.length === 3) {
-      methodCall = pathData[1];
+    if (!logCall) {
+      return logData;
     }
 
-    return {
-      level,
-      msg,
-      prefix,
-      fileName,
-      row: row ?? "",
-      column: column ?? "",
-      method: methodCall,
-    };
+    const { column, fileName, functionCall, row } = logCall;
+
+    if (fileName) {
+      logData = { ...logData, fileName };
+    }
+
+    if (column) {
+      logData = { ...logData, column: String(column) };
+    }
+
+    if (row) {
+      logData = { ...logData, row: String(row) };
+    }
+
+    if (functionCall) {
+      logData = { ...logData, method: functionCall };
+    }
+
+    return logData;
   }
 }
 
