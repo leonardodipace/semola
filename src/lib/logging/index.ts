@@ -1,5 +1,5 @@
 import { appendFileSync, existsSync, statSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { BaseFormatter } from "./formatter.js";
 
 import { mightThrowSync } from "../errors/index.js";
@@ -273,11 +273,7 @@ export class FileProvider extends LoggerProvider {
   }
 
   private isJSONFile() {
-    const fileName = basename(this.filePath);
-    const fileObj = Bun.file(fileName);
-    const { type } = fileObj;
-
-    return type === "application/json;charset=utf-8";
+    return extname(this.filePath) === ".json";
   }
 
   private createNewFileName() {
