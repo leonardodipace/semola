@@ -30,7 +30,7 @@ const DurationUnit = {
   hour: 1000 * 60 * 60,
   day: 1000 * 60 * 60 * 24,
   week: 1000 * 60 * 60 * 24 * 7,
-  month: 1000 * 60 * 60 * 24 * 7 * 4,
+  month: 1000 * 60 * 60 * 24 * 7 * 4.345, // On average a 1 month has 4,345 weeks
 } as const;
 
 type StackTraceData = {
