@@ -1,16 +1,16 @@
 import { appendFileSync, existsSync, statSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
-import { mightThrowSync } from "../errors/index.js";
+import { mightThrowSync } from "../../errors/index.js";
 import { BaseFormatter } from "./formatter.js";
 import {
-  type FileProviderOptions,
-  type LogDataType,
+  FileProviderOptions,
+  LogDataType,
   LogLevel,
-  type LogLevelType,
-  type LogMessageType,
-  type ProviderOptions,
-  type SizeBasedPolicyType,
-  type TimeBasedPolicyType,
+  LogLevelType,
+  LogMessageType,
+  ProviderOptions,
+  SizeBasedPolicyType,
+  TimeBasedPolicyType,
 } from "./types.js";
 
 const PROVIDER_OPTION_DEFAULT: ProviderOptions = {
