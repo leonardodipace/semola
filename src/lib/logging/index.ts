@@ -53,7 +53,11 @@ Error.prepareStackTrace = (_, stack) => {
 
 function readStackData() {
   const error = new Error();
-  return error.stack as unknown as StackTraceData[];
+  const { stack } = error;
+
+  if (!Array.isArray(stack)) return [] as StackTraceData[];
+
+  return stack as StackTraceData[];
 }
 
 export abstract class AbstractLogger {
