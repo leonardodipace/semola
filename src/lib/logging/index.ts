@@ -114,13 +114,6 @@ export abstract class AbstractLogger {
 }
 
 export class Logger extends AbstractLogger {
-  public constructor(
-    prefix: string,
-    providers: [LoggerProvider, ...LoggerProvider[]],
-  ) {
-    super(prefix, providers);
-  }
-
   public debug(msg: LogMessageType) {
     const data = this.createLogData("debug", msg, this.prefix);
     this.run(data);
