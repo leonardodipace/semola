@@ -14,7 +14,7 @@ import { Logger } from "semola/logging";
 
 Create a logger instance with a prefix and with at least one provider.
 In the following example, the `logger` instance will format and print all
-your messages on the console.
+your messages on the console using `"database"` as a prefix.
 
 ```typescript
 // log.ts
@@ -34,7 +34,60 @@ logger.critical("A critical");
 // 2026-03-09T11:38:33.441Z  [CRITICAL]    [database/log.ts:9:8] : A critical
 ```
 
-`debug()`, `info()`, `warning()`, `error()` and `critical()` methods accept a value of type `LogMessageType = string | number | boolean | object`.
+`debug(msg: LogMessageType): void`, `info(msg: LogMessageType): void`, `warning(msg: LogMessageType): void`, `error(msg: LogMessageType): void` and `critical(msg: LogMessageType): void` methods accept a value of type `LogMessageType = string | number | boolean | object`.
+
+### Create a custom logger
+
+In case you want to create your own logger, you need to create subclass that extends the `AbstractLogger` class. The `AbstractLogger` class, provides the `prefix` and the `providers` attributes to all subclasses and each subclass need to implement the following abstract methods:
+
+- `debug(msg: LogMessageType): void`,
+- `info(msg: LogMessageType): void`,
+- `warning(msg: LogMessageType): void`,
+- `error(msg: LogMessageType): void`
+- `critical(msg: LogMessageType): void`
+
+Inside each method, you first create a `LogDataType` object, which is explained in the [Create a new provider](#create-a-new-provider) section, and then pass this object as an argument to the `execute()` method of each provider you passed.
+
+Here a quick example on implementing a custom logger for an API:
+
+```typescript
+class APILogger extends AbstractLogger {
+  private api: string;
+
+  constructor(
+    api: string,
+    prefix: string,
+    providers: [LoggerProvider, ...LoggerProvider[]],
+  ) {
+    super(prefix, providers);
+    this.api = api;
+  }
+
+  public debug(msg: LogMessageType): void {
+    const data = this.createLogData("debug", msg, this.prefix);
+    const apiData = this.createLogData("debug", this.api, this.prefix);
+    const [provider] = this.providers;
+
+    if (!provider) throw new Error("No providers");
+
+    provider.execute(data);
+    provider.execute(apiData);
+  }
+
+  public info(msg: LogMessageType): void {
+    // Implementation
+  }
+  public warning(msg: LogMessageType): void {
+    // Implementation
+  }
+  public error(msg: LogMessageType): void {
+    // Implementation
+  }
+  public critical(msg: LogMessageType): void {
+    // Implementation
+  }
+}
+```
 
 ## Provider
 
@@ -84,7 +137,7 @@ The `FileProvider(file: string, options?: FileProviderOptions)` class direct all
 - `options` (optional) -
   - **`level`** (optional) - Define the log level and by default is set to _"debug"_;
   - **`formatter`** (optional) - Define how the provider should format a message. By default it use and instance of the `BaseFormatter()` class.
-  - **`policy`** (optional) - An object which define the type of rolling strategy to implement. By default it use a size based strategy.
+  - **`policy`** (optional) - An object which define the type of rolling strategy to implement. By default it use a size based rolling strategy.
 
 **Example**
 
@@ -122,9 +175,9 @@ With the object `policy` you can decide how to roll your files. Currently the `F
 
 The following tables will show how the `policy` object change based on the rolling strategy you choose.
 
-| Size based rolling property |   Type   | Required | Default Value | Note                                                                                    |
-| --------------------------- | :------: | :------: | :-----------: | --------------------------------------------------------------------------------------- |
-| `maxSize`                   | `number` |    No    |    `4096`     | Define the max size of each file. The default value is equal to 4KB expressed in bytes. |
+| Size based rolling property |   Type   | Required | Default Value | Note                                                                                             |
+| --------------------------- | :------: | :------: | :-----------: | ------------------------------------------------------------------------------------------------ |
+| `maxSize`                   | `number` |    No    |    `4096`     | Define the max size of each file in bytes. The default value is equal to 4KB expressed in bytes. |
 
 Note that `InstantType = "hour" | "day" | "week" | "month"`
 
@@ -178,7 +231,9 @@ For instance, this is how a message is formatted by default.
 <timestamp>  [<level>]       [<method>]  [<prefix>/<fileName>:<row>:<column>] : <msg>
 ```
 
-## Formatting messages
+## Formatters
+
+### Formatting messages
 
 Semola's logging module provides two simple out of the box formatting classes and also the ability to create custom formatters. By default all providers us the `BaseFormatter` class with produce strings containing all the information, or a small subset, collected inside a `LogDataType`. The following list shows which formatters the module expose:
 
@@ -217,9 +272,13 @@ jsonLogger.info("Formatted as a JSON object");
 - `dmyFormat(): string` - Return a date as a string value with the `dd-mm-yyyy` format;
 - `mdyFormat(): string` - Return a date as a string value with the `mm-dd-yyyy` format.
 
+### Formatting errors
+
+In case you need to format errors, you can use the `formatError(logData: LogDataType, error: Error): string` method. Note that all providers use this method for formatting errors throwed during the formatting phase.
+
 ### Create a new formatter
 
-In case you need to format your messages in a different way, you can create a new class that extends the `Formatter` abstract class. Every subclass need to implement the `format(logData: LogDataType): string` with all the necessary logic for formatting a message. In addition, the base class constructor should be called with the date formatting function of your choice.
+In case you need to format your messages in a different way, you can create a new class that extends the `Formatter` abstract class. Every subclass need to implement the `format(logData: LogDataType): string` and the `formatError(logData: LogDataType, error: Error): string` with all the necessary logic for formatting a message or an error. In addition, the base class constructor should be called with the date formatting function of your choice.
 
 Here a quick example on how to create a logging message similar on how is formatted in [Effect](https://effect.website/docs/observability/logging/#log)
 
@@ -235,6 +294,10 @@ class EffectFormatter extends Formatter {
     const timestamp = this.dateFmt();
 
     return `timestamp=${timestamp} level=${level.toUpperCase()} message="${msg}"`;
+  }
+
+  public formatError(logData: LogDataType, error: Error): string {
+    return `message=${error.message} cause=${error.cause}`;
   }
 }
 
