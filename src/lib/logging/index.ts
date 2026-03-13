@@ -61,6 +61,17 @@ function readStackData() {
 }
 
 export abstract class AbstractLogger {
+  protected providers: LoggerProvider[];
+  protected prefix: string;
+
+  public constructor(
+    prefix: string,
+    providers: [LoggerProvider, ...LoggerProvider[]],
+  ) {
+    this.prefix = prefix;
+    this.providers = providers;
+  }
+
   public abstract debug(msg: LogMessageType): void;
   public abstract info(msg: LogMessageType): void;
   public abstract warning(msg: LogMessageType): void;
@@ -103,16 +114,11 @@ export abstract class AbstractLogger {
 }
 
 export class Logger extends AbstractLogger {
-  private providers: LoggerProvider[];
-  private prefix: string;
-
   public constructor(
     prefix: string,
     providers: [LoggerProvider, ...LoggerProvider[]],
   ) {
-    super();
-    this.prefix = prefix;
-    this.providers = providers;
+    super(prefix, providers);
   }
 
   public debug(msg: LogMessageType) {
