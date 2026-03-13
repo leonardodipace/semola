@@ -18,16 +18,17 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 
 ## ✨ Features
 
-| Module               | Description                                            | Import          |
-| -------------------- | ------------------------------------------------------ | --------------- |
-| **🚀 API Framework** | Type-safe REST API with OpenAPI & Bun-native routing   | `semola/api`    |
-| **📬 Queue**         | Redis-backed job queue with timeouts & concurrency     | `semola/queue`  |
-| **📡 PubSub**        | Type-safe Redis pub/sub for real-time messaging        | `semola/pubsub` |
-| **🔐 Policy**        | Policy-based authorization with type-safe guards       | `semola/policy` |
-| **🌍 i18n**          | Compile-time validated internationalization            | `semola/i18n`   |
-| **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`  |
-| **⏰ Cron**          | In-memory cron scheduler for periodic task execution   | `semola/cron`   |
-| **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors` |
+| Module               | Description                                            | Import           |
+| -------------------- | ------------------------------------------------------ | ---------------- |
+| **🚀 API Framework** | Type-safe REST API with OpenAPI & Bun-native routing   | `semola/api`     |
+| **📬 Queue**         | Redis-backed job queue with timeouts & concurrency     | `semola/queue`   |
+| **📡 PubSub**        | Type-safe Redis pub/sub for real-time messaging        | `semola/pubsub`  |
+| **🔐 Policy**        | Policy-based authorization with type-safe guards       | `semola/policy`  |
+| **🌍 i18n**          | Compile-time validated internationalization            | `semola/i18n`    |
+| **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`   |
+| **⏰ Cron**          | In-memory cron scheduler for periodic task execution   | `semola/cron`    |
+| **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors`  |
+| **📃 Logging**       | A simple logging utility                               | `semola/logging` |
 
 ---
 
@@ -189,6 +190,15 @@ const i18n = new I18n({
 });
 
 console.log(i18n.translate("greeting", { name: "World" }));
+```
+
+### Log your messages
+
+```typescript
+import { ConsoleProvider, Logger } from "semola/logging";
+
+const logger = new Logger("database", [new ConsoleProvider()]);
+logger.info("Hello!");
 ```
 
 ---
