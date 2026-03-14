@@ -396,7 +396,10 @@ export const confirm = async (
       const rendered = state.value ? yesLabel : noLabel;
 
       return addErrorLine(
-        renderQuestionLine(currentOptions.message, `(${rendered})`),
+        [
+          renderQuestionLine(currentOptions.message, `(${rendered})`),
+          paint("dim", "  (y/n to select, ← yes / → no, space to toggle)"),
+        ].join("\n"),
         errorMessage,
       );
     },
