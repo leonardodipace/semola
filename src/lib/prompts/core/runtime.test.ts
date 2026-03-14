@@ -8,6 +8,7 @@ class MockStdin extends EventEmitter {
   public rawModes: boolean[] = [];
   public encoding: BufferEncoding | null = null;
   public resumed = false;
+  public paused = false;
 
   public setRawMode(value: boolean) {
     this.rawModes.push(value);
@@ -19,6 +20,10 @@ class MockStdin extends EventEmitter {
 
   public resume() {
     this.resumed = true;
+  }
+
+  public pause() {
+    this.paused = true;
   }
 }
 
@@ -91,6 +96,7 @@ describe("NodePromptRuntime", () => {
 
     expect(stdin.rawModes).toEqual([true, false]);
     expect(stdin.listenerCount("data")).toBe(0);
+    expect(stdin.paused).toBe(true);
     expect(stdout.writes.at(-1)).toBe("\u001B[?25h");
   });
 
@@ -192,7 +198,7 @@ describe("NodePromptRuntime", () => {
     }) as typeof process.exit;
 
     try {
-      runtime.interrupt("bye");
+      runtime.interrupt();
     } finally {
       process.exit = originalExit;
     }
