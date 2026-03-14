@@ -17,6 +17,15 @@ import {
 
 ## API
 
+| Function               | Returns    | Use case                                          |
+| ---------------------- | ---------- | ------------------------------------------------- |
+| `input(options)`       | `string`   | Free-text entry - project names, URLs, file paths |
+| `password(options)`    | `string`   | Sensitive input rendered as masked characters     |
+| `confirm(options)`     | `boolean`  | Yes/no decisions - deploy, overwrite, continue    |
+| `number(options)`      | `number`   | Numeric values - ports, counts, thresholds        |
+| `select(options)`      | `TValue`   | Single choice from a list - environments, regions |
+| `multiselect(options)` | `TValue[]` | Multiple choices from a list - features, tags     |
+
 All prompt functions return result tuples using `ok/err` pattern:
 
 - success: `[null, value]`

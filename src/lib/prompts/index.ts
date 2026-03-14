@@ -30,6 +30,7 @@ const insertAt = (value: string, at: number, character: string) => {
 const INVERSE = "\u001B[7m";
 const RESET = "\u001B[0m";
 const WHITESPACE = /\s/;
+const NUMBER_CHAR = /[0-9.-]/;
 const CURSOR_BLOCK = `${INVERSE} ${RESET}`;
 const paint = (
   color: "cyan" | "green" | "red" | "yellow" | "dim",
@@ -348,7 +349,12 @@ export const password = async (
     options,
     initialState: createTextState(initialValue),
     render: ({ options: currentOptions, state, errorMessage }) => {
-      const visible = renderTextSelection(state, mask);
+      let visible = renderTextSelection(state, mask);
+
+      if (state.value.length === 0 && currentOptions.placeholder) {
+        visible = `${CURSOR_BLOCK}${paint("dim", currentOptions.placeholder)}`;
+      }
+
       return addErrorLine(
         renderQuestionLine(currentOptions.message, visible),
         errorMessage,
@@ -460,7 +466,7 @@ export const number = async (
 
       const value = key.name === "space" ? " " : (key.value ?? "");
 
-      if (!/[0-9.-]/.test(value)) {
+      if (!NUMBER_CHAR.test(value)) {
         return state;
       }
 
