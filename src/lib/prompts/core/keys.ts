@@ -1,8 +1,23 @@
-import type { Key } from "./types.js";
+import type { Key, KeyName } from "./types.js";
 
 const ESC = "\u001B";
 const CSI = "\u001B[";
 const ESC_BACKSPACE = `${ESC}\u007F`;
+
+const CHAR_KEYS = {
+  enterCr: { value: "\r", name: "enter" },
+  enterLf: { value: "\n", name: "enter" },
+  ctrlA: { value: "\u0001", name: "ctrl_a" },
+  ctrlC: { value: "\u0003", name: "ctrl_c" },
+  ctrlBackspace: { value: "\u0017", name: "ctrl_backspace" },
+  backspace: { value: "\u007F", name: "backspace" },
+  tab: { value: "\t", name: "tab" },
+  space: { value: " ", name: "space" },
+} satisfies Record<string, { value: string; name: KeyName }>;
+
+const CHAR_KEY_MAP = new Map<string, Key>(
+  Object.values(CHAR_KEYS).map((entry) => [entry.value, { name: entry.name }]),
+);
 
 const KNOWN_SEQUENCES = [
   { sequence: "\u001B[1;2D", key: { name: "shift_left" } },
@@ -101,59 +116,22 @@ export const parseKeys = (chunk: string) => {
 
     const char = chunk[cursor] ?? "";
 
-    if (char === "\r" || char === "\n") {
-      keys.push({ name: "enter" });
-      cursor += 1;
-      continue;
-    }
-
-    if (char === "\u0001") {
-      keys.push({ name: "ctrl_a" });
-      cursor += 1;
-      continue;
-    }
-
-    if (char === "\u0003") {
-      keys.push({ name: "ctrl_c" });
-      cursor += 1;
-      continue;
-    }
-
-    if (char === "\u001B") {
-      if (cursor === chunk.length - 1) {
-        keys.push({ name: "escape" });
+    switch (char) {
+      case ESC: {
+        if (cursor === chunk.length - 1) {
+          keys.push({ name: "escape" });
+        }
+        break;
       }
+      default: {
+        const key = CHAR_KEY_MAP.get(char);
 
-      cursor += 1;
-      continue;
-    }
-
-    if (char === "\u0017") {
-      keys.push({ name: "ctrl_backspace" });
-      cursor += 1;
-      continue;
-    }
-
-    if (char === "\u007F") {
-      keys.push({ name: "backspace" });
-      cursor += 1;
-      continue;
-    }
-
-    if (char === "\t") {
-      keys.push({ name: "tab" });
-      cursor += 1;
-      continue;
-    }
-
-    if (char === " ") {
-      keys.push({ name: "space" });
-      cursor += 1;
-      continue;
-    }
-
-    if (!isControlChar(char)) {
-      keys.push({ name: "character", value: char });
+        if (key) {
+          keys.push(key);
+        } else if (!isControlChar(char)) {
+          keys.push({ name: "character", value: char });
+        }
+      }
     }
 
     cursor += 1;

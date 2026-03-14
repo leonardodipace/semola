@@ -197,122 +197,112 @@ const textOnKey = (
     value?: string;
   },
 ) => {
-  if (key.name === "ctrl_a") {
-    return {
-      ...state,
-      cursor: state.value.length,
-      selectionAnchor: 0,
-    };
-  }
-
-  if (key.name === "home") {
-    return moveCursor(state, 0, false);
-  }
-
-  if (key.name === "end") {
-    return moveCursor(state, state.value.length, false);
-  }
-
-  if (key.name === "shift_ctrl_left") {
-    return moveCursor(state, findWordStart(state.value, state.cursor), true);
-  }
-
-  if (key.name === "shift_ctrl_right") {
-    return moveCursor(state, findWordEnd(state.value, state.cursor), true);
-  }
-
-  if (key.name === "left") {
-    return moveCursor(state, Math.max(state.cursor - 1, 0), false);
-  }
-
-  if (key.name === "shift_left") {
-    return moveCursor(state, Math.max(state.cursor - 1, 0), true);
-  }
-
-  if (key.name === "right") {
-    return moveCursor(
-      state,
-      Math.min(state.cursor + 1, state.value.length),
-      false,
-    );
-  }
-
-  if (key.name === "ctrl_left") {
-    return moveCursor(state, findWordStart(state.value, state.cursor), false);
-  }
-
-  if (key.name === "ctrl_right") {
-    return moveCursor(state, findWordEnd(state.value, state.cursor), false);
-  }
-
-  if (key.name === "shift_right") {
-    return moveCursor(
-      state,
-      Math.min(state.cursor + 1, state.value.length),
-      true,
-    );
-  }
-
-  if (key.name === "backspace") {
-    const selectionDeleted = deleteSelectedRange(state);
-
-    if (selectionDeleted !== state) {
-      return selectionDeleted;
+  switch (key.name) {
+    case "ctrl_a": {
+      return {
+        ...state,
+        cursor: state.value.length,
+        selectionAnchor: 0,
+      };
     }
+    case "home": {
+      return moveCursor(state, 0, false);
+    }
+    case "end": {
+      return moveCursor(state, state.value.length, false);
+    }
+    case "shift_ctrl_left": {
+      return moveCursor(state, findWordStart(state.value, state.cursor), true);
+    }
+    case "shift_ctrl_right": {
+      return moveCursor(state, findWordEnd(state.value, state.cursor), true);
+    }
+    case "left": {
+      return moveCursor(state, Math.max(state.cursor - 1, 0), false);
+    }
+    case "shift_left": {
+      return moveCursor(state, Math.max(state.cursor - 1, 0), true);
+    }
+    case "right": {
+      return moveCursor(
+        state,
+        Math.min(state.cursor + 1, state.value.length),
+        false,
+      );
+    }
+    case "ctrl_left": {
+      return moveCursor(state, findWordStart(state.value, state.cursor), false);
+    }
+    case "ctrl_right": {
+      return moveCursor(state, findWordEnd(state.value, state.cursor), false);
+    }
+    case "shift_right": {
+      return moveCursor(
+        state,
+        Math.min(state.cursor + 1, state.value.length),
+        true,
+      );
+    }
+    case "backspace": {
+      const selectionDeleted = deleteSelectedRange(state);
 
-    if (state.cursor === 0) {
+      if (selectionDeleted !== state) {
+        return selectionDeleted;
+      }
+
+      if (state.cursor === 0) {
+        return state;
+      }
+
+      const nextCursor = state.cursor - 1;
+
+      return {
+        value: `${state.value.slice(0, nextCursor)}${state.value.slice(state.cursor)}`,
+        cursor: nextCursor,
+        selectionAnchor: null,
+      };
+    }
+    case "ctrl_backspace": {
+      const selectionDeleted = deleteSelectedRange(state);
+
+      if (selectionDeleted !== state) {
+        return selectionDeleted;
+      }
+
+      if (state.cursor === 0) {
+        return state;
+      }
+
+      const nextCursor = findWordStart(state.value, state.cursor);
+      return deleteRange(state, nextCursor, state.cursor);
+    }
+    case "delete": {
+      const selectionDeleted = deleteSelectedRange(state);
+
+      if (selectionDeleted !== state) {
+        return selectionDeleted;
+      }
+
+      return {
+        ...state,
+        value: `${state.value.slice(0, state.cursor)}${state.value.slice(state.cursor + 1)}`,
+      };
+    }
+    case "character":
+    case "space": {
+      const collapsed = deleteSelectedRange(state);
+      const text = key.name === "space" ? " " : (key.value ?? "");
+
+      return {
+        value: insertAt(collapsed.value, collapsed.cursor, text),
+        cursor: collapsed.cursor + 1,
+        selectionAnchor: null,
+      };
+    }
+    default: {
       return state;
     }
-
-    const nextCursor = state.cursor - 1;
-
-    return {
-      value: `${state.value.slice(0, nextCursor)}${state.value.slice(state.cursor)}`,
-      cursor: nextCursor,
-      selectionAnchor: null,
-    };
   }
-
-  if (key.name === "ctrl_backspace") {
-    const selectionDeleted = deleteSelectedRange(state);
-
-    if (selectionDeleted !== state) {
-      return selectionDeleted;
-    }
-
-    if (state.cursor === 0) {
-      return state;
-    }
-
-    const nextCursor = findWordStart(state.value, state.cursor);
-    return deleteRange(state, nextCursor, state.cursor);
-  }
-
-  if (key.name === "delete") {
-    const selectionDeleted = deleteSelectedRange(state);
-
-    if (selectionDeleted !== state) {
-      return selectionDeleted;
-    }
-
-    return {
-      ...state,
-      value: `${state.value.slice(0, state.cursor)}${state.value.slice(state.cursor + 1)}`,
-    };
-  }
-
-  if (key.name !== "character" && key.name !== "space") {
-    return state;
-  }
-
-  const collapsed = deleteSelectedRange(state);
-  const text = key.name === "space" ? " " : (key.value ?? "");
-
-  return {
-    value: insertAt(collapsed.value, collapsed.cursor, text),
-    cursor: collapsed.cursor + 1,
-    selectionAnchor: null,
-  };
 };
 
 export const input = async (options: InputOptions, runtime?: PromptRuntime) => {
@@ -405,31 +395,33 @@ export const confirm = async (
       return renderSuccessLine(currentOptions.message, label);
     },
     onKey: (state, key) => {
-      if (key.name === "left") {
-        return { value: true };
-      }
-
-      if (key.name === "right") {
-        return { value: false };
-      }
-
-      if (key.name === "space") {
-        return { value: !state.value };
-      }
-
-      if (key.name === "character") {
-        const lowered = (key.value ?? "").toLowerCase();
-
-        if (lowered === "y") {
+      switch (key.name) {
+        case "left": {
           return { value: true };
         }
-
-        if (lowered === "n") {
+        case "right": {
           return { value: false };
         }
-      }
+        case "space": {
+          return { value: !state.value };
+        }
+        case "character": {
+          const lowered = (key.value ?? "").toLowerCase();
 
-      return state;
+          if (lowered === "y") {
+            return { value: true };
+          }
+
+          if (lowered === "n") {
+            return { value: false };
+          }
+
+          return state;
+        }
+        default: {
+          return state;
+        }
+      }
     },
     onSubmit: (state) => {
       return { value: state.value };
@@ -628,19 +620,21 @@ export const select = async <TValue extends string>(
       );
     },
     onKey: (state, key) => {
-      if (key.name === "up") {
-        return {
-          cursor: findNextEnabledIndex(options.choices, state.cursor, -1),
-        };
+      switch (key.name) {
+        case "up": {
+          return {
+            cursor: findNextEnabledIndex(options.choices, state.cursor, -1),
+          };
+        }
+        case "down": {
+          return {
+            cursor: findNextEnabledIndex(options.choices, state.cursor, 1),
+          };
+        }
+        default: {
+          return state;
+        }
       }
-
-      if (key.name === "down") {
-        return {
-          cursor: findNextEnabledIndex(options.choices, state.cursor, 1),
-        };
-      }
-
-      return state;
     },
     onSubmit: (state) => {
       const selectedChoice = options.choices[state.cursor];
@@ -710,48 +704,70 @@ export const multiselect = async <TValue extends string>(
       return renderSuccessLine(currentOptions.message, labels.join(", "));
     },
     onKey: (state, key) => {
-      if (key.name === "up") {
-        return {
-          ...state,
-          cursor: findNextEnabledIndex(options.choices, state.cursor, -1),
-        };
-      }
+      switch (key.name) {
+        case "up": {
+          return {
+            ...state,
+            cursor: findNextEnabledIndex(options.choices, state.cursor, -1),
+          };
+        }
+        case "down": {
+          return {
+            ...state,
+            cursor: findNextEnabledIndex(options.choices, state.cursor, 1),
+          };
+        }
+        case "character": {
+          const lowered = (key.value ?? "").toLowerCase();
 
-      if (key.name === "down") {
-        return {
-          ...state,
-          cursor: findNextEnabledIndex(options.choices, state.cursor, 1),
-        };
-      }
+          if (lowered === "a") {
+            const enabledValues = options.choices
+              .filter((choice) => !choice.disabled)
+              .map((choice) => choice.value);
 
-      if (key.name === "character") {
-        const lowered = (key.value ?? "").toLowerCase();
+            const hasEnabledValues = enabledValues.length > 0;
 
-        if (lowered === "a") {
-          const enabledValues = options.choices
-            .filter((choice) => !choice.disabled)
-            .map((choice) => choice.value);
+            if (!hasEnabledValues) {
+              return state;
+            }
 
-          const hasEnabledValues = enabledValues.length > 0;
+            const areAllEnabledSelected = enabledValues.every((value) =>
+              state.selected.has(value),
+            );
 
-          if (!hasEnabledValues) {
+            const nextSelection = new Set(state.selected);
+
+            if (areAllEnabledSelected) {
+              for (const value of enabledValues) {
+                nextSelection.delete(value);
+              }
+            } else {
+              for (const value of enabledValues) {
+                nextSelection.add(value);
+              }
+            }
+
+            return {
+              ...state,
+              selected: nextSelection,
+            };
+          }
+
+          return state;
+        }
+        case "space": {
+          const currentChoice = options.choices[state.cursor];
+
+          if (!currentChoice || currentChoice.disabled) {
             return state;
           }
 
-          const areAllEnabledSelected = enabledValues.every((value) =>
-            state.selected.has(value),
-          );
-
           const nextSelection = new Set(state.selected);
 
-          if (areAllEnabledSelected) {
-            for (const value of enabledValues) {
-              nextSelection.delete(value);
-            }
+          if (nextSelection.has(currentChoice.value)) {
+            nextSelection.delete(currentChoice.value);
           } else {
-            for (const value of enabledValues) {
-              nextSelection.add(value);
-            }
+            nextSelection.add(currentChoice.value);
           }
 
           return {
@@ -759,30 +775,10 @@ export const multiselect = async <TValue extends string>(
             selected: nextSelection,
           };
         }
+        default: {
+          return state;
+        }
       }
-
-      if (key.name !== "space") {
-        return state;
-      }
-
-      const currentChoice = options.choices[state.cursor];
-
-      if (!currentChoice || currentChoice.disabled) {
-        return state;
-      }
-
-      const nextSelection = new Set(state.selected);
-
-      if (nextSelection.has(currentChoice.value)) {
-        nextSelection.delete(currentChoice.value);
-      } else {
-        nextSelection.add(currentChoice.value);
-      }
-
-      return {
-        ...state,
-        selected: nextSelection,
-      };
     },
     onSubmit: (state) => {
       const values = options.choices
