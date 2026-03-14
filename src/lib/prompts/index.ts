@@ -342,17 +342,21 @@ export const password = async (
 ) => {
   const promptRuntime = runtime ?? createNodePromptRuntime();
   const initialValue = options.defaultValue ?? "";
-  const mask = options.mask || "*";
+  const mask = options.mask;
 
   return runPromptSession<TextState, string, PasswordOptions>({
     runtime: promptRuntime,
     options,
     initialState: createTextState(initialValue),
     render: ({ options: currentOptions, state, errorMessage }) => {
-      let visible = renderTextSelection(state, mask);
+      let visible: string;
 
       if (state.value.length === 0 && currentOptions.placeholder) {
         visible = `${CURSOR_BLOCK}${paint("dim", currentOptions.placeholder)}`;
+      } else if (mask !== undefined) {
+        visible = renderTextSelection(state, mask);
+      } else {
+        visible = CURSOR_BLOCK;
       }
 
       return addErrorLine(
@@ -360,8 +364,11 @@ export const password = async (
         errorMessage,
       );
     },
-    complete: ({ options: currentOptions }) => {
-      return renderSuccessLine(currentOptions.message, mask.repeat(8));
+    complete: ({ options: currentOptions, value }) => {
+      return renderSuccessLine(
+        currentOptions.message,
+        mask !== undefined ? mask.repeat(value.length) : "",
+      );
     },
     onKey: (state, key) => {
       return textOnKey(state, key);
