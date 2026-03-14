@@ -171,6 +171,77 @@ const [nameError, name] = await input({
 
 ## Types
 
+### `BasePromptOptions<TValue>`
+
+| Property    | Type                | Description                                                                                                      |
+| ----------- | ------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `message`   | `string`            | The question text displayed to the user                                                                          |
+| `validate`  | `Validate<TValue>`  | Called with the final value before resolving. Return a string to show as an error, or `null`/`undefined` to pass |
+| `transform` | `Transform<TValue>` | Called with the submitted value before resolving. Return the transformed value                                   |
+
+### `InputOptions`
+
+Includes all properties from `BasePromptOptions<string>`.
+
+| Property          | Type      | Description                                 |
+| ----------------- | --------- | ------------------------------------------- |
+| `defaultValue`    | `string`  | Pre-filled value shown in the input         |
+| `placeholder`     | `string`  | Ghost text shown when the input is empty    |
+| `required`        | `boolean` | Prevents submission when the input is empty |
+| `requiredMessage` | `string`  | Error message shown when required and empty |
+
+### `PasswordOptions`
+
+Includes all properties from `InputOptions`.
+
+| Property | Type     | Description                                                                                  |
+| -------- | -------- | -------------------------------------------------------------------------------------------- |
+| `mask`   | `string` | Character used to replace each typed character. When omitted, nothing is shown (hidden mode) |
+
+### `ConfirmOptions`
+
+Includes all properties from `BasePromptOptions<boolean>`.
+
+| Property        | Type      | Description                                      |
+| --------------- | --------- | ------------------------------------------------ |
+| `defaultValue`  | `boolean` | Pre-selected answer                              |
+| `activeLabel`   | `string`  | Label for the "yes" option (defaults to `"Yes"`) |
+| `inactiveLabel` | `string`  | Label for the "no" option (defaults to `"No"`)   |
+
+### `NumberOptions`
+
+Includes all properties from `BasePromptOptions<number>`.
+
+| Property          | Type     | Description                                      |
+| ----------------- | -------- | ------------------------------------------------ |
+| `defaultValue`    | `number` | Pre-filled numeric value                         |
+| `min`             | `number` | Minimum allowed value                            |
+| `max`             | `number` | Maximum allowed value                            |
+| `requiredMessage` | `string` | Error shown when no value is entered             |
+| `invalidMessage`  | `string` | Error shown when the value is not a valid number |
+| `minMessage`      | `string` | Error shown when the value is below `min`        |
+| `maxMessage`      | `string` | Error shown when the value is above `max`        |
+
+### `SelectOptions<TValue>`
+
+Includes all properties from `BasePromptOptions<TValue>`.
+
+| Property       | Type                     | Description                                       |
+| -------------- | ------------------------ | ------------------------------------------------- |
+| `choices`      | `SelectChoice<TValue>[]` | Non-empty list of options                         |
+| `defaultValue` | `TValue`                 | Value of the choice the arrow initially points to |
+
+### `MultiselectOptions<TValue>`
+
+Includes all properties from `BasePromptOptions<TValue[]>`.
+
+| Property       | Type                     | Description                                     |
+| -------------- | ------------------------ | ----------------------------------------------- |
+| `choices`      | `SelectChoice<TValue>[]` | Non-empty list of options                       |
+| `defaultValue` | `readonly TValue[]`      | Values pre-selected when the prompt opens       |
+| `min`          | `number`                 | Minimum number of choices that must be selected |
+| `max`          | `number`                 | Maximum number of choices that can be selected  |
+
 ### `SelectChoice<TValue>`
 
 | Property   | Type      | Description                              |
