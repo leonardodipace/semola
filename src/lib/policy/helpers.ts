@@ -197,8 +197,9 @@ export const has = <V>(items: V | V[]): ConditionHelper<V[]> => {
   };
 };
 
-export const hasAny = <V>(items: V[]): ConditionHelper<V[]> => {
-  const fn = (actual: V[]) => items.some((item) => actual.includes(item));
+export const hasAny = <V>(items: V | V[]): ConditionHelper<V[]> => {
+  const normalized = Array.isArray(items) ? items : [items];
+  const fn = (actual: V[]) => normalized.some((item) => actual.includes(item));
 
   return {
     [_brand]: fn,

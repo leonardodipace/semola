@@ -291,6 +291,14 @@ describe("hasAny", () => {
     expect(hasAny<string>([]).fn(["tech"])).toBe(false);
   });
 
+  test("returns true when single item is in array", () => {
+    expect(hasAny("tech").fn(["tech", "business"])).toBe(true);
+  });
+
+  test("returns false when single item is not in array", () => {
+    expect(hasAny("finance").fn(["tech", "business"])).toBe(false);
+  });
+
   test("carries correct metadata", () => {
     const items = ["a", "b"];
 
