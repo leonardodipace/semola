@@ -22,6 +22,7 @@ type StdinLike = {
   setRawMode: (mode: boolean) => void;
   setEncoding: (encoding: BufferEncoding) => void;
   resume: () => void;
+  pause?: () => void;
   on: (event: string, listener: (chunk: Buffer | string) => void) => unknown;
   off: (event: string, listener: (chunk: Buffer | string) => void) => unknown;
 };
@@ -143,6 +144,7 @@ export class NodePromptRuntime implements PromptRuntime {
     const [closeError] = mightThrowSync(() => {
       this.stdin.off("data", this.onData);
       this.stdin.setRawMode(false);
+      this.stdin.pause?.();
       this.stdout.write(SHOW_CURSOR);
     });
 
