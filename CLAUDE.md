@@ -20,7 +20,9 @@ Semola is a TypeScript utility kit providing modular packages for common develop
 
 - Write minimal code, no over-engineering
 - Explicit if-statements over ternaries for complex logic
-- Prefer separate early returns over combined conditions — `if (a) return x; if (b) return x;` not `if (a || b) return x;`
+- Separate if statements for early returns — no `||` combining unrelated conditions (e.g. `if (a) return; if (b) return;` not `if (a || b) return;`)
+- Blank lines between if-statement groups, const definitions, and return statements inside functions
+- No type predicates (`value is Type` return annotations) — use inline guards for TypeScript narrowing
 - No type assertions (`as`, `!`)
 - No `any` type
 - Infer types, avoid explicit return types
