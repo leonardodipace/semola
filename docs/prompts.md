@@ -46,7 +46,7 @@ All prompt functions return result tuples using `ok/err` pattern:
 | `defaultValue`                  | all                           |
 | `required`                      | `input`, `password`           |
 | `requiredMessage`               | `input`, `password`, `number` |
-| `placeholder`                   | `input`                       |
+| `placeholder`                   | `input`, `password`           |
 | `mask`                          | `password`                    |
 | `min` / `max`                   | `number`, `multiselect`       |
 | `invalidMessage`                | `number`                      |
@@ -73,18 +73,19 @@ if (nameError) {
 
 ### Password
 
+When `mask` is omitted, the cursor stays still while typing and nothing is shown after submit - identical to the Linux `sudo` behavior. When `mask` is set, each character is replaced by the mask symbol and the same number of symbols is shown after submit.
+
 ```typescript
-const [passwordError, password] = await password({
+// hidden mode - cursor stays still, nothing shown on submit
+const [err1, secret] = await password({ message: "Enter password" });
+
+// masked mode - each character shown as "*", same count shown on submit
+const [err2, secret2] = await password({
   message: "Enter password",
-  required: true,
   mask: "*",
   validate: (value) =>
     value.length < 8 ? "Must be at least 8 characters" : null,
 });
-
-if (passwordError) {
-  console.error(passwordError.type, passwordError.message);
-}
 ```
 
 ### Confirm
