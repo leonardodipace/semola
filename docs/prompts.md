@@ -58,6 +58,21 @@ if (nameError) {
 }
 ```
 
+### Password
+
+```typescript
+const [passwordError, password] = await password({
+  message: "Enter password",
+  required: true,
+  validate: (value) =>
+    value.length < 8 ? "Must be at least 8 characters" : null,
+});
+
+if (passwordError) {
+  console.error(passwordError.type, passwordError.message);
+}
+```
+
 ### Confirm
 
 ```typescript
