@@ -153,7 +153,7 @@ export class NodePromptRuntime implements PromptRuntime {
     return ok(undefined);
   }
 
-  public interrupt(_message: string): never {
+  public interrupt(): never {
     this.close();
     process.exit(0);
   }
