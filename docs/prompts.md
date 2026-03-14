@@ -22,25 +22,28 @@ All prompt functions return result tuples using `ok/err` pattern:
 - success: `[null, value]`
 - failure: `[{ type, message }, null]`
 
-- `input(options)`
-- `password(options)`
-- `confirm(options)`
-- `number(options)`
-- `select(options)`
-- `multiselect(options)`
+## Common options
 
-### Common options
+| Option      | Description                                                                                                      |
+| ----------- | ---------------------------------------------------------------------------------------------------------------- |
+| `message`   | The question text displayed to the user                                                                          |
+| `validate`  | Called with the final value before resolving. Return a string to show as an error, or `null`/`undefined` to pass |
+| `transform` | Called with the submitted value before resolving. Return the transformed value                                   |
 
-- `message: string`
-- `validate?: (value) => string | null | undefined | Promise<...>`
-- `transform?: (value) => value | Promise<...>`
+## Prompt-specific options
 
-Prompt-specific options (varies by type):
-
-- `required` - reject empty submissions (`input`, `password`)
-- `defaultValue` - pre-filled value shown at start (all prompts)
-- `choices` - array of selectable items (`select`, `multiselect`)
-- `min` / `max` - numeric bounds (`number`) or selection count bounds (`multiselect`)
+| Option                          | Prompts                       |
+| ------------------------------- | ----------------------------- |
+| `defaultValue`                  | all                           |
+| `required`                      | `input`, `password`           |
+| `requiredMessage`               | `input`, `password`, `number` |
+| `placeholder`                   | `input`                       |
+| `mask`                          | `password`                    |
+| `min` / `max`                   | `number`, `multiselect`       |
+| `invalidMessage`                | `number`                      |
+| `minMessage` / `maxMessage`     | `number`                      |
+| `activeLabel` / `inactiveLabel` | `confirm`                     |
+| `choices`                       | `select`, `multiselect`       |
 
 ## Examples
 
@@ -50,6 +53,7 @@ Prompt-specific options (varies by type):
 const [nameError, name] = await input({
   message: "Project name",
   required: true,
+  placeholder: "my-app",
   validate: (value) => (value.length < 2 ? "Too short" : null),
 });
 
@@ -64,6 +68,7 @@ if (nameError) {
 const [passwordError, password] = await password({
   message: "Enter password",
   required: true,
+  mask: "*",
   validate: (value) =>
     value.length < 8 ? "Must be at least 8 characters" : null,
 });
@@ -86,6 +91,21 @@ if (confirmError) {
 }
 ```
 
+### Number
+
+```typescript
+const [portError, port] = await number({
+  message: "Port",
+  defaultValue: 3000,
+  min: 1,
+  max: 65535,
+});
+
+if (portError) {
+  console.error(portError.type, portError.message);
+}
+```
+
 ### Select
 
 ```typescript
@@ -94,7 +114,7 @@ const [environmentError, environment] = await select({
   choices: [
     { value: "dev", label: "Development" },
     { value: "staging", label: "Staging" },
-    { value: "prod", label: "Production" },
+    { value: "prod", label: "Production", hint: "irreversible" },
   ],
 });
 
@@ -137,6 +157,40 @@ const [nameError, name] = await input({
     return taken ? "Username already taken" : null;
   },
 });
+```
+
+## Types
+
+### `SelectChoice<TValue>`
+
+| Property   | Type      | Description                              |
+| ---------- | --------- | ---------------------------------------- |
+| `value`    | `TValue`  | Returned when selected                   |
+| `label`    | `string`  | Display text (defaults to `value`)       |
+| `hint`     | `string`  | Secondary text shown alongside the label |
+| `disabled` | `boolean` | Prevents the choice from being selected  |
+
+### `PromptRuntime`
+
+Used to provide a custom I/O backend (e.g. for testing).
+
+| Method               | Description                                   |
+| -------------------- | --------------------------------------------- |
+| `isInteractive()`    | Returns `true` if running in interactive mode |
+| `init()`             | Initialize the runtime                        |
+| `readKey()`          | Read the next key press                       |
+| `render(frame)`      | Display a frame during interaction            |
+| `done(frame)`        | Display the final frame and clean up          |
+| `close()`            | Close the runtime                             |
+| `interrupt(message)` | _(optional)_ Interrupt with a message         |
+
+```typescript
+import { input } from "semola/prompts";
+import type { PromptRuntime } from "semola/prompts";
+
+const runtime: PromptRuntime = { ... };
+
+const [error, value] = await input({ message: "Name" }, runtime);
 ```
 
 ## Interactive-only behavior
