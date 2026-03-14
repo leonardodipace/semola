@@ -35,6 +35,10 @@
     "./cron": {
       "import": "./dist/lib/cron/index.js",
       "types": "./dist/lib/cron/index.d.ts"
+    },
+    "./workflow": {
+      "import": "./dist/lib/workflow/index.js",
+      "types": "./dist/lib/workflow/index.d.ts"
     }
   },
   "files": [
@@ -62,6 +66,9 @@
     "cron",
     "scheduler",
     "job-scheduler",
+    "workflow",
+    "durable-workflow",
+    "resumable-workflow",
     "i18n",
     "internationalization",
     "authorization",
