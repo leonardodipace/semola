@@ -4,8 +4,25 @@ import { defineWorkflow } from "./index.js";
 class MockRedisClient {
   private hashes = new Map<string, Map<string, string>>();
   private strings = new Map<string, string>();
+  private expirations = new Map<string, number>();
   private failCommands = new Set<string>();
   private hsetCallsBeforeFail: number | null = null;
+
+  private isExpired(key: string) {
+    const expiry = this.expirations.get(key);
+
+    if (expiry === undefined) {
+      return false;
+    }
+
+    if (Date.now() >= expiry) {
+      this.strings.delete(key);
+      this.expirations.delete(key);
+      return true;
+    }
+
+    return false;
+  }
 
   public setCommandFailure(command: "hset" | "hget" | "set" | "get" | "del") {
     this.failCommands.add(command);
@@ -71,16 +88,23 @@ class MockRedisClient {
 
     let nx = false;
     let xx = false;
+    let pxValue: number | null = null;
 
-    for (const arg of args) {
-      if (arg === "NX") {
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === "NX") {
         nx = true;
       }
 
-      if (arg === "XX") {
+      if (args[i] === "XX") {
         xx = true;
       }
+
+      if (args[i] === "PX" && typeof args[i + 1] === "string") {
+        pxValue = parseInt(args[i + 1] as string, 10);
+      }
     }
+
+    this.isExpired(key);
 
     const exists = this.strings.has(key);
 
@@ -93,12 +117,23 @@ class MockRedisClient {
     }
 
     this.strings.set(key, value);
+
+    if (pxValue !== null) {
+      this.expirations.set(key, Date.now() + pxValue);
+    } else {
+      this.expirations.delete(key);
+    }
+
     return "OK";
   }
 
   public async get(key: string) {
     if (this.failCommands.has("get")) {
       throw new Error("get failed");
+    }
+
+    if (this.isExpired(key)) {
+      return null;
     }
 
     return this.strings.get(key) ?? null;
@@ -120,6 +155,67 @@ class MockRedisClient {
     }
 
     return count;
+  }
+
+  public async send(command: string, args: string[]) {
+    if (command !== "EVAL") {
+      throw new Error(`Unsupported command: ${command}`);
+    }
+
+    const script = args[0];
+    const numKeys = parseInt(args[1] ?? "0", 10);
+    const keys = args.slice(2, 2 + numKeys);
+    const argv = args.slice(2 + numKeys);
+
+    if (!script) {
+      throw new Error("EVAL requires a script");
+    }
+
+    // releaseLock: GET compare then DEL
+    if (script.includes("'DEL'")) {
+      const current = this.strings.get(keys[0] ?? "");
+
+      if (current === argv[0]) {
+        this.strings.delete(keys[0] ?? "");
+        this.expirations.delete(keys[0] ?? "");
+        return 1;
+      }
+
+      return 0;
+    }
+
+    // extendLock: GET compare then PEXPIRE
+    if (script.includes("'PEXPIRE'")) {
+      const current = this.strings.get(keys[0] ?? "");
+
+      if (current === argv[0]) {
+        const ms = parseInt(argv[1] ?? "0", 10);
+        this.expirations.set(keys[0] ?? "", Date.now() + ms);
+        return 1;
+      }
+
+      return 0;
+    }
+
+    // createExecution: EXISTS check then HSET all fields
+    if (script.includes("'EXISTS'") && script.includes("'HSET'")) {
+      const metaKey = keys[0] ?? "";
+
+      if (this.hashes.has(metaKey)) {
+        return 0;
+      }
+
+      const hash = new Map<string, string>();
+
+      for (let i = 0; i + 1 < argv.length; i += 2) {
+        hash.set(argv[i] ?? "", argv[i + 1] ?? "");
+      }
+
+      this.hashes.set(metaKey, hash);
+      return 1;
+    }
+
+    throw new Error("Unknown EVAL script");
   }
 }
 
@@ -728,10 +824,10 @@ describe("workflow", () => {
   });
 
   describe("execute hset failure matrix", () => {
-    // createExecution writes 10 fields; execute() writes "status":"running" as the 11th
+    // execute() writes "status":"running" as the 1st hset call
     test("fails when hset fails during running status write", async () => {
       const redis = createRedis() as MockRedisClient & Bun.RedisClient;
-      redis.failHsetAfterNCalls(10);
+      redis.failHsetAfterNCalls(0);
 
       const workflow = createWorkflowWithEchoResult("hset-running-fail", redis);
 
@@ -741,10 +837,10 @@ describe("workflow", () => {
       expect(data).toBeNull();
     });
 
-    // 10 createExecution + 2 running writes + 1 result = 13; 14th is "status":"completed"
+    // 2 running writes + 1 result = 3; 4th is "status":"completed"
     test("fails when hset fails during completed status write", async () => {
       const redis = createRedis() as MockRedisClient & Bun.RedisClient;
-      redis.failHsetAfterNCalls(13);
+      redis.failHsetAfterNCalls(3);
 
       const workflow = defineWorkflow<{ id: number }, string>({
         name: "hset-completed-fail",

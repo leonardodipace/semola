@@ -67,19 +67,6 @@ class WorkflowDefinition<TInput, TResult> {
   public async start(input: TInput, options?: WorkflowStartOptions) {
     const executionId = options?.executionId ?? crypto.randomUUID();
 
-    const [existsError, exists] = await this.hasExecution(executionId);
-
-    if (existsError || exists === null) {
-      return err("WorkflowError", "Unable to verify workflow execution");
-    }
-
-    if (exists) {
-      return err(
-        "WorkflowStateError",
-        `Workflow execution ${executionId} already exists`,
-      );
-    }
-
     const [createError] = await this.createExecution(executionId, input);
 
     if (createError) {
@@ -184,7 +171,11 @@ class WorkflowDefinition<TInput, TResult> {
 
     const [inputError, input] = await this.readInput(executionId);
 
-    if (inputError || input === null) {
+    if (inputError) {
+      return err(inputError.type, inputError.message);
+    }
+
+    if (input === null) {
       return err(
         "WorkflowStateError",
         `Workflow execution ${executionId} has invalid input`,
@@ -328,6 +319,22 @@ class WorkflowDefinition<TInput, TResult> {
       return err(cancelledAtError.type, cancelledAtError.message);
     }
 
+    const [clearErrorError] = await this.setMeta(executionId, "error", "");
+
+    if (clearErrorError) {
+      return err(clearErrorError.type, clearErrorError.message);
+    }
+
+    const [clearFailedAtError] = await this.setMeta(
+      executionId,
+      "failedAt",
+      "",
+    );
+
+    if (clearFailedAtError) {
+      return err(clearFailedAtError.type, clearFailedAtError.message);
+    }
+
     return ok(null);
   }
 
@@ -347,16 +354,6 @@ class WorkflowDefinition<TInput, TResult> {
     return `${this.executionKey(executionId)}:lock`;
   }
 
-  private async hasExecution(executionId: string) {
-    const [readError, status] = await this.getMeta(executionId, "status");
-
-    if (readError) {
-      return err(readError.type, readError.message);
-    }
-
-    return ok(status !== null);
-  }
-
   private async createExecution(executionId: string, input: TInput) {
     const [serializeError, serializedInput] = this.serializeInput(input);
 
@@ -369,25 +366,50 @@ class WorkflowDefinition<TInput, TResult> {
 
     const timestamp = now();
 
-    const fields: [string, string][] = [
-      ["status", "pending"],
-      ["input", serializedInput],
-      ["result", ""],
-      ["error", ""],
-      ["createdAt", String(timestamp)],
-      ["updatedAt", String(timestamp)],
-      ["completedAt", ""],
-      ["failedAt", ""],
-      ["cancelledAt", ""],
-      ["steps", "[]"],
+    const fields = [
+      "status",
+      "pending",
+      "input",
+      serializedInput,
+      "result",
+      "",
+      "error",
+      "",
+      "createdAt",
+      String(timestamp),
+      "updatedAt",
+      String(timestamp),
+      "completedAt",
+      "",
+      "failedAt",
+      "",
+      "cancelledAt",
+      "",
+      "steps",
+      "[]",
     ];
 
-    for (const [name, value] of fields) {
-      const [writeError] = await this.setMeta(executionId, name, value);
+    const script =
+      "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 else redis.call('HSET', KEYS[1], unpack(ARGV)) return 1 end";
 
-      if (writeError) {
-        return err(writeError.type, writeError.message);
-      }
+    const [evalError, result] = await mightThrow(
+      this.options.redis.send("EVAL", [
+        script,
+        "1",
+        this.metaKey(executionId),
+        ...fields,
+      ]),
+    );
+
+    if (evalError) {
+      return err("WorkflowError", `Unable to create execution ${executionId}`);
+    }
+
+    if (result === 0) {
+      return err(
+        "WorkflowStateError",
+        `Workflow execution ${executionId} already exists`,
+      );
     }
 
     return ok(null);
@@ -427,6 +449,20 @@ class WorkflowDefinition<TInput, TResult> {
     }
 
     const controller = new AbortController();
+
+    const renewInterval = Math.floor(this.lockTTL / 3);
+
+    let lockLost = false;
+
+    const renewTimer = setInterval(async () => {
+      const [renewError] = await this.extendLock(executionId, token);
+
+      if (renewError) {
+        lockLost = true;
+        controller.abort();
+        clearInterval(renewTimer);
+      }
+    }, renewInterval);
 
     const step = async <TStep>(
       name: string,
@@ -490,6 +526,17 @@ class WorkflowDefinition<TInput, TResult> {
         }),
       ),
     );
+
+    clearInterval(renewTimer);
+
+    if (lockLost) {
+      await this.releaseLock(executionId, token);
+
+      return err(
+        "WorkflowLockError",
+        `Lock expired during execution ${executionId}`,
+      );
+    }
 
     const [cancelledError, cancelled] = await this.isCancelled(executionId);
 
@@ -759,29 +806,53 @@ class WorkflowDefinition<TInput, TResult> {
   }
 
   private async releaseLock(executionId: string, token: string) {
-    const [readError, currentToken] = await mightThrow(
-      this.options.redis.get(this.lockKey(executionId)),
+    const script =
+      "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end";
+
+    const [evalError] = await mightThrow(
+      this.options.redis.send("EVAL", [
+        script,
+        "1",
+        this.lockKey(executionId),
+        token,
+      ]),
     );
 
-    if (readError) {
-      return err(
-        "WorkflowLockError",
-        `Unable to read lock for execution ${executionId}`,
-      );
-    }
-
-    if (currentToken !== token) {
-      return ok(null);
-    }
-
-    const [deleteError] = await mightThrow(
-      this.options.redis.del(this.lockKey(executionId)),
-    );
-
-    if (deleteError) {
+    if (evalError) {
       return err(
         "WorkflowLockError",
         `Unable to release lock for execution ${executionId}`,
+      );
+    }
+
+    return ok(null);
+  }
+
+  private async extendLock(executionId: string, token: string) {
+    const script =
+      "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('PEXPIRE', KEYS[1], ARGV[2]) else return 0 end";
+
+    const [evalError, result] = await mightThrow(
+      this.options.redis.send("EVAL", [
+        script,
+        "1",
+        this.lockKey(executionId),
+        token,
+        String(this.lockTTL),
+      ]),
+    );
+
+    if (evalError) {
+      return err(
+        "WorkflowLockError",
+        `Unable to extend lock for execution ${executionId}`,
+      );
+    }
+
+    if (result === 0) {
+      return err(
+        "WorkflowLockError",
+        `Lock ownership lost for execution ${executionId}`,
       );
     }
 
