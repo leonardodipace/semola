@@ -147,7 +147,9 @@ describe("prompts", () => {
 
     const value = await password({ message: "Password" }, runtime);
     expect(value).toBe("s3cret");
-    expect(runtime.frames.at(-1)).toContain("******");
+    expect(stripAnsi(runtime.frames.at(-1) ?? "")).not.toContain("s3cret");
+    expect(stripAnsi(runtime.doneFrames.at(-1) ?? "")).toContain("✔ Password");
+    expect(stripAnsi(runtime.doneFrames.at(-1) ?? "")).not.toContain("s3cret");
   });
 
   test("confirm should toggle and submit", async () => {
@@ -514,6 +516,72 @@ describe("prompts", () => {
     const value = await password({ message: "Password", mask: "•" }, runtime);
     expect(value).toBe("ab");
     expect(runtime.frames.at(-1)).toContain("••");
+    expect(stripAnsi(runtime.doneFrames.at(-1) ?? "")).toContain(
+      "✔ Password ••",
+    );
+  });
+
+  test("password should resolve raw value after backspace", async () => {
+    const runtime = new MockPromptRuntime([
+      { name: "character", value: "a" },
+      { name: "character", value: "b" },
+      { name: "character", value: "c" },
+      { name: "backspace" },
+      { name: "enter" },
+    ]);
+
+    const value = await password({ message: "Password" }, runtime);
+    expect(value).toBe("ab");
+    expect(stripAnsi(runtime.frames.at(-1) ?? "")).not.toContain("ab");
+  });
+
+  test("password should use defaultValue when nothing is typed", async () => {
+    const runtime = new MockPromptRuntime([{ name: "enter" }]);
+
+    const value = await password(
+      { message: "Password", defaultValue: "fallback" },
+      runtime,
+    );
+
+    expect(value).toBe("fallback");
+    expect(stripAnsi(runtime.doneFrames.at(-1) ?? "")).toContain("✔ Password");
+    expect(stripAnsi(runtime.doneFrames.at(-1) ?? "")).not.toContain(
+      "fallback",
+    );
+  });
+
+  test("password should require a value when required is set", async () => {
+    const runtime = new MockPromptRuntime([
+      { name: "enter" },
+      { name: "character", value: "x" },
+      { name: "enter" },
+    ]);
+
+    const value = await password(
+      { message: "Password", required: true },
+      runtime,
+    );
+    expect(value).toBe("x");
+  });
+
+  test("password should show placeholder when empty", async () => {
+    const runtime = new MockPromptRuntime([
+      { name: "character", value: "p" },
+      { name: "enter" },
+    ]);
+
+    const runtime2 = new MockPromptRuntime([{ name: "enter" }]);
+
+    await password(
+      { message: "Password", placeholder: "enter password", defaultValue: "p" },
+      runtime,
+    );
+    await password(
+      { message: "Password", placeholder: "enter password" },
+      runtime2,
+    );
+
+    expect(runtime2.frames[0]).toContain("enter password");
   });
 
   test("confirm should respond to arrow keys and space", async () => {
