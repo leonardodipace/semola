@@ -173,6 +173,10 @@ class MockRedisClient {
 
     // releaseLock: GET compare then DEL
     if (script.includes("'DEL'")) {
+      if (this.isExpired(keys[0] ?? "")) {
+        return 0;
+      }
+
       const current = this.strings.get(keys[0] ?? "");
 
       if (current === argv[0]) {
@@ -186,6 +190,10 @@ class MockRedisClient {
 
     // extendLock: GET compare then PEXPIRE
     if (script.includes("'PEXPIRE'")) {
+      if (this.isExpired(keys[0] ?? "")) {
+        return 0;
+      }
+
       const current = this.strings.get(keys[0] ?? "");
 
       if (current === argv[0]) {
@@ -1094,7 +1102,7 @@ describe("workflow", () => {
             throw new Error("fail after step");
           }
 
-          return `value:${(result as { value: number }).value}`;
+          return `value:${result.value}`;
         },
       });
 

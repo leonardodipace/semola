@@ -111,13 +111,6 @@ class WorkflowDefinition<TInput, TResult> {
       return err("WorkflowError", "Unexpected empty execution");
     }
 
-    if (execution.result === null) {
-      return err(
-        "WorkflowExecutionError",
-        `Workflow execution ${startData.executionId} has no result`,
-      );
-    }
-
     return ok(execution.result);
   }
 
@@ -422,6 +415,24 @@ class WorkflowDefinition<TInput, TResult> {
 
     if (lockError) {
       return err(lockError.type, lockError.message);
+    }
+
+    const [statusCheckError, currentStatus] = await this.getMeta(
+      executionId,
+      "status",
+    );
+
+    if (statusCheckError) {
+      await this.releaseLock(executionId, token);
+      return err(statusCheckError.type, statusCheckError.message);
+    }
+
+    if (currentStatus === "cancelled") {
+      await this.releaseLock(executionId, token);
+      return err(
+        "WorkflowStateError",
+        `Workflow execution ${executionId} was cancelled`,
+      );
     }
 
     const timestamp = now();
@@ -1035,7 +1046,11 @@ class WorkflowDefinition<TInput, TResult> {
   private async readInput(executionId: string) {
     const [readError, raw] = await this.getMeta(executionId, "input");
 
-    if (readError || !raw) {
+    if (readError) {
+      return err(readError.type, readError.message);
+    }
+
+    if (!raw) {
       return err(
         "WorkflowStateError",
         `Workflow execution ${executionId} input not found`,
