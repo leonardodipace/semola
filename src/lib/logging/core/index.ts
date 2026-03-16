@@ -24,7 +24,7 @@ const FILE_PROVIDER_OPTION_DEFAULT: FileProviderOptions = {
 } as const;
 
 const DEFAULT_MAX_SIZE = 4 * 1024; // 4KB
-const NON_ERROR_CALL_STACK_IDX = 3;
+const STACK_FRAME_IDX = 1;
 
 const DurationUnit = {
   hour: 1000 * 60 * 60,
@@ -40,24 +40,37 @@ type StackTraceData = {
   functionCall: string | null;
 };
 
-Error.prepareStackTrace = (_, stack) => {
-  return stack.map<StackTraceData>((callSite) => {
-    return {
-      fileName: callSite.getFileName(),
-      column: callSite.getColumnNumber(),
-      row: callSite.getLineNumber(),
-      functionCall: callSite.getFunctionName(),
-    };
-  });
-};
+class StackData {
+  private stack: StackTraceData[] = new Array<StackTraceData>();
 
-function readStackData() {
-  const error = new Error();
-  const { stack } = error;
+  constructor(fn: Function) {
+    const oldStackTrace = Error.prepareStackTrace;
+    const [stackTraceError] = mightThrowSync(() => {
+      Error.prepareStackTrace = (_, stack) => {
+        return stack.map<StackTraceData>((callSite) => {
+          return {
+            fileName: callSite.getFileName(),
+            column: callSite.getColumnNumber(),
+            row: callSite.getLineNumber(),
+            functionCall: callSite.getFunctionName(),
+          };
+        });
+      };
 
-  if (!Array.isArray(stack)) return [] as StackTraceData[];
+      Error.captureStackTrace(this, fn);
+    });
 
-  return stack as StackTraceData[];
+    Error.prepareStackTrace = oldStackTrace;
+    if (stackTraceError) this.stack = [];
+  }
+
+  public retriveCallFrame() {
+    if (this.stack.length === 0) return undefined;
+
+    // Access the second stack frame because I need to ignore
+    // a logging function's stack frame (e.g "debug()" and "info()")
+    return this.stack[STACK_FRAME_IDX];
+  }
 }
 
 export abstract class AbstractLogger {
@@ -83,8 +96,8 @@ export abstract class AbstractLogger {
     msg: LogMessageType,
     prefix: string,
   ): LogDataType {
-    const stack = readStackData();
-    const logCall = stack[NON_ERROR_CALL_STACK_IDX];
+    const stack = new StackData(this.createLogData);
+    const logCall = stack.retriveCallFrame();
     let logData: LogDataType = { level, msg, prefix };
 
     if (!logCall) {
