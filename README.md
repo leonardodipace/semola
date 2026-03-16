@@ -18,16 +18,17 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 
 ## ✨ Features
 
-| Module               | Description                                            | Import          |
-| -------------------- | ------------------------------------------------------ | --------------- |
-| **🚀 API Framework** | Type-safe REST API with OpenAPI & Bun-native routing   | `semola/api`    |
-| **📬 Queue**         | Redis-backed job queue with timeouts & concurrency     | `semola/queue`  |
-| **📡 PubSub**        | Type-safe Redis pub/sub for real-time messaging        | `semola/pubsub` |
-| **🔐 Policy**        | Policy-based authorization with type-safe guards       | `semola/policy` |
-| **🌍 i18n**          | Compile-time validated internationalization            | `semola/i18n`   |
-| **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`  |
-| **⏰ Cron**          | In-memory cron scheduler for periodic task execution   | `semola/cron`   |
-| **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors` |
+| Module               | Description                                            | Import           |
+| -------------------- | ------------------------------------------------------ | ---------------- |
+| **🚀 API Framework** | Type-safe REST API with OpenAPI & Bun-native routing   | `semola/api`     |
+| **📬 Queue**         | Redis-backed job queue with timeouts & concurrency     | `semola/queue`   |
+| **📡 PubSub**        | Type-safe Redis pub/sub for real-time messaging        | `semola/pubsub`  |
+| **🔐 Policy**        | Policy-based authorization with type-safe guards       | `semola/policy`  |
+| **🌍 i18n**          | Compile-time validated internationalization            | `semola/i18n`    |
+| **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`   |
+| **⏰ Cron**          | In-memory cron scheduler for periodic task execution   | `semola/cron`    |
+| **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors`  |
+| **⌨️ Prompts**       | Interactive zero-dependency CLI prompts                | `semola/prompts` |
 
 ---
 
@@ -265,6 +266,7 @@ _Higher is better for req/sec, lower is better for latency._
 - [i18n](./docs/i18n.md) - Type-safe internationalization
 - [Cache](./docs/cache.md) - Redis cache wrapper with TTL
 - [Errors](./docs/errors.md) - Result-based error handling
+- [Prompts](./docs/prompts.md) - Interactive CLI prompts
 
 ---
 
