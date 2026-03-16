@@ -106,36 +106,37 @@ export class Policy<
   }
 
   private matchValue(actual: unknown, condition: unknown) {
-    if (typeof condition === "function") {
-      return condition(actual);
+    if (typeof condition !== "object" || condition === null) {
+      return false;
     }
 
-    if (Array.isArray(condition)) {
-      return this.matchArray(actual, condition);
+    if ("fn" in condition && typeof condition.fn === "function") {
+      return condition.fn(actual);
     }
-
-    if (typeof condition !== "object") return actual === condition;
-
-    if (condition === null) return actual === null;
-
-    const proto = Object.getPrototypeOf(condition);
-
-    if (proto !== Object.prototype && proto !== null)
-      return actual === condition;
 
     return this.deepMatch(actual, condition);
   }
-
-  private matchArray(actual: unknown, condition: unknown[]) {
-    if (!Array.isArray(actual)) return false;
-    if (actual.length !== condition.length) return false;
-
-    for (let i = 0; i < condition.length; i++) {
-      if (!this.matchValue(actual[i], condition[i])) {
-        return false;
-      }
-    }
-
-    return true;
-  }
 }
+
+export type { ConditionHelper } from "./helpers.js";
+export {
+  and,
+  endsWith,
+  eq,
+  gt,
+  gte,
+  has,
+  hasAny,
+  hasLength,
+  includes,
+  isDefined,
+  isEmpty,
+  isNullish,
+  lt,
+  lte,
+  matches,
+  neq,
+  not,
+  or,
+  startsWith,
+} from "./helpers.js";
