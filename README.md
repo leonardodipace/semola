@@ -18,17 +18,18 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 
 ## ✨ Features
 
-| Module               | Description                                            | Import           |
-| -------------------- | ------------------------------------------------------ | ---------------- |
-| **🚀 API Framework** | Type-safe REST API with OpenAPI & Bun-native routing   | `semola/api`     |
-| **📬 Queue**         | Redis-backed job queue with timeouts & concurrency     | `semola/queue`   |
-| **📡 PubSub**        | Type-safe Redis pub/sub for real-time messaging        | `semola/pubsub`  |
-| **🔐 Policy**        | Policy-based authorization with type-safe guards       | `semola/policy`  |
-| **🌍 i18n**          | Compile-time validated internationalization            | `semola/i18n`    |
-| **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`   |
-| **⏰ Cron**          | In-memory cron scheduler for periodic task execution   | `semola/cron`    |
-| **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors`  |
-| **⌨️ Prompts**       | Interactive zero-dependency CLI prompts                | `semola/prompts` |
+| Module               | Description                                            | Import            |
+| -------------------- | ------------------------------------------------------ | ----------------- |
+| **🚀 API Framework** | Type-safe REST API with OpenAPI & Bun-native routing   | `semola/api`      |
+| **📬 Queue**         | Redis-backed job queue with timeouts & concurrency     | `semola/queue`    |
+| **📡 PubSub**        | Type-safe Redis pub/sub for real-time messaging        | `semola/pubsub`   |
+| **🔐 Policy**        | Policy-based authorization with type-safe guards       | `semola/policy`   |
+| **🌍 i18n**          | Compile-time validated internationalization            | `semola/i18n`     |
+| **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`    |
+| **⏰ Cron**          | In-memory cron scheduler for periodic task execution   | `semola/cron`     |
+| **🔁 Workflow**      | Durable resumable workflows with step persistence      | `semola/workflow` |
+| **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors`   |
+| **⌨️ Prompts**       | Interactive zero-dependency CLI prompts                | `semola/prompts`  |
 
 ---
 
@@ -262,6 +263,7 @@ _Higher is better for req/sec, lower is better for latency._
 - [Queue](./docs/queue.md) - Redis-backed job queue with timeouts & concurrency
 - [PubSub](./docs/pubsub.md) - Type-safe Redis pub/sub
 - [Cron](./docs/cron.md) - In-memory cron scheduler for periodic task execution
+- [Workflow](./docs/workflow.md) - Durable and resumable workflows with step persistence
 - [Policy](./docs/policy.md) - Policy-based authorization
 - [i18n](./docs/i18n.md) - Type-safe internationalization
 - [Cache](./docs/cache.md) - Redis cache wrapper with TTL
