@@ -1,4 +1,4 @@
-import { Formatter } from "./formatter.js";
+import type { Formatter } from "./formatter.js";
 
 export const LogLevel = {
   debug: 10,

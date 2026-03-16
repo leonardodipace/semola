@@ -3,14 +3,14 @@ import { basename, dirname, extname, join } from "node:path";
 import { mightThrowSync } from "../../errors/index.js";
 import { BaseFormatter } from "./formatter.js";
 import {
-  FileProviderOptions,
-  LogDataType,
+  type FileProviderOptions,
+  type LogDataType,
   LogLevel,
-  LogLevelType,
-  LogMessageType,
-  ProviderOptions,
-  SizeBasedPolicyType,
-  TimeBasedPolicyType,
+  type LogLevelType,
+  type LogMessageType,
+  type ProviderOptions,
+  type SizeBasedPolicyType,
+  type TimeBasedPolicyType,
 } from "./types.js";
 
 const PROVIDER_OPTION_DEFAULT: ProviderOptions = {
@@ -41,9 +41,9 @@ type StackTraceData = {
 };
 
 class StackData {
-  private stack: StackTraceData[] = new Array<StackTraceData>();
+  private stack: StackTraceData[] = [] as StackTraceData[];
 
-  constructor(fn: Function) {
+  public constructor(fn: Function) {
     const oldStackTrace = Error.prepareStackTrace;
     const [stackTraceError] = mightThrowSync(() => {
       Error.prepareStackTrace = (_, stack) => {

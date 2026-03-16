@@ -1,12 +1,4 @@
 export {
-  AbstractLogger,
-  ConsoleProvider,
-  FileProvider,
-  Logger,
-  LoggerProvider,
-} from "./core/index.js";
-
-export {
   BaseFormatter,
   dmyFormat,
   Formatter,
@@ -15,6 +7,13 @@ export {
   JSONFormatter,
   mdyFormat,
 } from "./core/formatter.js";
+export {
+  AbstractLogger,
+  ConsoleProvider,
+  FileProvider,
+  Logger,
+  LoggerProvider,
+} from "./core/index.js";
 
 export {
   DateFmtFnType,
