@@ -94,7 +94,7 @@ export abstract class AbstractLogger {
     const { column, fileName, functionCall, row } = logCall;
 
     if (fileName) {
-      logData = { ...logData, fileName };
+      logData = { ...logData, fileName: basename(fileName) };
     }
 
     if (column) {
@@ -211,7 +211,7 @@ export class FileProvider extends LoggerProvider {
     if (level > userLevel) return;
 
     let { msg } = data;
-    const [error, _] = mightThrowSync(() => {
+    const [error] = mightThrowSync(() => {
       const { formatter } = this.options;
       if (formatter) {
         msg = formatter.format(data);
