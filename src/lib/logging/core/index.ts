@@ -304,7 +304,7 @@ export class ConsoleProvider extends LoggerProvider {
     if (level > userLevel) return;
 
     let { msg } = data;
-    const [error, _] = mightThrowSync(() => {
+    const [error] = mightThrowSync(() => {
       const { formatter } = this.options;
       if (formatter) {
         msg = formatter.format(data);
