@@ -192,7 +192,11 @@ class WorkflowDefinition<TInput, TResult> {
       "createdAt",
     );
 
-    if (createdAtError || createdAt === null) {
+    if (createdAtError) {
+      return err(createdAtError.type, createdAtError.message);
+    }
+
+    if (createdAt === null) {
       return err(
         "WorkflowStateError",
         `Workflow execution ${executionId} is missing createdAt`,
@@ -204,7 +208,11 @@ class WorkflowDefinition<TInput, TResult> {
       "updatedAt",
     );
 
-    if (updatedAtError || updatedAt === null) {
+    if (updatedAtError) {
+      return err(updatedAtError.type, updatedAtError.message);
+    }
+
+    if (updatedAt === null) {
       return err(
         "WorkflowStateError",
         `Workflow execution ${executionId} is missing updatedAt`,
@@ -753,6 +761,20 @@ class WorkflowDefinition<TInput, TResult> {
       return err(
         completedClearErrorError.type,
         completedClearErrorError.message,
+      );
+    }
+
+    const [completedClearFailedAtError] = await this.setMeta(
+      executionId,
+      "failedAt",
+      "",
+    );
+
+    if (completedClearFailedAtError) {
+      await this.releaseLock(executionId, token);
+      return err(
+        completedClearFailedAtError.type,
+        completedClearFailedAtError.message,
       );
     }
 
