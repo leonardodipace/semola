@@ -151,7 +151,15 @@ export abstract class LoggerProvider {
   protected options: ProviderOptions;
 
   public constructor(options: ProviderOptions = PROVIDER_OPTION_DEFAULT) {
-    this.options = { ...PROVIDER_OPTION_DEFAULT, ...options };
+    this.options = options;
+
+    if (!this.options.formatter) {
+      this.options.formatter = PROVIDER_OPTION_DEFAULT.formatter;
+    }
+
+    if (!this.options.level) {
+      this.options.level = PROVIDER_OPTION_DEFAULT.level;
+    }
   }
 
   public abstract execute(data: LogDataType): void;
@@ -176,21 +184,8 @@ export class FileProvider extends LoggerProvider {
     file: string,
     options: FileProviderOptions = FILE_PROVIDER_OPTION_DEFAULT,
   ) {
-    if (Object.entries(options).length === 0) {
-      super({
-        formatter: FILE_PROVIDER_OPTION_DEFAULT.formatter,
-        level: FILE_PROVIDER_OPTION_DEFAULT.level,
-      });
-      this.policy = FILE_PROVIDER_OPTION_DEFAULT.policy;
-    } else {
-      super({ formatter: options.formatter, level: options.level });
-    }
-
-    if (!options.policy) {
-      this.policy = FILE_PROVIDER_OPTION_DEFAULT.policy;
-    } else {
-      this.policy = options.policy;
-    }
+    super({ formatter: options.formatter, level: options.level });
+    this.policy = options.policy ?? FILE_PROVIDER_OPTION_DEFAULT.policy;
 
     this.filePath = file;
     this.counter = 0;
@@ -207,7 +202,9 @@ export class FileProvider extends LoggerProvider {
       const { formatter } = this.options;
       if (formatter) {
         msg = formatter.format(data);
-      } else if (this.isJSONFile()) {
+      }
+
+      if (this.isJSONFile()) {
         msg = JSON.stringify({ message: msg });
       }
     });
