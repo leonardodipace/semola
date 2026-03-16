@@ -39,6 +39,9 @@
     "./logging": {
       "import": "./dist/lib/logging/index.js",
       "types": "./dist/lib/logging/index.d.ts"
+    "./prompts": {
+      "import": "./dist/lib/prompts/index.js",
+      "types": "./dist/lib/prompts/index.d.ts"
     }
   },
   "files": [
