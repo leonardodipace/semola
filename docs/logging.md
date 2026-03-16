@@ -210,7 +210,12 @@ class ZipProvider extends LoggerProvider {
 }
 
 // log.ts
-const logger = new Logger("database", [new ZipProvider()]);
+const logger = new Logger("database", [
+  new ZipProvider(4, {
+    formatter: new BaseFormatter(),
+    level: "warning",
+  }),
+]);
 ```
 
 The following table show what type of metadata are stored inside a `LogDataType` object
