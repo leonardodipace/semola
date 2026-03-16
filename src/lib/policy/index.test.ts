@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Policy } from "./index.js";
+import { eq, gt, has, isEmpty, Policy, startsWith } from "./index.js";
 
 type Post = {
   id: number;
@@ -27,7 +27,7 @@ describe("Policy", () => {
     policy.allow({
       action: "read",
       conditions: {
-        status: "published",
+        status: eq("published"),
       },
     });
 
@@ -49,7 +49,7 @@ describe("Policy", () => {
     policy.allow({
       action: "read",
       conditions: {
-        status: "published",
+        status: eq("published"),
       },
     });
 
@@ -71,7 +71,7 @@ describe("Policy", () => {
     policy.forbid({
       action: "update",
       conditions: {
-        status: "published",
+        status: eq("published"),
       },
     });
 
@@ -97,7 +97,7 @@ describe("Policy", () => {
     policy.forbid({
       action: "update",
       conditions: {
-        status: "published",
+        status: eq("published"),
       },
     });
 
@@ -129,8 +129,8 @@ describe("Policy", () => {
     policy.allow({
       action: "delete",
       conditions: {
-        authorId: 1,
-        status: "draft",
+        authorId: eq(1),
+        status: eq("draft"),
       },
     });
 
@@ -210,7 +210,7 @@ describe("Policy", () => {
     const policy = new Policy<CommentToUser>();
     policy.allow({
       conditions: {
-        comments,
+        comments: eq(comments),
       },
       action: ["update", "create", "delete"],
     });
@@ -251,14 +251,14 @@ describe("Policy", () => {
     policy.allow({
       action: "read",
       conditions: {
-        status: "published",
+        status: eq("published"),
       },
     });
 
     policy.forbid({
       action: "update",
       conditions: {
-        status: "published",
+        status: eq("published"),
       },
     });
 
@@ -276,14 +276,14 @@ describe("Policy", () => {
     policy.allow({
       action: "read",
       conditions: {
-        status: "published",
+        status: eq("published"),
       },
     });
 
     policy.allow({
       action: "update",
       conditions: {
-        status: "draft",
+        status: eq("draft"),
       },
     });
 
@@ -334,7 +334,7 @@ describe("Policy", () => {
       action: "delete",
       reason: "You cannot delete published posts",
       conditions: {
-        status: "published",
+        status: eq("published"),
       },
     });
 
@@ -359,7 +359,7 @@ describe("Policy", () => {
       action: "read",
       reason: "Public posts are visible to everyone",
       conditions: {
-        status: "published",
+        status: eq("published"),
       },
     });
 
@@ -383,7 +383,7 @@ describe("Policy", () => {
     policy.allow({
       action: "read",
       conditions: {
-        status: "published",
+        status: eq("published"),
       },
     });
 
@@ -419,8 +419,8 @@ describe("Policy", () => {
       action: "update",
       reason: "Admins cannot update their own published posts",
       conditions: {
-        authorId: 1,
-        status: "published",
+        authorId: eq(1),
+        status: eq("published"),
       },
     });
 
@@ -479,13 +479,13 @@ describe("Policy", () => {
     expect(policy.can("delete", post)).toMatchObject({ allowed: false });
   });
 
-  test("should support predicate functions in conditions", () => {
+  test("should support helper functions in conditions", () => {
     const policy = new Policy<Post>();
 
     policy.allow({
       action: "read",
       conditions: {
-        title: (v) => v.startsWith("Public"),
+        title: startsWith("Public"),
       },
     });
 
@@ -507,7 +507,7 @@ describe("Policy", () => {
     expect(policy.can("read", hiddenPost)).toMatchObject({ allowed: false });
   });
 
-  test("should match nested object conditions by value", () => {
+  test("should match nested object conditions", () => {
     type Post = {
       id: number;
       title: string;
@@ -520,7 +520,7 @@ describe("Policy", () => {
     policy.allow({
       action: "update",
       conditions: {
-        author: { id: 1, name: "john" },
+        author: { id: eq(1), name: eq("john") },
       },
     });
 
@@ -544,12 +544,12 @@ describe("Policy", () => {
   });
 
   describe("array conditions", () => {
-    test("should allow when array condition matches exactly", () => {
+    test("should allow when array contains the required item", () => {
       const policy = new Policy<User>();
 
-      policy.allow({ action: "read", conditions: { roles: ["admin"] } });
+      policy.allow({ action: "read", conditions: { roles: has("admin") } });
 
-      const user: User = {
+      const admin: User = {
         id: 1,
         name: "Alice",
         roles: ["admin"],
@@ -558,32 +558,40 @@ describe("Policy", () => {
         meta: { createdAt: new Date(), updatedAt: new Date() },
       };
 
-      expect(policy.can("read", user)).toMatchObject({ allowed: true });
-    });
-
-    test("should deny when array elements do not match", () => {
-      const policy = new Policy<User>();
-
-      policy.allow({ action: "read", conditions: { roles: ["admin"] } });
-
-      const user: User = {
-        id: 1,
+      const adminWithExtra: User = {
+        id: 2,
         name: "Bob",
+        roles: ["admin", "editor"],
+        age: 30,
+        posts: [],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      const guest: User = {
+        id: 3,
+        name: "Carol",
         roles: ["guest"],
         age: 25,
         posts: [],
         meta: { createdAt: new Date(), updatedAt: new Date() },
       };
 
-      expect(policy.can("read", user)).toMatchObject({ allowed: false });
+      expect(policy.can("read", admin)).toMatchObject({ allowed: true });
+      expect(policy.can("read", adminWithExtra)).toMatchObject({
+        allowed: true,
+      });
+      expect(policy.can("read", guest)).toMatchObject({ allowed: false });
     });
 
-    test("should deny when actual array is a superset of condition array", () => {
+    test("should allow when array contains all required items", () => {
       const policy = new Policy<User>();
 
-      policy.allow({ action: "read", conditions: { roles: ["admin"] } });
+      policy.allow({
+        action: "read",
+        conditions: { roles: has(["admin", "editor"]) },
+      });
 
-      const user: User = {
+      const adminEditor: User = {
         id: 1,
         name: "Alice",
         roles: ["admin", "editor"],
@@ -592,32 +600,52 @@ describe("Policy", () => {
         meta: { createdAt: new Date(), updatedAt: new Date() },
       };
 
-      expect(policy.can("read", user)).toMatchObject({ allowed: false });
-    });
-
-    test("should deny when condition is empty array but actual is not", () => {
-      const policy = new Policy<User>();
-
-      policy.allow({ action: "read", conditions: { roles: [] } });
-
-      const user: User = {
-        id: 1,
-        name: "Alice",
+      const adminOnly: User = {
+        id: 2,
+        name: "Bob",
         roles: ["admin"],
         age: 30,
         posts: [],
         meta: { createdAt: new Date(), updatedAt: new Date() },
       };
 
-      expect(policy.can("read", user)).toMatchObject({ allowed: false });
+      expect(policy.can("read", adminEditor)).toMatchObject({ allowed: true });
+      expect(policy.can("read", adminOnly)).toMatchObject({ allowed: false });
     });
 
-    test("should support predicate on array field", () => {
+    test("should allow when array is empty", () => {
+      const policy = new Policy<User>();
+
+      policy.allow({ action: "read", conditions: { roles: isEmpty() } });
+
+      const noRoles: User = {
+        id: 1,
+        name: "Alice",
+        roles: [],
+        age: 30,
+        posts: [],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      const withRoles: User = {
+        id: 2,
+        name: "Bob",
+        roles: ["admin"],
+        age: 25,
+        posts: [],
+        meta: { createdAt: new Date(), updatedAt: new Date() },
+      };
+
+      expect(policy.can("read", noRoles)).toMatchObject({ allowed: true });
+      expect(policy.can("read", withRoles)).toMatchObject({ allowed: false });
+    });
+
+    test("should support helper on array field", () => {
       const policy = new Policy<User>();
 
       policy.allow({
         action: "read",
-        conditions: { roles: (roles) => roles.includes("admin") },
+        conditions: { roles: has("admin") },
       });
 
       const admin: User = {
@@ -642,7 +670,7 @@ describe("Policy", () => {
       expect(policy.can("read", guest)).toMatchObject({ allowed: false });
     });
 
-    test("should match array of objects exactly", () => {
+    test("should allow when array contains a specific object", () => {
       const policy = new Policy<User>();
 
       const post: Post = {
@@ -652,7 +680,7 @@ describe("Policy", () => {
         status: "published",
       };
 
-      policy.allow({ action: "delete", conditions: { posts: [post] } });
+      policy.allow({ action: "delete", conditions: { posts: has(post) } });
 
       const userWithPost: User = {
         id: 1,
@@ -689,7 +717,7 @@ describe("Policy", () => {
 
       policy.allow({
         action: "read",
-        conditions: { meta: { createdAt: date, updatedAt: date } },
+        conditions: { meta: { createdAt: eq(date), updatedAt: eq(date) } },
       });
 
       const user: User = {
@@ -713,7 +741,7 @@ describe("Policy", () => {
       policy.allow({
         action: "read",
         conditions: {
-          meta: { createdAt: conditionDate, updatedAt: conditionDate },
+          meta: { createdAt: eq(conditionDate), updatedAt: eq(conditionDate) },
         },
       });
 
@@ -729,7 +757,7 @@ describe("Policy", () => {
       expect(policy.can("read", user)).toMatchObject({ allowed: false });
     });
 
-    test("should support predicate on Date field inside nested object", () => {
+    test("should support helper on Date field inside nested object", () => {
       const policy = new Policy<User>();
 
       const cutoff = new Date("2024-06-01");
@@ -737,7 +765,7 @@ describe("Policy", () => {
       policy.allow({
         action: "read",
         conditions: {
-          meta: (m) => m.createdAt > cutoff,
+          meta: { createdAt: gt(cutoff) },
         },
       });
 
@@ -764,14 +792,14 @@ describe("Policy", () => {
     });
   });
 
-  test("should support mixing direct equality and predicate conditions", () => {
+  test("should support combining conditions", () => {
     const policy = new Policy<Post>();
 
     policy.allow({
       action: "read",
       conditions: {
-        status: "published",
-        authorId: (v) => v > 0,
+        status: eq("published"),
+        authorId: gt(0),
       },
     });
 
@@ -841,7 +869,7 @@ describe("Policy", () => {
       policy.allow({
         action: "update",
         conditions: {
-          authorId: 1,
+          authorId: eq(1),
         },
       });
 
@@ -893,7 +921,7 @@ describe("Policy", () => {
       policy.forbid({
         action: ["update"],
         conditions: {
-          authorId: 1,
+          authorId: eq(1),
         },
       });
 

@@ -18,17 +18,18 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 
 ## ✨ Features
 
-| Module               | Description                                            | Import          |
-| -------------------- | ------------------------------------------------------ | --------------- |
-| **🚀 API Framework** | Type-safe REST API with OpenAPI & Bun-native routing   | `semola/api`    |
-| **📬 Queue**         | Redis-backed job queue with timeouts & concurrency     | `semola/queue`  |
-| **📡 PubSub**        | Type-safe Redis pub/sub for real-time messaging        | `semola/pubsub` |
-| **🔐 Policy**        | Policy-based authorization with type-safe guards       | `semola/policy` |
-| **🌍 i18n**          | Compile-time validated internationalization            | `semola/i18n`   |
-| **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`  |
-| **⏰ Cron**          | In-memory cron scheduler for periodic task execution   | `semola/cron`   |
-| **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors` |
-| **🗄️ ORM**           | Type-safe data layer with query APIs + migrations      | `semola/orm`    |
+| Module               | Description                                            | Import           |
+| -------------------- | ------------------------------------------------------ | ---------------- |
+| **🚀 API Framework** | Type-safe REST API with OpenAPI & Bun-native routing   | `semola/api`     |
+| **📬 Queue**         | Redis-backed job queue with timeouts & concurrency     | `semola/queue`   |
+| **📡 PubSub**        | Type-safe Redis pub/sub for real-time messaging        | `semola/pubsub`  |
+| **🔐 Policy**        | Policy-based authorization with type-safe guards       | `semola/policy`  |
+| **🌍 i18n**          | Compile-time validated internationalization            | `semola/i18n`    |
+| **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`   |
+| **⏰ Cron**          | In-memory cron scheduler for periodic task execution   | `semola/cron`    |
+| **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors`  |
+| **⌨️ Prompts**       | Interactive zero-dependency CLI prompts                | `semola/prompts` |
+| **🗄️ ORM**           | Type-safe data layer with query APIs + migrations      | `semola/orm`     |
 
 ---
 
@@ -216,23 +217,29 @@ semola orm migrations rollback
 ### Check Permissions
 
 ```typescript
-import { Policy } from "semola/policy";
+import { Policy, eq, has } from "semola/policy";
 
-type User = { id: number; role: string };
+type User = { id: number; role: string; permissions: string[] };
 
 const policy = new Policy<User>();
 
-// Allow admins to edit any resource
+// Allow admins full access
 policy.allow({
   action: ["create", "update", "delete"],
-  conditions: { role: "admin" },
+  conditions: { role: eq("admin") },
   reason: "Admins have full access",
 });
 
-// Check if user can edit
-const user: User = { id: 1, role: "admin" };
+// Allow users with a specific permission
+policy.allow({
+  action: "read",
+  conditions: { permissions: has("posts:read") },
+});
+
+// Check if user can perform an action
+const user: User = { id: 1, role: "admin", permissions: [] };
 const result = policy.can("update", user);
-console.log(result.allowed); // true or false
+console.log(result.allowed); // true
 ```
 
 ### Internationalize Your App
@@ -319,6 +326,7 @@ _Higher is better for req/sec, lower is better for latency._
 - [i18n](./docs/i18n.md) - Type-safe internationalization
 - [Cache](./docs/cache.md) - Redis cache wrapper with TTL
 - [Errors](./docs/errors.md) - Result-based error handling
+- [Prompts](./docs/prompts.md) - Interactive CLI prompts
 - [ORM](./docs/orm.md) - Type-safe data layer, result-pattern DX, and migrations
 
 ---

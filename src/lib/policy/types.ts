@@ -1,6 +1,11 @@
+import type { ConditionHelper } from "./helpers.js";
+
 export type Action = "read" | "create" | "update" | "delete" | (string & {});
 
-export type ConditionValue<V> = V | ((value: V) => boolean);
+export type ConditionValue<V> =
+  V extends Record<string, unknown>
+    ? ConditionHelper<V> | Conditions<V>
+    : ConditionHelper<V>;
 
 export type Conditions<T = Record<string, unknown>> = {
   [K in keyof T]?: ConditionValue<T[K]>;

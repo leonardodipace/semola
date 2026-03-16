@@ -43,6 +43,10 @@
       "import": "./dist/lib/cron/index.js",
       "types": "./dist/lib/cron/index.d.ts"
     },
+    "./prompts": {
+      "import": "./dist/lib/prompts/index.js",
+      "types": "./dist/lib/prompts/index.d.ts"
+    },
     "./orm": {
       "import": "./dist/lib/orm/index.js",
       "types": "./dist/lib/orm/index.d.ts"
