@@ -151,15 +151,7 @@ export abstract class LoggerProvider {
   protected options: ProviderOptions;
 
   public constructor(options: ProviderOptions = PROVIDER_OPTION_DEFAULT) {
-    this.options = options;
-
-    if (!this.options.formatter) {
-      this.options.formatter = PROVIDER_OPTION_DEFAULT.formatter;
-    }
-
-    if (!this.options.level) {
-      this.options.level = PROVIDER_OPTION_DEFAULT.level;
-    }
+    this.options = { ...PROVIDER_OPTION_DEFAULT, ...options };
   }
 
   public abstract execute(data: LogDataType): void;
