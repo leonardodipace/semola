@@ -246,6 +246,27 @@ describe("Formatters", () => {
       expect(expected).toEqualIgnoringWhitespace(res);
     });
 
+    test("should format an error message containing the error's 'cause'", () => {
+      const error = new Error("Formatting error", {
+        cause: new Error("Root error"),
+      });
+      const errorData = baseErrorFormat(error);
+      const expected = `2020-01-10T00:00:00.000Z  [ERROR] [/api/index.ts:1:10] : ${errorData}`;
+
+      const formatter = new BaseFormatter();
+      const data: LogDataType = {
+        level: "debug",
+        msg: "A message",
+        prefix: "/api",
+        fileName: "index.ts",
+        row: "1",
+        column: "10",
+      };
+
+      const res = formatter.formatError(data, error);
+      expect(expected).toEqualIgnoringWhitespace(res);
+    });
+
     test("should format a debug message with a method or function name", () => {
       const expected =
         "2020-01-10T00:00:00.000Z  [DEBUG] [foo] [/api/index.ts:1:10] : A message";
@@ -514,12 +535,43 @@ describe("Formatters", () => {
       const res = formatter.formatError(data, error);
       expect(expected).toEqualIgnoringWhitespace(res);
       expect(() => JSON.parse(res)).not.toThrow();
-
       const parsedJSON = JSON.parse(res);
       expect(parsedJSON).not.toHaveProperty("position.method");
       expect(parsedJSON).toHaveProperty("msg.errorName");
       expect(parsedJSON).toHaveProperty("msg.errorMessage");
       expect(parsedJSON).toHaveProperty("msg.stackTrace");
+      expect(parsedJSON).not.toHaveProperty("msg.errorCause");
+    });
+
+    test("should format an error message as JSON containing the error's 'cause'", () => {
+      const error = new Error("Formatting error", {
+        cause: new Error("Root error"),
+      });
+      const errorData = jsonErrorFormat(error);
+      const header = `"timestamp":"2020-01-10T00:00:00.000Z", "level":"ERROR"`;
+      const position = `"position":{"fileName":"index.ts","row":"1", "column":"10"}`;
+      const expected = `{${header}, "prefix":"/api", ${position}, "msg": ${errorData}}`;
+
+      const formatter = new JSONFormatter();
+      const data: LogDataType = {
+        level: "debug",
+        msg: "A message",
+        prefix: "/api",
+        fileName: "index.ts",
+        row: "1",
+        column: "10",
+      };
+
+      const res = formatter.formatError(data, error);
+      expect(expected).toEqualIgnoringWhitespace(res);
+      expect(() => JSON.parse(res)).not.toThrow();
+      const parsedJSON = JSON.parse(res);
+      expect(parsedJSON).not.toHaveProperty("position.method");
+      expect(parsedJSON).toHaveProperty("msg.errorName");
+      expect(parsedJSON).toHaveProperty("msg.errorMessage");
+      expect(parsedJSON).toHaveProperty("msg.errorCause");
+      expect(parsedJSON).toHaveProperty("msg.stackTrace");
+      expect(parsedJSON).toHaveProperty("msg.errorCause");
     });
   });
 });
