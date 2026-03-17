@@ -6,7 +6,7 @@ import {
   JSONFormatter,
   mdyFormat,
 } from "./formatter.js";
-import { LogDataType, LogLevelType } from "./types.js";
+import type { LogDataType, LogLevelType } from "./types.js";
 
 beforeAll(() => {
   setSystemTime(new Date("2020-01-10T00:00:00.000Z"));
