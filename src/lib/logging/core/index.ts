@@ -208,9 +208,7 @@ export class FileProvider extends LoggerProvider {
     let { msg } = data;
     const [error] = mightThrowSync(() => {
       const { formatter } = this.options;
-      if (formatter) {
-        msg = formatter.format(data);
-      }
+      msg = formatter?.format(data) ?? msg;
 
       if (this.isJSONFile()) {
         msg = JSON.stringify({ message: msg });
@@ -219,12 +217,8 @@ export class FileProvider extends LoggerProvider {
 
     if (error && error instanceof Error) {
       const { formatter } = this.options;
-      if (formatter) {
-        const errorMsg = formatter.formatError(data, error);
-        appendFileSync(this.file, `${errorMsg}\n`);
-      } else {
-        appendFileSync(this.file, `${error}\n`);
-      }
+      const errorMsg = formatter?.formatError(data, error);
+      appendFileSync(this.file, `${errorMsg}\n`);
     }
 
     if (this.canRollFile()) {
@@ -303,22 +297,14 @@ export class ConsoleProvider extends LoggerProvider {
     let { msg } = data;
     const [error] = mightThrowSync(() => {
       const { formatter } = this.options;
-      if (formatter) {
-        msg = formatter.format(data);
-      } else if (typeof msg === "object") {
-        msg = JSON.stringify(msg);
-      }
+      msg = formatter?.format(data) ?? msg;
     });
 
     // biome-ignore-start lint/suspicious/noConsole: function used for the correct
     // functionality of the logger
     if (error && error instanceof Error) {
       const { formatter } = this.options;
-      if (formatter) {
-        console.error(formatter.formatError(data, error));
-      } else {
-        console.error(error);
-      }
+      console.error(formatter?.formatError(data, error));
 
       return;
     }
