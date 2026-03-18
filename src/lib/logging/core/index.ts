@@ -294,10 +294,9 @@ export class ConsoleProvider extends LoggerProvider {
     const userLevel = LogLevel[data.level];
     if (level > userLevel) return;
 
-    let { msg } = data;
-    const [error] = mightThrowSync(() => {
+    const [error, formattedMessage] = mightThrowSync(() => {
       const { formatter } = this.options;
-      msg = formatter?.format(data) ?? msg;
+      return formatter?.format(data) ?? "";
     });
 
     // biome-ignore-start lint/suspicious/noConsole: function used for the correct
@@ -309,24 +308,26 @@ export class ConsoleProvider extends LoggerProvider {
       return;
     }
 
+    if (!formattedMessage) return;
+
     switch (userLevel) {
       case LogLevel.debug:
-        console.debug(msg);
+        console.debug(formattedMessage);
         break;
       case LogLevel.info:
-        console.info(msg);
+        console.info(formattedMessage);
         break;
       case LogLevel.warning:
-        console.warn(msg);
+        console.warn(formattedMessage);
         break;
       case LogLevel.error:
-        console.error(msg);
+        console.error(formattedMessage);
         break;
       case LogLevel.critical:
-        console.error(msg);
+        console.error(formattedMessage);
         break;
       default:
-        console.debug(msg);
+        console.debug(formattedMessage);
         break;
     }
     // biome-ignore-end lint/suspicious/noConsole: function used for the correct
