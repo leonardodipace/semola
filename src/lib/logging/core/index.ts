@@ -33,14 +33,14 @@ const DurationUnit = {
   month: 1000 * 60 * 60 * 24 * 7 * 4.345, // On average 1 month has 4,345 weeks
 } as const;
 
-type StackTraceData = {
+export type StackTraceData = {
   fileName: string | null;
   column: number | null;
   row: number | null;
   functionCall: string | null;
 };
 
-class StackData {
+export class StackData {
   private stack: StackTraceData[] = [] as StackTraceData[];
 
   public constructor(fn: Function) {
