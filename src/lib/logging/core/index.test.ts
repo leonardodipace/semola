@@ -10,10 +10,10 @@ import {
 } from "./formatter.js";
 import { LoggerProvider } from "./index.js";
 import {
-  LogLevel,
-  LogMessageType,
   type LogDataType,
+  LogLevel,
   type LogLevelType,
+  type LogMessageType,
 } from "./types.js";
 
 beforeAll(() => {
@@ -68,7 +68,7 @@ class MockFormatter extends Formatter {
   public format(logData: LogDataType): string {
     return JSON.stringify(logData);
   }
-  public override formatError(logData: LogDataType, error: Error): string {
+  public formatError(_logData: LogDataType, error: Error): string {
     return `${error.name} => ${error.message}`;
   }
 }
@@ -161,94 +161,85 @@ describe("Logging", () => {
         { level: "warning" },
         { level: "error" },
         { level: "critical" },
-      ])(
-        "'debug' level should be ignored when log level is set to '$level'",
-        (data) => {
-          const mockProvider = createMockProvider(data.level);
+      ])("'debug' level should be ignored when log level is set to '$level'", (data) => {
+        const mockProvider = createMockProvider(data.level);
 
-          const logData: LogDataType = {
-            level: "debug",
-            msg: "A message",
-            prefix: "mock",
-          };
+        const logData: LogDataType = {
+          level: "debug",
+          msg: "A message",
+          prefix: "mock",
+        };
 
-          const result = mockProvider.execute(logData);
-          expect(result.level).toEqual(-1);
-          expect(result.msg).toBeEmpty();
-        },
-      );
+        const result = mockProvider.execute(logData);
+        expect(result.level).toEqual(-1);
+        expect(result.msg).toBeEmpty();
+      });
 
       test.each([
         { level: "warning" },
         { level: "error" },
         { level: "critical" },
-      ])(
-        "'debug' and 'info' levels should be ignored when log level is set to '$level'",
-        (data) => {
-          const mockProvider = createMockProvider(data.level);
-          const logData: LogDataType = {
-            level: "debug",
-            msg: "A message",
-            prefix: "mock",
-          };
+      ])("'debug' and 'info' levels should be ignored when log level is set to '$level'", (data) => {
+        const mockProvider = createMockProvider(data.level);
+        const logData: LogDataType = {
+          level: "debug",
+          msg: "A message",
+          prefix: "mock",
+        };
 
-          let result = mockProvider.execute(logData);
-          expect(result.level).toEqual(-1);
-          expect(result.msg).toBeEmpty();
+        let result = mockProvider.execute(logData);
+        expect(result.level).toEqual(-1);
+        expect(result.msg).toBeEmpty();
 
-          logData.level = "info";
-          result = mockProvider.execute(logData);
-          expect(result.level).toEqual(-1);
-          expect(result.msg).toBeEmpty();
-        },
-      );
+        logData.level = "info";
+        result = mockProvider.execute(logData);
+        expect(result.level).toEqual(-1);
+        expect(result.msg).toBeEmpty();
+      });
 
-      test.each([{ level: "error" }, { level: "critical" }])(
-        "'debug', 'info' and 'warning' levels should be ignored when log level is set to '$level'",
-        (data) => {
-          const mockProvider = createMockProvider(data.level);
-          const logData: LogDataType = {
-            level: "debug",
-            msg: "A message",
-            prefix: "mock",
-          };
+      test.each([
+        { level: "error" },
+        { level: "critical" },
+      ])("'debug', 'info' and 'warning' levels should be ignored when log level is set to '$level'", (data) => {
+        const mockProvider = createMockProvider(data.level);
+        const logData: LogDataType = {
+          level: "debug",
+          msg: "A message",
+          prefix: "mock",
+        };
 
-          let result = mockProvider.execute(logData);
-          expect(result.level).toEqual(-1);
-          expect(result.msg).toBeEmpty();
+        let result = mockProvider.execute(logData);
+        expect(result.level).toEqual(-1);
+        expect(result.msg).toBeEmpty();
 
-          logData.level = "info";
-          result = mockProvider.execute(logData);
-          expect(result.level).toEqual(-1);
-          expect(result.msg).toBeEmpty();
+        logData.level = "info";
+        result = mockProvider.execute(logData);
+        expect(result.level).toEqual(-1);
+        expect(result.msg).toBeEmpty();
 
-          logData.level = "warning";
-          result = mockProvider.execute(logData);
-          expect(result.level).toEqual(-1);
-          expect(result.msg).toBeEmpty();
-        },
-      );
+        logData.level = "warning";
+        result = mockProvider.execute(logData);
+        expect(result.level).toEqual(-1);
+        expect(result.msg).toBeEmpty();
+      });
 
       test.each([
         { level: "debug" },
         { level: "info" },
         { level: "warning" },
         { level: "error" },
-      ])(
-        "Should show only 'critical' level logs when passed data created with '$level' level",
-        (data) => {
-          const mockProvider = createMockProvider("critical");
-          const logData: LogDataType = {
-            level: data.level,
-            msg: "A message",
-            prefix: "mock",
-          };
+      ])("Should show only 'critical' level logs when passed data created with '$level' level", (data) => {
+        const mockProvider = createMockProvider("critical");
+        const logData: LogDataType = {
+          level: data.level,
+          msg: "A message",
+          prefix: "mock",
+        };
 
-          const result = mockProvider.execute(logData);
-          expect(result.level).toEqual(-1);
-          expect(result.msg).toBeEmpty();
-        },
-      );
+        const result = mockProvider.execute(logData);
+        expect(result.level).toEqual(-1);
+        expect(result.msg).toBeEmpty();
+      });
 
       test("Should return an error message", () => {
         const mockProvider = createMockProvider();
