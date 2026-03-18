@@ -205,14 +205,13 @@ export class FileProvider extends LoggerProvider {
     const userLevel = LogLevel[data.level];
     if (level > userLevel) return;
 
-    let { msg } = data;
-    const [error] = mightThrowSync(() => {
-      const { formatter } = this.options;
-      msg = formatter?.format(data) ?? msg;
-
+    const [error, formattedMessage] = mightThrowSync(() => {
       if (this.isJSONFile()) {
-        msg = JSON.stringify({ message: msg });
+        return JSON.stringify({ message: data.msg });
       }
+
+      const { formatter } = this.options;
+      return formatter?.format(data) ?? "";
     });
 
     if (error && error instanceof Error) {
@@ -226,8 +225,8 @@ export class FileProvider extends LoggerProvider {
       this.file = this.createNewFileName();
     }
 
-    if (error) return;
-    appendFileSync(this.file, `${msg}\n`);
+    if (error || !formattedMessage) return;
+    appendFileSync(this.file, `${formattedMessage}\n`);
   }
 
   private canRollFile() {
