@@ -126,4 +126,69 @@ describe("createMigration", () => {
       await rm(cwd, { recursive: true, force: true });
     }
   });
+
+  test("emits explicit FOREIGN KEY constraints in generated SQL", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "semola-mig-fk-"));
+
+    try {
+      await mkdir(join(cwd, "src", "db"), { recursive: true });
+
+      const configContent = [
+        "export default {",
+        "  orm: {",
+        "    schema: './src/db/schema.ts',",
+        "    migrations: { dir: './migrations' }",
+        "  }",
+        "};",
+        "",
+      ].join("\n");
+
+      const ormModulePathTs = join(import.meta.dir, "..", "index.ts");
+      const ormModulePathJs = join(import.meta.dir, "..", "index.js");
+
+      let ormModulePath = ormModulePathJs;
+
+      if (await Bun.file(ormModulePathTs).exists()) {
+        ormModulePath = ormModulePathTs;
+      }
+
+      const schemaContent = [
+        `import { createOrm, createTable, string, uuid } from '${ormModulePath}';`,
+        "",
+        "const users = createTable('users', {",
+        "  id: uuid('id').primaryKey(),",
+        "  email: string('email').notNull(),",
+        "});",
+        "",
+        "const tasks = createTable('tasks', {",
+        "  id: uuid('id').primaryKey(),",
+        "  assigneeId: uuid('assignee_id').references(() => users.columns.id).onDelete('CASCADE'),",
+        "});",
+        "",
+        "export default createOrm({",
+        "  url: 'sqlite::memory:',",
+        "  tables: { users, tasks },",
+        "});",
+        "",
+      ].join("\n");
+
+      await Bun.write(join(cwd, "semola.config.ts"), configContent);
+      await Bun.write(join(cwd, "src", "db", "schema.ts"), schemaContent);
+
+      const result = await createMigration({ name: "add_tasks", cwd });
+      expect(result.created).toBe(true);
+
+      if (!result.created) {
+        return;
+      }
+
+      const upSql = await Bun.file(result.upPath).text();
+      expect(upSql).toContain("FOREIGN KEY");
+      expect(upSql).toContain(
+        'FOREIGN KEY ("assignee_id") REFERENCES "users" ("id") ON DELETE CASCADE',
+      );
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
 });

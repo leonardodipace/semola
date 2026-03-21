@@ -147,13 +147,76 @@ describe("buildUpSql/buildDownSql", () => {
     const sqliteSql = buildUpSql("sqlite", ops);
 
     expect(postgresSql).toContain(
-      '"assignee_id" UUID NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE',
+      'FOREIGN KEY ("assignee_id") REFERENCES "users" ("id") ON DELETE CASCADE',
     );
     expect(mysqlSql).toContain(
-      "`assignee_id` CHAR(36) NOT NULL REFERENCES `users` (`id`) ON DELETE CASCADE",
+      "FOREIGN KEY (`assignee_id`) REFERENCES `users` (`id`) ON DELETE CASCADE",
     );
     expect(sqliteSql).toContain(
-      '"assignee_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE',
+      'FOREIGN KEY ("assignee_id") REFERENCES "users" ("id") ON DELETE CASCADE',
+    );
+
+    const taskColumnLine =
+      '"assignee_id" UUID NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE';
+    expect(postgresSql).not.toContain(taskColumnLine);
+  });
+
+  test("emits multiple FOREIGN KEY clauses for one table", () => {
+    const ops: MigrationOperation[] = [
+      {
+        kind: "create-table",
+        table: {
+          key: "tasks",
+          tableName: "tasks",
+          columns: {
+            id: {
+              key: "id",
+              sqlName: "id",
+              kind: "uuid",
+              isPrimaryKey: true,
+              isNotNull: true,
+              isUnique: false,
+              hasDefault: false,
+              referencesTable: null,
+              referencesColumn: null,
+              onDeleteAction: null,
+            },
+            assigneeId: {
+              key: "assigneeId",
+              sqlName: "assignee_id",
+              kind: "uuid",
+              isPrimaryKey: false,
+              isNotNull: true,
+              isUnique: false,
+              hasDefault: false,
+              referencesTable: "users",
+              referencesColumn: "id",
+              onDeleteAction: "CASCADE",
+            },
+            projectId: {
+              key: "projectId",
+              sqlName: "project_id",
+              kind: "uuid",
+              isPrimaryKey: false,
+              isNotNull: true,
+              isUnique: false,
+              hasDefault: false,
+              referencesTable: "projects",
+              referencesColumn: "id",
+              onDeleteAction: "RESTRICT",
+            },
+          },
+        },
+      },
+    ];
+
+    const postgresSql = buildUpSql("postgres", ops);
+
+    expect(postgresSql).toContain(
+      'FOREIGN KEY ("assignee_id") REFERENCES "users" ("id") ON DELETE CASCADE',
+    );
+    expect(postgresSql).toContain(
+      'FOREIGN KEY ("project_id") REFERENCES "projects" ("id") ON DELETE RESTRICT',
     );
   });
 
@@ -411,5 +474,50 @@ describe("buildUpSql/buildDownSql", () => {
     expect(secondIndex).toBeGreaterThan(-1);
     expect(firstIndex).toBeGreaterThan(-1);
     expect(secondIndex).toBeLessThan(firstIndex);
+  });
+
+  test("buildDownSql recreates table with FOREIGN KEY constraints", () => {
+    const ops: MigrationOperation[] = [
+      {
+        kind: "drop-table",
+        table: {
+          key: "tasks",
+          tableName: "tasks",
+          columns: {
+            id: {
+              key: "id",
+              sqlName: "id",
+              kind: "uuid",
+              isPrimaryKey: true,
+              isNotNull: true,
+              isUnique: false,
+              hasDefault: false,
+              referencesTable: null,
+              referencesColumn: null,
+              onDeleteAction: null,
+            },
+            assigneeId: {
+              key: "assigneeId",
+              sqlName: "assignee_id",
+              kind: "uuid",
+              isPrimaryKey: false,
+              isNotNull: true,
+              isUnique: false,
+              hasDefault: false,
+              referencesTable: "users",
+              referencesColumn: "id",
+              onDeleteAction: "CASCADE",
+            },
+          },
+        },
+      },
+    ];
+
+    const down = buildDownSql("postgres", ops);
+
+    expect(down).toContain('CREATE TABLE "tasks"');
+    expect(down).toContain(
+      'FOREIGN KEY ("assignee_id") REFERENCES "users" ("id") ON DELETE CASCADE',
+    );
   });
 });

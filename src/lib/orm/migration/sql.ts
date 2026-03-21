@@ -138,7 +138,12 @@ function serializeDefaultValue(
 function buildColumnDefinition(
   dialect: SchemaSnapshot["dialect"],
   column: ColumnSnapshot,
+  options?: {
+    includeReferences?: boolean;
+  },
 ) {
+  const includeReferences = options?.includeReferences ?? true;
+
   const parts = [
     quoteIdentifier(dialect, column.sqlName),
     columnType(dialect, column.kind),
@@ -165,7 +170,7 @@ function buildColumnDefinition(
     parts.push("DEFAULT", uuidDefaultExpression(dialect));
   }
 
-  if (column.referencesTable && column.referencesColumn) {
+  if (includeReferences && column.referencesTable && column.referencesColumn) {
     parts.push(
       "REFERENCES",
       quoteIdentifier(dialect, column.referencesTable),
@@ -179,13 +184,55 @@ function buildColumnDefinition(
   return parts.join(" ");
 }
 
+function buildForeignKeyConstraint(
+  dialect: SchemaSnapshot["dialect"],
+  column: ColumnSnapshot,
+) {
+  if (!column.referencesTable) {
+    return null;
+  }
+
+  if (!column.referencesColumn) {
+    return null;
+  }
+
+  const parts = [
+    "FOREIGN KEY",
+    `(${quoteIdentifier(dialect, column.sqlName)})`,
+    "REFERENCES",
+    quoteIdentifier(dialect, column.referencesTable),
+    `(${quoteIdentifier(dialect, column.referencesColumn)})`,
+  ];
+
+  if (column.onDeleteAction) {
+    parts.push("ON DELETE", column.onDeleteAction);
+  }
+
+  return parts.join(" ");
+}
+
 function createTableSql(
   dialect: SchemaSnapshot["dialect"],
   table: TableSnapshot,
 ) {
-  const definitions = Object.values(table.columns).map((column) =>
-    buildColumnDefinition(dialect, column),
+  const columnDefinitions = Object.values(table.columns).map((column) =>
+    buildColumnDefinition(dialect, column, { includeReferences: false }),
   );
+
+  const foreignKeys: string[] = [];
+
+  for (const column of Object.values(table.columns)) {
+    const foreignKey = buildForeignKeyConstraint(dialect, column);
+
+    if (!foreignKey) {
+      continue;
+    }
+
+    foreignKeys.push(foreignKey);
+  }
+
+  const definitions = [...columnDefinitions, ...foreignKeys];
+
   const tableName = quoteIdentifier(dialect, table.tableName);
   return `CREATE TABLE ${tableName} (\n  ${definitions.join(",\n  ")}\n)`;
 }
