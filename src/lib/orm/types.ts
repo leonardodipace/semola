@@ -296,7 +296,7 @@ export type TinyTableClient<T extends ColDefs, TRels> = {
 
   findUnique: (input: FindUniqueInput<T>) => Promise<TableRow<T> | null>;
 
-  insert: <TReturning extends boolean | undefined = undefined>(
+  insert: <TReturning extends boolean>(
     input: InsertInput<T> & { returning?: TReturning },
   ) => SQL.Query<TReturning extends true ? TableRow<T>[] : unknown>;
 
@@ -306,7 +306,7 @@ export type TinyTableClient<T extends ColDefs, TRels> = {
     input: CreateManyInput<T>,
   ) => Promise<{ count: number; rows: TableRow<T>[] }>;
 
-  update: <TReturning extends boolean | undefined = undefined>(
+  update: <TReturning extends boolean>(
     input: UpdateBuilderInput<T> & { returning?: TReturning },
   ) => SQL.Query<TReturning extends true ? TableRow<T>[] : unknown>;
 
@@ -314,7 +314,7 @@ export type TinyTableClient<T extends ColDefs, TRels> = {
     input: UpdateManyInput<T>,
   ) => Promise<{ count: number; rows: TableRow<T>[] }>;
 
-  delete: <TReturning extends boolean | undefined = undefined>(
+  delete: <TReturning extends boolean>(
     input: DeleteBuilderInput<T> & { returning?: TReturning },
   ) => SQL.Query<TReturning extends true ? TableRow<T>[] : unknown>;
 
