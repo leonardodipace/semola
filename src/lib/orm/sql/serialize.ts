@@ -165,116 +165,111 @@ function serializeWherePredicate<T extends ColDefs>(
 
   const column = sql(sqlName);
 
-  if (predicate.op === "eq") {
-    return sql`${column} = ${serialized}`;
-  }
+  switch (predicate.op) {
+    case "eq":
+      return sql`${column} = ${serialized}`;
 
-  if (predicate.op === "neq") {
-    return sql`${column} != ${serialized}`;
-  }
+    case "neq":
+      return sql`${column} != ${serialized}`;
 
-  if (predicate.op === "gt") {
-    return sql`${column} > ${serialized}`;
-  }
+    case "gt":
+      return sql`${column} > ${serialized}`;
 
-  if (predicate.op === "gte") {
-    return sql`${column} >= ${serialized}`;
-  }
+    case "gte":
+      return sql`${column} >= ${serialized}`;
 
-  if (predicate.op === "lt") {
-    return sql`${column} < ${serialized}`;
-  }
+    case "lt":
+      return sql`${column} < ${serialized}`;
 
-  if (predicate.op === "lte") {
-    return sql`${column} <= ${serialized}`;
-  }
+    case "lte":
+      return sql`${column} <= ${serialized}`;
 
-  if (predicate.op === "like") {
-    const likeValue = predicate.value;
+    case "like": {
+      const likeValue = predicate.value;
 
-    if (typeof likeValue !== "object" || likeValue === null) {
-      return null;
-    }
-
-    const mode = Reflect.get(likeValue, "mode");
-    const val = Reflect.get(likeValue, "value");
-
-    if (mode !== "startsWith" && mode !== "endsWith" && mode !== "contains") {
-      return null;
-    }
-
-    if (typeof val !== "string") {
-      return null;
-    }
-
-    const pattern = dialectAdapter.renderLikePattern(mode, val);
-
-    if (dialectAdapter.likeKeyword === "ILIKE") {
-      return sql`${column} ILIKE ${pattern}`;
-    }
-
-    return sql`${column} LIKE ${pattern}`;
-  }
-
-  if (predicate.op === "in") {
-    if (!Array.isArray(predicate.value)) {
-      return null;
-    }
-
-    if (predicate.value.length === 0) {
-      return null;
-    }
-
-    const values: unknown[] = new Array(predicate.value.length);
-
-    for (let index = 0; index < predicate.value.length; index++) {
-      const item = predicate.value[index];
-
-      if (!kind) {
-        values[index] = item;
-        continue;
+      if (typeof likeValue !== "object" || likeValue === null) {
+        return null;
       }
 
-      values[index] = dialectAdapter.serializeValue(kind, item);
-    }
+      const mode = Reflect.get(likeValue, "mode");
+      const val = Reflect.get(likeValue, "value");
 
-    return sql`${column} IN ${sql(values)}`;
-  }
-
-  if (predicate.op === "not_in") {
-    if (!Array.isArray(predicate.value)) {
-      return null;
-    }
-
-    if (predicate.value.length === 0) {
-      return null;
-    }
-
-    const values: unknown[] = new Array(predicate.value.length);
-
-    for (let index = 0; index < predicate.value.length; index++) {
-      const item = predicate.value[index];
-
-      if (!kind) {
-        values[index] = item;
-        continue;
+      if (mode !== "startsWith" && mode !== "endsWith" && mode !== "contains") {
+        return null;
       }
 
-      values[index] = dialectAdapter.serializeValue(kind, item);
+      if (typeof val !== "string") {
+        return null;
+      }
+
+      const pattern = dialectAdapter.renderLikePattern(mode, val);
+
+      if (dialectAdapter.likeKeyword === "ILIKE") {
+        return sql`${column} ILIKE ${pattern}`;
+      }
+
+      return sql`${column} LIKE ${pattern}`;
     }
 
-    return sql`${column} NOT IN ${sql(values)}`;
-  }
+    case "in": {
+      if (!Array.isArray(predicate.value)) {
+        return null;
+      }
 
-  if (predicate.op === "is_null") {
-    return sql`${column} IS NULL`;
-  }
+      if (predicate.value.length === 0) {
+        return null;
+      }
 
-  if (predicate.op === "is_not_null") {
-    return sql`${column} IS NOT NULL`;
-  }
+      const values: unknown[] = new Array(predicate.value.length);
 
-  return null;
+      for (let index = 0; index < predicate.value.length; index++) {
+        const item = predicate.value[index];
+
+        if (!kind) {
+          values[index] = item;
+          continue;
+        }
+
+        values[index] = dialectAdapter.serializeValue(kind, item);
+      }
+
+      return sql`${column} IN ${sql(values)}`;
+    }
+
+    case "not_in": {
+      if (!Array.isArray(predicate.value)) {
+        return null;
+      }
+
+      if (predicate.value.length === 0) {
+        return null;
+      }
+
+      const values: unknown[] = new Array(predicate.value.length);
+
+      for (let index = 0; index < predicate.value.length; index++) {
+        const item = predicate.value[index];
+
+        if (!kind) {
+          values[index] = item;
+          continue;
+        }
+
+        values[index] = dialectAdapter.serializeValue(kind, item);
+      }
+
+      return sql`${column} NOT IN ${sql(values)}`;
+    }
+
+    case "is_null":
+      return sql`${column} IS NULL`;
+
+    case "is_not_null":
+      return sql`${column} IS NOT NULL`;
+
+    default:
+      return null;
+  }
 }
 
 function serializeWhereNode<T extends ColDefs>(
