@@ -104,4 +104,312 @@ describe("buildUpSql/buildDownSql", () => {
       `ALTER TABLE "users" ADD COLUMN "meta" JSON NOT NULL DEFAULT '{"level":0}'`,
     );
   });
+
+  test("emits foreign key clause in create table statements", () => {
+    const ops: MigrationOperation[] = [
+      {
+        kind: "create-table",
+        table: {
+          key: "tasks",
+          tableName: "tasks",
+          columns: {
+            id: {
+              key: "id",
+              sqlName: "id",
+              kind: "uuid",
+              isPrimaryKey: true,
+              isNotNull: true,
+              isUnique: false,
+              hasDefault: false,
+              referencesTable: null,
+              referencesColumn: null,
+              onDeleteAction: null,
+            },
+            assigneeId: {
+              key: "assigneeId",
+              sqlName: "assignee_id",
+              kind: "uuid",
+              isPrimaryKey: false,
+              isNotNull: true,
+              isUnique: false,
+              hasDefault: false,
+              referencesTable: "users",
+              referencesColumn: "id",
+              onDeleteAction: "CASCADE",
+            },
+          },
+        },
+      },
+    ];
+
+    const postgresSql = buildUpSql("postgres", ops);
+    const mysqlSql = buildUpSql("mysql", ops);
+    const sqliteSql = buildUpSql("sqlite", ops);
+
+    expect(postgresSql).toContain(
+      '"assignee_id" UUID NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE',
+    );
+    expect(mysqlSql).toContain(
+      "`assignee_id` CHAR(36) NOT NULL REFERENCES `users` (`id`) ON DELETE CASCADE",
+    );
+    expect(sqliteSql).toContain(
+      '"assignee_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE',
+    );
+  });
+
+  test("emits foreign key clause for add-column statements", () => {
+    const ops: MigrationOperation[] = [
+      {
+        kind: "add-column",
+        tableName: "tasks",
+        column: {
+          key: "assigneeId",
+          sqlName: "assignee_id",
+          kind: "uuid",
+          isPrimaryKey: false,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: "users",
+          referencesColumn: "id",
+          onDeleteAction: "CASCADE",
+        },
+      },
+    ];
+
+    const postgresSql = buildUpSql("postgres", ops);
+
+    expect(postgresSql).toContain(
+      'ALTER TABLE "tasks" ADD COLUMN "assignee_id" UUID NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE',
+    );
+  });
+
+  test("omits ON DELETE when relation action is null", () => {
+    const ops: MigrationOperation[] = [
+      {
+        kind: "add-column",
+        tableName: "tasks",
+        column: {
+          key: "assigneeId",
+          sqlName: "assignee_id",
+          kind: "uuid",
+          isPrimaryKey: false,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: "users",
+          referencesColumn: "id",
+          onDeleteAction: null,
+        },
+      },
+    ];
+
+    const up = buildUpSql("postgres", ops);
+
+    expect(up).toContain('REFERENCES "users" ("id")');
+    expect(up).not.toContain("ON DELETE");
+  });
+
+  test("serializes boolean defaults by dialect", () => {
+    const ops: MigrationOperation[] = [
+      {
+        kind: "add-column",
+        tableName: "users",
+        column: {
+          key: "isActive",
+          sqlName: "is_active",
+          kind: "boolean",
+          isPrimaryKey: false,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: true,
+          defaultKind: "value",
+          defaultValue: true,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+      },
+    ];
+
+    expect(buildUpSql("postgres", ops)).toContain("DEFAULT TRUE");
+    expect(buildUpSql("mysql", ops)).toContain("DEFAULT TRUE");
+    expect(buildUpSql("sqlite", ops)).toContain("DEFAULT 1");
+  });
+
+  test("escapes string defaults", () => {
+    const ops: MigrationOperation[] = [
+      {
+        kind: "add-column",
+        tableName: "users",
+        column: {
+          key: "name",
+          sqlName: "name",
+          kind: "string",
+          isPrimaryKey: false,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: true,
+          defaultKind: "value",
+          defaultValue: "O'Hara",
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+      },
+    ];
+
+    const up = buildUpSql("postgres", ops);
+
+    expect(up).toContain("DEFAULT 'O''Hara'");
+  });
+
+  test("serializes date defaults as ISO strings", () => {
+    const ops: MigrationOperation[] = [
+      {
+        kind: "add-column",
+        tableName: "users",
+        column: {
+          key: "createdAt",
+          sqlName: "created_at",
+          kind: "date",
+          isPrimaryKey: false,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: true,
+          defaultKind: "value",
+          defaultValue: new Date("2024-01-01T00:00:00.000Z"),
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+      },
+    ];
+
+    const up = buildUpSql("postgres", ops);
+
+    expect(up).toContain("DEFAULT '2024-01-01T00:00:00.000Z'");
+  });
+
+  test("does not emit literal DEFAULT for function defaults", () => {
+    const ops: MigrationOperation[] = [
+      {
+        kind: "add-column",
+        tableName: "users",
+        column: {
+          key: "updatedAt",
+          sqlName: "updated_at",
+          kind: "date",
+          isPrimaryKey: false,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: true,
+          defaultKind: "fn",
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+      },
+    ];
+
+    const up = buildUpSql("postgres", ops);
+
+    expect(up).not.toContain(" DEFAULT ");
+  });
+
+  test("joins multiple statements with semicolons and trailing newline", () => {
+    const ops: MigrationOperation[] = [
+      {
+        kind: "add-column",
+        tableName: "users",
+        column: {
+          key: "name",
+          sqlName: "name",
+          kind: "string",
+          isPrimaryKey: false,
+          isNotNull: false,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+      },
+      {
+        kind: "drop-column",
+        tableName: "users",
+        column: {
+          key: "legacy",
+          sqlName: "legacy",
+          kind: "string",
+          isPrimaryKey: false,
+          isNotNull: false,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+      },
+    ];
+
+    const up = buildUpSql("postgres", ops);
+
+    expect(up).toContain('ALTER TABLE "users" ADD COLUMN "name" TEXT');
+    expect(up).toContain('ALTER TABLE "users" DROP COLUMN "legacy"');
+    expect(up).toEndWith(";\n");
+  });
+
+  test("returns empty string for empty operations", () => {
+    const up = buildUpSql("postgres", []);
+    const down = buildDownSql("postgres", []);
+
+    expect(up).toBe("");
+    expect(down).toBe("");
+  });
+
+  test("buildDownSql reverses operation order", () => {
+    const ops: MigrationOperation[] = [
+      {
+        kind: "add-column",
+        tableName: "users",
+        column: {
+          key: "first",
+          sqlName: "first",
+          kind: "string",
+          isPrimaryKey: false,
+          isNotNull: false,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+      },
+      {
+        kind: "add-column",
+        tableName: "users",
+        column: {
+          key: "second",
+          sqlName: "second",
+          kind: "string",
+          isPrimaryKey: false,
+          isNotNull: false,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+      },
+    ];
+
+    const down = buildDownSql("postgres", ops);
+
+    const secondIndex = down.indexOf('DROP COLUMN "second"');
+    const firstIndex = down.indexOf('DROP COLUMN "first"');
+    expect(secondIndex).toBeGreaterThan(-1);
+    expect(firstIndex).toBeGreaterThan(-1);
+    expect(secondIndex).toBeLessThan(firstIndex);
+  });
 });
