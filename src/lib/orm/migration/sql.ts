@@ -60,10 +60,13 @@ function uuidDefaultExpression(dialect: SchemaSnapshot["dialect"]) {
   if (dialect === "postgres") {
     return "gen_random_uuid()";
   }
+
   if (dialect === "mysql") {
     return "UUID()";
   }
-  return "lower(hex(randomblob(16)))";
+
+  // SQLite requires expressions to be wrapped in parentheses
+  return "(lower(hex(randomblob(16))))";
 }
 
 function quoteLiteral(value: string) {

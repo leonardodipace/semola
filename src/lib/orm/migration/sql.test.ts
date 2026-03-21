@@ -41,6 +41,12 @@ describe("buildUpSql/buildDownSql", () => {
     expect(up).toContain("CREATE TABLE `users`");
   });
 
+  test("wraps sqlite uuid default expression in parentheses", () => {
+    const up = buildUpSql("sqlite", operations);
+
+    expect(up).toContain('DEFAULT (lower(hex(randomblob(16))))');
+  });
+
   test("maps jsonb by dialect", () => {
     const ops: MigrationOperation[] = [
       {
