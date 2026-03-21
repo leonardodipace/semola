@@ -359,7 +359,7 @@ export function serializeWherePlan<T extends ColDefs>(
   plan: SelectPlan<T>,
   dialectAdapter: DialectAdapter,
 ) {
-  return buildWhereClause(sql, table, plan, dialectAdapter);
+  return buildWhereFragment(sql, table, plan.where, dialectAdapter);
 }
 
 function buildJoinClauses<T extends ColDefs>(
