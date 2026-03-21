@@ -4,6 +4,7 @@ import { loadConfig } from "./config.js";
 import { loadOrmFromSchema } from "./discover.js";
 import { listMigrations, relativeFromCwd, splitStatements } from "./files.js";
 import { markAppliedMigration, readMigrationState } from "./state-file.js";
+import type { ApplyMigrationsInput } from "./types.js";
 
 async function runStatements(
   runner: SqlType | TransactionSQL,
@@ -41,8 +42,8 @@ async function runMigrationSql(
   await runStatements(sql, sqlText);
 }
 
-export async function applyMigrations(input: { cwd?: string }) {
-  const cwd = input.cwd ?? process.cwd();
+export async function applyMigrations(input?: ApplyMigrationsInput) {
+  const cwd = input?.cwd ?? process.cwd();
 
   const config = await loadConfig(cwd);
   const orm = await loadOrmFromSchema(config.orm.schema);

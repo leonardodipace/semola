@@ -96,3 +96,7 @@ export type MigrationState = {
     appliedAt: string;
   }>;
 };
+
+export type ApplyMigrationsInput = {
+  cwd?: string;
+};
