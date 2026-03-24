@@ -1,4 +1,5 @@
-import type { DateFmtFnType, LogDataType } from "./types.js";
+import type { LogDataType } from "../core/types.js";
+import { DateFmtFnType } from "./types.js";
 
 export abstract class Formatter {
   protected dateFmt: DateFmtFnType;
