@@ -3,8 +3,8 @@ import { basename, dirname, extname, join } from "node:path";
 import { mightThrowSync } from "../../errors/index.js";
 import { PROVIDER_OPTION_DEFAULT } from "../core/index.js";
 
-import { LogDataType, LogLevel } from "../core/types.js";
-import {
+import { type LogDataType, LogLevel } from "../core/types.js";
+import type {
   FileProviderOptions,
   ProviderOptions,
   SizeBasedPolicyType,

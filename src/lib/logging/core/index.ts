@@ -1,13 +1,9 @@
 import { basename } from "node:path";
 import { mightThrowSync } from "../../errors/index.js";
 import { BaseFormatter } from "../formatter/index.js";
-import { LoggerProvider } from "../provider/index.js";
-import { ProviderOptions } from "../provider/types.js";
-import {
-  type LogDataType,
-  type LogLevelType,
-  type LogMessageType,
-} from "./types.js";
+import type { LoggerProvider } from "../provider/index.js";
+import type { ProviderOptions } from "../provider/types.js";
+import type { LogDataType, LogLevelType, LogMessageType } from "./types.js";
 
 export const PROVIDER_OPTION_DEFAULT: ProviderOptions = {
   formatter: new BaseFormatter(),

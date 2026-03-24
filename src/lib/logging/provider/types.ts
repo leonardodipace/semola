@@ -1,5 +1,5 @@
-import { LogLevelType } from "../core/types.js";
-import { Formatter } from "../formatter/index.js";
+import type { LogLevelType } from "../core/types.js";
+import type { Formatter } from "../formatter/index.js";
 
 export type ProviderOptions = {
   level?: LogLevelType;

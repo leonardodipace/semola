@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, setSystemTime, test } from "bun:test";
-import { LogDataType, LogLevelType } from "../core/types.js";
+import type { LogDataType, LogLevelType } from "../core/types.js";
 import {
   BaseFormatter,
   dmyFormat,
