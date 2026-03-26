@@ -1,4 +1,6 @@
+import { SQL } from "bun";
 import { describe, expect, test } from "bun:test";
+import { splitStatements } from "./files.js";
 import { buildDownSql, buildUpSql } from "./sql.js";
 import type { MigrationOperation } from "./types.js";
 
@@ -153,8 +155,9 @@ describe("buildUpSql/buildDownSql", () => {
       "FOREIGN KEY (`assignee_id`) REFERENCES `users` (`id`) ON DELETE CASCADE",
     );
     expect(sqliteSql).toContain(
-      'FOREIGN KEY ("assignee_id") REFERENCES "users" ("id") ON DELETE CASCADE',
+      '"assignee_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE',
     );
+    expect(sqliteSql).not.toContain('FOREIGN KEY ("assignee_id")');
 
     const taskColumnLine =
       '"assignee_id" UUID NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE';
@@ -519,5 +522,111 @@ describe("buildUpSql/buildDownSql", () => {
     expect(down).toContain(
       'FOREIGN KEY ("assignee_id") REFERENCES "users" ("id") ON DELETE CASCADE',
     );
+  });
+
+  test("sqlite migration can alter fk column with foreign_keys enabled", async () => {
+    const ops: MigrationOperation[] = [
+      {
+        kind: "create-table",
+        table: {
+          key: "exam",
+          tableName: "exam",
+          columns: {
+            id: {
+              key: "id",
+              sqlName: "id",
+              kind: "uuid",
+              isPrimaryKey: true,
+              isNotNull: true,
+              isUnique: false,
+              hasDefault: false,
+              referencesTable: null,
+              referencesColumn: null,
+              onDeleteAction: null,
+            },
+          },
+        },
+      },
+      {
+        kind: "create-table",
+        table: {
+          key: "student",
+          tableName: "student",
+          columns: {
+            id: {
+              key: "id",
+              sqlName: "id",
+              kind: "uuid",
+              isPrimaryKey: true,
+              isNotNull: true,
+              isUnique: false,
+              hasDefault: false,
+              referencesTable: null,
+              referencesColumn: null,
+              onDeleteAction: null,
+            },
+            examId: {
+              key: "examId",
+              sqlName: "exam_id",
+              kind: "uuid",
+              isPrimaryKey: false,
+              isNotNull: false,
+              isUnique: false,
+              hasDefault: false,
+              referencesTable: "exam",
+              referencesColumn: "id",
+              onDeleteAction: null,
+            },
+          },
+        },
+      },
+      {
+        kind: "drop-column",
+        tableName: "student",
+        column: {
+          key: "examId",
+          sqlName: "exam_id",
+          kind: "uuid",
+          isPrimaryKey: false,
+          isNotNull: false,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: "exam",
+          referencesColumn: "id",
+          onDeleteAction: null,
+        },
+      },
+      {
+        kind: "add-column",
+        tableName: "student",
+        column: {
+          key: "examId",
+          sqlName: "exam_id",
+          kind: "uuid",
+          isPrimaryKey: false,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: "exam",
+          referencesColumn: "id",
+          onDeleteAction: null,
+        },
+      },
+    ];
+
+    const sqlText = buildUpSql("sqlite", ops);
+
+    expect(sqlText).toContain('"exam_id" TEXT REFERENCES "exam" ("id")');
+    expect(sqlText).not.toContain('FOREIGN KEY ("exam_id")');
+
+    const db = new SQL("sqlite::memory:");
+
+    await db`PRAGMA foreign_keys = ON`;
+
+    for (const statement of splitStatements(sqlText)) {
+      await db`${db.unsafe(statement)}`;
+    }
+
+    await db.close();
   });
 });

@@ -127,7 +127,7 @@ describe("createMigration", () => {
     }
   });
 
-  test("emits explicit FOREIGN KEY constraints in generated SQL", async () => {
+  test("emits inline REFERENCES for sqlite foreign keys", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "semola-mig-fk-"));
 
     try {
@@ -183,10 +183,10 @@ describe("createMigration", () => {
       }
 
       const upSql = await Bun.file(result.upPath).text();
-      expect(upSql).toContain("FOREIGN KEY");
       expect(upSql).toContain(
-        'FOREIGN KEY ("assignee_id") REFERENCES "users" ("id") ON DELETE CASCADE',
+        '"assignee_id" TEXT REFERENCES "users" ("id") ON DELETE CASCADE',
       );
+      expect(upSql).not.toContain("FOREIGN KEY");
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }
