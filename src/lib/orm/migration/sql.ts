@@ -215,9 +215,18 @@ function createTableSql(
   dialect: SchemaSnapshot["dialect"],
   table: TableSnapshot,
 ) {
+  const shouldInlineForeignKeys = dialect === "sqlite";
+
   const columnDefinitions = Object.values(table.columns).map((column) =>
-    buildColumnDefinition(dialect, column, { includeReferences: false }),
+    buildColumnDefinition(dialect, column, {
+      includeReferences: shouldInlineForeignKeys,
+    }),
   );
+
+  if (shouldInlineForeignKeys) {
+    const tableName = quoteIdentifier(dialect, table.tableName);
+    return `CREATE TABLE ${tableName} (\n  ${columnDefinitions.join(",\n  ")}\n)`;
+  }
 
   const foreignKeys: string[] = [];
 
