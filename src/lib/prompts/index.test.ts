@@ -77,46 +77,34 @@ class MockPromptRuntime implements PromptRuntime {
   }
 }
 
-const unwrap = <T>(
-  result: ReturnType<typeof err<string>> | ReturnType<typeof ok<T>>,
-) => {
-  const [resultError, data] = result;
-
-  if (resultError || data === null) {
-    throw new Error(resultError?.message ?? "Expected prompt success result");
-  }
-
-  return data;
-};
-
 const input = async (options: InputOptions, runtime?: PromptRuntime) => {
-  return unwrap(await inputPrompt(options, runtime));
+  return inputPrompt(options, runtime);
 };
 
 const password = async (options: PasswordOptions, runtime?: PromptRuntime) => {
-  return unwrap(await passwordPrompt(options, runtime));
+  return passwordPrompt(options, runtime);
 };
 
 const confirm = async (options: ConfirmOptions, runtime?: PromptRuntime) => {
-  return unwrap(await confirmPrompt(options, runtime));
+  return confirmPrompt(options, runtime);
 };
 
 const number = async (options: NumberOptions, runtime?: PromptRuntime) => {
-  return unwrap(await numberPrompt(options, runtime));
+  return numberPrompt(options, runtime);
 };
 
 const select = async <TValue extends string>(
   options: SelectOptions<TValue>,
   runtime?: PromptRuntime,
 ) => {
-  return unwrap(await selectPrompt(options, runtime));
+  return selectPrompt(options, runtime);
 };
 
 const multiselect = async <TValue extends string>(
   options: MultiselectOptions<TValue>,
   runtime?: PromptRuntime,
 ) => {
-  return unwrap(await multiselectPrompt(options, runtime));
+  return multiselectPrompt(options, runtime);
 };
 
 describe("prompts", () => {
@@ -257,14 +245,10 @@ describe("prompts", () => {
   test("should return cancelled error on escape", async () => {
     const runtime = new MockPromptRuntime([{ name: "escape" }]);
 
-    const [resultError, value] = await inputPrompt(
-      { message: "Name" },
-      runtime,
-    );
-
-    expect(value).toBeNull();
-    expect(resultError).toMatchObject({
-      type: "PromptCancelledError",
+    await expect(
+      inputPrompt({ message: "Name" }, runtime),
+    ).rejects.toMatchObject({
+      name: "PromptCancelledError",
       message: "Interrupted, bye!",
     });
   });
@@ -272,14 +256,10 @@ describe("prompts", () => {
   test("should return environment error when runtime is not interactive", async () => {
     const runtime = new MockPromptRuntime([], false);
 
-    const [resultError, value] = await inputPrompt(
-      { message: "Name" },
-      runtime,
-    );
-
-    expect(value).toBeNull();
-    expect(resultError).toMatchObject({
-      type: "PromptEnvironmentError",
+    await expect(
+      inputPrompt({ message: "Name" }, runtime),
+    ).rejects.toMatchObject({
+      name: "PromptEnvironmentError",
       message: "Interactive prompts require a TTY with raw mode support",
     });
   });

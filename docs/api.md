@@ -227,7 +227,7 @@ The handler receives a context object with type-safe request data and response m
 - **OpenAPI generation**: Automatic OpenAPI 3.1.0 spec from route definitions
 - **Schema reuse**: Define schemas once with `.meta({ id })` and reference them across routes
 - **Bun-native routing**: Leverages Bun.serve's SIMD-accelerated routing
-- **Result pattern**: Uses `[error, data]` tuples internally for error handling
+- **Validation errors**: Request and response validation failures return HTTP 400 with the validation message
 
 ## Usage Example
 

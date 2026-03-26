@@ -51,6 +51,34 @@ const renderSuccessLine = (message: string, content: string) => {
   return `${successMark()} ${message} ${content}`;
 };
 
+const toPromptError = (input: { type: string; message: string }) => {
+  const error = new Error(input.message);
+  error.name = input.type;
+  return error;
+};
+
+type PromptResult<T> = readonly [
+  { type: string; message: string } | null,
+  T | null,
+];
+
+const unwrapPromptResult = <T>(result: PromptResult<T>) => {
+  const [resultError, value] = result;
+
+  if (resultError) {
+    throw toPromptError(resultError);
+  }
+
+  if (value === null) {
+    throw toPromptError({
+      type: "PromptIOError",
+      message: "Unable to resolve prompt value",
+    });
+  }
+
+  return value;
+};
+
 type TextState = {
   value: string;
   cursor: number;
@@ -310,7 +338,7 @@ export const input = async (options: InputOptions, runtime?: PromptRuntime) => {
   const promptRuntime = runtime ?? createNodePromptRuntime();
   const initialValue = options.defaultValue ?? "";
 
-  return runPromptSession<TextState, string, InputOptions>({
+  const result = await runPromptSession<TextState, string, InputOptions>({
     runtime: promptRuntime,
     options,
     initialState: createTextState(initialValue),
@@ -334,6 +362,8 @@ export const input = async (options: InputOptions, runtime?: PromptRuntime) => {
     },
     onSubmit: (state) => submitTextValue(state, options),
   });
+
+  return unwrapPromptResult(result);
 };
 
 export const password = async (
@@ -344,7 +374,7 @@ export const password = async (
   const initialValue = options.defaultValue ?? "";
   const mask = options.mask;
 
-  return runPromptSession<TextState, string, PasswordOptions>({
+  const result = await runPromptSession<TextState, string, PasswordOptions>({
     runtime: promptRuntime,
     options,
     initialState: createTextState(initialValue),
@@ -375,6 +405,8 @@ export const password = async (
     },
     onSubmit: (state) => submitTextValue(state, options),
   });
+
+  return unwrapPromptResult(result);
 };
 
 export const confirm = async (
@@ -384,7 +416,11 @@ export const confirm = async (
   const promptRuntime = runtime ?? createNodePromptRuntime();
   const defaultValue = options.defaultValue ?? false;
 
-  return runPromptSession<{ value: boolean }, boolean, ConfirmOptions>({
+  const result = await runPromptSession<
+    { value: boolean },
+    boolean,
+    ConfirmOptions
+  >({
     runtime: promptRuntime,
     options,
     initialState: {
@@ -443,6 +479,8 @@ export const confirm = async (
       return { value: state.value };
     },
   });
+
+  return unwrapPromptResult(result);
 };
 
 export const number = async (
@@ -453,7 +491,7 @@ export const number = async (
   const defaultValue =
     options.defaultValue === undefined ? "" : String(options.defaultValue);
 
-  return runPromptSession<TextState, number, NumberOptions>({
+  const result = await runPromptSession<TextState, number, NumberOptions>({
     runtime: promptRuntime,
     options,
     initialState: createTextState(defaultValue),
@@ -531,6 +569,8 @@ export const number = async (
       return { value: parsed };
     },
   });
+
+  return unwrapPromptResult(result);
 };
 
 const findFirstEnabledIndex = <TValue extends string>(
@@ -599,7 +639,11 @@ export const select = async <TValue extends string>(
   const promptRuntime = runtime ?? createNodePromptRuntime();
   const initialCursor = findDefaultIndex(options.choices, options.defaultValue);
 
-  return runPromptSession<{ cursor: number }, TValue, SelectOptions<TValue>>({
+  const result = await runPromptSession<
+    { cursor: number },
+    TValue,
+    SelectOptions<TValue>
+  >({
     runtime: promptRuntime,
     options,
     initialState: {
@@ -666,6 +710,8 @@ export const select = async <TValue extends string>(
       return { value: selectedChoice.value };
     },
   });
+
+  return unwrapPromptResult(result);
 };
 
 export const multiselect = async <TValue extends string>(
@@ -674,7 +720,7 @@ export const multiselect = async <TValue extends string>(
 ) => {
   const promptRuntime = runtime ?? createNodePromptRuntime();
 
-  return runPromptSession<
+  const result = await runPromptSession<
     { cursor: number; selected: Set<TValue> },
     TValue[],
     MultiselectOptions<TValue>
@@ -816,6 +862,8 @@ export const multiselect = async <TValue extends string>(
       return { value: values };
     },
   });
+
+  return unwrapPromptResult(result);
 };
 
 export type { PromptRuntime } from "./core/types.js";

@@ -133,8 +133,12 @@ const cache = new Cache({
 await cache.set("user:123", { name: "John", age: 30 });
 
 // Retrieve data
-const [error, user] = await cache.get("user:123");
-if (!error) console.log(user);
+try {
+  const user = await cache.get("user:123");
+  console.log(user);
+} catch (error) {
+  console.error(error);
+}
 ```
 
 ### Schedule Recurring Tasks
@@ -250,7 +254,7 @@ _Higher is better for req/sec, lower is better for latency._
 - 🧩 **Modular by design**: Import only what you need. Your bundle stays lean.
 - 🔒 **Type safety that actually works**: From request validation to response serialization, TypeScript catches errors before they hit production.
 - 📄 **Documentation writes itself**: Auto-generated OpenAPI specs from your code. No more stale docs.
-- 🚫 **Error handling reimagined**: No more try-catch spaghetti. Clean result tuples that compose beautifully.
+- 🚫 **Error handling reimagined**: Use result tuples only where they make sense (`semola/errors`) and throw meaningful typed errors elsewhere.
 - ⚡ **Schema validation freedom**: Use Zod, Valibot, ArkType, or any Standard Schema library. Your choice.
 - 🔋 **Batteries included**: Everything you need in one cohesive toolkit. No 50 dependencies to audit.
 

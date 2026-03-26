@@ -74,6 +74,30 @@ const resolveValidation = (v?: ValidationOptions) => {
   return { input: v.input !== false, output: v.output !== false };
 };
 
+const toValidationError = (error: unknown) => {
+  if (error instanceof Error) {
+    return error;
+  }
+
+  return new Error("Validation failed");
+};
+
+const validateAndCapture = async <T>(validate: () => Promise<T>) => {
+  const [error, value] = await mightThrow(validate());
+
+  if (error) {
+    return {
+      success: false as const,
+      error: toValidationError(error),
+    };
+  }
+
+  return {
+    success: true as const,
+    value,
+  };
+};
+
 export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
   private options: ApiOptions<TMiddlewares>;
   private routes: RouteConfig<
@@ -106,77 +130,52 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     bodyCache?: BodyCache,
   ) {
     if (!schema) {
-      return { success: true, data: {} };
+      return { success: true as const, data: {} };
     }
 
     const v: Record<string, unknown> = {};
 
     if (schema.body) {
-      const [err, val] = await validateBody(req, schema.body, bodyCache);
-
-      if (err) {
-        return {
-          success: false,
-          error: err,
-        };
-      }
-
-      v.body = val;
+      const result = await validateAndCapture(() =>
+        validateBody(req, schema.body, bodyCache),
+      );
+      if (!result.success) return result;
+      v.body = result.value;
     }
 
     if (schema.query) {
-      const [err, val] = await validateQuery(req, schema.query);
-
-      if (err) {
-        return {
-          success: false,
-          error: err,
-        };
-      }
-
-      v.query = val;
+      const result = await validateAndCapture(() =>
+        validateQuery(req, schema.query),
+      );
+      if (!result.success) return result;
+      v.query = result.value;
     }
 
     if (schema.headers) {
-      const [err, val] = await validateHeaders(req, schema.headers);
-
-      if (err) {
-        return {
-          success: false,
-          error: err,
-        };
-      }
-
-      v.headers = val;
+      const result = await validateAndCapture(() =>
+        validateHeaders(req, schema.headers),
+      );
+      if (!result.success) return result;
+      v.headers = result.value;
     }
 
     if (schema.cookies) {
-      const [err, val] = await validateCookies(req, schema.cookies);
-
-      if (err) {
-        return {
-          success: false,
-          error: err,
-        };
-      }
-
-      v.cookies = val;
+      const result = await validateAndCapture(() =>
+        validateCookies(req, schema.cookies),
+      );
+      if (!result.success) return result;
+      v.cookies = result.value;
     }
 
     if (schema.params) {
-      const [err, val] = await validateParams(req, schema.params);
-
-      if (err) {
-        return {
-          success: false,
-          error: err,
-        };
-      }
-
-      v.params = val;
+      const result = await validateAndCapture(() =>
+        validateParams(req, schema.params),
+      );
+      if (!result.success) return result;
+      v.params = result.value;
     }
 
-    return { success: true, data: v };
+    return { success: true as const, data: v };
   }
 
   private createContext(
@@ -212,10 +211,13 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
       return responseHelpers.json(400, { message: "Invalid response body" });
     }
 
-    const [validationError] = await validateSchema(statusSchema, body);
+    const [validationError] = await mightThrow(
+      validateSchema(statusSchema, body),
+    );
 
     if (validationError) {
-      return responseHelpers.json(400, { message: validationError.message });
+      const error = toValidationError(validationError);
+      return responseHelpers.json(400, { message: error.message });
     }
 
     return response;

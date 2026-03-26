@@ -1,4 +1,4 @@
-import { err, mightThrow, mightThrowSync, ok } from "../errors/index.js";
+import { mightThrow, mightThrowSync } from "../errors/index.js";
 import type { MessageHandler, PubSubOptions } from "./types.js";
 
 export class PubSub<T extends Record<string, unknown>> {
@@ -15,7 +15,10 @@ export class PubSub<T extends Record<string, unknown>> {
     );
 
     if (stringifyError || !stringified) {
-      return err("SerializationError", "Unable to serialize message");
+      throw this.createError(
+        "SerializationError",
+        "Unable to serialize message",
+      );
     }
 
     const [publishError, count] = await mightThrow(
@@ -23,18 +26,18 @@ export class PubSub<T extends Record<string, unknown>> {
     );
 
     if (publishError) {
-      return err(
+      throw this.createError(
         "PublishError",
         `Unable to publish to ${this.options.channel}`,
       );
     }
 
-    return ok(count);
+    return count;
   }
 
   public async subscribe(handler: MessageHandler<T>) {
     if (this.isActive()) {
-      return err("SubscribeError", "Already subscribed");
+      throw this.createError("SubscribeError", "Already subscribed");
     }
 
     this.isSubscribed = true;
@@ -55,18 +58,18 @@ export class PubSub<T extends Record<string, unknown>> {
     if (subscribeError) {
       this.isSubscribed = false;
 
-      return err(
+      throw this.createError(
         "SubscribeError",
         `Unable to subscribe to ${this.options.channel}`,
       );
     }
 
-    return ok(count);
+    return count;
   }
 
   public async unsubscribe() {
     if (!this.isActive()) {
-      return err("UnsubscribeError", "Not subscribed");
+      throw this.createError("UnsubscribeError", "Not subscribed");
     }
 
     this.isSubscribed = false;
@@ -78,16 +81,22 @@ export class PubSub<T extends Record<string, unknown>> {
     if (unsubscribeError) {
       this.isSubscribed = true;
 
-      return err(
+      throw this.createError(
         "UnsubscribeError",
         `Unable to unsubscribe from ${this.options.channel}`,
       );
     }
 
-    return ok(true);
+    return true;
   }
 
   public isActive() {
     return this.isSubscribed;
+  }
+
+  private createError(type: string, message: string) {
+    const error = new Error(message);
+    error.name = type;
+    return error;
   }
 }

@@ -8,6 +8,19 @@ import {
   validateSchema,
 } from "./index.js";
 
+const settle = async <T>(promise: Promise<T>) => {
+  try {
+    const value = await promise;
+    return [null, value] as const;
+  } catch (error) {
+    if (error instanceof Error) {
+      return [{ type: error.name, message: error.message }, null] as const;
+    }
+
+    return [{ type: "UnknownError", message: String(error) }, null] as const;
+  }
+};
+
 describe("Validation Module", () => {
   describe("validateSchema", () => {
     test("should format validation errors into a readable string", async () => {
@@ -18,9 +31,11 @@ describe("Validation Module", () => {
         age: z.number(),
       });
 
-      const [error, data] = await validateSchema(schema, {
-        user: { email: "invalid" },
-      });
+      const [error, data] = await settle(
+        validateSchema(schema, {
+          user: { email: "invalid" },
+        }),
+      );
 
       expect(data).toBeNull();
       expect(error?.message).toContain("user.email:");
@@ -37,7 +52,7 @@ describe("Validation Module", () => {
         body: JSON.stringify({ id: 123 }),
       });
 
-      const [error, data] = await validateBody(req, schema);
+      const [error, data] = await settle(validateBody(req, schema));
 
       expect(error).toBeNull();
       expect(data).toEqual({ id: 123 });
@@ -50,7 +65,7 @@ describe("Validation Module", () => {
         body: "{ invalid json }",
       });
 
-      const [error] = await validateBody(req, z.any());
+      const [error] = await settle(validateBody(req, z.any()));
       expect(error?.type).toBe("ParseError");
     });
 
@@ -61,7 +76,7 @@ describe("Validation Module", () => {
         body: "hello",
       });
 
-      const [error, data] = await validateBody(req, z.string());
+      const [error, data] = await settle(validateBody(req, z.string()));
       expect(error).toBeNull();
       expect(data).toBeUndefined();
     });
@@ -76,7 +91,7 @@ describe("Validation Module", () => {
 
       const bodyCache = { parsed: false, value: undefined as unknown };
 
-      const [err1, data1] = await validateBody(req, schema, bodyCache);
+      const [err1, data1] = await settle(validateBody(req, schema, bodyCache));
 
       expect(err1).toBeNull();
       expect(data1).toEqual({ name: "test" });
@@ -84,7 +99,7 @@ describe("Validation Module", () => {
       expect(bodyCache.value).toEqual({ name: "test" });
 
       // Second call should use cached value (would fail without cache since body is consumed)
-      const [err2, data2] = await validateBody(req, schema, bodyCache);
+      const [err2, data2] = await settle(validateBody(req, schema, bodyCache));
 
       expect(err2).toBeNull();
       expect(data2).toEqual({ name: "test" });
@@ -102,12 +117,16 @@ describe("Validation Module", () => {
       const bodyCache = { parsed: false, value: undefined as unknown };
 
       // First validation with partial schema
-      const [err1, data1] = await validateBody(req, partialSchema, bodyCache);
+      const [err1, data1] = await settle(
+        validateBody(req, partialSchema, bodyCache),
+      );
       expect(err1).toBeNull();
       expect(data1).toEqual({ name: "test" });
 
       // Second validation with full schema using cached body
-      const [err2, data2] = await validateBody(req, fullSchema, bodyCache);
+      const [err2, data2] = await settle(
+        validateBody(req, fullSchema, bodyCache),
+      );
       expect(err2).toBeNull();
       expect(data2).toEqual({ name: "test", age: 25 });
     });
@@ -121,7 +140,7 @@ describe("Validation Module", () => {
       });
       const req = new Request("http://localhost?filter=active&tags=a&tags=b");
 
-      const [error, data] = await validateQuery(req, schema);
+      const [error, data] = await settle(validateQuery(req, schema));
 
       expect(error).toBeNull();
       expect(data).toEqual({ filter: "active", tags: ["a", "b"] });
@@ -137,7 +156,7 @@ describe("Validation Module", () => {
         headers: { "X-API-KEY": "secret-123" },
       });
 
-      const [error, data] = await validateHeaders(req, schema);
+      const [error, data] = await settle(validateHeaders(req, schema));
 
       expect(error).toBeNull();
       expect(data).toEqual({ "x-api-key": "secret-123" });
@@ -154,7 +173,7 @@ describe("Validation Module", () => {
         headers: { cookie: "theme=dark; session=abc" },
       });
 
-      const [error, data] = await validateCookies(req, schema);
+      const [error, data] = await settle(validateCookies(req, schema));
 
       expect(error).toBeNull();
       expect(data).toEqual({ theme: "dark", session: "abc" });
@@ -164,7 +183,7 @@ describe("Validation Module", () => {
       const schema = z.object({ requiredCookie: z.string() });
       const req = new Request("http://localhost");
 
-      const [error] = await validateCookies(req, schema);
+      const [error] = await settle(validateCookies(req, schema));
       expect(error?.message).toContain("requiredCookie:");
     });
   });

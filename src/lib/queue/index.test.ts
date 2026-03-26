@@ -60,9 +60,8 @@ describe("Queue", () => {
       const handler = () => {};
       const queue = new Queue({ name: "test", redis, retries: 3, handler });
 
-      const [error, jobId] = await queue.enqueue({ message: "hello" });
+      const jobId = await queue.enqueue({ message: "hello" });
 
-      expect(error).toBeNull();
       expect(jobId).toBeDefined();
       expect(typeof jobId).toBe("string");
 
@@ -76,14 +75,10 @@ describe("Queue", () => {
 
       redis.setShouldFail(true);
 
-      const [error, jobId] = await queue.enqueue({ message: "hello" });
-
-      expect(error).toEqual({
-        type: "QueueError",
+      await expect(queue.enqueue({ message: "hello" })).rejects.toMatchObject({
+        name: "QueueError",
         message: "Unable to enqueue job",
       });
-
-      expect(jobId).toBeNull();
 
       await queue.stop();
     });
@@ -99,14 +94,10 @@ describe("Queue", () => {
 
       circular.self = circular;
 
-      const [error, jobId] = await queue.enqueue(circular);
-
-      expect(error).toEqual({
-        type: "QueueError",
+      await expect(queue.enqueue(circular)).rejects.toMatchObject({
+        name: "QueueError",
         message: "Unable to serialize job data",
       });
-
-      expect(jobId).toBeNull();
 
       await queue.stop();
     });
@@ -176,7 +167,7 @@ describe("Queue", () => {
         onSuccess,
       });
 
-      const [, jobId] = await queue.enqueue({ message: "hello" });
+      const jobId = await queue.enqueue({ message: "hello" });
 
       await sleep(200);
 
@@ -226,7 +217,7 @@ describe("Queue", () => {
         onRetry,
       });
 
-      const [, jobId] = await queue.enqueue({ message: "hello" });
+      const jobId = await queue.enqueue({ message: "hello" });
 
       await sleep(2500);
 
@@ -315,7 +306,7 @@ describe("Queue", () => {
         onSuccess,
       });
 
-      const [, jobId] = await queue.enqueue({ message: "hello" });
+      const jobId = await queue.enqueue({ message: "hello" });
 
       await sleep(200);
 
@@ -356,7 +347,7 @@ describe("Queue", () => {
         onError,
       });
 
-      const [, jobId] = await queue.enqueue({ message: "hello" });
+      const jobId = await queue.enqueue({ message: "hello" });
 
       await sleep(4000);
 
@@ -421,7 +412,7 @@ describe("Queue", () => {
         onError,
       });
 
-      const [, jobId] = await queue.enqueue({ message: "hello" });
+      const jobId = await queue.enqueue({ message: "hello" });
 
       await sleep(4000);
 
@@ -469,7 +460,7 @@ describe("Queue", () => {
         onError,
       });
 
-      const [, jobId] = await queue.enqueue({ message: "hello" });
+      const jobId = await queue.enqueue({ message: "hello" });
 
       await sleep(3000);
 
@@ -509,7 +500,7 @@ describe("Queue", () => {
         onError,
       });
 
-      const [, jobId] = await queue.enqueue({ message: "hello" });
+      const jobId = await queue.enqueue({ message: "hello" });
 
       await sleep(3000);
 
@@ -932,7 +923,7 @@ describe("Queue", () => {
         onError,
       });
 
-      const [, jobId] = await queue.enqueue({ message: "hello" });
+      const jobId = await queue.enqueue({ message: "hello" });
 
       await sleep(3000);
 

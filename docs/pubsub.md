@@ -1,6 +1,6 @@
 # PubSub
 
-A type-safe Redis pub/sub wrapper for real-time messaging with result-based error handling. Built on Bun's native Redis client.
+A type-safe Redis pub/sub wrapper for real-time messaging. Built on Bun's native Redis client.
 
 ## Import
 
@@ -32,37 +32,33 @@ Use two separate `Bun.RedisClient` instances when you both subscribe and publish
 
 **`pubsub.publish(message: T)`**
 
-Publishes a message to the channel or pattern. Returns a result tuple with the number of subscribers who received the message.
+Publishes a message to the channel or pattern. Returns the number of subscribers who received the message.
 
 ```typescript
-const [error, count] = await pubsub.publish({
-  userId: "123",
-  action: "login",
-  timestamp: Date.now(),
-});
+try {
+  const count = await pubsub.publish({
+    userId: "123",
+    action: "login",
+    timestamp: Date.now(),
+  });
 
-if (error) {
-  console.error("Failed to publish:", error.message);
-} else {
   console.log(`Message delivered to ${count} subscribers`);
+} catch (error) {
+  console.error("Failed to publish:", error);
 }
 ```
 
 **`pubsub.subscribe(handler: MessageHandler<T>)`**
 
-Subscribes to messages with a handler function. Returns a result tuple indicating success or failure.
+Subscribes to messages with a handler function.
 
 ```typescript
 type MessageHandler<T> = (message: T, channel: string) => void | Promise<void>;
 
-const [error] = await pubsub.subscribe(async (message, channel) => {
+await pubsub.subscribe(async (message, channel) => {
   console.log(`Received on ${channel}:`, message);
   await processMessage(message);
 });
-
-if (error) {
-  console.error("Failed to subscribe:", error.message);
-}
 ```
 
 **`pubsub.unsubscribe()`**
@@ -70,11 +66,7 @@ if (error) {
 Unsubscribes from the channel or pattern and cleans up the handler.
 
 ```typescript
-const [error] = await pubsub.unsubscribe();
-
-if (error) {
-  console.error("Failed to unsubscribe:", error.message);
-}
+await pubsub.unsubscribe();
 ```
 
 **`pubsub.isActive()`**
@@ -139,30 +131,22 @@ const pubsub = new PubSub<{ notification: string }>({
 });
 
 // Subscribe with error handling
-const [subscribeError] = await pubsub.subscribe(async (message) => {
+await pubsub.subscribe(async (message) => {
   // Handler errors are caught automatically; subscription remains active even if handler throws
   await processNotification(message.notification);
 });
 
-if (subscribeError) {
-  console.error("Failed to subscribe:", subscribeError.message);
-  return;
-}
-
 // Publish with error handling
-const [publishError, count] = await pubsub.publish({ notification: "Hello!" });
-
-if (publishError) {
-  switch (publishError.type) {
-    case "SerializationError":
-      console.error("Invalid message format");
-      break;
-    case "PublishError":
-      console.error("Redis connection failed");
-      break;
-  }
-} else {
+try {
+  const count = await pubsub.publish({ notification: "Hello!" });
   console.log(`Delivered to ${count} subscribers`);
+} catch (error) {
+  if (error instanceof Error && error.name === "SerializationError") {
+    console.error("Invalid message format");
+    return;
+  }
+
+  console.error("Redis connection failed");
 }
 
 // Clean up

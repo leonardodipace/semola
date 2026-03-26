@@ -1,4 +1,4 @@
-import { err, mightThrow, mightThrowSync, ok } from "../errors/index.js";
+import { mightThrow, mightThrowSync } from "../errors/index.js";
 import type { Job, JobState, QueueOptions } from "./types.js";
 
 const toMinimalJob = <T>(jobState: JobState<T>): Job<T> => ({
@@ -47,15 +47,15 @@ export class Queue<T> {
 
     const [serializeError, serialized] = this.serializeJob(job);
     if (serializeError || !serialized) {
-      return err("QueueError", "Unable to serialize job data");
+      throw this.createError("QueueError", "Unable to serialize job data");
     }
 
     const [enqueueError] = await this.enqueueJobData(serialized);
     if (enqueueError) {
-      return err("QueueError", "Unable to enqueue job");
+      throw this.createError("QueueError", "Unable to enqueue job");
     }
 
-    return ok(job.id);
+    return job.id;
   }
 
   public async stop() {
@@ -293,5 +293,11 @@ export class Queue<T> {
       job.error = `Failed to re-enqueue job for retry: ${this.formatErrorMessage(pushError)}`;
       await this.callOnError(job);
     }
+  }
+
+  private createError(type: string, message: string) {
+    const error = new Error(message);
+    error.name = type;
+    return error;
   }
 }

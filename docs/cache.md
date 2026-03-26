@@ -1,6 +1,6 @@
 # Cache
 
-A type-safe Redis cache wrapper with TTL support and result-based error handling. Built on Bun's native Redis client.
+A type-safe Redis cache wrapper with TTL support. Built on Bun's native Redis client.
 
 ## Import
 
@@ -36,22 +36,19 @@ const cache = new Cache<User>({
 
 **`cache.get(key: string)`**
 
-Retrieves a value from the cache. Returns a result tuple with the parsed value or an error.
+Retrieves a value from the cache. Returns the parsed value or throws.
 
 ```typescript
-const [error, user] = await cache.get("user:123");
-
-if (error) {
-  switch (error.type) {
-    case "NotFoundError":
-      console.log("Cache miss");
-      break;
-    case "CacheError":
-      console.error("Cache error:", error.message);
-      break;
-  }
-} else {
+try {
+  const user = await cache.get("user:123");
   console.log("Cache hit:", user);
+} catch (error) {
+  if (error instanceof Error && error.name === "NotFoundError") {
+    console.log("Cache miss");
+    return;
+  }
+
+  console.error("Cache error:", error);
 }
 ```
 
@@ -60,13 +57,8 @@ if (error) {
 Stores a value in the cache with serialization. Applies TTL if configured.
 
 ```typescript
-const [error, data] = await cache.set("user:123", { id: 123, name: "John" });
-
-if (error) {
-  console.error("Failed to cache:", error.message);
-} else {
-  console.log("Cached successfully");
-}
+await cache.set("user:123", { id: 123, name: "John" });
+console.log("Cached successfully");
 ```
 
 **`cache.delete(key: string)`**
@@ -74,11 +66,7 @@ if (error) {
 Removes a key from the cache.
 
 ```typescript
-const [error] = await cache.delete("user:123");
-
-if (error) {
-  console.error("Failed to delete:", error.message);
-}
+await cache.delete("user:123");
 ```
 
 ## Usage Example
@@ -101,23 +89,27 @@ const userCache = new Cache<User>({
 // Get or fetch user
 async function getUser(id: string) {
   // Try cache first
-  const [cacheError, cachedUser] = await userCache.get(`user:${id}`);
-
-  if (!cacheError) {
-    return ok(cachedUser);
+  try {
+    return await userCache.get(`user:${id}`);
+  } catch (error) {
+    if (!(error instanceof Error) || error.name !== "NotFoundError") {
+      throw error;
+    }
   }
 
   // Cache miss - fetch from database
-  const [dbError, user] = await fetchUserFromDB(id);
+  const user = await fetchUserFromDB(id);
 
-  if (dbError) {
-    return err("NotFoundError", "User not found");
+  if (!user) {
+    const error = new Error("User not found");
+    error.name = "NotFoundError";
+    throw error;
   }
 
   // Store in cache for next time
   await userCache.set(`user:${id}`, user);
 
-  return ok(user);
+  return user;
 }
 ```
 
@@ -178,7 +170,7 @@ const cache = new Cache<Session>({
 ```
 
 - `ttl: 0` is treated as a valid TTL and passed to Redis as `PX 0`.
-- If the TTL function throws, `set` returns `InvalidTTLError` (and triggers `onError` when configured).
+- If the TTL function throws, `set` throws `InvalidTTLError` (and triggers `onError` when configured).
 
 ### onError
 
