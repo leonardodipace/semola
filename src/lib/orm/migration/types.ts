@@ -78,6 +78,11 @@ export type MigrationOperation =
       kind: "drop-column";
       tableName: string;
       column: ColumnSnapshot;
+    }
+  | {
+      kind: "rebuild-table";
+      fromTable: TableSnapshot;
+      toTable: TableSnapshot;
     };
 
 export type MigrationInfo = {

@@ -9,6 +9,16 @@ function snapshot(tables: SchemaSnapshot["tables"]): SchemaSnapshot {
   };
 }
 
+function snapshotForDialect(
+  dialect: SchemaSnapshot["dialect"],
+  tables: SchemaSnapshot["tables"],
+): SchemaSnapshot {
+  return {
+    dialect,
+    tables,
+  };
+}
+
 describe("diffSnapshots", () => {
   test("detects create table", () => {
     const operations = diffSnapshots(
@@ -698,5 +708,150 @@ describe("diffSnapshots", () => {
     expect(operations).toHaveLength(2);
     expect(operations[0]?.kind).toBe("drop-column");
     expect(operations[1]?.kind).toBe("create-table");
+  });
+
+  test("uses rebuild-table for sqlite altered columns", () => {
+    const operations = diffSnapshots(
+      snapshotForDialect("sqlite", {
+        student: {
+          key: "student",
+          tableName: "student",
+          columns: {
+            id: {
+              key: "id",
+              sqlName: "id",
+              kind: "uuid",
+              isPrimaryKey: true,
+              isNotNull: true,
+              isUnique: false,
+              hasDefault: false,
+              referencesTable: null,
+              referencesColumn: null,
+              onDeleteAction: null,
+            },
+            examId: {
+              key: "examId",
+              sqlName: "exam_id",
+              kind: "uuid",
+              isPrimaryKey: false,
+              isNotNull: false,
+              isUnique: false,
+              hasDefault: false,
+              referencesTable: "exam",
+              referencesColumn: "id",
+              onDeleteAction: null,
+            },
+          },
+        },
+      }),
+      snapshotForDialect("sqlite", {
+        student: {
+          key: "student",
+          tableName: "student",
+          columns: {
+            id: {
+              key: "id",
+              sqlName: "id",
+              kind: "uuid",
+              isPrimaryKey: true,
+              isNotNull: true,
+              isUnique: false,
+              hasDefault: false,
+              referencesTable: null,
+              referencesColumn: null,
+              onDeleteAction: null,
+            },
+            examId: {
+              key: "examId",
+              sqlName: "exam_id",
+              kind: "uuid",
+              isPrimaryKey: false,
+              isNotNull: true,
+              isUnique: false,
+              hasDefault: false,
+              referencesTable: "exam",
+              referencesColumn: "id",
+              onDeleteAction: null,
+            },
+          },
+        },
+      }),
+    );
+
+    expect(operations).toHaveLength(1);
+    expect(operations[0]?.kind).toBe("rebuild-table");
+  });
+
+  test("keeps drop+add strategy for postgres altered columns", () => {
+    const operations = diffSnapshots(
+      snapshot({
+        student: {
+          key: "student",
+          tableName: "student",
+          columns: {
+            id: {
+              key: "id",
+              sqlName: "id",
+              kind: "uuid",
+              isPrimaryKey: true,
+              isNotNull: true,
+              isUnique: false,
+              hasDefault: false,
+              referencesTable: null,
+              referencesColumn: null,
+              onDeleteAction: null,
+            },
+            examId: {
+              key: "examId",
+              sqlName: "exam_id",
+              kind: "uuid",
+              isPrimaryKey: false,
+              isNotNull: false,
+              isUnique: false,
+              hasDefault: false,
+              referencesTable: "exam",
+              referencesColumn: "id",
+              onDeleteAction: null,
+            },
+          },
+        },
+      }),
+      snapshot({
+        student: {
+          key: "student",
+          tableName: "student",
+          columns: {
+            id: {
+              key: "id",
+              sqlName: "id",
+              kind: "uuid",
+              isPrimaryKey: true,
+              isNotNull: true,
+              isUnique: false,
+              hasDefault: false,
+              referencesTable: null,
+              referencesColumn: null,
+              onDeleteAction: null,
+            },
+            examId: {
+              key: "examId",
+              sqlName: "exam_id",
+              kind: "uuid",
+              isPrimaryKey: false,
+              isNotNull: true,
+              isUnique: false,
+              hasDefault: false,
+              referencesTable: "exam",
+              referencesColumn: "id",
+              onDeleteAction: null,
+            },
+          },
+        },
+      }),
+    );
+
+    expect(operations).toHaveLength(2);
+    expect(operations[0]?.kind).toBe("drop-column");
+    expect(operations[1]?.kind).toBe("add-column");
   });
 });

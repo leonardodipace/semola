@@ -273,6 +273,47 @@ function dropColumnSql(
   return `ALTER TABLE ${table} DROP COLUMN ${col}`;
 }
 
+function rebuildTableSql(
+  dialect: SchemaSnapshot["dialect"],
+  fromTable: TableSnapshot,
+  toTable: TableSnapshot,
+) {
+  if (dialect !== "sqlite") {
+    return [];
+  }
+
+  const tableName = quoteIdentifier(dialect, toTable.tableName);
+  const tempTableName = quoteIdentifier(
+    dialect,
+    `__semola_tmp_${toTable.tableName}`,
+  );
+
+  const createSql = createTableSql(dialect, toTable);
+
+  const fromColumns = new Set(
+    Object.values(fromTable.columns).map((column) => column.sqlName),
+  );
+
+  const copyColumns = Object.values(toTable.columns)
+    .filter((column) => fromColumns.has(column.sqlName))
+    .map((column) => quoteIdentifier(dialect, column.sqlName));
+
+  const statements = [
+    `ALTER TABLE ${tableName} RENAME TO ${tempTableName}`,
+    createSql,
+  ];
+
+  if (copyColumns.length > 0) {
+    statements.push(
+      `INSERT INTO ${tableName} (${copyColumns.join(", ")}) SELECT ${copyColumns.join(", ")} FROM ${tempTableName}`,
+    );
+  }
+
+  statements.push(`DROP TABLE ${tempTableName}`);
+
+  return statements;
+}
+
 function reverseOperation(operation: MigrationOperation) {
   if (operation.kind === "create-table") {
     return { kind: "drop-table", table: operation.table } as const;
@@ -287,6 +328,13 @@ function reverseOperation(operation: MigrationOperation) {
       column: operation.column,
     } as const;
   }
+  if (operation.kind === "rebuild-table") {
+    return {
+      kind: "rebuild-table",
+      fromTable: operation.toTable,
+      toTable: operation.fromTable,
+    } as const;
+  }
   return {
     kind: "add-column",
     tableName: operation.tableName,
@@ -294,20 +342,23 @@ function reverseOperation(operation: MigrationOperation) {
   } as const;
 }
 
-function operationToSql(
+function operationToStatements(
   dialect: SchemaSnapshot["dialect"],
   operation: MigrationOperation,
 ) {
   if (operation.kind === "create-table") {
-    return createTableSql(dialect, operation.table);
+    return [createTableSql(dialect, operation.table)];
   }
   if (operation.kind === "drop-table") {
-    return dropTableSql(dialect, operation.table);
+    return [dropTableSql(dialect, operation.table)];
   }
   if (operation.kind === "add-column") {
-    return addColumnSql(dialect, operation.tableName, operation.column);
+    return [addColumnSql(dialect, operation.tableName, operation.column)];
   }
-  return dropColumnSql(dialect, operation.tableName, operation.column);
+  if (operation.kind === "rebuild-table") {
+    return rebuildTableSql(dialect, operation.fromTable, operation.toTable);
+  }
+  return [dropColumnSql(dialect, operation.tableName, operation.column)];
 }
 
 function joinStatements(statements: string[]) {
@@ -321,9 +372,26 @@ export function buildUpSql(
   dialect: SchemaSnapshot["dialect"],
   operations: MigrationOperation[],
 ) {
-  const statements = operations.map((operation) =>
-    operationToSql(dialect, operation),
+  const statements = operations.flatMap((operation) =>
+    operationToStatements(dialect, operation),
   );
+
+  const hasRebuildOperation = operations.some(
+    (operation) => operation.kind === "rebuild-table",
+  );
+
+  if (dialect === "sqlite" && hasRebuildOperation) {
+    const wrappedStatements = [
+      "PRAGMA foreign_keys = OFF",
+      "BEGIN",
+      ...statements,
+      "COMMIT",
+      "PRAGMA foreign_keys = ON",
+    ];
+
+    return joinStatements(wrappedStatements);
+  }
+
   return joinStatements(statements);
 }
 
@@ -334,8 +402,25 @@ export function buildDownSql(
   const reversed = [...operations]
     .reverse()
     .map((operation) => reverseOperation(operation));
-  const statements = reversed.map((operation) =>
-    operationToSql(dialect, operation),
+  const statements = reversed.flatMap((operation) =>
+    operationToStatements(dialect, operation),
   );
+
+  const hasRebuildOperation = reversed.some(
+    (operation) => operation.kind === "rebuild-table",
+  );
+
+  if (dialect === "sqlite" && hasRebuildOperation) {
+    const wrappedStatements = [
+      "PRAGMA foreign_keys = OFF",
+      "BEGIN",
+      ...statements,
+      "COMMIT",
+      "PRAGMA foreign_keys = ON",
+    ];
+
+    return joinStatements(wrappedStatements);
+  }
+
   return joinStatements(statements);
 }

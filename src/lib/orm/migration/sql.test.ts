@@ -524,66 +524,24 @@ describe("buildUpSql/buildDownSql", () => {
     );
   });
 
-  test("sqlite migration can alter fk column with foreign_keys enabled", async () => {
-    const ops: MigrationOperation[] = [
-      {
-        kind: "create-table",
-        table: {
-          key: "exam",
-          tableName: "exam",
-          columns: {
-            id: {
-              key: "id",
-              sqlName: "id",
-              kind: "uuid",
-              isPrimaryKey: true,
-              isNotNull: true,
-              isUnique: false,
-              hasDefault: false,
-              referencesTable: null,
-              referencesColumn: null,
-              onDeleteAction: null,
-            },
-          },
+  test("sqlite rebuild migration preserves data for altered columns", async () => {
+    const studentBefore = {
+      key: "student",
+      tableName: "student",
+      columns: {
+        id: {
+          key: "id",
+          sqlName: "id",
+          kind: "uuid",
+          isPrimaryKey: true,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
         },
-      },
-      {
-        kind: "create-table",
-        table: {
-          key: "student",
-          tableName: "student",
-          columns: {
-            id: {
-              key: "id",
-              sqlName: "id",
-              kind: "uuid",
-              isPrimaryKey: true,
-              isNotNull: true,
-              isUnique: false,
-              hasDefault: false,
-              referencesTable: null,
-              referencesColumn: null,
-              onDeleteAction: null,
-            },
-            examId: {
-              key: "examId",
-              sqlName: "exam_id",
-              kind: "uuid",
-              isPrimaryKey: false,
-              isNotNull: false,
-              isUnique: false,
-              hasDefault: false,
-              referencesTable: "exam",
-              referencesColumn: "id",
-              onDeleteAction: null,
-            },
-          },
-        },
-      },
-      {
-        kind: "drop-column",
-        tableName: "student",
-        column: {
+        examId: {
           key: "examId",
           sqlName: "exam_id",
           kind: "uuid",
@@ -596,10 +554,25 @@ describe("buildUpSql/buildDownSql", () => {
           onDeleteAction: null,
         },
       },
-      {
-        kind: "add-column",
-        tableName: "student",
-        column: {
+    } as const;
+
+    const studentAfter = {
+      key: "student",
+      tableName: "student",
+      columns: {
+        id: {
+          key: "id",
+          sqlName: "id",
+          kind: "uuid",
+          isPrimaryKey: true,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+        examId: {
           key: "examId",
           sqlName: "exam_id",
           kind: "uuid",
@@ -612,20 +585,117 @@ describe("buildUpSql/buildDownSql", () => {
           onDeleteAction: null,
         },
       },
+    } as const;
+
+    const examBefore = {
+      key: "exam",
+      tableName: "exam",
+      columns: {
+        id: {
+          key: "id",
+          sqlName: "id",
+          kind: "uuid",
+          isPrimaryKey: true,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+        name: {
+          key: "name",
+          sqlName: "name",
+          kind: "string",
+          isPrimaryKey: false,
+          isNotNull: false,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+      },
+    } as const;
+
+    const examAfter = {
+      key: "exam",
+      tableName: "exam",
+      columns: {
+        id: {
+          key: "id",
+          sqlName: "id",
+          kind: "uuid",
+          isPrimaryKey: true,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+        name: {
+          key: "name",
+          sqlName: "name",
+          kind: "string",
+          isPrimaryKey: false,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+      },
+    } as const;
+
+    const ops: MigrationOperation[] = [
+      {
+        kind: "rebuild-table",
+        fromTable: examBefore,
+        toTable: examAfter,
+      },
+      {
+        kind: "rebuild-table",
+        fromTable: studentBefore,
+        toTable: studentAfter,
+      },
     ];
 
     const sqlText = buildUpSql("sqlite", ops);
 
-    expect(sqlText).toContain('"exam_id" TEXT REFERENCES "exam" ("id")');
-    expect(sqlText).not.toContain('FOREIGN KEY ("exam_id")');
+    expect(sqlText).toContain("PRAGMA foreign_keys = OFF");
+    expect(sqlText).toContain("BEGIN");
+    expect(sqlText).toContain(
+      'ALTER TABLE "exam" RENAME TO "__semola_tmp_exam"',
+    );
+    expect(sqlText).toContain(
+      'ALTER TABLE "student" RENAME TO "__semola_tmp_student"',
+    );
+    expect(sqlText).toContain("COMMIT");
+    expect(sqlText).toContain("PRAGMA foreign_keys = ON");
 
     const db = new SQL("sqlite::memory:");
 
     await db`PRAGMA foreign_keys = ON`;
+    await db`CREATE TABLE exam (id TEXT PRIMARY KEY, name TEXT)`;
+    await db`CREATE TABLE student (id TEXT PRIMARY KEY, exam_id TEXT REFERENCES exam(id))`;
+    await db`INSERT INTO exam (id, name) VALUES ('e1', 'math')`;
+    await db`INSERT INTO student (id, exam_id) VALUES ('s1', 'e1')`;
 
     for (const statement of splitStatements(sqlText)) {
       await db`${db.unsafe(statement)}`;
     }
+
+    const exams = await db`SELECT id, name FROM exam ORDER BY id`;
+    expect(exams.length).toBe(1);
+    expect(exams[0]?.id).toBe("e1");
+    expect(exams[0]?.name).toBe("math");
+
+    const students = await db`SELECT id, exam_id FROM student ORDER BY id`;
+    expect(students.length).toBe(1);
+    expect(students[0]?.id).toBe("s1");
+    expect(students[0]?.exam_id).toBe("e1");
 
     await db.close();
   });

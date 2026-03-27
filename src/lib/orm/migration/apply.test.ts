@@ -69,4 +69,30 @@ describe("applyMigrations", () => {
     };
     expect(state.applied[0]?.id).toBe("20260228231146001");
   });
+
+  test("applies migration with explicit transaction statements", async () => {
+    const cwd = await setupProject();
+    const migrationDir = join(cwd, "migrations", "20260326221500000_rebuild");
+
+    await mkdir(migrationDir, { recursive: true });
+    await Bun.write(
+      join(migrationDir, "up.sql"),
+      [
+        "PRAGMA foreign_keys = OFF;",
+        "BEGIN;",
+        "CREATE TABLE users (id TEXT PRIMARY KEY);",
+        "COMMIT;",
+        "PRAGMA foreign_keys = ON;",
+        "",
+      ].join("\n"),
+    );
+    await Bun.write(
+      join(migrationDir, "down.sql"),
+      "DROP TABLE IF EXISTS users;\n",
+    );
+
+    const result = await applyMigrations({ cwd });
+    expect(result.applied).toBe(1);
+    expect(result.total).toBe(1);
+  });
 });

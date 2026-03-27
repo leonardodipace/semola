@@ -184,6 +184,14 @@ function orderDropTableOperations(
   }));
 }
 
+function orderRebuildTableOperations(
+  operations: Array<Extract<MigrationOperation, { kind: "rebuild-table" }>>,
+): Array<Extract<MigrationOperation, { kind: "rebuild-table" }>> {
+  return [...operations].sort((left, right) =>
+    left.toTable.tableName.localeCompare(right.toTable.tableName),
+  );
+}
+
 export function diffSnapshots(
   previous: SchemaSnapshot,
   current: SchemaSnapshot,
@@ -196,6 +204,9 @@ export function diffSnapshots(
   > = [];
   const dropColumnOperations: Array<
     Extract<MigrationOperation, { kind: "drop-column" }>
+  > = [];
+  const rebuildTableOperations: Array<
+    Extract<MigrationOperation, { kind: "rebuild-table" }>
   > = [];
   const addColumnOperations: Array<
     Extract<MigrationOperation, { kind: "add-column" }>
@@ -222,6 +233,46 @@ export function diffSnapshots(
     const newBySqlName = new Map(
       Object.values(newTable.columns).map((c) => [c.sqlName, c]),
     );
+
+    let shouldRebuildTable = false;
+
+    const needsSqliteRebuild = current.dialect === "sqlite";
+
+    if (needsSqliteRebuild) {
+      for (const sqlName of oldBySqlName.keys()) {
+        if (newBySqlName.has(sqlName)) {
+          continue;
+        }
+
+        shouldRebuildTable = true;
+        break;
+      }
+
+      if (!shouldRebuildTable) {
+        for (const [sqlName, newColumn] of newBySqlName) {
+          const oldColumn = oldBySqlName.get(sqlName);
+
+          if (!oldColumn) {
+            continue;
+          }
+
+          if (!columnsEqual(oldColumn, newColumn)) {
+            shouldRebuildTable = true;
+            break;
+          }
+        }
+      }
+
+      if (shouldRebuildTable) {
+        rebuildTableOperations.push({
+          kind: "rebuild-table",
+          fromTable: oldTable,
+          toTable: newTable,
+        });
+
+        continue;
+      }
+    }
 
     for (const [sqlName, oldColumn] of oldBySqlName) {
       if (!newBySqlName.has(sqlName)) {
@@ -263,6 +314,7 @@ export function diffSnapshots(
   }
 
   return [
+    ...orderRebuildTableOperations(rebuildTableOperations),
     ...dropColumnOperations,
     ...orderDropTableOperations(dropTableOperations),
     ...orderCreateTableOperations(createTableOperations),
