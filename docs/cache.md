@@ -36,18 +36,19 @@ const cache = new Cache<User>({
 
 **`cache.get(key: string)`**
 
-Retrieves a value from the cache. Returns the parsed value or throws.
+Retrieves a value from the cache. Returns the parsed value or `null` on cache miss, and throws only on cache errors.
 
 ```typescript
 try {
   const user = await cache.get("user:123");
-  console.log("Cache hit:", user);
-} catch (error) {
-  if (error instanceof Error && error.name === "NotFoundError") {
+
+  if (user === null) {
     console.log("Cache miss");
     return;
   }
 
+  console.log("Cache hit:", user);
+} catch (error) {
   console.error("Cache error:", error);
 }
 ```
@@ -90,11 +91,13 @@ const userCache = new Cache<User>({
 async function getUser(id: string) {
   // Try cache first
   try {
-    return await userCache.get(`user:${id}`);
-  } catch (error) {
-    if (!(error instanceof Error) || error.name !== "NotFoundError") {
-      throw error;
+    const cached = await userCache.get(`user:${id}`);
+
+    if (cached !== null) {
+      return cached;
     }
+  } catch (error) {
+    throw error;
   }
 
   // Cache miss - fetch from database
@@ -132,7 +135,7 @@ await usersCache.delete("123"); // Deletes "users:123"
 
 When `enabled` is set to `false`, all cache operations become no-ops:
 
-- `get` returns a `NotFoundError` (cache miss)
+- `get` returns `null` (cache miss)
 - `set` returns the value without storing it
 - `delete` returns `0` without deleting
 
@@ -174,7 +177,7 @@ const cache = new Cache<Session>({
 
 ### onError
 
-Receive a callback on unexpected errors (`CacheError`, `InvalidTTLError`). Not called on `NotFoundError` (normal cache miss).
+Receive a callback on unexpected errors (`CacheError`, `InvalidTTLError`). Not called on normal cache miss (`null`).
 
 ```typescript
 const cache = new Cache<User>({

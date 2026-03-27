@@ -14,7 +14,7 @@ export class Cache<T> {
 
   public async get(key: string) {
     if (!this.isEnabled) {
-      this.fail("NotFoundError", `Key ${key} not found`);
+      return null;
     }
 
     const resolvedKey = this.resolveKey(key);
@@ -28,7 +28,7 @@ export class Cache<T> {
     }
 
     if (value === null || value === undefined) {
-      this.fail("NotFoundError", `Key ${key} not found`);
+      return null;
     }
 
     const [deserializeErr, deserialized] = mightThrowSync<T>(() =>

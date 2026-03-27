@@ -91,15 +91,12 @@ describe("Cache", () => {
       expect(data).toEqual({ name: "John" });
     });
 
-    test("should return NotFoundError when key does not exist", async () => {
+    test("should return null when key does not exist", async () => {
       const redis = createMockRedis();
       const cache = new Cache<string>({ redis });
 
       const [error, data] = await settle(cache.get("nonexistent"));
-      expect(error).toEqual({
-        type: "NotFoundError",
-        message: "Key nonexistent not found",
-      });
+      expect(error).toBeNull();
       expect(data).toBeNull();
     });
 
@@ -361,16 +358,13 @@ describe("Cache", () => {
   });
 
   describe("enabled", () => {
-    test("get should return NotFoundError when disabled", async () => {
+    test("get should return null when disabled", async () => {
       const redis = createMockRedis();
       await redis.set("key", JSON.stringify("value"));
       const cache = new Cache<string>({ redis, enabled: false });
 
       const [error, data] = await settle(cache.get("key"));
-      expect(error).toEqual({
-        type: "NotFoundError",
-        message: "Key key not found",
-      });
+      expect(error).toBeNull();
       expect(data).toBeNull();
     });
 
@@ -623,7 +617,7 @@ describe("Cache", () => {
       ]);
     });
 
-    test("should call onError on NotFoundError", async () => {
+    test("should not call onError on cache miss", async () => {
       const redis = createMockRedis();
       const errors: { type: string; message: string }[] = [];
       const cache = new Cache<string>({
@@ -631,11 +625,9 @@ describe("Cache", () => {
         onError: (error) => errors.push(error),
       });
 
-      await cache.get("nonexistent").catch(() => null);
+      await cache.get("nonexistent");
 
-      expect(errors).toEqual([
-        { type: "NotFoundError", message: "Key nonexistent not found" },
-      ]);
+      expect(errors).toEqual([]);
     });
 
     test("should not call onError when no errors occur", async () => {
@@ -750,8 +742,9 @@ describe("Cache", () => {
       expect(delCount).toBe(1);
 
       // Verify deleted
-      const [notFoundError] = await settle(cache.get("user:123"));
-      expect(notFoundError?.type).toBe("NotFoundError");
+      const [notFoundError, missingValue] = await settle(cache.get("user:123"));
+      expect(notFoundError).toBeNull();
+      expect(missingValue).toBeNull();
     });
 
     test("should handle multiple cache instances with same Redis client", async () => {
