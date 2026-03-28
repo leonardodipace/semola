@@ -38,11 +38,11 @@ job.stop();
 Five fields: minute, hour, day of month, month, day of week
 
 ```typescript
-"0 0 * * *"      // Daily at midnight
-"0 */6 * * *"    // Every 6 hours
-"30 9 * * 1-5"   // 9:30 AM on weekdays
-"0 0 1 * *"      // First day of month
-"0 0 * * 0"      // Every Sunday
+"0 0 * * *"; // Daily at midnight
+"0 */6 * * *"; // Every 6 hours
+"30 9 * * 1-5"; // 9:30 AM on weekdays
+"0 0 1 * *"; // First day of month
+"0 0 * * 0"; // Every Sunday
 ```
 
 ### With Seconds (6 fields)
@@ -50,31 +50,31 @@ Five fields: minute, hour, day of month, month, day of week
 Six fields: second, minute, hour, day of month, month, day of week
 
 ```typescript
-"* * * * * *"     // Every second
-"*/5 * * * * *"   // Every 5 seconds
-"30 * * * * *"    // Every 30th second of each minute
-"0 */5 * * * *"   // Every 5 minutes
+"* * * * * *"; // Every second
+"*/5 * * * * *"; // Every 5 seconds
+"30 * * * * *"; // Every 30th second of each minute
+"0 */5 * * * *"; // Every 5 minutes
 ```
 
 ### Convenient Aliases
 
 ```typescript
-"@yearly"    // 0 0 1 1 *
-"@monthly"   // 0 0 1 * *
-"@weekly"    // 0 0 * * 0
-"@daily"     // 0 0 * * *
-"@hourly"    // 0 * * * *
-"@minutely"  // * * * * *
+"@yearly"; // 0 0 1 1 *
+"@monthly"; // 0 0 1 * *
+"@weekly"; // 0 0 * * 0
+"@daily"; // 0 0 * * *
+"@hourly"; // 0 * * * *
+"@minutely"; // * * * * *
 ```
 
 ### Advanced Patterns
 
 ```typescript
-"*/5 * * * *"      // Every 5 minutes
-"0 9-17 * * *"     // Every hour from 9 AM to 5 PM
-"0 0,12 * * *"     // At midnight and noon
-"0 9-17/2 * * *"   // Every 2 hours from 9 AM to 5 PM
-"*/30 * * * * *"   // Every 30 seconds
+"*/5 * * * *"; // Every 5 minutes
+"0 9-17 * * *"; // Every hour from 9 AM to 5 PM
+"0 0,12 * * *"; // At midnight and noon
+"0 9-17/2 * * *"; // Every 2 hours from 9 AM to 5 PM
+"*/30 * * * * *"; // Every 30 seconds
 ```
 
 ## Job Control
@@ -183,7 +183,7 @@ process.on("SIGTERM", async () => {
 
 ## Error Handling
 
-If the handler throws an error, the job continues to the next scheduled execution. Handle errors in your handler.
+`Cron` does not catch errors thrown by your handler. If the handler rejects, that failure bubbles out of the scheduled run.
 
 ```typescript
 const job = new Cron({
@@ -203,4 +203,4 @@ const job = new Cron({
 
 ## Concurrency
 
-By default, only one instance of a job runs at a time. If a job is still running when the next schedule hits, the new execution is skipped.
+Only one scheduled execution is active at a time. The next run is scheduled after the current handler settles, so long-running handlers delay later executions rather than overlapping them.

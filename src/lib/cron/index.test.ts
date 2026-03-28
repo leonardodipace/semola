@@ -49,7 +49,9 @@ describe("Cron", () => {
           schedule: "invalid",
           handler,
         });
-      }).toThrow("CronLengthError");
+      }).toThrow(
+        "Invalid number of fields for 'invalid'. Expected 5 or 6 fields but got 1 field(s)",
+      );
     });
 
     test("should throw error for cron expression with wrong field count", () => {
@@ -61,7 +63,9 @@ describe("Cron", () => {
           schedule: "0 0 * *",
           handler,
         });
-      }).toThrow("CronLengthError");
+      }).toThrow(
+        "Invalid number of fields for '0 0 * *'. Expected 5 or 6 fields but got 4 field(s)",
+      );
     });
   });
 
@@ -75,7 +79,7 @@ describe("Cron", () => {
           schedule: "10000000 0 * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow("Expected 10000000 <= 59");
     });
 
     test("should reject an out-of-bounds number in second (100)", () => {
@@ -87,7 +91,7 @@ describe("Cron", () => {
           schedule: "100 * * * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow("Expected 100 <= 59");
     });
 
     test("should reject an out-of-bounds step range in minute field (50-70/5)", () => {
@@ -99,7 +103,7 @@ describe("Cron", () => {
           schedule: "* 50-70/5  * * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow("Expected 70 <= 59");
     });
 
     test("should accept a step range in minute field without the starting value", () => {
@@ -135,7 +139,7 @@ describe("Cron", () => {
           schedule: "* -70/5  * * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow("Expected 70 <= 59");
     });
 
     test("should reject an out-of-bounds step range in minute field (70/5)", () => {
@@ -147,7 +151,7 @@ describe("Cron", () => {
           schedule: "* 70/5  * * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow("Expected 70 <= 59");
     });
 
     test("should reject an out-of-bounds step range in day of the week field (7)", () => {
@@ -159,7 +163,7 @@ describe("Cron", () => {
           schedule: "0 0 * * 7",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow("Expected 7 <= 6");
     });
 
     test("should reject an out-of-bounds list value in hour field (1,15,40)", () => {
@@ -171,7 +175,7 @@ describe("Cron", () => {
           schedule: "0 1,15,40 * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow("Expected 40 <= 23");
     });
 
     test("should reject an out-of-bounds range value in day field (1-33)", () => {
@@ -183,7 +187,7 @@ describe("Cron", () => {
           schedule: "0 * 1-33 * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow("Expected 33 <= 31");
     });
 
     test("inverted range with step inside a list passes scanner", () => {
@@ -195,7 +199,7 @@ describe("Cron", () => {
           schedule: "30-10/5 * * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow("Expected 30 <= 10");
     });
 
     test("inverted range inside a list passes scanner", () => {
@@ -207,7 +211,7 @@ describe("Cron", () => {
           schedule: "30-10 * * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow("Expected 30 <= 10");
     });
 
     test("wildcard-with-step = 0 should fail", () => {
@@ -219,7 +223,7 @@ describe("Cron", () => {
           schedule: "*/0,30 * * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow("Step must be greater than 0");
     });
 
     test("should reject an out-of-bounds step range in minute field (2-70/5)", () => {
@@ -231,7 +235,7 @@ describe("Cron", () => {
           schedule: "2-70/5 * * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow("Expected 70 <= 59");
     });
   });
 
