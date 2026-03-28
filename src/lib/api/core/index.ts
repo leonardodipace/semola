@@ -74,12 +74,12 @@ const resolveValidation = (v?: ValidationOptions) => {
   return { input: v.input !== false, output: v.output !== false };
 };
 
-const toValidationError = (error: unknown) => {
+const getErrorMessage = (error: unknown) => {
   if (error instanceof Error) {
-    return error;
+    return error.message;
   }
 
-  return new Error("Validation failed");
+  return "Validation failed";
 };
 
 const validateAndCapture = async <T>(validate: () => Promise<T>) => {
@@ -88,7 +88,7 @@ const validateAndCapture = async <T>(validate: () => Promise<T>) => {
   if (error) {
     return {
       success: false as const,
-      error: toValidationError(error),
+      message: getErrorMessage(error),
     };
   }
 
@@ -216,8 +216,9 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     );
 
     if (validationError) {
-      const error = toValidationError(validationError);
-      return responseHelpers.json(400, { message: error.message });
+      return responseHelpers.json(400, {
+        message: getErrorMessage(validationError),
+      });
     }
 
     return response;
@@ -286,7 +287,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
 
               if (!result.success) {
                 return responseHelpers.json(400, {
-                  message: result.error?.message,
+                  message: result.message,
                 });
               }
 
@@ -318,7 +319,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
 
             if (!result.success) {
               return responseHelpers.json(400, {
-                message: result.error?.message,
+                message: result.message,
               });
             }
 

@@ -96,9 +96,7 @@ async function getUser(id: string) {
   const user = await fetchUserFromDB(id);
 
   if (!user) {
-    const error = new Error("User not found");
-    error.name = "NotFoundError";
-    throw error;
+    return null;
   }
 
   // Store in cache for next time

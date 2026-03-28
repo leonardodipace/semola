@@ -64,19 +64,6 @@ const createMockRedis = () => {
   return new MockRedisClient() as MockRedisClient & Bun.RedisClient;
 };
 
-const settle = async <T>(promise: Promise<T>) => {
-  try {
-    const value = await promise;
-    return [null, value] as const;
-  } catch (error) {
-    if (error instanceof Error) {
-      return [{ type: error.name, message: error.message }, null] as const;
-    }
-
-    return [{ type: "UnknownError", message: String(error) }, null] as const;
-  }
-};
-
 describe("PubSub", () => {
   describe("Channel mode", () => {
     test("should publish and receive messages", async () => {
@@ -89,24 +76,16 @@ describe("PubSub", () => {
 
       const messages: Array<{ userId: string; action: string }> = [];
 
-      const [subscribeError, subscriberCount] = await settle(
-        pubsub.subscribe(async (message) => {
-          messages.push(message);
-        }),
-      );
-
-      expect(subscribeError).toBeNull();
+      const subscriberCount = await pubsub.subscribe(async (message) => {
+        messages.push(message);
+      });
       expect(subscriberCount).toBe(1);
       expect(pubsub.isActive()).toBe(true);
 
-      const [publishError, count] = await settle(
-        pubsub.publish({
-          userId: "123",
-          action: "login",
-        }),
-      );
-
-      expect(publishError).toBeNull();
+      const count = await pubsub.publish({
+        userId: "123",
+        action: "login",
+      });
       expect(count).toBe(1);
 
       // Wait for async message handling
@@ -149,9 +128,7 @@ describe("PubSub", () => {
 
       expect(pubsub.isActive()).toBe(true);
 
-      const [error] = await settle(pubsub.unsubscribe());
-
-      expect(error).toBeNull();
+      await pubsub.unsubscribe();
       expect(pubsub.isActive()).toBe(false);
       expect(redis.getSubscriptions().size).toBe(0);
     });
@@ -164,18 +141,13 @@ describe("PubSub", () => {
         channel: "test",
       });
 
-      const [error1, count1] = await settle(pubsub.subscribe(async () => {}));
-
-      expect(error1).toBeNull();
+      const count1 = await pubsub.subscribe(async () => {});
       expect(count1).toBe(1);
 
-      const [error2, count2] = await settle(pubsub.subscribe(async () => {}));
-
-      expect(error2).toEqual({
-        type: "SubscribeError",
+      await expect(pubsub.subscribe(async () => {})).rejects.toMatchObject({
+        name: "SubscribeError",
         message: "Already subscribed",
       });
-      expect(count2).toBeNull();
     });
 
     test("should return subscriber count on successful subscribe", async () => {
@@ -186,12 +158,12 @@ describe("PubSub", () => {
         channel: "test",
       });
 
-      const [, count] = await settle(pubsub.subscribe(async () => {}));
+      const count = await pubsub.subscribe(async () => {});
 
       expect(count).toBe(1);
     });
 
-    test("should return null count on subscribe error", async () => {
+    test("should throw on subscribe error", async () => {
       const redis = createMockRedis();
       const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
@@ -201,9 +173,10 @@ describe("PubSub", () => {
 
       redis.setShouldFail(true);
 
-      const [, count] = await settle(pubsub.subscribe(async () => {}));
-
-      expect(count).toBeNull();
+      await expect(pubsub.subscribe(async () => {})).rejects.toMatchObject({
+        name: "SubscribeError",
+        message: "Unable to subscribe to test",
+      });
     });
 
     test("should increment subscriber count with multiple subscribers", async () => {
@@ -244,10 +217,8 @@ describe("PubSub", () => {
         channel: "test",
       });
 
-      const [error] = await settle(pubsub.unsubscribe());
-
-      expect(error).toEqual({
-        type: "UnsubscribeError",
+      await expect(pubsub.unsubscribe()).rejects.toMatchObject({
+        name: "UnsubscribeError",
         message: "Not subscribed",
       });
     });
@@ -451,14 +422,10 @@ describe("PubSub", () => {
 
       circular.self = circular;
 
-      const [error, data] = await settle(pubsub.publish(circular));
-
-      expect(error).toEqual({
-        type: "SerializationError",
+      await expect(pubsub.publish(circular)).rejects.toMatchObject({
+        name: "SerializationError",
         message: "Unable to serialize message",
       });
-
-      expect(data).toBeNull();
     });
 
     test("should handle publish errors", async () => {
@@ -471,16 +438,10 @@ describe("PubSub", () => {
 
       redis.setShouldFail(true);
 
-      const [error, data] = await settle(
-        pubsub.publish({ message: "message" }),
-      );
-
-      expect(error).toEqual({
-        type: "PublishError",
+      await expect(pubsub.publish({ message: "message" })).rejects.toMatchObject({
+        name: "PublishError",
         message: "Unable to publish to test",
       });
-
-      expect(data).toBeNull();
     });
 
     test("should handle subscribe errors", async () => {
@@ -493,14 +454,10 @@ describe("PubSub", () => {
 
       redis.setShouldFail(true);
 
-      const [error, count] = await settle(pubsub.subscribe(async () => {}));
-
-      expect(error).toEqual({
-        type: "SubscribeError",
+      await expect(pubsub.subscribe(async () => {})).rejects.toMatchObject({
+        name: "SubscribeError",
         message: "Unable to subscribe to test",
       });
-
-      expect(count).toBeNull();
       expect(pubsub.isActive()).toBe(false);
     });
 
@@ -516,14 +473,10 @@ describe("PubSub", () => {
 
       redis.setShouldFail(true);
 
-      const [error, data] = await settle(pubsub.unsubscribe());
-
-      expect(error).toEqual({
-        type: "UnsubscribeError",
+      await expect(pubsub.unsubscribe()).rejects.toMatchObject({
+        name: "UnsubscribeError",
         message: "Unable to unsubscribe from test",
       });
-
-      expect(data).toBeNull();
     });
 
     test("should handle invalid JSON gracefully", async () => {
@@ -740,18 +693,18 @@ describe("PubSub", () => {
 
       expect(pubsub.isActive()).toBe(true);
 
-      // Attempt two concurrent unsubscribe calls using Promise.all
-      const results = await Promise.all([
-        settle(pubsub.unsubscribe()),
-        settle(pubsub.unsubscribe()),
+      // Attempt two concurrent unsubscribe calls using Promise.allSettled
+      const results = await Promise.allSettled([
+        pubsub.unsubscribe(),
+        pubsub.unsubscribe(),
       ]);
 
-      const [error1] = results[0];
-      const [error2] = results[1];
-
-      // Only one should succeed (null error), the other should fail
-      const successCount = [error1, error2].filter((e) => e === null).length;
-      const failureCount = [error1, error2].filter((e) => e !== null).length;
+      const successCount = results.filter(
+        (result) => result.status === "fulfilled",
+      ).length;
+      const failureCount = results.filter(
+        (result) => result.status === "rejected",
+      ).length;
 
       expect(successCount).toBe(1);
       expect(failureCount).toBe(1);

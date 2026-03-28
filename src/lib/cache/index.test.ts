@@ -501,7 +501,7 @@ describe("Cache", () => {
       });
 
       redis.setShouldFail(true);
-      await cache.get("key").catch(() => null);
+      await expect(cache.get("key")).rejects.toBeInstanceOf(Error);
 
       expect(errors).toEqual([
         { type: "CacheError", message: "Unable to get value for key key" },
@@ -517,7 +517,7 @@ describe("Cache", () => {
       });
 
       redis.setShouldFail(true);
-      await cache.set("key", "value").catch(() => null);
+      await expect(cache.set("key", "value")).rejects.toBeInstanceOf(Error);
 
       expect(errors).toEqual([
         { type: "CacheError", message: "Unable to set value for key key" },
@@ -533,7 +533,7 @@ describe("Cache", () => {
       });
 
       redis.setShouldFail(true);
-      await cache.delete("key").catch(() => null);
+      await expect(cache.delete("key")).rejects.toBeInstanceOf(Error);
 
       expect(errors).toEqual([
         { type: "CacheError", message: "Unable to delete key key" },
@@ -549,7 +549,7 @@ describe("Cache", () => {
         onError: (error) => errors.push(error),
       });
 
-      await cache.set("key", "value").catch(() => null);
+      await expect(cache.set("key", "value")).rejects.toBeInstanceOf(Error);
 
       expect(errors).toEqual([
         {
@@ -567,8 +567,9 @@ describe("Cache", () => {
         onError: (error) => errors.push(error),
       });
 
-      await cache.get("nonexistent");
+      const value = await cache.get("nonexistent");
 
+      expect(value).toBeNull();
       expect(errors).toEqual([]);
     });
 
