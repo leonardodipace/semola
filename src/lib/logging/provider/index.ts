@@ -4,6 +4,7 @@ import { mightThrowSync } from "../../errors/index.js";
 import { PROVIDER_OPTION_DEFAULT } from "../core/index.js";
 
 import { type LogDataType, LogLevel } from "../core/types.js";
+import { isoDateTimeFormat } from "../formatter/index.js";
 import type {
   FileProviderOptions,
   ProviderOptions,
@@ -72,7 +73,11 @@ export class FileProvider extends LoggerProvider {
 
     const [error, formattedMessage] = mightThrowSync(() => {
       if (this.isJSONFile()) {
-        return JSON.stringify({ message: data.msg });
+        return JSON.stringify({
+          timestamp: isoDateTimeFormat(),
+          level: data.level,
+          message: data.msg,
+        });
       }
 
       const { formatter } = this.options;
