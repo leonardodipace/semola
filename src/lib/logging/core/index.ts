@@ -20,7 +20,7 @@ export type StackTraceData = {
 };
 
 export class StackData {
-  private stack: StackTraceData[] = [] as StackTraceData[];
+  private stack: StackTraceData[] = [];
 
   public constructor(fn: Function) {
     const oldStackTrace = Error.prepareStackTrace;
