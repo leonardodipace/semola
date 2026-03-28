@@ -43,7 +43,7 @@ export class StackData {
     if (stackTraceError) this.stack = [];
   }
 
-  public retriveFrame() {
+  public retrieveFrame() {
     if (this.stack.length === 0) return undefined;
 
     // Access the second stack frame because I need to ignore
@@ -76,7 +76,7 @@ export abstract class AbstractLogger {
     prefix: string,
   ): LogDataType {
     const stack = new StackData(this.createLogData);
-    const logCall = stack.retriveFrame();
+    const logCall = stack.retrieveFrame();
     let logData: LogDataType = { level, msg, prefix };
 
     if (!logCall) {
