@@ -1,6 +1,6 @@
 # Cache
 
-A type-safe Redis cache wrapper with TTL support and result-based error handling. Built on Bun's native Redis client.
+A type-safe Redis cache wrapper with TTL support and customizable serialization. Built on Bun's native Redis client.
 
 ## Import
 
@@ -15,8 +15,6 @@ import { Cache } from "semola/cache";
 Creates a new cache instance.
 
 ```typescript
-type CacheError = "CacheError" | "InvalidTTLError";
-
 type CacheOptions<T> = {
   redis: Bun.RedisClient;
   ttl?: number | ((key: string, value: T) => number); // TTL in ms, or per-entry function
@@ -24,7 +22,6 @@ type CacheOptions<T> = {
   prefix?: string; // Key prefix, e.g. "users" -> "users:key"
   serializer?: (value: T) => string; // Custom serializer (default: JSON.stringify)
   deserializer?: (raw: string) => T; // Custom deserializer (default: JSON.parse)
-  onError?: (error: { type: CacheError; message: string }) => void; // Error callback
 };
 
 const cache = new Cache<User>({
@@ -36,37 +33,21 @@ const cache = new Cache<User>({
 
 **`cache.get(key: string)`**
 
-Retrieves a value from the cache. Returns a result tuple with the parsed value or an error.
+Retrieves and deserializes a value from the cache. Returns `null` when caching is disabled or the key is missing.
 
 ```typescript
-const [error, user] = await cache.get("user:123");
-
-if (error) {
-  switch (error.type) {
-    case "NotFoundError":
-      console.log("Cache miss");
-      break;
-    case "CacheError":
-      console.error("Cache error:", error.message);
-      break;
-  }
-} else {
-  console.log("Cache hit:", user);
-}
+const user = await cache.get("user:123");
 ```
 
 **`cache.set(key: string, value: T)`**
 
-Stores a value in the cache with serialization. Applies TTL if configured.
+Stores a value in the cache with serialization. Applies TTL if configured and returns the original value.
 
 ```typescript
-const [error, data] = await cache.set("user:123", { id: 123, name: "John" });
-
-if (error) {
-  console.error("Failed to cache:", error.message);
-} else {
-  console.log("Cached successfully");
-}
+const user = await cache.set("user:123", {
+  id: 123,
+  name: "John",
+});
 ```
 
 **`cache.delete(key: string)`**
@@ -74,11 +55,7 @@ if (error) {
 Removes a key from the cache.
 
 ```typescript
-const [error] = await cache.delete("user:123");
-
-if (error) {
-  console.error("Failed to delete:", error.message);
-}
+await cache.delete("user:123");
 ```
 
 ## Usage Example
@@ -101,23 +78,19 @@ const userCache = new Cache<User>({
 // Get or fetch user
 async function getUser(id: string) {
   // Try cache first
-  const [cacheError, cachedUser] = await userCache.get(`user:${id}`);
+  const cachedUser = await userCache.get(`user:${id}`);
 
-  if (!cacheError) {
-    return ok(cachedUser);
+  if (cachedUser) {
+    return cachedUser;
   }
 
   // Cache miss - fetch from database
-  const [dbError, user] = await fetchUserFromDB(id);
-
-  if (dbError) {
-    return err("NotFoundError", "User not found");
-  }
+  const user = await fetchUserFromDB(id);
 
   // Store in cache for next time
   await userCache.set(`user:${id}`, user);
 
-  return ok(user);
+  return user;
 }
 ```
 
@@ -140,7 +113,7 @@ await usersCache.delete("123"); // Deletes "users:123"
 
 When `enabled` is set to `false`, all cache operations become no-ops:
 
-- `get` returns a `NotFoundError` (cache miss)
+- `get` returns `null`
 - `set` returns the value without storing it
 - `delete` returns `0` without deleting
 
@@ -178,18 +151,7 @@ const cache = new Cache<Session>({
 ```
 
 - `ttl: 0` is treated as a valid TTL and passed to Redis as `PX 0`.
-- If the TTL function throws, `set` returns `InvalidTTLError` (and triggers `onError` when configured).
-
-### onError
-
-Receive a callback on unexpected errors (`CacheError`, `InvalidTTLError`). Not called on `NotFoundError` (normal cache miss).
-
-```typescript
-const cache = new Cache<User>({
-  redis: redisClient,
-  onError: (error) => logger.warn(`Cache: ${error.type} - ${error.message}`),
-});
-```
+- If the TTL function throws, the `set` call rejects with that error.
 
 **Note on lifecycle management:** The `Cache` class does not manage the Redis client lifecycle. Since you provide the client when creating the cache, you're responsible for closing it when done:
 
