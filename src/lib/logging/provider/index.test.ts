@@ -184,8 +184,21 @@ class MockFileProvider extends LoggerProvider {
             return Math.floor(diffMs / DurationUnit.day) >= duration;
           case "week":
             return Math.floor(diffMs / DurationUnit.week) >= duration;
-          case "month":
-            return Math.floor(diffMs / DurationUnit.month) >= duration;
+          case "month": {
+            const birthtime = new Date(creationTimeMs);
+            const currentDate = new Date(currenTimeMs);
+
+            const monthsDiff =
+              (currentDate.getFullYear() - birthtime.getFullYear()) * 12 +
+              (currentDate.getMonth() - birthtime.getMonth());
+
+            const adjustedDiff =
+              currentDate.getDate() >= birthtime.getDate()
+                ? monthsDiff
+                : monthsDiff - 1;
+
+            return adjustedDiff >= duration;
+          }
         }
       }
     }
@@ -950,6 +963,56 @@ describe("Providers", () => {
         setSystemTime(new Date("2020-01-10T00:00:00.000Z"));
       });
 
+      test("Should create a new file after 1 month starting from february", () => {
+        setSystemTime(new Date("2020-02-10T00:00:00.000Z"));
+
+        const mockProvider = createFileMockProvider("file.log", "debug", {
+          type: "time",
+          duration: 1,
+          instant: "month",
+        });
+        const firstCreatedAt = new Date().toISOString();
+        const firstRow: LogDataType = {
+          level: "debug",
+          msg: `File created at: ${firstCreatedAt}`,
+          prefix: "mock",
+        };
+
+        mockProvider.execute(firstRow);
+        setSystemTime(new Date("2020-03-10T00:00:00.000Z"));
+
+        const secondCreatedAt = new Date().toISOString();
+        const secondRow: LogDataType = {
+          level: "debug",
+          msg: `File created at: ${secondCreatedAt}`,
+          prefix: "mock",
+        };
+
+        mockProvider.execute(secondRow);
+
+        const firstFile = mockProvider.fs["file.0.log"];
+        expect(firstFile).not.toBeFalsy();
+        expect(firstFile).toBeObject();
+        expect(firstFile?.isJSON).toBeFalse();
+        expect(firstFile?.birthtime.toISOString()).toEqual(firstCreatedAt);
+        expect(firstFile?.content).not.toBeEmpty();
+        expect(firstFile?.content).toEqualIgnoringWhitespace(
+          `File created at: ${firstCreatedAt}`,
+        );
+
+        const secondFile = mockProvider.fs["file.1.log"];
+        expect(secondFile).not.toBeFalsy();
+        expect(secondFile).toBeObject();
+        expect(secondFile?.isJSON).toBeFalse();
+        expect(secondFile?.birthtime.toISOString()).toEqual(secondCreatedAt);
+        expect(secondFile?.content).not.toBeEmpty();
+        expect(secondFile?.content).toEqualIgnoringWhitespace(
+          `File created at: ${secondCreatedAt}`,
+        );
+
+        setSystemTime(new Date("2020-01-10T00:00:00.000Z"));
+      });
+
       test("Should create a new file after 24 months", () => {
         const mockProvider = createFileMockProvider("file.log", "debug", {
           type: "time",
@@ -965,6 +1028,54 @@ describe("Providers", () => {
 
         mockProvider.execute(firstRow);
         setSystemTime(new Date("2022-01-10T00:00:00.000Z"));
+
+        const secondCreatedAt = new Date().toISOString();
+        const secondRow: LogDataType = {
+          level: "debug",
+          msg: `File created at: ${secondCreatedAt}`,
+          prefix: "mock",
+        };
+
+        mockProvider.execute(secondRow);
+
+        const firstFile = mockProvider.fs["file.0.log"];
+        expect(firstFile).not.toBeFalsy();
+        expect(firstFile).toBeObject();
+        expect(firstFile?.isJSON).toBeFalse();
+        expect(firstFile?.birthtime.toISOString()).toEqual(firstCreatedAt);
+        expect(firstFile?.content).not.toBeEmpty();
+        expect(firstFile?.content).toEqualIgnoringWhitespace(
+          `File created at: ${firstCreatedAt}`,
+        );
+
+        const secondFile = mockProvider.fs["file.1.log"];
+        expect(secondFile).not.toBeFalsy();
+        expect(secondFile).toBeObject();
+        expect(secondFile?.isJSON).toBeFalse();
+        expect(secondFile?.birthtime.toISOString()).toEqual(secondCreatedAt);
+        expect(secondFile?.content).not.toBeEmpty();
+        expect(secondFile?.content).toEqualIgnoringWhitespace(
+          `File created at: ${secondCreatedAt}`,
+        );
+
+        setSystemTime(new Date("2020-01-10T00:00:00.000Z"));
+      });
+
+      test("Should create a new file after 15 months", () => {
+        const mockProvider = createFileMockProvider("file.log", "debug", {
+          type: "time",
+          duration: 15,
+          instant: "month",
+        });
+        const firstCreatedAt = new Date().toISOString();
+        const firstRow: LogDataType = {
+          level: "debug",
+          msg: `File created at: ${firstCreatedAt}`,
+          prefix: "mock",
+        };
+
+        mockProvider.execute(firstRow);
+        setSystemTime(new Date("2021-04-10T00:00:00.000Z"));
 
         const secondCreatedAt = new Date().toISOString();
         const secondRow: LogDataType = {

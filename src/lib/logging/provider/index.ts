@@ -121,8 +121,19 @@ export class FileProvider extends LoggerProvider {
             return Math.floor(diffMs / DurationUnit.day) >= duration;
           case "week":
             return Math.floor(diffMs / DurationUnit.week) >= duration;
-          case "month":
-            return Math.floor(diffMs / DurationUnit.month) >= duration;
+          case "month": {
+            const currentDate = new Date(currenTimeMs);
+            const monthsDiff =
+              (currentDate.getFullYear() - birthtime.getFullYear()) * 12 +
+              (currentDate.getMonth() - birthtime.getMonth());
+
+            const adjustedDiff =
+              currentDate.getDate() >= birthtime.getDate()
+                ? monthsDiff
+                : monthsDiff - 1;
+
+            return adjustedDiff >= duration;
+          }
         }
       }
     }
