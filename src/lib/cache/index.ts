@@ -24,7 +24,7 @@ export class Cache<T> {
     );
 
     if (error) {
-      this.fail("CacheError", `Unable to get value for key ${key}`);
+      return this.fail("CacheError", `Unable to get value for key ${key}`);
     }
 
     if (value === null || value === undefined) {
@@ -36,7 +36,7 @@ export class Cache<T> {
     );
 
     if (deserializeErr) {
-      this.fail("CacheError", `Unable to deserialize value for key ${key}`);
+      return this.fail("CacheError", `Unable to deserialize value for key ${key}`);
     }
 
     return deserialized;
@@ -52,21 +52,21 @@ export class Cache<T> {
     );
 
     if (serializeErr) {
-      this.fail("CacheError", `Unable to serialize value for key ${key}`);
+      return this.fail("CacheError", `Unable to serialize value for key ${key}`);
     }
 
     if (serialized === null || serialized === undefined) {
-      this.fail("CacheError", `Unable to serialize value for key ${key}`);
+      return this.fail("CacheError", `Unable to serialize value for key ${key}`);
     }
 
     const [ttlErr, ttl] = mightThrowSync(() => this.resolveTTL(key, value));
 
     if (ttlErr) {
-      this.fail("InvalidTTLError", `Unable to resolve ttl for key ${key}`);
+      return this.fail("InvalidTTLError", `Unable to resolve ttl for key ${key}`);
     }
 
     if (!this.isTTLValid(ttl)) {
-      this.fail(
+      return this.fail(
         "InvalidTTLError",
         `Unable to save records with ttl equal to ${ttl}`,
       );
@@ -79,7 +79,7 @@ export class Cache<T> {
     const [setError] = await mightThrow(setPromise);
 
     if (setError) {
-      this.fail("CacheError", `Unable to set value for key ${key}`);
+      return this.fail("CacheError", `Unable to set value for key ${key}`);
     }
 
     return value;
@@ -95,7 +95,7 @@ export class Cache<T> {
     const [error, data] = await mightThrow(this.options.redis.del(resolvedKey));
 
     if (error) {
-      this.fail("CacheError", `Unable to delete key ${key}`);
+      return this.fail("CacheError", `Unable to delete key ${key}`);
     }
 
     return data;
