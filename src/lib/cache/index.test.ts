@@ -65,19 +65,6 @@ const createMockRedis = () => {
   return new MockRedisClient() as MockRedisClient & Bun.RedisClient;
 };
 
-const settle = async <T>(promise: Promise<T>) => {
-  try {
-    const value = await promise;
-    return [null, value] as const;
-  } catch (error) {
-    if (error instanceof Error) {
-      return [{ type: error.name, message: error.message }, null] as const;
-    }
-
-    return [{ type: "UnknownError", message: String(error) }, null] as const;
-  }
-};
-
 describe("Cache", () => {
   describe("get", () => {
     test("should retrieve and parse a cached value", async () => {
@@ -86,8 +73,7 @@ describe("Cache", () => {
 
       await redis.set("user:1", JSON.stringify({ name: "John" }));
 
-      const [error, data] = await settle(cache.get("user:1"));
-      expect(error).toBeNull();
+      const data = await cache.get("user:1");
       expect(data).toEqual({ name: "John" });
     });
 
@@ -95,8 +81,7 @@ describe("Cache", () => {
       const redis = createMockRedis();
       const cache = new Cache<string>({ redis });
 
-      const [error, data] = await settle(cache.get("nonexistent"));
-      expect(error).toBeNull();
+      const data = await cache.get("nonexistent");
       expect(data).toBeNull();
     });
 
@@ -105,12 +90,10 @@ describe("Cache", () => {
       redis.setShouldFail(true);
       const cache = new Cache<string>({ redis });
 
-      const [error, data] = await settle(cache.get("key"));
-      expect(error).toEqual({
-        type: "CacheError",
+      await expect(cache.get("key")).rejects.toMatchObject({
+        name: "CacheError",
         message: "Unable to get value for key key",
       });
-      expect(data).toBeNull();
     });
 
     test("should return CacheError on invalid JSON", async () => {
@@ -119,12 +102,10 @@ describe("Cache", () => {
 
       await redis.set("invalid", "not valid json {");
 
-      const [error, data] = await settle(cache.get("invalid"));
-      expect(error).toEqual({
-        type: "CacheError",
+      await expect(cache.get("invalid")).rejects.toMatchObject({
+        name: "CacheError",
         message: "Unable to deserialize value for key invalid",
       });
-      expect(data).toBeNull();
     });
 
     test("should work with different data types", async () => {
@@ -166,8 +147,7 @@ describe("Cache", () => {
       const redis = createMockRedis();
       const cache = new Cache<{ name: string }>({ redis });
 
-      const [error, data] = await settle(cache.set("user:1", { name: "John" }));
-      expect(error).toBeNull();
+      const data = await cache.set("user:1", { name: "John" });
       expect(data).toEqual({ name: "John" });
 
       const stored = redis.getStore().get("user:1");
@@ -178,8 +158,7 @@ describe("Cache", () => {
       const redis = createMockRedis();
       const cache = new Cache<{ id: number }>({ redis });
 
-      const [error, data] = await settle(cache.set("user:id", { id: NaN }));
-      expect(error).toBeNull();
+      const data = await cache.set("user:id", { id: NaN });
       expect(data).toEqual({ id: NaN });
 
       const stored = redis.getStore().get("user:id");
@@ -190,8 +169,7 @@ describe("Cache", () => {
       const redis = createMockRedis();
       const cache = new Cache<string>({ redis, ttl: 5000 });
 
-      const [error, data] = await settle(cache.set("key", "value"));
-      expect(error).toBeNull();
+      const data = await cache.set("key", "value");
       expect(data).toBe("value");
       expect(redis.getLastSetOptions()).toEqual({ mode: "PX", ttl: 5000 });
     });
@@ -200,8 +178,7 @@ describe("Cache", () => {
       const redis = createMockRedis();
       const cache = new Cache<string>({ redis, ttl: 0 });
 
-      const [error, data] = await settle(cache.set("key", "value"));
-      expect(error).toBeNull();
+      const data = await cache.set("key", "value");
       expect(data).toBe("value");
       expect(redis.getLastSetOptions()).toEqual({ mode: "PX", ttl: 0 });
     });
@@ -215,12 +192,10 @@ describe("Cache", () => {
       const circular: CircularType = { a: 1 };
       circular.self = circular;
 
-      const [error, data] = await settle(cache.set("circular", circular));
-      expect(error).toEqual({
-        type: "CacheError",
+      await expect(cache.set("circular", circular)).rejects.toMatchObject({
+        name: "CacheError",
         message: "Unable to serialize value for key circular",
       });
-      expect(data).toBeNull();
     });
 
     test("should return CacheError on Redis connection failure", async () => {
@@ -229,12 +204,10 @@ describe("Cache", () => {
 
       redis.setShouldFail(true);
 
-      const [error, data] = await settle(cache.set("key", "value"));
-      expect(error).toEqual({
-        type: "CacheError",
+      await expect(cache.set("key", "value")).rejects.toMatchObject({
+        name: "CacheError",
         message: "Unable to set value for key key",
       });
-      expect(data).toBeNull();
     });
 
     test("should work with different data types", async () => {
@@ -271,12 +244,10 @@ describe("Cache", () => {
       const redis = createMockRedis();
       const cache = new Cache<{ name: string }>({ redis, ttl: -1 });
 
-      const [error, data] = await settle(cache.set("user:1", { name: "John" }));
-      expect(error).toEqual({
-        type: "InvalidTTLError",
+      await expect(cache.set("user:1", { name: "John" })).rejects.toMatchObject({
+        name: "InvalidTTLError",
         message: "Unable to save records with ttl equal to -1",
       });
-      expect(data).toBeNull();
     });
 
     test("should return InvalidTTLError on non integer TTL", async () => {
@@ -284,38 +255,30 @@ describe("Cache", () => {
       const nonIntegerTTL = 0.1 + 0.2;
       const cache = new Cache<{ name: string }>({ redis, ttl: nonIntegerTTL });
 
-      const [error, data] = await settle(cache.set("user:1", { name: "John" }));
-      expect(error).toEqual({
-        type: "InvalidTTLError",
+      await expect(cache.set("user:1", { name: "John" })).rejects.toMatchObject({
+        name: "InvalidTTLError",
         message: `Unable to save records with ttl equal to ${nonIntegerTTL}`,
       });
-      expect(data).toBeNull();
     });
 
     test("should return InvalidTTLError on NaN TTL", async () => {
       const redis = createMockRedis();
       const cache = new Cache<{ name: string }>({ redis, ttl: NaN });
 
-      const [error, data] = await settle(cache.set("user:1", { name: "John" }));
-
-      expect(error).toEqual({
-        type: "InvalidTTLError",
+      await expect(cache.set("user:1", { name: "John" })).rejects.toMatchObject({
+        name: "InvalidTTLError",
         message: "Unable to save records with ttl equal to NaN",
       });
-      expect(data).toBeNull();
     });
 
     test("should return InvalidTTLError on very large TTL", async () => {
       const redis = createMockRedis();
       const cache = new Cache<{ name: string }>({ redis, ttl: Infinity });
 
-      const [error, data] = await settle(cache.set("user:1", { name: "John" }));
-
-      expect(error).toEqual({
-        type: "InvalidTTLError",
+      await expect(cache.set("user:1", { name: "John" })).rejects.toMatchObject({
+        name: "InvalidTTLError",
         message: "Unable to save records with ttl equal to Infinity",
       });
-      expect(data).toBeNull();
     });
   });
 
@@ -327,8 +290,7 @@ describe("Cache", () => {
       await redis.set("key", "value");
       expect(redis.getStore().has("key")).toBe(true);
 
-      const [error, count] = await settle(cache.delete("key"));
-      expect(error).toBeNull();
+      const count = await cache.delete("key");
       expect(count).toBe(1);
       expect(redis.getStore().has("key")).toBe(false);
     });
@@ -337,8 +299,7 @@ describe("Cache", () => {
       const redis = createMockRedis();
       const cache = new Cache<string>({ redis });
 
-      const [error, count] = await settle(cache.delete("nonexistent"));
-      expect(error).toBeNull();
+      const count = await cache.delete("nonexistent");
       expect(count).toBe(0);
     });
 
@@ -348,12 +309,10 @@ describe("Cache", () => {
 
       redis.setShouldFail(true);
 
-      const [error, data] = await settle(cache.delete("key"));
-      expect(error).toEqual({
-        type: "CacheError",
+      await expect(cache.delete("key")).rejects.toMatchObject({
+        name: "CacheError",
         message: "Unable to delete key key",
       });
-      expect(data).toBeNull();
     });
   });
 
@@ -363,8 +322,7 @@ describe("Cache", () => {
       await redis.set("key", JSON.stringify("value"));
       const cache = new Cache<string>({ redis, enabled: false });
 
-      const [error, data] = await settle(cache.get("key"));
-      expect(error).toBeNull();
+      const data = await cache.get("key");
       expect(data).toBeNull();
     });
 
@@ -372,8 +330,7 @@ describe("Cache", () => {
       const redis = createMockRedis();
       const cache = new Cache<string>({ redis, enabled: false });
 
-      const [error, data] = await settle(cache.set("key", "value"));
-      expect(error).toBeNull();
+      const data = await cache.set("key", "value");
       expect(data).toBe("value");
       expect(redis.getStore().has("key")).toBe(false);
     });
@@ -383,8 +340,7 @@ describe("Cache", () => {
       await redis.set("key", "value");
       const cache = new Cache<string>({ redis, enabled: false });
 
-      const [error, count] = await settle(cache.delete("key"));
-      expect(error).toBeNull();
+      const count = await cache.delete("key");
       expect(count).toBe(0);
       expect(redis.getStore().has("key")).toBe(true);
     });
@@ -393,11 +349,9 @@ describe("Cache", () => {
       const redis = createMockRedis();
       const cache = new Cache<string>({ redis, enabled: true });
 
-      const [setError] = await settle(cache.set("key", "value"));
-      expect(setError).toBeNull();
+      await cache.set("key", "value");
 
-      const [getError, data] = await settle(cache.get("key"));
-      expect(getError).toBeNull();
+      const data = await cache.get("key");
       expect(data).toBe("value");
     });
 
@@ -405,11 +359,9 @@ describe("Cache", () => {
       const redis = createMockRedis();
       const cache = new Cache<string>({ redis });
 
-      const [setError] = await settle(cache.set("key", "value"));
-      expect(setError).toBeNull();
+      await cache.set("key", "value");
 
-      const [getError, data] = await settle(cache.get("key"));
-      expect(getError).toBeNull();
+      const data = await cache.get("key");
       expect(data).toBe("value");
     });
   });
@@ -421,8 +373,7 @@ describe("Cache", () => {
 
       await redis.set("users:123", JSON.stringify("John"));
 
-      const [error, data] = await settle(cache.get("123"));
-      expect(error).toBeNull();
+      const data = await cache.get("123");
       expect(data).toBe("John");
     });
 
@@ -441,8 +392,7 @@ describe("Cache", () => {
 
       await redis.set("users:123", JSON.stringify("John"));
 
-      const [error, count] = await settle(cache.delete("123"));
-      expect(error).toBeNull();
+      const count = await cache.delete("123");
       expect(count).toBe(1);
       expect(redis.getStore().has("users:123")).toBe(false);
     });
@@ -464,8 +414,7 @@ describe("Cache", () => {
         serializer: (value) => `custom:${value.name}`,
       });
 
-      const [error, data] = await settle(cache.set("key", { name: "John" }));
-      expect(error).toBeNull();
+      const data = await cache.set("key", { name: "John" });
       expect(data).toEqual({ name: "John" });
       expect(redis.getStore().get("key")).toBe("custom:John");
     });
@@ -477,8 +426,7 @@ describe("Cache", () => {
         serializer: () => "",
       });
 
-      const [error, data] = await settle(cache.set("key", "value"));
-      expect(error).toBeNull();
+      const data = await cache.set("key", "value");
       expect(data).toBe("value");
       expect(redis.getStore().get("key")).toBe("");
     });
@@ -491,10 +439,9 @@ describe("Cache", () => {
         deserializer: (raw) => raw,
       });
 
-      await settle(cache.set("key", "value"));
+      await cache.set("key", "value");
 
-      const [error, data] = await settle(cache.get("key"));
-      expect(error).toBeNull();
+      const data = await cache.get("key");
       expect(data).toBe("");
     });
 
@@ -507,8 +454,7 @@ describe("Cache", () => {
 
       await redis.set("key", "custom:John");
 
-      const [error, data] = await settle(cache.get("key"));
-      expect(error).toBeNull();
+      const data = await cache.get("key");
       expect(data).toEqual({ name: "John" });
     });
 
@@ -521,12 +467,10 @@ describe("Cache", () => {
         },
       });
 
-      const [error, data] = await settle(cache.set("key", "value"));
-      expect(error).toEqual({
-        type: "CacheError",
+      await expect(cache.set("key", "value")).rejects.toMatchObject({
+        name: "CacheError",
         message: "Unable to serialize value for key key",
       });
-      expect(data).toBeNull();
     });
 
     test("should return CacheError when deserializer throws", async () => {
@@ -540,12 +484,10 @@ describe("Cache", () => {
 
       await redis.set("key", "value");
 
-      const [error, data] = await settle(cache.get("key"));
-      expect(error).toEqual({
-        type: "CacheError",
+      await expect(cache.get("key")).rejects.toMatchObject({
+        name: "CacheError",
         message: "Unable to deserialize value for key key",
       });
-      expect(data).toBeNull();
     });
   });
 
@@ -654,10 +596,7 @@ describe("Cache", () => {
         ttl: (_key, value) => (value.priority === "high" ? 60000 : 5000),
       });
 
-      const [error, data] = await settle(
-        cache.set("item", { priority: "high" }),
-      );
-      expect(error).toBeNull();
+      const data = await cache.set("item", { priority: "high" });
       expect(data).toEqual({ priority: "high" });
     });
 
@@ -688,12 +627,10 @@ describe("Cache", () => {
         ttl: () => -1,
       });
 
-      const [error, data] = await settle(cache.set("key", "value"));
-      expect(error).toEqual({
-        type: "InvalidTTLError",
+      await expect(cache.set("key", "value")).rejects.toMatchObject({
+        name: "InvalidTTLError",
         message: "Unable to save records with ttl equal to -1",
       });
-      expect(data).toBeNull();
     });
 
     test("should return InvalidTTLError when function throws", async () => {
@@ -705,12 +642,10 @@ describe("Cache", () => {
         },
       });
 
-      const [error, data] = await settle(cache.set("key", "value"));
-      expect(error).toEqual({
-        type: "InvalidTTLError",
+      await expect(cache.set("key", "value")).rejects.toMatchObject({
+        name: "InvalidTTLError",
         message: "Unable to resolve ttl for key key",
       });
-      expect(data).toBeNull();
     });
   });
 
@@ -722,28 +657,22 @@ describe("Cache", () => {
       });
 
       // Set
-      const [setError, setValue] = await settle(
-        cache.set("user:123", {
-          id: 123,
-          name: "Alice",
-        }),
-      );
-      expect(setError).toBeNull();
+      const setValue = await cache.set("user:123", {
+        id: 123,
+        name: "Alice",
+      });
       expect(setValue).toEqual({ id: 123, name: "Alice" });
 
       // Get
-      const [getError, getValue] = await settle(cache.get("user:123"));
-      expect(getError).toBeNull();
+      const getValue = await cache.get("user:123");
       expect(getValue).toEqual({ id: 123, name: "Alice" });
 
       // Delete
-      const [delError, delCount] = await settle(cache.delete("user:123"));
-      expect(delError).toBeNull();
+      const delCount = await cache.delete("user:123");
       expect(delCount).toBe(1);
 
       // Verify deleted
-      const [notFoundError, missingValue] = await settle(cache.get("user:123"));
-      expect(notFoundError).toBeNull();
+      const missingValue = await cache.get("user:123");
       expect(missingValue).toBeNull();
     });
 
@@ -753,7 +682,7 @@ describe("Cache", () => {
       const cache2 = new Cache<string>({ redis });
 
       await cache1.set("shared", "value1");
-      const [, value] = await settle(cache2.get("shared"));
+      const value = await cache2.get("shared");
       expect(value).toBe("value1");
     });
 
@@ -761,11 +690,10 @@ describe("Cache", () => {
       const redis = createMockRedis();
       const cache = new Cache<string>({ redis, ttl: 1000 });
 
-      const [error, data] = await settle(cache.set("expiring", "value"));
-      expect(error).toBeNull();
+      const data = await cache.set("expiring", "value");
       expect(data).toBe("value");
 
-      const [, retrieved] = await settle(cache.get("expiring"));
+      const retrieved = await cache.get("expiring");
       expect(retrieved).toBe("value");
     });
 
@@ -774,11 +702,11 @@ describe("Cache", () => {
       const cache = new Cache<string>({ redis });
 
       await cache.set("key", "value1");
-      const [, first] = await settle(cache.get("key"));
+      const first = await cache.get("key");
       expect(first).toBe("value1");
 
       await cache.set("key", "value2");
-      const [, second] = await settle(cache.get("key"));
+      const second = await cache.get("key");
       expect(second).toBe("value2");
     });
   });

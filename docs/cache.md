@@ -39,18 +39,14 @@ const cache = new Cache<User>({
 Retrieves a value from the cache. Returns the parsed value or `null` on cache miss, and throws only on cache errors.
 
 ```typescript
-try {
-  const user = await cache.get("user:123");
+const user = await cache.get("user:123");
 
-  if (user === null) {
-    console.log("Cache miss");
-    return;
-  }
-
-  console.log("Cache hit:", user);
-} catch (error) {
-  console.error("Cache error:", error);
+if (user === null) {
+  console.log("Cache miss");
+  return;
 }
+
+console.log("Cache hit:", user);
 ```
 
 **`cache.set(key: string, value: T)`**
@@ -90,14 +86,10 @@ const userCache = new Cache<User>({
 // Get or fetch user
 async function getUser(id: string) {
   // Try cache first
-  try {
-    const cached = await userCache.get(`user:${id}`);
+  const cached = await userCache.get(`user:${id}`);
 
-    if (cached !== null) {
-      return cached;
-    }
-  } catch (error) {
-    throw error;
+  if (cached !== null) {
+    return cached;
   }
 
   // Cache miss - fetch from database
