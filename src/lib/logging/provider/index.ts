@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { mightThrowSync } from "../../errors/index.js";
 import { PROVIDER_OPTION_DEFAULT } from "../core/index.js";
@@ -155,6 +155,11 @@ export class FileProvider extends LoggerProvider {
   private createNewFileName() {
     const fileName = basename(this.filePath);
     const directory = dirname(this.filePath);
+
+    if (!existsSync(directory)) {
+      mkdirSync(directory, { recursive: true });
+    }
+
     const fileInfo = fileName.split(".");
     const extension = fileInfo.pop();
     const newFileName = [...fileInfo, this.counter, extension].join(".");
