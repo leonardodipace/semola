@@ -699,4 +699,162 @@ describe("buildUpSql/buildDownSql", () => {
 
     await db.close();
   });
+
+  test("sqlite rebuild migration preserves data for renamed foreign key columns", async () => {
+    const studentBefore = {
+      key: "student",
+      tableName: "student",
+      columns: {
+        id: {
+          key: "id",
+          sqlName: "id",
+          kind: "uuid",
+          isPrimaryKey: true,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+        name: {
+          key: "name",
+          sqlName: "name",
+          kind: "string",
+          isPrimaryKey: false,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+        examId: {
+          key: "examId",
+          sqlName: "exam_id",
+          kind: "uuid",
+          isPrimaryKey: false,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: "exam",
+          referencesColumn: "id",
+          onDeleteAction: null,
+        },
+      },
+    } as const;
+
+    const studentAfter = {
+      key: "student",
+      tableName: "student",
+      columns: {
+        id: {
+          key: "id",
+          sqlName: "id",
+          kind: "uuid",
+          isPrimaryKey: true,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+        name: {
+          key: "name",
+          sqlName: "name",
+          kind: "string",
+          isPrimaryKey: false,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+        examId: {
+          key: "examId",
+          sqlName: "examID",
+          kind: "uuid",
+          isPrimaryKey: false,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: "exam",
+          referencesColumn: "id",
+          onDeleteAction: null,
+        },
+      },
+    } as const;
+
+    const examTable = {
+      key: "exam",
+      tableName: "exam",
+      columns: {
+        id: {
+          key: "id",
+          sqlName: "id",
+          kind: "uuid",
+          isPrimaryKey: true,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+        name: {
+          key: "name",
+          sqlName: "name",
+          kind: "string",
+          isPrimaryKey: false,
+          isNotNull: true,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+      },
+    } as const;
+
+    const ops: MigrationOperation[] = [
+      {
+        kind: "rebuild-table",
+        fromTable: examTable,
+        toTable: examTable,
+      },
+      {
+        kind: "rebuild-table",
+        fromTable: studentBefore,
+        toTable: studentAfter,
+      },
+    ];
+
+    const sqlText = buildUpSql("sqlite", ops);
+
+    expect(sqlText).toContain(
+      'INSERT INTO "student" ("id", "name", "examID") SELECT "id", "name", "exam_id" FROM "__semola_tmp_student"',
+    );
+
+    const db = new SQL("sqlite::memory:");
+
+    await db`PRAGMA foreign_keys = ON`;
+    await db`CREATE TABLE exam (id TEXT PRIMARY KEY, name TEXT NOT NULL)`;
+    await db`CREATE TABLE student (id TEXT PRIMARY KEY, name TEXT NOT NULL, exam_id TEXT NOT NULL REFERENCES exam(id))`;
+    await db`INSERT INTO exam (id, name) VALUES ('e1', 'math')`;
+    await db`INSERT INTO student (id, name, exam_id) VALUES ('s1', 'alice', 'e1')`;
+
+    for (const statement of splitStatements(sqlText)) {
+      await db`${db.unsafe(statement)}`;
+    }
+
+    const students = await db`SELECT id, name, examID FROM student ORDER BY id`;
+    expect(students.length).toBe(1);
+    expect(students[0]?.id).toBe("s1");
+    expect(students[0]?.name).toBe("alice");
+    expect(students[0]?.examID).toBe("e1");
+
+    await db.close();
+  });
 });
