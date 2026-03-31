@@ -290,13 +290,39 @@ function rebuildTableSql(
 
   const createSql = createTableSql(dialect, toTable);
 
-  const fromColumns = new Set(
-    Object.values(fromTable.columns).map((column) => column.sqlName),
+  const fromColumnsByKey = new Map(
+    Object.values(fromTable.columns).map((column) => [column.key, column]),
   );
 
-  const copyColumns = Object.values(toTable.columns)
-    .filter((column) => fromColumns.has(column.sqlName))
-    .map((column) => quoteIdentifier(dialect, column.sqlName));
+  const fromColumnsBySqlName = new Map(
+    Object.values(fromTable.columns).map((column) => [column.sqlName, column]),
+  );
+
+  const copyColumns = Object.values(toTable.columns).flatMap((column) => {
+    const fromColumnByKey = fromColumnsByKey.get(column.key);
+
+    if (fromColumnByKey) {
+      return [
+        {
+          targetSqlName: column.sqlName,
+          sourceSqlName: fromColumnByKey.sqlName,
+        },
+      ];
+    }
+
+    const fromColumnBySqlName = fromColumnsBySqlName.get(column.sqlName);
+
+    if (!fromColumnBySqlName) {
+      return [];
+    }
+
+    return [
+      {
+        targetSqlName: column.sqlName,
+        sourceSqlName: fromColumnBySqlName.sqlName,
+      },
+    ];
+  });
 
   const statements = [
     `ALTER TABLE ${tableName} RENAME TO ${tempTableName}`,
@@ -304,8 +330,16 @@ function rebuildTableSql(
   ];
 
   if (copyColumns.length > 0) {
+    const targetColumns = copyColumns.map((column) =>
+      quoteIdentifier(dialect, column.targetSqlName),
+    );
+
+    const sourceColumns = copyColumns.map((column) =>
+      quoteIdentifier(dialect, column.sourceSqlName),
+    );
+
     statements.push(
-      `INSERT INTO ${tableName} (${copyColumns.join(", ")}) SELECT ${copyColumns.join(", ")} FROM ${tempTableName}`,
+      `INSERT INTO ${tableName} (${targetColumns.join(", ")}) SELECT ${sourceColumns.join(", ")} FROM ${tempTableName}`,
     );
   }
 
