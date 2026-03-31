@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { err } from "../../errors/index.js";
 import { createNodePromptRuntime, NodePromptRuntime } from "./runtime.js";
 
 class MockStdin extends EventEmitter {
@@ -63,14 +62,8 @@ describe("NodePromptRuntime", () => {
 
     const runtime = new NodePromptRuntime(stdin, stdout);
 
-    const [error, value] = runtime.init();
-
-    expect(value).toBeNull();
-    expect(error).toEqual(
-      err(
-        "PromptEnvironmentError",
-        "Interactive prompts require a TTY with raw mode support",
-      )[0],
+    expect(() => runtime.init()).toThrow(
+      "Interactive prompts require a TTY with raw mode support",
     );
   });
 
@@ -80,9 +73,7 @@ describe("NodePromptRuntime", () => {
 
     const runtime = new NodePromptRuntime(stdin, stdout);
 
-    const [initError] = runtime.init();
-
-    expect(initError).toBeNull();
+    runtime.init();
 
     expect(stdin.rawModes).toEqual([true]);
     expect(stdin.encoding).toBe("utf8");
@@ -90,9 +81,7 @@ describe("NodePromptRuntime", () => {
     expect(stdin.listenerCount("data")).toBe(1);
     expect(stdout.writes[0]).toBe("\u001B[?25l");
 
-    const [closeError] = runtime.close();
-
-    expect(closeError).toBeNull();
+    runtime.close();
 
     expect(stdin.rawModes).toEqual([true, false]);
     expect(stdin.listenerCount("data")).toBe(0);
@@ -123,11 +112,9 @@ describe("NodePromptRuntime", () => {
 
     stdin.emit("data", "ab");
 
-    const [keyAError, keyA] = await runtime.readKey();
-    const [keyBError, keyB] = await runtime.readKey();
+    const keyA = await runtime.readKey();
+    const keyB = await runtime.readKey();
 
-    expect(keyAError).toBeNull();
-    expect(keyBError).toBeNull();
     expect(keyA).toEqual({ name: "character", value: "a" });
     expect(keyB).toEqual({ name: "character", value: "b" });
   });
@@ -143,9 +130,8 @@ describe("NodePromptRuntime", () => {
     const pending = runtime.readKey();
     stdin.emit("data", "\u001B[A");
 
-    const [readError, key] = await pending;
+    const key = await pending;
 
-    expect(readError).toBeNull();
     expect(key).toEqual({ name: "up" });
   });
 

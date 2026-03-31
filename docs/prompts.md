@@ -26,10 +26,14 @@ import {
 | `select(options)`      | `TValue`   | Single choice from a list - environments, regions |
 | `multiselect(options)` | `TValue[]` | Multiple choices from a list - features, tags     |
 
-All prompt functions return result tuples using `ok/err` pattern:
+All prompt functions resolve directly to their value.
 
-- success: `[null, value]`
-- failure: `[{ type, message }, null]`
+When a prompt cannot run or is interrupted, it throws an `Error`:
+
+- missing TTY or raw mode support
+- `Esc` / `Ctrl+C` cancellation
+- runtime I/O failures
+- thrown `validate` / `transform` callbacks
 
 ## Common options
 
@@ -59,16 +63,12 @@ All prompt functions return result tuples using `ok/err` pattern:
 ### Input
 
 ```typescript
-const [nameError, name] = await input({
+const name = await input({
   message: "Project name",
   required: true,
   placeholder: "my-app",
   validate: (value) => (value.length < 2 ? "Too short" : null),
 });
-
-if (nameError) {
-  console.error(nameError.type, nameError.message);
-}
 ```
 
 ### Password
@@ -77,10 +77,10 @@ When `mask` is omitted, the cursor stays still while typing and nothing is shown
 
 ```typescript
 // hidden mode - cursor stays still, nothing shown on submit
-const [err1, secret] = await password({ message: "Enter password" });
+const secret = await password({ message: "Enter password" });
 
 // masked mode - each character shown as "*", same count shown on submit
-const [err2, secret2] = await password({
+const secret2 = await password({
   message: "Enter password",
   mask: "*",
   validate: (value) =>
@@ -91,35 +91,27 @@ const [err2, secret2] = await password({
 ### Confirm
 
 ```typescript
-const [confirmError, shouldDeploy] = await confirm({
+const shouldDeploy = await confirm({
   message: "Deploy now?",
   defaultValue: true,
 });
-
-if (confirmError) {
-  console.error(confirmError.type, confirmError.message);
-}
 ```
 
 ### Number
 
 ```typescript
-const [portError, port] = await number({
+const port = await number({
   message: "Port",
   defaultValue: 3000,
   min: 1,
   max: 65535,
 });
-
-if (portError) {
-  console.error(portError.type, portError.message);
-}
 ```
 
 ### Select
 
 ```typescript
-const [environmentError, environment] = await select({
+const environment = await select({
   message: "Choose environment",
   choices: [
     { value: "dev", label: "Development" },
@@ -127,30 +119,22 @@ const [environmentError, environment] = await select({
     { value: "prod", label: "Production", hint: "irreversible" },
   ],
 });
-
-if (environmentError) {
-  console.error(environmentError.type, environmentError.message);
-}
 ```
 
 ### Multiselect
 
 ```typescript
-const [toolsError, tools] = await multiselect({
+const tools = await multiselect({
   message: "Enable tools",
   choices: [{ value: "lint" }, { value: "test" }, { value: "build" }],
   min: 1,
 });
-
-if (toolsError) {
-  console.error(toolsError.type, toolsError.message);
-}
 ```
 
 ### Transform
 
 ```typescript
-const [portError, port] = await number({
+const port = await number({
   message: "Port",
   defaultValue: 3000,
   transform: (value) => Math.floor(value),
@@ -160,7 +144,7 @@ const [portError, port] = await number({
 ### Async validate
 
 ```typescript
-const [nameError, name] = await input({
+const name = await input({
   message: "Username",
   validate: async (value) => {
     const taken = await checkUsernameExists(value);
@@ -258,12 +242,12 @@ Used to provide a custom I/O backend (e.g. for testing).
 | Method               | Description                                   |
 | -------------------- | --------------------------------------------- |
 | `isInteractive()`    | Returns `true` if running in interactive mode |
-| `init()`             | Initialize the runtime                        |
-| `readKey()`          | Read the next key press                       |
-| `render(frame)`      | Display a frame during interaction            |
-| `done(frame)`        | Display the final frame and clean up          |
-| `close()`            | Close the runtime                             |
-| `interrupt(message)` | _(optional)_ Interrupt with a message         |
+| `init()`             | Prepares the runtime or throws if unavailable |
+| `readKey()`          | Resolves with the next parsed key             |
+| `render(frame)`      | Draws the current prompt frame                |
+| `done(frame)`        | Finalizes the prompt output                   |
+| `close()`            | Restores terminal state                       |
+| `interrupt(message)` | Optional cancellation hook                    |
 
 ```typescript
 import { input } from "semola/prompts";
@@ -271,7 +255,7 @@ import type { PromptRuntime } from "semola/prompts";
 
 const runtime: PromptRuntime = { ... };
 
-const [error, value] = await input({ message: "Name" }, runtime);
+const value = await input({ message: "Name" }, runtime);
 ```
 
 ## Interactive-only behavior

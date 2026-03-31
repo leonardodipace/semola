@@ -1,6 +1,5 @@
-import { err, mightThrowSync, ok } from "../../errors/index.js";
 import { parseKeys } from "./keys.js";
-import type { Key, PromptResultLike, PromptRuntime } from "./types.js";
+import type { Key, PromptRuntime } from "./types.js";
 
 const HIDE_CURSOR = "\u001B[?25l";
 const SHOW_CURSOR = "\u001B[?25h";
@@ -32,11 +31,24 @@ type StdoutLike = {
   write: (chunk: string) => boolean;
 };
 
+const withRuntimeError = <T>(message: string, callback: () => T) => {
+  try {
+    return callback();
+  } catch {
+    throw new Error(message);
+  }
+};
+
+type Waiter = {
+  resolve: (key: Key) => void;
+  reject: (error: Error) => void;
+};
+
 export class NodePromptRuntime implements PromptRuntime {
   private readonly stdin: StdinLike;
   private readonly stdout: StdoutLike;
   private readonly queue: Key[] = [];
-  private readonly waiters: Array<(result: PromptResultLike<Key>) => void> = [];
+  private readonly waiters: Waiter[] = [];
   private initialized = false;
   private previousLines = 0;
   private buffer = "";
@@ -59,17 +71,16 @@ export class NodePromptRuntime implements PromptRuntime {
 
   public init() {
     if (!this.isInteractive()) {
-      return err(
-        "PromptEnvironmentError",
+      throw new Error(
         "Interactive prompts require a TTY with raw mode support",
       );
     }
 
     if (this.initialized) {
-      return ok(undefined);
+      return;
     }
 
-    const [initError] = mightThrowSync(() => {
+    withRuntimeError("Unable to initialize prompt runtime", () => {
       this.stdin.setRawMode(true);
       this.stdin.setEncoding("utf8");
       this.stdin.resume();
@@ -77,28 +88,23 @@ export class NodePromptRuntime implements PromptRuntime {
       this.stdout.write(HIDE_CURSOR);
     });
 
-    if (initError) {
-      return err("PromptIOError", "Unable to initialize prompt runtime");
-    }
-
     this.initialized = true;
-    return ok(undefined);
   }
 
-  public readKey(): Promise<PromptResultLike<Key>> {
+  public readKey(): Promise<Key> {
     const queued = this.queue.shift();
 
     if (queued) {
-      return Promise.resolve(ok(queued));
+      return Promise.resolve(queued);
     }
 
-    return new Promise<PromptResultLike<Key>>((resolve) => {
-      this.waiters.push(resolve);
+    return new Promise<Key>((resolve, reject) => {
+      this.waiters.push({ resolve, reject });
     });
   }
 
   public render(frame: string) {
-    const [renderError] = mightThrowSync(() => {
+    withRuntimeError("Unable to render prompt frame", () => {
       if (this.previousLines > 1) {
         this.stdout.write(`\u001B[${this.previousLines - 1}A`);
       }
@@ -108,16 +114,10 @@ export class NodePromptRuntime implements PromptRuntime {
 
       this.previousLines = countLines(frame);
     });
-
-    if (renderError) {
-      return err("PromptIOError", "Unable to render prompt frame");
-    }
-
-    return ok(undefined);
   }
 
   public done(frame: string) {
-    const [doneError] = mightThrowSync(() => {
+    withRuntimeError("Unable to finalize prompt frame", () => {
       if (this.previousLines > 1) {
         this.stdout.write(`\u001B[${this.previousLines - 1}A`);
       }
@@ -126,33 +126,21 @@ export class NodePromptRuntime implements PromptRuntime {
       this.stdout.write(`${frame}\n`);
       this.previousLines = 0;
     });
-
-    if (doneError) {
-      return err("PromptIOError", "Unable to finalize prompt frame");
-    }
-
-    return ok(undefined);
   }
 
   public close() {
     if (!this.initialized) {
-      return ok(undefined);
+      return;
     }
 
     this.initialized = false;
 
-    const [closeError] = mightThrowSync(() => {
+    withRuntimeError("Unable to close prompt runtime", () => {
       this.stdin.off("data", this.onData);
       this.stdin.setRawMode(false);
       this.stdin.pause?.();
       this.stdout.write(SHOW_CURSOR);
     });
-
-    if (closeError) {
-      return err("PromptIOError", "Unable to close prompt runtime");
-    }
-
-    return ok(undefined);
   }
 
   public interrupt(): never {
@@ -165,11 +153,15 @@ export class NodePromptRuntime implements PromptRuntime {
     const combined = `${this.buffer}${value}`;
     this.buffer = "";
 
-    const [parseError, result] = mightThrowSync(() => parseKeys(combined));
+    let result: ReturnType<typeof parseKeys>;
 
-    if (parseError || !result) {
+    try {
+      result = parseKeys(combined);
+    } catch {
+      const error = new Error("Failed to parse input");
+
       for (const waiter of this.waiters.splice(0)) {
-        waiter(err("PromptIOError", "Failed to parse input"));
+        waiter.reject(error);
       }
 
       return;
@@ -181,7 +173,7 @@ export class NodePromptRuntime implements PromptRuntime {
       const waiter = this.waiters.shift();
 
       if (waiter) {
-        waiter(ok(key));
+        waiter.resolve(key);
       } else {
         this.queue.push(key);
       }

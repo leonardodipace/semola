@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { err, ok } from "../../errors/index.js";
 import type { BasePromptOptions } from "../types.js";
 import { runPromptSession } from "./session.js";
 import type { Key, PromptRuntime } from "./types.js";
@@ -24,55 +23,35 @@ class MockSessionRuntime implements PromptRuntime {
   }
 
   public init() {
-    return ok(undefined);
+    return;
   }
 
   public readKey() {
     const key = this.keys.shift();
 
     if (!key) {
-      return Promise.resolve(
-        err("PromptIOError", "No more mock keys available"),
-      );
+      return Promise.reject(new Error("No more mock keys available"));
     }
 
-    return Promise.resolve(ok(key));
+    return Promise.resolve(key);
   }
 
   public render(frame: string) {
     this.frames.push(frame);
-    return ok(undefined);
   }
 
   public done(frame: string) {
     this.doneFrames.push(frame);
-    return ok(undefined);
   }
 
   public close() {
     this.closed = true;
-    return ok(undefined);
   }
 
   public interrupt(message: string) {
     this.interruptMessage = message;
-    return ok(undefined);
   }
 }
-
-const expectOk = <T>(
-  result: ReturnType<typeof err<string>> | ReturnType<typeof ok<T>>,
-) => {
-  const [resultError, data] = result;
-
-  expect(resultError).toBeNull();
-
-  if (data === null) {
-    throw new Error("Expected prompt session to succeed");
-  }
-
-  return data;
-};
 
 const createSessionOptions = (
   options: BasePromptOptions<string>,
@@ -130,9 +109,8 @@ describe("runPromptSession", () => {
     const result = await runPromptSession(
       createSessionOptions({ message: "Name" }, runtime),
     );
-    const value = expectOk(result);
 
-    expect(value).toBe("ok");
+    expect(result).toBe("ok");
     expect(runtime.closed).toBe(true);
     expect(runtime.doneFrames.at(-1)).toBe("✔ ok");
   });
@@ -147,9 +125,8 @@ describe("runPromptSession", () => {
     const result = await runPromptSession(
       createSessionOptions({ message: "Name" }, runtime),
     );
-    const value = expectOk(result);
 
-    expect(value).toBe("a");
+    expect(result).toBe("a");
     const hasSubmitError = runtime.frames.some((frame) =>
       frame.includes("Value required"),
     );
@@ -159,15 +136,9 @@ describe("runPromptSession", () => {
   test("should cancel on escape and call interrupt", async () => {
     const runtime = new MockSessionRuntime([{ name: "escape" }]);
 
-    const [resultError, value] = await runPromptSession(
-      createSessionOptions({ message: "Name" }, runtime),
-    );
-
-    expect(value).toBeNull();
-    expect(resultError).toMatchObject({
-      type: "PromptCancelledError",
-      message: "Interrupted, bye!",
-    });
+    await expect(
+      runPromptSession(createSessionOptions({ message: "Name" }, runtime)),
+    ).rejects.toThrow("Interrupted, bye!");
 
     expect(runtime.closed).toBe(true);
     expect(runtime.doneFrames.at(-1)).toContain("Interrupted, bye!");
@@ -177,14 +148,9 @@ describe("runPromptSession", () => {
   test("should cancel on ctrl+c", async () => {
     const runtime = new MockSessionRuntime([{ name: "ctrl_c" }]);
 
-    const [resultError, value] = await runPromptSession(
-      createSessionOptions({ message: "Name" }, runtime),
-    );
-
-    expect(value).toBeNull();
-    expect(resultError).toMatchObject({
-      type: "PromptCancelledError",
-    });
+    await expect(
+      runPromptSession(createSessionOptions({ message: "Name" }, runtime)),
+    ).rejects.toThrow("Interrupted, bye!");
 
     expect(runtime.closed).toBe(true);
   });
@@ -214,9 +180,8 @@ describe("runPromptSession", () => {
         runtime,
       ),
     );
-    const value = expectOk(result);
 
-    expect(value).toBe("ok");
+    expect(result).toBe("ok");
     const hasValidationError = runtime.frames.some((frame) =>
       frame.includes("Not ok"),
     );
@@ -229,23 +194,19 @@ describe("runPromptSession", () => {
       { name: "enter" },
     ]);
 
-    const [resultError, value] = await runPromptSession(
-      createSessionOptions(
-        {
-          message: "Name",
-          validate: () => {
-            throw new Error("boom");
+    await expect(
+      runPromptSession(
+        createSessionOptions(
+          {
+            message: "Name",
+            validate: () => {
+              throw new Error("boom");
+            },
           },
-        },
-        runtime,
+          runtime,
+        ),
       ),
-    );
-
-    expect(value).toBeNull();
-    expect(resultError).toMatchObject({
-      type: "PromptIOError",
-      message: "Prompt validate callback failed unexpectedly",
-    });
+    ).rejects.toThrow("Prompt validate callback failed unexpectedly");
 
     expect(runtime.closed).toBe(true);
     expect(runtime.doneFrames.at(-1)).toBe("✖ Name");
@@ -267,9 +228,8 @@ describe("runPromptSession", () => {
         runtime,
       ),
     );
-    const value = expectOk(result);
 
-    expect(value).toBe("AB");
+    expect(result).toBe("AB");
     expect(runtime.doneFrames.at(-1)).toBe("✔ AB");
   });
 
@@ -279,23 +239,19 @@ describe("runPromptSession", () => {
       { name: "enter" },
     ]);
 
-    const [resultError, value] = await runPromptSession(
-      createSessionOptions(
-        {
-          message: "Name",
-          transform: () => {
-            throw new Error("boom");
+    await expect(
+      runPromptSession(
+        createSessionOptions(
+          {
+            message: "Name",
+            transform: () => {
+              throw new Error("boom");
+            },
           },
-        },
-        runtime,
+          runtime,
+        ),
       ),
-    );
-
-    expect(value).toBeNull();
-    expect(resultError).toMatchObject({
-      type: "PromptIOError",
-      message: "Prompt transform callback failed unexpectedly",
-    });
+    ).rejects.toThrow("Prompt transform callback failed unexpectedly");
 
     expect(runtime.closed).toBe(true);
     expect(runtime.doneFrames.at(-1)).toBe("✖ Name");

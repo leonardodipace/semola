@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { err, ok } from "../errors/index.js";
 import type { Key, PromptRuntime } from "./core/types.js";
 import {
   confirm as confirmPrompt,
@@ -40,83 +39,63 @@ class MockPromptRuntime implements PromptRuntime {
 
   public init() {
     if (!this.interactive) {
-      return err(
-        "PromptEnvironmentError",
+      throw new Error(
         "Interactive prompts require a TTY with raw mode support",
       );
     }
-
-    return ok(undefined);
   }
 
   public readKey() {
     const key = this.keys.shift();
 
     if (!key) {
-      return Promise.resolve(
-        err("PromptIOError", "No more mock keys available"),
-      );
+      return Promise.reject(new Error("No more mock keys available"));
     }
 
-    return Promise.resolve(ok(key));
+    return Promise.resolve(key);
   }
 
   public render(frame: string) {
     this.frames.push(frame);
-    return ok(undefined);
   }
 
   public done(frame: string) {
     this.doneFrames.push(frame);
-    return ok(undefined);
   }
 
   public close() {
     this.closed = true;
-    return ok(undefined);
   }
 }
 
-const unwrap = <T>(
-  result: ReturnType<typeof err<string>> | ReturnType<typeof ok<T>>,
-) => {
-  const [resultError, data] = result;
-
-  if (resultError || data === null) {
-    throw new Error(resultError?.message ?? "Expected prompt success result");
-  }
-
-  return data;
-};
-
 const input = async (options: InputOptions, runtime?: PromptRuntime) => {
-  return unwrap(await inputPrompt(options, runtime));
+  return inputPrompt(options, runtime);
 };
 
 const password = async (options: PasswordOptions, runtime?: PromptRuntime) => {
-  return unwrap(await passwordPrompt(options, runtime));
+  return passwordPrompt(options, runtime);
 };
 
 const confirm = async (options: ConfirmOptions, runtime?: PromptRuntime) => {
-  return unwrap(await confirmPrompt(options, runtime));
+  return confirmPrompt(options, runtime);
 };
 
 const number = async (options: NumberOptions, runtime?: PromptRuntime) => {
-  return unwrap(await numberPrompt(options, runtime));
+  return numberPrompt(options, runtime);
 };
 
 const select = async <TValue extends string>(
   options: SelectOptions<TValue>,
   runtime?: PromptRuntime,
 ) => {
-  return unwrap(await selectPrompt(options, runtime));
+  return selectPrompt(options, runtime);
 };
 
 const multiselect = async <TValue extends string>(
   options: MultiselectOptions<TValue>,
   runtime?: PromptRuntime,
 ) => {
-  return unwrap(await multiselectPrompt(options, runtime));
+  return multiselectPrompt(options, runtime);
 };
 
 describe("prompts", () => {
@@ -257,31 +236,17 @@ describe("prompts", () => {
   test("should return cancelled error on escape", async () => {
     const runtime = new MockPromptRuntime([{ name: "escape" }]);
 
-    const [resultError, value] = await inputPrompt(
-      { message: "Name" },
-      runtime,
+    await expect(inputPrompt({ message: "Name" }, runtime)).rejects.toThrow(
+      "Interrupted, bye!",
     );
-
-    expect(value).toBeNull();
-    expect(resultError).toMatchObject({
-      type: "PromptCancelledError",
-      message: "Interrupted, bye!",
-    });
   });
 
   test("should return environment error when runtime is not interactive", async () => {
     const runtime = new MockPromptRuntime([], false);
 
-    const [resultError, value] = await inputPrompt(
-      { message: "Name" },
-      runtime,
+    await expect(inputPrompt({ message: "Name" }, runtime)).rejects.toThrow(
+      "Interactive prompts require a TTY with raw mode support",
     );
-
-    expect(value).toBeNull();
-    expect(resultError).toMatchObject({
-      type: "PromptEnvironmentError",
-      message: "Interactive prompts require a TTY with raw mode support",
-    });
   });
 
   test("should support validate and transform callbacks", async () => {
