@@ -28,6 +28,7 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 | **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`   |
 | **⏰ Cron**          | In-memory cron scheduler for periodic task execution   | `semola/cron`    |
 | **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors`  |
+| **📃 Logging**       | A simple logging utility                               | `semola/logging` |
 | **⌨️ Prompts**       | Interactive zero-dependency CLI prompts                | `semola/prompts` |
 
 ---
@@ -198,6 +199,15 @@ const i18n = new I18n({
 console.log(i18n.translate("greeting", { name: "World" }));
 ```
 
+### Log your messages
+
+```typescript
+import { ConsoleProvider, Logger } from "semola/logging";
+
+const logger = new Logger("database", [new ConsoleProvider()]);
+logger.info("Hello!");
+```
+
 ---
 
 ## 📦 Installation
@@ -233,14 +243,14 @@ Stop piecing together half-baked solutions from npm. Stop wrestling with type de
 
 Semola API is the **fastest API framework** for Bun.
 
-| Framework  | Avg Req/Sec | Latency Avg (ms) |   vs Semola   |
-| :--------- | ----------: | ---------------: | :-----------: |
-| **Semola** |  **40,050** |         **1.88** | **baseline**  |
-| Elysia     |      37,185 |             2.13 |  1.1x slower  |
-| Hono       |      34,611 |             2.31 |  1.2x slower  |
-| Fastify    |      26,330 |             3.70 |  1.5x slower  |
-| Express    |      20,031 |             5.02 | **2x slower** |
-| NestJS     |      16,118 |             6.21 |  2.5x slower  |
+| Framework  | Avg Req/Sec | Latency Avg (ms) |  vs Semola   |
+| :--------- | ----------: | ---------------: | :----------: |
+| **Semola** |  **40,050** |         **1.88** | **baseline** |
+| Elysia     |      37,185 |             2.13 | 1.1x slower  |
+| Hono       |      34,611 |             2.31 | 1.2x slower  |
+| Fastify    |      26,330 |             3.70 | 1.5x slower  |
+| Express    |      20,031 |             5.02 |  2x slower   |
+| NestJS     |      16,118 |             6.21 | 2.5x slower  |
 
 _Higher is better for req/sec, lower is better for latency._
 
@@ -266,6 +276,7 @@ _Higher is better for req/sec, lower is better for latency._
 - [i18n](./docs/i18n.md) - Type-safe internationalization
 - [Cache](./docs/cache.md) - Redis cache wrapper with TTL
 - [Errors](./docs/errors.md) - Result-based error handling
+- [Logging](./docs/logging.md) - Logging utility
 - [Prompts](./docs/prompts.md) - Interactive CLI prompts
 
 ---
