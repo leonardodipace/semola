@@ -37,6 +37,7 @@ export class StackData {
       };
 
       Error.captureStackTrace(this, fn);
+      this.stack; // Invoke the getter for `stack`.
     });
 
     Error.prepareStackTrace = oldStackTrace;
