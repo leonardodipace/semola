@@ -139,6 +139,8 @@ The `FileProvider(file: string, options?: FileProviderOptions)` class direct all
   - **`formatter`** (optional) - Define how the provider should format a message. By default it use and instance of the `BaseFormatter()` class.
   - **`policy`** (optional) - An object which define the type of rolling strategy to implement. By default it use a size based rolling strategy.
 
+**Note:** If an error occurs during a write operation, such as a permission denied error, the provider will raise an exception;
+
 **Example**
 
 ```typescript
