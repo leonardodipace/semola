@@ -84,19 +84,25 @@ export class FileProvider extends LoggerProvider {
       return formatter?.format(data) ?? "";
     });
 
-    if (error && error instanceof Error) {
-      const { formatter } = this.options;
-      const errorMsg = formatter?.formatError(data, error);
-      appendFileSync(this.file, `${errorMsg}\n`);
-    }
+    const [fsError] = mightThrowSync(() => {
+      if (error && error instanceof Error) {
+        const { formatter } = this.options;
+        const errorMsg = formatter?.formatError(data, error);
+        appendFileSync(this.file, `${errorMsg}\n`);
+      }
 
-    if (this.canRollFile()) {
-      this.counter += 1;
-      this.file = this.createNewFileName();
-    }
+      if (this.canRollFile()) {
+        this.counter += 1;
+        this.file = this.createNewFileName();
+      }
 
-    if (error || !formattedMessage) return;
-    appendFileSync(this.file, `${formattedMessage}\n`);
+      if (error || !formattedMessage) return;
+      appendFileSync(this.file, `${formattedMessage}\n`);
+    });
+
+    if (fsError && fsError instanceof Error) {
+      throw fsError;
+    }
   }
 
   private canRollFile() {
@@ -149,7 +155,17 @@ export class FileProvider extends LoggerProvider {
       return 0;
     }
 
-    const { size } = statSync(this.file);
+    const [statError, size] = mightThrowSync(() => {
+      const { size } = statSync(this.file);
+      return size;
+    });
+
+    if (statError && statError instanceof Error) {
+      return 0;
+    }
+
+    if (!size) return 0;
+
     return size;
   }
 
