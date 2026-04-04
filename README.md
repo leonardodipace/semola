@@ -364,6 +364,6 @@ bun check
 
 This package uses GitHub Actions for automated publishing. To release:
 
-1. Bump version: `bun version <major|minor|patch>`
+1. Bump version: `bun pm version <major|minor|patch>`
 2. Create a GitHub release with a new tag (e.g., `v0.4.0`)
 3. The GitHub Action automatically publishes to npm with provenance
