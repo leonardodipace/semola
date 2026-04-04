@@ -14,6 +14,38 @@ import {
 import { buildDownSql, buildUpSql } from "./sql.js";
 import type { SchemaSnapshot } from "./types.js";
 
+function assertNoUnsafePrimaryKeyChanges(
+  dialect: SchemaSnapshot["dialect"],
+  operations: ReturnType<typeof diffSnapshots>,
+) {
+  if (dialect === "sqlite") {
+    return;
+  }
+
+  const columns: string[] = [];
+
+  for (const operation of operations) {
+    if (operation.kind !== "drop-column") {
+      continue;
+    }
+
+    if (!operation.column.isPrimaryKey) {
+      continue;
+    }
+
+    columns.push(`${operation.tableName}.${operation.column.sqlName}`);
+  }
+
+  if (columns.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    `Unsafe primary key change detected for ${dialect}: ${columns.join(", ")}. ` +
+      "Changing an existing primary key requires a manual migration to preserve constraints and data safely.",
+  );
+}
+
 function emptySnapshot(dialect: "postgres" | "mysql" | "sqlite") {
   const snapshot: SchemaSnapshot = {
     dialect,
@@ -92,6 +124,8 @@ export async function createMigration(input: { name: string; cwd?: string }) {
     currentSnapshot.dialect,
   );
   const operations = diffSnapshots(previousSnapshot, currentSnapshot);
+
+  assertNoUnsafePrimaryKeyChanges(currentSnapshot.dialect, operations);
 
   if (operations.length === 0) {
     return {

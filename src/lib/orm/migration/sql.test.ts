@@ -1,5 +1,5 @@
-import { SQL } from "bun";
 import { describe, expect, test } from "bun:test";
+import { SQL } from "bun";
 import { splitStatements } from "./files.js";
 import { buildDownSql, buildUpSql } from "./sql.js";
 import type { MigrationOperation } from "./types.js";

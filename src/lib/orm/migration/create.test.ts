@@ -1017,4 +1017,183 @@ describe("createMigration", () => {
       await rm(cwd, { recursive: true, force: true });
     }
   });
+
+  test("throws when postgres migration attempts to change an existing primary key column", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "semola-mig-postgres-pk-change-"));
+
+    try {
+      await mkdir(join(cwd, "src", "db"), { recursive: true });
+
+      const configContent = [
+        "export default {",
+        "  orm: {",
+        "    schema: './src/db/schema.ts',",
+        "    migrations: { dir: './migrations' }",
+        "  }",
+        "};",
+        "",
+      ].join("\n");
+
+      const ormModulePathTs = join(import.meta.dir, "..", "index.ts");
+      const ormModulePathJs = join(import.meta.dir, "..", "index.js");
+
+      let ormModulePath = ormModulePathJs;
+
+      if (await Bun.file(ormModulePathTs).exists()) {
+        ormModulePath = ormModulePathTs;
+      }
+
+      const schemaV2 = [
+        `import { createOrm, createTable, string } from '${ormModulePath}';`,
+        "",
+        "const users = createTable('users', {",
+        "  id: string('id').primaryKey(),",
+        "});",
+        "",
+        "export default createOrm({",
+        "  url: 'postgres://localhost/db',",
+        "  tables: { users },",
+        "});",
+        "",
+      ].join("\n");
+
+      const previousSnapshot = {
+        dialect: "postgres",
+        tables: {
+          users: {
+            key: "users",
+            tableName: "users",
+            columns: {
+              id: {
+                key: "id",
+                sqlName: "id",
+                kind: "number",
+                isPrimaryKey: true,
+                isNotNull: true,
+                isUnique: false,
+                hasDefault: false,
+                defaultKind: null,
+                referencesTable: null,
+                referencesColumn: null,
+                onDeleteAction: null,
+              },
+            },
+          },
+        },
+      };
+
+      await Bun.write(join(cwd, "semola.config.ts"), configContent);
+      await Bun.write(join(cwd, "src", "db", "schema.ts"), schemaV2);
+
+      const previousMigrationDir = join(
+        cwd,
+        "migrations",
+        "20260101000000000_init",
+      );
+
+      await mkdir(previousMigrationDir, { recursive: true });
+      await Bun.write(join(previousMigrationDir, "up.sql"), "-- init\n");
+      await Bun.write(join(previousMigrationDir, "down.sql"), "-- init\n");
+      await Bun.write(
+        join(previousMigrationDir, "snapshot.json"),
+        `${JSON.stringify(previousSnapshot, null, 2)}\n`,
+      );
+
+      await expect(
+        createMigration({ name: "unsafe_pk_change", cwd }),
+      ).rejects.toThrow("Unsafe primary key change detected for postgres");
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("throws when mysql migration attempts to change an existing primary key column", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "semola-mig-mysql-pk-change-"));
+
+    try {
+      await mkdir(join(cwd, "src", "db"), { recursive: true });
+
+      const configContent = [
+        "export default {",
+        "  orm: {",
+        "    schema: './src/db/schema.ts',",
+        "    migrations: { dir: './migrations' }",
+        "  }",
+        "};",
+        "",
+      ].join("\n");
+
+      const ormModulePathTs = join(import.meta.dir, "..", "index.ts");
+      const ormModulePathJs = join(import.meta.dir, "..", "index.js");
+
+      let ormModulePath = ormModulePathJs;
+
+      if (await Bun.file(ormModulePathTs).exists()) {
+        ormModulePath = ormModulePathTs;
+      }
+
+      const schemaV2 = [
+        `import { createOrm, createTable, string } from '${ormModulePath}';`,
+        "",
+        "const users = createTable('users', {",
+        "  id: string('id').primaryKey(),",
+        "});",
+        "",
+        "export default createOrm({",
+        "  url: 'mysql://localhost/db',",
+        "  dialect: 'mysql',",
+        "  tables: { users },",
+        "});",
+        "",
+      ].join("\n");
+
+      const previousSnapshot = {
+        dialect: "mysql",
+        tables: {
+          users: {
+            key: "users",
+            tableName: "users",
+            columns: {
+              id: {
+                key: "id",
+                sqlName: "id",
+                kind: "number",
+                isPrimaryKey: true,
+                isNotNull: true,
+                isUnique: false,
+                hasDefault: false,
+                defaultKind: null,
+                referencesTable: null,
+                referencesColumn: null,
+                onDeleteAction: null,
+              },
+            },
+          },
+        },
+      };
+
+      await Bun.write(join(cwd, "semola.config.ts"), configContent);
+      await Bun.write(join(cwd, "src", "db", "schema.ts"), schemaV2);
+
+      const previousMigrationDir = join(
+        cwd,
+        "migrations",
+        "20260101000000000_init",
+      );
+
+      await mkdir(previousMigrationDir, { recursive: true });
+      await Bun.write(join(previousMigrationDir, "up.sql"), "-- init\n");
+      await Bun.write(join(previousMigrationDir, "down.sql"), "-- init\n");
+      await Bun.write(
+        join(previousMigrationDir, "snapshot.json"),
+        `${JSON.stringify(previousSnapshot, null, 2)}\n`,
+      );
+
+      await expect(
+        createMigration({ name: "unsafe_pk_change", cwd }),
+      ).rejects.toThrow("Unsafe primary key change detected for mysql");
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
 });
