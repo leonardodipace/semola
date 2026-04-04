@@ -5,10 +5,46 @@ type Handler = (message: string, channel: string) => void | Promise<void>;
 
 class MockRedisClient {
   private subscriptions = new Map<string, Handler[]>();
+  private subscribeCalls = new Map<string, number>();
+  private unsubscribeCalls = new Map<string, number>();
   private shouldFail = false;
+  private subscribeGate: Promise<void> | null = null;
+  private releaseSubscribeGate: (() => void) | null = null;
+  private unsubscribeGate: Promise<void> | null = null;
+  private releaseUnsubscribeGate: (() => void) | null = null;
 
   public setShouldFail(value: boolean) {
     this.shouldFail = value;
+  }
+
+  public blockNextSubscribe() {
+    this.subscribeGate = new Promise((resolve) => {
+      this.releaseSubscribeGate = resolve;
+    });
+  }
+
+  public unblockNextSubscribe() {
+    if (!this.releaseSubscribeGate) {
+      return;
+    }
+
+    this.releaseSubscribeGate();
+    this.releaseSubscribeGate = null;
+  }
+
+  public blockNextUnsubscribe() {
+    this.unsubscribeGate = new Promise((resolve) => {
+      this.releaseUnsubscribeGate = resolve;
+    });
+  }
+
+  public unblockNextUnsubscribe() {
+    if (!this.releaseUnsubscribeGate) {
+      return;
+    }
+
+    this.releaseUnsubscribeGate();
+    this.releaseUnsubscribeGate = null;
   }
 
   public async publish(channel: string, message: string) {
@@ -32,9 +68,18 @@ class MockRedisClient {
   }
 
   public async subscribe(channel: string, handler: Handler) {
+    if (this.subscribeGate) {
+      await this.subscribeGate;
+      this.subscribeGate = null;
+    }
+
     if (this.shouldFail) {
       throw new Error("Redis connection error");
     }
+
+    const subscribeCount = this.subscribeCalls.get(channel) ?? 0;
+
+    this.subscribeCalls.set(channel, subscribeCount + 1);
 
     const handlers = this.subscriptions.get(channel) ?? [];
     handlers.push(handler);
@@ -44,9 +89,18 @@ class MockRedisClient {
   }
 
   public async unsubscribe(channel: string) {
+    if (this.unsubscribeGate) {
+      await this.unsubscribeGate;
+      this.unsubscribeGate = null;
+    }
+
     if (this.shouldFail) {
       throw new Error("Redis connection error");
     }
+
+    const unsubscribeCount = this.unsubscribeCalls.get(channel) ?? 0;
+
+    this.unsubscribeCalls.set(channel, unsubscribeCount + 1);
 
     this.subscriptions.delete(channel);
   }
@@ -57,6 +111,14 @@ class MockRedisClient {
 
   public getSubscriptions() {
     return this.subscriptions;
+  }
+
+  public getSubscribeCallCount(channel: string) {
+    return this.subscribeCalls.get(channel) ?? 0;
+  }
+
+  public getUnsubscribeCallCount(channel: string) {
+    return this.unsubscribeCalls.get(channel) ?? 0;
   }
 }
 
@@ -76,14 +138,14 @@ describe("PubSub", () => {
 
       const messages: Array<{ userId: string; action: string }> = [];
 
-      const [subscribeError, subscriberCount] = await pubsub.subscribe(
+      const [subscribeError, unsubscribeHandler] = await pubsub.subscribe(
         async (message) => {
           messages.push(message);
         },
       );
 
       expect(subscribeError).toBeNull();
-      expect(subscriberCount).toBe(1);
+      expect(typeof unsubscribeHandler).toBe("function");
       expect(pubsub.isActive()).toBe(true);
 
       const [publishError, count] = await pubsub.publish({
@@ -141,7 +203,7 @@ describe("PubSub", () => {
       expect(redis.getSubscriptions().size).toBe(0);
     });
 
-    test("should return error when subscribing twice", async () => {
+    test("should fan out messages to multiple handlers on one instance", async () => {
       const redis = createMockRedis();
       const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
@@ -149,21 +211,35 @@ describe("PubSub", () => {
         channel: "test",
       });
 
-      const [error1, count1] = await pubsub.subscribe(async () => {});
+      const handler1Messages: string[] = [];
+      const handler2Messages: string[] = [];
+
+      const [error1] = await pubsub.subscribe(async (message) => {
+        handler1Messages.push(message.message);
+      });
+
+      const [error2] = await pubsub.subscribe(async (message) => {
+        handler2Messages.push(message.message);
+      });
 
       expect(error1).toBeNull();
-      expect(count1).toBe(1);
+      expect(error2).toBeNull();
 
-      const [error2, count2] = await pubsub.subscribe(async () => {});
-
-      expect(error2).toEqual({
-        type: "SubscribeError",
-        message: "Already subscribed",
+      const [publishError, publishCount] = await pubsub.publish({
+        message: "hello",
       });
-      expect(count2).toBeNull();
+
+      expect(publishError).toBeNull();
+      expect(publishCount).toBe(1);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(handler1Messages).toEqual(["hello"]);
+      expect(handler2Messages).toEqual(["hello"]);
+      expect(redis.getSubscribeCallCount("test")).toBe(1);
     });
 
-    test("should return subscriber count on successful subscribe", async () => {
+    test("should return handler-level unsubscribe function", async () => {
       const redis = createMockRedis();
       const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
@@ -171,12 +247,15 @@ describe("PubSub", () => {
         channel: "test",
       });
 
-      const [, count] = await pubsub.subscribe(async () => {});
+      const [error, unsubscribeHandler] = await pubsub.subscribe(
+        async () => {},
+      );
 
-      expect(count).toBe(1);
+      expect(error).toBeNull();
+      expect(typeof unsubscribeHandler).toBe("function");
     });
 
-    test("should return null count on subscribe error", async () => {
+    test("should return null unsubscribe function on subscribe error", async () => {
       const redis = createMockRedis();
       const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
@@ -186,12 +265,18 @@ describe("PubSub", () => {
 
       redis.setShouldFail(true);
 
-      const [, count] = await pubsub.subscribe(async () => {});
+      const [error, unsubscribeHandler] = await pubsub.subscribe(
+        async () => {},
+      );
 
-      expect(count).toBeNull();
+      expect(error).toEqual({
+        type: "SubscribeError",
+        message: "Unable to subscribe to test",
+      });
+      expect(unsubscribeHandler).toBeNull();
     });
 
-    test("should increment subscriber count with multiple subscribers", async () => {
+    test("should increment subscriber count with multiple PubSub instances", async () => {
       const redis = createMockRedis();
 
       const pubsub1 = new PubSub<{ message: string }>({
@@ -212,13 +297,17 @@ describe("PubSub", () => {
         channel: "shared-channel",
       });
 
-      const [, count1] = await pubsub1.subscribe(async () => {});
-      const [, count2] = await pubsub2.subscribe(async () => {});
-      const [, count3] = await pubsub3.subscribe(async () => {});
+      const [error1] = await pubsub1.subscribe(async () => {});
+      const [error2] = await pubsub2.subscribe(async () => {});
+      const [error3] = await pubsub3.subscribe(async () => {});
 
-      expect(count1).toBe(1);
-      expect(count2).toBe(2);
-      expect(count3).toBe(3);
+      expect(error1).toBeNull();
+      expect(error2).toBeNull();
+      expect(error3).toBeNull();
+
+      const subscribers = redis.getSubscriptions().get("shared-channel") ?? [];
+
+      expect(subscribers).toHaveLength(3);
     });
 
     test("should return error when unsubscribing without subscription", async () => {
@@ -476,14 +565,16 @@ describe("PubSub", () => {
 
       redis.setShouldFail(true);
 
-      const [error, count] = await pubsub.subscribe(async () => {});
+      const [error, unsubscribeHandler] = await pubsub.subscribe(
+        async () => {},
+      );
 
       expect(error).toEqual({
         type: "SubscribeError",
         message: "Unable to subscribe to test",
       });
 
-      expect(count).toBeNull();
+      expect(unsubscribeHandler).toBeNull();
       expect(pubsub.isActive()).toBe(false);
     });
 
@@ -582,9 +673,12 @@ describe("PubSub", () => {
         throw new Error("Synchronous handler error");
       });
 
-      await pubsub.publish({ message: "test" });
+      const [publishError, count] = await pubsub.publish({ message: "test" });
 
       await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(publishError).toBeNull();
+      expect(count).toBe(1);
 
       // Handler was called and threw error
       expect(errorThrown).toBe(true);
@@ -711,6 +805,74 @@ describe("PubSub", () => {
       expect(callCount).toBe(11); // Old handler not called, new one adds 10
     });
 
+    test("should unsubscribe one handler without affecting others", async () => {
+      const redis = createMockRedis();
+      const pubsub = new PubSub<{ message: string }>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
+
+      const handler1Messages: string[] = [];
+      const handler2Messages: string[] = [];
+
+      const [, unsubscribeHandler1] = await pubsub.subscribe(
+        async (message) => {
+          handler1Messages.push(message.message);
+        },
+      );
+
+      await pubsub.subscribe(async (message) => {
+        handler2Messages.push(message.message);
+      });
+
+      if (!unsubscribeHandler1) {
+        throw new Error("Expected unsubscribe handler");
+      }
+
+      await unsubscribeHandler1();
+
+      await pubsub.publish({ message: "fanout" });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(handler1Messages).toHaveLength(0);
+      expect(handler2Messages).toEqual(["fanout"]);
+      expect(pubsub.isActive()).toBe(true);
+    });
+
+    test("should unsubscribe Redis only when last handler is removed", async () => {
+      const redis = createMockRedis();
+      const pubsub = new PubSub<{ message: string }>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
+
+      const [, unsubscribeHandler1] = await pubsub.subscribe(async () => {});
+      const [, unsubscribeHandler2] = await pubsub.subscribe(async () => {});
+
+      if (!unsubscribeHandler1) {
+        throw new Error("Expected unsubscribe handlers");
+      }
+
+      if (!unsubscribeHandler2) {
+        throw new Error("Expected unsubscribe handlers");
+      }
+
+      expect(redis.getSubscribeCallCount("test")).toBe(1);
+      expect(redis.getUnsubscribeCallCount("test")).toBe(0);
+
+      await unsubscribeHandler1();
+
+      expect(redis.getUnsubscribeCallCount("test")).toBe(0);
+      expect(pubsub.isActive()).toBe(true);
+
+      await unsubscribeHandler2();
+
+      expect(redis.getUnsubscribeCallCount("test")).toBe(1);
+      expect(pubsub.isActive()).toBe(false);
+    });
+
     test("should prevent concurrent unsubscribe calls", async () => {
       const redis = createMockRedis();
       const pubsub = new PubSub<{ message: string }>({
@@ -739,6 +901,132 @@ describe("PubSub", () => {
       expect(successCount).toBe(1);
       expect(failureCount).toBe(1);
       expect(pubsub.isActive()).toBe(false);
+    });
+
+    test("should not report active while subscribe is in flight", async () => {
+      const redis = createMockRedis();
+      const pubsub = new PubSub<{ message: string }>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
+
+      redis.blockNextSubscribe();
+
+      const subscribePromise = pubsub.subscribe(async () => {});
+
+      await Promise.resolve();
+
+      expect(pubsub.isActive()).toBe(false);
+
+      const [unsubscribeError] = await pubsub.unsubscribe();
+
+      expect(unsubscribeError).toEqual({
+        type: "UnsubscribeError",
+        message: "Not subscribed",
+      });
+
+      redis.unblockNextSubscribe();
+
+      const [subscribeError, unsubscribeHandler] = await subscribePromise;
+
+      expect(subscribeError).toBeNull();
+      expect(typeof unsubscribeHandler).toBe("function");
+      expect(pubsub.isActive()).toBe(true);
+    });
+
+    test("should serialize subscribe while unsubscribe is in flight", async () => {
+      const redis = createMockRedis();
+      const pubsub = new PubSub<{ message: string }>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
+
+      const received: string[] = [];
+
+      const [, unsubscribeHandler] = await pubsub.subscribe(async () => {});
+
+      if (!unsubscribeHandler) {
+        throw new Error("Expected unsubscribe handler");
+      }
+
+      redis.blockNextUnsubscribe();
+
+      const unsubscribePromise = unsubscribeHandler();
+      const subscribePromise = pubsub.subscribe(async (message) => {
+        received.push(message.message);
+      });
+
+      let subscribeResolved = false;
+
+      subscribePromise.then(() => {
+        subscribeResolved = true;
+      });
+
+      await Promise.resolve();
+
+      expect(subscribeResolved).toBe(false);
+
+      redis.unblockNextUnsubscribe();
+
+      const [unsubscribeError] = await unsubscribePromise;
+
+      expect(unsubscribeError).toBeNull();
+
+      const [subscribeError] = await subscribePromise;
+
+      expect(subscribeError).toBeNull();
+
+      const [publishError, count] = await pubsub.publish({
+        message: "after-race",
+      });
+
+      expect(publishError).toBeNull();
+      expect(count).toBe(1);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(received).toEqual(["after-race"]);
+      expect(redis.getUnsubscribeCallCount("test")).toBe(1);
+      expect(redis.getSubscribeCallCount("test")).toBe(2);
+    });
+
+    test("should remove new handler when in-flight subscribe fails", async () => {
+      const redis = createMockRedis();
+      const pubsub = new PubSub<{ message: string }>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
+
+      redis.blockNextSubscribe();
+
+      const subscribePromise = pubsub.subscribe(async () => {});
+
+      await Promise.resolve();
+
+      redis.setShouldFail(true);
+      redis.unblockNextSubscribe();
+
+      const [subscribeError, unsubscribeHandler] = await subscribePromise;
+
+      expect(subscribeError).toEqual({
+        type: "SubscribeError",
+        message: "Unable to subscribe to test",
+      });
+      expect(unsubscribeHandler).toBeNull();
+      expect(pubsub.isActive()).toBe(false);
+      expect(redis.getSubscribeCallCount("test")).toBe(0);
+
+      redis.setShouldFail(false);
+
+      const [publishError, count] = await pubsub.publish({
+        message: "should-not-deliver",
+      });
+
+      expect(publishError).toBeNull();
+      expect(count).toBe(0);
     });
   });
 });

@@ -112,12 +112,16 @@ const pubsub = new PubSub({
 });
 
 // Subscribe to messages
-await pubsub.subscribe((message) => {
+const [, unsubscribeHandler] = await pubsub.subscribe((message) => {
   console.log("Received:", message);
 });
 
 // Publish a message
 await pubsub.publish({ userId: 123, text: "New alert!" });
+
+if (unsubscribeHandler) {
+  await unsubscribeHandler();
+}
 ```
 
 ### Cache Data with TTL

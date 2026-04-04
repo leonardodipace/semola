@@ -50,24 +50,31 @@ if (error) {
 
 **`pubsub.subscribe(handler: MessageHandler<T>)`**
 
-Subscribes to messages with a handler function. Returns a result tuple indicating success or failure.
+Registers a local handler for messages on this PubSub instance. Returns a result tuple with a handler-level unsubscribe function.
 
 ```typescript
 type MessageHandler<T> = (message: T, channel: string) => void | Promise<void>;
 
-const [error] = await pubsub.subscribe(async (message, channel) => {
-  console.log(`Received on ${channel}:`, message);
-  await processMessage(message);
-});
+const [error, unsubscribeHandler] = await pubsub.subscribe(
+  async (message, channel) => {
+    console.log(`Received on ${channel}:`, message);
+    await processMessage(message);
+  },
+);
 
 if (error) {
   console.error("Failed to subscribe:", error.message);
+}
+
+if (unsubscribeHandler) {
+  // Removes only this handler.
+  await unsubscribeHandler();
 }
 ```
 
 **`pubsub.unsubscribe()`**
 
-Unsubscribes from the channel or pattern and cleans up the handler.
+Unsubscribes all local handlers for this instance and removes the Redis subscription.
 
 ```typescript
 const [error] = await pubsub.unsubscribe();
@@ -111,7 +118,7 @@ const events = new PubSub<UserEvent>({
 });
 
 // Subscribe to events
-await events.subscribe(async (event) => {
+const [, unsubscribeEvents] = await events.subscribe(async (event) => {
   console.log(`User ${event.userId} performed ${event.action}`);
   await logToDatabase(event);
 });
@@ -122,6 +129,45 @@ await events.publish({
   action: "login",
   timestamp: Date.now(),
 });
+
+if (unsubscribeEvents) {
+  await unsubscribeEvents();
+}
+```
+
+### Multiple Handlers On One Instance
+
+```typescript
+import { PubSub } from "semola/pubsub";
+
+const subscriber = new Bun.RedisClient("redis://localhost:6379");
+const publisher = new Bun.RedisClient("redis://localhost:6379");
+
+const pubsub = new PubSub<{ text: string }>({
+  subscriber,
+  publisher,
+  channel: "notifications",
+});
+
+const [, unsubscribeLogger] = await pubsub.subscribe(async (message) => {
+  console.log("logger:", message.text);
+});
+
+const [, unsubscribeMetrics] = await pubsub.subscribe(async (message) => {
+  await metrics.increment("notifications.received", { text: message.text });
+});
+
+await pubsub.publish({ text: "New alert" });
+
+// Remove one handler, keep the other active
+if (unsubscribeLogger) {
+  await unsubscribeLogger();
+}
+
+// Redis unsubscribe happens only when the last local handler is removed
+if (unsubscribeMetrics) {
+  await unsubscribeMetrics();
+}
 ```
 
 ### Error Handling
@@ -139,10 +185,12 @@ const pubsub = new PubSub<{ notification: string }>({
 });
 
 // Subscribe with error handling
-const [subscribeError] = await pubsub.subscribe(async (message) => {
-  // Handler errors are caught automatically; subscription remains active even if handler throws
-  await processNotification(message.notification);
-});
+const [subscribeError, unsubscribeHandler] = await pubsub.subscribe(
+  async (message) => {
+    // Handler errors are caught automatically; subscription remains active even if handler throws
+    await processNotification(message.notification);
+  },
+);
 
 if (subscribeError) {
   console.error("Failed to subscribe:", subscribeError.message);
@@ -166,7 +214,9 @@ if (publishError) {
 }
 
 // Clean up
-await pubsub.unsubscribe();
+if (unsubscribeHandler) {
+  await unsubscribeHandler();
+}
 ```
 
 ### Multiple Instances
@@ -230,6 +280,10 @@ await publisher.quit();
 
 **JSON Serialization:** Messages are automatically serialized to JSON when published and deserialized when received. This ensures type safety but means only JSON-serializable values can be sent. Attempting to publish circular references or other non-serializable values will return a `SerializationError`.
 
-**One Handler Per Instance:** Each PubSub instance supports a single message handler. If you need multiple handlers for the same channel, create multiple PubSub instances.
+**Multiple Local Handlers:** A single PubSub instance can have multiple active handlers. Internally, it keeps one Redis subscription per channel per instance and fans out each message to every active local handler.
+
+**Handler-Level Unsubscribe:** Each successful `subscribe()` call returns a dedicated unsubscribe function for that handler only. Other handlers remain active.
+
+**Last Handler Cleanup:** Redis-level `unsubscribe` runs only when the final local handler is removed (or when `pubsub.unsubscribe()` is called to clear all handlers).
 
 **When to Use Redis Streams:** If you need message acknowledgment, guaranteed delivery, message history, or consumer groups, use Redis Streams instead of pub/sub. PubSub is best for real-time, fire-and-forget messaging where occasional message loss is acceptable.
