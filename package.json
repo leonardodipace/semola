@@ -85,8 +85,14 @@
       }
     },
     "./logging": {
-      "import": "./dist/lib/logging/index.js",
-      "types": "./dist/lib/logging/index.d.ts"
+      "import": {
+        "types": "./dist/lib/logging/index.d.mts",
+        "default": "./dist/lib/logging/index.mjs"
+      },
+      "require": {
+        "types": "./dist/lib/logging/index.d.cts",
+        "default": "./dist/lib/logging/index.cjs"
+      }
     },
     "./prompts": {
       "import": {
