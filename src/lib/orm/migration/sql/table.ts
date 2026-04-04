@@ -104,6 +104,38 @@ export function dropColumnSql(
   return `ALTER TABLE ${table} DROP COLUMN ${col}`;
 }
 
+export function renameColumnSql(
+  dialect: SchemaSnapshot["dialect"],
+  tableName: string,
+  fromSqlName: string,
+  toSqlName: string,
+) {
+  const table = quoteIdentifier(dialect, tableName);
+  const fromCol = quoteIdentifier(dialect, fromSqlName);
+  const toCol = quoteIdentifier(dialect, toSqlName);
+  return `ALTER TABLE ${table} rename COLUMN ${fromCol} to ${toCol}`;
+}
+
+export function setColumnNotNullSql(
+  dialect: SchemaSnapshot["dialect"],
+  tableName: string,
+  columnSqlName: string,
+) {
+  const table = quoteIdentifier(dialect, tableName);
+  const col = quoteIdentifier(dialect, columnSqlName);
+  return `ALTER TABLE ${table} ALTER COLUMN ${col} SET NOT NULL`;
+}
+
+export function dropColumnNotNullSql(
+  dialect: SchemaSnapshot["dialect"],
+  tableName: string,
+  columnSqlName: string,
+) {
+  const table = quoteIdentifier(dialect, tableName);
+  const col = quoteIdentifier(dialect, columnSqlName);
+  return `ALTER TABLE ${table} ALTER COLUMN ${col} DROP NOT NULL`;
+}
+
 export function rebuildTableSql(
   dialect: SchemaSnapshot["dialect"],
   fromTable: TableSnapshot,
