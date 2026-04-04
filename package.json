@@ -5,44 +5,98 @@
   "type": "module",
   "exports": {
     "./errors": {
-      "import": "./dist/lib/errors/index.js",
-      "types": "./dist/lib/errors/index.d.ts"
+      "import": {
+        "types": "./dist/lib/errors/index.d.mts",
+        "default": "./dist/lib/errors/index.mjs"
+      },
+      "require": {
+        "types": "./dist/lib/errors/index.d.cts",
+        "default": "./dist/lib/errors/index.cjs"
+      }
     },
     "./cache": {
-      "import": "./dist/lib/cache/index.js",
-      "types": "./dist/lib/cache/index.d.ts"
+      "import": {
+        "types": "./dist/lib/cache/index.d.mts",
+        "default": "./dist/lib/cache/index.mjs"
+      },
+      "require": {
+        "types": "./dist/lib/cache/index.d.cts",
+        "default": "./dist/lib/cache/index.cjs"
+      }
     },
     "./i18n": {
-      "import": "./dist/lib/i18n/index.js",
-      "types": "./dist/lib/i18n/index.d.ts"
+      "import": {
+        "types": "./dist/lib/i18n/index.d.mts",
+        "default": "./dist/lib/i18n/index.mjs"
+      },
+      "require": {
+        "types": "./dist/lib/i18n/index.d.cts",
+        "default": "./dist/lib/i18n/index.cjs"
+      }
     },
     "./policy": {
-      "import": "./dist/lib/policy/index.js",
-      "types": "./dist/lib/policy/index.d.ts"
+      "import": {
+        "types": "./dist/lib/policy/index.d.mts",
+        "default": "./dist/lib/policy/index.mjs"
+      },
+      "require": {
+        "types": "./dist/lib/policy/index.d.cts",
+        "default": "./dist/lib/policy/index.cjs"
+      }
     },
     "./api": {
-      "import": "./dist/lib/api/index.js",
-      "types": "./dist/lib/api/index.d.ts"
+      "import": {
+        "types": "./dist/lib/api/index.d.mts",
+        "default": "./dist/lib/api/index.mjs"
+      },
+      "require": {
+        "types": "./dist/lib/api/index.d.cts",
+        "default": "./dist/lib/api/index.cjs"
+      }
     },
     "./queue": {
-      "import": "./dist/lib/queue/index.js",
-      "types": "./dist/lib/queue/index.d.ts"
+      "import": {
+        "types": "./dist/lib/queue/index.d.mts",
+        "default": "./dist/lib/queue/index.mjs"
+      },
+      "require": {
+        "types": "./dist/lib/queue/index.d.cts",
+        "default": "./dist/lib/queue/index.cjs"
+      }
     },
     "./pubsub": {
-      "import": "./dist/lib/pubsub/index.js",
-      "types": "./dist/lib/pubsub/index.d.ts"
+      "import": {
+        "types": "./dist/lib/pubsub/index.d.mts",
+        "default": "./dist/lib/pubsub/index.mjs"
+      },
+      "require": {
+        "types": "./dist/lib/pubsub/index.d.cts",
+        "default": "./dist/lib/pubsub/index.cjs"
+      }
     },
     "./cron": {
-      "import": "./dist/lib/cron/index.js",
-      "types": "./dist/lib/cron/index.d.ts"
+      "import": {
+        "types": "./dist/lib/cron/index.d.mts",
+        "default": "./dist/lib/cron/index.mjs"
+      },
+      "require": {
+        "types": "./dist/lib/cron/index.d.cts",
+        "default": "./dist/lib/cron/index.cjs"
+      }
     },
     "./logging": {
       "import": "./dist/lib/logging/index.js",
       "types": "./dist/lib/logging/index.d.ts"
     },
     "./prompts": {
-      "import": "./dist/lib/prompts/index.js",
-      "types": "./dist/lib/prompts/index.d.ts"
+      "import": {
+        "types": "./dist/lib/prompts/index.d.mts",
+        "default": "./dist/lib/prompts/index.mjs"
+      },
+      "require": {
+        "types": "./dist/lib/prompts/index.d.cts",
+        "default": "./dist/lib/prompts/index.cjs"
+      }
     }
   },
   "files": [
@@ -50,7 +104,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsdown",
     "check": "biome check --write . && tsc --noEmit",
     "test": "bun test",
     "prepublishOnly": "bun run build"
@@ -91,6 +145,7 @@
     "@standard-schema/spec": "^1.1.0",
     "@types/bun": "latest",
     "openapi-types": "^12.1.3",
+    "tsdown": "^0.21.7",
     "zod": "^4.3.6"
   },
   "peerDependencies": {
