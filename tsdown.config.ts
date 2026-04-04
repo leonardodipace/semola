@@ -10,6 +10,7 @@ export default defineConfig({
     "lib/queue/index": "src/lib/queue/index.ts",
     "lib/pubsub/index": "src/lib/pubsub/index.ts",
     "lib/cron/index": "src/lib/cron/index.ts",
+    "lib/logging/index": "src/lib/logging/index.ts",
     "lib/prompts/index": "src/lib/prompts/index.ts",
     "lib/orm/index": "src/lib/orm/index.ts",
   },
