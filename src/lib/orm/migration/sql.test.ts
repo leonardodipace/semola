@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
 import { SQL } from "bun";
+import { describe, expect, test } from "bun:test";
 import { splitStatements } from "./files.js";
 import { buildDownSql, buildUpSql } from "./sql.js";
 import type { MigrationOperation } from "./types.js";
@@ -424,6 +424,58 @@ describe("buildUpSql/buildDownSql", () => {
     expect(up).toContain('ALTER TABLE "users" ADD COLUMN "name" TEXT');
     expect(up).toContain('ALTER TABLE "users" DROP COLUMN "legacy"');
     expect(up).toEndWith(";\n");
+  });
+
+  test("does not optimize drop+add column changes for mysql and sqlite", () => {
+    const operations: MigrationOperation[] = [
+      {
+        kind: "drop-column",
+        tableName: "users",
+        column: {
+          key: "name",
+          sqlName: "name",
+          kind: "string",
+          isPrimaryKey: false,
+          isNotNull: false,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+      },
+      {
+        kind: "add-column",
+        tableName: "users",
+        column: {
+          key: "name",
+          sqlName: "full_name",
+          kind: "string",
+          isPrimaryKey: false,
+          isNotNull: false,
+          isUnique: false,
+          hasDefault: false,
+          referencesTable: null,
+          referencesColumn: null,
+          onDeleteAction: null,
+        },
+      },
+    ];
+
+    const mysqlUp = buildUpSql("mysql", operations);
+    const sqliteUp = buildUpSql("sqlite", operations);
+
+    expect(mysqlUp).toContain("ALTER TABLE `users` DROP COLUMN `name`");
+    expect(mysqlUp).toContain(
+      "ALTER TABLE `users` ADD COLUMN `full_name` VARCHAR(255)",
+    );
+    expect(mysqlUp).not.toContain("RENAME COLUMN");
+
+    expect(sqliteUp).toContain('ALTER TABLE "users" DROP COLUMN "name"');
+    expect(sqliteUp).toContain(
+      'ALTER TABLE "users" ADD COLUMN "full_name" TEXT',
+    );
+    expect(sqliteUp).not.toContain("RENAME COLUMN");
   });
 
   test("returns empty string for empty operations", () => {

@@ -84,4 +84,48 @@ describe("rollbackMigration", () => {
     ) as { applied: unknown[] };
     expect(state.applied).toHaveLength(0);
   });
+
+  test("rolls back migration with explicit transaction statements", async () => {
+    const cwd = await setupProject();
+    const migrationDir = join(cwd, "migrations", "20260326221500000_rebuild");
+
+    await mkdir(migrationDir, { recursive: true });
+    await Bun.write(join(migrationDir, "up.sql"), "SELECT 1;\n");
+    await Bun.write(
+      join(migrationDir, "down.sql"),
+      [
+        "PRAGMA foreign_keys = OFF;",
+        "BEGIN;",
+        "SELECT 1;",
+        "COMMIT;",
+        "PRAGMA foreign_keys = ON;",
+        "",
+      ].join("\n"),
+    );
+
+    await Bun.write(
+      join(cwd, ".semola-migrations.json"),
+      JSON.stringify(
+        {
+          applied: [
+            {
+              id: "20260326221500000",
+              appliedAt: "2026-03-26T22:15:00.000Z",
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+
+    const result = await rollbackMigration({ cwd });
+
+    expect(result.rolledBack).toBe(true);
+
+    const state = JSON.parse(
+      await Bun.file(join(cwd, ".semola-migrations.json")).text(),
+    ) as { applied: unknown[] };
+    expect(state.applied).toHaveLength(0);
+  });
 });

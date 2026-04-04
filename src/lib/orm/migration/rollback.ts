@@ -16,12 +16,38 @@ async function runStatements(
   }
 }
 
+function hasExplicitTransaction(sqlText: string) {
+  const statements = splitStatements(sqlText);
+
+  for (const statement of statements) {
+    const normalized = statement.trim().toUpperCase();
+
+    if (normalized === "BEGIN") {
+      return true;
+    }
+
+    if (normalized === "BEGIN TRANSACTION") {
+      return true;
+    }
+
+    if (normalized === "COMMIT") {
+      return true;
+    }
+
+    if (normalized === "ROLLBACK") {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 async function runRollbackSql(
   sql: SQL,
   sqlText: string,
   transactional: boolean,
 ) {
-  if (transactional) {
+  if (transactional && !hasExplicitTransaction(sqlText)) {
     await sql.begin(async (tx) => {
       await runStatements(tx, sqlText);
     });
