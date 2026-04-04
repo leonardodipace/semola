@@ -1,10 +1,10 @@
 export { AbstractLogger, Logger } from "./core/index.js";
-export {
+export type {
   LogDataType,
-  LogLevel,
   LogLevelType,
   LogMessageType,
 } from "./core/types.js";
+export { LogLevel } from "./core/types.js";
 export {
   BaseFormatter,
   dmyFormat,
@@ -14,13 +14,13 @@ export {
   JSONFormatter,
   mdyFormat,
 } from "./formatter/index.js";
-export { DateFmtFnType } from "./formatter/types.js";
+export type { DateFmtFnType } from "./formatter/types.js";
 export {
   ConsoleProvider,
   FileProvider,
   LoggerProvider,
 } from "./provider/index.js";
-export {
+export type {
   FileProviderOptions,
   ProviderOptions,
   SizeBasedPolicyType,
