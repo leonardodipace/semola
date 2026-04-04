@@ -29,6 +29,34 @@ describe("splitStatements", () => {
     const result = splitStatements("SELECT 1;;SELECT 2");
     expect(result).toEqual(["SELECT 1", "SELECT 2"]);
   });
+
+  test("handles escaped single quotes inside string literals", () => {
+    const result = splitStatements(
+      "INSERT INTO t (a) VALUES ('it''s; fine'); SELECT 1;",
+    );
+
+    expect(result).toHaveLength(2);
+    expect(result[0]).toBe("INSERT INTO t (a) VALUES ('it''s; fine')");
+    expect(result[1]).toBe("SELECT 1");
+  });
+
+  test("handles semicolons inside PostgreSQL dollar-quoted bodies", () => {
+    const result = splitStatements(
+      [
+        "CREATE FUNCTION fn() RETURNS void AS $$",
+        "BEGIN",
+        "  PERFORM 1;",
+        "END;",
+        "$$ LANGUAGE plpgsql;",
+        "SELECT 1;",
+      ].join("\n"),
+    );
+
+    expect(result).toHaveLength(2);
+    expect(result[0]).toContain("PERFORM 1;");
+    expect(result[0]).toContain("$$ LANGUAGE plpgsql");
+    expect(result[1]).toBe("SELECT 1");
+  });
 });
 
 describe("listMigrations", () => {

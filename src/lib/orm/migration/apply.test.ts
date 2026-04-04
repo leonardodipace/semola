@@ -79,7 +79,7 @@ describe("applyMigrations", () => {
       join(migrationDir, "up.sql"),
       [
         "PRAGMA foreign_keys = OFF;",
-        "BEGIN;",
+        "BEGIN IMMEDIATE;",
         "CREATE TABLE users (id TEXT PRIMARY KEY);",
         "COMMIT;",
         "PRAGMA foreign_keys = ON;",

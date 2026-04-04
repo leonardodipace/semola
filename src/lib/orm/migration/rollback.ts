@@ -26,15 +26,19 @@ function hasExplicitTransaction(sqlText: string) {
       return true;
     }
 
-    if (normalized === "BEGIN TRANSACTION") {
+    if (normalized.startsWith("BEGIN ")) {
       return true;
     }
 
-    if (normalized === "COMMIT") {
+    if (normalized === "START TRANSACTION") {
       return true;
     }
 
-    if (normalized === "ROLLBACK") {
+    if (normalized.startsWith("COMMIT")) {
+      return true;
+    }
+
+    if (normalized.startsWith("ROLLBACK")) {
       return true;
     }
   }

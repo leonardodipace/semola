@@ -95,7 +95,7 @@ describe("rollbackMigration", () => {
       join(migrationDir, "down.sql"),
       [
         "PRAGMA foreign_keys = OFF;",
-        "BEGIN;",
+        "BEGIN IMMEDIATE;",
         "SELECT 1;",
         "COMMIT;",
         "PRAGMA foreign_keys = ON;",
