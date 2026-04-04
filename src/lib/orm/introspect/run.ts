@@ -1,5 +1,6 @@
 import { relative, resolve } from "node:path";
 import { SQL } from "bun";
+import { inferDialectFromUrl, isDialect } from "../dialect/utils.js";
 import { loadConfig } from "../migration/config.js";
 import type { Dialect } from "../types.js";
 import { generateCode } from "./codegen.js";
@@ -12,16 +13,6 @@ type IntrospectOptions = {
   dialect?: string;
   schema?: string;
 };
-
-function inferDialect(url: string): Dialect {
-  if (url.includes("mysql")) return "mysql";
-  if (url.includes("postgres")) return "postgres";
-  return "sqlite";
-}
-
-function isDialect(value: string) {
-  return value === "postgres" || value === "mysql" || value === "sqlite";
-}
 
 function parseSchemaFromUrl(url: string) {
   try {
@@ -71,7 +62,7 @@ function resolveDialect(
   const rawDialect = options.dialect ?? config?.orm.introspect.dialect ?? null;
 
   if (!rawDialect) {
-    return inferDialect(dbUrl);
+    return inferDialectFromUrl(dbUrl);
   }
 
   if (!isDialect(rawDialect)) {

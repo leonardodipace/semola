@@ -11,40 +11,38 @@ export type {
   OnDeleteAction,
 } from "./types.js";
 
+async function unwrapIntrospection(
+  resultPromise:
+    | ReturnType<typeof introspectPostgres>
+    | ReturnType<typeof introspectSqlite>
+    | ReturnType<typeof introspectMysql>,
+) {
+  const [error, data] = await resultPromise;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (data === null) {
+    throw new Error("Introspection returned no data");
+  }
+
+  return data;
+}
+
 export async function introspectSchema(
   sql: SQL,
   dialect: Dialect,
   options?: { schema?: string },
 ) {
   if (dialect === "postgres") {
-    const [error, data] = await introspectPostgres(
-      sql,
-      options?.schema ?? "public",
+    return unwrapIntrospection(
+      introspectPostgres(sql, options?.schema ?? "public"),
     );
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    if (data === null) {
-      throw new Error("Introspection returned no data");
-    }
-
-    return data;
   }
 
   if (dialect === "sqlite") {
-    const [error, data] = await introspectSqlite(sql);
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    if (data === null) {
-      throw new Error("Introspection returned no data");
-    }
-
-    return data;
+    return unwrapIntrospection(introspectSqlite(sql));
   }
 
   if (dialect === "mysql") {
@@ -54,17 +52,7 @@ export async function introspectSchema(
       throw new Error("schema name is required for MySQL");
     }
 
-    const [error, data] = await introspectMysql(sql, schema);
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    if (data === null) {
-      throw new Error("Introspection returned no data");
-    }
-
-    return data;
+    return unwrapIntrospection(introspectMysql(sql, schema));
   }
 
   throw new Error(`unknown dialect: ${dialect}`);

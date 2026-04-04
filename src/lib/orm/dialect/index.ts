@@ -3,14 +3,12 @@ import { mysqlDialectAdapter } from "./mysql.js";
 import { postgresDialectAdapter } from "./postgres.js";
 import { sqliteDialectAdapter } from "./sqlite.js";
 
+const dialectAdapters = {
+  postgres: postgresDialectAdapter,
+  mysql: mysqlDialectAdapter,
+  sqlite: sqliteDialectAdapter,
+} satisfies Record<Dialect, DialectAdapter>;
+
 export function getDialectAdapter(dialect: Dialect): DialectAdapter {
-  if (dialect === "postgres") {
-    return postgresDialectAdapter;
-  }
-
-  if (dialect === "mysql") {
-    return mysqlDialectAdapter;
-  }
-
-  return sqliteDialectAdapter;
+  return dialectAdapters[dialect];
 }
