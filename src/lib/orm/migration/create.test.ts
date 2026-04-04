@@ -524,4 +524,497 @@ describe("createMigration", () => {
       await rm(cwd, { recursive: true, force: true });
     }
   });
+
+  test("generate 'rename column' instead of multiple alter table commands for postgres", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "semola-mig-postgres-rename-"));
+
+    try {
+      await mkdir(join(cwd, "src", "db"), { recursive: true });
+
+      const configContent = [
+        "export default {",
+        "  orm: {",
+        "    schema: './src/db/schema.ts',",
+        "    migrations: { dir: './migrations' }",
+        "  }",
+        "};",
+        "",
+      ].join("\n");
+
+      const ormModulePathTs = join(import.meta.dir, "..", "index.ts");
+      const ormModulePathJs = join(import.meta.dir, "..", "index.js");
+
+      let ormModulePath = ormModulePathJs;
+
+      if (await Bun.file(ormModulePathTs).exists()) {
+        ormModulePath = ormModulePathTs;
+      }
+
+      const schemaV2 = [
+        `import { createOrm, createTable, string, uuid } from '${ormModulePath}';`,
+        "",
+        "const examTable = createTable('exam', {",
+        "  id: uuid('id').primaryKey(),",
+        "  name: string('exam_name').notNull().unique(),",
+        "});",
+        "",
+        "const studentTable = createTable('student', {",
+        "  id: uuid('id').primaryKey(),",
+        "  name: string('name').notNull(),",
+        "  examId: uuid('exam_id').references(() => examTable.columns.id).notNull(),",
+        "});",
+        "",
+        "export default createOrm({",
+        "  url: 'postgres://localhost/db',",
+        "  tables: { exam: examTable, student: studentTable },",
+        "});",
+        "",
+      ].join("\n");
+
+      const previousSnapshot = {
+        dialect: "postgres",
+        tables: {
+          student: {
+            key: "student",
+            tableName: "student",
+            columns: {
+              id: {
+                key: "id",
+                sqlName: "id",
+                kind: "uuid",
+                isPrimaryKey: true,
+                isNotNull: true,
+                isUnique: false,
+                hasDefault: false,
+                defaultKind: null,
+                referencesTable: null,
+                referencesColumn: null,
+                onDeleteAction: null,
+              },
+              name: {
+                key: "name",
+                sqlName: "name",
+                kind: "string",
+                isPrimaryKey: false,
+                isNotNull: true,
+                isUnique: false,
+                hasDefault: false,
+                defaultKind: null,
+                referencesTable: null,
+                referencesColumn: null,
+                onDeleteAction: null,
+              },
+              examId: {
+                key: "examId",
+                sqlName: "exam_id",
+                kind: "uuid",
+                isPrimaryKey: false,
+                isNotNull: true,
+                isUnique: false,
+                hasDefault: false,
+                defaultKind: null,
+                referencesTable: "exam",
+                referencesColumn: "id",
+                onDeleteAction: null,
+              },
+            },
+          },
+          exam: {
+            key: "exam",
+            tableName: "exam",
+            columns: {
+              id: {
+                key: "id",
+                sqlName: "id",
+                kind: "uuid",
+                isPrimaryKey: true,
+                isNotNull: true,
+                isUnique: false,
+                hasDefault: false,
+                defaultKind: null,
+                referencesTable: null,
+                referencesColumn: null,
+                onDeleteAction: null,
+              },
+              name: {
+                key: "name",
+                sqlName: "name",
+                kind: "string",
+                isPrimaryKey: false,
+                isNotNull: true,
+                isUnique: true,
+                hasDefault: false,
+                defaultKind: null,
+                referencesTable: null,
+                referencesColumn: null,
+                onDeleteAction: null,
+              },
+            },
+          },
+        },
+      };
+
+      await Bun.write(join(cwd, "semola.config.ts"), configContent);
+      await Bun.write(join(cwd, "src", "db", "schema.ts"), schemaV2);
+
+      const previousMigrationDir = join(
+        cwd,
+        "migrations",
+        "20260101000000000_init",
+      );
+      await mkdir(previousMigrationDir, { recursive: true });
+      await Bun.write(join(previousMigrationDir, "up.sql"), "-- init\n");
+      await Bun.write(join(previousMigrationDir, "down.sql"), "-- init\n");
+      await Bun.write(
+        join(previousMigrationDir, "snapshot.json"),
+        `${JSON.stringify(previousSnapshot, null, 2)}\n`,
+      );
+
+      const result = await createMigration({ name: "rename_postgres", cwd });
+      expect(result.created).toBe(true);
+
+      if (!result.created) {
+        return;
+      }
+
+      const upSql = await Bun.file(result.upPath).text();
+      expect(upSql).toContain("BEGIN");
+      expect(upSql).toContain(
+        'ALTER TABLE "exam" rename COLUMN "name" to "exam_name"',
+      );
+      expect(upSql).toContain("COMMIT");
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("generate 'set not null' for a column instead of multiple alter table commands for postgres", async () => {
+    const cwd = await mkdtemp(
+      join(tmpdir(), "semola-mig-postgres-set-not-null-"),
+    );
+
+    try {
+      await mkdir(join(cwd, "src", "db"), { recursive: true });
+
+      const configContent = [
+        "export default {",
+        "  orm: {",
+        "    schema: './src/db/schema.ts',",
+        "    migrations: { dir: './migrations' }",
+        "  }",
+        "};",
+        "",
+      ].join("\n");
+
+      const ormModulePathTs = join(import.meta.dir, "..", "index.ts");
+      const ormModulePathJs = join(import.meta.dir, "..", "index.js");
+
+      let ormModulePath = ormModulePathJs;
+
+      if (await Bun.file(ormModulePathTs).exists()) {
+        ormModulePath = ormModulePathTs;
+      }
+
+      const schemaV2 = [
+        `import { createOrm, createTable, string, uuid } from '${ormModulePath}';`,
+        "",
+        "const examTable = createTable('exam', {",
+        "  id: uuid('id').primaryKey(),",
+        "  name: string('name').notNull(),",
+        "});",
+        "",
+        "const studentTable = createTable('student', {",
+        "  id: uuid('id').primaryKey(),",
+        "  name: string('name').notNull(),",
+        "  examId: uuid('exam_id').references(() => examTable.columns.id).notNull(),",
+        "});",
+        "",
+        "export default createOrm({",
+        "  url: 'postgres://localhost/db',",
+        "  tables: { exam: examTable, student: studentTable },",
+        "});",
+        "",
+      ].join("\n");
+
+      const previousSnapshot = {
+        dialect: "postgres",
+        tables: {
+          student: {
+            key: "student",
+            tableName: "student",
+            columns: {
+              id: {
+                key: "id",
+                sqlName: "id",
+                kind: "uuid",
+                isPrimaryKey: true,
+                isNotNull: true,
+                isUnique: false,
+                hasDefault: false,
+                defaultKind: null,
+                referencesTable: null,
+                referencesColumn: null,
+                onDeleteAction: null,
+              },
+              name: {
+                key: "name",
+                sqlName: "name",
+                kind: "string",
+                isPrimaryKey: false,
+                isNotNull: true,
+                isUnique: false,
+                hasDefault: false,
+                defaultKind: null,
+                referencesTable: null,
+                referencesColumn: null,
+                onDeleteAction: null,
+              },
+              examId: {
+                key: "examId",
+                sqlName: "exam_id",
+                kind: "uuid",
+                isPrimaryKey: false,
+                isNotNull: true,
+                isUnique: false,
+                hasDefault: false,
+                defaultKind: null,
+                referencesTable: "exam",
+                referencesColumn: "id",
+                onDeleteAction: null,
+              },
+            },
+          },
+          exam: {
+            key: "exam",
+            tableName: "exam",
+            columns: {
+              id: {
+                key: "id",
+                sqlName: "id",
+                kind: "uuid",
+                isPrimaryKey: true,
+                isNotNull: true,
+                isUnique: false,
+                hasDefault: false,
+                defaultKind: null,
+                referencesTable: null,
+                referencesColumn: null,
+                onDeleteAction: null,
+              },
+              name: {
+                key: "name",
+                sqlName: "name",
+                kind: "string",
+                isPrimaryKey: false,
+                isNotNull: false,
+                isUnique: false,
+                hasDefault: false,
+                defaultKind: null,
+                referencesTable: null,
+                referencesColumn: null,
+                onDeleteAction: null,
+              },
+            },
+          },
+        },
+      };
+
+      await Bun.write(join(cwd, "semola.config.ts"), configContent);
+      await Bun.write(join(cwd, "src", "db", "schema.ts"), schemaV2);
+
+      const previousMigrationDir = join(
+        cwd,
+        "migrations",
+        "20260101000000000_init",
+      );
+      await mkdir(previousMigrationDir, { recursive: true });
+      await Bun.write(join(previousMigrationDir, "up.sql"), "-- init\n");
+      await Bun.write(join(previousMigrationDir, "down.sql"), "-- init\n");
+      await Bun.write(
+        join(previousMigrationDir, "snapshot.json"),
+        `${JSON.stringify(previousSnapshot, null, 2)}\n`,
+      );
+
+      const result = await createMigration({ name: "add_set_not_null", cwd });
+      expect(result.created).toBe(true);
+
+      if (!result.created) {
+        return;
+      }
+
+      const upSql = await Bun.file(result.upPath).text();
+      expect(upSql).toContain("BEGIN");
+      expect(upSql).toContain(
+        'ALTER TABLE "exam" ALTER COLUMN "name" SET NOT NULL',
+      );
+      expect(upSql).toContain("COMMIT");
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("generate 'drop not null' for a column instead of multiple alter table commands for postgres", async () => {
+    const cwd = await mkdtemp(
+      join(tmpdir(), "semola-mig-postgres-drop-not-null-"),
+    );
+
+    try {
+      await mkdir(join(cwd, "src", "db"), { recursive: true });
+
+      const configContent = [
+        "export default {",
+        "  orm: {",
+        "    schema: './src/db/schema.ts',",
+        "    migrations: { dir: './migrations' }",
+        "  }",
+        "};",
+        "",
+      ].join("\n");
+
+      const ormModulePathTs = join(import.meta.dir, "..", "index.ts");
+      const ormModulePathJs = join(import.meta.dir, "..", "index.js");
+
+      let ormModulePath = ormModulePathJs;
+
+      if (await Bun.file(ormModulePathTs).exists()) {
+        ormModulePath = ormModulePathTs;
+      }
+
+      const schemaV2 = [
+        `import { createOrm, createTable, string, uuid } from '${ormModulePath}';`,
+        "",
+        "const examTable = createTable('exam', {",
+        "  id: uuid('id').primaryKey(),",
+        "  name: string('name'),",
+        "});",
+        "",
+        "const studentTable = createTable('student', {",
+        "  id: uuid('id').primaryKey(),",
+        "  name: string('name').notNull(),",
+        "  examId: uuid('exam_id').references(() => examTable.columns.id).notNull(),",
+        "});",
+        "",
+        "export default createOrm({",
+        "  url: 'postgres://localhost/db',",
+        "  tables: { exam: examTable, student: studentTable },",
+        "});",
+        "",
+      ].join("\n");
+
+      const previousSnapshot = {
+        dialect: "postgres",
+        tables: {
+          student: {
+            key: "student",
+            tableName: "student",
+            columns: {
+              id: {
+                key: "id",
+                sqlName: "id",
+                kind: "uuid",
+                isPrimaryKey: true,
+                isNotNull: true,
+                isUnique: false,
+                hasDefault: false,
+                defaultKind: null,
+                referencesTable: null,
+                referencesColumn: null,
+                onDeleteAction: null,
+              },
+              name: {
+                key: "name",
+                sqlName: "name",
+                kind: "string",
+                isPrimaryKey: false,
+                isNotNull: true,
+                isUnique: false,
+                hasDefault: false,
+                defaultKind: null,
+                referencesTable: null,
+                referencesColumn: null,
+                onDeleteAction: null,
+              },
+              examId: {
+                key: "examId",
+                sqlName: "exam_id",
+                kind: "uuid",
+                isPrimaryKey: false,
+                isNotNull: true,
+                isUnique: false,
+                hasDefault: false,
+                defaultKind: null,
+                referencesTable: "exam",
+                referencesColumn: "id",
+                onDeleteAction: null,
+              },
+            },
+          },
+          exam: {
+            key: "exam",
+            tableName: "exam",
+            columns: {
+              id: {
+                key: "id",
+                sqlName: "id",
+                kind: "uuid",
+                isPrimaryKey: true,
+                isNotNull: true,
+                isUnique: false,
+                hasDefault: false,
+                defaultKind: null,
+                referencesTable: null,
+                referencesColumn: null,
+                onDeleteAction: null,
+              },
+              name: {
+                key: "name",
+                sqlName: "name",
+                kind: "string",
+                isPrimaryKey: false,
+                isNotNull: true,
+                isUnique: false,
+                hasDefault: false,
+                defaultKind: null,
+                referencesTable: null,
+                referencesColumn: null,
+                onDeleteAction: null,
+              },
+            },
+          },
+        },
+      };
+
+      await Bun.write(join(cwd, "semola.config.ts"), configContent);
+      await Bun.write(join(cwd, "src", "db", "schema.ts"), schemaV2);
+
+      const previousMigrationDir = join(
+        cwd,
+        "migrations",
+        "20260101000000000_init",
+      );
+      await mkdir(previousMigrationDir, { recursive: true });
+      await Bun.write(join(previousMigrationDir, "up.sql"), "-- init\n");
+      await Bun.write(join(previousMigrationDir, "down.sql"), "-- init\n");
+      await Bun.write(
+        join(previousMigrationDir, "snapshot.json"),
+        `${JSON.stringify(previousSnapshot, null, 2)}\n`,
+      );
+
+      const result = await createMigration({ name: "drop_not_null", cwd });
+      expect(result.created).toBe(true);
+
+      if (!result.created) {
+        return;
+      }
+
+      const upSql = await Bun.file(result.upPath).text();
+      expect(upSql).toContain("BEGIN");
+      expect(upSql).toContain(
+        'ALTER TABLE "exam" ALTER COLUMN "name" DROP NOT NULL',
+      );
+      expect(upSql).toContain("COMMIT");
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
 });
