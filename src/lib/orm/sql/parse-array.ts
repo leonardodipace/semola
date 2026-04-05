@@ -39,6 +39,7 @@ export function parsePostgresArrayLiteral(value: string) {
   let token = "";
   let index = 0;
   let inQuotes = false;
+  let tokenWasQuoted = false;
 
   while (index < inner.length) {
     const char = inner[index];
@@ -67,13 +68,20 @@ export function parsePostgresArrayLiteral(value: string) {
 
     if (char === '"') {
       inQuotes = true;
+      tokenWasQuoted = true;
       index++;
       continue;
     }
 
     if (char === ",") {
-      out.push(coerceUnquotedToken(token));
+      if (tokenWasQuoted) {
+        out.push(token);
+      } else {
+        out.push(coerceUnquotedToken(token));
+      }
+
       token = "";
+      tokenWasQuoted = false;
       index++;
       continue;
     }
@@ -86,7 +94,11 @@ export function parsePostgresArrayLiteral(value: string) {
     return null;
   }
 
-  out.push(coerceUnquotedToken(token));
+  if (tokenWasQuoted) {
+    out.push(token);
+  } else {
+    out.push(coerceUnquotedToken(token));
+  }
 
   return out;
 }
