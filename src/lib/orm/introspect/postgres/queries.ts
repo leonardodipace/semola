@@ -66,6 +66,7 @@ export async function getConstraintRows(
       JOIN information_schema.key_column_usage kcu
         ON tc.constraint_name = kcu.constraint_name
         AND tc.table_schema = kcu.table_schema
+        AND tc.table_name = kcu.table_name
       WHERE tc.table_schema = ${schema}
         AND tc.table_name = ${tableName}
         AND tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE')
@@ -111,6 +112,7 @@ export async function getForeignKeyRows(
       JOIN information_schema.key_column_usage kcu
         ON tc.constraint_name = kcu.constraint_name
         AND tc.table_schema = kcu.table_schema
+        AND tc.table_name = kcu.table_name
       JOIN information_schema.referential_constraints rc
         ON tc.constraint_name = rc.constraint_name
         AND tc.table_schema = rc.constraint_schema
