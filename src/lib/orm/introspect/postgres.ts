@@ -66,7 +66,7 @@ export async function introspectPostgres(sql: SQL, schema = "public") {
 
     const columns = mapColumns(
       colRows ?? [],
-      (constraintRows ?? []) as Array<[string, string, number?]>,
+      constraintRows ?? [],
       fkRows ?? [],
       enumMap,
     );

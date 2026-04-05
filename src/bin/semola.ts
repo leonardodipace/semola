@@ -126,7 +126,7 @@ async function runApplyMigrationsCommand(io: CliIo) {
 
   io.log(`Loaded config from ${result.configPathRelative}`);
 
-  if (result.pending === 0) {
+  if (result.applied === 0) {
     io.log(
       `No pending migrations (${result.total} total, tracker: ${result.trackerTable})`,
     );

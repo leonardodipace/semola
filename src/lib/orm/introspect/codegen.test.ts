@@ -146,6 +146,7 @@ describe("generateCode", () => {
         {
           sqlName: "id",
           kind: "uuid",
+          enumValues: null,
           nullable: false,
           primaryKey: true,
           unique: false,
@@ -157,6 +158,7 @@ describe("generateCode", () => {
         {
           sqlName: "author_id",
           kind: "uuid",
+          enumValues: null,
           nullable: false,
           primaryKey: false,
           unique: false,
@@ -168,6 +170,7 @@ describe("generateCode", () => {
         {
           sqlName: "reviewer_id",
           kind: "uuid",
+          enumValues: null,
           nullable: false,
           primaryKey: false,
           unique: false,

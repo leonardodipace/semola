@@ -92,7 +92,7 @@ export async function getConstraintRows(
         AND i.indexprs IS NULL
         AND i.indpred IS NULL
         AND i.indnkeyatts = 1
-    `.values() as Promise<[string, string, number][]>,
+      `.values() as Promise<[string, string, number?][]>,
   );
 }
 
