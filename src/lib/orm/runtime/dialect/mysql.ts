@@ -1,4 +1,5 @@
 import { SQL } from "bun";
+import { getPrimaryKeyColumn } from "../../internal/table.js";
 import type { ColDefs, RelationDefs } from "../../types.js";
 import type { RuntimeDialect } from "./types.js";
 import { expectSingleRow, mergeRows, toWhereInput } from "./utils.js";
@@ -9,14 +10,48 @@ export function createMysqlRuntimeDialect<
 >(): RuntimeDialect<T, TRels> {
   return {
     async create(context, input) {
-      await context.executeOrThrow(context.insert({ data: input.data }));
+      const primaryKey = getPrimaryKeyColumn(context.table);
 
-      const rows = await context.selectRows({
-        where: toWhereInput<T>(input.data),
-        limit: 1,
-      });
+      const selectCreatedRow = async (whereData: Record<string, unknown>) => {
+        const rows = await context.selectRows({
+          where: toWhereInput<T>(whereData),
+          limit: 1,
+        });
 
-      return expectSingleRow(rows, "Insert returned no rows");
+        return expectSingleRow(rows, "Insert returned no rows");
+      };
+
+      const insertResult = await context.executeOrThrow(
+        context.insert({ data: input.data }),
+      );
+
+      if (!primaryKey) {
+        return selectCreatedRow(input.data);
+      }
+
+      const providedPkValue = Reflect.get(input.data, primaryKey.jsKey);
+
+      if (providedPkValue === null || providedPkValue === undefined) {
+        let insertedPkValue: unknown;
+
+        if (typeof insertResult === "object" && insertResult !== null) {
+          insertedPkValue = Reflect.get(insertResult, "insertId");
+        }
+
+        if (insertedPkValue === null || insertedPkValue === undefined) {
+          return selectCreatedRow(input.data);
+        }
+
+        const whereByPk: Record<string, unknown> = {};
+        Reflect.set(whereByPk, primaryKey.jsKey, insertedPkValue);
+
+        return selectCreatedRow(whereByPk);
+      }
+
+      const whereByPk: Record<string, unknown> = {};
+      Reflect.set(whereByPk, primaryKey.jsKey, providedPkValue);
+
+      return selectCreatedRow(whereByPk);
     },
 
     async createMany(context, input) {
@@ -84,7 +119,7 @@ export function createMysqlRuntimeDialect<
               where: input.where,
             });
 
-            await context.executeOrThrow(
+            await txContext.executeOrThrow(
               txContext.deleteByWhere({ where: input.where }),
             );
 

@@ -43,7 +43,7 @@ export async function hydrateOneRelation<T extends ColDefs>(options: {
     return;
   }
 
-  const fkValues: unknown[] = [];
+  const fkValues = new Set<unknown>();
 
   for (const row of rows) {
     const value = Reflect.get(row as Record<string, unknown>, sourceFk.jsKey);
@@ -52,13 +52,13 @@ export async function hydrateOneRelation<T extends ColDefs>(options: {
       continue;
     }
 
-    fkValues.push(value);
+    fkValues.add(value);
   }
 
   const targetRows = await selectWhereIn(
     targetTable,
     targetPk.col.meta.sqlName,
-    fkValues,
+    Array.from(fkValues),
   );
 
   const byPk = new Map<unknown, Record<string, unknown>>();
