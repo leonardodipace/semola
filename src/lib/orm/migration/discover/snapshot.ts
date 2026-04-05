@@ -63,6 +63,7 @@ export function buildSchemaSnapshot(orm: {
               key: columnKey,
               sqlName: column.meta.sqlName,
               kind: column.kind,
+              isSqlArray: column.meta.isSqlArray,
               isPrimaryKey: column.meta.isPrimaryKey,
               isNotNull: column.meta.isNotNull,
               isUnique: column.meta.isUnique,

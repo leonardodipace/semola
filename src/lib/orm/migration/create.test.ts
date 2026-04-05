@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createMigration } from "./create.js";
 
 describe("createMigration", () => {
@@ -96,8 +97,10 @@ describe("createMigration", () => {
         ormModulePath = ormModulePathTs;
       }
 
+      const ormModuleUrl = pathToFileURL(ormModulePath).href;
+
       const schemaContent = [
-        `import { createOrm, createTable, uuid } from '${ormModulePath}';`,
+        `import { createOrm, createTable, uuid } from '${ormModuleUrl}';`,
         "",
         "const users = createTable('users', {",
         "  id: uuid('id').primaryKey(),",
@@ -152,8 +155,10 @@ describe("createMigration", () => {
         ormModulePath = ormModulePathTs;
       }
 
+      const ormModuleUrl = pathToFileURL(ormModulePath).href;
+
       const schemaContent = [
-        `import { createOrm, createTable, string, uuid } from '${ormModulePath}';`,
+        `import { createOrm, createTable, string, uuid } from '${ormModuleUrl}';`,
         "",
         "const users = createTable('users', {",
         "  id: uuid('id').primaryKey(),",
@@ -217,8 +222,10 @@ describe("createMigration", () => {
         ormModulePath = ormModulePathTs;
       }
 
+      const ormModuleUrl = pathToFileURL(ormModulePath).href;
+
       const schemaV2 = [
-        `import { createOrm, createTable, string, uuid } from '${ormModulePath}';`,
+        `import { createOrm, createTable, string, uuid } from '${ormModuleUrl}';`,
         "",
         "const examTable = createTable('exam', {",
         "  id: uuid('id').primaryKey(),",
@@ -393,8 +400,10 @@ describe("createMigration", () => {
         ormModulePath = ormModulePathTs;
       }
 
+      const ormModuleUrl = pathToFileURL(ormModulePath).href;
+
       const schemaV2 = [
-        `import { createOrm, createTable, string, uuid } from '${ormModulePath}';`,
+        `import { createOrm, createTable, string, uuid } from '${ormModuleUrl}';`,
         "",
         "const examTable = createTable('exam', {",
         "  id: uuid('id').primaryKey(),",
@@ -550,8 +559,10 @@ describe("createMigration", () => {
         ormModulePath = ormModulePathTs;
       }
 
+      const ormModuleUrl = pathToFileURL(ormModulePath).href;
+
       const schemaV2 = [
-        `import { createOrm, createTable, string, uuid } from '${ormModulePath}';`,
+        `import { createOrm, createTable, string, uuid } from '${ormModuleUrl}';`,
         "",
         "const examTable = createTable('exam', {",
         "  id: uuid('id').primaryKey(),",
@@ -680,7 +691,7 @@ describe("createMigration", () => {
       const upSql = await Bun.file(result.upPath).text();
       expect(upSql).toContain("BEGIN");
       expect(upSql).toContain(
-        'ALTER TABLE "exam" rename COLUMN "name" to "exam_name"',
+        'ALTER TABLE "exam" RENAME COLUMN "name" TO "exam_name"',
       );
       expect(upSql).toContain("COMMIT");
     } finally {
@@ -715,8 +726,10 @@ describe("createMigration", () => {
         ormModulePath = ormModulePathTs;
       }
 
+      const ormModuleUrl = pathToFileURL(ormModulePath).href;
+
       const schemaV2 = [
-        `import { createOrm, createTable, string, uuid } from '${ormModulePath}';`,
+        `import { createOrm, createTable, string, uuid } from '${ormModuleUrl}';`,
         "",
         "const examTable = createTable('exam', {",
         "  id: uuid('id').primaryKey(),",
@@ -880,8 +893,10 @@ describe("createMigration", () => {
         ormModulePath = ormModulePathTs;
       }
 
+      const ormModuleUrl = pathToFileURL(ormModulePath).href;
+
       const schemaV2 = [
-        `import { createOrm, createTable, string, uuid } from '${ormModulePath}';`,
+        `import { createOrm, createTable, string, uuid } from '${ormModuleUrl}';`,
         "",
         "const examTable = createTable('exam', {",
         "  id: uuid('id').primaryKey(),",
@@ -1043,8 +1058,10 @@ describe("createMigration", () => {
         ormModulePath = ormModulePathTs;
       }
 
+      const ormModuleUrl = pathToFileURL(ormModulePath).href;
+
       const schemaV2 = [
-        `import { createOrm, createTable, string } from '${ormModulePath}';`,
+        `import { createOrm, createTable, string } from '${ormModuleUrl}';`,
         "",
         "const users = createTable('users', {",
         "  id: string('id').primaryKey(),",
@@ -1132,8 +1149,10 @@ describe("createMigration", () => {
         ormModulePath = ormModulePathTs;
       }
 
+      const ormModuleUrl = pathToFileURL(ormModulePath).href;
+
       const schemaV2 = [
-        `import { createOrm, createTable, string } from '${ormModulePath}';`,
+        `import { createOrm, createTable, string } from '${ormModuleUrl}';`,
         "",
         "const users = createTable('users', {",
         "  id: string('id').primaryKey(),",

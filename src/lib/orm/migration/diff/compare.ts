@@ -2,6 +2,23 @@ import type { SchemaSnapshot } from "../types.js";
 
 const UNDEFINED_SENTINEL = Object.freeze({});
 
+function safeStringify(value: unknown) {
+  const seen = new Set<object>();
+
+  return JSON.stringify(value, (_key, current) => {
+    if (typeof current !== "object" || current === null) {
+      return current;
+    }
+
+    if (seen.has(current)) {
+      return "[Circular]";
+    }
+
+    seen.add(current);
+    return current;
+  });
+}
+
 function stableValue(value: unknown) {
   if (value === undefined) {
     return UNDEFINED_SENTINEL;
@@ -20,11 +37,13 @@ function stableValue(value: unknown) {
     return value;
   }
 
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
+  const serialized = safeStringify(value);
+
+  if (serialized !== undefined) {
+    return serialized;
   }
+
+  return String(value);
 }
 
 export function defaultsEqual(
@@ -51,6 +70,7 @@ export function columnsEqual(
 ) {
   if (left.sqlName !== right.sqlName) return false;
   if (left.kind !== right.kind) return false;
+  if ((left.isSqlArray ?? false) !== (right.isSqlArray ?? false)) return false;
   if (left.isPrimaryKey !== right.isPrimaryKey) return false;
   if (left.isNotNull !== right.isNotNull) return false;
   if (left.isUnique !== right.isUnique) return false;

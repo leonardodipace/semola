@@ -3,6 +3,8 @@ import { join } from "node:path";
 import type { MigrationInfo } from "../types.js";
 import { migrationDirectoryPath } from "./naming.js";
 
+const MAX_ATTEMPTS = 1000;
+
 export async function ensureMigrationsDirectory(migrationsDir: string) {
   await mkdir(migrationsDir, { recursive: true });
 }
@@ -91,6 +93,12 @@ export async function uniqueMigrationDirectoryPath(
         migrationId: candidateId,
         migrationDir: dirPath,
       };
+    }
+
+    if (attempt >= MAX_ATTEMPTS) {
+      throw new Error(
+        `Too many migration directory collisions for id '${id}' in '${migrationsDir}' (last candidate: '${candidateId}')`,
+      );
     }
 
     attempt += 1;

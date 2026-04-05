@@ -7,57 +7,57 @@ import {
   rebuildTableSql,
 } from "./table.js";
 
-export function reverseOperation(operation: MigrationOperation) {
-  if (operation.kind === "create-table") {
-    return { kind: "drop-table", table: operation.table } as const;
-  }
+export function reverseOperation(
+  operation: MigrationOperation,
+): MigrationOperation {
+  switch (operation.kind) {
+    case "create-table":
+      return { kind: "drop-table", table: operation.table };
 
-  if (operation.kind === "drop-table") {
-    return { kind: "create-table", table: operation.table } as const;
-  }
+    case "drop-table":
+      return { kind: "create-table", table: operation.table };
 
-  if (operation.kind === "add-column") {
-    return {
-      kind: "drop-column",
-      tableName: operation.tableName,
-      column: operation.column,
-    } as const;
-  }
+    case "add-column":
+      return {
+        kind: "drop-column",
+        tableName: operation.tableName,
+        column: operation.column,
+      };
 
-  if (operation.kind === "rebuild-table") {
-    return {
-      kind: "rebuild-table",
-      fromTable: operation.toTable,
-      toTable: operation.fromTable,
-    } as const;
-  }
+    case "drop-column":
+      return {
+        kind: "add-column",
+        tableName: operation.tableName,
+        column: operation.column,
+      };
 
-  return {
-    kind: "add-column",
-    tableName: operation.tableName,
-    column: operation.column,
-  } as const;
+    case "rebuild-table":
+      return {
+        kind: "rebuild-table",
+        fromTable: operation.toTable,
+        toTable: operation.fromTable,
+      };
+  }
 }
 
 export function operationToStatements(
   dialect: SchemaSnapshot["dialect"],
   operation: MigrationOperation,
 ) {
-  if (operation.kind === "create-table") {
-    return [createTableSql(dialect, operation.table)];
-  }
+  switch (operation.kind) {
+    case "create-table":
+      return [createTableSql(dialect, operation.table)];
 
-  if (operation.kind === "drop-table") {
-    return [dropTableSql(dialect, operation.table)];
-  }
+    case "drop-table":
+      return [dropTableSql(dialect, operation.table)];
 
-  if (operation.kind === "add-column") {
-    return [addColumnSql(dialect, operation.tableName, operation.column)];
-  }
+    case "add-column":
+      return [addColumnSql(dialect, operation.tableName, operation.column)];
 
-  if (operation.kind === "rebuild-table") {
-    return rebuildTableSql(dialect, operation.fromTable, operation.toTable);
-  }
+    case "drop-column":
+      return [dropColumnSql(dialect, operation.tableName, operation.column)];
 
-  return [dropColumnSql(dialect, operation.tableName, operation.column)];
+    case "rebuild-table":
+      return rebuildTableSql(dialect, operation.fromTable, operation.toTable);
+  }
 }

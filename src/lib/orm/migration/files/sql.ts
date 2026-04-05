@@ -108,6 +108,12 @@ export function splitStatements(sqlText: string) {
     }
 
     if (ch === '"' && !inSingle) {
+      if (inDouble && next === '"') {
+        current += '""';
+        i++;
+        continue;
+      }
+
       inDouble = !inDouble;
     }
 

@@ -36,6 +36,7 @@ export type ColumnSnapshot = {
   key: string;
   sqlName: string;
   kind: "uuid" | "string" | "number" | "boolean" | "date" | "json" | "jsonb";
+  isSqlArray?: boolean;
   isPrimaryKey: boolean;
   isNotNull: boolean;
   isUnique: boolean;

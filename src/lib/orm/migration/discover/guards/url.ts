@@ -22,7 +22,9 @@ export function buildUrlFromSqlOptions(sql: unknown) {
       return null;
     }
 
-    return `sqlite:${filename}`;
+    const encodedFilename = encodeURI(filename);
+
+    return `sqlite:${encodedFilename}`;
   }
 
   if (adapter !== "postgres" && adapter !== "mysql") {
@@ -57,7 +59,12 @@ export function buildUrlFromSqlOptions(sql: unknown) {
   let port: number | null = null;
   const rawPort = Reflect.get(options, "port");
 
-  if (typeof rawPort === "number") {
+  if (
+    typeof rawPort === "number" &&
+    Number.isInteger(rawPort) &&
+    rawPort >= 1 &&
+    rawPort <= 65535
+  ) {
     port = rawPort;
   }
 
@@ -69,7 +76,9 @@ export function buildUrlFromSqlOptions(sql: unknown) {
     auth = `${encodeURIComponent(username)}@`;
   }
 
-  const portPart = port ? `:${port}` : "";
+  const encodedHostname = encodeURIComponent(hostname);
+  const encodedDatabase = encodeURIComponent(database);
+  const portPart = port !== null ? `:${port}` : "";
 
-  return `${adapter}://${auth}${hostname}${portPart}/${database}`;
+  return `${adapter}://${auth}${encodedHostname}${portPart}/${encodedDatabase}`;
 }

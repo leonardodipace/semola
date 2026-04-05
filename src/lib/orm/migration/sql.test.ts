@@ -729,27 +729,29 @@ describe("buildUpSql/buildDownSql", () => {
 
     const db = new SQL("sqlite::memory:");
 
-    await db`PRAGMA foreign_keys = ON`;
-    await db`CREATE TABLE exam (id TEXT PRIMARY KEY, name TEXT)`;
-    await db`CREATE TABLE student (id TEXT PRIMARY KEY, exam_id TEXT REFERENCES exam(id))`;
-    await db`INSERT INTO exam (id, name) VALUES ('e1', 'math')`;
-    await db`INSERT INTO student (id, exam_id) VALUES ('s1', 'e1')`;
+    try {
+      await db`PRAGMA foreign_keys = ON`;
+      await db`CREATE TABLE exam (id TEXT PRIMARY KEY, name TEXT)`;
+      await db`CREATE TABLE student (id TEXT PRIMARY KEY, exam_id TEXT REFERENCES exam(id))`;
+      await db`INSERT INTO exam (id, name) VALUES ('e1', 'math')`;
+      await db`INSERT INTO student (id, exam_id) VALUES ('s1', 'e1')`;
 
-    for (const statement of splitStatements(sqlText)) {
-      await db`${db.unsafe(statement)}`;
+      for (const statement of splitStatements(sqlText)) {
+        await db`${db.unsafe(statement)}`;
+      }
+
+      const exams = await db`SELECT id, name FROM exam ORDER BY id`;
+      expect(exams.length).toBe(1);
+      expect(exams[0]?.id).toBe("e1");
+      expect(exams[0]?.name).toBe("math");
+
+      const students = await db`SELECT id, exam_id FROM student ORDER BY id`;
+      expect(students.length).toBe(1);
+      expect(students[0]?.id).toBe("s1");
+      expect(students[0]?.exam_id).toBe("e1");
+    } finally {
+      await db.close();
     }
-
-    const exams = await db`SELECT id, name FROM exam ORDER BY id`;
-    expect(exams.length).toBe(1);
-    expect(exams[0]?.id).toBe("e1");
-    expect(exams[0]?.name).toBe("math");
-
-    const students = await db`SELECT id, exam_id FROM student ORDER BY id`;
-    expect(students.length).toBe(1);
-    expect(students[0]?.id).toBe("s1");
-    expect(students[0]?.exam_id).toBe("e1");
-
-    await db.close();
   });
 
   test("sqlite rebuild migration preserves data for renamed foreign key columns", async () => {
@@ -891,22 +893,25 @@ describe("buildUpSql/buildDownSql", () => {
 
     const db = new SQL("sqlite::memory:");
 
-    await db`PRAGMA foreign_keys = ON`;
-    await db`CREATE TABLE exam (id TEXT PRIMARY KEY, name TEXT NOT NULL)`;
-    await db`CREATE TABLE student (id TEXT PRIMARY KEY, name TEXT NOT NULL, exam_id TEXT NOT NULL REFERENCES exam(id))`;
-    await db`INSERT INTO exam (id, name) VALUES ('e1', 'math')`;
-    await db`INSERT INTO student (id, name, exam_id) VALUES ('s1', 'alice', 'e1')`;
+    try {
+      await db`PRAGMA foreign_keys = ON`;
+      await db`CREATE TABLE exam (id TEXT PRIMARY KEY, name TEXT NOT NULL)`;
+      await db`CREATE TABLE student (id TEXT PRIMARY KEY, name TEXT NOT NULL, exam_id TEXT NOT NULL REFERENCES exam(id))`;
+      await db`INSERT INTO exam (id, name) VALUES ('e1', 'math')`;
+      await db`INSERT INTO student (id, name, exam_id) VALUES ('s1', 'alice', 'e1')`;
 
-    for (const statement of splitStatements(sqlText)) {
-      await db`${db.unsafe(statement)}`;
+      for (const statement of splitStatements(sqlText)) {
+        await db`${db.unsafe(statement)}`;
+      }
+
+      const students =
+        await db`SELECT id, name, examID FROM student ORDER BY id`;
+      expect(students.length).toBe(1);
+      expect(students[0]?.id).toBe("s1");
+      expect(students[0]?.name).toBe("alice");
+      expect(students[0]?.examID).toBe("e1");
+    } finally {
+      await db.close();
     }
-
-    const students = await db`SELECT id, name, examID FROM student ORDER BY id`;
-    expect(students.length).toBe(1);
-    expect(students[0]?.id).toBe("s1");
-    expect(students[0]?.name).toBe("alice");
-    expect(students[0]?.examID).toBe("e1");
-
-    await db.close();
   });
 });

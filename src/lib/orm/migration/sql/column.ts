@@ -6,75 +6,75 @@ export function columnType(
   dialect: SchemaSnapshot["dialect"],
   kind: ColumnSnapshot["kind"],
 ) {
-  if (kind === "uuid") {
-    if (dialect === "postgres") {
-      return "UUID";
-    }
+  switch (kind) {
+    case "uuid":
+      if (dialect === "postgres") {
+        return "UUID";
+      }
 
-    if (dialect === "mysql") {
-      return "CHAR(36)";
-    }
+      if (dialect === "mysql") {
+        return "CHAR(36)";
+      }
 
-    return "TEXT";
-  }
+      return "TEXT";
 
-  if (kind === "string") {
-    if (dialect === "mysql") {
-      return "VARCHAR(255)";
-    }
+    case "string":
+      if (dialect === "mysql") {
+        return "VARCHAR(255)";
+      }
 
-    return "TEXT";
-  }
+      return "TEXT";
 
-  if (kind === "number") {
-    if (dialect === "mysql") {
-      return "INT";
-    }
+    case "number":
+      if (dialect === "postgres") {
+        return "DOUBLE PRECISION";
+      }
 
-    return "INTEGER";
-  }
+      return "REAL";
 
-  if (kind === "boolean") {
-    if (dialect === "sqlite") {
+    case "boolean":
+      if (dialect === "postgres") {
+        return "BOOLEAN";
+      }
+
       return "INTEGER";
-    }
 
-    if (dialect === "mysql") {
-      return "TINYINT(1)";
-    }
+    case "json":
+      if (dialect === "postgres") {
+        return "JSON";
+      }
 
-    return "BOOLEAN";
+      if (dialect === "sqlite") {
+        return "TEXT";
+      }
+
+      return "JSON";
+
+    case "jsonb":
+      if (dialect === "postgres") {
+        return "JSONB";
+      }
+
+      if (dialect === "sqlite") {
+        return "TEXT";
+      }
+
+      return "JSON";
+
+    case "date":
+      if (dialect === "mysql") {
+        return "DATETIME";
+      }
+
+      if (dialect === "sqlite") {
+        return "TEXT";
+      }
+
+      return "TIMESTAMP";
+
+    default:
+      throw new Error(`Unknown column kind: ${kind}`);
   }
-
-  if (kind === "json") {
-    if (dialect === "sqlite") {
-      return "TEXT";
-    }
-
-    return "JSON";
-  }
-
-  if (kind === "jsonb") {
-    if (dialect === "postgres") {
-      return "JSONB";
-    }
-
-    if (dialect === "sqlite") {
-      return "TEXT";
-    }
-
-    return "JSON";
-  }
-
-  if (dialect === "mysql") {
-    return "DATETIME";
-  }
-
-  if (dialect === "sqlite") {
-    return "TEXT";
-  }
-
-  return "TIMESTAMP";
 }
 
 export function buildColumnDefinition(

@@ -113,7 +113,7 @@ export function renameColumnSql(
   const table = quoteIdentifier(dialect, tableName);
   const fromCol = quoteIdentifier(dialect, fromSqlName);
   const toCol = quoteIdentifier(dialect, toSqlName);
-  return `ALTER TABLE ${table} rename COLUMN ${fromCol} to ${toCol}`;
+  return `ALTER TABLE ${table} RENAME COLUMN ${fromCol} TO ${toCol}`;
 }
 
 export function setColumnNotNullSql(
