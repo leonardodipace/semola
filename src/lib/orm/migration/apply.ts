@@ -84,9 +84,12 @@ export async function applyMigrations(input?: ApplyMigrationsInput) {
     const migrations = await listMigrations(config.orm.migrations.dir);
     const state = await readState(config.orm.migrations.stateFile);
 
-    const appliedIds = new Set(state.applied.map((item) => item.id));
+    const appliedIds = new Set(
+      state.applied.map((item) => item.directoryName ?? item.id),
+    );
+
     const pending = migrations.filter(
-      (migration) => !appliedIds.has(migration.id),
+      (migration) => !appliedIds.has(migration.directoryName),
     );
 
     if (pending.length === 0) {
@@ -107,7 +110,10 @@ export async function applyMigrations(input?: ApplyMigrationsInput) {
 
       await runMigrationSql(sql, sqlText, config.orm.migrations.transactional);
 
-      await markAppliedMigration(config.orm.migrations.stateFile, migration.id);
+      await markAppliedMigration(config.orm.migrations.stateFile, {
+        id: migration.id,
+        directoryName: migration.directoryName,
+      });
     }
 
     return {

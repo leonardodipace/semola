@@ -45,10 +45,18 @@ export async function writeMigrationState(
 
 export async function markAppliedMigration(
   statePath: string,
-  migrationId: string,
+  migration: { id: string; directoryName: string },
 ) {
   const state = await readMigrationState(statePath);
-  const existing = state.applied.find((item) => item.id === migrationId);
+
+  const existing = state.applied.find((item) => {
+    if (item.directoryName) {
+      return item.directoryName === migration.directoryName;
+    }
+
+    return item.id === migration.id;
+  });
+
   if (existing) {
     return state;
   }
@@ -57,7 +65,8 @@ export async function markAppliedMigration(
     applied: [
       ...state.applied,
       {
-        id: migrationId,
+        id: migration.id,
+        directoryName: migration.directoryName,
         appliedAt: new Date().toISOString(),
       },
     ],
@@ -69,12 +78,20 @@ export async function markAppliedMigration(
 
 export async function unmarkAppliedMigration(
   statePath: string,
-  migrationId: string,
+  migration: { id: string; directoryName: string },
 ) {
   const state = await readMigrationState(statePath);
+
   const nextState: MigrationState = {
-    applied: state.applied.filter((item) => item.id !== migrationId),
+    applied: state.applied.filter((item) => {
+      if (item.directoryName) {
+        return item.directoryName !== migration.directoryName;
+      }
+
+      return item.id !== migration.id;
+    }),
   };
+
   await writeMigrationState(statePath, nextState);
   return nextState;
 }

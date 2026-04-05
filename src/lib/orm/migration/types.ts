@@ -98,6 +98,7 @@ export type MigrationInfo = {
 export type MigrationState = {
   applied: Array<{
     id: string;
+    directoryName?: string;
     appliedAt: string;
   }>;
 };

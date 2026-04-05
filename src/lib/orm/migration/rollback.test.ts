@@ -128,4 +128,60 @@ describe("rollbackMigration", () => {
     ) as { applied: unknown[] };
     expect(state.applied).toHaveLength(0);
   });
+
+  test("rolls back latest directory when applied migrations share id prefix", async () => {
+    const cwd = await setupProject();
+
+    const firstDir = join(cwd, "migrations", "20260326221500000_00_init");
+    const secondDir = join(cwd, "migrations", "20260326221500000_01_add_email");
+
+    await mkdir(firstDir, { recursive: true });
+    await mkdir(secondDir, { recursive: true });
+
+    await Bun.write(join(firstDir, "up.sql"), "SELECT 1;\n");
+    await Bun.write(join(firstDir, "down.sql"), "SELECT 1;\n");
+    await Bun.write(join(secondDir, "up.sql"), "SELECT 1;\n");
+    await Bun.write(join(secondDir, "down.sql"), "SELECT 1;\n");
+
+    await Bun.write(
+      join(cwd, ".semola-migrations.json"),
+      JSON.stringify(
+        {
+          applied: [
+            {
+              id: "20260326221500000",
+              directoryName: "20260326221500000_00_init",
+              appliedAt: "2026-03-26T22:15:00.000Z",
+            },
+            {
+              id: "20260326221500000",
+              directoryName: "20260326221500000_01_add_email",
+              appliedAt: "2026-03-26T22:16:00.000Z",
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+
+    const result = await rollbackMigration({ cwd });
+
+    expect(result.rolledBack).toBe(true);
+    if (!result.rolledBack) {
+      return;
+    }
+
+    expect(result.migrationId).toBe("20260326221500000");
+    expect(result.migrationName).toBe("01_add_email");
+
+    const state = JSON.parse(
+      await Bun.file(join(cwd, ".semola-migrations.json")).text(),
+    ) as {
+      applied: Array<{ directoryName?: string }>;
+    };
+
+    expect(state.applied).toHaveLength(1);
+    expect(state.applied[0]?.directoryName).toBe("20260326221500000_00_init");
+  });
 });

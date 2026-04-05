@@ -93,7 +93,13 @@ export async function rollbackMigration(input: { cwd?: string }) {
       };
     }
 
-    const migration = migrations.find((item) => item.id === last.id);
+    const migration = migrations.find((item) => {
+      if (last.directoryName) {
+        return item.directoryName === last.directoryName;
+      }
+
+      return item.id === last.id;
+    });
 
     if (!migration) {
       throw new Error(`Could not find migration directory for id ${last.id}`);
@@ -102,7 +108,10 @@ export async function rollbackMigration(input: { cwd?: string }) {
     const sqlText = await Bun.file(migration.downPath).text();
 
     await runRollbackSql(sql, sqlText, config.orm.migrations.transactional);
-    await unmarkAppliedMigration(config.orm.migrations.stateFile, migration.id);
+    await unmarkAppliedMigration(config.orm.migrations.stateFile, {
+      id: migration.id,
+      directoryName: migration.directoryName,
+    });
 
     return {
       rolledBack: true as const,

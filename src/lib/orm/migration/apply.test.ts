@@ -167,4 +167,48 @@ describe("applyMigrations", () => {
 
     expect(state.applied).toHaveLength(0);
   });
+
+  test("applies both migrations when two directories share the same id prefix", async () => {
+    const cwd = await setupProject();
+
+    const firstDir = join(cwd, "migrations", "20260326221500000_00_init");
+    const secondDir = join(cwd, "migrations", "20260326221500000_01_add_email");
+
+    await mkdir(firstDir, { recursive: true });
+    await mkdir(secondDir, { recursive: true });
+
+    await Bun.write(
+      join(firstDir, "up.sql"),
+      "CREATE TABLE users (id TEXT PRIMARY KEY);\n",
+    );
+    await Bun.write(join(firstDir, "down.sql"), "DROP TABLE users;\n");
+
+    await Bun.write(
+      join(secondDir, "up.sql"),
+      "ALTER TABLE users ADD COLUMN email TEXT;\n",
+    );
+    await Bun.write(
+      join(secondDir, "down.sql"),
+      "ALTER TABLE users DROP COLUMN email;\n",
+    );
+
+    const result = await applyMigrations({ cwd });
+
+    expect(result.applied).toBe(2);
+    expect(result.total).toBe(2);
+
+    const state = JSON.parse(
+      await Bun.file(join(cwd, ".semola-migrations.json")).text(),
+    ) as {
+      applied: Array<{ id: string; directoryName?: string }>;
+    };
+
+    expect(state.applied).toHaveLength(2);
+    expect(state.applied[0]?.id).toBe("20260326221500000");
+    expect(state.applied[1]?.id).toBe("20260326221500000");
+    expect(state.applied[0]?.directoryName).toBe("20260326221500000_00_init");
+    expect(state.applied[1]?.directoryName).toBe(
+      "20260326221500000_01_add_email",
+    );
+  });
 });
