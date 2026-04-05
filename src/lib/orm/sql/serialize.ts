@@ -35,7 +35,12 @@ export function serializeSelectPlan<T extends ColDefs>(
   const joins = buildJoinClauses(sql, table, relations, plan);
   const where = buildWhereFragment(sql, table, plan.where, dialectAdapter);
   const orderBy = buildOrderByClause(sql, table, plan);
-  const limitOffset = buildLimitClause(sql, plan.page.limit, plan.page.offset);
+  const limitOffset = buildLimitClause(
+    sql,
+    plan.page.limit,
+    plan.page.offset,
+    dialectAdapter.dialect,
+  );
   const columns = buildSelectColumns(sql, table);
 
   return sql`SELECT ${columns} FROM ${sql(table.tableName)} ${joins} ${where} ${orderBy} ${limitOffset}`;

@@ -1,11 +1,12 @@
 import type { SQL, TransactionSQL } from "bun";
 import type { Table } from "../../table.js";
-import type { ColDefs, SelectPlan } from "../../types.js";
+import type { ColDefs, Dialect, SelectPlan } from "../../types.js";
 
 export function buildLimitClause(
   sql: SQL | TransactionSQL,
   limit?: number,
   offset?: number,
+  dialect?: Dialect,
 ) {
   if (limit != null && offset != null) {
     return sql`LIMIT ${limit} OFFSET ${offset}`;
@@ -16,6 +17,14 @@ export function buildLimitClause(
   }
 
   if (offset != null) {
+    if (dialect === "mysql") {
+      return sql`LIMIT 18446744073709551615 OFFSET ${offset}`;
+    }
+
+    if (dialect === "sqlite") {
+      return sql`LIMIT -1 OFFSET ${offset}`;
+    }
+
     return sql`OFFSET ${offset}`;
   }
 

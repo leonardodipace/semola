@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { SQL } from "bun";
 import { boolean as booleanCol, json, string, uuid } from "../column.js";
+import { mysqlDialectAdapter } from "../dialect/mysql.js";
 import { postgresDialectAdapter } from "../dialect/postgres.js";
 import { sqliteDialectAdapter } from "../dialect/sqlite.js";
 import { many } from "../relation.js";
@@ -252,6 +253,46 @@ describe("serializeSelectPlan", () => {
       .filter((value) => typeof value === "string");
 
     expect(helperValues).toContain("assignee_id");
+  });
+
+  test("renders postgres offset-only paging", () => {
+    const sql = makeMockSql();
+
+    const plan = buildSelectPlan({ offset: 2 });
+
+    void serializeSelectPlan(sql, users, {}, plan, postgresDialectAdapter);
+
+    const all = sql.calls.flatMap((call) => call.strings).join(" ");
+
+    expect(all).toContain("OFFSET");
+    expect(all).not.toContain("LIMIT -1");
+    expect(all).not.toContain("18446744073709551615");
+  });
+
+  test("renders mysql offset-only paging", () => {
+    const sql = makeMockSql();
+
+    const plan = buildSelectPlan({ offset: 2 });
+
+    void serializeSelectPlan(sql, users, {}, plan, mysqlDialectAdapter);
+
+    const all = sql.calls.flatMap((call) => call.strings).join(" ");
+
+    expect(all).toContain("LIMIT 18446744073709551615");
+    expect(all).toContain("OFFSET");
+  });
+
+  test("renders sqlite offset-only paging", () => {
+    const sql = makeMockSql();
+
+    const plan = buildSelectPlan({ offset: 2 });
+
+    void serializeSelectPlan(sql, users, {}, plan, sqliteDialectAdapter);
+
+    const all = sql.calls.flatMap((call) => call.strings).join(" ");
+
+    expect(all).toContain("LIMIT -1");
+    expect(all).toContain("OFFSET");
   });
 });
 

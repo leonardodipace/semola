@@ -1,5 +1,5 @@
-import type { SQL } from "bun";
 import { describe, expect, test } from "bun:test";
+import type { SQL } from "bun";
 import { introspectPostgres } from "./postgres.js";
 
 // Each call to sql`...` in postgres.ts returns an object with .values().
