@@ -3,4 +3,6 @@ export type CommonError =
   | "UnauthorizedError"
   | "InternalServerError"
   | "ValidationError"
+  | "MigrationError"
+  | "SchemaError"
   | (string & {});

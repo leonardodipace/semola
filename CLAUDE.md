@@ -19,6 +19,7 @@ Semola is a TypeScript utility kit providing modular packages for common develop
 ### Simplicity First
 
 - Write minimal code, no over-engineering
+- Keep code breathing with blank lines between logical blocks
 - Explicit if-statements over ternaries for complex logic
 - Separate if statements for early returns — no `||` combining unrelated conditions (e.g. `if (a) return; if (b) return;` not `if (a || b) return;`)
 - Blank lines between if-statement groups, const definitions, and return statements inside functions
@@ -27,12 +28,12 @@ Semola is a TypeScript utility kit providing modular packages for common develop
 - No `any` type
 - Infer types, avoid explicit return types
 - Use generics extensively
+- Prefer separate, clearly-named `if` guards over merged conditions - no inline `&&`/`||` between unrelated checks (e.g. check `instanceof` in its own `if`, then check `.code` inside that block)
+- No TypeScript type predicates (`value is Type` return annotations)
 
 ### Error Handling
 
-- Result tuple pattern: `[error, data]` instead of throwing
-- Use `ok(data)` and `err(type, message)` helpers
-- Avoid try-catch blocks, use result tuples instead
+- Avoid try-catch blocks, use `mightThrow` and `mightThrowSync` instead
 
 ### TypeScript
 
@@ -72,3 +73,4 @@ bun pm version <major|minor|patch>   # Bump version for publishing
 
 - Don't create new docs in `/docs` unless necessary
 - Keep plans concise, sacrificing grammar for brevity
+- No em-dashes (—) in any code comments or documentation

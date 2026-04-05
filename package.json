@@ -3,7 +3,14 @@
   "version": "0.5.2",
   "description": "Zero-dependency TypeScript utilities for Bun. Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable imports.",
   "type": "module",
+  "bin": {
+    "semola": "./dist/cli/index.js"
+  },
   "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
     "./errors": {
       "import": {
         "types": "./dist/lib/errors/index.d.mts",
@@ -102,6 +109,16 @@
       "require": {
         "types": "./dist/lib/prompts/index.d.cts",
         "default": "./dist/lib/prompts/index.cjs"
+      }
+    },
+    "./orm": {
+      "import": {
+        "types": "./dist/lib/orm/index.d.mts",
+        "default": "./dist/lib/orm/index.mjs"
+      },
+      "require": {
+        "types": "./dist/lib/orm/index.d.cts",
+        "default": "./dist/lib/orm/index.cjs"
       }
     }
   },
