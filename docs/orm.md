@@ -260,7 +260,6 @@ export default defineConfig({
     schema: "./src/db/schema.ts",
     migrations: {
       dir: "./migrations",
-      stateFile: "./.semola-migrations.json",
       transactional: true,
     },
   },
@@ -297,8 +296,8 @@ semola orm migrations rollback
   - `migrations/<id>_<name>/up.sql`
   - `migrations/<id>_<name>/down.sql`
   - `migrations/<id>_<name>/snapshot.json`
-- `apply` runs pending `up.sql` files and updates state file
-- `rollback` runs latest applied `down.sql` and updates state file
+- `apply` runs pending `up.sql` files and records them in `_semola_migrations`
+- `rollback` runs latest applied `down.sql` and removes it from `_semola_migrations`
 
 ---
 

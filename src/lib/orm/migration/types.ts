@@ -5,7 +5,6 @@ export type SemolaConfig = {
     schema: string;
     migrations?: {
       dir?: string;
-      stateFile?: string;
       transactional?: boolean;
     };
     introspect?: {
@@ -23,7 +22,6 @@ export type ResolvedSemolaConfig = {
     schema: string;
     migrations: {
       dir: string;
-      stateFile: string;
       transactional: boolean;
     };
     introspect: {
@@ -93,14 +91,6 @@ export type MigrationInfo = {
   upPath: string;
   downPath: string;
   snapshotPath: string;
-};
-
-export type MigrationState = {
-  applied: Array<{
-    id: string;
-    directoryName?: string;
-    appliedAt: string;
-  }>;
 };
 
 export type ApplyMigrationsInput = {

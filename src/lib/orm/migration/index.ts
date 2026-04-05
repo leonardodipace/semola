@@ -6,7 +6,6 @@ export { rollbackMigration } from "./rollback.js";
 export type {
   MigrationInfo,
   MigrationOperation,
-  MigrationState,
   ResolvedSemolaConfig,
   SchemaSnapshot,
   SemolaConfig,

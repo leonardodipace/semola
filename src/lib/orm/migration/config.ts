@@ -7,7 +7,6 @@ export function defineConfig(config: SemolaConfig) {
 }
 
 const defaultMigrationDir = "migrations";
-const defaultStateFile = ".semola-migrations.json";
 const defaultIntrospectOutput = "orm.generated.ts";
 
 async function findConfigPath(cwd: string) {
@@ -53,7 +52,6 @@ export async function loadConfig(cwd = process.cwd()) {
   }
 
   const migrationDir = loadedConfig.orm.migrations?.dir ?? defaultMigrationDir;
-  const stateFile = loadedConfig.orm.migrations?.stateFile ?? defaultStateFile;
   const transactional = loadedConfig.orm.migrations?.transactional ?? true;
   const introspectOutput =
     loadedConfig.orm.introspect?.output ?? defaultIntrospectOutput;
@@ -67,7 +65,6 @@ export async function loadConfig(cwd = process.cwd()) {
       schema: resolve(cwd, loadedConfig.orm.schema),
       migrations: {
         dir: resolve(cwd, migrationDir),
-        stateFile: resolve(cwd, stateFile),
         transactional,
       },
       introspect: {

@@ -128,7 +128,7 @@ async function runApplyMigrationsCommand(io: CliIo) {
 
   if (result.pending === 0) {
     io.log(
-      `No pending migrations (${result.total} total, state: ${result.stateFileRelative})`,
+      `No pending migrations (${result.total} total, tracker: ${result.trackerTable})`,
     );
     return;
   }

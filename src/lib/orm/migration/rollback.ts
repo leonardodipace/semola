@@ -3,7 +3,11 @@ import { SQL } from "bun";
 import { loadConfig } from "./config.js";
 import { loadOrmFromSchema } from "./discover.js";
 import { listMigrations, relativeFromCwd, splitStatements } from "./files.js";
-import { readMigrationState, unmarkAppliedMigration } from "./state-file.js";
+import {
+  ensureMigrationStateTable,
+  readLatestAppliedMigration,
+  unmarkAppliedMigration,
+} from "./state-table.js";
 
 async function runStatements(
   runner: SqlType | TransactionSQL,
@@ -61,16 +65,6 @@ async function runRollbackSql(
   await runStatements(sql, sqlText);
 }
 
-async function readState(stateFilePath: string) {
-  const state = await readMigrationState(stateFilePath);
-
-  if (!state) {
-    return { applied: [] };
-  }
-
-  return state;
-}
-
 export async function rollbackMigration(input: { cwd?: string }) {
   const cwd = input.cwd ?? process.cwd();
 
@@ -80,10 +74,10 @@ export async function rollbackMigration(input: { cwd?: string }) {
   const sql = new SQL(orm.options.url);
 
   try {
-    const migrations = await listMigrations(config.orm.migrations.dir);
-    const state = await readState(config.orm.migrations.stateFile);
+    await ensureMigrationStateTable(sql);
 
-    const last = state.applied[state.applied.length - 1];
+    const migrations = await listMigrations(config.orm.migrations.dir);
+    const last = await readLatestAppliedMigration(sql);
 
     if (!last) {
       return {
@@ -93,23 +87,20 @@ export async function rollbackMigration(input: { cwd?: string }) {
       };
     }
 
-    const migration = migrations.find((item) => {
-      if (last.directoryName) {
-        return item.directoryName === last.directoryName;
-      }
-
-      return item.id === last.id;
-    });
+    const migration = migrations.find(
+      (item) => item.directoryName === last.directoryName,
+    );
 
     if (!migration) {
-      throw new Error(`Could not find migration directory for id ${last.id}`);
+      throw new Error(
+        `Could not find migration directory for ${last.directoryName}`,
+      );
     }
 
     const sqlText = await Bun.file(migration.downPath).text();
 
     await runRollbackSql(sql, sqlText, config.orm.migrations.transactional);
-    await unmarkAppliedMigration(config.orm.migrations.stateFile, {
-      id: migration.id,
+    await unmarkAppliedMigration(sql, {
       directoryName: migration.directoryName,
     });
 

@@ -3,7 +3,12 @@ import { SQL } from "bun";
 import { loadConfig } from "./config.js";
 import { loadOrmFromSchema } from "./discover.js";
 import { listMigrations, relativeFromCwd, splitStatements } from "./files.js";
-import { markAppliedMigration, readMigrationState } from "./state-file.js";
+import {
+  ensureMigrationStateTable,
+  getMigrationTableName,
+  listAppliedMigrations,
+  markAppliedMigration,
+} from "./state-table.js";
 import type { ApplyMigrationsInput } from "./types.js";
 
 async function runStatements(
@@ -47,16 +52,6 @@ function hasExplicitTransaction(sqlText: string) {
   return false;
 }
 
-async function readState(stateFilePath: string) {
-  const state = await readMigrationState(stateFilePath);
-
-  if (!state) {
-    return { applied: [] };
-  }
-
-  return state;
-}
-
 async function runMigrationSql(
   sql: SQL,
   sqlText: string,
@@ -81,12 +76,12 @@ export async function applyMigrations(input?: ApplyMigrationsInput) {
   const sql = new SQL(orm.options.url);
 
   try {
-    const migrations = await listMigrations(config.orm.migrations.dir);
-    const state = await readState(config.orm.migrations.stateFile);
+    await ensureMigrationStateTable(sql);
 
-    const appliedIds = new Set(
-      state.applied.map((item) => item.directoryName ?? item.id),
-    );
+    const migrations = await listMigrations(config.orm.migrations.dir);
+    const applied = await listAppliedMigrations(sql);
+
+    const appliedIds = new Set(applied.map((item) => item.directoryName));
 
     const pending = migrations.filter(
       (migration) => !appliedIds.has(migration.directoryName),
@@ -97,11 +92,8 @@ export async function applyMigrations(input?: ApplyMigrationsInput) {
         applied: 0,
         pending: 0,
         total: migrations.length,
+        trackerTable: getMigrationTableName(),
         configPathRelative: relativeFromCwd(cwd, config.configPath),
-        stateFileRelative: relativeFromCwd(
-          cwd,
-          config.orm.migrations.stateFile,
-        ),
       };
     }
 
@@ -110,8 +102,9 @@ export async function applyMigrations(input?: ApplyMigrationsInput) {
 
       await runMigrationSql(sql, sqlText, config.orm.migrations.transactional);
 
-      await markAppliedMigration(config.orm.migrations.stateFile, {
+      await markAppliedMigration(sql, {
         id: migration.id,
+        name: migration.name,
         directoryName: migration.directoryName,
       });
     }
@@ -121,8 +114,8 @@ export async function applyMigrations(input?: ApplyMigrationsInput) {
       pending: 0,
       total: migrations.length,
       appliedIds: pending.map((item) => item.id),
+      trackerTable: getMigrationTableName(),
       configPathRelative: relativeFromCwd(cwd, config.configPath),
-      stateFileRelative: relativeFromCwd(cwd, config.orm.migrations.stateFile),
     };
   } finally {
     await sql.close();

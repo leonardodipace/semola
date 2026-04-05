@@ -37,9 +37,6 @@ describe("loadConfig", () => {
 
     expect(result.orm.schema).toBe(join(cwd, "src", "db", "index.ts"));
     expect(result.orm.migrations.dir).toBe(join(cwd, "migrations"));
-    expect(result.orm.migrations.stateFile).toBe(
-      join(cwd, ".semola-migrations.json"),
-    );
     expect(result.orm.migrations.transactional).toBe(true);
   });
 
