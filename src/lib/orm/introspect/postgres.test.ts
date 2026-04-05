@@ -331,6 +331,67 @@ describe("introspectPostgres", () => {
     });
   });
 
+  test("uses table-qualified joins for constraints and foreign keys", async () => {
+    const sql = ((strings: TemplateStringsArray) => {
+      const query = strings.join(" ");
+
+      if (query.includes("FROM pg_catalog.pg_type t")) {
+        return { values: () => Promise.resolve([]) };
+      }
+
+      if (query.includes("FROM information_schema.tables")) {
+        return { values: () => Promise.resolve([["posts"]]) };
+      }
+
+      if (query.includes("FROM information_schema.columns")) {
+        return {
+          values: () =>
+            Promise.resolve([["user_id", "uuid", "USER-DEFINED", "NO", null]]),
+        };
+      }
+
+      if (query.includes("tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE')")) {
+        const hasTableJoin = /tc\.table_name\s*=\s*kcu\.table_name/.test(query);
+
+        if (!hasTableJoin) {
+          return {
+            values: () => Promise.resolve([["other_table_col", "UNIQUE", 1]]),
+          };
+        }
+
+        return { values: () => Promise.resolve([["user_id", "UNIQUE", 1]]) };
+      }
+
+      if (query.includes("tc.constraint_type = 'FOREIGN KEY'")) {
+        const hasTableJoin = /tc\.table_name\s*=\s*kcu\.table_name/.test(query);
+
+        if (!hasTableJoin) {
+          return {
+            values: () =>
+              Promise.resolve([["other_table_fk", "users", "id", "CASCADE"]]),
+          };
+        }
+
+        return {
+          values: () =>
+            Promise.resolve([["user_id", "users", "id", "CASCADE"]]),
+        };
+      }
+
+      return { values: () => Promise.resolve([]) };
+    }) as unknown as SQL;
+
+    const [, tables] = await introspectPostgres(sql);
+    const col = tables?.[0]?.columns[0];
+
+    expect(col?.unique).toBe(true);
+    expect(col?.references).toEqual({
+      table: "users",
+      column: "id",
+      onDelete: "CASCADE",
+    });
+  });
+
   test("onDelete is null for NO ACTION delete rules", async () => {
     const sql = makeSql(
       [["posts"]],
