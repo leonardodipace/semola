@@ -76,7 +76,7 @@ export async function applyMigrations(input?: ApplyMigrationsInput) {
   const sql = new SQL(orm.options.url);
 
   try {
-    await ensureMigrationStateTable(sql);
+    await ensureMigrationStateTable(sql, orm.dialect);
 
     const migrations = await listMigrations(config.orm.migrations.dir);
     const applied = await listAppliedMigrations(sql);

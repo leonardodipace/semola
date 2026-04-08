@@ -1,4 +1,5 @@
 import type { SQL } from "bun";
+import type { Dialect } from "../types.js";
 
 const migrationTableName = "_semola_migrations";
 
@@ -63,10 +64,22 @@ export function getMigrationTableName() {
   return migrationTableName;
 }
 
-export async function ensureMigrationStateTable(sql: SQL) {
+export async function ensureMigrationStateTable(sql: SQL, dialect: Dialect) {
+  let directoryNameType = "TEXT";
+
+  if (dialect === "mysql") {
+    // In MySQL, TEXT type can't be used as a primary key
+    // becaused it's unable to guarantee the uniqueness of
+    // the column. In addition, part of the column's data is storead
+    // in a separate memory allocation. Switching to VARCHAR, with an
+    // arbitrary large limit, because TEXT don't support a length limit.
+
+    directoryNameType = "VARCHAR(2048)";
+  }
+
   await sql.unsafe(
     `CREATE TABLE IF NOT EXISTS ${migrationTableName} (` +
-      "directory_name TEXT PRIMARY KEY," +
+      `directory_name ${directoryNameType} PRIMARY KEY,` +
       "migration_id TEXT NOT NULL," +
       "migration_name TEXT NOT NULL," +
       "applied_at TEXT NOT NULL" +

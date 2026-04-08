@@ -74,7 +74,7 @@ export async function rollbackMigration(input?: { cwd?: string }) {
   const sql = new SQL(orm.options.url);
 
   try {
-    await ensureMigrationStateTable(sql);
+    await ensureMigrationStateTable(sql, orm.dialect);
 
     const migrations = await listMigrations(config.orm.migrations.dir);
     const last = await readLatestAppliedMigration(sql);
