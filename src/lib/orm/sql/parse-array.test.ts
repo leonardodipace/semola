@@ -14,6 +14,12 @@ describe("parsePostgresArrayLiteral", () => {
     expect(result).toEqual([1, 2, true, false]);
   });
 
+  test("parse null value", () => {
+    const result = parsePostgresArrayLiteral("{NULL}");
+
+    expect(result).toEqual([null]);
+  });
+
   test("keeps quoted primitive-like tokens as strings", () => {
     const result = parsePostgresArrayLiteral('{"NULL","true","1"}');
 
