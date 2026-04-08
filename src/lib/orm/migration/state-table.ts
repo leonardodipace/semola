@@ -129,17 +129,12 @@ export async function markAppliedMigration(
     directoryName: string;
   },
 ) {
-  await sql.unsafe(
-    `INSERT INTO ${migrationTableName} (` +
-      "directory_name, migration_id, migration_name, applied_at" +
-      ") VALUES (?, ?, ?, ?)",
-    [
-      migration.directoryName,
-      migration.id,
-      migration.name,
-      new Date().toISOString(),
-    ],
-  );
+  await sql`
+    INSERT INTO ${sql(migrationTableName)} (directory_name, migration_id, migration_name, applied_at) 
+    VALUES (
+      ${migration.directoryName}, ${migration.id}, 
+      ${migration.name}, ${new Date().toISOString()}
+    )`;
 }
 
 export async function unmarkAppliedMigration(
@@ -148,8 +143,5 @@ export async function unmarkAppliedMigration(
     directoryName: string;
   },
 ) {
-  await sql.unsafe(
-    `DELETE FROM ${migrationTableName} WHERE directory_name = ?`,
-    [migration.directoryName],
-  );
+  await sql`DELETE FROM ${sql(migrationTableName)} WHERE directory_name = ${migration.directoryName}`;
 }
