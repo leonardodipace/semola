@@ -65,13 +65,13 @@ function resolveDialect(
     return inferDialectFromUrl(dbUrl);
   }
 
-  if (!isDialect(rawDialect)) {
+  if (!isDialect(rawDialect as Dialect)) {
     throw new Error(
       `Invalid dialect: "${rawDialect}". Must be postgres, mysql, or sqlite.`,
     );
   }
 
-  return rawDialect;
+  return rawDialect as Dialect;
 }
 
 function resolveOutputPath(
