@@ -65,8 +65,8 @@ async function runRollbackSql(
   await runStatements(sql, sqlText);
 }
 
-export async function rollbackMigration(input: { cwd?: string }) {
-  const cwd = input.cwd ?? process.cwd();
+export async function rollbackMigration(input?: { cwd?: string }) {
+  const cwd = input?.cwd ?? process.cwd();
 
   const config = await loadConfig(cwd);
   const orm = await loadOrmFromSchema(config.orm.schema);
