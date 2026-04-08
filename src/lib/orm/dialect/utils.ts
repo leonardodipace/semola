@@ -16,6 +16,6 @@ export function inferDialectFromUrl(url: string): Dialect {
   return "sqlite";
 }
 
-export function isDialect(value: string): value is Dialect {
+export function isDialect(value: Dialect) {
   return value === "postgres" || value === "mysql" || value === "sqlite";
 }
