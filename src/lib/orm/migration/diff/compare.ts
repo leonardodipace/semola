@@ -68,9 +68,9 @@ export function columnsEqual(
   left: SchemaSnapshot["tables"][string]["columns"][string],
   right: SchemaSnapshot["tables"][string]["columns"][string],
 ) {
+  if (left.isSqlArray !== right.isSqlArray) return false;
   if (left.sqlName !== right.sqlName) return false;
   if (left.kind !== right.kind) return false;
-  if ((left.isSqlArray ?? false) !== (right.isSqlArray ?? false)) return false;
   if (left.isPrimaryKey !== right.isPrimaryKey) return false;
   if (left.isNotNull !== right.isNotNull) return false;
   if (left.isUnique !== right.isUnique) return false;
