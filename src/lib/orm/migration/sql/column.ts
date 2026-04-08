@@ -91,6 +91,14 @@ export function buildColumnDefinition(
     columnType(dialect, column.kind),
   ];
 
+  if (column.isSqlArray) {
+    if (dialect !== "postgres") {
+      throw new Error(`Array type is not supported for dialect: '${dialect}'`);
+    }
+
+    parts.push("ARRAY");
+  }
+
   if (column.isPrimaryKey) {
     parts.push("PRIMARY KEY");
   }
