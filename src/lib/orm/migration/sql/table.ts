@@ -120,8 +120,18 @@ export function setColumnNotNullSql(
   dialect: SchemaSnapshot["dialect"],
   tableName: string,
   columnSqlName: string,
+  column: ColumnSnapshot,
 ) {
   const table = quoteIdentifier(dialect, tableName);
+  if (dialect === "mysql") {
+    const notNullColumn = {
+      ...column,
+      isNotNull: true,
+    };
+
+    return `ALTER TABLE ${table} MODIFY COLUMN ${buildColumnDefinition(dialect, notNullColumn)}`;
+  }
+
   const col = quoteIdentifier(dialect, columnSqlName);
   return `ALTER TABLE ${table} ALTER COLUMN ${col} SET NOT NULL`;
 }
@@ -130,8 +140,18 @@ export function dropColumnNotNullSql(
   dialect: SchemaSnapshot["dialect"],
   tableName: string,
   columnSqlName: string,
+  column: ColumnSnapshot,
 ) {
   const table = quoteIdentifier(dialect, tableName);
+  if (dialect === "mysql") {
+    const nullableColumn = {
+      ...column,
+      isNotNull: false,
+    };
+
+    return `ALTER TABLE ${table} MODIFY COLUMN ${buildColumnDefinition(dialect, nullableColumn)}`;
+  }
+
   const col = quoteIdentifier(dialect, columnSqlName);
   return `ALTER TABLE ${table} ALTER COLUMN ${col} DROP NOT NULL`;
 }

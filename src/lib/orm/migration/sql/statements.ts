@@ -128,6 +128,7 @@ function maybeOptimizePostgresColumnChange(
         dialect,
         operation.tableName,
         oldColumn.sqlName,
+        newColumn,
       );
     }
 
@@ -136,6 +137,7 @@ function maybeOptimizePostgresColumnChange(
         dialect,
         operation.tableName,
         oldColumn.sqlName,
+        newColumn,
       );
     }
   }
