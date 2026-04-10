@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test";
 import type { SQL as SQLType } from "bun";
 import { SQL } from "bun";
+import { describe, expect, test } from "bun:test";
 import { string, uuid } from "./column.js";
 import { postgresDialectAdapter } from "./dialect/postgres.js";
 import { createOrm } from "./orm.js";
@@ -12,26 +12,38 @@ type MockCall = { strings: readonly string[]; values: unknown[] };
 
 function makeMockSql() {
   const calls: MockCall[] = [];
+  const sql = new SQL("sqlite::memory:");
 
-  function fn(
-    stringsOrValue: TemplateStringsArray | unknown,
-    ...values: unknown[]
-  ): unknown {
-    if (Array.isArray(stringsOrValue) && "raw" in (stringsOrValue as object)) {
-      calls.push({
-        strings: [...(stringsOrValue as readonly string[])],
-        values,
-      });
+  const mockSql = new Proxy(sql, {
+    apply(_target, _thisArg, args) {
+      const [stringsOrValue, ...values] = args;
 
-      return Promise.resolve([]);
-    }
+      if (Array.isArray(stringsOrValue) && "raw" in stringsOrValue) {
+        const strings: string[] = [];
 
-    return { __mock: stringsOrValue, __values: values };
-  }
+        for (const value of stringsOrValue) {
+          if (typeof value === "string") {
+            strings.push(value);
+          }
+        }
 
-  fn.calls = calls;
+        calls.push({
+          strings,
+          values,
+        });
 
-  return fn as unknown as SQLType & { calls: MockCall[] };
+        return [];
+      }
+
+      return { __mock: stringsOrValue, __values: values };
+    },
+  });
+
+  const withCalls = Object.assign(mockSql, { calls }) satisfies SQLType & {
+    calls: MockCall[];
+  };
+
+  return withCalls;
 }
 
 function runLoop(iterations: number, fn: () => void) {
