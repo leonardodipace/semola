@@ -347,6 +347,40 @@ describe("createOrm()", () => {
     expect(notAlice.map((r) => r.id).sort()).toEqual(["2", "3"]);
   });
 
+  test("findMany() supports OR and nested AND conditions", async () => {
+    const db = createOrm({
+      url: "sqlite::memory:",
+      tables: { users: usersTable },
+    });
+
+    await setupUsers(db);
+    await db.$raw`INSERT INTO users (id, name) VALUES ('1', 'Alice')`;
+    await db.$raw`INSERT INTO users (id, name) VALUES ('2', 'Bob')`;
+    await db.$raw`INSERT INTO users (id, name) VALUES ('3', 'Carol')`;
+
+    const eitherAliceOrBob = await db.users.findMany({
+      where: {
+        or: [{ name: "Alice" }, { name: "Bob" }],
+      },
+      orderBy: { id: "asc" },
+    });
+
+    expect(eitherAliceOrBob.map((row) => row.id)).toEqual(["1", "2"]);
+
+    const nested = await db.users.findMany({
+      where: {
+        and: [
+          {
+            or: [{ name: "Alice" }, { name: "Bob" }],
+          },
+          { id: { not: "2" } },
+        ],
+      },
+    });
+
+    expect(nested.map((row) => row.id)).toEqual(["1"]);
+  });
+
   test("findMany() hydrates many() include via inverse one() relation", async () => {
     const users = new Table("users", {
       id: uuid("id").primaryKey(),
@@ -441,6 +475,103 @@ describe("createOrm()", () => {
 
     expect(aliceTaskIds.sort()).toEqual(["10", "11"]);
     expect(bobTaskIds.sort()).toEqual(["12"]);
+  });
+
+  test("findMany() hydrates many() include when primary key is not id", async () => {
+    const accounts = new Table("accounts", {
+      userId: uuid("user_id").primaryKey(),
+      name: string("name").notNull(),
+    });
+
+    const projects = new Table("projects", {
+      id: uuid("id").primaryKey(),
+      ownerUserId: uuid("owner_user_id").notNull(),
+      title: string("title").notNull(),
+    });
+
+    const db = createOrm({
+      url: "sqlite::memory:",
+      tables: { accounts, projects },
+      relations: {
+        accounts: { projects: many(() => projects) },
+        projects: { owner: one("owner_user_id", () => accounts) },
+      },
+    });
+
+    await db.$raw`CREATE TABLE accounts (user_id TEXT PRIMARY KEY, name TEXT NOT NULL)`;
+    await db.$raw`CREATE TABLE projects (id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL, title TEXT NOT NULL)`;
+    await db.$raw`INSERT INTO accounts (user_id, name) VALUES ('u1', 'Alice')`;
+    await db.$raw`INSERT INTO accounts (user_id, name) VALUES ('u2', 'Bob')`;
+    await db.$raw`INSERT INTO projects (id, owner_user_id, title) VALUES ('p1', 'u1', 'One')`;
+    await db.$raw`INSERT INTO projects (id, owner_user_id, title) VALUES ('p2', 'u1', 'Two')`;
+    await db.$raw`INSERT INTO projects (id, owner_user_id, title) VALUES ('p3', 'u2', 'Three')`;
+
+    const rows = await db.accounts.findMany({
+      orderBy: { userId: "asc" },
+      include: { projects: true },
+    });
+
+    expect(rows).toHaveLength(2);
+
+    const first = rows[0];
+    const second = rows[1];
+
+    if (!first) {
+      expect(first).toBeDefined();
+      return;
+    }
+
+    if (!second) {
+      expect(second).toBeDefined();
+      return;
+    }
+
+    const firstProjects = Reflect.get(first, "projects");
+    const secondProjects = Reflect.get(second, "projects");
+
+    expect(Array.isArray(firstProjects)).toBe(true);
+    expect(Array.isArray(secondProjects)).toBe(true);
+
+    if (!Array.isArray(firstProjects)) {
+      expect(firstProjects).toBeArray();
+      return;
+    }
+
+    if (!Array.isArray(secondProjects)) {
+      expect(secondProjects).toBeArray();
+      return;
+    }
+
+    const firstProjectIds = firstProjects.map((project) => {
+      if (typeof project !== "object" || project === null) {
+        return null;
+      }
+
+      const id = Reflect.get(project, "id");
+
+      if (typeof id !== "string") {
+        return null;
+      }
+
+      return id;
+    });
+
+    const secondProjectIds = secondProjects.map((project) => {
+      if (typeof project !== "object" || project === null) {
+        return null;
+      }
+
+      const id = Reflect.get(project, "id");
+
+      if (typeof id !== "string") {
+        return null;
+      }
+
+      return id;
+    });
+
+    expect(firstProjectIds.sort()).toEqual(["p1", "p2"]);
+    expect(secondProjectIds.sort()).toEqual(["p3"]);
   });
 
   test("findMany() hydrates one() include", async () => {

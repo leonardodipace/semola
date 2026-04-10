@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { listMigrations, splitStatements } from "./files.js";
+import { listMigrations, splitStatements, toMigrationName } from "./files.js";
 
 describe("splitStatements", () => {
   test("splits on semicolons", () => {
@@ -73,5 +73,19 @@ describe("listMigrations", () => {
     expect(migrations).toHaveLength(1);
     expect(migrations[0]?.id).toBe("20260228231146001");
     expect(migrations[0]?.name).toBe("init");
+  });
+});
+
+describe("toMigrationName", () => {
+  test("normalizes mixed separators to single underscores", () => {
+    expect(toMigrationName("Add  users---table")).toBe("add_users_table");
+  });
+
+  test("trims leading and trailing separators", () => {
+    expect(toMigrationName("___Create___Index___")).toBe("create_index");
+  });
+
+  test("falls back to migration when input has no alphanumeric chars", () => {
+    expect(toMigrationName("___---***___")).toBe("migration");
   });
 });

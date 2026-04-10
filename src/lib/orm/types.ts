@@ -113,6 +113,9 @@ type IsRequired<C> =
     : false;
 
 export type WhereInput<T extends ColDefs> = {
+  and?: WhereInput<T>[];
+  or?: WhereInput<T>[];
+} & {
   [K in keyof T]?:
     | (T[K] extends ColumnDef<ColumnKind, ColumnMetaBase, infer V> ? V : never)
     | WhereFilter<

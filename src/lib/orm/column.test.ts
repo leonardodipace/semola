@@ -172,6 +172,27 @@ describe(".default()", () => {
     expect(col.meta.defaultFn).toBeNull();
     expect(col.meta.defaultValue).toBe("generated-id");
   });
+
+  test("keeps hasDefault true for zero", () => {
+    const col = number("score").default(0);
+
+    expect(col.meta.hasDefault).toBe(true);
+    expect(col.meta.defaultValue).toBe(0);
+  });
+
+  test("keeps hasDefault true for false", () => {
+    const col = boolean("active").default(false);
+
+    expect(col.meta.hasDefault).toBe(true);
+    expect(col.meta.defaultValue).toBe(false);
+  });
+
+  test("keeps hasDefault true for empty string", () => {
+    const col = string("nickname").default("");
+
+    expect(col.meta.hasDefault).toBe(true);
+    expect(col.meta.defaultValue).toBe("");
+  });
 });
 
 describe(".defaultFn()", () => {

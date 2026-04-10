@@ -7,6 +7,21 @@ import {
 } from "./where/guards.js";
 import { toOperatorPredicates } from "./where/operators.js";
 
+function combineWhereNodes<T extends ColDefs>(
+  kind: "and" | "or",
+  nodes: Array<WhereNode<T>>,
+) {
+  if (nodes.length === 0) {
+    return undefined;
+  }
+
+  if (nodes.length === 1) {
+    return nodes[0];
+  }
+
+  return { kind, nodes };
+}
+
 export function buildWhereNode<T extends ColDefs>(where?: WhereInput<T>) {
   if (!where) {
     return undefined;
@@ -14,7 +29,51 @@ export function buildWhereNode<T extends ColDefs>(where?: WhereInput<T>) {
 
   const nodes: Array<WhereNode<T>> = [];
 
+  const andInputs = where.and;
+
+  if (andInputs) {
+    for (const entry of andInputs) {
+      const node = buildWhereNode(entry);
+
+      if (!node) {
+        continue;
+      }
+
+      nodes.push(node);
+    }
+  }
+
+  const orInputs = where.or;
+
+  if (orInputs) {
+    const orNodes: Array<WhereNode<T>> = [];
+
+    for (const entry of orInputs) {
+      const node = buildWhereNode(entry);
+
+      if (!node) {
+        continue;
+      }
+
+      orNodes.push(node);
+    }
+
+    const orNode = combineWhereNodes("or", orNodes);
+
+    if (orNode) {
+      nodes.push(orNode);
+    }
+  }
+
   for (const [key, condition] of Object.entries(where)) {
+    if (key === "and") {
+      continue;
+    }
+
+    if (key === "or") {
+      continue;
+    }
+
     const typedKey = key as keyof T & string;
 
     if (typeof condition !== "object" || condition === null) {
@@ -45,18 +104,7 @@ export function buildWhereNode<T extends ColDefs>(where?: WhereInput<T>) {
     }
   }
 
-  if (nodes.length === 0) {
-    return undefined;
-  }
-
-  if (nodes.length === 1) {
-    return nodes[0];
-  }
-
-  return {
-    kind: "and" as const,
-    nodes,
-  };
+  return combineWhereNodes("and", nodes);
 }
 
 export { isLikePredicateValue, isValueOperator };

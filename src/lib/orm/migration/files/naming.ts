@@ -16,11 +16,35 @@ export function nowMigrationId() {
 }
 
 export function toMigrationName(value: string) {
-  const name = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+  let name = "";
+  let wasSeparator = false;
+
+  for (const char of value.trim().toLowerCase()) {
+    const code = char.charCodeAt(0);
+    const isLower = code >= 97 && code <= 122;
+    const isDigit = code >= 48 && code <= 57;
+
+    if (isLower || isDigit) {
+      name += char;
+      wasSeparator = false;
+      continue;
+    }
+
+    if (name.length === 0) {
+      continue;
+    }
+
+    if (wasSeparator) {
+      continue;
+    }
+
+    name += "_";
+    wasSeparator = true;
+  }
+
+  if (name.endsWith("_")) {
+    name = name.slice(0, -1);
+  }
 
   if (!name) {
     return "migration";
