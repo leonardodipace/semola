@@ -75,19 +75,22 @@ export type InsertData<T extends ColDefs> = Prettify<
       ? IsRequired<T[K]> extends true
         ? K
         : never
-      : never]: T[K] extends ColumnDef<ColumnKind, ColumnMetaBase, infer V>
-      ? V
-      : never;
+      : never]: InsertValue<T[K]>;
   } & {
     [K in keyof T as IsUserProvided<T[K]> extends true
       ? IsRequired<T[K]> extends true
         ? never
         : K
-      : never]?: T[K] extends ColumnDef<ColumnKind, ColumnMetaBase, infer V>
-      ? V
-      : never;
+      : never]?: InsertValue<T[K]>;
   }
 >;
+
+type InsertValue<C> =
+  C extends ColumnDef<ColumnKind, infer Meta, infer V>
+    ? Meta["isNotNull"] extends true
+      ? V
+      : V | null
+    : never;
 
 // Excluded from InsertData: uuid PKs with no JS default (DB-generated)
 type IsUserProvided<C> =
