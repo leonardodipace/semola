@@ -1,6 +1,17 @@
 import type { IntrospectedColumn } from "../../../types.js";
 import { parseStringLiteral, stripWrappingParens } from "./literals.js";
 
+
+function isNumber(value: string) {
+  value = value.trim();
+
+  if (value.length === 0) {
+    return false
+  }
+
+  return !Number.isNaN(Number(value))
+}
+
 function parseArrayToken(
   token: string,
   elementKind: NonNullable<IntrospectedColumn["arrayElementKind"]>,
@@ -19,7 +30,7 @@ function parseArrayToken(
   }
 
   if (elementKind === "number") {
-    if (/^-?\d+(\.\d+)?$/.test(value)) {
+    if (isNumber(value)) {
       return Number(value);
     }
 
