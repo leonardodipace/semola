@@ -360,6 +360,57 @@ describe("serializeSelectPlan", () => {
     expect(fragment.__values).toContain("assignee_id");
   });
 
+  test("aliases each join when multiple relations target the same table", () => {
+    const sql = makeMockSql();
+
+    const members = createTable("members", {
+      id: uuid("id").primaryKey(),
+      name: string("name").notNull(),
+    });
+
+    const workItems = createTable("work_items", {
+      id: uuid("id").primaryKey(),
+      creatorId: uuid("creator_id").notNull(),
+      reviewerId: uuid("reviewer_id").notNull(),
+      title: string("title").notNull(),
+    });
+
+    const plan = buildSelectPlan({
+      include: {
+        creator: true,
+        reviewer: true,
+      },
+    });
+
+    const fragment = readMockFragment(
+      serializeSelectPlan(
+        sql,
+        workItems,
+        {
+          creator: {
+            kind: "one",
+            foreignKey: "creator_id",
+            table: () => members,
+          },
+          reviewer: {
+            kind: "one",
+            foreignKey: "reviewer_id",
+            table: () => members,
+          },
+        },
+        plan,
+        postgresDialectAdapter,
+      ),
+    );
+
+    const all = fragment.__strings.join(" ");
+
+    expect(all).toContain("LEFT JOIN");
+    expect(fragment.__values).toContain("members");
+    expect(fragment.__values).toContain("creator_0");
+    expect(fragment.__values).toContain("reviewer_1");
+  });
+
   test("renders postgres offset-only paging", () => {
     const sql = makeMockSql();
 

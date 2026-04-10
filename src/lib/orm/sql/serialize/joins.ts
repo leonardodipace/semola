@@ -23,7 +23,7 @@ export function buildJoinClauses<T extends ColDefs>(
     return joinClause;
   }
 
-  for (const join of plan.joins) {
+  for (const [joinIndex, join] of plan.joins.entries()) {
     const rel = relations[join.relationKey];
 
     if (!rel) {
@@ -37,8 +37,10 @@ export function buildJoinClauses<T extends ColDefs>(
       continue;
     }
 
+    const targetAlias = `${join.relationKey}_${joinIndex}`;
+
     if (rel.kind === "one") {
-      joinClause = sql`${joinClause} LEFT JOIN ${sql(target.tableName)} ON ${sql(table.tableName)}.${sql(rel.foreignKey)} = ${sql(target.tableName)}.${sql(targetPk.col.meta.sqlName)}`;
+      joinClause = sql`${joinClause} LEFT JOIN ${sql(target.tableName)} AS ${sql(targetAlias)} ON ${sql(table.tableName)}.${sql(rel.foreignKey)} = ${sql(targetAlias)}.${sql(targetPk.col.meta.sqlName)}`;
       continue;
     }
 
@@ -59,7 +61,7 @@ export function buildJoinClauses<T extends ColDefs>(
       continue;
     }
 
-    joinClause = sql`${joinClause} LEFT JOIN ${sql(target.tableName)} ON ${sql(target.tableName)}.${sql(foreignSqlName)} = ${sql(table.tableName)}.${sql(basePk.col.meta.sqlName)}`;
+    joinClause = sql`${joinClause} LEFT JOIN ${sql(target.tableName)} AS ${sql(targetAlias)} ON ${sql(targetAlias)}.${sql(foreignSqlName)} = ${sql(table.tableName)}.${sql(basePk.col.meta.sqlName)}`;
   }
 
   return joinClause;
