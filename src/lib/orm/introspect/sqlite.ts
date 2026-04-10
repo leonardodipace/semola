@@ -1,17 +1,18 @@
 import type { SQL } from "bun";
 import { err, mightThrow, ok } from "../../errors/index.js";
+import { sqliteDialectAdapter } from "../dialect/sqlite.js";
 import { toErrMsg } from "./shared.js";
 import { mapSqliteColumns } from "./sqlite/mapping.js";
 import type { IntrospectedTable } from "./types.js";
 
 export async function introspectSqlite(sql: SQL) {
-  const [tablesErr, tableRows] = await mightThrow(
+  const [tablesErr, tableRows] = await mightThrow<[string][]>(
     sql`
       SELECT name FROM sqlite_master
       WHERE type = 'table'
         AND name NOT LIKE 'sqlite_%'
       ORDER BY name
-    `.values() as Promise<[string][]>,
+    `.values(),
   );
 
   if (tablesErr) {
@@ -25,11 +26,11 @@ export async function introspectSqlite(sql: SQL) {
   const tables: IntrospectedTable[] = [];
 
   for (const tableName of tableNames) {
-    const [colErr, colRows] = await mightThrow(
-      sql`PRAGMA table_info(${sql.unsafe(tableName)})`.values() as Promise<
-        [number, string, string, number, string | null, number][]
-      >,
-    );
+    const quotedTableName = sqliteDialectAdapter.quoteIdentifier(tableName);
+
+    const [colErr, colRows] = await mightThrow<
+      [number, string, string, number, string | null, number][]
+    >(sql`PRAGMA table_info(${sql.unsafe(quotedTableName)})`.values());
 
     if (colErr) {
       return err(
@@ -38,11 +39,9 @@ export async function introspectSqlite(sql: SQL) {
       );
     }
 
-    const [fkErr, fkRows] = await mightThrow(
-      sql`PRAGMA foreign_key_list(${sql.unsafe(tableName)})`.values() as Promise<
-        [number, number, string, string, string, string, string, string][]
-      >,
-    );
+    const [fkErr, fkRows] = await mightThrow<
+      [number, number, string, string, string, string, string, string][]
+    >(sql`PRAGMA foreign_key_list(${sql.unsafe(quotedTableName)})`.values());
 
     if (fkErr) {
       return err(

@@ -35,34 +35,88 @@ export async function loadConfig(cwd = process.cwd()) {
   const configUrl = pathToFileURL(configPath).href;
   const mod = await import(`${configUrl}?t=${Date.now()}`);
 
-  const loadedConfig = (mod as Record<string, unknown>).default as
-    | SemolaConfig
-    | undefined;
+  const loadedConfig = Reflect.get(mod, "default");
 
-  if (!loadedConfig) {
+  if (typeof loadedConfig !== "object") {
     throw new Error("semola.config.ts must export a default config object");
   }
 
-  if (!loadedConfig.orm) {
+  if (loadedConfig === null) {
+    throw new Error("semola.config.ts must export a default config object");
+  }
+
+  const orm = Reflect.get(loadedConfig, "orm");
+
+  if (typeof orm !== "object") {
     throw new Error("semola.config.ts must contain an orm section");
   }
 
-  if (!loadedConfig.orm.schema) {
+  if (orm === null) {
+    throw new Error("semola.config.ts must contain an orm section");
+  }
+
+  const schema = Reflect.get(orm, "schema");
+
+  if (typeof schema !== "string") {
     throw new Error("semola.config.ts must define orm.schema");
   }
 
-  const migrationDir = loadedConfig.orm.migrations?.dir ?? defaultMigrationDir;
-  const transactional = loadedConfig.orm.migrations?.transactional ?? true;
+  const migrations = Reflect.get(orm, "migrations");
+  const introspect = Reflect.get(orm, "introspect");
+
+  const migrationDirValue =
+    typeof migrations === "object" && migrations !== null
+      ? Reflect.get(migrations, "dir")
+      : null;
+
+  const migrationDir =
+    typeof migrationDirValue === "string"
+      ? migrationDirValue
+      : defaultMigrationDir;
+
+  const transactionalValue =
+    typeof migrations === "object" && migrations !== null
+      ? Reflect.get(migrations, "transactional")
+      : null;
+
+  const transactional =
+    typeof transactionalValue === "boolean" ? transactionalValue : true;
+
+  const introspectOutputValue =
+    typeof introspect === "object" && introspect !== null
+      ? Reflect.get(introspect, "output")
+      : null;
+
   const introspectOutput =
-    loadedConfig.orm.introspect?.output ?? defaultIntrospectOutput;
-  const introspectUrl = loadedConfig.orm.introspect?.url ?? null;
-  const introspectDialect = loadedConfig.orm.introspect?.dialect ?? null;
+    typeof introspectOutputValue === "string"
+      ? introspectOutputValue
+      : defaultIntrospectOutput;
+
+  const introspectUrlValue =
+    typeof introspect === "object" && introspect !== null
+      ? Reflect.get(introspect, "url")
+      : null;
+
+  const introspectUrl =
+    typeof introspectUrlValue === "string" ? introspectUrlValue : null;
+
+  const introspectDialectValue =
+    typeof introspect === "object" && introspect !== null
+      ? Reflect.get(introspect, "dialect")
+      : null;
+
+  const introspectDialect =
+    introspectDialectValue === "postgres" ||
+    introspectDialectValue === "mysql" ||
+    introspectDialectValue === "sqlite"
+      ? introspectDialectValue
+      : null;
 
   const resolved: ResolvedSemolaConfig = {
     cwd,
     configPath,
     orm: {
-      schema: resolve(cwd, loadedConfig.orm.schema),
+      schema: resolve(cwd, schema),
       migrations: {
         dir: resolve(cwd, migrationDir),
         transactional,
