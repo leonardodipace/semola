@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
 import type { SQL } from "bun";
+import { describe, expect, test } from "bun:test";
 import { boolean as booleanCol, json, string, uuid } from "../column.js";
 import { mysqlDialectAdapter } from "../dialect/mysql.js";
 import { postgresDialectAdapter } from "../dialect/postgres.js";
@@ -15,6 +15,113 @@ import {
 } from "./serialize.js";
 
 type MockCall = { strings: readonly string[]; values: unknown[] };
+type MockFragment = {
+  __mock: true;
+  __strings: readonly string[];
+  __values: unknown[];
+};
+
+function isMockFragment(value: unknown) {
+  if (typeof value !== "object") {
+    return false;
+  }
+
+  if (value === null) {
+    return false;
+  }
+
+  return "__mock" in value && "__strings" in value && "__values" in value;
+}
+
+function readMockFragment(value: unknown): MockFragment {
+  if (typeof value !== "object") {
+    throw new Error("Expected mock SQL fragment object");
+  }
+
+  if (value === null) {
+    throw new Error("Expected mock SQL fragment object");
+  }
+
+  const mockMarker = Reflect.get(value, "__mock");
+  const rawStrings = Reflect.get(value, "__strings");
+  const rawValues = Reflect.get(value, "__values");
+
+  if (mockMarker !== true) {
+    throw new Error("Expected mock SQL fragment marker");
+  }
+
+  if (!Array.isArray(rawStrings)) {
+    throw new Error("Expected mock SQL fragment strings");
+  }
+
+  if (!Array.isArray(rawValues)) {
+    throw new Error("Expected mock SQL fragment values");
+  }
+
+  const strings: string[] = [];
+
+  for (const item of rawStrings) {
+    if (typeof item !== "string") {
+      throw new Error("Expected mock SQL fragment string entry");
+    }
+
+    strings.push(item);
+  }
+
+  return {
+    __mock: true,
+    __strings: strings,
+    __values: [...rawValues],
+  };
+}
+
+function flattenTemplateCall(
+  strings: readonly string[],
+  values: unknown[],
+): { strings: readonly string[]; values: unknown[] } {
+  const composedStrings = [strings[0] ?? ""];
+  const composedValues: unknown[] = [];
+
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index];
+    const nextString = strings[index + 1] ?? "";
+
+    if (isMockFragment(value)) {
+      const fragment = readMockFragment(value);
+
+      composedStrings[composedStrings.length - 1] +=
+        fragment.__strings[0] ?? "";
+
+      for (
+        let nestedIndex = 0;
+        nestedIndex < fragment.__values.length;
+        nestedIndex += 1
+      ) {
+        composedValues.push(fragment.__values[nestedIndex]);
+        composedStrings.push(fragment.__strings[nestedIndex + 1] ?? "");
+      }
+
+      composedStrings[composedStrings.length - 1] += nextString;
+      continue;
+    }
+
+    composedValues.push(value);
+    composedStrings.push(nextString);
+  }
+
+  return {
+    strings: composedStrings,
+    values: composedValues,
+  };
+}
+
+function toMockFragment(value: unknown): MockFragment {
+  return {
+    __mock: true,
+    __strings: ["", ""],
+    __values: [value],
+  };
+}
 
 function makeMockSql() {
   const calls: MockCall[] = [];
@@ -24,14 +131,24 @@ function makeMockSql() {
     ...values: unknown[]
   ): unknown {
     if (Array.isArray(stringsOrValue) && "raw" in (stringsOrValue as object)) {
-      calls.push({
-        strings: [...(stringsOrValue as readonly string[])],
+      const composed = flattenTemplateCall(
+        [...(stringsOrValue as readonly string[])],
         values,
+      );
+
+      calls.push({
+        strings: composed.strings,
+        values: composed.values,
       });
-      return Promise.resolve([]);
+
+      return {
+        __mock: true,
+        __strings: composed.strings,
+        __values: composed.values,
+      };
     }
 
-    return { __mock: stringsOrValue, __values: values };
+    return toMockFragment(stringsOrValue);
   }
 
   fn.calls = calls;
@@ -184,15 +301,17 @@ describe("serializeSelectPlan", () => {
       offset: 10,
     });
 
-    void serializeSelectPlan(
-      sql,
-      users,
-      { tasks: many(() => tasks) },
-      plan,
-      postgresDialectAdapter,
+    const fragment = readMockFragment(
+      serializeSelectPlan(
+        sql,
+        users,
+        { tasks: many(() => tasks) },
+        plan,
+        postgresDialectAdapter,
+      ),
     );
 
-    const all = sql.calls.flatMap((call) => call.strings).join(" ");
+    const all = fragment.__strings.join(" ");
 
     expect(all).toContain("SELECT");
     expect(all).not.toContain("SELECT * FROM");
@@ -219,40 +338,26 @@ describe("serializeSelectPlan", () => {
 
     const plan = buildSelectPlan({ include: { assignee: true } });
 
-    void serializeSelectPlan(
-      sql,
-      workItems,
-      {
-        assignee: {
-          kind: "one",
-          foreignKey: "assignee_id",
-          table: () => assignees,
+    const fragment = readMockFragment(
+      serializeSelectPlan(
+        sql,
+        workItems,
+        {
+          assignee: {
+            kind: "one",
+            foreignKey: "assignee_id",
+            table: () => assignees,
+          },
         },
-      },
-      plan,
-      postgresDialectAdapter,
+        plan,
+        postgresDialectAdapter,
+      ),
     );
 
-    const all = sql.calls.flatMap((call) => call.strings).join(" ");
+    const all = fragment.__strings.join(" ");
 
     expect(all).toContain("LEFT JOIN");
-
-    const allValues = sql.calls.flatMap((call) => call.values);
-    const helperValues = allValues
-      .map((value) => {
-        if (typeof value !== "object" || value === null) {
-          return value;
-        }
-
-        if (!("__mock" in value)) {
-          return value;
-        }
-
-        return (value as { __mock: unknown }).__mock;
-      })
-      .filter((value) => typeof value === "string");
-
-    expect(helperValues).toContain("assignee_id");
+    expect(fragment.__values).toContain("assignee_id");
   });
 
   test("renders postgres offset-only paging", () => {
@@ -260,9 +365,11 @@ describe("serializeSelectPlan", () => {
 
     const plan = buildSelectPlan({ offset: 2 });
 
-    void serializeSelectPlan(sql, users, {}, plan, postgresDialectAdapter);
+    const fragment = readMockFragment(
+      serializeSelectPlan(sql, users, {}, plan, postgresDialectAdapter),
+    );
 
-    const all = sql.calls.flatMap((call) => call.strings).join(" ");
+    const all = fragment.__strings.join(" ");
 
     expect(all).toContain("OFFSET");
     expect(all).not.toContain("LIMIT -1");
@@ -274,9 +381,11 @@ describe("serializeSelectPlan", () => {
 
     const plan = buildSelectPlan({ offset: 2 });
 
-    void serializeSelectPlan(sql, users, {}, plan, mysqlDialectAdapter);
+    const fragment = readMockFragment(
+      serializeSelectPlan(sql, users, {}, plan, mysqlDialectAdapter),
+    );
 
-    const all = sql.calls.flatMap((call) => call.strings).join(" ");
+    const all = fragment.__strings.join(" ");
 
     expect(all).toContain("LIMIT 18446744073709551615");
     expect(all).toContain("OFFSET");
@@ -287,9 +396,11 @@ describe("serializeSelectPlan", () => {
 
     const plan = buildSelectPlan({ offset: 2 });
 
-    void serializeSelectPlan(sql, users, {}, plan, sqliteDialectAdapter);
+    const fragment = readMockFragment(
+      serializeSelectPlan(sql, users, {}, plan, sqliteDialectAdapter),
+    );
 
-    const all = sql.calls.flatMap((call) => call.strings).join(" ");
+    const all = fragment.__strings.join(" ");
 
     expect(all).toContain("LIMIT -1");
     expect(all).toContain("OFFSET");
@@ -300,21 +411,23 @@ describe("serializeSelectInput", () => {
   test("renders select directly from input", () => {
     const sql = makeMockSql();
 
-    void serializeSelectInput(
-      sql,
-      users,
-      { tasks: many(() => tasks) },
-      {
-        where: { name: { contains: "li" } },
-        include: { tasks: true },
-        orderBy: { name: "desc" },
-        limit: 3,
-        offset: 2,
-      },
-      postgresDialectAdapter,
+    const fragment = readMockFragment(
+      serializeSelectInput(
+        sql,
+        users,
+        { tasks: many(() => tasks) },
+        {
+          where: { name: { contains: "li" } },
+          include: { tasks: true },
+          orderBy: { name: "desc" },
+          limit: 3,
+          offset: 2,
+        },
+        postgresDialectAdapter,
+      ),
     );
 
-    const all = sql.calls.flatMap((call) => call.strings).join(" ");
+    const all = fragment.__strings.join(" ");
 
     expect(all).toContain("SELECT");
     expect(all).not.toContain("SELECT * FROM");
