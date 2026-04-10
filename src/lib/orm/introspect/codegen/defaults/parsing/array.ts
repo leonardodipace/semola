@@ -1,15 +1,14 @@
 import type { IntrospectedColumn } from "../../../types.js";
 import { parseStringLiteral, stripWrappingParens } from "./literals.js";
 
-
 function isNumber(value: string) {
   value = value.trim();
 
   if (value.length === 0) {
-    return false
+    return false;
   }
 
-  return !Number.isNaN(Number(value))
+  return !Number.isNaN(Number(value));
 }
 
 function parseArrayToken(
