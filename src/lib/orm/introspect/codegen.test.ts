@@ -251,6 +251,69 @@ describe("generateCode", () => {
     expect(code).toContain("userProfiles: userProfilesTable,");
   });
 
+  test("uses computed properties for invalid SQL column names", () => {
+    const table: IntrospectedTable = {
+      name: "users",
+      columns: [
+        {
+          sqlName: "display name",
+          kind: "string",
+          nullable: false,
+          primaryKey: false,
+          unique: false,
+          rawDefault: null,
+          arrayElementKind: null,
+          references: null,
+          unknownDbType: null,
+        },
+        {
+          sqlName: "123status",
+          kind: "string",
+          nullable: false,
+          primaryKey: false,
+          unique: false,
+          rawDefault: null,
+          arrayElementKind: null,
+          references: null,
+          unknownDbType: null,
+        },
+      ],
+    };
+
+    const code = generateCode([table], "postgres");
+
+    expect(code).toContain(
+      '["display name"]: string("display name").notNull(),',
+    );
+    expect(code).toContain('["123status"]: string("123status").notNull(),');
+  });
+
+  test("uses computed properties for invalid SQL table names", () => {
+    const table: IntrospectedTable = {
+      name: "user sessions",
+      columns: [
+        {
+          sqlName: "id",
+          kind: "uuid",
+          nullable: false,
+          primaryKey: true,
+          unique: false,
+          rawDefault: null,
+          arrayElementKind: null,
+          references: null,
+          unknownDbType: null,
+        },
+      ],
+    };
+
+    const code = generateCode([table], "postgres");
+
+    expect(code).toContain(
+      'const userSessionsTable = createTable("user sessions", {',
+    );
+    expect(code).toContain('["user sessions"]: userSessionsTable,');
+  });
+
   test("maps uuid primary key DB defaults to defaultFn", () => {
     const tableWithUuidDefault: IntrospectedTable = {
       name: "users",
@@ -413,6 +476,66 @@ describe("generateCode", () => {
     const code = generateCode([table], "postgres");
 
     expect(code).toContain('rule: string("rule").asArray().notNull(),');
+  });
+
+  test("uses computed relation keys for invalid SQL names", () => {
+    const customersTable: IntrospectedTable = {
+      name: "customers",
+      columns: [
+        {
+          sqlName: "id",
+          kind: "uuid",
+          enumValues: null,
+          nullable: false,
+          primaryKey: true,
+          unique: false,
+          rawDefault: null,
+          arrayElementKind: null,
+          references: null,
+          unknownDbType: null,
+        },
+      ],
+    };
+
+    const ordersTable: IntrospectedTable = {
+      name: "sales orders",
+      columns: [
+        {
+          sqlName: "id",
+          kind: "uuid",
+          enumValues: null,
+          nullable: false,
+          primaryKey: true,
+          unique: false,
+          rawDefault: null,
+          arrayElementKind: null,
+          references: null,
+          unknownDbType: null,
+        },
+        {
+          sqlName: "customer id",
+          kind: "uuid",
+          enumValues: null,
+          nullable: false,
+          primaryKey: false,
+          unique: false,
+          rawDefault: null,
+          arrayElementKind: null,
+          references: { table: "customers", column: "id", onDelete: null },
+          unknownDbType: null,
+        },
+      ],
+    };
+
+    const code = generateCode([customersTable, ordersTable], "postgres");
+
+    expect(code).toContain('["sales orders"]: {');
+    expect(code).toContain(
+      '["customer id"]: one("customer id", () => customersTable),',
+    );
+    expect(code).toContain(
+      '["sales orders"]: many(() => salesOrdersTable, "customer id"),',
+    );
   });
 
   test("parses enum column default with type cast suffix", () => {

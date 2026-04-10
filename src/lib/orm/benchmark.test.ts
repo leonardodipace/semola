@@ -1,6 +1,6 @@
+import { describe, expect, test } from "bun:test";
 import type { SQL as SQLType } from "bun";
 import { SQL } from "bun";
-import { describe, expect, test } from "bun:test";
 import { string, uuid } from "./column.js";
 import { postgresDialectAdapter } from "./dialect/postgres.js";
 import { createOrm } from "./orm.js";
