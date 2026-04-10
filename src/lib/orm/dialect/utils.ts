@@ -1,16 +1,12 @@
 import type { Dialect } from "../types.js";
 
 export function inferDialectFromUrl(url: string): Dialect {
-  if (url.includes("mysql")) {
+  if (url.startsWith("postgres://") || url.startsWith("postgresql://")) {
+    return "postgres"
+  }
+
+  if (url.startsWith("mysql://") || url.startsWith("mysql2://")) {
     return "mysql";
-  }
-
-  if (url.includes("postgresql")) {
-    return "postgres";
-  }
-
-  if (url.includes("postgres")) {
-    return "postgres";
   }
 
   return "sqlite";
