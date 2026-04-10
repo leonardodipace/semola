@@ -85,7 +85,7 @@ export async function uniqueMigrationDirectoryPath(
     let exists = false;
 
     if (stats) {
-      exists = stats.isDirectory();
+      exists = true;
     }
 
     if (!exists) {

@@ -6,6 +6,7 @@ import type {
   DialectAdapter,
   FindManyInput,
   RelationDefs,
+  SelectInput,
 } from "../../types.js";
 
 export function mapFindInputToSelect<
@@ -32,7 +33,7 @@ export function createSelectQuery<
   sql: SQL | TransactionSQL,
   table: Table<T>,
   relations: TRels,
-  input: object,
+  input: SelectInput<T, TRels>,
   dialectAdapter: DialectAdapter,
 ) {
   return serializeSelectInput(sql, table, relations, input, dialectAdapter);

@@ -2,7 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { listMigrations, splitStatements, toMigrationName } from "./files.js";
+import {
+  listMigrations,
+  splitStatements,
+  toMigrationName,
+  uniqueMigrationDirectoryPath,
+} from "./files.js";
 
 describe("splitStatements", () => {
   test("splits on semicolons", () => {
@@ -73,6 +78,28 @@ describe("listMigrations", () => {
     expect(migrations).toHaveLength(1);
     expect(migrations[0]?.id).toBe("20260228231146001");
     expect(migrations[0]?.name).toBe("init");
+  });
+});
+
+describe("uniqueMigrationDirectoryPath", () => {
+  test("treats existing files as collisions", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "semola-files-collision-"));
+    const migrationsDir = join(cwd, "migrations");
+    const firstPath = join(migrationsDir, "20260228231146001_init");
+
+    await mkdir(migrationsDir, { recursive: true });
+    await Bun.write(firstPath, "collision");
+
+    const result = await uniqueMigrationDirectoryPath(
+      migrationsDir,
+      "20260228231146001",
+      "init",
+    );
+
+    expect(result.migrationId).toBe("2026022823114600101");
+    expect(result.migrationDir).toBe(
+      join(migrationsDir, "2026022823114600101_init"),
+    );
   });
 });
 
