@@ -1,5 +1,41 @@
+const SAFE_IDENTIFIER_PLACEHOLDER = "field";
+
+function normalizeSqlIdentifier(value: string) {
+  const trimmed = value.trim();
+  const replaced = trimmed.replace(/[^A-Za-z0-9]+/g, "_");
+  const collapsed = replaced.replace(/_+/g, "_");
+
+  if (!/[A-Za-z0-9]/.test(collapsed)) {
+    return SAFE_IDENTIFIER_PLACEHOLDER;
+  }
+
+  if (/^[0-9]/.test(collapsed)) {
+    return `_${collapsed}`;
+  }
+
+  return collapsed;
+}
+
+export function canUseUnquotedIdentifier(value: string) {
+  if (value.length === 0) {
+    return false;
+  }
+
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(value);
+}
+
+export function toObjectPropertyKey(sqlName: string, identifier: string) {
+  if (canUseUnquotedIdentifier(sqlName)) {
+    return identifier;
+  }
+
+  return `[${toTypeLiteral(sqlName)}]`;
+}
+
 export function toCamelCase(sqlName: string) {
-  return sqlName.replace(/_([a-z])/g, (_, letter: string) =>
+  const normalized = normalizeSqlIdentifier(sqlName);
+
+  return normalized.replace(/_([a-z])/g, (_, letter: string) =>
     letter.toUpperCase(),
   );
 }

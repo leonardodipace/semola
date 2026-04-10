@@ -2,7 +2,7 @@ import type { ColumnKind, Dialect } from "../../types.js";
 import type { IntrospectedTable } from "../types.js";
 
 import { buildColumnCall } from "./defaults.js";
-import { toCamelCase, toVarName } from "./naming.js";
+import { toCamelCase, toObjectPropertyKey, toVarName } from "./naming.js";
 import { buildRelationsConfig, hasAnyRelations } from "./relations.js";
 
 function collectImports(tables: IntrospectedTable[]): ColumnKind[] {
@@ -42,7 +42,7 @@ function buildTableBlock(table: IntrospectedTable) {
   lines.push(`const ${varName} = createTable("${table.name}", {`);
 
   for (const col of table.columns) {
-    const jsKey = toCamelCase(col.sqlName);
+    const jsKey = toObjectPropertyKey(col.sqlName, toCamelCase(col.sqlName));
     const call = buildColumnCall(col);
     const suffix = col.unknownDbType
       ? ` // TODO: unknown type: ${col.unknownDbType}`
@@ -77,7 +77,10 @@ export function generateCode(tables: IntrospectedTable[], dialect: Dialect) {
   }
 
   const tableEntries = tables
-    .map((table) => `  ${toCamelCase(table.name)}: ${toVarName(table.name)},`)
+    .map((table) => {
+      const key = toObjectPropertyKey(table.name, toCamelCase(table.name));
+      return `  ${key}: ${toVarName(table.name)},`;
+    })
     .join("\n");
 
   const relationsBlock = buildRelationsConfig(tables);

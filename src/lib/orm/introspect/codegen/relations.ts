@@ -2,6 +2,7 @@ import type { IntrospectedTable } from "../types.js";
 
 import {
   toCamelCase,
+  toObjectPropertyKey,
   toOneRelationBaseName,
   toUniqueRelationKey,
   toVarName,
@@ -37,9 +38,10 @@ function buildRelationEntriesForTable(
 
     const oneKeyBase = toCamelCase(toOneRelationBaseName(col.sqlName));
     const oneKey = toUniqueRelationKey(oneKeyBase, used, col.sqlName);
+    const oneProperty = toObjectPropertyKey(col.sqlName, oneKey);
 
     entries.push(
-      `      ${oneKey}: one("${col.sqlName}", () => ${toVarName(targetTable.name)}),`,
+      `      ${oneProperty}: one("${col.sqlName}", () => ${toVarName(targetTable.name)}),`,
     );
   }
 
@@ -55,9 +57,10 @@ function buildRelationEntriesForTable(
 
       const manyKeyBase = toCamelCase(sourceTable.name);
       const manyKey = toUniqueRelationKey(manyKeyBase, used, sourceCol.sqlName);
+      const manyProperty = toObjectPropertyKey(sourceTable.name, manyKey);
 
       entries.push(
-        `      ${manyKey}: many(() => ${toVarName(sourceTable.name)}, "${sourceCol.sqlName}"),`,
+        `      ${manyProperty}: many(() => ${toVarName(sourceTable.name)}, "${sourceCol.sqlName}"),`,
       );
     }
   }
@@ -91,7 +94,8 @@ export function buildRelationsConfig(tables: IntrospectedTable[]) {
       lines.push("  relations: {");
     }
 
-    lines.push(`    ${toCamelCase(table.name)}: {`);
+    const tableKey = toObjectPropertyKey(table.name, toCamelCase(table.name));
+    lines.push(`    ${tableKey}: {`);
 
     for (const relationEntry of relationEntries) {
       lines.push(relationEntry);
