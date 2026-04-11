@@ -4,6 +4,7 @@ import {
   createEnum,
   createTableSql,
   dropColumnSql,
+  dropEnum,
   dropTableSql,
   rebuildTableSql,
 } from "./table.js";
@@ -41,6 +42,12 @@ export function reverseOperation(
 
     case "create-enum":
       return {
+        kind: "drop-enum",
+        column: operation.column,
+      };
+
+    case "drop-enum":
+      return {
         kind: "create-enum",
         column: operation.column,
       };
@@ -69,5 +76,8 @@ export function operationToStatements(
 
     case "create-enum":
       return [createEnum(dialect, operation.column)];
+
+    case "drop-enum":
+      return [dropEnum(dialect, operation.column)];
   }
 }

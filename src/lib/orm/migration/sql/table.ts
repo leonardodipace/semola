@@ -88,6 +88,16 @@ export function createEnum(
   return `CREATE TYPE ${name} AS ENUM (${values?.join(", ")})`;
 }
 
+export function dropEnum(
+  dialect: SchemaSnapshot["dialect"],
+  column: ColumnSnapshot,
+) {
+  const col = quoteIdentifier(dialect, column.sqlName);
+  const name = quoteIdentifier(dialect, column.enumName ?? `${col}_enum`);
+
+  return `DROP TYPE ${name}`;
+}
+
 export function dropTableSql(
   dialect: SchemaSnapshot["dialect"],
   table: TableSnapshot,

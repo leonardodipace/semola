@@ -89,6 +89,10 @@ export type MigrationOperation =
   | {
       kind: "create-enum";
       column: ColumnSnapshot;
+    }
+  | {
+      kind: "drop-enum";
+      column: ColumnSnapshot;
     };
 
 export type MigrationInfo = {
