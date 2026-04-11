@@ -79,6 +79,14 @@ export function mapColumns(
         resolvedEnumValues = enumMap.get(udtName) ?? [];
       }
 
+      if (dataType.toLowerCase() === "array" && !unknown) {
+        const elementDbType = udtName.startsWith("_")
+          ? udtName.slice(1)
+          : udtName;
+
+        resolvedEnumValues = enumMap.get(elementDbType) ?? [];
+      }
+
       return {
         sqlName: columnName,
         kind,

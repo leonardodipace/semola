@@ -6,7 +6,8 @@ export type IntrospectedArrayElementKind =
   | "uuid"
   | "string"
   | "number"
-  | "boolean";
+  | "boolean"
+  | "enum";
 
 export type IntrospectedColumn = {
   sqlName: string;

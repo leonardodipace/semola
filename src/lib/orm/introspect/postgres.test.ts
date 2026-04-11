@@ -187,7 +187,7 @@ describe("introspectPostgres", () => {
     const [, tables] = await introspectPostgres(sql);
     const col = tables?.[0]?.columns[0];
 
-    expect(col?.kind).toBe("string");
+    expect(col?.kind).toBe("enum");
     expect(col?.arrayElementKind).toBe("string");
     expect(col?.enumValues).toEqual(["basic", "microsoft"]);
     expect(col?.unknownDbType).toBeNull();
@@ -480,7 +480,7 @@ describe("introspectPostgres", () => {
     const [, tables] = await introspectPostgres(sql);
     const col = tables?.[0]?.columns[0];
 
-    expect(col?.kind).toBe("string");
+    expect(col?.kind).toBe("enum");
     expect(col?.unknownDbType).toBeNull();
     expect(col?.enumValues).toEqual(["active", "retired"]);
     expect(col?.nullable).toBe(false);

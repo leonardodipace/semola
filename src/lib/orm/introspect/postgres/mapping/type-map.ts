@@ -124,6 +124,7 @@ export function mapDbType(
 
     if (isEnumArray) {
       unknown = null;
+      scalar.kind = "enum";
     }
 
     return {
