@@ -255,6 +255,62 @@ describe("buildUpSql/buildDownSql", () => {
     );
   });
 
+  test("emits PostgresSQL enum type", () => {
+    const ops: MigrationOperation[] = [
+      {
+        kind: "create-enum",
+        column: {
+          key: "status",
+          sqlName: "status",
+          kind: "enum",
+          isPrimaryKey: false,
+          isNotNull: true,
+          isUnique: false,
+          isSqlArray: false,
+          hasDefault: false,
+          isEnum: true,
+          enumValues: ["active", "pending", "disabled"],
+          enumName: "status_enum",
+          referencesTable: "users",
+          referencesColumn: "id",
+          onDeleteAction: "CASCADE",
+        },
+      },
+    ];
+
+    const postgresSql = buildUpSql("postgres", ops);
+    expect(postgresSql).toContain(
+      `CREATE TYPE "status_enum" AS ENUM ('active', 'pending', 'disabled')`,
+    );
+  });
+
+  test("remove PostgresSQL enum type", () => {
+    const ops: MigrationOperation[] = [
+      {
+        kind: "drop-enum",
+        column: {
+          key: "status",
+          sqlName: "status",
+          kind: "enum",
+          isPrimaryKey: false,
+          isNotNull: true,
+          isUnique: false,
+          isSqlArray: false,
+          hasDefault: false,
+          isEnum: true,
+          enumValues: ["active", "pending", "disabled"],
+          enumName: "status_enum",
+          referencesTable: "users",
+          referencesColumn: "id",
+          onDeleteAction: "CASCADE",
+        },
+      },
+    ];
+
+    const postgresSql = buildUpSql("postgres", ops);
+    expect(postgresSql).toContain(`DROP TYPE "status_enum"`);
+  });
+
   test("emits foreign key clause for add-column statements", () => {
     const ops: MigrationOperation[] = [
       {
