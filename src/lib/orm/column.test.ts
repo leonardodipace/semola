@@ -41,17 +41,25 @@ describe("string()", () => {
 
 describe("enumeration()", () => {
   test("kind is string", () => {
-    expect(enumeration("status", ["active", "retired"]).kind).toBe("string");
+    expect(
+      enumeration("status", "status_enum", ["active", "retired"]).kind,
+    ).toBe("enum");
   });
 
   test("stores sqlName", () => {
-    expect(enumeration("status", ["active", "retired"]).meta.sqlName).toBe(
-      "status",
-    );
+    expect(
+      enumeration("status", "status_enum", ["active", "retired"]).meta.sqlName,
+    ).toBe("status");
+  });
+
+  test("stores enum type name", () => {
+    expect(
+      enumeration("status", "status_enum", ["active", "retired"]).meta.enumName,
+    ).toBe("status_enum");
   });
 
   test("keeps enum literal union type for defaults", () => {
-    const status = enumeration("status", ["active", "retired"]);
+    const status = enumeration("status", "status_enum", ["active", "retired"]);
     const withDefault = status.default("active");
 
     expect(withDefault.meta.defaultValue).toBe("active");
@@ -60,9 +68,9 @@ describe("enumeration()", () => {
 
 describe("enumColumn() alias", () => {
   test("still works for backwards compatibility", () => {
-    const col = enumColumn("status", ["active", "retired"]);
+    const col = enumColumn("status", "status_enum", ["active", "retired"]);
 
-    expect(col.kind).toBe("string");
+    expect(col.kind).toBe("enum");
     expect(col.meta.sqlName).toBe("status");
   });
 });
@@ -215,7 +223,7 @@ describe(".asArray()", () => {
   });
 
   test("supports mixed enum union members in array defaults", () => {
-    const authMethods = enumeration("auth_methods", [
+    const authMethods = enumeration("auth_methods", "auth_methods_enum", [
       "basic",
       "microsoft",
       "cognito",

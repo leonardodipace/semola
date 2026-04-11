@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import type { Dialect } from "../types.js";
 import { loadConfig } from "./config.js";
 import { diffSnapshots } from "./diff.js";
 import { buildSchemaSnapshot, loadOrmFromSchema } from "./discover.js";
@@ -13,7 +14,6 @@ import {
 } from "./files.js";
 import { buildDownSql, buildUpSql } from "./sql.js";
 import type { SchemaSnapshot } from "./types.js";
-import type { Dialect } from "../types.js";
 
 function assertNoUnsafePrimaryKeyChanges(
   dialect: SchemaSnapshot["dialect"],
