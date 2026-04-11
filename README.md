@@ -30,6 +30,7 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 | **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors`  |
 | **📃 Logging**       | A simple logging utility                               | `semola/logging` |
 | **⌨️ Prompts**       | Interactive zero-dependency CLI prompts                | `semola/prompts` |
+| **🗄️ ORM**           | Type-safe data layer with query APIs + migrations      | `semola/orm`     |
 
 ---
 
@@ -155,6 +156,65 @@ const cleanup = new Cron({
 cleanup.start();
 ```
 
+### Query a Database
+
+```typescript
+import { createOrm, createTable, string, uuid } from "semola/orm";
+
+const users = createTable("users", {
+  id: uuid("id").primaryKey(),
+  name: string("name").notNull(),
+  email: string("email").unique().notNull(),
+});
+
+const db = createOrm({
+  url: "sqlite::memory:",
+  tables: { users },
+});
+
+// Result-pattern query
+const [findErr, rows] = await db.users.findMany({
+  where: { name: { contains: "John" } },
+  take: 10,
+});
+
+if (findErr) {
+  console.error(findErr.type, findErr.message);
+}
+
+// Create record (result pattern)
+const [createErr, user] = await db.users.create({
+  data: {
+    name: "John Doe",
+    email: "john@example.com",
+  },
+});
+
+// Low-level SQL-style methods are also available
+const insertedRows = await db.users.insert({
+  data: {
+    name: "Jane Doe",
+    email: "jane@example.com",
+  },
+  returning: true,
+});
+
+console.log(rows, user, createErr, insertedRows);
+```
+
+### Run ORM Migrations
+
+```bash
+# create migration from schema diff
+semola orm migrations create add-users
+
+# apply pending migrations
+semola orm migrations apply
+
+# rollback last applied migration
+semola orm migrations rollback
+```
+
 ### Check Permissions
 
 ```typescript
@@ -278,6 +338,7 @@ _Higher is better for req/sec, lower is better for latency._
 - [Errors](./docs/errors.md) - Result-based error handling
 - [Logging](./docs/logging.md) - Logging utility
 - [Prompts](./docs/prompts.md) - Interactive CLI prompts
+- [ORM](./docs/orm.md) - Type-safe data layer, result-pattern DX, and migrations
 
 ---
 

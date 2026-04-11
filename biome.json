@@ -20,10 +20,6 @@
       "complexity": {
         "noBannedTypes": "off"
       },
-      "suspicious": {
-        "noExplicitAny": "off",
-        "noConsole": "warn"
-      },
       "style": {
         "noInferrableTypes": "error",
         "useConst": "error",
