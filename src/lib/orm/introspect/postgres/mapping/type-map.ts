@@ -110,7 +110,6 @@ export function mapDbType(
   kind: ColumnKind;
   unknown: string | null;
   arrayElementKind: IntrospectedArrayElementKind | null;
-  enumValues: string[] | null;
 } {
   if (dataType.toLowerCase() === "array") {
     const normalized = udtName.toLowerCase();
@@ -131,28 +130,23 @@ export function mapDbType(
       kind: scalar.kind,
       unknown,
       arrayElementKind: inferArrayElementKind(udtName),
-      enumValues: isEnumArray ? [] : null,
     };
   }
 
-  const normalizedUdt = udtName.toLowerCase();
   const isUserDefined = dataType === "USER-DEFINED";
-
-  if (isUserDefined && enumTypes.has(normalizedUdt)) {
+  if (isUserDefined && enumTypes.has(udtName)) {
     return {
-      kind: "string",
+      kind: "enum",
       unknown: null,
       arrayElementKind: null,
-      enumValues: [],
     };
   }
 
-  const effectiveType = isUserDefined ? normalizedUdt : dataType;
+  const effectiveType = isUserDefined ? udtName.toLowerCase() : dataType;
   const scalar = mapScalarDbType(effectiveType);
 
   return {
     ...scalar,
     arrayElementKind: null,
-    enumValues: null,
   };
 }

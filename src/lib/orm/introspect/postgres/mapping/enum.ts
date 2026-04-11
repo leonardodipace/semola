@@ -1,20 +1,16 @@
-import { mapColumns } from "./mapping/columns.js";
-
 export function buildEnumMap(rows: [string, string][]) {
   const enumMap = new Map<string, string[]>();
 
   for (const [typeName, enumLabel] of rows) {
-    const key = typeName.toLowerCase();
-    const labels = enumMap.get(key);
+    const labels = enumMap.get(typeName);
 
     if (labels) {
       labels.push(enumLabel);
       continue;
     }
 
-    enumMap.set(key, [enumLabel]);
+    enumMap.set(typeName, [enumLabel]);
   }
 
   return enumMap;
 }
-export { mapColumns };

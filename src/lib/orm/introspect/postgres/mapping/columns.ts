@@ -66,24 +66,18 @@ export function mapColumns(
       isNullable,
       columnDefault,
     ]): IntrospectedColumn => {
-      const { kind, unknown, arrayElementKind, enumValues } = mapDbType(
+      const { kind, unknown, arrayElementKind } = mapDbType(
         dataType,
         udtName,
         enumTypes,
       );
 
-      let resolvedEnumValues = enumValues;
-
-      if (resolvedEnumValues !== null) {
-        const enumTypeName =
-          dataType.toLowerCase() === "array"
-            ? udtName.toLowerCase().replace(/^_/, "")
-            : udtName.toLowerCase();
-
-        resolvedEnumValues = enumMap.get(enumTypeName) ?? [];
-      }
-
+      let resolvedEnumValues: string[] | undefined;
       const fk = fkMap.get(columnName);
+
+      if (kind === "enum") {
+        resolvedEnumValues = enumMap.get(udtName) ?? [];
+      }
 
       return {
         sqlName: columnName,

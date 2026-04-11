@@ -12,6 +12,7 @@ export type IntrospectedColumn = {
   sqlName: string;
   kind: ColumnKind;
   enumValues?: string[] | null;
+  enumName?: string | null;
   nullable: boolean;
   primaryKey: boolean;
   unique: boolean;

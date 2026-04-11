@@ -1,7 +1,6 @@
 import type { SQL } from "bun";
 import { err, ok } from "../../errors/index.js";
 import { toErrMsg } from "./postgres/errors.js";
-import { buildEnumMap, mapColumns } from "./postgres/mapping.js";
 import {
   getColumnRows,
   getConstraintRows,
@@ -9,7 +8,10 @@ import {
   getForeignKeyRows,
   getTableRows,
 } from "./postgres/queries.js";
+
 import type { IntrospectedTable } from "./types.js";
+import { mapColumns } from "./postgres/mapping/columns.js";
+import { buildEnumMap } from "./postgres/mapping/enum.js";
 
 export async function introspectPostgres(sql: SQL, schema = "public") {
   const [enumErr, enumRows] = await getEnumRows(sql, schema);
