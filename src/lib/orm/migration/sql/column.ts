@@ -4,9 +4,9 @@ import { quoteIdentifier } from "./identifiers.js";
 
 export function columnType(
   dialect: SchemaSnapshot["dialect"],
-  kind: ColumnSnapshot["kind"],
+  column: ColumnSnapshot,
 ) {
-  switch (kind) {
+  switch (column.kind) {
     case "uuid":
       if (dialect === "postgres") {
         return "UUID";
@@ -72,8 +72,12 @@ export function columnType(
 
       return "TIMESTAMP";
 
+    case "enum": {
+      return column.enumName;
+    }
+
     default:
-      throw new Error(`Unknown column kind: ${kind}`);
+      throw new Error(`Unknown column kind: ${column.kind}`);
   }
 }
 
@@ -88,7 +92,7 @@ export function buildColumnDefinition(
 
   const parts = [
     quoteIdentifier(dialect, column.sqlName),
-    columnType(dialect, column.kind),
+    columnType(dialect, column),
   ];
 
   if (column.isSqlArray) {

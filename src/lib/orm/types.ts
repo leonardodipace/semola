@@ -9,7 +9,8 @@ export type ColumnKind =
   | "boolean"
   | "date"
   | "json"
-  | "jsonb";
+  | "jsonb"
+  | "enum";
 
 export type Dialect = "postgres" | "mysql" | "sqlite";
 
@@ -34,6 +35,9 @@ export type ColumnMetaBase = {
   isPrimaryKey: boolean;
   isNotNull: boolean;
   isUnique: boolean;
+  isEnum: boolean;
+  enumValues: string[] | null;
+  enumName: string | null;
   hasDefault: boolean;
   defaultKind: "value" | "fn" | null;
   defaultValue: unknown;

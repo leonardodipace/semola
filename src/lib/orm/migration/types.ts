@@ -1,4 +1,4 @@
-import type { Dialect } from "../types.js";
+import type { ColumnKind, Dialect } from "../types.js";
 
 export type SemolaConfig = {
   orm: {
@@ -35,11 +35,14 @@ export type ResolvedSemolaConfig = {
 export type ColumnSnapshot = {
   key: string;
   sqlName: string;
-  kind: "uuid" | "string" | "number" | "boolean" | "date" | "json" | "jsonb";
+  kind: ColumnKind;
   isSqlArray: boolean;
   isPrimaryKey: boolean;
   isNotNull: boolean;
   isUnique: boolean;
+  isEnum: boolean;
+  enumValues: string[] | null;
+  enumName: string | null;
   hasDefault: boolean;
   defaultKind?: "value" | "fn" | null;
   defaultValue?: unknown;
@@ -82,6 +85,10 @@ export type MigrationOperation =
       kind: "rebuild-table";
       fromTable: TableSnapshot;
       toTable: TableSnapshot;
+    }
+  | {
+      kind: "create-enum";
+      column: ColumnSnapshot;
     };
 
 export type MigrationInfo = {

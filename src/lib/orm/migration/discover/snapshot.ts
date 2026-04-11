@@ -1,6 +1,6 @@
 import type { ColumnDef } from "../../column.js";
 import type { ColumnKind, ColumnMetaBase } from "../../types.js";
-import type { SchemaSnapshot } from "../types.js";
+import type { ColumnSnapshot, SchemaSnapshot } from "../types.js";
 
 function buildColumnOwners(orm: {
   tables: Record<
@@ -63,6 +63,9 @@ export function buildSchemaSnapshot(orm: {
               key: columnKey,
               sqlName: column.meta.sqlName,
               kind: column.kind,
+              isEnum: column.meta.isEnum,
+              enumValues: column.meta.enumValues,
+              enumName: column.meta.enumName,
               isSqlArray: column.meta.isSqlArray,
               isPrimaryKey: column.meta.isPrimaryKey,
               isNotNull: column.meta.isNotNull,
@@ -73,7 +76,7 @@ export function buildSchemaSnapshot(orm: {
               referencesTable,
               referencesColumn,
               onDeleteAction: column.meta.onDeleteAction,
-            },
+            } satisfies ColumnSnapshot,
           ];
         }),
       );

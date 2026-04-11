@@ -13,6 +13,7 @@ import {
 } from "./files.js";
 import { buildDownSql, buildUpSql } from "./sql.js";
 import type { SchemaSnapshot } from "./types.js";
+import type { Dialect } from "../types.js";
 
 function assertNoUnsafePrimaryKeyChanges(
   dialect: SchemaSnapshot["dialect"],
@@ -46,7 +47,7 @@ function assertNoUnsafePrimaryKeyChanges(
   );
 }
 
-function emptySnapshot(dialect: "postgres" | "mysql" | "sqlite") {
+function emptySnapshot(dialect: Dialect) {
   const snapshot: SchemaSnapshot = {
     dialect,
     tables: {},

@@ -64,10 +64,22 @@ export function defaultsEqual(
   return stableValue(left.defaultValue) === stableValue(right.defaultValue);
 }
 
+function compareEnum(left: string[], right: string[]) {
+  if (left.length !== right.length) return false;
+  if (left.length === 0 && right.length === 0) return true;
+
+  return left.every((enumV) => right.includes(enumV));
+}
+
 export function columnsEqual(
   left: SchemaSnapshot["tables"][string]["columns"][string],
   right: SchemaSnapshot["tables"][string]["columns"][string],
 ) {
+  if (left.isEnum !== right.isEnum) return false;
+  if (!compareEnum(left.enumValues ?? [], right.enumValues ?? [])) {
+    return false;
+  }
+
   if (left.isSqlArray !== right.isSqlArray) return false;
   if (left.sqlName !== right.sqlName) return false;
   if (left.kind !== right.kind) return false;

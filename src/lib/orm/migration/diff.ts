@@ -26,6 +26,10 @@ export function diffSnapshots(
     Extract<MigrationOperation, { kind: "add-column" }>
   > = [];
 
+  const createEnumOperations: Array<
+    Extract<MigrationOperation, { kind: "create-enum" }>
+  > = [];
+
   for (const [tableKey, oldTable] of Object.entries(previous.tables)) {
     const newTable = current.tables[tableKey];
     if (!newTable) {
@@ -36,6 +40,15 @@ export function diffSnapshots(
   for (const [tableKey, newTable] of Object.entries(current.tables)) {
     const oldTable = previous.tables[tableKey];
     if (!oldTable) {
+      for (const [_, columnInfo] of Object.entries(newTable.columns)) {
+        if (columnInfo.isEnum) {
+          createEnumOperations.push({
+            kind: "create-enum",
+            column: columnInfo,
+          });
+        }
+      }
+
       createTableOperations.push({ kind: "create-table", table: newTable });
       continue;
     }
@@ -128,6 +141,7 @@ export function diffSnapshots(
   }
 
   return [
+    ...createEnumOperations,
     ...orderRebuildTableOperations(rebuildTableOperations),
     ...dropColumnOperations,
     ...orderDropTableOperations(dropTableOperations),

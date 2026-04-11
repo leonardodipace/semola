@@ -103,6 +103,9 @@ const defaultMeta: Omit<ColumnMetaBase, "sqlName"> = {
   isPrimaryKey: false,
   isNotNull: false,
   isUnique: false,
+  isEnum: false,
+  enumValues: null,
+  enumName: null,
   hasDefault: false,
   defaultKind: null,
   defaultValue: undefined,
@@ -119,14 +122,16 @@ export function string(sqlName: string) {
   return new ColumnDef("string", { ...defaultMeta, sqlName });
 }
 
-export function enumeration<const TValues extends readonly string[]>(
+export function enumeration<const TValues extends string[]>(
   sqlName: string,
+  enumName: string,
   values: TValues,
 ) {
-  void values;
-
-  return new ColumnDef<"string", ColumnMetaBase, TValues[number]>("string", {
+  return new ColumnDef<"enum", ColumnMetaBase, TValues[number]>("enum", {
     ...defaultMeta,
+    isEnum: true,
+    enumValues: values,
+    enumName,
     sqlName,
   });
 }

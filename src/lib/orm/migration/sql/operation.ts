@@ -1,6 +1,7 @@
 import type { MigrationOperation, SchemaSnapshot } from "../types.js";
 import {
   addColumnSql,
+  createEnum,
   createTableSql,
   dropColumnSql,
   dropTableSql,
@@ -37,6 +38,12 @@ export function reverseOperation(
         fromTable: operation.toTable,
         toTable: operation.fromTable,
       };
+
+    case "create-enum":
+      return {
+        kind: "create-enum",
+        column: operation.column,
+      };
   }
 }
 
@@ -59,5 +66,8 @@ export function operationToStatements(
 
     case "rebuild-table":
       return rebuildTableSql(dialect, operation.fromTable, operation.toTable);
+
+    case "create-enum":
+      return [createEnum(dialect, operation.column)];
   }
 }

@@ -4,7 +4,7 @@ import type {
   TableSnapshot,
 } from "../types.js";
 import { buildColumnDefinition, buildForeignKeyConstraint } from "./column.js";
-import { quoteIdentifier } from "./identifiers.js";
+import { quoteIdentifier, quoteLiteral } from "./identifiers.js";
 
 function createCopyColumns(fromTable: TableSnapshot, toTable: TableSnapshot) {
   const fromColumnsByKey = new Map(
@@ -75,6 +75,17 @@ export function createTableSql(
   const tableName = quoteIdentifier(dialect, table.tableName);
 
   return `CREATE TABLE ${tableName} (\n  ${definitions.join(",\n  ")}\n)`;
+}
+
+export function createEnum(
+  dialect: SchemaSnapshot["dialect"],
+  column: ColumnSnapshot,
+) {
+  const col = quoteIdentifier(dialect, column.sqlName);
+  const name = quoteIdentifier(dialect, column.enumName ?? `${col}_enum`);
+  const values = column.enumValues?.map((v) => quoteLiteral(v));
+
+  return `CREATE TYPE ${name} AS ENUM (${values?.join(", ")})`;
 }
 
 export function dropTableSql(
