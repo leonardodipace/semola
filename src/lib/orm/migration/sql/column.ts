@@ -2,83 +2,31 @@ import type { ColumnSnapshot, SchemaSnapshot } from "../types.js";
 import { serializeDefaultValue, uuidDefaultExpression } from "./defaults.js";
 import { quoteIdentifier } from "./identifiers.js";
 
+const COLUMN_TYPES = {
+  uuid: { postgres: "UUID", mysql: "CHAR(36)", sqlite: "TEXT" },
+  string: { postgres: "TEXT", mysql: "VARCHAR(255)", sqlite: "TEXT" },
+  number: { postgres: "DOUBLE PRECISION", mysql: "REAL", sqlite: "REAL" },
+  boolean: { postgres: "BOOLEAN", mysql: "INTEGER", sqlite: "INTEGER" },
+  json: { postgres: "JSON", mysql: "JSON", sqlite: "TEXT" },
+  jsonb: { postgres: "JSONB", mysql: "JSON", sqlite: "TEXT" },
+  date: { postgres: "TIMESTAMP", mysql: "DATETIME", sqlite: "TEXT" },
+} satisfies Record<string, Record<SchemaSnapshot["dialect"], string>>;
+
 export function columnType(
   dialect: SchemaSnapshot["dialect"],
   column: ColumnSnapshot,
 ) {
-  switch (column.kind) {
-    case "uuid":
-      if (dialect === "postgres") {
-        return "UUID";
-      }
-
-      if (dialect === "mysql") {
-        return "CHAR(36)";
-      }
-
-      return "TEXT";
-
-    case "string":
-      if (dialect === "mysql") {
-        return "VARCHAR(255)";
-      }
-
-      return "TEXT";
-
-    case "number":
-      if (dialect === "postgres") {
-        return "DOUBLE PRECISION";
-      }
-
-      return "REAL";
-
-    case "boolean":
-      if (dialect === "postgres") {
-        return "BOOLEAN";
-      }
-
-      return "INTEGER";
-
-    case "json":
-      if (dialect === "postgres") {
-        return "JSON";
-      }
-
-      if (dialect === "sqlite") {
-        return "TEXT";
-      }
-
-      return "JSON";
-
-    case "jsonb":
-      if (dialect === "postgres") {
-        return "JSONB";
-      }
-
-      if (dialect === "sqlite") {
-        return "TEXT";
-      }
-
-      return "JSON";
-
-    case "date":
-      if (dialect === "mysql") {
-        return "DATETIME";
-      }
-
-      if (dialect === "sqlite") {
-        return "TEXT";
-      }
-
-      return "TIMESTAMP";
-
-    case "enum": {
-      return column.enumName;
-    }
-
-    default:
-      throw new Error(`Unknown column kind: ${column.kind}`);
+  if (column.kind === "enum") {
+    return column.enumName;
   }
+
+  const types = COLUMN_TYPES[column.kind];
+
+  if (!types) {
+    throw new Error(`Unknown column kind: ${column.kind}`);
+  }
+
+  return types[dialect];
 }
 
 export function buildColumnDefinition(
