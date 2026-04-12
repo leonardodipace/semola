@@ -1,12 +1,12 @@
 import type { DialectAdapter } from "../types.js";
-import { renderLikePattern } from "./utils.js";
+import { quoteWithDoubleQuotes, renderLikePattern } from "./utils.js";
 
 export const postgresDialectAdapter: DialectAdapter = {
   dialect: "postgres",
   likeKeyword: "ILIKE",
 
   quoteIdentifier(identifier: string) {
-    return `"${identifier.replaceAll('"', '""')}"`;
+    return quoteWithDoubleQuotes(identifier);
   },
 
   serializeValue(_kind, value) {

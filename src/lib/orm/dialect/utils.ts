@@ -42,6 +42,14 @@ export function serializeSqlValue(kind: ColumnKind, value: unknown) {
   return value;
 }
 
+export function quoteWithDoubleQuotes(identifier: string) {
+  return `"${identifier.replaceAll('"', '""')}"`;
+}
+
+export function quoteWithBackticks(identifier: string) {
+  return `\`${identifier.replaceAll("`", "``")}\``;
+}
+
 export function inferDialectFromUrl(url: string): Dialect {
   if (url.startsWith("postgres://") || url.startsWith("postgresql://")) {
     return "postgres";

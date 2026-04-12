@@ -1,12 +1,12 @@
 import type { DialectAdapter } from "../types.js";
-import { renderLikePattern, serializeSqlValue } from "./utils.js";
+import { quoteWithBackticks, renderLikePattern, serializeSqlValue } from "./utils.js";
 
 export const mysqlDialectAdapter: DialectAdapter = {
   dialect: "mysql",
   likeKeyword: "LIKE",
 
   quoteIdentifier(identifier: string) {
-    return `\`${identifier.replaceAll("`", "``")}\``;
+    return quoteWithBackticks(identifier);
   },
 
   serializeValue(kind, value) {

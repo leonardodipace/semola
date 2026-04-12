@@ -1,3 +1,4 @@
+import { quoteWithBackticks, quoteWithDoubleQuotes } from "../../dialect/utils.js";
 import type { SchemaSnapshot } from "../types.js";
 
 export function quoteIdentifier(
@@ -5,10 +6,10 @@ export function quoteIdentifier(
   identifier: string,
 ) {
   if (dialect === "mysql") {
-    return `\`${identifier.replaceAll("`", "``")}\``;
+    return quoteWithBackticks(identifier);
   }
 
-  return `"${identifier.replaceAll('"', '""')}"`;
+  return quoteWithDoubleQuotes(identifier);
 }
 
 export function quoteLiteral(value: string) {

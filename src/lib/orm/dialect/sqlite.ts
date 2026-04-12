@@ -1,12 +1,12 @@
 import type { DialectAdapter } from "../types.js";
-import { renderLikePattern, serializeSqlValue } from "./utils.js";
+import { quoteWithDoubleQuotes, renderLikePattern, serializeSqlValue } from "./utils.js";
 
 export const sqliteDialectAdapter: DialectAdapter = {
   dialect: "sqlite",
   likeKeyword: "LIKE",
 
   quoteIdentifier(identifier: string) {
-    return `"${identifier.replaceAll('"', '""')}"`;
+    return quoteWithDoubleQuotes(identifier);
   },
 
   serializeValue(kind, value) {
