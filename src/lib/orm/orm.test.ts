@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { number, string, uuid } from "./column.js";
+import { boolean, date, json, number, string, uuid } from "./column.js";
 import { createOrm, Orm } from "./orm.js";
 import { many, one } from "./relation.js";
 import { Table } from "./table.js";
@@ -956,6 +956,81 @@ describe("$transaction()", () => {
 
     const rows = await db.users.select();
     expect(rows).toEqual([]);
+  });
+});
+
+describe("SQLite type serialization roundtrip", () => {
+  const itemsTable = new Table("items", {
+    id: string("id").primaryKey(),
+    active: boolean("active").notNull(),
+    meta: json<{ value: number }>("meta").notNull(),
+    createdAt: date("created_at").notNull(),
+  });
+
+  test("boolean roundtrip", async () => {
+    const db = createOrm({
+      url: "sqlite::memory:",
+      tables: { items: itemsTable },
+    });
+
+    await db.$raw`CREATE TABLE items (id TEXT PRIMARY KEY, active INTEGER NOT NULL, meta TEXT NOT NULL, created_at TEXT NOT NULL)`;
+
+    await db.items.create({
+      data: {
+        id: "1",
+        active: true,
+        meta: { value: 42 },
+        createdAt: new Date("2024-01-01"),
+      },
+    });
+
+    const rows = await db.items.findMany();
+
+    const active: unknown = rows[0]?.active;
+    expect(active).toBe(1);
+  });
+
+  test("json roundtrip", async () => {
+    const db = createOrm({
+      url: "sqlite::memory:",
+      tables: { items: itemsTable },
+    });
+
+    await db.$raw`CREATE TABLE items (id TEXT PRIMARY KEY, active INTEGER NOT NULL, meta TEXT NOT NULL, created_at TEXT NOT NULL)`;
+
+    await db.items.create({
+      data: {
+        id: "1",
+        active: true,
+        meta: { value: 42 },
+        createdAt: new Date("2024-01-01"),
+      },
+    });
+
+    const rows = await db.items.findMany();
+
+    const meta: unknown = rows[0]?.meta;
+    expect(meta).toBe('{"value":42}');
+  });
+
+  test("date roundtrip", async () => {
+    const db = createOrm({
+      url: "sqlite::memory:",
+      tables: { items: itemsTable },
+    });
+
+    await db.$raw`CREATE TABLE items (id TEXT PRIMARY KEY, active INTEGER NOT NULL, meta TEXT NOT NULL, created_at TEXT NOT NULL)`;
+
+    const now = new Date("2024-01-01T00:00:00.000Z");
+
+    await db.items.create({
+      data: { id: "1", active: true, meta: { value: 42 }, createdAt: now },
+    });
+
+    const rows = await db.items.findMany();
+
+    const createdAt: unknown = rows[0]?.createdAt;
+    expect(createdAt).toBe(now.toISOString());
   });
 });
 
