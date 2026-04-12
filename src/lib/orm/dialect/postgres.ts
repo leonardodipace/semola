@@ -1,8 +1,5 @@
 import type { DialectAdapter } from "../types.js";
-
-function escapeLike(s: string) {
-  return s.replaceAll("%", "\\%").replaceAll("_", "\\_");
-}
+import { renderLikePattern } from "./utils.js";
 
 export const postgresDialectAdapter: DialectAdapter = {
   dialect: "postgres",
@@ -21,16 +18,6 @@ export const postgresDialectAdapter: DialectAdapter = {
   },
 
   renderLikePattern(mode, value) {
-    const escaped = escapeLike(value);
-
-    if (mode === "startsWith") {
-      return `${escaped}%`;
-    }
-
-    if (mode === "endsWith") {
-      return `%${escaped}`;
-    }
-
-    return `%${escaped}%`;
+    return renderLikePattern(mode, value);
   },
 };

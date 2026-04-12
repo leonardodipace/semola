@@ -1,8 +1,5 @@
 import type { DialectAdapter } from "../types.js";
-
-function escapeLike(s: string) {
-  return s.replaceAll("%", "\\%").replaceAll("_", "\\_");
-}
+import { renderLikePattern, serializeSqlValue } from "./utils.js";
 
 export const mysqlDialectAdapter: DialectAdapter = {
   dialect: "mysql",
@@ -13,37 +10,10 @@ export const mysqlDialectAdapter: DialectAdapter = {
   },
 
   serializeValue(kind, value) {
-    if (kind === "date") {
-      if (value instanceof Date) {
-        return value.toISOString();
-      }
-
-      return value;
-    }
-
-    if (kind === "json" || kind === "jsonb") {
-      return JSON.stringify(value);
-    }
-
-    if (kind === "boolean") {
-      if (value === true) return 1;
-      if (value === false) return 0;
-    }
-
-    return value;
+    return serializeSqlValue(kind, value);
   },
 
   renderLikePattern(mode, value) {
-    const escaped = escapeLike(value);
-
-    if (mode === "startsWith") {
-      return `${escaped}%`;
-    }
-
-    if (mode === "endsWith") {
-      return `%${escaped}`;
-    }
-
-    return `%${escaped}%`;
+    return renderLikePattern(mode, value);
   },
 };
