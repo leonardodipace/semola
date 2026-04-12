@@ -92,7 +92,9 @@ export function createMysqlRuntimeDialect<
         context.mapSqlRow(item as Record<string, unknown>),
       );
 
-      await context.executeOrThrow(context.insertMany(rows, false));
+      await context.executeOrThrow(
+        context.insertMany(rows, { returning: false }),
+      );
 
       return {
         count: rows.length,

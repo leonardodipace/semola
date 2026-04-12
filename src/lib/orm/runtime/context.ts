@@ -55,36 +55,67 @@ export function createRuntimeDialectContext<
   const select = (input = {}) =>
     createSelectQuery(runner, table, relations, input, dialectAdapter);
 
-  const insert = (input: InsertInput<T>) =>
-    createInsertQuery(runner, table, input, dialectAdapter, supportsReturning);
+  function insert(
+    input: InsertInput<T> & { returning: true },
+  ): SQL.Query<TableRow<T>[]>;
+  function insert(input: InsertInput<T>): SQL.Query<unknown>;
+  function insert(input: InsertInput<T>) {
+    return createInsertQuery(
+      runner,
+      table,
+      input,
+      dialectAdapter,
+      supportsReturning,
+    );
+  }
 
-  const insertReturning = (input: InsertInput<T> & { returning: true }) =>
-    createInsertQuery(runner, table, input, dialectAdapter, supportsReturning);
-
-  const insertMany = (
+  function insertMany(
     rows: Array<Record<string, unknown>>,
-    returning: boolean,
-  ) =>
-    createInsertManyQuery(runner, table, rows, supportsReturning && returning);
+    options: { returning: true },
+  ): SQL.Query<TableRow<T>[]>;
+  function insertMany(
+    rows: Array<Record<string, unknown>>,
+    options: { returning: boolean },
+  ): SQL.Query<unknown>;
+  function insertMany(
+    rows: Array<Record<string, unknown>>,
+    options: { returning: boolean },
+  ) {
+    return createInsertManyQuery(
+      runner,
+      table,
+      rows,
+      supportsReturning && options.returning,
+    );
+  }
 
-  const insertManyReturning = (rows: Array<Record<string, unknown>>) =>
-    createInsertManyQuery(runner, table, rows, true);
-
-  const update = (input: UpdateBuilderInput<T>) =>
-    createUpdateQuery(runner, table, input, dialectAdapter, supportsReturning);
-
-  const updateReturning = (
+  function update(
     input: UpdateBuilderInput<T> & { returning: true },
-  ) =>
-    createUpdateQuery(runner, table, input, dialectAdapter, supportsReturning);
+  ): SQL.Query<TableRow<T>[]>;
+  function update(input: UpdateBuilderInput<T>): SQL.Query<unknown>;
+  function update(input: UpdateBuilderInput<T>) {
+    return createUpdateQuery(
+      runner,
+      table,
+      input,
+      dialectAdapter,
+      supportsReturning,
+    );
+  }
 
-  const deleteByWhere = (input: DeleteBuilderInput<T>) =>
-    createDeleteQuery(runner, table, input, dialectAdapter, supportsReturning);
-
-  const deleteReturning = (
+  function deleteByWhere(
     input: DeleteBuilderInput<T> & { returning: true },
-  ) =>
-    createDeleteQuery(runner, table, input, dialectAdapter, supportsReturning);
+  ): SQL.Query<TableRow<T>[]>;
+  function deleteByWhere(input: DeleteBuilderInput<T>): SQL.Query<unknown>;
+  function deleteByWhere(input: DeleteBuilderInput<T>) {
+    return createDeleteQuery(
+      runner,
+      table,
+      input,
+      dialectAdapter,
+      supportsReturning,
+    );
+  }
 
   const selectRows = async (input = {}) => {
     const rows = await executeOrThrow(select(input));
@@ -98,13 +129,9 @@ export function createRuntimeDialectContext<
     select,
     selectRows,
     insert,
-    insertReturning,
     insertMany,
-    insertManyReturning,
     update,
-    updateReturning,
     deleteByWhere,
-    deleteReturning,
     mapSqlRow: (data) => mapDataToSqlRow(table, data, dialectAdapter),
     normalizeResultRows: normalizeCurrentRows,
     executeOrThrow,

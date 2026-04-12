@@ -23,25 +23,24 @@ export type RuntimeDialectContext<
   relations: TRels;
   select: (input?: SelectInput<T, TRels>) => SQL.Query<TableRow<T>[]>;
   selectRows: (input?: SelectInput<T, TRels>) => Promise<TableRow<T>[]>;
-  insert: (input: InsertInput<T>) => SQL.Query<unknown>;
-  insertReturning: (
-    input: InsertInput<T> & { returning: true },
-  ) => SQL.Query<TableRow<T>[]>;
-  insertMany: (
+  insert(input: InsertInput<T> & { returning: true }): SQL.Query<TableRow<T>[]>;
+  insert(input: InsertInput<T>): SQL.Query<unknown>;
+  insertMany(
     rows: Array<Record<string, unknown>>,
-    returning: boolean,
-  ) => SQL.Query<unknown>;
-  insertManyReturning: (
+    options: { returning: true },
+  ): SQL.Query<TableRow<T>[]>;
+  insertMany(
     rows: Array<Record<string, unknown>>,
-  ) => SQL.Query<TableRow<T>[]>;
-  update: (input: UpdateBuilderInput<T>) => SQL.Query<unknown>;
-  updateReturning: (
+    options: { returning: boolean },
+  ): SQL.Query<unknown>;
+  update(
     input: UpdateBuilderInput<T> & { returning: true },
-  ) => SQL.Query<TableRow<T>[]>;
-  deleteByWhere: (input: DeleteBuilderInput<T>) => SQL.Query<unknown>;
-  deleteReturning: (
+  ): SQL.Query<TableRow<T>[]>;
+  update(input: UpdateBuilderInput<T>): SQL.Query<unknown>;
+  deleteByWhere(
     input: DeleteBuilderInput<T> & { returning: true },
-  ) => SQL.Query<TableRow<T>[]>;
+  ): SQL.Query<TableRow<T>[]>;
+  deleteByWhere(input: DeleteBuilderInput<T>): SQL.Query<unknown>;
   mapSqlRow: (data: Record<string, unknown>) => Record<string, unknown>;
   normalizeResultRows: (rows: TableRow<T>[]) => TableRow<T>[];
   executeOrThrow: <TValue>(promise: Promise<TValue>) => Promise<TValue>;

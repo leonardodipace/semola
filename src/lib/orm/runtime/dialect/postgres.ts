@@ -9,7 +9,7 @@ export function createPostgresRuntimeDialect<
   return {
     async create(context, input) {
       const rows = await context.executeOrThrow(
-        context.insertReturning({ data: input.data, returning: true }),
+        context.insert({ data: input.data, returning: true }),
       );
 
       return expectSingleRow(
@@ -28,7 +28,7 @@ export function createPostgresRuntimeDialect<
       );
 
       const createdRows = await context.executeOrThrow(
-        context.insertManyReturning(rows),
+        context.insertMany(rows, { returning: true }),
       );
 
       const normalizedRows = context.normalizeResultRows(createdRows);
@@ -41,7 +41,7 @@ export function createPostgresRuntimeDialect<
 
     async updateMany(context, input) {
       const rows = await context.executeOrThrow(
-        context.updateReturning({
+        context.update({
           where: input.where,
           data: input.data,
           returning: true,
@@ -58,7 +58,7 @@ export function createPostgresRuntimeDialect<
 
     async deleteMany(context, input) {
       const rows = await context.executeOrThrow(
-        context.deleteReturning({ where: input.where, returning: true }),
+        context.deleteByWhere({ where: input.where, returning: true }),
       );
 
       const normalizedRows = context.normalizeResultRows(rows);

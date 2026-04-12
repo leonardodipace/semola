@@ -4,17 +4,14 @@ import type {
   ColDefs,
   CreateInput,
   CreateManyInput,
-  DeleteBuilderInput,
   DeleteManyInput,
   DialectAdapter,
   FindFirstInput,
   FindManyInput,
   FindUniqueInput,
-  InsertInput,
   RelationDefs,
   TableRow,
   TinyTableClient,
-  UpdateBuilderInput,
   UpdateManyInput,
 } from "../types.js";
 import { mapFindInputToSelect } from "./builders.js";
@@ -55,42 +52,6 @@ export function createTableClient<
     normalizeCurrentRows,
     executeOrThrow,
   });
-
-  function insertQuery(
-    input: InsertInput<T> & { returning: true },
-  ): SQL.Query<TableRow<T>[]>;
-  function insertQuery(input: InsertInput<T>): SQL.Query<unknown>;
-  function insertQuery(input: InsertInput<T>) {
-    if (input.returning === true) {
-      return context.insertReturning({ ...input, returning: true });
-    }
-
-    return context.insert(input);
-  }
-
-  function updateQuery(
-    input: UpdateBuilderInput<T> & { returning: true },
-  ): SQL.Query<TableRow<T>[]>;
-  function updateQuery(input: UpdateBuilderInput<T>): SQL.Query<unknown>;
-  function updateQuery(input: UpdateBuilderInput<T>) {
-    if (input.returning === true) {
-      return context.updateReturning({ ...input, returning: true });
-    }
-
-    return context.update(input);
-  }
-
-  function deleteQuery(
-    input: DeleteBuilderInput<T> & { returning: true },
-  ): SQL.Query<TableRow<T>[]>;
-  function deleteQuery(input: DeleteBuilderInput<T>): SQL.Query<unknown>;
-  function deleteQuery(input: DeleteBuilderInput<T>) {
-    if (input.returning === true) {
-      return context.deleteReturning({ ...input, returning: true });
-    }
-
-    return context.deleteByWhere(input);
-  }
 
   const hydrateIncludedRelations = createRelationHydrator({
     sql,
@@ -136,7 +97,7 @@ export function createTableClient<
       return rows[0] ?? null;
     },
 
-    insert: insertQuery,
+    insert: context.insert,
 
     async create(input: CreateInput<T>) {
       return runtimeDialect.create(context, input);
@@ -146,13 +107,13 @@ export function createTableClient<
       return runtimeDialect.createMany(context, input);
     },
 
-    update: updateQuery,
+    update: context.update,
 
     async updateMany(input: UpdateManyInput<T>) {
       return runtimeDialect.updateMany(context, input);
     },
 
-    delete: deleteQuery,
+    delete: context.deleteByWhere,
 
     async deleteMany(input: DeleteManyInput<T>) {
       return runtimeDialect.deleteMany(context, input);
