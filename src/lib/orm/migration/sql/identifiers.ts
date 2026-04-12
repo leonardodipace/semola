@@ -1,4 +1,7 @@
-import { quoteWithBackticks, quoteWithDoubleQuotes } from "../../dialect/utils.js";
+import {
+  quoteWithBackticks,
+  quoteWithDoubleQuotes,
+} from "../../dialect/utils.js";
 import type { SchemaSnapshot } from "../types.js";
 
 export function quoteIdentifier(

@@ -1,5 +1,9 @@
 import type { DialectAdapter } from "../types.js";
-import { quoteWithDoubleQuotes, renderLikePattern, serializeSqlValue } from "./utils.js";
+import {
+  quoteWithDoubleQuotes,
+  renderLikePattern,
+  serializeSqlValue,
+} from "./utils.js";
 
 export const sqliteDialectAdapter: DialectAdapter = {
   dialect: "sqlite",

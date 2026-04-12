@@ -1,5 +1,9 @@
 import type { DialectAdapter } from "../types.js";
-import { quoteWithBackticks, renderLikePattern, serializeSqlValue } from "./utils.js";
+import {
+  quoteWithBackticks,
+  renderLikePattern,
+  serializeSqlValue,
+} from "./utils.js";
 
 export const mysqlDialectAdapter: DialectAdapter = {
   dialect: "mysql",
