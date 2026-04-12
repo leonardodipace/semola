@@ -21,28 +21,6 @@ export function createMysqlRuntimeDialect<
         return expectSingleRow(rows, "Insert returned no rows");
       };
 
-      const selectLastInsertId = async () => {
-        const rows = await context.executeOrThrow(
-          context.runner`SELECT LAST_INSERT_ID() AS insertId`,
-        );
-
-        if (!Array.isArray(rows)) {
-          return undefined;
-        }
-
-        const firstRow = rows[0];
-
-        if (typeof firstRow !== "object") {
-          return undefined;
-        }
-
-        if (firstRow === null) {
-          return undefined;
-        }
-
-        return Reflect.get(firstRow, "insertId");
-      };
-
       const insertResult = await context.executeOrThrow(
         context.insert({ data: input.data }),
       );
@@ -66,14 +44,12 @@ export function createMysqlRuntimeDialect<
 
       let insertedPkValue: unknown;
 
-      if (typeof insertResult === "object") {
-        if (insertResult !== null) {
+      if (typeof insertResult === "object" && insertResult !== null) {
+        insertedPkValue = Reflect.get(insertResult, "lastInsertRowid");
+
+        if (insertedPkValue === null || insertedPkValue === undefined) {
           insertedPkValue = Reflect.get(insertResult, "insertId");
         }
-      }
-
-      if (insertedPkValue === null || insertedPkValue === undefined) {
-        insertedPkValue = await selectLastInsertId();
       }
 
       if (insertedPkValue === null || insertedPkValue === undefined) {
