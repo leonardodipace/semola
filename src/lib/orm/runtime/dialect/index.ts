@@ -1,19 +1,20 @@
 import type { ColDefs, Dialect, RelationDefs } from "../../types.js";
-import { createMysqlRuntimeDialect } from "./mysql.js";
-import { createPostgresRuntimeDialect } from "./postgres.js";
-import { createSqliteRuntimeDialect } from "./sqlite.js";
+import type { DialectOptions } from "./base.js";
+import { MysqlDialect } from "./mysql.js";
+import { PostgresDialect } from "./postgres.js";
+import { SqliteDialect } from "./sqlite.js";
 
-export function getRuntimeDialect<
+export function createRuntimeDialect<
   T extends ColDefs,
   TRels extends RelationDefs,
->(dialect: Dialect) {
-  if (dialect === "postgres") {
-    return createPostgresRuntimeDialect<T, TRels>();
+>(options: DialectOptions<T, TRels> & { dialect: Dialect }) {
+  if (options.dialect === "postgres") {
+    return new PostgresDialect<T, TRels>(options);
   }
 
-  if (dialect === "mysql") {
-    return createMysqlRuntimeDialect<T, TRels>();
+  if (options.dialect === "mysql") {
+    return new MysqlDialect<T, TRels>(options);
   }
 
-  return createSqliteRuntimeDialect<T, TRels>();
+  return new SqliteDialect<T, TRels>(options);
 }

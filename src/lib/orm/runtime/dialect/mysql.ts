@@ -1,111 +1,112 @@
 import { getPrimaryKeyColumn } from "../../internal/table.js";
-import type { ColDefs, RelationDefs } from "../../types.js";
-import type { RuntimeDialect } from "./types.js";
+import type {
+  ColDefs,
+  CreateInput,
+  CreateManyInput,
+  DeleteManyInput,
+  RelationDefs,
+  UpdateManyInput,
+} from "../../types.js";
+import { BaseDialect } from "./base.js";
 import { expectSingleRow, mergeRows, toWhereInput } from "./utils.js";
 
-export function createMysqlRuntimeDialect<
+export class MysqlDialect<
   T extends ColDefs,
   TRels extends RelationDefs,
->(): RuntimeDialect<T, TRels> {
-  return {
-    async create(context, input) {
-      const primaryKey = getPrimaryKeyColumn(context.table);
+> extends BaseDialect<T, TRels> {
+  public async create(input: CreateInput<T>) {
+    const primaryKey = getPrimaryKeyColumn(this.table);
 
-      const selectCreatedRow = async (whereData: Record<string, unknown>) => {
-        const rows = await context.selectRows({
-          where: toWhereInput<T>(whereData),
-          limit: 1,
-        });
+    const selectCreatedRow = async (whereData: Record<string, unknown>) => {
+      const rows = await this.selectRows({
+        where: toWhereInput<T>(whereData),
+        limit: 1,
+      });
 
-        return expectSingleRow(rows, "Insert returned no rows");
-      };
+      return expectSingleRow(rows, "Insert returned no rows");
+    };
 
-      const insertResult = await context.executeOrThrow(
-        context.insert({ data: input.data }),
-      );
+    const insertResult = await this.executeOrThrow(
+      this.insert({ data: input.data }),
+    );
 
-      if (!primaryKey) {
-        return selectCreatedRow(input.data);
-      }
+    if (!primaryKey) {
+      return selectCreatedRow(input.data);
+    }
 
-      const selectCreatedRowByPrimaryKey = async (value: unknown) => {
-        const whereByPk: Record<string, unknown> = {};
-        Reflect.set(whereByPk, primaryKey.jsKey, value);
+    const selectCreatedRowByPrimaryKey = async (value: unknown) => {
+      const whereByPk: Record<string, unknown> = {};
+      Reflect.set(whereByPk, primaryKey.jsKey, value);
 
-        return selectCreatedRow(whereByPk);
-      };
+      return selectCreatedRow(whereByPk);
+    };
 
-      const providedPkValue = Reflect.get(input.data, primaryKey.jsKey);
+    const providedPkValue = Reflect.get(input.data, primaryKey.jsKey);
 
-      if (providedPkValue !== null && providedPkValue !== undefined) {
-        return selectCreatedRowByPrimaryKey(providedPkValue);
-      }
+    if (providedPkValue !== null && providedPkValue !== undefined) {
+      return selectCreatedRowByPrimaryKey(providedPkValue);
+    }
 
-      let insertedPkValue: unknown;
+    let insertedPkValue: unknown;
 
-      if (typeof insertResult === "object" && insertResult !== null) {
-        insertedPkValue = Reflect.get(insertResult, "lastInsertRowid");
-
-        if (insertedPkValue === null || insertedPkValue === undefined) {
-          insertedPkValue = Reflect.get(insertResult, "insertId");
-        }
-      }
+    if (typeof insertResult === "object" && insertResult !== null) {
+      insertedPkValue = Reflect.get(insertResult, "lastInsertRowid");
 
       if (insertedPkValue === null || insertedPkValue === undefined) {
-        throw new Error("Insert returned no primary key");
+        insertedPkValue = Reflect.get(insertResult, "insertId");
       }
+    }
 
-      return selectCreatedRowByPrimaryKey(insertedPkValue);
-    },
+    if (insertedPkValue === null || insertedPkValue === undefined) {
+      throw new Error("Insert returned no primary key");
+    }
 
-    async createMany(context, input) {
-      if (input.data.length === 0) {
-        return { count: 0, rows: [] };
-      }
+    return selectCreatedRowByPrimaryKey(insertedPkValue);
+  }
 
-      const rows = input.data.map((item) =>
-        context.mapSqlRow(item as Record<string, unknown>),
-      );
+  public async createMany(input: CreateManyInput<T>) {
+    if (input.data.length === 0) {
+      return { count: 0, rows: [] };
+    }
 
-      await context.executeOrThrow(
-        context.insertMany(rows, { returning: false }),
-      );
+    const rows = input.data.map((item) =>
+      this.mapSqlRow(item as Record<string, unknown>),
+    );
 
-      return {
-        count: rows.length,
-        rows: [],
-      };
-    },
+    await this.executeOrThrow(this.insertMany(rows, { returning: false }));
 
-    async updateMany(context, input) {
-      // MySQL lacks RETURNING; rows are fetched before mutation. For atomicity, wrap in $transaction().
-      const beforeRows = await context.selectRows({ where: input.where });
+    return {
+      count: rows.length,
+      rows: [],
+    };
+  }
 
-      await context.executeOrThrow(
-        context.update({ where: input.where, data: input.data }),
-      );
+  public async updateMany(input: UpdateManyInput<T>) {
+    // MySQL lacks RETURNING; rows are fetched before mutation. For atomicity, wrap in $transaction().
+    const beforeRows = await this.selectRows({ where: input.where });
 
-      return {
-        count: beforeRows.length,
-        rows: mergeRows(
-          beforeRows,
-          input.data as Partial<Record<string, unknown>>,
-        ),
-      };
-    },
+    await this.executeOrThrow(
+      this.update({ where: input.where, data: input.data }),
+    );
 
-    async deleteMany(context, input) {
-      // MySQL lacks RETURNING; rows are fetched before mutation. For atomicity, wrap in $transaction().
-      const rows = await context.selectRows({ where: input.where });
+    return {
+      count: beforeRows.length,
+      rows: mergeRows(
+        beforeRows,
+        input.data as Partial<Record<string, unknown>>,
+      ),
+    };
+  }
 
-      await context.executeOrThrow(
-        context.deleteByWhere({ where: input.where }),
-      );
+  public async deleteMany(input: DeleteManyInput<T>) {
+    // MySQL lacks RETURNING; rows are fetched before mutation. For atomicity, wrap in $transaction().
+    const rows = await this.selectRows({ where: input.where });
 
-      return {
-        count: rows.length,
-        rows,
-      };
-    },
-  };
+    await this.executeOrThrow(this.deleteByWhere({ where: input.where }));
+
+    return {
+      count: rows.length,
+      rows,
+    };
+  }
 }

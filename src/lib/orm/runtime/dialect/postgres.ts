@@ -1,72 +1,77 @@
-import type { ColDefs, RelationDefs } from "../../types.js";
-import type { RuntimeDialect } from "./types.js";
+import type {
+  ColDefs,
+  CreateInput,
+  CreateManyInput,
+  DeleteManyInput,
+  RelationDefs,
+  UpdateManyInput,
+} from "../../types.js";
+import { BaseDialect } from "./base.js";
 import { expectSingleRow } from "./utils.js";
 
-export function createPostgresRuntimeDialect<
+export class PostgresDialect<
   T extends ColDefs,
   TRels extends RelationDefs,
->(): RuntimeDialect<T, TRels> {
-  return {
-    async create(context, input) {
-      const rows = await context.executeOrThrow(
-        context.insert({ data: input.data, returning: true }),
-      );
+> extends BaseDialect<T, TRels> {
+  public async create(input: CreateInput<T>) {
+    const rows = await this.executeOrThrow(
+      this.insert({ data: input.data, returning: true }),
+    );
 
-      return expectSingleRow(
-        context.normalizeResultRows(rows),
-        "Insert returned no rows",
-      );
-    },
+    return expectSingleRow(
+      this.normalizeResultRows(rows),
+      "Insert returned no rows",
+    );
+  }
 
-    async createMany(context, input) {
-      if (input.data.length === 0) {
-        return { count: 0, rows: [] };
-      }
+  public async createMany(input: CreateManyInput<T>) {
+    if (input.data.length === 0) {
+      return { count: 0, rows: [] };
+    }
 
-      const rows = input.data.map((item) =>
-        context.mapSqlRow(item as Record<string, unknown>),
-      );
+    const rows = input.data.map((item) =>
+      this.mapSqlRow(item as Record<string, unknown>),
+    );
 
-      const createdRows = await context.executeOrThrow(
-        context.insertMany(rows, { returning: true }),
-      );
+    const createdRows = await this.executeOrThrow(
+      this.insertMany(rows, { returning: true }),
+    );
 
-      const normalizedRows = context.normalizeResultRows(createdRows);
+    const normalizedRows = this.normalizeResultRows(createdRows);
 
-      return {
-        count: normalizedRows.length,
-        rows: normalizedRows,
-      };
-    },
+    return {
+      count: normalizedRows.length,
+      rows: normalizedRows,
+    };
+  }
 
-    async updateMany(context, input) {
-      const rows = await context.executeOrThrow(
-        context.update({
-          where: input.where,
-          data: input.data,
-          returning: true,
-        }),
-      );
+  public async updateMany(input: UpdateManyInput<T>) {
+    const rows = await this.executeOrThrow(
+      this.update({
+        where: input.where,
+        data: input.data,
+        returning: true,
+      }),
+    );
 
-      const normalizedRows = context.normalizeResultRows(rows);
+    const normalizedRows = this.normalizeResultRows(rows);
 
-      return {
-        count: normalizedRows.length,
-        rows: normalizedRows,
-      };
-    },
+    return {
+      count: normalizedRows.length,
+      rows: normalizedRows,
+    };
+  }
 
-    async deleteMany(context, input) {
-      const rows = await context.executeOrThrow(
-        context.deleteByWhere({ where: input.where, returning: true }),
-      );
+  public async deleteMany(input: DeleteManyInput<T>) {
+    const rows = await this.executeOrThrow(
+      this.deleteByWhere({ where: input.where, returning: true }),
+    );
 
-      const normalizedRows = context.normalizeResultRows(rows);
+    const normalizedRows = this.normalizeResultRows(rows);
 
-      return {
-        count: normalizedRows.length,
-        rows: normalizedRows,
-      };
-    },
-  };
+    return {
+      count: normalizedRows.length,
+      rows: normalizedRows,
+    };
+  }
 }

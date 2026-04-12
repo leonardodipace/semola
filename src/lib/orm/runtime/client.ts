@@ -15,8 +15,7 @@ import type {
   UpdateManyInput,
 } from "../types.js";
 import { mapFindInputToSelect } from "./builders.js";
-import { createRuntimeDialectContext } from "./context.js";
-import { getRuntimeDialect } from "./dialect/index.js";
+import { createRuntimeDialect } from "./dialect/index.js";
 import { executeOrThrow } from "./errors.js";
 import { createRelationHydrator } from "./hydrate.js";
 import { normalizeRows, normalizeRowsForTable } from "./rows.js";
@@ -43,8 +42,9 @@ export function createTableClient<
     rows: Record<string, unknown>[],
   ) => normalizeRowsForTable(dialectAdapter.dialect, targetTable, rows);
 
-  const context = createRuntimeDialectContext({
-    runner: sql,
+  const dialect = createRuntimeDialect({
+    dialect: dialectAdapter.dialect,
+    sql,
     table,
     relations,
     dialectAdapter,
@@ -63,18 +63,16 @@ export function createTableClient<
     executeOrThrow,
   });
 
-  const runtimeDialect = getRuntimeDialect<T, TRels>(dialectAdapter.dialect);
-
   return {
-    select: context.select,
+    select: dialect.select,
 
     async findMany(input?: FindManyInput<T, TRels>) {
-      const rows = await context.selectRows(mapFindInputToSelect(input));
+      const rows = await dialect.selectRows(mapFindInputToSelect(input));
       return hydrateIncludedRelations(rows, input?.include);
     },
 
     async findFirst(input?: FindFirstInput<T, TRels>) {
-      const rows = await context.selectRows({
+      const rows = await dialect.selectRows({
         ...mapFindInputToSelect(input),
         limit: 1,
       });
@@ -87,7 +85,7 @@ export function createTableClient<
     },
 
     async findUnique(input: FindUniqueInput<T>) {
-      const rows = await context.selectRows({
+      const rows = await dialect.selectRows({
         where: toWhereInput<T>(input.where) as FindManyInput<
           T,
           Record<never, never>
@@ -97,26 +95,26 @@ export function createTableClient<
       return rows[0] ?? null;
     },
 
-    insert: context.insert,
+    insert: dialect.insert,
 
     async create(input: CreateInput<T>) {
-      return runtimeDialect.create(context, input);
+      return dialect.create(input);
     },
 
     async createMany(input: CreateManyInput<T>) {
-      return runtimeDialect.createMany(context, input);
+      return dialect.createMany(input);
     },
 
-    update: context.update,
+    update: dialect.update,
 
     async updateMany(input: UpdateManyInput<T>) {
-      return runtimeDialect.updateMany(context, input);
+      return dialect.updateMany(input);
     },
 
-    delete: context.deleteByWhere,
+    delete: dialect.deleteByWhere,
 
     async deleteMany(input: DeleteManyInput<T>) {
-      return runtimeDialect.deleteMany(context, input);
+      return dialect.deleteMany(input);
     },
   };
 }
