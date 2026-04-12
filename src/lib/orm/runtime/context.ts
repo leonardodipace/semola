@@ -41,17 +41,6 @@ export function createRuntimeDialectContext<
     executeOrThrow,
   } = options;
 
-  const withRunner = (nextRunner: SQL | TransactionSQL) =>
-    createRuntimeDialectContext({
-      runner: nextRunner,
-      table,
-      relations,
-      dialectAdapter,
-      supportsReturning,
-      normalizeCurrentRows,
-      executeOrThrow,
-    });
-
   const select = (input = {}) =>
     createSelectQuery(runner, table, relations, input, dialectAdapter);
 
@@ -123,7 +112,6 @@ export function createRuntimeDialectContext<
   };
 
   const context: RuntimeDialectContext<T, TRels> = {
-    runner,
     table,
     relations,
     select,
@@ -135,7 +123,6 @@ export function createRuntimeDialectContext<
     mapSqlRow: (data) => mapDataToSqlRow(table, data, dialectAdapter),
     normalizeResultRows: normalizeCurrentRows,
     executeOrThrow,
-    withRunner,
   };
 
   return context;

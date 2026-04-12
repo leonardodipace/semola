@@ -1,4 +1,3 @@
-import { SQL } from "bun";
 import { getPrimaryKeyColumn } from "../../internal/table.js";
 import type { ColDefs, RelationDefs } from "../../types.js";
 import type { RuntimeDialect } from "./types.js";
@@ -79,29 +78,7 @@ export function createMysqlRuntimeDialect<
     },
 
     async updateMany(context, input) {
-      if (context.runner instanceof SQL) {
-        return context.executeOrThrow(
-          context.runner.begin(async (tx) => {
-            const txContext = context.withRunner(tx);
-            const beforeRows = await txContext.selectRows({
-              where: input.where,
-            });
-
-            await txContext.executeOrThrow(
-              txContext.update({ where: input.where, data: input.data }),
-            );
-
-            return {
-              count: beforeRows.length,
-              rows: mergeRows(
-                beforeRows,
-                input.data as Partial<Record<string, unknown>>,
-              ),
-            };
-          }),
-        );
-      }
-
+      // MySQL lacks RETURNING; rows are fetched before mutation. For atomicity, wrap in $transaction().
       const beforeRows = await context.selectRows({ where: input.where });
 
       await context.executeOrThrow(
@@ -118,26 +95,7 @@ export function createMysqlRuntimeDialect<
     },
 
     async deleteMany(context, input) {
-      if (context.runner instanceof SQL) {
-        return context.executeOrThrow(
-          context.runner.begin(async (tx) => {
-            const txContext = context.withRunner(tx);
-            const beforeRows = await txContext.selectRows({
-              where: input.where,
-            });
-
-            await txContext.executeOrThrow(
-              txContext.deleteByWhere({ where: input.where }),
-            );
-
-            return {
-              count: beforeRows.length,
-              rows: beforeRows,
-            };
-          }),
-        );
-      }
-
+      // MySQL lacks RETURNING; rows are fetched before mutation. For atomicity, wrap in $transaction().
       const rows = await context.selectRows({ where: input.where });
 
       await context.executeOrThrow(

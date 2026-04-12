@@ -1,4 +1,4 @@
-import type { SQL, TransactionSQL } from "bun";
+import type { SQL } from "bun";
 import type { Table } from "../../table.js";
 import type {
   ColDefs,
@@ -18,7 +18,6 @@ export type RuntimeDialectContext<
   T extends ColDefs,
   TRels extends RelationDefs,
 > = {
-  runner: SQL | TransactionSQL;
   table: Table<T>;
   relations: TRels;
   select: (input?: SelectInput<T, TRels>) => SQL.Query<TableRow<T>[]>;
@@ -44,7 +43,6 @@ export type RuntimeDialectContext<
   mapSqlRow: (data: Record<string, unknown>) => Record<string, unknown>;
   normalizeResultRows: (rows: TableRow<T>[]) => TableRow<T>[];
   executeOrThrow: <TValue>(promise: Promise<TValue>) => Promise<TValue>;
-  withRunner: (runner: SQL | TransactionSQL) => RuntimeDialectContext<T, TRels>;
 };
 
 export type RuntimeDialect<T extends ColDefs, TRels extends RelationDefs> = {
