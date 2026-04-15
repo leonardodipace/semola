@@ -147,11 +147,21 @@ export type DayType =
 export type MonthType = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
 export type WeekDayType = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
+type CronPropertyType<Type> =
+  | Type
+  | CronRange<Type>
+  | CronStep<Type>
+  | CronList<Type>;
+
 export type CronJobBuilderOptions = {
-  second: TimeType;
-  minute: TimeType;
-  hour: HourType;
-  day: DayType;
-  month: MonthType;
-  weekday: WeekDayType;
+  second: CronPropertyType<TimeType>;
+  minute: CronPropertyType<TimeType>;
+  hour: CronPropertyType<HourType>;
+  day: CronPropertyType<DayType>;
+  month: CronPropertyType<MonthType>;
+  weekday: CronPropertyType<WeekDayType>;
 };
+
+export type CronRange<T> = { min: T; max: T };
+export type CronStep<T> = { step: T; range: CronRange<T> };
+export type CronList<T> = (T | CronRange<T> | CronStep<T>)[];
