@@ -59,5 +59,5 @@ export type CronJobBuilderOptions = {
 
 export type CronRange<T> = { min: T; max: T };
 export type CronStep<T> = { step: T; min?: T; max?: T };
-export type CronList<T> = (T | CronRange<T> | CronStep<T>)[];
+export type CronList<T> = (T | CronRange<T> | CronStep<T> | CronAny)[];
 export type CronAny = { wildcard: "*" };
