@@ -1,9 +1,9 @@
-import type { CronJobBuilderOptions, CronList, CronStep } from "./types.js";
+import type { CronAny, CronJobBuilderOptions, CronList } from "./types.js";
 
 export function cronJobBuilder(options: CronJobBuilderOptions) {}
 
-export function range<Min, Max>(min: Min, max: Max) {
-  return { min, max };
+export function range<Min, Max>(options: { min: Min; max: Max }) {
+  return options;
 }
 
 export function step<Step, Min, Max>(options: {
@@ -14,6 +14,10 @@ export function step<Step, Min, Max>(options: {
   return options;
 }
 
-export function list<E>(elements: CronList<E>) {
+export function list<E>(...elements: CronList<E>) {
   return elements;
+}
+
+export function any(): CronAny {
+  return { wildcard: "*" };
 }
