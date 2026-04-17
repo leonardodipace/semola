@@ -41,23 +41,46 @@ export type DayType = IntRange<1, 32>; // 1–31
 export type MonthType = IntRange<1, 13>; // 1–12
 export type WeekDayType = IntRange<0, 7>; // 0–6
 
-type CronPropertyType<Type> =
-  | Type
-  | CronRange<Type>
-  | CronStep<Type>
-  | CronList<Type>
-  | CronAny;
-
-export type CronJobBuilderOptions = {
-  second: CronPropertyType<TimeType>;
-  minute: CronPropertyType<TimeType>;
-  hour: CronPropertyType<HourType>;
-  day: CronPropertyType<DayType>;
-  month: CronPropertyType<MonthType>;
-  weekday: CronPropertyType<WeekDayType>;
-};
-
 export type CronRange<T> = { min: T; max: T };
-export type CronStep<T> = { step: T; min?: T; max?: T };
+export type CronStep<T> = { step: T; range?: { min: T; max?: T } };
 export type CronList<T> = (T | CronRange<T> | CronStep<T> | CronAny)[];
 export type CronAny = { wildcard: "*" };
+
+export type CronField =
+  | "second"
+  | "minute"
+  | "hour"
+  | "day"
+  | "month"
+  | "weekday";
+
+export type CronListElements<T> =
+  | { type: "any" }
+  | { type: "value"; value: T }
+  | { type: "range"; min: T; max: T }
+  | { type: "step"; step: T; range?: { min: T; max?: T } };
+
+export type CronExpr<T> =
+  | { type: "any" }
+  | { type: "value"; value: T }
+  | { type: "range"; min: T; max: T }
+  | { type: "step"; step: T; range?: { min: T; max?: T } }
+  | { type: "list"; values: CronListElements<T>[] };
+
+interface IBuilder<Used extends CronField> {
+  second(expr: CronExpr<TimeType>): CronBuilderType<Used | "second">;
+  minute(expr: CronExpr<TimeType>): CronBuilderType<Used | "minute">;
+  hour(expr: CronExpr<HourType>): CronBuilderType<Used | "hour">;
+  day(expr: CronExpr<DayType>): CronBuilderType<Used | "day">;
+  month(expr: CronExpr<MonthType>): CronBuilderType<Used | "month">;
+  weekday(expr: CronExpr<WeekDayType>): CronBuilderType<Used | "weekday">;
+}
+
+export type CronBuilderType<Used extends CronField = never> = Omit<
+  IBuilder<Used>,
+  Used
+>;
+
+export type BuilderFn = (
+  builder: CronBuilderType,
+) => Omit<CronBuilderType, CronField>;
