@@ -12,31 +12,43 @@ import type {
   WeekDayType,
 } from "./types.js";
 
-class CronListBuilder<T> {
+class FieldWrapper<T> {
   private fields: CronExpr<T>[] = [];
 
+  public add(expr: CronExpr<T>) {
+    this.fields.push(expr);
+  }
+
+  public read() {
+    return this.fields;
+  }
+}
+
+class CronListBuilder<T> {
+  private wrapper: FieldWrapper<T>;
+
+  public constructor(wrapper: FieldWrapper<T>) {
+    this.wrapper = wrapper;
+  }
+
   public any(): CronListBuilder<T> {
-    this.fields.push({ type: "any" });
+    this.wrapper.add({ type: "any" });
     return this;
   }
 
   public range(options: CronRange<T>): CronListBuilder<T> {
-    this.fields.push({ type: "range", ...options });
+    this.wrapper.add({ type: "range", ...options });
     return this;
   }
 
   public step(options: CronStep<T>): CronListBuilder<T> {
-    this.fields.push({ type: "step", ...options });
+    this.wrapper.add({ type: "step", ...options });
     return this;
   }
 
   public number(value: T): CronListBuilder<T> {
-    this.fields.push({ type: "value", value: value });
+    this.wrapper.add({ type: "value", value: value });
     return this;
-  }
-
-  public getFields() {
-    return this.fields;
   }
 }
 
@@ -55,9 +67,10 @@ export function step<T>(options: CronStep<T>): CronExpr<T> {
 export function list<T>(
   builderFn: (builder: CronListBuilder<T>) => CronListBuilder<T>,
 ): CronExpr<T> {
-  const listBuilder = builderFn(new CronListBuilder<T>());
+  const wrapper = new FieldWrapper<T>();
+  builderFn(new CronListBuilder<T>(wrapper));
 
-  return { type: "list", values: listBuilder.getFields() };
+  return { type: "list", values: wrapper.read() };
 }
 
 export function number<T>(value: T) {
