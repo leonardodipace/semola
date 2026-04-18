@@ -41,10 +41,11 @@ export type DayType = IntRange<1, 32>; // 1–31
 export type MonthType = IntRange<1, 13>; // 1–12
 export type WeekDayType = IntRange<0, 7>; // 0–6
 
-export type CronRange<T> = { min: T; max: T };
-export type CronStep<T> = { step: T; range?: { min: T; max?: T } };
-export type CronList<T> = (T | CronRange<T> | CronStep<T> | CronAny)[];
-export type CronAny = { wildcard: "*" };
+export type CronRange<T> = { min: NoInfer<T>; max: NoInfer<T> };
+export type CronStep<T> = {
+  step: NoInfer<T>;
+  range?: { min: NoInfer<T>; max?: NoInfer<T> };
+};
 
 export type CronField =
   | "second"
@@ -54,18 +55,12 @@ export type CronField =
   | "month"
   | "weekday";
 
-export type CronListElements<T> =
-  | { type: "any" }
-  | { type: "value"; value: T }
-  | { type: "range"; min: T; max: T }
-  | { type: "step"; step: T; range?: { min: T; max?: T } };
-
 export type CronExpr<T> =
   | { type: "any" }
   | { type: "value"; value: T }
   | { type: "range"; min: T; max: T }
   | { type: "step"; step: T; range?: { min: T; max?: T } }
-  | { type: "list"; values: CronListElements<T>[] };
+  | { type: "list"; values: CronExpr<T>[] };
 
 interface IBuilder<Used extends CronField> {
   second(expr: CronExpr<TimeType>): CronBuilderType<Used | "second">;
@@ -81,6 +76,4 @@ export type CronBuilderType<Used extends CronField = never> = Omit<
   Used
 >;
 
-export type BuilderFn = (
-  builder: CronBuilderType,
-) => Omit<CronBuilderType, CronField>;
+export type BuilderFn = (builder: CronBuilderType) => void;
