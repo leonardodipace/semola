@@ -3,7 +3,6 @@ import type {
   CronBuilderType,
   CronExpr,
   CronField,
-  CronListElements,
   CronRange,
   CronStep,
   DayType,
@@ -13,20 +12,52 @@ import type {
   WeekDayType,
 } from "./types.js";
 
-export function range<T>(options: CronRange<T>) {
-  return { type: "range", ...options } satisfies CronExpr<T>;
+class CronListBuilder<T> {
+  private fields: CronExpr<T>[] = [];
+
+  public any(): CronListBuilder<T> {
+    this.fields.push({ type: "any" });
+    return this;
+  }
+
+  public range(options: CronRange<T>): CronListBuilder<T> {
+    this.fields.push({ type: "range", ...options });
+    return this;
+  }
+
+  public step(options: CronStep<T>): CronListBuilder<T> {
+    this.fields.push({ type: "step", ...options });
+    return this;
+  }
+
+  public number(value: T): CronListBuilder<T> {
+    this.fields.push({ type: "value", value: value });
+    return this;
+  }
+
+  public getFields() {
+    return this.fields;
+  }
 }
 
-export function any<T>() {
-  return { type: "any" } satisfies CronExpr<T>;
+export function range<T>(options: CronRange<T>): CronExpr<T> {
+  return { type: "range", ...options };
 }
 
-export function step<T>(options: CronStep<T>) {
-  return { type: "step", ...options } satisfies CronExpr<T>;
+export function any<T>(): CronExpr<T> {
+  return { type: "any" };
 }
 
-export function list<T>(elements: CronListElements<T>[]) {
-  throw new Error("TODO: Implement this function");
+export function step<T>(options: CronStep<T>): CronExpr<T> {
+  return { type: "step", ...options };
+}
+
+export function list<T>(
+  builderFn: (builder: CronListBuilder<T>) => CronListBuilder<T>,
+): CronExpr<T> {
+  const listBuilder = builderFn(new CronListBuilder<T>());
+
+  return { type: "list", values: listBuilder.getFields() };
 }
 
 export function number<T>(value: T) {
@@ -34,7 +65,15 @@ export function number<T>(value: T) {
 }
 
 export function cronJobBuilder(buildFn: BuilderFn) {
-  const fields: Partial<Record<CronField, string>> = {};
+  const fields: Partial<Record<CronField, string>> = {
+    second: undefined,
+    minute: undefined,
+    hour: undefined,
+    day: undefined,
+    month: undefined,
+    weekday: undefined,
+  };
+
   const obj: CronBuilderType = {
     second(expr: CronExpr<TimeType>) {
       fields.second = checkExpr(expr);
@@ -42,7 +81,6 @@ export function cronJobBuilder(buildFn: BuilderFn) {
     },
     minute(expr: CronExpr<TimeType>) {
       fields.minute = checkExpr(expr);
-
       return obj;
     },
     hour(expr: CronExpr<HourType>) {
@@ -63,17 +101,30 @@ export function cronJobBuilder(buildFn: BuilderFn) {
     },
   };
 
-  const builder = buildFn(obj);
-  return generate(builder);
+  buildFn(obj);
+  return generate(fields);
 }
 
 function checkExpr<T>(expr: CronExpr<T>) {
-  switch (expr.type) {
-    case "any":
-      return "*";
+  if (expr.type === "list") {
+    const { values } = expr;
+    const data = values.map((e) => handleSimpleExpression(e));
 
-    case "value":
+    return data.join(",");
+  }
+
+  return handleSimpleExpression(expr);
+}
+
+function handleSimpleExpression<T>(expr: CronExpr<T>) {
+  switch (expr.type) {
+    case "any": {
+      return "*";
+    }
+
+    case "value": {
       return `${expr.value}`;
+    }
 
     case "range": {
       const { min, max } = expr;
@@ -106,14 +157,23 @@ function checkExpr<T>(expr: CronExpr<T>) {
       return `${min}-${max}/${step}`;
     }
 
-    case "list": {
-      return "";
-    }
-    default:
+    default: {
       return "*";
+    }
   }
 }
 
-function generate(builderObj: Omit<CronBuilderType<never>, CronField>): string {
-  throw new Error("TODO: Implement");
+function generate(fields: Partial<Record<CronField, string>>): string {
+  const entries = Object.entries(fields);
+  const expression: string[] = [];
+
+  for (const [_, part] of entries) {
+    if (!part) {
+      expression.push("*");
+    } else {
+      expression.push(part);
+    }
+  }
+
+  return expression.join(" ");
 }
