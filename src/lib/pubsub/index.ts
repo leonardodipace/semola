@@ -4,9 +4,85 @@ import type { MessageHandler, PubSubOptions } from "./types.js";
 export class PubSub<T extends Record<string, unknown>> {
   private options: PubSubOptions;
   private isSubscribed = false;
+  private nextHandlerId = 0;
+  private handlers = new Map<number, MessageHandler<T>>();
+  private unsubscribeInFlight: Promise<
+    readonly [null, unknown] | readonly [unknown, null]
+  > | null = null;
+  private subscribeInFlight: Promise<
+    readonly [null, number] | readonly [unknown, null]
+  > | null = null;
 
   public constructor(options: PubSubOptions) {
     this.options = options;
+  }
+
+  private async onMessage(message: string, channel: string) {
+    const [parseError, parsed] = mightThrowSync<T>(() => JSON.parse(message));
+
+    if (parseError) return;
+    if (!parsed) return;
+
+    const handlers = Array.from(this.handlers.values());
+
+    for (const handler of handlers) {
+      await mightThrow(Promise.resolve().then(() => handler(parsed, channel)));
+    }
+  }
+
+  private async unsubscribeHandler(handlerId: number) {
+    const inFlightUnsubscribe = this.unsubscribeInFlight;
+
+    if (inFlightUnsubscribe) {
+      await inFlightUnsubscribe;
+    }
+
+    const handler = this.handlers.get(handlerId);
+
+    if (!handler) {
+      return err("UnsubscribeError", "Not subscribed");
+    }
+
+    this.handlers.delete(handlerId);
+
+    if (this.handlers.size > 0) {
+      return ok(true);
+    }
+
+    this.isSubscribed = false;
+
+    this.unsubscribeInFlight = mightThrow(
+      this.options.subscriber.unsubscribe(this.options.channel),
+    );
+
+    const unsubscribeInFlight = this.unsubscribeInFlight;
+
+    if (!unsubscribeInFlight) {
+      this.handlers.set(handlerId, handler);
+      this.isSubscribed = true;
+
+      return err(
+        "UnsubscribeError",
+        `Unable to unsubscribe from ${this.options.channel}`,
+      );
+    }
+
+    const [unsubscribeError] = await unsubscribeInFlight;
+
+    if (unsubscribeError) {
+      this.handlers.set(handlerId, handler);
+      this.isSubscribed = true;
+      this.unsubscribeInFlight = null;
+
+      return err(
+        "UnsubscribeError",
+        `Unable to unsubscribe from ${this.options.channel}`,
+      );
+    }
+
+    this.unsubscribeInFlight = null;
+
+    return ok(true);
   }
 
   public async publish(message: T) {
@@ -33,27 +109,49 @@ export class PubSub<T extends Record<string, unknown>> {
   }
 
   public async subscribe(handler: MessageHandler<T>) {
-    if (this.isActive()) {
-      return err("SubscribeError", "Already subscribed");
+    const inFlightUnsubscribe = this.unsubscribeInFlight;
+
+    if (inFlightUnsubscribe) {
+      await inFlightUnsubscribe;
     }
 
-    this.isSubscribed = true;
+    const handlerId = this.nextHandlerId;
 
-    const wrappedHandler = async (message: string, channel: string) => {
-      const [parseError, parsed] = mightThrowSync<T>(() => JSON.parse(message));
+    this.nextHandlerId += 1;
+    this.handlers.set(handlerId, handler);
 
-      if (parseError) return;
-      if (!parsed) return;
+    if (this.isActive()) {
+      return ok(() => this.unsubscribeHandler(handlerId));
+    }
 
-      await mightThrow(Promise.resolve(handler(parsed, channel)));
-    };
+    const inFlightSubscribe = this.subscribeInFlight;
 
-    const [subscribeError, count] = await mightThrow(
-      this.options.subscriber.subscribe(this.options.channel, wrappedHandler),
+    if (inFlightSubscribe) {
+      const [inFlightError] = await inFlightSubscribe;
+
+      if (inFlightError || !this.isSubscribed) {
+        this.handlers.delete(handlerId);
+
+        return err(
+          "SubscribeError",
+          `Unable to subscribe to ${this.options.channel}`,
+        );
+      }
+
+      return ok(() => this.unsubscribeHandler(handlerId));
+    }
+
+    this.subscribeInFlight = mightThrow(
+      this.options.subscriber.subscribe(
+        this.options.channel,
+        async (message, channel) => this.onMessage(message, channel),
+      ),
     );
 
-    if (subscribeError) {
-      this.isSubscribed = false;
+    const subscribeInFlight = this.subscribeInFlight;
+
+    if (!subscribeInFlight) {
+      this.handlers.delete(handlerId);
 
       return err(
         "SubscribeError",
@@ -61,21 +159,58 @@ export class PubSub<T extends Record<string, unknown>> {
       );
     }
 
-    return ok(count);
+    const [subscribeError, count] = await subscribeInFlight;
+
+    this.subscribeInFlight = null;
+
+    if (subscribeError) {
+      this.handlers.delete(handlerId);
+
+      return err(
+        "SubscribeError",
+        `Unable to subscribe to ${this.options.channel}`,
+      );
+    }
+
+    if (!count) {
+      this.handlers.delete(handlerId);
+
+      return err(
+        "SubscribeError",
+        `Unable to subscribe to ${this.options.channel}`,
+      );
+    }
+
+    this.isSubscribed = true;
+
+    return ok(() => this.unsubscribeHandler(handlerId));
   }
 
   public async unsubscribe() {
+    const inFlightUnsubscribe = this.unsubscribeInFlight;
+
+    if (inFlightUnsubscribe) {
+      await inFlightUnsubscribe;
+    }
+
     if (!this.isActive()) {
       return err("UnsubscribeError", "Not subscribed");
     }
 
+    const handlers = new Map(this.handlers);
+
+    this.handlers.clear();
+
     this.isSubscribed = false;
 
-    const [unsubscribeError] = await mightThrow(
+    this.unsubscribeInFlight = mightThrow(
       this.options.subscriber.unsubscribe(this.options.channel),
     );
 
-    if (unsubscribeError) {
+    const unsubscribeInFlight = this.unsubscribeInFlight;
+
+    if (!unsubscribeInFlight) {
+      this.handlers = handlers;
       this.isSubscribed = true;
 
       return err(
@@ -84,10 +219,25 @@ export class PubSub<T extends Record<string, unknown>> {
       );
     }
 
+    const [unsubscribeError] = await unsubscribeInFlight;
+
+    if (unsubscribeError) {
+      this.handlers = handlers;
+      this.isSubscribed = true;
+      this.unsubscribeInFlight = null;
+
+      return err(
+        "UnsubscribeError",
+        `Unable to unsubscribe from ${this.options.channel}`,
+      );
+    }
+
+    this.unsubscribeInFlight = null;
+
     return ok(true);
   }
 
   public isActive() {
-    return this.isSubscribed;
+    return this.handlers.size > 0 && this.isSubscribed;
   }
 }
