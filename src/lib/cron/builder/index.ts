@@ -160,13 +160,13 @@ function handleSimpleExpression<T>(expr: CronExpr<T>) {
     case "step": {
       const { step, range } = expr;
 
-      if (!range) {
-        if (step === 0) {
-          throw new Error(
-            `OutOfBoundError: Expected step value greater than zero`,
-          );
-        }
+      if (step === 0) {
+        throw new Error(
+          `OutOfBoundError: Expected step value greater than zero`,
+        );
+      }
 
+      if (!range) {
         return `*/${step}`;
       }
 
