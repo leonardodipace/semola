@@ -159,7 +159,7 @@ describe("Cron Expression Builder", () => {
       test("should raise an error if the step's range bounds are incorrect", () => {
         function inner() {
           cronJobBuilder((b) =>
-            b.minute(step({ step: 0, range: { min: 10, max: 1 } })),
+            b.minute(step({ step: 3, range: { min: 10, max: 1 } })),
           );
         }
 
