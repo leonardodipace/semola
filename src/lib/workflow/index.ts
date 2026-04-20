@@ -501,7 +501,7 @@ class WorkflowDefinition<TInput, TResult> {
         return Promise.reject(new Error("Workflow cancelled"));
       }
 
-      const [readError, cachedStep] = await this.readStepOutput<unknown>(
+      const [readError, cachedStep] = await this.readStepOutput<TStep>(
         executionId,
         name,
       );
