@@ -40,7 +40,18 @@ class MockRedisClient {
     this.hashes.get(key)?.set(field, value);
   }
 
-  public async hset(key: string, field: string, value: string) {
+  public async hset(key: string, field: string, value: string): Promise<number>;
+
+  public async hset(
+    key: string,
+    values: Record<string, string>,
+  ): Promise<number>;
+
+  public async hset(
+    key: string,
+    fieldOrValues: string | Record<string, string>,
+    value?: string,
+  ) {
     if (this.failCommands.has("hset")) {
       throw new Error("hset failed");
     }
@@ -63,8 +74,26 @@ class MockRedisClient {
       return 0;
     }
 
-    hash.set(field, value);
-    return 1;
+    if (typeof fieldOrValues === "string") {
+      if (typeof value !== "string") {
+        return 0;
+      }
+
+      hash.set(fieldOrValues, value);
+      return 1;
+    }
+
+    let count = 0;
+
+    for (const [field, entry] of Object.entries(fieldOrValues)) {
+      if (!hash.has(field)) {
+        count++;
+      }
+
+      hash.set(field, entry);
+    }
+
+    return count;
   }
 
   public async hget(key: string, field: string) {
@@ -820,7 +849,9 @@ describe("workflow", () => {
         if (command === "hset") {
           expect(error?.type).toBe("WorkflowError");
           expect(
-            error?.message.includes("Unable to persist status for execution "),
+            error?.message.includes(
+              "Unable to persist metadata for execution ",
+            ),
           ).toBe(true);
         } else {
           expect(error?.type).toBe("WorkflowLockError");

@@ -3,6 +3,8 @@ import type {
   StepSnapshot,
   Workflow,
   WorkflowExecution,
+  WorkflowMeta,
+  WorkflowMetaField,
   WorkflowOptions,
   WorkflowStartOptions,
   WorkflowStartResult,
@@ -367,49 +369,43 @@ class WorkflowDefinition<TInput, TResult> {
 
     const timestamp = now();
 
-    const fields = [
+    const [statusReadError, existingStatus] = await this.getMeta(
+      executionId,
       "status",
-      "pending",
-      "input",
-      serializedInput,
-      "result",
-      "",
-      "error",
-      "",
-      "createdAt",
-      String(timestamp),
-      "updatedAt",
-      String(timestamp),
-      "completedAt",
-      "",
-      "failedAt",
-      "",
-      "cancelledAt",
-      "",
-      "steps",
-      "[]",
-    ];
-
-    const script =
-      "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 else redis.call('HSET', KEYS[1], unpack(ARGV)) return 1 end";
-
-    const [evalError, result] = await mightThrow(
-      this.options.redis.send("EVAL", [
-        script,
-        "1",
-        this.metaKey(executionId),
-        ...fields,
-      ]),
     );
 
-    if (evalError) {
-      return err("WorkflowError", `Unable to create execution ${executionId}`);
+    if (statusReadError) {
+      return err(statusReadError.type, statusReadError.message);
     }
 
-    if (result === 0) {
+    if (existingStatus) {
       return err(
         "WorkflowStateError",
         `Workflow execution ${executionId} already exists`,
+      );
+    }
+
+    const metadata: WorkflowMeta = {
+      status: "pending",
+      input: serializedInput,
+      result: "",
+      error: "",
+      createdAt: String(timestamp),
+      updatedAt: String(timestamp),
+      completedAt: "",
+      failedAt: "",
+      cancelledAt: "",
+      steps: "[]",
+    };
+
+    const [writeError] = await mightThrow(
+      this.options.redis.hset(this.metaKey(executionId), metadata),
+    );
+
+    if (writeError) {
+      return err(
+        "WorkflowError",
+        `Unable to persist metadata for execution ${executionId}`,
       );
     }
 
@@ -902,7 +898,11 @@ class WorkflowDefinition<TInput, TResult> {
     return ok(status === "cancelled");
   }
 
-  private async setMeta(executionId: string, field: string, value: string) {
+  private async setMeta(
+    executionId: string,
+    field: WorkflowMetaField,
+    value: string,
+  ) {
     const [writeError] = await mightThrow(
       this.options.redis.hset(this.metaKey(executionId), field, value),
     );
@@ -917,7 +917,7 @@ class WorkflowDefinition<TInput, TResult> {
     return ok(null);
   }
 
-  private async getMeta(executionId: string, field: string) {
+  private async getMeta(executionId: string, field: WorkflowMetaField) {
     const [readError, value] = await mightThrow(
       this.options.redis.hget(this.metaKey(executionId), field),
     );
@@ -947,7 +947,7 @@ class WorkflowDefinition<TInput, TResult> {
     return ok(value);
   }
 
-  private async readNumberMeta(executionId: string, field: string) {
+  private async readNumberMeta(executionId: string, field: WorkflowMetaField) {
     const [readError, value] = await this.getMeta(executionId, field);
 
     if (readError) {
@@ -1358,6 +1358,8 @@ export type {
   WorkflowError,
   WorkflowExecution,
   WorkflowHandlerContext,
+  WorkflowMeta,
+  WorkflowMetaField,
   WorkflowOptions,
   WorkflowStartOptions,
   WorkflowStartResult,
