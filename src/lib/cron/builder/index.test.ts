@@ -197,6 +197,14 @@ describe("Cron Expression Builder", () => {
         expect(expr.split(" ")).toHaveLength(5);
         expect(expr).toEqual("* * * 2-4 *");
       });
+
+      test("should raise an error for empty list", () => {
+        function emptyList() {
+          cronJobBuilder((b) => b.month(list((l) => l)));
+        }
+
+        expect(emptyList).toThrow("EmptyListError");
+      });
     });
   });
 });
