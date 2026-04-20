@@ -194,5 +194,17 @@ function handleSimpleExpression<T>(expr: CronExpr<T>) {
 }
 
 function generate(fields: Partial<Record<CronField, string>>): string {
-  return CRON_FIELD_ORDER.map((key) => fields[key] ?? "*").join(" ");
+  const parts: string[] = [];
+
+  for (let index = 0; index < CRON_FIELD_ORDER.length; index++) {
+    const key = CRON_FIELD_ORDER[index];
+    if (!key) return "";
+    if (key === "second" && !fields[key]) {
+      continue;
+    }
+
+    parts.push(fields[key] ?? "*");
+  }
+
+  return parts.join(" ");
 }
