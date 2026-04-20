@@ -100,7 +100,7 @@ const status = job.getStatus();
 
 ## Expression Builder
 
-Build cron expressions programmatically with full type-safety supported by a fluent and intuitive API.
+Build cron expressions programmatically with full type-safety supported by a fluent and an intuitive API.
 
 ```typescript
 import { 
