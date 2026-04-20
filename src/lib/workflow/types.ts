@@ -81,6 +81,21 @@ export type WorkflowStartResult = {
   status: WorkflowStatus;
 };
 
+export type WorkflowMeta = {
+  status: string;
+  input: string;
+  result: string;
+  error: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string;
+  failedAt: string;
+  cancelledAt: string;
+  steps: string;
+};
+
+export type WorkflowMetaField = keyof WorkflowMeta;
+
 export type Workflow<TInput, TResult> = {
   start: (
     input: TInput,
