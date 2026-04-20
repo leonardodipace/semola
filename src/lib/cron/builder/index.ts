@@ -12,6 +12,15 @@ import type {
   WeekDayType,
 } from "./types.js";
 
+const CRON_FIELD_ORDER: CronField[] = [
+  "second",
+  "minute",
+  "hour",
+  "day",
+  "month",
+  "weekday",
+] as const;
+
 class FieldWrapper<T> {
   private fields: CronExpr<T>[] = [];
 
@@ -185,16 +194,5 @@ function handleSimpleExpression<T>(expr: CronExpr<T>) {
 }
 
 function generate(fields: Partial<Record<CronField, string>>): string {
-  const entries = Object.entries(fields);
-  const expression: string[] = [];
-
-  for (const [_, part] of entries) {
-    if (!part) {
-      expression.push("*");
-    } else {
-      expression.push(part);
-    }
-  }
-
-  return expression.join(" ");
+  return CRON_FIELD_ORDER.map((key) => fields[key] ?? "*").join(" ");
 }
