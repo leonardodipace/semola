@@ -12,21 +12,49 @@ export async function runStatements(
   }
 }
 
+function normalizeStatementForTransactionCheck(statement: string) {
+  let current = statement;
+
+  while (true) {
+    const withoutLeadingWhitespace = current.trimStart();
+
+    if (withoutLeadingWhitespace.startsWith("--")) {
+      const newlineIndex = withoutLeadingWhitespace.indexOf("\n");
+
+      if (newlineIndex === -1) {
+        return "";
+      }
+
+      current = withoutLeadingWhitespace.slice(newlineIndex + 1);
+      continue;
+    }
+
+    if (withoutLeadingWhitespace.startsWith("/*")) {
+      const endCommentIndex = withoutLeadingWhitespace.indexOf("*/");
+
+      if (endCommentIndex === -1) {
+        return "";
+      }
+
+      current = withoutLeadingWhitespace.slice(endCommentIndex + 2);
+      continue;
+    }
+
+    return withoutLeadingWhitespace.trim().toUpperCase();
+  }
+}
+
 export function hasExplicitTransaction(sqlText: string) {
   const statements = splitStatements(sqlText);
 
   for (const statement of statements) {
-    const normalized = statement.trim().toUpperCase();
+    const normalized = normalizeStatementForTransactionCheck(statement);
 
-    if (normalized === "BEGIN") {
+    if (normalized.startsWith("BEGIN")) {
       return true;
     }
 
-    if (normalized.startsWith("BEGIN ")) {
-      return true;
-    }
-
-    if (normalized === "START TRANSACTION") {
+    if (normalized.startsWith("START TRANSACTION")) {
       return true;
     }
 
