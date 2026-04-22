@@ -578,8 +578,8 @@ export class Cron {
       const dow = date.getDay();
 
       if (this.month[mon + 1] === 0) {
-        date.setMonth(mon + 1);
         date.setDate(1);
+        date.setMonth(mon + 1);
         date.setHours(0, 0, 0, 0);
         continue;
       }
