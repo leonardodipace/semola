@@ -3,6 +3,7 @@ import { FieldAmount, Scanner, type Token } from "./scanner.js";
 import type { CronOptions, CronParsingError, CronStatus } from "./types.js";
 
 const RETRY_DELAY_MS = 60 * 60 * 1000; // 1 hour
+const MAX_YEARS = 4;
 
 const ALIASES: Record<string, string> = {
   "@yearly": "0 0 1 1 *",
@@ -553,8 +554,7 @@ export class Cron {
   }
 
   public getNextRun() {
-    const now = new Date();
-    const date = new Date(now);
+    const date = new Date();
 
     // Start from next minute/second
     if (this.hasSeconds) {
@@ -565,27 +565,56 @@ export class Cron {
       date.setMinutes(date.getMinutes() + 1);
     }
 
-    // Search up to 4 years to cover leap-day schedules (next Feb 29 can be ~4 years away)
-    const maxIterations = this.hasSeconds
-      ? 366 * 4 * 24 * 3600
-      : 366 * 4 * 24 * 60;
+    const deadline = new Date(date);
+    deadline.setFullYear(deadline.getFullYear() + MAX_YEARS);
 
-    for (let i = 0; i < maxIterations; i++) {
-      if (this.matches(date)) {
-        const freshNow = new Date();
+    while (date < deadline) {
+      const s = date.getSeconds();
+      const m = date.getMinutes();
+      const h = date.getHours();
+      const d = date.getDate();
+      const mon = date.getMonth();
+      const dow = date.getDay();
 
-        // Ensure match is still in the future
-        if (date > freshNow) {
-          return new Date(date);
-        }
+      if (this.month[mon + 1] === 0) {
+        date.setMonth(mon + 1);
+        date.setDate(1);
+        date.setHours(0, 0, 0, 0);
+        continue;
       }
 
-      // Increment time
-      if (this.hasSeconds) {
-        date.setSeconds(date.getSeconds() + 1);
+      let isDayOrDowMatch: boolean;
+      if (!this._dayWildcard && !this._dowWildcard) {
+        isDayOrDowMatch = this.day[d] === 0 && this.dayOfWeek[dow] === 0;
       } else {
-        date.setMinutes(date.getMinutes() + 1);
+        isDayOrDowMatch = this.day[d] === 0 || this.dayOfWeek[dow] === 0;
       }
+
+      if (isDayOrDowMatch) {
+        date.setDate(d + 1);
+        date.setHours(0, 0, 0, 0);
+        continue;
+      }
+
+      if (this.hour[h] === 0) {
+        date.setHours(h + 1);
+        date.setMinutes(0, 0, 0);
+        continue;
+      }
+
+      if (this.minute[m] === 0) {
+        date.setMinutes(m + 1);
+        date.setSeconds(0, 0);
+        continue;
+      }
+
+      if (this.hasSeconds && this.second[s] === 0) {
+        date.setSeconds(s + 1);
+        date.setMilliseconds(0);
+        continue;
+      }
+
+      return new Date(date);
     }
 
     return null;
@@ -640,7 +669,6 @@ export class Cron {
     }
 
     const delay = nextRun.getTime() - Date.now();
-
     const actualDelay = Math.max(0, delay);
 
     this.timeoutId = setTimeout(() => {
