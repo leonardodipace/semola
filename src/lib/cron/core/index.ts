@@ -565,6 +565,7 @@ export class Cron {
       date.setMinutes(date.getMinutes() + 1);
     }
 
+    // Search up to 4 years to cover leap-day schedules (next Feb 29 can be ~4 years away)
     const deadline = new Date(date);
     deadline.setFullYear(deadline.getFullYear() + MAX_YEARS);
 
