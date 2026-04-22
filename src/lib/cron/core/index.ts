@@ -55,7 +55,7 @@ export class Cron {
   private day = Array<number>(CronDayRange.max + 1).fill(0); // indices 1-31 (0 unused)
   private month = Array<number>(CronMonthRange.max + 1).fill(0); // indices 1-12 (0 unused)
   private dayOfWeek = Array<number>(CronDayOfWeekRange.max + 1).fill(0); // 0-6
-  private hasSeconds;
+  private hasSeconds: boolean;
   private _dayWildcard = false;
   private _dowWildcard = false;
 
