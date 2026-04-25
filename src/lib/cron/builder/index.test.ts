@@ -165,6 +165,16 @@ describe("Cron Expression Builder", () => {
 
         expect(inner).toThrow("OutOfBoundError");
       });
+
+      test("should raise an error when step range max is zero and min is greater than max", () => {
+        function inner() {
+          cronJobBuilder((b) =>
+            b.minute(step({ step: 1, range: { min: 5, max: 0 } })),
+          );
+        }
+
+        expect(inner).toThrow("OutOfBoundError");
+      });
     });
 
     describe("List", () => {
@@ -204,6 +214,24 @@ describe("Cron Expression Builder", () => {
         }
 
         expect(emptyList).toThrow("EmptyListError");
+      });
+
+      test("should not silently fallback to wildcard for nested list payloads", () => {
+        function nestedList() {
+          cronJobBuilder((b) =>
+            b.minute({
+              type: "list",
+              values: [
+                {
+                  type: "list",
+                  values: [{ type: "value", value: 1 }],
+                },
+              ],
+            }),
+          );
+        }
+
+        expect(nestedList).toThrow();
       });
     });
   });
