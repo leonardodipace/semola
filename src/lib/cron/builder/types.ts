@@ -55,12 +55,14 @@ export type CronField =
   | "month"
   | "weekday";
 
+export type CronListExpr<T> = Exclude<CronExpr<T>, { type: "list" }>;
+
 export type CronExpr<T> =
   | { type: "any" }
   | { type: "value"; value: T }
   | { type: "range"; min: T; max: T }
   | { type: "step"; step: T; range?: { min: T; max?: T } }
-  | { type: "list"; values: CronExpr<T>[] };
+  | { type: "list"; values: CronListExpr<T>[] };
 
 interface IBuilder<Used extends CronField> {
   second(expr: CronExpr<TimeType>): CronBuilderType<Used | "second">;

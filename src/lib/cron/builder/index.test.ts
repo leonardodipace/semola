@@ -216,22 +216,19 @@ describe("Cron Expression Builder", () => {
         expect(emptyList).toThrow("EmptyListError");
       });
 
-      test("should not silently fallback to wildcard for nested list payloads", () => {
-        function nestedList() {
-          cronJobBuilder((b) =>
-            b.minute({
-              type: "list",
-              values: [
-                {
-                  type: "list",
-                  values: [{ type: "value", value: 1 }],
-                },
-              ],
-            }),
-          );
-        }
+      test("should generate a list in case of using an object instead of helper functions", () => {
+        const expr = cronJobBuilder((b) =>
+          b.month(list((l) => l.number(10).number(2))).weekday({
+            type: "list",
+            values: [
+              { type: "value", value: 2 },
+              { type: "value", value: 4 },
+              { type: "value", value: 1 },
+            ],
+          }),
+        );
 
-        expect(nestedList).toThrow();
+        expect("* * * 10,2 2,4,1").toEqual(expr);
       });
     });
   });

@@ -3,6 +3,7 @@ import type {
   CronBuilderType,
   CronExpr,
   CronField,
+  CronListExpr,
   CronRange,
   CronStep,
   DayType,
@@ -22,9 +23,9 @@ const CRON_FIELD_ORDER: CronField[] = [
 ] as const;
 
 class FieldWrapper<T> {
-  private fields: CronExpr<T>[] = [];
+  private fields: CronListExpr<T>[] = [];
 
-  public add(expr: CronExpr<T>) {
+  public add(expr: CronListExpr<T>) {
     this.fields.push(expr);
   }
 
