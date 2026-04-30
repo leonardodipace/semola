@@ -178,9 +178,13 @@ function handleSimpleExpression<T>(expr: CronExpr<T>) {
       const { min, max } = range;
 
       if (max === 0) {
-        throw new Error(
-          `OutOfBoundError: Expected max value greater than zero`,
-        );
+        if (min > max) {
+          throw new Error(
+            `OutOfBoundError: Expected max value greater than zero`,
+          );
+        } else {
+          return `${min}-${max}/${step}`;
+        }
       }
 
       if (!max) {
