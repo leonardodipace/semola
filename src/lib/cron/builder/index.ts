@@ -182,9 +182,9 @@ function handleSimpleExpression<T>(expr: CronExpr<T>) {
           throw new Error(
             `OutOfBoundError: Expected max value greater than zero`,
           );
-        } else {
-          return `${min}-${max}/${step}`;
         }
+
+        return `${min}-${max}/${step}`;
       }
 
       if (!max) {
