@@ -159,7 +159,7 @@ function handleSimpleExpression<T>(expr: CronExpr<T>) {
         throw new Error(`OutOfBoundError: Expected ${min} <= ${max}`);
       }
 
-      return `${expr.min}-${expr.max}`;
+      return `${min}-${max}`;
     }
 
     case "step": {
