@@ -16,7 +16,7 @@ type User = {
   email: string;
 };
 
-const onboardUser = defineWorkflow<User, void>({
+const onboardUser = defineWorkflow<User>({
   name: "onboard-user",
   redis: redisClient,
   handler: async ({ input, step }) => {
