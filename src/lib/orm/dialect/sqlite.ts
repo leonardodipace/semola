@@ -1,49 +1,15 @@
-import type { DialectAdapter } from "../types.js";
+import type { Table } from "../table/types.js";
+import { quoteIdentifier } from "../utils.js";
+import type { Dialect } from "./types.js";
 
-function escapeLike(s: string) {
-  return s.replaceAll("%", "\\%").replaceAll("_", "\\_");
-}
+export const createSqliteDialect = <T extends Table>(table: T): Dialect<T> => {
+  return {
+    name: "sqlite",
+    findMany: async (sql: Bun.SQL) => {
+      const tableName = sql(table.sqlName);
+      const columns = Object.keys(table.columns).map(quoteIdentifier);
 
-export const sqliteDialectAdapter: DialectAdapter = {
-  dialect: "sqlite",
-  likeKeyword: "LIKE",
-
-  quoteIdentifier(identifier: string) {
-    return `"${identifier.replaceAll('"', '""')}"`;
-  },
-
-  serializeValue(kind, value) {
-    if (kind === "date") {
-      if (value instanceof Date) {
-        return value.toISOString();
-      }
-
-      return value;
-    }
-
-    if (kind === "json" || kind === "jsonb") {
-      return JSON.stringify(value);
-    }
-
-    if (kind === "boolean") {
-      if (value === true) return 1;
-      if (value === false) return 0;
-    }
-
-    return value;
-  },
-
-  renderLikePattern(mode, value) {
-    const escaped = escapeLike(value);
-
-    if (mode === "startsWith") {
-      return `${escaped}%`;
-    }
-
-    if (mode === "endsWith") {
-      return `%${escaped}`;
-    }
-
-    return `%${escaped}%`;
-  },
+      return await sql`SELECT ${columns} FROM ${tableName}`;
+    },
+  };
 };

@@ -1,14 +1,17 @@
-import type { Dialect, DialectAdapter } from "../types.js";
-import { mysqlDialectAdapter } from "./mysql.js";
-import { postgresDialectAdapter } from "./postgres.js";
-import { sqliteDialectAdapter } from "./sqlite.js";
+import type { Table } from "../table/types.js";
+import { createSqliteDialect } from "./sqlite.js";
+import type { Adapter, Dialect } from "./types.js";
 
-const dialectAdapters = {
-  postgres: postgresDialectAdapter,
-  mysql: mysqlDialectAdapter,
-  sqlite: sqliteDialectAdapter,
-} satisfies Record<Dialect, DialectAdapter>;
+export const getDialect = <T extends Table>(
+  adapter: Adapter,
+  table: T,
+): Dialect<T> => {
+  switch (adapter) {
+    case "sqlite":
+      return createSqliteDialect(table);
+    default:
+      throw new Error(`Unsupported adapter: ${adapter}`);
+  }
+};
 
-export function getDialectAdapter(dialect: Dialect): DialectAdapter {
-  return dialectAdapters[dialect];
-}
+export type { Adapter, Dialect };

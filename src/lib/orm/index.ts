@@ -1,38 +1,32 @@
-export {
-  boolean,
-  date,
-  enumColumn,
-  enumeration,
-  json,
-  jsonb,
-  number,
-  string,
-  uuid,
-} from "./column.js";
-export { defineConfig } from "./migration/config.js";
-export { createOrm } from "./orm.js";
-export { many, one } from "./relation.js";
-export { createTable } from "./table.js";
-export type {
-  CreateInput,
-  CreateManyInput,
-  DeleteBuilderInput,
-  DeleteInput,
-  DeleteManyInput,
-  Dialect,
-  DialectAdapter,
-  FindFirstInput,
-  FindManyInput,
-  FindUniqueInput,
-  InsertInput,
-  JoinNode,
-  OrderDirection,
-  SelectInput,
-  SelectPlan,
-  TableRow,
-  TinyTableClient,
-  UpdateBuilderInput,
-  UpdateInput,
-  UpdateManyInput,
-  WhereNode,
-} from "./types.js";
+import { uuid } from "./column/index.js";
+import { createOrm } from "./orm/index.js";
+import { defineTable } from "./table/index.js";
+
+const usersTable = defineTable("users", {
+  id: uuid("id")
+    .primaryKey()
+    .notNull()
+    .default(() => Bun.randomUUIDv7()),
+});
+
+const orm = createOrm({
+  adapter: "sqlite",
+  url: ":memory:",
+  tables: {
+    users: usersTable,
+  },
+});
+
+console.time("create table");
+await orm.$raw`
+  CREATE TABLE users (
+    id TEXT PRIMARY KEY NOT NULL
+  )
+`;
+console.timeEnd("create table");
+
+console.time("findMany");
+const users = await orm.users.findMany();
+console.timeEnd("findMany");
+
+console.log(users.map((user) => user.id));
