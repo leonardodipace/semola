@@ -1,4 +1,4 @@
-import { err, ok } from "../errors/index.js";
+import { err, ok } from "../../errors/index.js";
 import type { CronScannerError } from "./types.js";
 
 export const FieldAmount = {
