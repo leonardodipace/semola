@@ -115,6 +115,12 @@ describe("Cron Expression Builder", () => {
 
         expect(inner).toThrow("OutOfBoundError");
       });
+
+      test("should create a range with min and max equals to zero", () => {
+        const expr = cronJobBuilder((b) => b.minute(range({ min: 0, max: 0 })));
+
+        expect(expr).toEqual("0-0 * * * *");
+      });
     });
 
     describe("Step", () => {
@@ -174,6 +180,14 @@ describe("Cron Expression Builder", () => {
         }
 
         expect(inner).toThrow("OutOfBoundError");
+      });
+
+      test("should create a step with min and max equals to zero", () => {
+        const expr = cronJobBuilder((b) =>
+          b.minute(step({ step: 1, range: { min: 0, max: 0 } })),
+        );
+
+        expect(expr).toEqual("0-0/1 * * * *");
       });
     });
 
