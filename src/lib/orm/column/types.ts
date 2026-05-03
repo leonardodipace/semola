@@ -1,8 +1,13 @@
 export type BaseColumn = {
   sqlName: string;
-  isNullable: boolean;
+  _meta: ColumnTypeState;
   primaryKey?: boolean;
   unique?: boolean;
+  hasDefault?: boolean;
+};
+
+type ColumnTypeState<TNullable extends boolean = boolean> = {
+  isNullable: TNullable;
 };
 
 export type ColumnRuntimeValueMap = {
@@ -38,19 +43,39 @@ type ColumnByType<TType extends Column["type"]> = Extract<
 type ColumnBuilderState<
   TType extends Column["type"],
   TNullable extends boolean,
-> = Omit<ColumnByType<TType>, "default" | "isNullable"> & {
-  isNullable: TNullable;
+> = Omit<ColumnByType<TType>, "default" | "_meta"> & {
+  _meta: ColumnTypeState<TNullable>;
 };
+
+type SetNullable<
+  TType extends Column["type"],
+  TNullable extends boolean,
+> = ColumnBuilder<TType, TNullable>;
+
+type SetHasDefault<
+  TType extends Column["type"],
+  TNullable extends boolean,
+> = ColumnBuilder<TType, TNullable>;
+
+type SetPrimaryKey<
+  TType extends Column["type"],
+  TNullable extends boolean,
+> = ColumnBuilder<TType, TNullable>;
+
+type SetUnique<
+  TType extends Column["type"],
+  TNullable extends boolean,
+> = ColumnBuilder<TType, TNullable>;
 
 export type ColumnBuilder<
   TType extends Column["type"],
   TNullable extends boolean = true,
 > = ColumnBuilderState<TType, TNullable> & {
-  primaryKey: () => ColumnBuilder<TType, TNullable>;
-  notNull: () => ColumnBuilder<TType, false>;
-  nullable: () => ColumnBuilder<TType, true>;
-  unique: () => ColumnBuilder<TType, TNullable>;
+  primaryKey: () => SetPrimaryKey<TType, TNullable>;
+  notNull: () => SetNullable<TType, false>;
+  nullable: () => SetNullable<TType, true>;
+  unique: () => SetUnique<TType, TNullable>;
   default: (
     value: () => ColumnRuntimeValueMap[TType],
-  ) => ColumnBuilder<TType, TNullable>;
+  ) => SetHasDefault<TType, TNullable>;
 };

@@ -20,7 +20,7 @@ export type OrmClient<T extends Record<string, Table>> = {
 
 type ColumnRuntimeValue<T extends Column["type"]> = ColumnRuntimeValueMap[T];
 
-type ColumnValue<T extends Column> = T["isNullable"] extends false
+type ColumnValue<T extends Column> = T["_meta"]["isNullable"] extends false
   ? ColumnRuntimeValue<T["type"]>
   : ColumnRuntimeValue<T["type"]> | null;
 
