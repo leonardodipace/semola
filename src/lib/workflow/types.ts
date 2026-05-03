@@ -81,6 +81,14 @@ export type WorkflowStartResult = {
   status: WorkflowStatus;
 };
 
+export type WorkflowCancelResult = {
+  status: WorkflowStatus;
+  executionId: string;
+  updatedAt: number;
+  cancelledAt: number;
+  createdAt: number;
+};
+
 export type WorkflowMeta = {
   status: string;
   input: string;
@@ -115,5 +123,5 @@ export type Workflow<TInput, TResult> = {
   >;
   cancel: (
     executionId: string,
-  ) => Promise<readonly [WorkflowError | null, null]>;
+  ) => Promise<readonly [WorkflowError | null, WorkflowCancelResult | null]>;
 };

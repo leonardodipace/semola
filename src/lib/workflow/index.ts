@@ -2,6 +2,7 @@ import { err, mightThrow, mightThrowSync, ok } from "../errors/index.js";
 import type {
   StepSnapshot,
   Workflow,
+  WorkflowCancelResult,
   WorkflowExecution,
   WorkflowMeta,
   WorkflowMetaField,
@@ -338,7 +339,15 @@ class WorkflowDefinition<TInput, TResult> {
       return err(clearFailedAtError.type, clearFailedAtError.message);
     }
 
-    return ok(null);
+    const response: WorkflowCancelResult = {
+      executionId,
+      createdAt: execution.createdAt,
+      cancelledAt: timestamp,
+      updatedAt: timestamp,
+      status: "cancelled",
+    };
+
+    return ok(response);
   }
 
   private executionKey(executionId: string) {
