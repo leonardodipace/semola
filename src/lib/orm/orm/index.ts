@@ -11,8 +11,8 @@ const createTableClient = <T extends Table>(
   const dialect = getDialect(adapter, table);
 
   return {
-    findMany: async () => {
-      return await dialect.findMany(sql);
+    findMany: async (options) => {
+      return await dialect.findMany(sql, options);
     },
   };
 };

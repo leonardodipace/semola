@@ -67,10 +67,6 @@ type ColumnWhere<T extends Column> = ColumnValue<T> | ColumnWhereOperators<T>;
 
 export type TableWhere<T extends Table> = {
   [TColumnName in keyof T["columns"]]?: ColumnWhere<T["columns"][TColumnName]>;
-} & {
-  and?: Array<TableWhere<T>>;
-  or?: Array<TableWhere<T>>;
-  not?: TableWhere<T> | Array<TableWhere<T>>;
 };
 
 export type FindManyOptions<T extends Table> = {
