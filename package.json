@@ -111,6 +111,16 @@
         "default": "./dist/lib/prompts/index.cjs"
       }
     },
+    "./workflow": {
+      "import": {
+        "types": "./dist/lib/workflow/index.d.mts",
+        "default": "./dist/lib/workflow/index.mjs"
+      },
+      "require": {
+        "types": "./dist/lib/workflow/index.d.cts",
+        "default": "./dist/lib/workflow/index.cjs"
+      }
+    },
     "./orm": {
       "import": {
         "types": "./dist/lib/orm/index.d.mts",
@@ -147,6 +157,9 @@
     "cron",
     "scheduler",
     "job-scheduler",
+    "workflow",
+    "durable-workflow",
+    "resumable-workflow",
     "i18n",
     "internationalization",
     "authorization",
