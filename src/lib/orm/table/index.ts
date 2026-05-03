@@ -9,5 +9,3 @@ export const defineTable = <const TColumns extends Record<string, Column>>(
     columns,
   };
 };
-
-export const createTable = defineTable;
