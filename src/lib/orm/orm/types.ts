@@ -20,9 +20,9 @@ export type OrmClient<T extends Record<string, Table>> = {
 
 type ColumnRuntimeValue<T extends Column["type"]> = ColumnRuntimeValueMap[T];
 
-type ColumnValue<T extends Column> = T["nullable"] extends true
-  ? ColumnRuntimeValue<T["type"]> | null
-  : ColumnRuntimeValue<T["type"]>;
+type ColumnValue<T extends Column> = T["isNullable"] extends false
+  ? ColumnRuntimeValue<T["type"]>
+  : ColumnRuntimeValue<T["type"]> | null;
 
 export type TableRow<T extends Table> = Prettify<{
   [TColumnName in keyof T["columns"]]: ColumnValue<T["columns"][TColumnName]>;

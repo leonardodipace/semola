@@ -1,39 +1,39 @@
-import type {
-  BooleanColumn,
-  Column,
-  ColumnBuilder,
-  ColumnRuntimeValueMap,
-  DateColumn,
-  NumberColumn,
-  StringColumn,
-} from "./types.js";
+import type { Column, ColumnBuilder, ColumnRuntimeValueMap } from "./types.js";
 
-type ColumnBuilderState<TType extends Column["type"]> = Omit<
-  Extract<Column, { type: TType }>,
-  "default"
->;
+type ColumnBuilderState<
+  TType extends Column["type"],
+  TNullable extends boolean,
+> = Omit<Extract<Column, { type: TType }>, "default" | "isNullable"> & {
+  isNullable: TNullable;
+};
 
-const createColumnBuilder = <TType extends Column["type"]>(
-  column: ColumnBuilderState<TType>,
-): ColumnBuilder<TType> => {
+const createColumnBuilder = <
+  TType extends Column["type"],
+  TNullable extends boolean,
+>(
+  column: ColumnBuilderState<TType, TNullable>,
+): ColumnBuilder<TType, TNullable> => {
   const primaryKey = () => {
-    return createColumnBuilder<TType>({ ...column, primaryKey: true });
+    return createColumnBuilder<TType, TNullable>({
+      ...column,
+      primaryKey: true,
+    });
   };
 
   const notNull = () => {
-    return createColumnBuilder<TType>({ ...column, nullable: false });
+    return createColumnBuilder<TType, false>({ ...column, isNullable: false });
   };
 
   const nullable = () => {
-    return createColumnBuilder<TType>({ ...column, nullable: true });
+    return createColumnBuilder<TType, true>({ ...column, isNullable: true });
   };
 
   const unique = () => {
-    return createColumnBuilder<TType>({ ...column, unique: true });
+    return createColumnBuilder<TType, TNullable>({ ...column, unique: true });
   };
 
   const defaultHandler = (_value: () => ColumnRuntimeValueMap[TType]) => {
-    return createColumnBuilder<TType>({ ...column });
+    return createColumnBuilder<TType, TNullable>({ ...column });
   };
 
   return {
@@ -47,12 +47,13 @@ const createColumnBuilder = <TType extends Column["type"]>(
 };
 
 export const string = (sqlName: string): ColumnBuilder<"string"> => {
-  const column: StringColumn = {
+  const column = {
     sqlName,
     type: "string",
-  };
+    isNullable: true,
+  } as const;
 
-  return createColumnBuilder<"string">(column);
+  return createColumnBuilder<"string", true>(column);
 };
 
 export const uuid = (sqlName: string): ColumnBuilder<"string"> => {
@@ -60,28 +61,31 @@ export const uuid = (sqlName: string): ColumnBuilder<"string"> => {
 };
 
 export const number = (sqlName: string): ColumnBuilder<"number"> => {
-  const column: NumberColumn = {
+  const column = {
     sqlName,
     type: "number",
-  };
+    isNullable: true,
+  } as const;
 
-  return createColumnBuilder<"number">(column);
+  return createColumnBuilder<"number", true>(column);
 };
 
 export const boolean = (sqlName: string): ColumnBuilder<"boolean"> => {
-  const column: BooleanColumn = {
+  const column = {
     sqlName,
     type: "boolean",
-  };
+    isNullable: true,
+  } as const;
 
-  return createColumnBuilder<"boolean">(column);
+  return createColumnBuilder<"boolean", true>(column);
 };
 
 export const date = (sqlName: string): ColumnBuilder<"date"> => {
-  const column: DateColumn = {
+  const column = {
     sqlName,
     type: "date",
-  };
+    isNullable: true,
+  } as const;
 
-  return createColumnBuilder<"date">(column);
+  return createColumnBuilder<"date", true>(column);
 };

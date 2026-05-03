@@ -1,6 +1,6 @@
 export type BaseColumn = {
   sqlName: string;
-  nullable?: boolean;
+  isNullable: boolean;
   primaryKey?: boolean;
   unique?: boolean;
 };
@@ -35,18 +35,22 @@ type ColumnByType<TType extends Column["type"]> = Extract<
   { type: TType }
 >;
 
-type ColumnBuilderState<TType extends Column["type"]> = Omit<
-  ColumnByType<TType>,
-  "default"
->;
+type ColumnBuilderState<
+  TType extends Column["type"],
+  TNullable extends boolean,
+> = Omit<ColumnByType<TType>, "default" | "isNullable"> & {
+  isNullable: TNullable;
+};
 
-export type ColumnBuilder<TType extends Column["type"]> =
-  ColumnBuilderState<TType> & {
-    primaryKey: () => ColumnBuilder<TType>;
-    notNull: () => ColumnBuilder<TType>;
-    nullable: () => ColumnBuilder<TType>;
-    unique: () => ColumnBuilder<TType>;
-    default: (
-      value: () => ColumnRuntimeValueMap[TType],
-    ) => ColumnBuilder<TType>;
-  };
+export type ColumnBuilder<
+  TType extends Column["type"],
+  TNullable extends boolean = true,
+> = ColumnBuilderState<TType, TNullable> & {
+  primaryKey: () => ColumnBuilder<TType, TNullable>;
+  notNull: () => ColumnBuilder<TType, false>;
+  nullable: () => ColumnBuilder<TType, true>;
+  unique: () => ColumnBuilder<TType, TNullable>;
+  default: (
+    value: () => ColumnRuntimeValueMap[TType],
+  ) => ColumnBuilder<TType, TNullable>;
+};

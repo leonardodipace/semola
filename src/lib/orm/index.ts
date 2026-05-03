@@ -5,7 +5,7 @@ import { defineTable } from "./table/index.js";
 const usersTable = defineTable("users", {
   id: uuid("id")
     .primaryKey()
-    .notNull()
+    // .notNull()
     .default(() => Bun.randomUUIDv7()),
 });
 
