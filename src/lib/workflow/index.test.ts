@@ -930,13 +930,24 @@ describe("workflow", () => {
       });
 
       await workflow.start({ id: 1 }, { executionId: "cancel-twice-1" });
-      const [firstCancelError] = await workflow.cancel("cancel-twice-1");
+      const [firstCancelError, firstCancelData] =
+        await workflow.cancel("cancel-twice-1");
       const [secondCancelError, secondCancelData] =
         await workflow.cancel("cancel-twice-1");
 
       expect(firstCancelError).toBeNull();
+      expect(firstCancelData).not.toBeNull();
+
       expect(secondCancelError).toBeNull();
-      expect(secondCancelData).toBeNull();
+      expect(secondCancelData).not.toBeNull();
+
+      expect(firstCancelData?.executionId).toEqual("cancel-twice-1");
+      expect(secondCancelData?.executionId).toEqual("cancel-twice-1");
+
+      expect(firstCancelData?.status).toEqual("cancelled");
+      expect(secondCancelData?.status).toEqual("cancelled");
+
+      expect(firstCancelData?.createdAt).toEqual(secondCancelData?.createdAt);
     });
   });
 
