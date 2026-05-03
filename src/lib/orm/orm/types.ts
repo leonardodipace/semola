@@ -24,10 +24,63 @@ type ColumnValue<T extends Column> = T["_meta"]["isNullable"] extends false
   ? ColumnRuntimeValue<T["type"]>
   : ColumnRuntimeValue<T["type"]> | null;
 
+type NonNullableColumnValue<T extends Column> = Exclude<ColumnValue<T>, null>;
+
+type StringWhereOperators<T extends Column> = {
+  eq?: ColumnValue<T>;
+  startsWith?: NonNullableColumnValue<T>;
+  endsWith?: NonNullableColumnValue<T>;
+  contains?: NonNullableColumnValue<T>;
+};
+
+type NumberWhereOperators<T extends Column> = {
+  eq?: ColumnValue<T>;
+  gt?: NonNullableColumnValue<T>;
+  gte?: NonNullableColumnValue<T>;
+  lt?: NonNullableColumnValue<T>;
+  lte?: NonNullableColumnValue<T>;
+};
+
+type BooleanWhereOperators<T extends Column> = {
+  eq?: ColumnValue<T>;
+};
+
+type DateWhereOperators<T extends Column> = {
+  eq?: ColumnValue<T>;
+  gt?: NonNullableColumnValue<T>;
+  gte?: NonNullableColumnValue<T>;
+  lt?: NonNullableColumnValue<T>;
+  lte?: NonNullableColumnValue<T>;
+};
+
+type ColumnWhereOperatorsMap<T extends Column> = {
+  string: StringWhereOperators<T>;
+  number: NumberWhereOperators<T>;
+  boolean: BooleanWhereOperators<T>;
+  date: DateWhereOperators<T>;
+};
+
+type ColumnWhereOperators<T extends Column> =
+  ColumnWhereOperatorsMap<T>[T["type"]];
+
+type ColumnWhere<T extends Column> = ColumnValue<T> | ColumnWhereOperators<T>;
+
+export type TableWhere<T extends Table> = {
+  [TColumnName in keyof T["columns"]]?: ColumnWhere<T["columns"][TColumnName]>;
+} & {
+  and?: Array<TableWhere<T>>;
+  or?: Array<TableWhere<T>>;
+  not?: TableWhere<T> | Array<TableWhere<T>>;
+};
+
+export type FindManyOptions<T extends Table> = {
+  where?: TableWhere<T>;
+};
+
 export type TableRow<T extends Table> = Prettify<{
   [TColumnName in keyof T["columns"]]: ColumnValue<T["columns"][TColumnName]>;
 }>;
 
 export type TableClient<T extends Table> = {
-  findMany: () => Promise<Array<TableRow<T>>>;
+  findMany: (options?: FindManyOptions<T>) => Promise<Array<TableRow<T>>>;
 };
