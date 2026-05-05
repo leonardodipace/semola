@@ -73,9 +73,14 @@ export type TableSelect<T extends Table> = {
   [TColumnName in keyof T["columns"]]?: true;
 };
 
+export type TableOrderBy<T extends Table> = {
+  [TColumnName in keyof T["columns"]]?: "asc" | "desc";
+};
+
 export type FindManyOptions<T extends Table> = {
   where?: TableWhere<T>;
   select?: TableSelect<T>;
+  orderBy?: TableOrderBy<T>;
 };
 
 export type TableRow<T extends Table> = Prettify<{
