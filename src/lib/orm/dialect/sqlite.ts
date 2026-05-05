@@ -3,10 +3,6 @@ import type { TableWhere } from "../orm/types.js";
 import type { Table } from "../table/types.js";
 import type { Dialect } from "./types.js";
 
-const quoteIdentifier = (name: string) => {
-  return `"${name}"`;
-};
-
 type WhereClause = {
   sql: string;
   params: unknown[];
@@ -29,87 +25,86 @@ const buildWhereClause = <T extends Table>(
 
     const column = table.columns[typedKey] as Column;
     const sqlName = table.columns[typedKey].sqlName;
-    const columnName = quoteIdentifier(sqlName);
 
     if (column.type === "string") {
       if ("eq" in value) {
-        clauses.push(`${columnName} = ?`);
+        clauses.push(`${sqlName} = ?`);
         params.push(value.eq);
       }
 
       if ("startsWith" in value) {
-        clauses.push(`${columnName} LIKE ?`);
+        clauses.push(`${sqlName} LIKE ?`);
         params.push(`${value.startsWith}%`);
       }
 
       if ("endsWith" in value) {
-        clauses.push(`${columnName} LIKE ?`);
+        clauses.push(`${sqlName} LIKE ?`);
         params.push(`%${value.endsWith}`);
       }
 
       if ("contains" in value) {
-        clauses.push(`${columnName} LIKE ?`);
+        clauses.push(`${sqlName} LIKE ?`);
         params.push(`%${value.contains}%`);
       }
     }
 
     if (column.type === "number") {
       if ("eq" in value) {
-        clauses.push(`${columnName} = ?`);
+        clauses.push(`${sqlName} = ?`);
         params.push(value.eq);
       }
 
       if ("gt" in value) {
-        clauses.push(`${columnName} > ?`);
+        clauses.push(`${sqlName} > ?`);
         params.push(value.gt);
       }
 
       if ("gte" in value) {
-        clauses.push(`${columnName} >= ?`);
+        clauses.push(`${sqlName} >= ?`);
         params.push(value.gte);
       }
 
       if ("lt" in value) {
-        clauses.push(`${columnName} < ?`);
+        clauses.push(`${sqlName} < ?`);
         params.push(value.lt);
       }
 
       if ("lte" in value) {
-        clauses.push(`${columnName} <= ?`);
+        clauses.push(`${sqlName} <= ?`);
         params.push(value.lte);
       }
     }
 
     if (column.type === "boolean") {
       if ("eq" in value) {
-        clauses.push(`${columnName} = ?`);
+        clauses.push(`${sqlName} = ?`);
         params.push(value.eq);
       }
     }
 
     if (column.type === "date") {
       if ("eq" in value) {
-        clauses.push(`${columnName} = ?`);
+        clauses.push(`${sqlName} = ?`);
         params.push(value.eq);
       }
 
       if ("gt" in value) {
-        clauses.push(`${columnName} > ?`);
+        clauses.push(`${sqlName} > ?`);
         params.push(value.gt);
       }
 
       if ("gte" in value) {
-        clauses.push(`${columnName} >= ?`);
+        clauses.push(`${sqlName} >= ?`);
         params.push(value.gte);
       }
 
       if ("lt" in value) {
-        clauses.push(`${columnName} < ?`);
+        clauses.push(`${sqlName} < ?`);
         params.push(value.lt);
       }
 
       if ("lte" in value) {
-        clauses.push(`${columnName} <= ?`);
+        clauses.push(`${sqlName} <= ?`);
         params.push(value.lte);
       }
     }
@@ -119,7 +114,7 @@ const buildWhereClause = <T extends Table>(
 };
 
 const buildSelectStatement = (tableName: string, where: string) => {
-  const base = `SELECT * FROM ${quoteIdentifier(tableName)}`;
+  const base = `SELECT * FROM ${tableName}`;
 
   if (!where) return base;
 
