@@ -1,4 +1,4 @@
-import type { TableSelect, TableWhere } from "../orm/types.js";
+import type { TableOrderBy, TableSelect, TableWhere } from "../orm/types.js";
 import type { Table } from "../table/types.js";
 import type { Dialect } from "./types.js";
 
@@ -85,16 +85,45 @@ const buildSelectColumns = <T extends Table>(
     .join(", ");
 };
 
+const buildOrderByClause = <T extends Table>(
+  table: T,
+  orderBy?: TableOrderBy<T>,
+) => {
+  if (!orderBy) return "";
+
+  const clauses: string[] = [];
+
+  for (const [jsKey, direction] of Object.entries(orderBy)) {
+    const sqlName = table.columns[jsKey as keyof T["columns"]]?.sqlName;
+
+    if (!sqlName) continue;
+
+    if (direction === "desc") {
+      clauses.push(`${sqlName} DESC`);
+      continue;
+    }
+
+    clauses.push(`${sqlName} ASC`);
+  }
+
+  if (!clauses.length) return "";
+
+  return clauses.join(", ");
+};
+
 const buildSelectStatement = (
   tableName: string,
   columns: string,
   where: string,
+  orderBy: string,
 ) => {
-  const base = `SELECT ${columns} FROM ${tableName}`;
+  let query = `SELECT ${columns} FROM ${tableName}`;
 
-  if (!where) return base;
+  if (where) query = `${query} WHERE ${where}`;
 
-  return `${base} WHERE ${where}`;
+  if (orderBy) query = `${query} ORDER BY ${orderBy}`;
+
+  return query;
 };
 
 export const createSqliteDialect = <T extends Table>(table: T): Dialect<T> => {
@@ -103,7 +132,13 @@ export const createSqliteDialect = <T extends Table>(table: T): Dialect<T> => {
     findMany: async (sql, options) => {
       const where = buildWhereClause(table, options?.where);
       const columns = buildSelectColumns(table, options?.select);
-      const statement = buildSelectStatement(table.sqlName, columns, where.sql);
+      const orderBy = buildOrderByClause(table, options?.orderBy);
+      const statement = buildSelectStatement(
+        table.sqlName,
+        columns,
+        where.sql,
+        orderBy,
+      );
 
       console.log(statement, where.params);
 
