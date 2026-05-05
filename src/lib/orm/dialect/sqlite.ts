@@ -93,7 +93,7 @@ export const createSqliteDialect = <T extends Table>(table: T): Dialect<T> => {
 
       console.log(statement, where.params);
 
-      return await sql.unsafe(statement, where.params);
+      return [...(await sql.unsafe(statement, where.params))];
     },
   };
 };
