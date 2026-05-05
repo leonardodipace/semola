@@ -43,7 +43,11 @@ await orm.$raw`
 console.timeEnd("insert users");
 
 console.time("findMany");
-const users = await orm.users.findMany();
+const users = await orm.users.findMany({
+  where: {
+    firstName: { eq: "John" },
+  },
+});
 console.timeEnd("findMany");
 
 console.log(users);
