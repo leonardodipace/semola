@@ -1,4 +1,3 @@
-import type { Column } from "../column/types.js";
 import type { TableWhere } from "../orm/types.js";
 import type { Table } from "../table/types.js";
 import type { Dialect } from "./types.js";
@@ -7,6 +6,17 @@ type WhereClause = {
   sql: string;
   params: unknown[];
 };
+
+const OPERATORS = {
+  eq: { sql: "= ?", transform: (v: unknown) => v },
+  gt: { sql: "> ?", transform: (v: unknown) => v },
+  gte: { sql: ">= ?", transform: (v: unknown) => v },
+  lt: { sql: "< ?", transform: (v: unknown) => v },
+  lte: { sql: "<= ?", transform: (v: unknown) => v },
+  startsWith: { sql: "LIKE ?", transform: (v: unknown) => `${v}%` },
+  endsWith: { sql: "LIKE ?", transform: (v: unknown) => `%${v}` },
+  contains: { sql: "LIKE ?", transform: (v: unknown) => `%${v}%` },
+} as const;
 
 const buildWhereClause = <T extends Table>(
   table: T,
@@ -21,92 +31,21 @@ const buildWhereClause = <T extends Table>(
 
   for (const entry of entries) {
     const [jsKey, value] = entry;
+
     const typedKey = jsKey as keyof T["columns"];
 
-    const column = table.columns[typedKey] as Column;
     const sqlName = table.columns[typedKey].sqlName;
 
-    if (column.type === "string") {
-      if ("eq" in value) {
-        clauses.push(`${sqlName} = ?`);
-        params.push(value.eq);
-      }
+    const entries = Object.entries(value);
 
-      if ("startsWith" in value) {
-        clauses.push(`${sqlName} LIKE ?`);
-        params.push(`${value.startsWith}%`);
-      }
+    for (const entry of entries) {
+      const [op, operand] = entry;
+      const operator = OPERATORS[op as keyof typeof OPERATORS];
 
-      if ("endsWith" in value) {
-        clauses.push(`${sqlName} LIKE ?`);
-        params.push(`%${value.endsWith}`);
-      }
+      if (!operator) continue;
 
-      if ("contains" in value) {
-        clauses.push(`${sqlName} LIKE ?`);
-        params.push(`%${value.contains}%`);
-      }
-    }
-
-    if (column.type === "number") {
-      if ("eq" in value) {
-        clauses.push(`${sqlName} = ?`);
-        params.push(value.eq);
-      }
-
-      if ("gt" in value) {
-        clauses.push(`${sqlName} > ?`);
-        params.push(value.gt);
-      }
-
-      if ("gte" in value) {
-        clauses.push(`${sqlName} >= ?`);
-        params.push(value.gte);
-      }
-
-      if ("lt" in value) {
-        clauses.push(`${sqlName} < ?`);
-        params.push(value.lt);
-      }
-
-      if ("lte" in value) {
-        clauses.push(`${sqlName} <= ?`);
-        params.push(value.lte);
-      }
-    }
-
-    if (column.type === "boolean") {
-      if ("eq" in value) {
-        clauses.push(`${sqlName} = ?`);
-        params.push(value.eq);
-      }
-    }
-
-    if (column.type === "date") {
-      if ("eq" in value) {
-        clauses.push(`${sqlName} = ?`);
-        params.push(value.eq);
-      }
-
-      if ("gt" in value) {
-        clauses.push(`${sqlName} > ?`);
-        params.push(value.gt);
-      }
-
-      if ("gte" in value) {
-        clauses.push(`${sqlName} >= ?`);
-        params.push(value.gte);
-      }
-
-      if ("lt" in value) {
-        clauses.push(`${sqlName} < ?`);
-        params.push(value.lt);
-      }
-
-      if ("lte" in value) {
-        clauses.push(`${sqlName} <= ?`);
-        params.push(value.lte);
-      }
+      clauses.push(`${sqlName} ${operator.sql}`);
+      params.push(operator.transform(operand));
     }
   }
 
