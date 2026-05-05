@@ -7,15 +7,21 @@ type WhereClause = {
   params: unknown[];
 };
 
+const serializeParam = (value: unknown) => {
+  if (value instanceof Date) return value.toISOString();
+
+  return value;
+};
+
 const OPERATORS = {
-  eq: { sql: "= ?", transform: (v: unknown) => v },
-  gt: { sql: "> ?", transform: (v: unknown) => v },
-  gte: { sql: ">= ?", transform: (v: unknown) => v },
-  lt: { sql: "< ?", transform: (v: unknown) => v },
-  lte: { sql: "<= ?", transform: (v: unknown) => v },
-  startsWith: { sql: "LIKE ?", transform: (v: unknown) => `${v}%` },
-  endsWith: { sql: "LIKE ?", transform: (v: unknown) => `%${v}` },
-  contains: { sql: "LIKE ?", transform: (v: unknown) => `%${v}%` },
+  eq: { sql: "= ?", transform: (v: unknown) => serializeParam(v) },
+  gt: { sql: "> ?", transform: (v: unknown) => serializeParam(v) },
+  gte: { sql: ">= ?", transform: (v: unknown) => serializeParam(v) },
+  lt: { sql: "< ?", transform: (v: unknown) => serializeParam(v) },
+  lte: { sql: "<= ?", transform: (v: unknown) => serializeParam(v) },
+  startsWith: { sql: "LIKE ?", transform: (v: unknown) => `${serializeParam(v)}%` },
+  endsWith: { sql: "LIKE ?", transform: (v: unknown) => `%${serializeParam(v)}` },
+  contains: { sql: "LIKE ?", transform: (v: unknown) => `%${serializeParam(v)}%` },
 } as const;
 
 const buildWhereClause = <T extends Table>(
@@ -38,7 +44,7 @@ const buildWhereClause = <T extends Table>(
 
     if (typeof value !== "object") {
       clauses.push(`${sqlName} = ?`);
-      params.push(value);
+      params.push(serializeParam(value));
       continue;
     }
 
