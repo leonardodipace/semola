@@ -36,6 +36,12 @@ const buildWhereClause = <T extends Table>(
 
     const sqlName = table.columns[typedKey].sqlName;
 
+    if (typeof value !== "object") {
+      clauses.push(`${sqlName} = ?`);
+      params.push(value);
+      continue;
+    }
+
     const entries = Object.entries(value);
 
     for (const entry of entries) {
