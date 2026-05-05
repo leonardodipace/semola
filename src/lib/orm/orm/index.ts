@@ -1,7 +1,12 @@
 import type { Adapter } from "../dialect/index.js";
 import { getDialect } from "../dialect/index.js";
 import type { Table } from "../table/types.js";
-import type { CreateOrmOptions, OrmClient, TableClient } from "./types.js";
+import type {
+  CreateOrmOptions,
+  FindManyOptions,
+  OrmClient,
+  TableClient,
+} from "./types.js";
 
 const createTableClient = <T extends Table>(
   sql: Bun.SQL,
@@ -11,7 +16,9 @@ const createTableClient = <T extends Table>(
   const dialect = getDialect(adapter, table);
 
   return {
-    findMany: async (options) => {
+    findMany: async <const TOptions extends FindManyOptions<T>>(
+      options?: TOptions,
+    ) => {
       return await dialect.findMany(sql, options);
     },
   };

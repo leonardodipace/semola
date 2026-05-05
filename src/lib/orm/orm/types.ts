@@ -69,14 +69,31 @@ export type TableWhere<T extends Table> = {
   [TColumnName in keyof T["columns"]]?: ColumnWhere<T["columns"][TColumnName]>;
 };
 
+export type TableSelect<T extends Table> = {
+  [TColumnName in keyof T["columns"]]?: true;
+};
+
 export type FindManyOptions<T extends Table> = {
   where?: TableWhere<T>;
+  select?: TableSelect<T>;
 };
 
 export type TableRow<T extends Table> = Prettify<{
   [TColumnName in keyof T["columns"]]: ColumnValue<T["columns"][TColumnName]>;
 }>;
 
+export type FindManyResult<
+  T extends Table,
+  TOptions extends FindManyOptions<T>,
+> = TOptions["select"] extends TableSelect<T>
+  ? Prettify<{
+      [K in keyof NonNullable<TOptions["select"]> &
+        keyof T["columns"]]: ColumnValue<T["columns"][K]>;
+    }>
+  : TableRow<T>;
+
 export type TableClient<T extends Table> = {
-  findMany: (options?: FindManyOptions<T>) => Promise<Array<TableRow<T>>>;
+  findMany<const TOptions extends FindManyOptions<T>>(
+    options?: TOptions,
+  ): Promise<Array<FindManyResult<T, TOptions>>>;
 };

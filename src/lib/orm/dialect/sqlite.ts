@@ -1,4 +1,4 @@
-import type { TableWhere } from "../orm/types.js";
+import type { TableSelect, TableWhere } from "../orm/types.js";
 import type { Table } from "../table/types.js";
 import type { Dialect } from "./types.js";
 
@@ -52,8 +52,31 @@ const buildWhereClause = <T extends Table>(
   return { sql: clauses.join(" AND "), params };
 };
 
-const buildSelectStatement = (tableName: string, where: string) => {
-  const base = `SELECT * FROM ${tableName}`;
+const buildSelectColumns = <T extends Table>(
+  table: T,
+  select?: TableSelect<T>,
+) => {
+  if (!select) return "*";
+
+  const keys = Object.keys(select);
+
+  return keys
+    .flatMap((k) => {
+      const sqlName = table.columns[k]?.sqlName;
+
+      if (!sqlName) return [];
+
+      return [sqlName];
+    })
+    .join(", ");
+};
+
+const buildSelectStatement = (
+  tableName: string,
+  columns: string,
+  where: string,
+) => {
+  const base = `SELECT ${columns} FROM ${tableName}`;
 
   if (!where) return base;
 
@@ -65,7 +88,8 @@ export const createSqliteDialect = <T extends Table>(table: T): Dialect<T> => {
     name: "sqlite",
     findMany: async (sql, options) => {
       const where = buildWhereClause(table, options?.where);
-      const statement = buildSelectStatement(table.sqlName, where.sql);
+      const columns = buildSelectColumns(table, options?.select);
+      const statement = buildSelectStatement(table.sqlName, columns, where.sql);
 
       console.log(statement, where.params);
 
