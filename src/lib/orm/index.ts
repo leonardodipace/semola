@@ -46,6 +46,7 @@ console.time("findMany");
 const users = await orm.users.findMany({
   where: {
     firstName: { eq: "John" },
+    email: { contains: "@example.com" },
   },
 });
 console.timeEnd("findMany");
