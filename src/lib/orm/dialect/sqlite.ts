@@ -16,10 +16,10 @@ const buildWhereClause = <T extends Table>(
   table: T,
   where?: TableWhere<T>,
 ): WhereClause => {
-  const clauses: string[] = ["1 = 1"];
+  const clauses: string[] = [];
   const params: unknown[] = [];
 
-  if (!where) return { sql: clauses.join(" AND "), params };
+  if (!where) return { sql: "", params };
 
   const entries = Object.entries(where);
 
@@ -119,7 +119,11 @@ const buildWhereClause = <T extends Table>(
 };
 
 const buildSelectStatement = (tableName: string, where: string) => {
-  return `SELECT * FROM ${quoteIdentifier(tableName)} WHERE ${where}`;
+  const base = `SELECT * FROM ${quoteIdentifier(tableName)}`;
+
+  if (!where) return base;
+
+  return `${base} WHERE ${where}`;
 };
 
 export const createSqliteDialect = <T extends Table>(table: T): Dialect<T> => {
@@ -128,6 +132,8 @@ export const createSqliteDialect = <T extends Table>(table: T): Dialect<T> => {
     findMany: async (sql, options) => {
       const where = buildWhereClause(table, options?.where);
       const statement = buildSelectStatement(table.sqlName, where.sql);
+
+      console.log(statement, where.params);
 
       return await sql.unsafe(statement, where.params);
     },
