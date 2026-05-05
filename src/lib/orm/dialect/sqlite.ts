@@ -52,11 +52,19 @@ const buildWhereClause = <T extends Table>(
   return { sql: clauses.join(" AND "), params };
 };
 
+const getColumnAlias = (sqlName: string, jsKey: string) => {
+  return `${sqlName} AS ${jsKey}`;
+};
+
 const buildSelectColumns = <T extends Table>(
   table: T,
   select?: TableSelect<T>,
 ) => {
-  if (!select) return "*";
+  if (!select) {
+    return Object.entries(table.columns)
+      .map(([k, col]) => getColumnAlias(col.sqlName, k))
+      .join(", ");
+  }
 
   const keys = Object.keys(select);
 
@@ -66,7 +74,7 @@ const buildSelectColumns = <T extends Table>(
 
       if (!sqlName) return [];
 
-      return [sqlName];
+      return [getColumnAlias(sqlName, k)];
     })
     .join(", ");
 };
