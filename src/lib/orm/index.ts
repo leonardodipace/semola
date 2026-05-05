@@ -10,7 +10,9 @@ const usersTable = defineTable("users", {
   firstName: string("first_name").notNull(),
   lastName: string("last_name").notNull(),
   email: string("email").notNull().unique(),
-  createdAt: date("created_at").notNull().default(() => new Date()),
+  createdAt: date("created_at")
+    .notNull()
+    .default(() => new Date()),
 });
 
 const orm = createOrm({

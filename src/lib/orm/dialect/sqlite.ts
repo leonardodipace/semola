@@ -19,9 +19,18 @@ const OPERATORS = {
   gte: { sql: ">= ?", transform: (v: unknown) => serializeParam(v) },
   lt: { sql: "< ?", transform: (v: unknown) => serializeParam(v) },
   lte: { sql: "<= ?", transform: (v: unknown) => serializeParam(v) },
-  startsWith: { sql: "LIKE ?", transform: (v: unknown) => `${serializeParam(v)}%` },
-  endsWith: { sql: "LIKE ?", transform: (v: unknown) => `%${serializeParam(v)}` },
-  contains: { sql: "LIKE ?", transform: (v: unknown) => `%${serializeParam(v)}%` },
+  startsWith: {
+    sql: "LIKE ?",
+    transform: (v: unknown) => `${serializeParam(v)}%`,
+  },
+  endsWith: {
+    sql: "LIKE ?",
+    transform: (v: unknown) => `%${serializeParam(v)}`,
+  },
+  contains: {
+    sql: "LIKE ?",
+    transform: (v: unknown) => `%${serializeParam(v)}%`,
+  },
 } as const;
 
 const buildWhereClause = <T extends Table>(
