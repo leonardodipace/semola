@@ -70,19 +70,10 @@ console.timeEnd("insert users");
 
 console.time("findMany");
 const users = await orm.users.findMany({
-  select: {
-    firstName: true,
-  },
-  where: {
-    firstName: "John",
-    email: {
-      contains: "@example.com",
-    },
-    createdAt: {
-      lt: now,
-    },
+  include: {
+    posts: true,
   },
 });
 console.timeEnd("findMany");
 
-console.log(users);
+console.log(users.map((u) => u.posts));

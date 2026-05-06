@@ -9,6 +9,7 @@ import type {
   OrmClient,
   Relations,
   TableClient,
+  TableRelations,
 } from "./types.js";
 
 export const many = <T extends Table>(table: () => T): HasMany<T> => {
@@ -25,15 +26,16 @@ export const one = <T extends Table>(table: () => T): HasOne<T> => {
   };
 };
 
-const createTableClient = <T extends Table>(
+const createTableClient = <T extends Table, TRelations extends TableRelations>(
   sql: Bun.SQL,
   table: T,
   adapter: Adapter,
-): TableClient<T> => {
+  _relations: TRelations,
+): TableClient<T, TRelations> => {
   const dialect = getDialect(adapter, table);
 
   return {
-    findMany: async <const TOptions extends FindManyOptions<T>>(
+    findMany: async <const TOptions extends FindManyOptions<T, TRelations>>(
       options?: TOptions,
     ) => {
       return await dialect.findMany(sql, options);
@@ -54,11 +56,16 @@ export const createOrm = <
 
   const resultEntries = Object.entries(options.tables).map(
     ([tableName, table]) => {
-      return [tableName, createTableClient(sql, table, options.adapter)];
+      const tableRelations = (options.relations?.[tableName] ??
+        {}) as TableRelations;
+      return [
+        tableName,
+        createTableClient(sql, table, options.adapter, tableRelations),
+      ];
     },
   );
 
-  const orm = Object.fromEntries(resultEntries) as OrmClient<T>;
+  const orm = Object.fromEntries(resultEntries) as OrmClient<T, R>;
 
   orm.$raw = sql;
 

@@ -30,12 +30,19 @@ export type CreateOrmOptions<
   relations?: R;
 };
 
-export type OrmClient<T extends Record<string, Table> = Record<string, Table>> =
-  {
-    [TTableName in keyof T]: TableClient<T[TTableName]>;
-  } & {
-    $raw: Bun.SQL;
-  };
+export type OrmClient<
+  T extends Record<string, Table> = Record<string, Table>,
+  R extends Relations = Relations,
+> = {
+  [TTableName in keyof T]: TableClient<
+    T[TTableName],
+    R[TTableName & string] extends TableRelations
+      ? R[TTableName & string]
+      : never
+  >;
+} & {
+  $raw: Bun.SQL;
+};
 
 type ColumnRuntimeValue<T extends Column["type"]> = ColumnRuntimeValueMap[T];
 
@@ -96,28 +103,59 @@ export type TableOrderBy<T extends Table> = {
   [TColumnName in keyof T["columns"]]?: "asc" | "desc";
 };
 
-export type FindManyOptions<T extends Table> = {
+export type FindManyOptions<
+  T extends Table,
+  TRelations extends TableRelations = TableRelations,
+> = {
   where?: TableWhere<T>;
   select?: TableSelect<T>;
   orderBy?: TableOrderBy<T>;
+  include?: Partial<Record<keyof TRelations, boolean>>;
 };
 
 export type TableRow<T extends Table> = Prettify<{
   [TColumnName in keyof T["columns"]]: ColumnValue<T["columns"][TColumnName]>;
 }>;
 
-export type FindManyResult<
+type RelationType<R extends HasMany<Table> | HasOne<Table>> =
+  R extends HasMany<infer T>
+    ? Array<TableRow<T>>
+    : R extends HasOne<infer T>
+      ? TableRow<T> | null
+      : never;
+
+type SelectResult<
   T extends Table,
   TOptions extends FindManyOptions<T>,
 > = TOptions["select"] extends TableSelect<T>
-  ? Prettify<{
+  ? {
       [K in keyof NonNullable<TOptions["select"]> &
         keyof T["columns"]]: ColumnValue<T["columns"][K]>;
-    }>
+    }
   : TableRow<T>;
 
-export type TableClient<T extends Table> = {
-  findMany<const TOptions extends FindManyOptions<T>>(
+type IncludeResult<
+  TRelations extends TableRelations,
+  TOptions extends FindManyOptions<Table, TRelations>,
+> = TOptions["include"] extends Record<string, true>
+  ? {
+      [K in keyof TOptions["include"]]: K extends keyof TRelations
+        ? RelationType<TRelations[K]>
+        : never;
+    }
+  : {};
+
+export type FindManyResult<
+  T extends Table,
+  TRelations extends TableRelations,
+  TOptions extends FindManyOptions<T, TRelations>,
+> = Prettify<SelectResult<T, TOptions> & IncludeResult<TRelations, TOptions>>;
+
+export type TableClient<
+  T extends Table,
+  TRelations extends TableRelations = TableRelations,
+> = {
+  findMany<const TOptions extends FindManyOptions<T, TRelations>>(
     options?: TOptions,
-  ): Promise<Array<FindManyResult<T, TOptions>>>;
+  ): Promise<Array<FindManyResult<T, TRelations, TOptions>>>;
 };
