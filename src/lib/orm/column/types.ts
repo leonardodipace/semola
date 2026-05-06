@@ -4,6 +4,9 @@ export type BaseColumn = {
   primaryKey?: boolean;
   unique?: boolean;
   hasDefault?: boolean;
+  references?: {
+    tableColumn: () => { sqlName: string };
+  };
 };
 
 type ColumnTypeState<TNullable extends boolean = boolean> = {
@@ -78,4 +81,7 @@ export type ColumnBuilder<
   default: (
     value: () => ColumnRuntimeValueMap[TType],
   ) => SetHasDefault<TType, TNullable>;
+  references: (
+    tableColumn: () => { sqlName: string },
+  ) => ColumnBuilder<TType, TNullable>;
 };

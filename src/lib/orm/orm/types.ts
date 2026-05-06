@@ -2,21 +2,40 @@ import type { Column, ColumnRuntimeValueMap } from "../column/types.js";
 import type { Adapter } from "../dialect/index.js";
 import type { Table } from "../table/types.js";
 
+export type HasMany<T extends Table> = {
+  _type: "hasMany";
+  _table: T;
+};
+
+export type HasOne<T extends Table> = {
+  _type: "hasOne";
+  _table: T;
+};
+
+export type TableRelations = Record<string, HasMany<Table> | HasOne<Table>>;
+
+export type Relations = Record<string, TableRelations>;
+
 type Prettify<T> = {
   [TKey in keyof T]: T[TKey];
 } & {};
 
-export type CreateOrmOptions<T extends Record<string, Table>> = {
+export type CreateOrmOptions<
+  T extends Record<string, Table> = Record<string, Table>,
+  R extends Relations = Relations,
+> = {
   adapter: Adapter;
   url: string;
   tables: T;
+  relations?: R;
 };
 
-export type OrmClient<T extends Record<string, Table>> = {
-  [TTableName in keyof T]: TableClient<T[TTableName]>;
-} & {
-  $raw: Bun.SQL;
-};
+export type OrmClient<T extends Record<string, Table> = Record<string, Table>> =
+  {
+    [TTableName in keyof T]: TableClient<T[TTableName]>;
+  } & {
+    $raw: Bun.SQL;
+  };
 
 type ColumnRuntimeValue<T extends Column["type"]> = ColumnRuntimeValueMap[T];
 

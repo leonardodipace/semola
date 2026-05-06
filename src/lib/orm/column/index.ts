@@ -56,6 +56,15 @@ const createColumnBuilder = <
     });
   };
 
+  const references = (tableColumn: () => { sqlName: string }) => {
+    return createColumnBuilder<TType, TNullable>({
+      ...column,
+      references: {
+        tableColumn,
+      },
+    });
+  };
+
   return {
     ...column,
     primaryKey,
@@ -63,6 +72,7 @@ const createColumnBuilder = <
     nullable,
     unique,
     default: defaultHandler,
+    references,
   };
 };
 

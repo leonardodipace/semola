@@ -1,6 +1,6 @@
-import type { Column } from "../column/types.js";
-
-export const defineTable = <const TColumns extends Record<string, Column>>(
+export const defineTable = <
+  const TColumns extends Record<string, { sqlName: string }>,
+>(
   sqlName: string,
   columns: TColumns,
 ) => {

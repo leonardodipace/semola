@@ -4,9 +4,26 @@ import type { Table } from "../table/types.js";
 import type {
   CreateOrmOptions,
   FindManyOptions,
+  HasMany,
+  HasOne,
   OrmClient,
+  Relations,
   TableClient,
 } from "./types.js";
+
+export const many = <T extends Table>(table: () => T): HasMany<T> => {
+  return {
+    _type: "hasMany",
+    _table: table(),
+  };
+};
+
+export const one = <T extends Table>(table: () => T): HasOne<T> => {
+  return {
+    _type: "hasOne",
+    _table: table(),
+  };
+};
 
 const createTableClient = <T extends Table>(
   sql: Bun.SQL,
@@ -24,8 +41,11 @@ const createTableClient = <T extends Table>(
   };
 };
 
-export const createOrm = <const T extends Record<string, Table>>(
-  options: CreateOrmOptions<T>,
+export const createOrm = <
+  const T extends Record<string, Table>,
+  const R extends Relations,
+>(
+  options: CreateOrmOptions<T, R>,
 ) => {
   const sql = new Bun.SQL({
     url: options.url,
