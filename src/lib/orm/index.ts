@@ -31,6 +31,7 @@ const orm = createOrm({
   url: ":memory:",
   tables: {
     users: usersTable,
+    posts: postsTable,
   },
   relations: {
     users: {
@@ -68,12 +69,18 @@ await orm.$raw`
 `;
 console.timeEnd("insert users");
 
-console.time("findMany");
-const users = await orm.users.findMany({
+console.time("findMany users");
+const _users = await orm.users.findMany({
   include: {
     posts: true,
   },
 });
-console.timeEnd("findMany");
+console.timeEnd("findMany users");
 
-console.log(users.map((u) => u.posts));
+console.time("findMany users");
+const _posts = await orm.posts.findMany({
+  include: {
+    author: true,
+  },
+});
+console.timeEnd("findMany users");

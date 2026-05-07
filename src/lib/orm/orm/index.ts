@@ -38,7 +38,7 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
     findMany: async <const TOptions extends FindManyOptions<T, TRelations>>(
       options?: TOptions,
     ) => {
-      return await dialect.findMany(sql, options);
+      return await dialect.findMany<TRelations, TOptions>(sql, options);
     },
   };
 };

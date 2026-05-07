@@ -122,19 +122,31 @@ export type TableRow<T extends Table> = Prettify<{
   [TColumnName in keyof T["columns"]]: ColumnValue<T["columns"][TColumnName]>;
 }>;
 
-type HasManyRelationResult<R extends HasMany<Table> | HasOne<Table>> =
-  Extract<R, HasMany<Table>> extends HasMany<infer T>
-    ? Array<TableRow<T>>
-    : never;
+type RelationTable<R extends HasMany<Table> | HasOne<Table>> = R extends {
+  _table: infer TTable;
+}
+  ? TTable
+  : never;
 
-type HasOneRelationResult<R extends HasMany<Table> | HasOne<Table>> =
-  Extract<R, HasOne<Table>> extends HasOne<infer T>
-    ? TableRow<T> | null
-    : never;
+type HasManyRelationType<R extends HasMany<Table> | HasOne<Table>> = R extends {
+  _type: "hasMany";
+}
+  ? Array<TableRow<RelationTable<R>>>
+  : never;
+
+type HasOneRelationType<R extends HasMany<Table> | HasOne<Table>> = R extends {
+  _type: "hasOne";
+}
+  ? TableRow<RelationTable<R>> | null
+  : never;
 
 type RelationType<R extends HasMany<Table> | HasOne<Table>> =
-  | HasManyRelationResult<R>
-  | HasOneRelationResult<R>;
+  | HasManyRelationType<R>
+  | HasOneRelationType<R>;
+
+type IncludedKeys<TInclude> = {
+  [K in keyof TInclude]: TInclude[K] extends true ? K : never;
+}[keyof TInclude];
 
 type SelectResult<
   T extends Table,
@@ -149,11 +161,11 @@ type SelectResult<
 type IncludeResult<
   TRelations extends TableRelations,
   TOptions extends FindManyOptions<Table, TRelations>,
-> = TOptions["include"] extends Record<string, true>
+> = TOptions["include"] extends Partial<Record<keyof TRelations, boolean>>
   ? {
-      [K in keyof TOptions["include"]]: K extends keyof TRelations
-        ? RelationType<TRelations[K]>
-        : never;
+      [K in IncludedKeys<
+        NonNullable<TOptions["include"]>
+      >]: K extends keyof TRelations ? RelationType<TRelations[K]> : never;
     }
   : {};
 
