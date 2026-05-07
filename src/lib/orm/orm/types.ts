@@ -36,13 +36,18 @@ export type OrmClient<
 > = {
   [TTableName in keyof T]: TableClient<
     T[TTableName],
-    R[TTableName & string] extends TableRelations
-      ? R[TTableName & string]
-      : never
+    TableRelationsFor<R, TTableName>
   >;
 } & {
   $raw: Bun.SQL;
 };
+
+type TableRelationsFor<
+  TRelations extends Relations,
+  TTableName extends PropertyKey,
+> = TTableName extends keyof TRelations
+  ? TRelations[TTableName]
+  : Record<never, never>;
 
 type ColumnRuntimeValue<T extends Column["type"]> = ColumnRuntimeValueMap[T];
 
@@ -117,12 +122,19 @@ export type TableRow<T extends Table> = Prettify<{
   [TColumnName in keyof T["columns"]]: ColumnValue<T["columns"][TColumnName]>;
 }>;
 
-type RelationType<R extends HasMany<Table> | HasOne<Table>> =
-  R extends HasMany<infer T>
+type HasManyRelationResult<R extends HasMany<Table> | HasOne<Table>> =
+  Extract<R, HasMany<Table>> extends HasMany<infer T>
     ? Array<TableRow<T>>
-    : R extends HasOne<infer T>
-      ? TableRow<T> | null
-      : never;
+    : never;
+
+type HasOneRelationResult<R extends HasMany<Table> | HasOne<Table>> =
+  Extract<R, HasOne<Table>> extends HasOne<infer T>
+    ? TableRow<T> | null
+    : never;
+
+type RelationType<R extends HasMany<Table> | HasOne<Table>> =
+  | HasManyRelationResult<R>
+  | HasOneRelationResult<R>;
 
 type SelectResult<
   T extends Table,
