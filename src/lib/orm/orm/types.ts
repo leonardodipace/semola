@@ -122,27 +122,39 @@ export type TableRow<T extends Table> = Prettify<{
   [TColumnName in keyof T["columns"]]: ColumnValue<T["columns"][TColumnName]>;
 }>;
 
-type RelationTable<R extends HasMany<Table> | HasOne<Table>> = R extends {
-  _table: infer TTable;
-}
-  ? TTable
+type HasManyRelationType<R extends HasMany<Table> | HasOne<Table>> =
+  R extends HasMany<infer TTable> ? Array<TableRow<TTable>> : never;
+
+type NullableRelationRow<
+  TTable extends Table,
+  TNullable extends boolean,
+> = TNullable extends false ? TableRow<TTable> : TableRow<TTable> | null;
+
+type HasOneRelationType<
+  R extends HasMany<Table> | HasOne<Table>,
+  TNullable extends boolean,
+> = R extends HasOne<infer TTable>
+  ? NullableRelationRow<TTable, TNullable>
   : never;
 
-type HasManyRelationType<R extends HasMany<Table> | HasOne<Table>> = R extends {
-  _type: "hasMany";
-}
-  ? Array<TableRow<RelationTable<R>>>
+type RelationForeignKeyName<TRelationName extends PropertyKey> =
+  TRelationName extends string ? `${TRelationName}Id` : never;
+
+type ForeignKeyColumnForRelation<
+  TTable extends Table,
+  TRelationName extends PropertyKey,
+> = RelationForeignKeyName<TRelationName> extends keyof TTable["columns"]
+  ? TTable["columns"][RelationForeignKeyName<TRelationName>]
   : never;
 
-type HasOneRelationType<R extends HasMany<Table> | HasOne<Table>> = R extends {
-  _type: "hasOne";
-}
-  ? TableRow<RelationTable<R>> | null
-  : never;
+type IsColumnNullable<TColumn> = TColumn extends Column
+  ? TColumn["_meta"]["isNullable"]
+  : true;
 
-type RelationType<R extends HasMany<Table> | HasOne<Table>> =
-  | HasManyRelationType<R>
-  | HasOneRelationType<R>;
+type IsRelationNullable<
+  TTable extends Table,
+  TRelationName extends PropertyKey,
+> = IsColumnNullable<ForeignKeyColumnForRelation<TTable, TRelationName>>;
 
 type IncludedKeys<TInclude> = {
   [K in keyof TInclude]: TInclude[K] extends true ? K : never;
@@ -159,13 +171,18 @@ type SelectResult<
   : TableRow<T>;
 
 type IncludeResult<
+  T extends Table,
   TRelations extends TableRelations,
   TOptions extends FindManyOptions<Table, TRelations>,
 > = TOptions["include"] extends Partial<Record<keyof TRelations, boolean>>
   ? {
       [K in IncludedKeys<
         NonNullable<TOptions["include"]>
-      >]: K extends keyof TRelations ? RelationType<TRelations[K]> : never;
+      >]: K extends keyof TRelations
+        ?
+            | HasManyRelationType<TRelations[K]>
+            | HasOneRelationType<TRelations[K], IsRelationNullable<T, K>>
+        : never;
     }
   : {};
 
@@ -173,7 +190,9 @@ export type FindManyResult<
   T extends Table,
   TRelations extends TableRelations,
   TOptions extends FindManyOptions<T, TRelations>,
-> = Prettify<SelectResult<T, TOptions> & IncludeResult<TRelations, TOptions>>;
+> = Prettify<
+  SelectResult<T, TOptions> & IncludeResult<T, TRelations, TOptions>
+>;
 
 export type TableClient<
   T extends Table,
