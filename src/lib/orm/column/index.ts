@@ -56,7 +56,7 @@ const createColumnBuilder = <
     });
   };
 
-  const references = (tableColumn: () => { sqlName: string }) => {
+  const referencesBuilder = (tableColumn: () => { sqlName: string }) => {
     return createColumnBuilder<TType, TNullable>({
       ...column,
       references: {
@@ -64,6 +64,12 @@ const createColumnBuilder = <
       },
     });
   };
+
+  const referencesMetadata = {
+    tableColumn: column.references?.tableColumn,
+  };
+
+  const references = Object.assign(referencesBuilder, referencesMetadata);
 
   return {
     ...column,
