@@ -1,10 +1,27 @@
-import type { TableOrderBy, TableSelect, TableWhere } from "../orm/types.js";
+import type {
+  TableInclude,
+  TableOrderBy,
+  TableRelations,
+  TableSelect,
+  TableWhere,
+} from "../orm/types.js";
 import type { Table } from "../table/types.js";
 import type { Dialect } from "./types.js";
 
 type WhereClause = {
   sql: string;
   params: unknown[];
+};
+
+type IncludeDescriptor = {
+  name: string;
+  type: "hasMany" | "hasOne";
+};
+
+type IncludeClause = {
+  sql: string;
+  params: unknown[];
+  descriptors: IncludeDescriptor[];
 };
 
 const serializeParam = (value: unknown) => {
@@ -126,6 +143,151 @@ const buildOrderByClause = <T extends Table>(
   return clauses.join(", ");
 };
 
+const getPrimaryKeyColumn = (table: Table) => {
+  const entries = Object.entries(table.columns);
+  const primaryKey = entries.find(([, column]) => column.primaryKey);
+
+  if (!primaryKey) {
+    throw new Error(`Missing primary key on table ${table.sqlName}`);
+  }
+
+  return primaryKey[1];
+};
+
+const resolveHasManyForeignKeyColumn = (
+  sourceTable: Table,
+  targetTable: Table,
+) => {
+  const sourcePrimaryKey = getPrimaryKeyColumn(sourceTable);
+
+  const entries = Object.entries(targetTable.columns);
+  const candidates = entries.filter(([, column]) => {
+    if (!column.references) return false;
+
+    const getReferencedColumn = column.references.tableColumn;
+
+    if (!getReferencedColumn) return false;
+
+    const referencedColumn = getReferencedColumn();
+
+    return referencedColumn === sourcePrimaryKey;
+  });
+
+  if (!candidates.length) {
+    throw new Error(
+      `Missing hasMany foreign key from ${targetTable.sqlName} to ${sourceTable.sqlName}`,
+    );
+  }
+
+  if (candidates.length > 1) {
+    throw new Error(
+      `Ambiguous hasMany foreign key from ${targetTable.sqlName} to ${sourceTable.sqlName}`,
+    );
+  }
+
+  const candidate = candidates[0];
+
+  if (!candidate) {
+    throw new Error(
+      `Missing hasMany foreign key from ${targetTable.sqlName} to ${sourceTable.sqlName}`,
+    );
+  }
+
+  return candidate[1];
+};
+
+const buildJsonObjectExpression = (alias: string, table: Table) => {
+  const columns = Object.entries(table.columns);
+
+  const pairs = columns
+    .flatMap(([jsKey, column]) => {
+      return [`'${jsKey}'`, `${alias}.${column.sqlName}`];
+    })
+    .join(", ");
+
+  return `json_object(${pairs})`;
+};
+
+const buildIncludeClause = <T extends Table, R extends TableRelations>(
+  table: T,
+  relations: R,
+  include?: TableInclude<R>,
+) => {
+  if (!include) {
+    return {
+      sql: "",
+      params: [],
+      descriptors: [],
+    } satisfies IncludeClause;
+  }
+
+  const enabledRelations = Object.entries(include).filter(([, enabled]) => {
+    return enabled === true;
+  });
+
+  if (!enabledRelations.length) {
+    return {
+      sql: "",
+      params: [],
+      descriptors: [],
+    } satisfies IncludeClause;
+  }
+
+  const sourcePrimaryKey = getPrimaryKeyColumn(table);
+  const clauses: string[] = [];
+  const descriptors: IncludeDescriptor[] = [];
+
+  for (const [relationName] of enabledRelations) {
+    const relation = relations[relationName as keyof R];
+
+    if (!relation) {
+      throw new Error(
+        `Unknown relation ${relationName} on table ${table.sqlName}`,
+      );
+    }
+
+    const relationTable = relation._table;
+    const relationAlias = `${relationName}__${relationTable.sqlName}`;
+    const relationJsonObject = buildJsonObjectExpression(
+      relationAlias,
+      relationTable,
+    );
+
+    if (relation._type === "hasMany") {
+      const foreignKey = resolveHasManyForeignKeyColumn(table, relationTable);
+      clauses.push(
+        `COALESCE((SELECT json_group_array(${relationJsonObject}) FROM ${relationTable.sqlName} AS ${relationAlias} WHERE ${relationAlias}.${foreignKey.sqlName} = ${table.sqlName}.${sourcePrimaryKey.sqlName}), '[]') AS ${relationName}`,
+      );
+      descriptors.push({ name: relationName, type: "hasMany" });
+      continue;
+    }
+
+    const localForeignKeyName = `${relationName}Id`;
+    const localForeignKeyEntry = Object.entries(table.columns).find(
+      ([columnName]) => columnName === localForeignKeyName,
+    );
+    const localForeignKey = localForeignKeyEntry?.[1];
+
+    if (!localForeignKey) {
+      throw new Error(
+        `Missing hasOne foreign key column ${localForeignKeyName} on ${table.sqlName}`,
+      );
+    }
+
+    const relationPrimaryKey = getPrimaryKeyColumn(relationTable);
+    clauses.push(
+      `(SELECT ${relationJsonObject} FROM ${relationTable.sqlName} AS ${relationAlias} WHERE ${relationAlias}.${relationPrimaryKey.sqlName} = ${table.sqlName}.${localForeignKey.sqlName} LIMIT 1) AS ${relationName}`,
+    );
+    descriptors.push({ name: relationName, type: "hasOne" });
+  }
+
+  return {
+    sql: clauses.join(", "),
+    params: [],
+    descriptors,
+  } satisfies IncludeClause;
+};
+
 const buildSelectStatement = (
   tableName: string,
   columns: string,
@@ -141,23 +303,57 @@ const buildSelectStatement = (
   return query;
 };
 
-export const createSqliteDialect = <T extends Table>(table: T): Dialect<T> => {
+export const createSqliteDialect = <T extends Table, R extends TableRelations>(
+  table: T,
+  relations: R,
+): Dialect<T, R> => {
   return {
     name: "sqlite",
     findMany: async (sql, options) => {
       const where = buildWhereClause(table, options?.where);
       const columns = buildSelectColumns(table, options?.select);
       const orderBy = buildOrderByClause(table, options?.orderBy);
+      const include = buildIncludeClause(table, relations, options?.include);
+      const selectColumns = include.sql
+        ? `${columns}, ${include.sql}`
+        : columns;
+      const params = [...where.params, ...include.params];
       const statement = buildSelectStatement(
         table.sqlName,
-        columns,
+        selectColumns,
         where.sql,
         orderBy,
       );
 
-      console.log(statement, where.params);
+      console.log(statement, params);
 
-      return [...(await sql.unsafe(statement, where.params))];
+      const rows = [...(await sql.unsafe(statement, params))];
+
+      if (!include.descriptors.length) {
+        return rows;
+      }
+
+      return rows.map((row) => {
+        const result = { ...row };
+
+        for (const descriptor of include.descriptors) {
+          const value = row[descriptor.name];
+
+          if (value === null) {
+            if (descriptor.type === "hasMany") {
+              result[descriptor.name] = [];
+            }
+
+            continue;
+          }
+
+          if (typeof value !== "string") continue;
+
+          result[descriptor.name] = JSON.parse(value);
+        }
+
+        return result;
+      });
     },
   };
 };
