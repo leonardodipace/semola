@@ -94,6 +94,7 @@ console.timeEnd("insert posts");
 
 console.time("findMany users");
 const users = await orm.users.findMany({
+  take: 1,
   include: {
     posts: true,
   },
@@ -104,6 +105,7 @@ console.log(users);
 
 console.time("findMany posts");
 const posts = await orm.posts.findMany({
+  take: 1,
   include: {
     author: true,
   },

@@ -119,6 +119,8 @@ export type FindManyOptions<
   select?: TableSelect<T>;
   orderBy?: TableOrderBy<T>;
   include?: TableInclude<TRelations>;
+  take?: number;
+  skip?: number;
 };
 
 export type TableRow<T extends Table> = Prettify<{

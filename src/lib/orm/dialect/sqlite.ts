@@ -24,6 +24,11 @@ type IncludeClause = {
   descriptors: IncludeDescriptor[];
 };
 
+type PaginationClause = {
+  sql: string;
+  params: unknown[];
+};
+
 const serializeParam = (value: unknown) => {
   if (value instanceof Date) return value.toISOString();
 
@@ -288,17 +293,59 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
   } satisfies IncludeClause;
 };
 
+const buildPaginationClause = (
+  take?: number,
+  skip?: number,
+): PaginationClause => {
+  const params: unknown[] = [];
+
+  if (take === undefined) {
+    if (skip === undefined) {
+      return {
+        sql: "",
+        params,
+      };
+    }
+
+    params.push(skip);
+
+    return {
+      sql: "LIMIT -1 OFFSET ?",
+      params,
+    };
+  }
+
+  params.push(take);
+
+  if (skip === undefined) {
+    return {
+      sql: "LIMIT ?",
+      params,
+    };
+  }
+
+  params.push(skip);
+
+  return {
+    sql: "LIMIT ? OFFSET ?",
+    params,
+  };
+};
+
 const buildSelectStatement = (
   tableName: string,
   columns: string,
   where: string,
   orderBy: string,
+  pagination: string,
 ) => {
   let query = `SELECT ${columns} FROM ${tableName}`;
 
   if (where) query = `${query} WHERE ${where}`;
 
   if (orderBy) query = `${query} ORDER BY ${orderBy}`;
+
+  if (pagination) query = `${query} ${pagination}`;
 
   return query;
 };
@@ -314,15 +361,17 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
       const columns = buildSelectColumns(table, options?.select);
       const orderBy = buildOrderByClause(table, options?.orderBy);
       const include = buildIncludeClause(table, relations, options?.include);
+      const pagination = buildPaginationClause(options?.take, options?.skip);
       const selectColumns = include.sql
         ? `${columns}, ${include.sql}`
         : columns;
-      const params = [...where.params, ...include.params];
+      const params = [...where.params, ...include.params, ...pagination.params];
       const statement = buildSelectStatement(
         table.sqlName,
         selectColumns,
         where.sql,
         orderBy,
+        pagination.sql,
       );
 
       console.log(statement, params);
