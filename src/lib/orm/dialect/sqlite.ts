@@ -37,11 +37,26 @@ const serializeParam = (value: unknown) => {
 };
 
 const OPERATORS = {
-  eq: { sql: "= ?", transform: (v: unknown) => serializeParam(v) },
-  gt: { sql: "> ?", transform: (v: unknown) => serializeParam(v) },
-  gte: { sql: ">= ?", transform: (v: unknown) => serializeParam(v) },
-  lt: { sql: "< ?", transform: (v: unknown) => serializeParam(v) },
-  lte: { sql: "<= ?", transform: (v: unknown) => serializeParam(v) },
+  eq: {
+    sql: "= ?",
+    transform: (v: unknown) => serializeParam(v),
+  },
+  gt: {
+    sql: "> ?",
+    transform: (v: unknown) => serializeParam(v),
+  },
+  gte: {
+    sql: ">= ?",
+    transform: (v: unknown) => serializeParam(v),
+  },
+  lt: {
+    sql: "< ?",
+    transform: (v: unknown) => serializeParam(v),
+  },
+  lte: {
+    sql: "<= ?",
+    transform: (v: unknown) => serializeParam(v),
+  },
   startsWith: {
     sql: "LIKE ?",
     transform: (v: unknown) => `${serializeParam(v)}%`,
