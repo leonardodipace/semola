@@ -108,6 +108,9 @@ export type TableOrderBy<T extends Table> = {
   [TColumnName in keyof T["columns"]]?: "asc" | "desc";
 };
 
+export type TableInclude<TRelations extends TableRelations = TableRelations> =
+  Partial<Record<keyof TRelations, boolean>>;
+
 export type FindManyOptions<
   T extends Table,
   TRelations extends TableRelations = TableRelations,
@@ -115,7 +118,7 @@ export type FindManyOptions<
   where?: TableWhere<T>;
   select?: TableSelect<T>;
   orderBy?: TableOrderBy<T>;
-  include?: Partial<Record<keyof TRelations, boolean>>;
+  include?: TableInclude<TRelations>;
 };
 
 export type TableRow<T extends Table> = Prettify<{
@@ -174,7 +177,7 @@ type IncludeResult<
   T extends Table,
   TRelations extends TableRelations,
   TOptions extends FindManyOptions<Table, TRelations>,
-> = TOptions["include"] extends Partial<Record<keyof TRelations, boolean>>
+> = TOptions["include"] extends TableInclude<TRelations>
   ? {
       [K in IncludedKeys<
         NonNullable<TOptions["include"]>
