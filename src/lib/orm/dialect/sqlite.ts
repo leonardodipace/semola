@@ -374,8 +374,6 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
         pagination.sql,
       );
 
-      console.log(statement, params);
-
       const rows = [...(await sql.unsafe(statement, params))];
 
       if (!include.descriptors.length) {
