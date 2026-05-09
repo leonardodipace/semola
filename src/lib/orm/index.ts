@@ -43,7 +43,7 @@ const orm = createOrm({
   },
 });
 
-console.time("create table");
+console.time("create tables");
 await orm.$raw`
   CREATE TABLE users (
     id TEXT PRIMARY KEY NOT NULL,
@@ -53,34 +53,61 @@ await orm.$raw`
     created_at DATETIME NOT NULL
   )
 `;
-console.timeEnd("create table");
+
+await orm.$raw`
+  CREATE TABLE posts (
+    id TEXT PRIMARY KEY NOT NULL,
+    title TEXT NOT NULL,
+    author_id TEXT NOT NULL
+  )
+`;
+console.timeEnd("create tables");
 
 console.time("insert users");
 const now = new Date();
 const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+const johnId = Bun.randomUUIDv7();
+const janeId = Bun.randomUUIDv7();
+const bobId = Bun.randomUUIDv7();
+const aliceId = Bun.randomUUIDv7();
+const charlieId = Bun.randomUUIDv7();
 
 await orm.$raw`
   INSERT INTO users (id, first_name, last_name, email, created_at) VALUES
-  (${Bun.randomUUIDv7()}, 'John', 'Doe', 'john@example.com', ${oneHourAgo.toISOString()}),
-  (${Bun.randomUUIDv7()}, 'Jane', 'Smith', 'jane@example.com', ${oneHourAgo.toISOString()}),
-  (${Bun.randomUUIDv7()}, 'Bob', 'Johnson', 'bob@example.com', ${now.toISOString()}),
-  (${Bun.randomUUIDv7()}, 'Alice', 'Williams', 'alice@example.com', ${now.toISOString()}),
-  (${Bun.randomUUIDv7()}, 'Charlie', 'Brown', 'charlie@example.com', ${now.toISOString()})
+  (${johnId}, 'John', 'Doe', 'john@example.com', ${oneHourAgo.toISOString()}),
+  (${janeId}, 'Jane', 'Smith', 'jane@example.com', ${oneHourAgo.toISOString()}),
+  (${bobId}, 'Bob', 'Johnson', 'bob@example.com', ${now.toISOString()}),
+  (${aliceId}, 'Alice', 'Williams', 'alice@example.com', ${now.toISOString()}),
+  (${charlieId}, 'Charlie', 'Brown', 'charlie@example.com', ${now.toISOString()})
 `;
 console.timeEnd("insert users");
 
+console.time("insert posts");
+await orm.$raw`
+  INSERT INTO posts (id, title, author_id) VALUES
+  (${Bun.randomUUIDv7()}, 'Hello World', ${johnId}),
+  (${Bun.randomUUIDv7()}, 'SQLite include demo', ${johnId}),
+  (${Bun.randomUUIDv7()}, 'Using Semola ORM', ${janeId}),
+  (${Bun.randomUUIDv7()}, 'Composability matters', ${bobId})
+`;
+console.timeEnd("insert posts");
+
 console.time("findMany users");
-const _users = await orm.users.findMany({
+const users = await orm.users.findMany({
   include: {
     posts: true,
   },
 });
 console.timeEnd("findMany users");
 
-console.time("findMany users");
-const _posts = await orm.posts.findMany({
+console.log(users);
+
+console.time("findMany posts");
+const posts = await orm.posts.findMany({
   include: {
     author: true,
   },
 });
-console.timeEnd("findMany users");
+console.timeEnd("findMany posts");
+
+console.log(posts);
