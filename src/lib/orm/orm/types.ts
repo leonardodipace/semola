@@ -94,7 +94,10 @@ type ColumnWhereOperatorsMap<T extends Column> = {
 type ColumnWhereOperators<T extends Column> =
   ColumnWhereOperatorsMap<T>[T["type"]];
 
-type ColumnWhere<T extends Column> = ColumnValue<T> | ColumnWhereOperators<T>;
+type ColumnWhere<T extends Column> =
+  ColumnRuntimeValue<T["type"]> extends object
+    ? ColumnWhereOperators<T>
+    : ColumnValue<T> | ColumnWhereOperators<T>;
 
 export type TableWhere<T extends Table> = {
   [TColumnName in keyof T["columns"]]?: ColumnWhere<T["columns"][TColumnName]>;
