@@ -1,6 +1,8 @@
 import type {
   FindManyOptions,
   FindManyResult,
+  FindUniqueOptions,
+  FindUniqueResult,
   TableRelations,
 } from "../orm/types.js";
 import type { Table } from "../table/types.js";
@@ -16,4 +18,9 @@ export type Dialect<
     sql: Bun.SQL,
     options?: TOptions,
   ): Promise<Array<FindManyResult<T, TRelations, TOptions>>>;
+
+  findUnique<const TOptions extends FindUniqueOptions<T, TRelations>>(
+    sql: Bun.SQL,
+    options: TOptions,
+  ): Promise<FindUniqueResult<T, TRelations, TOptions>>;
 };

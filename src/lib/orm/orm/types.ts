@@ -20,6 +20,14 @@ type Prettify<T> = {
   [TKey in keyof T]: T[TKey];
 } & {};
 
+type ExactlyOne<T extends Record<PropertyKey, unknown>> = {
+  [TKey in keyof T]: {
+    [TSelected in TKey]-?: T[TSelected];
+  } & {
+    [TOmitted in Exclude<keyof T, TKey>]?: never;
+  };
+}[keyof T];
+
 export type CreateOrmOptions<
   T extends Record<string, Table> = Record<string, Table>,
   R extends Relations = Relations,
@@ -126,6 +134,49 @@ export type FindManyOptions<
   skip?: number;
 };
 
+type TableColumns<T extends Table> = T["columns"];
+
+type TableColumnByName<
+  T extends Table,
+  TColumnName extends keyof TableColumns<T>,
+> = TableColumns<T>[TColumnName];
+
+type IsUniqueColumn<TColumn extends Column> =
+  TColumn["_meta"]["isPrimaryKey"] extends true
+    ? true
+    : TColumn["_meta"]["isUnique"] extends true
+      ? true
+      : false;
+
+type FindUniqueColumnValue<TColumn extends Column> = ColumnValue<TColumn>;
+
+type UniqueColumnKeys<T extends Table> = {
+  [TColumnName in keyof TableColumns<T>]: IsUniqueColumn<
+    TableColumnByName<T, TColumnName>
+  > extends true
+    ? TColumnName
+    : never;
+}[keyof TableColumns<T>];
+
+type UniqueColumnWhereShape<T extends Table> = {
+  [TColumnName in UniqueColumnKeys<T>]: FindUniqueColumnValue<
+    TableColumnByName<T, TColumnName>
+  >;
+};
+
+export type FindUniqueWhere<T extends Table> = ExactlyOne<
+  UniqueColumnWhereShape<T>
+>;
+
+export type FindUniqueOptions<
+  T extends Table,
+  TRelations extends TableRelations = TableRelations,
+> = {
+  where: FindUniqueWhere<T>;
+  select?: TableSelect<T>;
+  include?: TableInclude<TRelations>;
+};
+
 export type TableRow<T extends Table> = Prettify<{
   [TColumnName in keyof T["columns"]]: ColumnValue<T["columns"][TColumnName]>;
 }>;
@@ -170,7 +221,7 @@ type IncludedKeys<TInclude> = {
 
 type SelectResult<
   T extends Table,
-  TOptions extends FindManyOptions<T>,
+  TOptions extends { select?: TableSelect<T> },
 > = TOptions["select"] extends TableSelect<T>
   ? {
       [K in keyof NonNullable<TOptions["select"]> &
@@ -181,7 +232,7 @@ type SelectResult<
 type IncludeResult<
   T extends Table,
   TRelations extends TableRelations,
-  TOptions extends FindManyOptions<Table, TRelations>,
+  TOptions extends { include?: TableInclude<TRelations> },
 > = TOptions["include"] extends TableInclude<TRelations>
   ? {
       [K in IncludedKeys<
@@ -202,6 +253,14 @@ export type FindManyResult<
   SelectResult<T, TOptions> & IncludeResult<T, TRelations, TOptions>
 >;
 
+export type FindUniqueResult<
+  T extends Table,
+  TRelations extends TableRelations,
+  TOptions extends FindUniqueOptions<T, TRelations>,
+> = Prettify<
+  SelectResult<T, TOptions> & IncludeResult<T, TRelations, TOptions>
+> | null;
+
 export type TableClient<
   T extends Table,
   TRelations extends TableRelations = TableRelations,
@@ -209,4 +268,8 @@ export type TableClient<
   findMany<const TOptions extends FindManyOptions<T, TRelations>>(
     options?: TOptions,
   ): Promise<Array<FindManyResult<T, TRelations, TOptions>>>;
+
+  findUnique<const TOptions extends FindUniqueOptions<T, TRelations>>(
+    options: TOptions,
+  ): Promise<FindUniqueResult<T, TRelations, TOptions>>;
 };

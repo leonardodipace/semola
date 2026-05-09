@@ -1,5 +1,5 @@
 import { date, string, uuid } from "./column/index.js";
-import { createOrm, many, one } from "./orm/index.js";
+import { createOrm } from "./orm/index.js";
 import { defineTable } from "./table/index.js";
 
 const usersTable = defineTable("users", {
@@ -15,31 +15,11 @@ const usersTable = defineTable("users", {
     .default(() => new Date()),
 });
 
-const postsTable = defineTable("posts", {
-  id: uuid("id")
-    .primaryKey()
-    .notNull()
-    .default(() => Bun.randomUUIDv7()),
-  title: string("title").notNull(),
-  authorId: uuid("author_id")
-    .notNull()
-    .references(() => usersTable.columns.id),
-});
-
 const orm = createOrm({
   adapter: "sqlite",
   url: ":memory:",
   tables: {
     users: usersTable,
-    posts: postsTable,
-  },
-  relations: {
-    users: {
-      posts: many(() => postsTable),
-    },
-    posts: {
-      author: one(() => usersTable),
-    },
   },
 });
 
@@ -82,34 +62,19 @@ await orm.$raw`
 `;
 console.timeEnd("insert users");
 
-console.time("insert posts");
-await orm.$raw`
-  INSERT INTO posts (id, title, author_id) VALUES
-  (${Bun.randomUUIDv7()}, 'Hello World', ${johnId}),
-  (${Bun.randomUUIDv7()}, 'SQLite include demo', ${johnId}),
-  (${Bun.randomUUIDv7()}, 'Using Semola ORM', ${janeId}),
-  (${Bun.randomUUIDv7()}, 'Composability matters', ${bobId})
-`;
-console.timeEnd("insert posts");
-
-console.time("findMany users");
-const users = await orm.users.findMany({
+console.time("findMany");
+await orm.users.findMany({
   take: 1,
   include: {
     posts: true,
   },
 });
-console.timeEnd("findMany users");
+console.timeEnd("findMany");
 
-console.log(users);
-
-console.time("findMany posts");
-const posts = await orm.posts.findMany({
-  take: 1,
-  include: {
-    author: true,
+console.time("findUnique");
+await orm.users.findUnique({
+  where: {
+    id: "user-1",
   },
 });
-console.timeEnd("findMany posts");
-
-console.log(posts);
+console.timeEnd("findUnique");

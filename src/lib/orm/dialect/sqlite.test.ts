@@ -3,9 +3,10 @@ import { date, string, uuid } from "../column/index.js";
 import { many, one } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
 import {
-  buildSqliteFindManyQuery,
-  parseSqliteIncludeRows,
-  type SqliteIncludeDescriptor,
+  buildFindManyQuery,
+  buildFindUniqueQuery,
+  type IncludeDescriptor,
+  parseIncludeRows,
 } from "./sqlite.js";
 
 const usersTable = defineTable("users", {
@@ -22,11 +23,11 @@ const postsTable = defineTable("posts", {
     .references(() => usersTable.columns.id),
 });
 
-describe("buildSqliteFindManyQuery", () => {
+describe("buildFindManyQuery", () => {
   test("builds a select statement with where operators, ordering, and pagination", () => {
     const createdAfter = new Date("2025-01-01T00:00:00.000Z");
 
-    const query = buildSqliteFindManyQuery(
+    const query = buildFindManyQuery(
       usersTable,
       { posts: many(() => postsTable) },
       {
@@ -49,7 +50,7 @@ describe("buildSqliteFindManyQuery", () => {
   });
 
   test("builds offset-only pagination with LIMIT -1 OFFSET", () => {
-    const query = buildSqliteFindManyQuery(usersTable, {}, { skip: 3 });
+    const query = buildFindManyQuery(usersTable, {}, { skip: 3 });
 
     expect(query.statement).toBe(
       "SELECT id AS id, first_name AS firstName, created_at AS createdAt FROM users LIMIT -1 OFFSET ?",
@@ -58,7 +59,7 @@ describe("buildSqliteFindManyQuery", () => {
   });
 
   test("builds hasMany include subquery SQL", () => {
-    const query = buildSqliteFindManyQuery(
+    const query = buildFindManyQuery(
       usersTable,
       { posts: many(() => postsTable) },
       {
@@ -76,7 +77,7 @@ describe("buildSqliteFindManyQuery", () => {
   });
 
   test("builds hasOne include subquery SQL", () => {
-    const query = buildSqliteFindManyQuery(
+    const query = buildFindManyQuery(
       postsTable,
       { author: one(() => usersTable) },
       {
@@ -95,7 +96,7 @@ describe("buildSqliteFindManyQuery", () => {
 
   test("throws for unknown relation names", () => {
     expect(() =>
-      buildSqliteFindManyQuery(
+      buildFindManyQuery(
         usersTable,
         {},
         {
@@ -112,7 +113,7 @@ describe("buildSqliteFindManyQuery", () => {
     });
 
     expect(() =>
-      buildSqliteFindManyQuery(
+      buildFindManyQuery(
         usersTable,
         { comments: many(() => commentsTable) },
         {
@@ -130,7 +131,7 @@ describe("buildSqliteFindManyQuery", () => {
     });
 
     expect(() =>
-      buildSqliteFindManyQuery(
+      buildFindManyQuery(
         usersTable,
         { memberships: many(() => membershipsTable) },
         {
@@ -147,7 +148,7 @@ describe("buildSqliteFindManyQuery", () => {
     });
 
     expect(() =>
-      buildSqliteFindManyQuery(
+      buildFindManyQuery(
         usersTable,
         { profile: one(() => profilesTable) },
         {
@@ -158,12 +159,52 @@ describe("buildSqliteFindManyQuery", () => {
   });
 });
 
-describe("parseSqliteIncludeRows", () => {
+describe("buildFindUniqueQuery", () => {
+  test("builds a select statement with LIMIT 1", () => {
+    const query = buildFindUniqueQuery(
+      usersTable,
+      {},
+      {
+        where: {
+          id: "user-1",
+        },
+      },
+    );
+
+    expect(query.statement).toBe(
+      "SELECT id AS id, first_name AS firstName, created_at AS createdAt FROM users WHERE id = ? LIMIT 1",
+    );
+    expect(query.params).toEqual(["user-1"]);
+    expect(query.includeDescriptors).toEqual([]);
+  });
+
+  test("throws when runtime where payload has multiple keys", () => {
+    const where = {
+      id: "user-1",
+    };
+
+    Object.assign(where, {
+      firstName: "John",
+    });
+
+    expect(() =>
+      buildFindUniqueQuery(
+        usersTable,
+        {},
+        {
+          where,
+        },
+      ),
+    ).toThrow("findUnique requires exactly one where key");
+  });
+});
+
+describe("parseIncludeRows", () => {
   test("parses JSON include values and normalizes null hasMany values", () => {
     const descriptors = [
       { name: "posts", type: "hasMany" },
       { name: "author", type: "hasOne" },
-    ] satisfies Array<SqliteIncludeDescriptor>;
+    ] satisfies Array<IncludeDescriptor>;
 
     const rows = [
       { id: "u1", posts: null, author: null },
@@ -174,7 +215,7 @@ describe("parseSqliteIncludeRows", () => {
       },
     ];
 
-    const parsed = parseSqliteIncludeRows(rows, descriptors);
+    const parsed = parseIncludeRows(rows, descriptors);
 
     expect(parsed).toEqual([
       { id: "u1", posts: [], author: null },

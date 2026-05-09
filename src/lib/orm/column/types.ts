@@ -1,16 +1,24 @@
-export type BaseColumn = {
+export type BaseColumn<
+  TNullable extends boolean = boolean,
+  TPrimaryKey extends boolean = boolean,
+  TUnique extends boolean = boolean,
+> = {
   sqlName: string;
-  _meta: ColumnTypeState;
-  primaryKey?: boolean;
-  unique?: boolean;
+  _meta: ColumnTypeState<TNullable, TPrimaryKey, TUnique>;
   hasDefault?: boolean;
   references?: {
-    tableColumn: () => { sqlName: string };
+    tableColumn?: () => { sqlName: string };
   };
 };
 
-type ColumnTypeState<TNullable extends boolean = boolean> = {
+type ColumnTypeState<
+  TNullable extends boolean = boolean,
+  TPrimaryKey extends boolean = boolean,
+  TUnique extends boolean = boolean,
+> = {
   isNullable: TNullable;
+  isPrimaryKey: TPrimaryKey;
+  isUnique: TUnique;
 };
 
 export type ColumnRuntimeValueMap = {
@@ -20,68 +28,101 @@ export type ColumnRuntimeValueMap = {
   date: Date;
 };
 
-export type StringColumn = BaseColumn & {
+export type StringColumn<
+  TNullable extends boolean = boolean,
+  TPrimaryKey extends boolean = boolean,
+  TUnique extends boolean = boolean,
+> = BaseColumn<TNullable, TPrimaryKey, TUnique> & {
   type: "string";
 };
 
-export type NumberColumn = BaseColumn & {
+export type NumberColumn<
+  TNullable extends boolean = boolean,
+  TPrimaryKey extends boolean = boolean,
+  TUnique extends boolean = boolean,
+> = BaseColumn<TNullable, TPrimaryKey, TUnique> & {
   type: "number";
 };
 
-export type BooleanColumn = BaseColumn & {
+export type BooleanColumn<
+  TNullable extends boolean = boolean,
+  TPrimaryKey extends boolean = boolean,
+  TUnique extends boolean = boolean,
+> = BaseColumn<TNullable, TPrimaryKey, TUnique> & {
   type: "boolean";
 };
 
-export type DateColumn = BaseColumn & {
+export type DateColumn<
+  TNullable extends boolean = boolean,
+  TPrimaryKey extends boolean = boolean,
+  TUnique extends boolean = boolean,
+> = BaseColumn<TNullable, TPrimaryKey, TUnique> & {
   type: "date";
 };
 
 export type Column = StringColumn | NumberColumn | BooleanColumn | DateColumn;
 
-type ColumnByType<TType extends Column["type"]> = Extract<
-  Column,
-  { type: TType }
->;
+type ColumnType = Column["type"];
 
 type ColumnBuilderState<
-  TType extends Column["type"],
+  TType extends ColumnType,
   TNullable extends boolean,
-> = Omit<ColumnByType<TType>, "default" | "_meta"> & {
-  _meta: ColumnTypeState<TNullable>;
+  TPrimaryKey extends boolean,
+  TUnique extends boolean,
+> = {
+  sqlName: string;
+  type: TType;
+  _meta: ColumnTypeState<TNullable, TPrimaryKey, TUnique>;
+  hasDefault?: boolean;
+  references?: {
+    tableColumn?: () => { sqlName: string };
+  };
 };
 
 type SetNullable<
-  TType extends Column["type"],
+  TType extends ColumnType,
   TNullable extends boolean,
-> = ColumnBuilder<TType, TNullable>;
+  TPrimaryKey extends boolean,
+  TUnique extends boolean,
+> = ColumnBuilder<TType, TNullable, TPrimaryKey, TUnique>;
 
 type SetHasDefault<
-  TType extends Column["type"],
+  TType extends ColumnType,
   TNullable extends boolean,
-> = ColumnBuilder<TType, TNullable>;
+  TPrimaryKey extends boolean,
+  TUnique extends boolean,
+> = ColumnBuilder<TType, TNullable, TPrimaryKey, TUnique>;
 
 type SetPrimaryKey<
-  TType extends Column["type"],
+  TType extends ColumnType,
   TNullable extends boolean,
-> = ColumnBuilder<TType, TNullable>;
+  _TPrimaryKey extends boolean,
+  TUnique extends boolean,
+> = ColumnBuilder<TType, TNullable, true, TUnique>;
 
 type SetUnique<
-  TType extends Column["type"],
+  TType extends ColumnType,
   TNullable extends boolean,
-> = ColumnBuilder<TType, TNullable>;
+  TPrimaryKey extends boolean,
+  _TUnique extends boolean,
+> = ColumnBuilder<TType, TNullable, TPrimaryKey, true>;
 
 export type ColumnBuilder<
-  TType extends Column["type"],
+  TType extends ColumnType,
   TNullable extends boolean = true,
-> = ColumnBuilderState<TType, TNullable> & {
-  primaryKey: () => SetPrimaryKey<TType, TNullable>;
-  notNull: () => SetNullable<TType, false>;
-  nullable: () => SetNullable<TType, true>;
-  unique: () => SetUnique<TType, TNullable>;
+  TPrimaryKey extends boolean = false,
+  TUnique extends boolean = false,
+> = ColumnBuilderState<TType, TNullable, TPrimaryKey, TUnique> & {
+  primaryKey: () => SetPrimaryKey<TType, TNullable, TPrimaryKey, TUnique>;
+  notNull: () => SetNullable<TType, false, TPrimaryKey, TUnique>;
+  nullable: () => SetNullable<TType, true, TPrimaryKey, TUnique>;
+  unique: () => SetUnique<TType, TNullable, TPrimaryKey, TUnique>;
   default: (
     value: () => ColumnRuntimeValueMap[TType],
-  ) => SetHasDefault<TType, TNullable>;
-  references: (
+  ) => SetHasDefault<TType, TNullable, TPrimaryKey, TUnique>;
+  references: ((
     tableColumn: () => { sqlName: string },
-  ) => ColumnBuilder<TType, TNullable>;
+  ) => ColumnBuilder<TType, TNullable, TPrimaryKey, TUnique>) & {
+    tableColumn?: () => { sqlName: string };
+  };
 };

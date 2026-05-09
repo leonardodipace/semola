@@ -4,6 +4,7 @@ import type { Table } from "../table/types.js";
 import type {
   CreateOrmOptions,
   FindManyOptions,
+  FindUniqueOptions,
   HasMany,
   HasOne,
   OrmClient,
@@ -39,6 +40,12 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
       options?: TOptions,
     ) => {
       return await dialect.findMany<TOptions>(sql, options);
+    },
+
+    findUnique: async <const TOptions extends FindUniqueOptions<T, TRelations>>(
+      options: TOptions,
+    ) => {
+      return await dialect.findUnique<TOptions>(sql, options);
     },
   };
 };

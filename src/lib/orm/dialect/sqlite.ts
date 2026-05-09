@@ -1,5 +1,6 @@
 import type {
   FindManyOptions,
+  FindUniqueOptions,
   TableInclude,
   TableOrderBy,
   TableRelations,
@@ -14,7 +15,7 @@ type WhereClause = {
   params: unknown[];
 };
 
-export type SqliteIncludeDescriptor = {
+export type IncludeDescriptor = {
   name: string;
   type: "hasMany" | "hasOne";
 };
@@ -22,7 +23,7 @@ export type SqliteIncludeDescriptor = {
 type IncludeClause = {
   sql: string;
   params: unknown[];
-  descriptors: SqliteIncludeDescriptor[];
+  descriptors: IncludeDescriptor[];
 };
 
 type PaginationClause = {
@@ -166,7 +167,7 @@ const buildOrderByClause = <T extends Table>(
 
 const getPrimaryKeyColumn = (table: Table) => {
   const entries = Object.entries(table.columns);
-  const primaryKey = entries.find(([, column]) => column.primaryKey);
+  const primaryKey = entries.find(([, column]) => column._meta.isPrimaryKey);
 
   if (!primaryKey) {
     throw new Error(`Missing primary key on table ${table.sqlName}`);
@@ -256,7 +257,7 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
 
   const sourcePrimaryKey = getPrimaryKeyColumn(table);
   const clauses: string[] = [];
-  const descriptors: SqliteIncludeDescriptor[] = [];
+  const descriptors: IncludeDescriptor[] = [];
 
   for (const [relationName] of enabledRelations) {
     const relation = relations[relationName as keyof R];
@@ -366,20 +367,62 @@ const buildSelectStatement = (
   return query;
 };
 
-type SqliteFindManyQuery = {
-  statement: string;
-  params: unknown[];
-  includeDescriptors: SqliteIncludeDescriptor[];
+const validateFindUniqueWhere = (
+  table: Table,
+  where: Record<string, unknown>,
+) => {
+  const keys = Object.keys(where);
+
+  if (!keys.length) {
+    throw new Error("findUnique requires exactly one where key");
+  }
+
+  if (keys.length > 1) {
+    throw new Error("findUnique requires exactly one where key");
+  }
+
+  const key = keys[0];
+
+  if (!key) {
+    throw new Error("findUnique requires exactly one where key");
+  }
+
+  const columnEntry = Object.entries(table.columns).find(([columnName]) => {
+    return columnName === key;
+  });
+
+  if (!columnEntry) {
+    throw new Error(`Unknown where key ${key} on table ${table.sqlName}`);
+  }
+
+  const column = columnEntry[1];
+
+  if (!column._meta.isPrimaryKey) {
+    if (!column._meta.isUnique) {
+      throw new Error(
+        `findUnique where key ${key} must reference a unique or primary key column`,
+      );
+    }
+  }
 };
 
-export const buildSqliteFindManyQuery = <
-  T extends Table,
-  R extends TableRelations,
->(
+type FindManyQuery = {
+  statement: string;
+  params: unknown[];
+  includeDescriptors: IncludeDescriptor[];
+};
+
+type FindUniqueQuery = {
+  statement: string;
+  params: unknown[];
+  includeDescriptors: IncludeDescriptor[];
+};
+
+export const buildFindManyQuery = <T extends Table, R extends TableRelations>(
   table: T,
   relations: R,
   options?: FindManyOptions<T, R>,
-): SqliteFindManyQuery => {
+): FindManyQuery => {
   const where = buildWhereClause(table, options?.where);
   const columns = buildSelectColumns(table, options?.select);
   const orderBy = buildOrderByClause(table, options?.orderBy);
@@ -402,9 +445,36 @@ export const buildSqliteFindManyQuery = <
   };
 };
 
-export const parseSqliteIncludeRows = (
+export const buildFindUniqueQuery = <T extends Table, R extends TableRelations>(
+  table: T,
+  relations: R,
+  options: FindUniqueOptions<T, R>,
+): FindUniqueQuery => {
+  validateFindUniqueWhere(table, options.where);
+
+  const where = buildWhereClause(table, options.where);
+  const columns = buildSelectColumns(table, options.select);
+  const include = buildIncludeClause(table, relations, options.include);
+  const selectColumns = include.sql ? `${columns}, ${include.sql}` : columns;
+  const params = [...where.params, ...include.params];
+  const statement = buildSelectStatement(
+    table.sqlName,
+    selectColumns,
+    where.sql,
+    "",
+    "LIMIT 1",
+  );
+
+  return {
+    statement,
+    params,
+    includeDescriptors: include.descriptors,
+  };
+};
+
+export const parseIncludeRows = (
   rows: Array<Record<string, unknown>>,
-  descriptors: SqliteIncludeDescriptor[],
+  descriptors: IncludeDescriptor[],
 ) => {
   return rows.map((row) => {
     const result = { ...row };
@@ -436,14 +506,33 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
   return {
     name: "sqlite",
     findMany: async (sql, options) => {
-      const query = buildSqliteFindManyQuery(table, relations, options);
+      const query = buildFindManyQuery(table, relations, options);
       const rows = [...(await sql.unsafe(query.statement, query.params))];
 
       if (!query.includeDescriptors.length) {
         return rows;
       }
 
-      return parseSqliteIncludeRows(rows, query.includeDescriptors);
+      return parseIncludeRows(rows, query.includeDescriptors);
+    },
+    findUnique: async (sql, options) => {
+      const query = buildFindUniqueQuery(table, relations, options);
+      const rows = [...(await sql.unsafe(query.statement, query.params))];
+
+      if (!query.includeDescriptors.length) {
+        const firstRow = rows[0];
+
+        if (!firstRow) return null;
+
+        return firstRow;
+      }
+
+      const parsedRows = parseIncludeRows(rows, query.includeDescriptors);
+      const firstRow = parsedRows[0];
+
+      if (!firstRow) return null;
+
+      return firstRow;
     },
   };
 };
