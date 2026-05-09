@@ -30,15 +30,15 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
   sql: Bun.SQL,
   table: T,
   adapter: Adapter,
-  _relations: TRelations,
+  relations: TRelations,
 ): TableClient<T, TRelations> => {
-  const dialect = getDialect(adapter, table);
+  const dialect = getDialect(adapter, table, relations);
 
   return {
     findMany: async <const TOptions extends FindManyOptions<T, TRelations>>(
       options?: TOptions,
     ) => {
-      return await dialect.findMany<TRelations, TOptions>(sql, options);
+      return await dialect.findMany<TOptions>(sql, options);
     },
   };
 };
