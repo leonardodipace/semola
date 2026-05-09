@@ -1,4 +1,5 @@
 import type {
+  FindManyOptions,
   TableInclude,
   TableOrderBy,
   TableRelations,
@@ -13,7 +14,7 @@ type WhereClause = {
   params: unknown[];
 };
 
-type IncludeDescriptor = {
+export type SqliteIncludeDescriptor = {
   name: string;
   type: "hasMany" | "hasOne";
 };
@@ -21,7 +22,7 @@ type IncludeDescriptor = {
 type IncludeClause = {
   sql: string;
   params: unknown[];
-  descriptors: IncludeDescriptor[];
+  descriptors: SqliteIncludeDescriptor[];
 };
 
 type PaginationClause = {
@@ -240,7 +241,7 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
 
   const sourcePrimaryKey = getPrimaryKeyColumn(table);
   const clauses: string[] = [];
-  const descriptors: IncludeDescriptor[] = [];
+  const descriptors: SqliteIncludeDescriptor[] = [];
 
   for (const [relationName] of enabledRelations) {
     const relation = relations[relationName as keyof R];
@@ -350,6 +351,69 @@ const buildSelectStatement = (
   return query;
 };
 
+type SqliteFindManyQuery = {
+  statement: string;
+  params: unknown[];
+  includeDescriptors: SqliteIncludeDescriptor[];
+};
+
+export const buildSqliteFindManyQuery = <
+  T extends Table,
+  R extends TableRelations,
+>(
+  table: T,
+  relations: R,
+  options?: FindManyOptions<T, R>,
+): SqliteFindManyQuery => {
+  const where = buildWhereClause(table, options?.where);
+  const columns = buildSelectColumns(table, options?.select);
+  const orderBy = buildOrderByClause(table, options?.orderBy);
+  const include = buildIncludeClause(table, relations, options?.include);
+  const pagination = buildPaginationClause(options?.take, options?.skip);
+  const selectColumns = include.sql ? `${columns}, ${include.sql}` : columns;
+  const params = [...where.params, ...include.params, ...pagination.params];
+  const statement = buildSelectStatement(
+    table.sqlName,
+    selectColumns,
+    where.sql,
+    orderBy,
+    pagination.sql,
+  );
+
+  return {
+    statement,
+    params,
+    includeDescriptors: include.descriptors,
+  };
+};
+
+export const parseSqliteIncludeRows = (
+  rows: Array<Record<string, unknown>>,
+  descriptors: SqliteIncludeDescriptor[],
+) => {
+  return rows.map((row) => {
+    const result = { ...row };
+
+    for (const descriptor of descriptors) {
+      const value = row[descriptor.name];
+
+      if (value === null) {
+        if (descriptor.type === "hasMany") {
+          result[descriptor.name] = [];
+        }
+
+        continue;
+      }
+
+      if (typeof value !== "string") continue;
+
+      result[descriptor.name] = JSON.parse(value);
+    }
+
+    return result;
+  });
+};
+
 export const createSqliteDialect = <T extends Table, R extends TableRelations>(
   table: T,
   relations: R,
@@ -357,50 +421,14 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
   return {
     name: "sqlite",
     findMany: async (sql, options) => {
-      const where = buildWhereClause(table, options?.where);
-      const columns = buildSelectColumns(table, options?.select);
-      const orderBy = buildOrderByClause(table, options?.orderBy);
-      const include = buildIncludeClause(table, relations, options?.include);
-      const pagination = buildPaginationClause(options?.take, options?.skip);
-      const selectColumns = include.sql
-        ? `${columns}, ${include.sql}`
-        : columns;
-      const params = [...where.params, ...include.params, ...pagination.params];
-      const statement = buildSelectStatement(
-        table.sqlName,
-        selectColumns,
-        where.sql,
-        orderBy,
-        pagination.sql,
-      );
+      const query = buildSqliteFindManyQuery(table, relations, options);
+      const rows = [...(await sql.unsafe(query.statement, query.params))];
 
-      const rows = [...(await sql.unsafe(statement, params))];
-
-      if (!include.descriptors.length) {
+      if (!query.includeDescriptors.length) {
         return rows;
       }
 
-      return rows.map((row) => {
-        const result = { ...row };
-
-        for (const descriptor of include.descriptors) {
-          const value = row[descriptor.name];
-
-          if (value === null) {
-            if (descriptor.type === "hasMany") {
-              result[descriptor.name] = [];
-            }
-
-            continue;
-          }
-
-          if (typeof value !== "string") continue;
-
-          result[descriptor.name] = JSON.parse(value);
-        }
-
-        return result;
-      });
+      return parseSqliteIncludeRows(rows, query.includeDescriptors);
     },
   };
 };
