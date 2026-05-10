@@ -1,5 +1,5 @@
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
-import type { CronOptions, CronStatus } from "./types.js";
+import type { CronOptions, CronStatus, ErrorMetadataType } from "./types.js";
 
 const MinuteExpr = "* * * * *" as const;
 
@@ -31,7 +31,14 @@ export class CronV2 {
       this.status = "idle";
       if (!this.options.onError) throw scheduleFormatErr;
 
-      this.options.onError();
+      const data: ErrorMetadataType = {
+        name: this.options.name,
+        error: scheduleFormatErr as Error,
+        failedAt: Date.now(),
+      };
+
+      this.options.onError(data);
+
       return;
     }
 
@@ -54,7 +61,13 @@ export class CronV2 {
       this.status = "idle";
       if (!this.options.onError) throw osError;
 
-      this.options.onError();
+      const data: ErrorMetadataType = {
+        name: this.options.name,
+        error: osError as Error,
+        failedAt: Date.now(),
+      };
+
+      this.options.onError(data);
       return;
     }
   }
