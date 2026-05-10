@@ -1,16 +1,7 @@
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
+import type { CronOptions, CronStatus } from "./types.js";
 
-type MinutelyAlias = "@minutely";
 const MinuteExpr = "* * * * *" as const;
-
-export type CronOptions = {
-  name: string;
-  schedule: Bun.CronWithAutocomplete | MinutelyAlias | (string & {});
-  handler: () => Promise<unknown>;
-  onError?: () => void;
-};
-
-export type CronStatus = "idle" | "running";
 
 export class CronV2 {
   private options: CronOptions;
