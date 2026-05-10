@@ -37,6 +37,7 @@ export class CronV2 {
     });
 
     if (scheduleFormatErr) {
+      this.status = "idle";
       if (!this.options.onError) throw scheduleFormatErr;
 
       this.options.onError();
@@ -59,6 +60,7 @@ export class CronV2 {
     if (!osError) return;
 
     if (osError) {
+      this.status = "idle";
       if (!this.options.onError) throw osError;
 
       this.options.onError();
@@ -67,6 +69,7 @@ export class CronV2 {
   }
 
   public async stopOSLevel() {
+    this.status = "idle";
     await Bun.cron.remove(this.options.name);
   }
 
@@ -79,6 +82,7 @@ export class CronV2 {
     if (this.status !== "running") return;
     if (!this.cron) return;
 
+    this.status = "idle";
     this.cron.stop();
   }
 
