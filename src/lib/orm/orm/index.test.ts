@@ -42,9 +42,7 @@ describe("relation helpers", () => {
     expect(typeof orm.users.findUnique).toBe("function");
     expect(orm.$raw).toBeDefined();
 
-    if ("close" in orm.$raw) {
-      await orm.$raw.close();
-    }
+    await orm.$raw.close();
   });
 
   test("findUnique types only accept a single unique key", async () => {
@@ -74,7 +72,7 @@ describe("relation helpers", () => {
 
     const invalidByName: Parameters<typeof orm.users.findUnique>[0] = {
       where: {
-        // @ts-expect-error - non-unique columns are invalid for findUnique where
+        // @ts-expect-error
         name: "John",
       },
     };
@@ -82,7 +80,7 @@ describe("relation helpers", () => {
     expect(invalidByName).toBeDefined();
 
     const invalidByManyKeys: Parameters<typeof orm.users.findUnique>[0] = {
-      // @ts-expect-error - only one unique key is allowed in findUnique where
+      // @ts-expect-error
       where: {
         id: "user-1",
         email: "john@example.com",
@@ -93,7 +91,7 @@ describe("relation helpers", () => {
 
     const invalidByOperator: Parameters<typeof orm.users.findUnique>[0] = {
       where: {
-        // @ts-expect-error - findUnique only accepts direct equality
+        // @ts-expect-error
         id: {
           endsWith: "user-1",
         },
@@ -104,7 +102,7 @@ describe("relation helpers", () => {
 
     const invalidByEqObject: Parameters<typeof orm.users.findUnique>[0] = {
       where: {
-        // @ts-expect-error - eq object syntax is not allowed for findUnique
+        // @ts-expect-error
         id: {
           eq: "user-1",
         },
@@ -113,8 +111,62 @@ describe("relation helpers", () => {
 
     expect(invalidByEqObject).toBeDefined();
 
-    if ("close" in orm.$raw) {
-      await orm.$raw.close();
-    }
+    await orm.$raw.close();
+  });
+
+  test("table client findMany and findUnique execute through the dialect", async () => {
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: {
+        users: usersTable,
+      },
+    });
+
+    await orm.$raw.unsafe(
+      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
+    );
+
+    await orm.$raw.unsafe(
+      "INSERT INTO users (id, name, email) VALUES (?, ?, ?), (?, ?, ?)",
+      [
+        "user-1",
+        "John",
+        "john@example.com",
+        "user-2",
+        "Alice",
+        "alice@example.com",
+      ],
+    );
+
+    const rows = await orm.users.findMany({
+      where: {
+        name: {
+          startsWith: "Jo",
+        },
+      },
+    });
+
+    const user = await orm.users.findUnique({
+      where: {
+        email: "john@example.com",
+      },
+    });
+
+    expect(rows).toEqual([
+      {
+        id: "user-1",
+        name: "John",
+        email: "john@example.com",
+      },
+    ]);
+
+    expect(user).toEqual({
+      id: "user-1",
+      name: "John",
+      email: "john@example.com",
+    });
+
+    await orm.$raw.close();
   });
 });
