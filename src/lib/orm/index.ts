@@ -33,14 +33,6 @@ await orm.$raw`
     created_at DATETIME NOT NULL
   )
 `;
-
-await orm.$raw`
-  CREATE TABLE posts (
-    id TEXT PRIMARY KEY NOT NULL,
-    title TEXT NOT NULL,
-    author_id TEXT NOT NULL
-  )
-`;
 console.timeEnd("create tables");
 
 console.time("insert users");
@@ -63,12 +55,7 @@ await orm.$raw`
 console.timeEnd("insert users");
 
 console.time("findMany");
-await orm.users.findMany({
-  take: 1,
-  include: {
-    posts: true,
-  },
-});
+await orm.users.findMany();
 console.timeEnd("findMany");
 
 console.time("findUnique");
