@@ -85,11 +85,14 @@ const createColumnBuilder = <
     });
   };
 
-  const referencesMetadata = {
-    tableColumn: column.references?.tableColumn,
-  };
+  const references: ColumnBuilder<
+    TType,
+    TNullable,
+    TPrimaryKey,
+    TUnique
+  >["references"] = referencesBuilder;
 
-  const references = Object.assign(referencesBuilder, referencesMetadata);
+  references.tableColumn = column.references?.tableColumn;
 
   return {
     ...column,
@@ -102,10 +105,13 @@ const createColumnBuilder = <
   };
 };
 
-export const string = (sqlName: string): ColumnBuilder<"string"> => {
-  const column: ColumnBuilderState<"string", true, false, false> = {
+const createBaseColumn = <TType extends ColumnType>(
+  sqlName: string,
+  type: TType,
+) => {
+  const column: ColumnBuilderState<TType, true, false, false> = {
     sqlName,
-    type: "string",
+    type,
     _meta: {
       isNullable: true,
       isPrimaryKey: false,
@@ -113,7 +119,11 @@ export const string = (sqlName: string): ColumnBuilder<"string"> => {
     },
   };
 
-  return createColumnBuilder<"string", true, false, false>(column);
+  return createColumnBuilder<TType, true, false, false>(column);
+};
+
+export const string = (sqlName: string): ColumnBuilder<"string"> => {
+  return createBaseColumn(sqlName, "string");
 };
 
 export const uuid = (sqlName: string): ColumnBuilder<"string"> => {
@@ -121,43 +131,13 @@ export const uuid = (sqlName: string): ColumnBuilder<"string"> => {
 };
 
 export const number = (sqlName: string): ColumnBuilder<"number"> => {
-  const column: ColumnBuilderState<"number", true, false, false> = {
-    sqlName,
-    type: "number",
-    _meta: {
-      isNullable: true,
-      isPrimaryKey: false,
-      isUnique: false,
-    },
-  };
-
-  return createColumnBuilder<"number", true, false, false>(column);
+  return createBaseColumn(sqlName, "number");
 };
 
 export const boolean = (sqlName: string): ColumnBuilder<"boolean"> => {
-  const column: ColumnBuilderState<"boolean", true, false, false> = {
-    sqlName,
-    type: "boolean",
-    _meta: {
-      isNullable: true,
-      isPrimaryKey: false,
-      isUnique: false,
-    },
-  };
-
-  return createColumnBuilder<"boolean", true, false, false>(column);
+  return createBaseColumn(sqlName, "boolean");
 };
 
 export const date = (sqlName: string): ColumnBuilder<"date"> => {
-  const column: ColumnBuilderState<"date", true, false, false> = {
-    sqlName,
-    type: "date",
-    _meta: {
-      isNullable: true,
-      isPrimaryKey: false,
-      isUnique: false,
-    },
-  };
-
-  return createColumnBuilder<"date", true, false, false>(column);
+  return createBaseColumn(sqlName, "date");
 };

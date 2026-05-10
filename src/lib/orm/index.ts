@@ -74,7 +74,7 @@ console.timeEnd("findFirst");
 console.time("findUnique");
 await orm.users.findUnique({
   where: {
-    id: "user-1",
+    id: johnId,
   },
 });
 console.timeEnd("findUnique");

@@ -82,9 +82,9 @@ const buildWhereClause = <T extends Table>(
 
   if (!where) return { sql: "", params };
 
-  const entries = Object.entries(where);
+  const whereEntries = Object.entries(where);
 
-  for (const entry of entries) {
+  for (const entry of whereEntries) {
     const [jsKey, value] = entry;
 
     const typedKey = jsKey as keyof T["columns"];
@@ -97,9 +97,9 @@ const buildWhereClause = <T extends Table>(
       continue;
     }
 
-    const entries = Object.entries(value);
+    const operatorEntries = Object.entries(value);
 
-    for (const entry of entries) {
+    for (const entry of operatorEntries) {
       const [op, operand] = entry;
       const operator = OPERATORS[op as keyof typeof OPERATORS];
 
@@ -127,17 +127,18 @@ const buildSelectColumns = <T extends Table>(
       .join(", ");
   }
 
+  const selectedColumns: string[] = [];
   const keys = Object.keys(select);
 
-  return keys
-    .flatMap((k) => {
-      const sqlName = table.columns[k]?.sqlName;
+  for (const key of keys) {
+    const sqlName = table.columns[key]?.sqlName;
 
-      if (!sqlName) return [];
+    if (!sqlName) continue;
 
-      return [getColumnAlias(sqlName, k)];
-    })
-    .join(", ");
+    selectedColumns.push(getColumnAlias(sqlName, key));
+  }
+
+  return selectedColumns.join(", ");
 };
 
 const buildOrderByClause = <T extends Table>(
@@ -425,6 +426,12 @@ type FindUniqueQuery = {
   includeDescriptors: IncludeDescriptor[];
 };
 
+type SelectQuery = {
+  statement: string;
+  params: unknown[];
+  includeDescriptors: IncludeDescriptor[];
+};
+
 export const buildFindManyQuery = <T extends Table, R extends TableRelations>(
   table: T,
   relations: R,
@@ -533,6 +540,26 @@ export const parseIncludeRows = (
   });
 };
 
+const executeSelectQuery = async (sql: Bun.SQL, query: SelectQuery) => {
+  const rows = [...(await sql.unsafe(query.statement, query.params))];
+
+  if (!query.includeDescriptors.length) {
+    return rows;
+  }
+
+  return parseIncludeRows(rows, query.includeDescriptors);
+};
+
+const getFirstRow = <TRow>(rows: Array<TRow>) => {
+  const firstRow = rows[0];
+
+  if (!firstRow) {
+    return null;
+  }
+
+  return firstRow;
+};
+
 export const createSqliteDialect = <T extends Table, R extends TableRelations>(
   table: T,
   relations: R,
@@ -541,51 +568,21 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
     name: "sqlite",
     findMany: async (sql, options) => {
       const query = buildFindManyQuery(table, relations, options);
-      const rows = [...(await sql.unsafe(query.statement, query.params))];
 
-      if (!query.includeDescriptors.length) {
-        return rows;
-      }
-
-      return parseIncludeRows(rows, query.includeDescriptors);
+      return await executeSelectQuery(sql, query);
     },
+    // findFirst and findUnique build different queries but share row execution/parsing.
     findFirst: async (sql, options) => {
       const query = buildFindFirstQuery(table, relations, options);
-      const rows = [...(await sql.unsafe(query.statement, query.params))];
+      const rows = await executeSelectQuery(sql, query);
 
-      if (!query.includeDescriptors.length) {
-        const firstRow = rows[0];
-
-        if (!firstRow) return null;
-
-        return firstRow;
-      }
-
-      const parsedRows = parseIncludeRows(rows, query.includeDescriptors);
-      const firstRow = parsedRows[0];
-
-      if (!firstRow) return null;
-
-      return firstRow;
+      return getFirstRow(rows);
     },
     findUnique: async (sql, options) => {
       const query = buildFindUniqueQuery(table, relations, options);
-      const rows = [...(await sql.unsafe(query.statement, query.params))];
+      const rows = await executeSelectQuery(sql, query);
 
-      if (!query.includeDescriptors.length) {
-        const firstRow = rows[0];
-
-        if (!firstRow) return null;
-
-        return firstRow;
-      }
-
-      const parsedRows = parseIncludeRows(rows, query.includeDescriptors);
-      const firstRow = parsedRows[0];
-
-      if (!firstRow) return null;
-
-      return firstRow;
+      return getFirstRow(rows);
     },
   };
 };
