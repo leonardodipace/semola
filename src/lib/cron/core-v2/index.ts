@@ -58,7 +58,12 @@ export class CronV2 {
     const [osError] = await mightThrow(osJob);
     if (!osError) return;
 
-    throw osError;
+    if (osError) {
+      if (!this.options.onError) throw osError;
+
+      this.options.onError();
+      return;
+    }
   }
 
   public async stopOSLevel() {
