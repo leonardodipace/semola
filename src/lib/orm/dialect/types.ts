@@ -1,4 +1,6 @@
 import type {
+  FindFirstOptions,
+  FindFirstResult,
   FindManyOptions,
   FindManyResult,
   FindUniqueOptions,
@@ -18,6 +20,11 @@ export type Dialect<
     sql: Bun.SQL,
     options?: TOptions,
   ): Promise<Array<FindManyResult<T, TRelations, TOptions>>>;
+
+  findFirst<const TOptions extends FindFirstOptions<T, TRelations>>(
+    sql: Bun.SQL,
+    options?: TOptions,
+  ): Promise<FindFirstResult<T, TRelations, TOptions>>;
 
   findUnique<const TOptions extends FindUniqueOptions<T, TRelations>>(
     sql: Bun.SQL,

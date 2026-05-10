@@ -1,4 +1,5 @@
 import type {
+  FindFirstOptions,
   FindManyOptions,
   FindUniqueOptions,
   TableInclude,
@@ -412,6 +413,12 @@ type FindManyQuery = {
   includeDescriptors: IncludeDescriptor[];
 };
 
+type FindFirstQuery = {
+  statement: string;
+  params: unknown[];
+  includeDescriptors: IncludeDescriptor[];
+};
+
 type FindUniqueQuery = {
   statement: string;
   params: unknown[];
@@ -428,6 +435,33 @@ export const buildFindManyQuery = <T extends Table, R extends TableRelations>(
   const orderBy = buildOrderByClause(table, options?.orderBy);
   const include = buildIncludeClause(table, relations, options?.include);
   const pagination = buildPaginationClause(options?.take, options?.skip);
+  const selectColumns = include.sql ? `${columns}, ${include.sql}` : columns;
+  const params = [...where.params, ...include.params, ...pagination.params];
+  const statement = buildSelectStatement(
+    table.sqlName,
+    selectColumns,
+    where.sql,
+    orderBy,
+    pagination.sql,
+  );
+
+  return {
+    statement,
+    params,
+    includeDescriptors: include.descriptors,
+  };
+};
+
+export const buildFindFirstQuery = <T extends Table, R extends TableRelations>(
+  table: T,
+  relations: R,
+  options?: FindFirstOptions<T, R>,
+): FindFirstQuery => {
+  const where = buildWhereClause(table, options?.where);
+  const columns = buildSelectColumns(table, options?.select);
+  const orderBy = buildOrderByClause(table, options?.orderBy);
+  const include = buildIncludeClause(table, relations, options?.include);
+  const pagination = buildPaginationClause(1, options?.skip);
   const selectColumns = include.sql ? `${columns}, ${include.sql}` : columns;
   const params = [...where.params, ...include.params, ...pagination.params];
   const statement = buildSelectStatement(
@@ -514,6 +548,25 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
       }
 
       return parseIncludeRows(rows, query.includeDescriptors);
+    },
+    findFirst: async (sql, options) => {
+      const query = buildFindFirstQuery(table, relations, options);
+      const rows = [...(await sql.unsafe(query.statement, query.params))];
+
+      if (!query.includeDescriptors.length) {
+        const firstRow = rows[0];
+
+        if (!firstRow) return null;
+
+        return firstRow;
+      }
+
+      const parsedRows = parseIncludeRows(rows, query.includeDescriptors);
+      const firstRow = parsedRows[0];
+
+      if (!firstRow) return null;
+
+      return firstRow;
     },
     findUnique: async (sql, options) => {
       const query = buildFindUniqueQuery(table, relations, options);

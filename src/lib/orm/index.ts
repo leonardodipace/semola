@@ -58,6 +58,19 @@ console.time("findMany");
 await orm.users.findMany();
 console.timeEnd("findMany");
 
+console.time("findFirst");
+await orm.users.findFirst({
+  where: {
+    firstName: {
+      startsWith: "J",
+    },
+  },
+  orderBy: {
+    createdAt: "asc",
+  },
+});
+console.timeEnd("findFirst");
+
 console.time("findUnique");
 await orm.users.findUnique({
   where: {

@@ -3,6 +3,7 @@ import { date, string, uuid } from "../column/index.js";
 import { many, one } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
 import {
+  buildFindFirstQuery,
   buildFindManyQuery,
   buildFindUniqueQuery,
   createSqliteDialect,
@@ -328,6 +329,50 @@ describe("buildFindUniqueQuery", () => {
   });
 });
 
+describe("buildFindFirstQuery", () => {
+  test("builds a select statement with LIMIT 1", () => {
+    const query = buildFindFirstQuery(
+      usersTable,
+      {},
+      {
+        where: {
+          firstName: { startsWith: "Jo" },
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      },
+    );
+
+    expect(query.statement).toBe(
+      "SELECT id AS id, first_name AS firstName, created_at AS createdAt FROM users WHERE first_name LIKE ? ORDER BY created_at DESC LIMIT ?",
+    );
+    expect(query.params).toEqual(["Jo%", 1]);
+    expect(query.includeDescriptors).toEqual([]);
+  });
+
+  test("supports include and skip while limiting to one row", () => {
+    const query = buildFindFirstQuery(
+      usersTable,
+      { posts: many(() => postsTable) },
+      {
+        include: {
+          posts: true,
+        },
+        skip: 2,
+      },
+    );
+
+    expect(query.statement).toBe(
+      "SELECT id AS id, first_name AS firstName, created_at AS createdAt, COALESCE((SELECT json_group_array(json_object('id', posts__posts.id, 'title', posts__posts.title, 'authorId', posts__posts.author_id)) FROM posts AS posts__posts WHERE posts__posts.author_id = users.id), '[]') AS posts FROM users LIMIT ? OFFSET ?",
+    );
+    expect(query.params).toEqual([1, 2]);
+    expect(query.includeDescriptors).toEqual([
+      { name: "posts", type: "hasMany" },
+    ]);
+  });
+});
+
 describe("parseIncludeRows", () => {
   test("parses JSON include values and normalizes null hasMany values", () => {
     const descriptors = [
@@ -445,6 +490,71 @@ describe("createSqliteDialect", () => {
     ]);
 
     expect(missing).toBeNull();
+
+    await sql.close();
+  });
+
+  test("findFirst returns the first row or null without include", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+    await insertUser(sql, "user-2", "Alice", "2025-01-02T00:00:00.000Z");
+
+    const dialect = createSqliteDialect(usersTable, {});
+
+    const firstByDate = await dialect.findFirst(sql, {
+      orderBy: {
+        createdAt: "asc",
+      },
+    });
+
+    const missing = await dialect.findFirst(sql, {
+      where: {
+        id: "missing",
+      },
+    });
+
+    expect(firstByDate?.id).toBe("user-1");
+    expect(missing).toBeNull();
+
+    await sql.close();
+  });
+
+  test("findFirst parses include rows", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await createPostsTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+    await insertUser(sql, "user-2", "Alice", "2025-01-02T00:00:00.000Z");
+    await insertPost(sql, "post-1", "Hello", "user-1");
+
+    const dialect = createSqliteDialect(usersTable, {
+      posts: many(() => postsTable),
+    });
+
+    const first = await dialect.findFirst(sql, {
+      orderBy: {
+        createdAt: "asc",
+      },
+      include: {
+        posts: true,
+      },
+    });
+
+    expect(first?.id).toBe("user-1");
+    expect(first?.firstName).toBe("John");
+    expect(new Date(first?.createdAt ?? 0).toISOString()).toBe(
+      "2025-01-01T00:00:00.000Z",
+    );
+    expect(first?.posts).toEqual([
+      {
+        id: "post-1",
+        title: "Hello",
+        authorId: "user-1",
+      },
+    ]);
 
     await sql.close();
   });

@@ -134,6 +134,11 @@ export type FindManyOptions<
   skip?: number;
 };
 
+export type FindFirstOptions<
+  T extends Table,
+  TRelations extends TableRelations = TableRelations,
+> = Omit<FindManyOptions<T, TRelations>, "take">;
+
 type TableColumns<T extends Table> = T["columns"];
 
 type TableColumnByName<
@@ -253,6 +258,14 @@ export type FindManyResult<
   SelectResult<T, TOptions> & IncludeResult<T, TRelations, TOptions>
 >;
 
+export type FindFirstResult<
+  T extends Table,
+  TRelations extends TableRelations,
+  TOptions extends FindFirstOptions<T, TRelations>,
+> = Prettify<
+  SelectResult<T, TOptions> & IncludeResult<T, TRelations, TOptions>
+> | null;
+
 export type FindUniqueResult<
   T extends Table,
   TRelations extends TableRelations,
@@ -268,6 +281,10 @@ export type TableClient<
   findMany<const TOptions extends FindManyOptions<T, TRelations>>(
     options?: TOptions,
   ): Promise<Array<FindManyResult<T, TRelations, TOptions>>>;
+
+  findFirst<const TOptions extends FindFirstOptions<T, TRelations>>(
+    options?: TOptions,
+  ): Promise<FindFirstResult<T, TRelations, TOptions>>;
 
   findUnique<const TOptions extends FindUniqueOptions<T, TRelations>>(
     options: TOptions,

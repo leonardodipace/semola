@@ -3,6 +3,7 @@ import { getDialect } from "../dialect/index.js";
 import type { Table } from "../table/types.js";
 import type {
   CreateOrmOptions,
+  FindFirstOptions,
   FindManyOptions,
   FindUniqueOptions,
   HasMany,
@@ -40,6 +41,12 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
       options?: TOptions,
     ) => {
       return await dialect.findMany<TOptions>(sql, options);
+    },
+
+    findFirst: async <const TOptions extends FindFirstOptions<T, TRelations>>(
+      options?: TOptions,
+    ) => {
+      return await dialect.findFirst<TOptions>(sql, options);
     },
 
     findUnique: async <const TOptions extends FindUniqueOptions<T, TRelations>>(

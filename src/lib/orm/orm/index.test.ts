@@ -39,6 +39,7 @@ describe("relation helpers", () => {
     });
 
     expect(typeof orm.users.findMany).toBe("function");
+    expect(typeof orm.users.findFirst).toBe("function");
     expect(typeof orm.users.findUnique).toBe("function");
     expect(orm.$raw).toBeDefined();
 
@@ -114,7 +115,42 @@ describe("relation helpers", () => {
     await orm.$raw.close();
   });
 
-  test("table client findMany and findUnique execute through the dialect", async () => {
+  test("findFirst types accept regular filters and reject take", async () => {
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: {
+        users: usersTable,
+      },
+    });
+
+    const acceptFindFirstOptions = <TOptions>(_options: TOptions) => {
+      return undefined;
+    };
+
+    acceptFindFirstOptions<Parameters<typeof orm.users.findFirst>[0]>({
+      where: {
+        name: {
+          startsWith: "J",
+        },
+      },
+      orderBy: {
+        name: "asc",
+      },
+      skip: 1,
+    });
+
+    const invalidByTake: Parameters<typeof orm.users.findFirst>[0] = {
+      // @ts-expect-error
+      take: 1,
+    };
+
+    expect(invalidByTake).toBeDefined();
+
+    await orm.$raw.close();
+  });
+
+  test("table client findMany, findFirst, and findUnique execute through the dialect", async () => {
     const orm = createOrm({
       adapter: "sqlite",
       url: ":memory:",
@@ -153,6 +189,17 @@ describe("relation helpers", () => {
       },
     });
 
+    const firstUser = await orm.users.findFirst({
+      where: {
+        name: {
+          contains: "o",
+        },
+      },
+      orderBy: {
+        name: "asc",
+      },
+    });
+
     expect(rows).toEqual([
       {
         id: "user-1",
@@ -162,6 +209,12 @@ describe("relation helpers", () => {
     ]);
 
     expect(user).toEqual({
+      id: "user-1",
+      name: "John",
+      email: "john@example.com",
+    });
+
+    expect(firstUser).toEqual({
       id: "user-1",
       name: "John",
       email: "john@example.com",
