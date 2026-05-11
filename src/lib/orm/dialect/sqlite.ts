@@ -73,6 +73,24 @@ const OPERATORS = {
   },
 } as const;
 
+const isPlainObject = (value: unknown) => {
+  if (value === null) return false;
+
+  if (typeof value !== "object") return false;
+
+  if (Array.isArray(value)) return false;
+
+  if (value instanceof Date) return false;
+
+  const prototype = Object.getPrototypeOf(value);
+
+  if (prototype === null) return true;
+
+  if (prototype === Object.prototype) return true;
+
+  return false;
+};
+
 const buildWhereClause = <T extends Table>(
   table: T,
   where?: TableWhere<T>,
@@ -91,7 +109,7 @@ const buildWhereClause = <T extends Table>(
 
     const sqlName = table.columns[typedKey].sqlName;
 
-    if (typeof value !== "object") {
+    if (!isPlainObject(value)) {
       clauses.push(`${sqlName} = ?`);
       params.push(serializeParam(value));
       continue;
