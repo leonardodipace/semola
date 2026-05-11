@@ -6,9 +6,14 @@ export type ErrorMetadataType = {
   error: Error;
 };
 
+export type ScheduleType =
+  | Bun.CronWithAutocomplete
+  | MinutelyAlias
+  | (string & {});
+
 export type CronOptions = {
   name: string;
-  schedule: Bun.CronWithAutocomplete | MinutelyAlias | (string & {});
+  schedule: ScheduleType;
   handler: () => Promise<unknown>;
   onError?: (error: ErrorMetadataType) => void;
 };

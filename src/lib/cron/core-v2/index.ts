@@ -1,9 +1,14 @@
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
-import type { CronOptions, CronStatus, ErrorMetadataType } from "./types.js";
+import type {
+  CronOptions,
+  CronStatus,
+  ErrorMetadataType,
+  ScheduleType,
+} from "./types.js";
 
 const MINUTELY_EXPR = "* * * * *" as const;
 
-export class CronV2 {
+export class Cron {
   private options: CronOptions;
   private status: CronStatus;
   private cron: Bun.CronJob | null = null;
@@ -97,7 +102,7 @@ export class CronV2 {
     this.cron.unref();
   }
 
-  public next(expr: string, from?: Date | number) {
+  public next(expr: ScheduleType, from?: Date | number) {
     if (!this.cron) return null;
 
     return Bun.cron.parse(expr, from);
