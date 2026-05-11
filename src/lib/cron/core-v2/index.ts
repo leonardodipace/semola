@@ -35,14 +35,10 @@ export class CronV2 {
       };
 
       this.options.onError(data);
-
       return;
     }
 
-    if (cron) {
-      this.status = "running";
-    }
-
+    this.status = "running";
     this.cron = cron;
   }
 
@@ -75,7 +71,7 @@ export class CronV2 {
   }
 
   public getExpression() {
-    if (!this.cron) return undefined;
+    if (!this.cron) return null;
     return this.cron.cron;
   }
 
@@ -99,5 +95,11 @@ export class CronV2 {
     if (!this.cron) return;
 
     this.cron.unref();
+  }
+
+  public next(expr: string, from?: Date | number) {
+    if (!this.cron) return null;
+
+    return Bun.cron.parse(expr, from);
   }
 }
