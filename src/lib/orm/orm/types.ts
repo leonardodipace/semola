@@ -153,7 +153,9 @@ type IsUniqueColumn<TColumn extends Column> =
       ? true
       : false;
 
-type FindUniqueColumnValue<TColumn extends Column> = ColumnValue<TColumn>;
+type FindUniqueColumnValue<TColumn extends Column> = NonNullable<
+  ColumnValue<TColumn>
+>;
 
 type UniqueColumnKeys<T extends Table> = {
   [TColumnName in keyof TableColumns<T>]: IsUniqueColumn<
