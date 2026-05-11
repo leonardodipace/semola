@@ -54,27 +54,14 @@ describe("Cron Expression Builder", () => {
   });
 
   describe("Custom expressions", () => {
-    test("should emit an expression with the 'second' field", () => {
-      const expr = cronJobBuilder((b) => b.second(any()));
-
-      expect(expr.split(" ")).toHaveLength(6);
-      expect(expr).toEqual("* * * * * *");
-    });
-
     describe("Any", () => {
       test("should produce an 'any' expression", () => {
         const expr = cronJobBuilder((b) =>
-          b
-            .second(any())
-            .minute(any())
-            .hour(any())
-            .day(any())
-            .month(any())
-            .weekday(any()),
+          b.minute(any()).hour(any()).day(any()).month(any()).weekday(any()),
         );
 
-        expect(expr.split(" ")).toHaveLength(6);
-        expect(expr).toEqual("* * * * * *");
+        expect(expr.split(" ")).toHaveLength(5);
+        expect(expr).toEqual("* * * * *");
       });
     });
 
@@ -82,7 +69,6 @@ describe("Cron Expression Builder", () => {
       test("should produce an expression with just numbers", () => {
         const expr = cronJobBuilder((b) =>
           b
-            .second(number(2))
             .minute(number(19))
             .hour(number(20))
             .day(number(3))
@@ -90,8 +76,8 @@ describe("Cron Expression Builder", () => {
             .weekday(number(WeekDay.thu)),
         );
 
-        expect(expr.split(" ")).toHaveLength(6);
-        expect(expr).toEqual("2 19 20 3 7 4");
+        expect(expr.split(" ")).toHaveLength(5);
+        expect(expr).toEqual("19 20 3 7 4");
       });
     });
 
@@ -99,13 +85,12 @@ describe("Cron Expression Builder", () => {
       test("should emit an expression with a range", () => {
         const expr = cronJobBuilder((b) =>
           b
-            .second(any())
             .hour(range({ min: 12, max: 20 }))
             .weekday(range({ min: 1, max: 3 })),
         );
 
-        expect(expr.split(" ")).toHaveLength(6);
-        expect(expr).toEqual("* * 12-20 * * 1-3");
+        expect(expr.split(" ")).toHaveLength(5);
+        expect(expr).toEqual("* 12-20 * * 1-3");
       });
 
       test("should raise an error if range bounds are incorrect", () => {
@@ -194,23 +179,23 @@ describe("Cron Expression Builder", () => {
     describe("List", () => {
       test("should emit a simple list of numbers", () => {
         const expr = cronJobBuilder((b) =>
-          b.second(list((l) => l.number(2).number(4).number(6))),
+          b.minute(list((l) => l.number(2).number(4).number(6))),
         );
 
-        expect(expr.split(" ")).toHaveLength(6);
-        expect(expr).toEqual("2,4,6 * * * * *");
+        expect(expr.split(" ")).toHaveLength(5);
+        expect(expr).toEqual("2,4,6 * * * *");
       });
 
       test("should emit a more complex list", () => {
         const expr = cronJobBuilder((b) =>
           b
-            .second(list((l) => l.number(2).number(4).number(6)))
+            .minute(list((l) => l.number(2).number(4).number(6)))
             .month(list((l) => l.range({ min: 2, max: 4 }).number(10)))
             .weekday(list((l) => l.step({ step: 2 }).number(3))),
         );
 
-        expect(expr.split(" ")).toHaveLength(6);
-        expect(expr).toEqual("2,4,6 * * * 2-4,10 */2,3");
+        expect(expr.split(" ")).toHaveLength(5);
+        expect(expr).toEqual("2,4,6 * * 2-4,10 */2,3");
       });
 
       test("should reduce a one-element list to a simple expression", () => {
