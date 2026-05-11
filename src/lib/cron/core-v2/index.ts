@@ -20,11 +20,8 @@ export class CronV2 {
   public run() {
     const { schedule, handler } = this.options;
     const [scheduleFormatErr, cron] = mightThrowSync(() => {
-      if (schedule === "@minutely") {
-        return Bun.cron(MINUTELY_EXPR, handler);
-      }
-
-      return Bun.cron(schedule, handler);
+      const expr = schedule === "@minutely" ? MINUTELY_EXPR : schedule;
+      return Bun.cron(expr, handler);
     });
 
     if (scheduleFormatErr) {
