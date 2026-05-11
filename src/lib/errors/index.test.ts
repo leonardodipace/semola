@@ -113,7 +113,8 @@ describe("Errors Module", () => {
         throw new Error("string error");
       };
       const [error, data] = mightThrowSync(fn);
-      expect(error).toEqual(new Error("string error"));
+      expect(error).toBeInstanceOf(Error);
+      expect(error?.message).toBe("string error");
       expect(data).toBeNull();
     });
 
