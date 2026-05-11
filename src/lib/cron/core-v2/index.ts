@@ -1,7 +1,7 @@
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
 import type { CronOptions, CronStatus, ErrorMetadataType } from "./types.js";
 
-const MinuteExpr = "* * * * *" as const;
+const MINUTELY_EXPR = "* * * * *" as const;
 
 export class CronV2 {
   private options: CronOptions;
@@ -21,7 +21,7 @@ export class CronV2 {
     const { schedule, handler } = this.options;
     const [scheduleFormatErr, cron] = mightThrowSync(() => {
       if (schedule === "@minutely") {
-        return Bun.cron(MinuteExpr, handler);
+        return Bun.cron(MINUTELY_EXPR, handler);
       }
 
       return Bun.cron(schedule, handler);
