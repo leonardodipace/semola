@@ -30,10 +30,11 @@ const createColumnBuilder = <
   column: ColumnBuilderState<TType, TNullable, TPrimaryKey, TUnique>,
 ): ColumnBuilder<TType, TNullable, TPrimaryKey, TUnique> => {
   const primaryKey = () => {
-    return createColumnBuilder<TType, TNullable, true, TUnique>({
+    return createColumnBuilder<TType, false, true, TUnique>({
       ...column,
       _meta: {
         ...column._meta,
+        isNullable: false,
         isPrimaryKey: true,
       },
     });

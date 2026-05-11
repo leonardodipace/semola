@@ -30,17 +30,19 @@ describe("ORM column builders", () => {
   });
 
   test("supports chaining primaryKey, unique, and default", () => {
-    const idColumn = uuid("id").primaryKey().notNull();
+    const idColumn = uuid("id").primaryKey();
     const emailColumn = string("email").notNull().unique();
     const createdAtColumn = date("created_at").default(() => new Date());
 
     expect(typeof idColumn.primaryKey).toBe("function");
+    expect(idColumn._meta.isNullable).toBe(false);
+    expect(idColumn._meta.isPrimaryKey).toBe(true);
     expect(typeof emailColumn.unique).toBe("function");
     expect(createdAtColumn.hasDefault).toBeTrue();
   });
 
   test("carry references metadata after calling references()", () => {
-    const usersId = uuid("id").primaryKey().notNull();
+    const usersId = uuid("id").primaryKey();
     const authorId = uuid("author_id")
       .notNull()
       .references(() => usersId);

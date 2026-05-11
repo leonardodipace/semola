@@ -95,10 +95,10 @@ type SetHasDefault<
 
 type SetPrimaryKey<
   TType extends ColumnType,
-  TNullable extends boolean,
+  _TNullable extends boolean,
   _TPrimaryKey extends boolean,
   TUnique extends boolean,
-> = ColumnBuilder<TType, TNullable, true, TUnique>;
+> = ColumnBuilder<TType, false, true, TUnique>;
 
 type SetUnique<
   TType extends ColumnType,
