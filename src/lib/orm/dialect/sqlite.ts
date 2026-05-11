@@ -38,6 +38,15 @@ const serializeParam = (value: unknown) => {
   return value;
 };
 
+const escapeLikeValue = (value: unknown) => {
+  const escaped = `${serializeParam(value)}`
+    .replaceAll("\\", "\\\\")
+    .replaceAll("%", "\\%")
+    .replaceAll("_", "\\_");
+
+  return serializeParam(escaped);
+};
+
 const OPERATORS = {
   eq: {
     sql: "= ?",
@@ -60,16 +69,16 @@ const OPERATORS = {
     transform: (v: unknown) => serializeParam(v),
   },
   startsWith: {
-    sql: "LIKE ?",
-    transform: (v: unknown) => `${serializeParam(v)}%`,
+    sql: "LIKE ? ESCAPE '\\'",
+    transform: (v: unknown) => serializeParam(`${escapeLikeValue(v)}%`),
   },
   endsWith: {
-    sql: "LIKE ?",
-    transform: (v: unknown) => `%${serializeParam(v)}`,
+    sql: "LIKE ? ESCAPE '\\'",
+    transform: (v: unknown) => serializeParam(`%${escapeLikeValue(v)}`),
   },
   contains: {
-    sql: "LIKE ?",
-    transform: (v: unknown) => `%${serializeParam(v)}%`,
+    sql: "LIKE ? ESCAPE '\\'",
+    transform: (v: unknown) => serializeParam(`%${escapeLikeValue(v)}%`),
   },
 } as const;
 
