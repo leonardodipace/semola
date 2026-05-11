@@ -93,6 +93,32 @@ describe("buildFindManyQuery", () => {
     expect(query.includeDescriptors).toEqual([]);
   });
 
+  test("treats non-plain where values as direct equality", () => {
+    const createdAt = new Date("2025-01-01T00:00:00.000Z");
+    const idList = ["user-1"];
+
+    const query = buildFindManyQuery(
+      usersTable,
+      {},
+      {
+        where: {
+          // @ts-expect-error runtime guard for non-plain object inputs
+          id: idList,
+          // @ts-expect-error runtime guard for direct date inputs
+          createdAt,
+          // @ts-expect-error runtime guard for null inputs
+          firstName: null,
+        },
+      },
+    );
+
+    expect(query.statement).toBe(
+      "SELECT id AS id, first_name AS firstName, created_at AS createdAt FROM users WHERE id = ? AND created_at = ? AND first_name = ?",
+    );
+    expect(query.params).toEqual([idList, createdAt.toISOString(), null]);
+    expect(query.includeDescriptors).toEqual([]);
+  });
+
   test("builds offset-only pagination with LIMIT -1 OFFSET", () => {
     const query = buildFindManyQuery(usersTable, {}, { skip: 3 });
 
