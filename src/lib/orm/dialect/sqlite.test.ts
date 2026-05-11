@@ -87,9 +87,35 @@ describe("buildFindManyQuery", () => {
     );
 
     expect(query.statement).toBe(
-      "SELECT id AS id, first_name AS firstName FROM users WHERE first_name LIKE ? AND created_at >= ? ORDER BY created_at DESC, first_name ASC LIMIT ? OFFSET ?",
+      "SELECT id AS id, first_name AS firstName FROM users WHERE first_name LIKE ? ESCAPE '\\' AND created_at >= ? ORDER BY created_at DESC, first_name ASC LIMIT ? OFFSET ?",
     );
     expect(query.params).toEqual(["Jo%", createdAfter.toISOString(), 10, 5]);
+    expect(query.includeDescriptors).toEqual([]);
+  });
+
+  test("escapes LIKE metacharacters for startsWith, endsWith, and contains", () => {
+    const query = buildFindManyQuery(
+      usersTable,
+      {},
+      {
+        where: {
+          firstName: {
+            startsWith: "a%_\\",
+            endsWith: "a%_\\",
+            contains: "a%_\\",
+          },
+        },
+      },
+    );
+
+    expect(query.statement).toBe(
+      "SELECT id AS id, first_name AS firstName, created_at AS createdAt FROM users WHERE first_name LIKE ? ESCAPE '\\' AND first_name LIKE ? ESCAPE '\\' AND first_name LIKE ? ESCAPE '\\'",
+    );
+    expect(query.params).toEqual([
+      "a\\%\\_\\\\%",
+      "%a\\%\\_\\\\",
+      "%a\\%\\_\\\\%",
+    ]);
     expect(query.includeDescriptors).toEqual([]);
   });
 
@@ -371,7 +397,7 @@ describe("buildFindFirstQuery", () => {
     );
 
     expect(query.statement).toBe(
-      "SELECT id AS id, first_name AS firstName, created_at AS createdAt FROM users WHERE first_name LIKE ? ORDER BY created_at DESC LIMIT ?",
+      "SELECT id AS id, first_name AS firstName, created_at AS createdAt FROM users WHERE first_name LIKE ? ESCAPE '\\' ORDER BY created_at DESC LIMIT ?",
     );
     expect(query.params).toEqual(["Jo%", 1]);
     expect(query.includeDescriptors).toEqual([]);
