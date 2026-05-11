@@ -38,19 +38,21 @@ const result = err("NotFoundError", "User not found");
 const [error, data] = result;
 
 if (error) {
-  console.log(error.type);    // "NotFoundError"
+  console.log(error.type); // "NotFoundError"
   console.log(error.message); // "User not found"
 }
 ```
 
 **Common error types:** `NotFoundError`, `UnauthorizedError`, `InternalServerError`, `ValidationError`, or any custom string.
 
-**`mightThrow<T>(promise: Promise<T>)`**
+**`mightThrow<T, E = Error>(promise: Promise<T>)`**
 
 Wraps async operations that might throw into result tuples.
 
+By default, `E` is `Error`. If the promise can reject with a non-Error value, pass a custom `E` generic.
+
 ```typescript
-const [error, data] = await mightThrow(fetch('/api/users'));
+const [error, data] = await mightThrow(fetch("/api/users"));
 
 if (error) {
   console.error("Request failed:", error);
@@ -60,9 +62,21 @@ if (error) {
 console.log("Success:", data);
 ```
 
-**`mightThrowSync<T>(fn: () => T)`**
+```typescript
+const [error] = await mightThrow<never, { code: string }>(
+  Promise.reject({ code: "RATE_LIMITED" }),
+);
+
+if (error) {
+  console.log(error.code); // RATE_LIMITED
+}
+```
+
+**`mightThrowSync<T, E = Error>(fn: () => T)`**
 
 Wraps synchronous operations that might throw into result tuples.
+
+By default, `E` is `Error`. If the function can throw a non-Error value, pass a custom `E` generic.
 
 ```typescript
 const [error, data] = mightThrowSync(() => JSON.parse(input));
@@ -85,9 +99,7 @@ async function getUser(id: string) {
     return err("ValidationError", "User ID is required");
   }
 
-  const [fetchError, response] = await mightThrow(
-    fetch(`/api/users/${id}`)
-  );
+  const [fetchError, response] = await mightThrow(fetch(`/api/users/${id}`));
 
   if (fetchError) {
     return err("InternalServerError", "Failed to fetch user");
