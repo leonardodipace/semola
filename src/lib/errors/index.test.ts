@@ -110,10 +110,10 @@ describe("Errors Module", () => {
 
     test("should handle different error types", () => {
       const fn = () => {
-        throw "string error";
+        throw new Error("string error");
       };
       const [error, data] = mightThrowSync(fn);
-      expect(error).toBe("string error");
+      expect(error).toEqual(new Error("string error"));
       expect(data).toBeNull();
     });
 
@@ -183,13 +183,17 @@ describe("Errors Module", () => {
     });
 
     test("should handle different rejection types", async () => {
-      const [error1] = await mightThrow(Promise.reject("string error"));
+      const [error1] = await mightThrow<never, string>(
+        Promise.reject("string error"),
+      );
       expect(error1).toBe("string error");
 
-      const [error2] = await mightThrow(Promise.reject(404));
+      const [error2] = await mightThrow<never, number>(Promise.reject(404));
       expect(error2).toBe(404);
 
-      const [error3] = await mightThrow(Promise.reject({ code: "ERROR" }));
+      const [error3] = await mightThrow<never, { code: string }>(
+        Promise.reject({ code: "ERROR" }),
+      );
       expect(error3).toEqual({ code: "ERROR" });
     });
   });
