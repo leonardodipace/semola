@@ -102,9 +102,10 @@ export class Cron {
     this.cron.unref();
   }
 
-  public next(expr: ScheduleType, from?: Date | number) {
+  public next(expr?: ScheduleType, from?: Date | number) {
     if (!this.cron) return null;
+    const exprToParse = expr ? expr : this.options.schedule;
 
-    return Bun.cron.parse(expr, from);
+    return Bun.cron.parse(exprToParse, from);
   }
 }
