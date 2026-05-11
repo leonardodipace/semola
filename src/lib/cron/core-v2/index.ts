@@ -51,7 +51,7 @@ export class CronV2 {
 
   public async runOSLevel(path: string) {
     const { schedule, name } = this.options;
-    const expr = schedule === "@minutely" ? MinuteExpr : schedule;
+    const expr = schedule === "@minutely" ? MINUTELY_EXPR : schedule;
     const osJob = Bun.cron(path, expr, name);
 
     const [osError] = await mightThrow(osJob);
