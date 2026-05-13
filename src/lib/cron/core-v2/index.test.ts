@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setSystemTime, test } from "bun:test";
 import { Cron } from "./index.js";
 
 describe("Cron", () => {
@@ -64,6 +64,28 @@ describe("Cron", () => {
           handler,
         }).run();
       }).toThrow(TypeError);
+    });
+
+    test("should call the onError() callback when passing an invalid expression", async () => {
+      setSystemTime(new Date("2020-01-01T00:00:00.000Z"));
+      const handler = () => Promise.resolve();
+
+      const cron = new Cron({
+        name: "invalid-job",
+        schedule: "0 0 * *",
+        handler,
+        onError: (err) => {
+          expect(err).not.toBeFalsy();
+          expect(err.error).toBeInstanceOf(TypeError);
+          expect(err.name).toBe("invalid-job");
+          expect(err.failedAt).toBe(Date.now());
+        },
+      });
+
+      cron.run();
+      cron.stop();
+
+      setSystemTime();
     });
   });
 
@@ -301,6 +323,49 @@ describe("Cron", () => {
       expect(next.getDate()).toBe(8);
       expect(next.getHours()).toBe(0);
       expect(next.getMinutes()).toBe(17);
+    });
+
+    test("should return null when no match is found", () => {
+      const cron = new Cron({
+        name: "leap-day",
+        schedule: "0 0 31 2 *",
+        handler: () => Promise.resolve(),
+      });
+
+      const next = cron.next();
+      expect(next).toBeNull();
+    });
+
+    test("should return null when starting date an invalid number", () => {
+      const cron = new Cron({
+        name: "leap-day",
+        schedule: "0 0 2 2 *",
+        handler: () => Promise.resolve(),
+      });
+
+      expect(() => cron.next(NaN)).toThrow(TypeError);
+      expect(() => cron.next(Infinity)).toThrow(TypeError);
+      expect(() => cron.next(-Infinity)).toThrow(TypeError);
+    });
+
+    test("should call the onError() callback when passing an invalid expression", () => {
+      setSystemTime(new Date("2020-01-01T00:00:00.000Z"));
+
+      const cron = new Cron({
+        name: "leap-day",
+        schedule: "0 0 18 2 *",
+        handler: () => Promise.resolve(),
+        onError: (err) => {
+          expect(err).not.toBeFalsy();
+          expect(err.error).toBeInstanceOf(TypeError);
+          expect(err.name).toBe("invalid-job");
+          expect(err.failedAt).toBe(Date.now());
+        },
+      });
+
+      expect(() => cron.next(NaN));
+      expect(() => cron.next(Infinity));
+      expect(() => cron.next(-Infinity));
     });
   });
 
