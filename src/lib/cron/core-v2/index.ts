@@ -110,7 +110,8 @@ export class Cron {
 
   public next(expr?: ScheduleType, from?: Date | number) {
     if (!this.cron) return null;
-    const exprToParse = expr ? expr : this.options.schedule;
+    const userExpr = expr ? expr : this.options.schedule;
+    const exprToParse = userExpr === "@minutely" ? MINUTELY_EXPR : userExpr;
 
     return Bun.cron.parse(exprToParse, from);
   }
