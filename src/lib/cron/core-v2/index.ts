@@ -104,9 +104,25 @@ export class Cron {
   }
 
   public next(from?: Date | number) {
-    const { schedule } = this.options;
+    const { schedule, onError } = this.options;
     const exprToParse = schedule === "@minutely" ? MINUTELY_EXPR : schedule;
 
-    return Bun.cron.parse(exprToParse, from);
+    const [parseError, nextMatch] = mightThrowSync(() =>
+      Bun.cron.parse(exprToParse, from),
+    );
+
+    if (parseError) {
+      if (!onError) throw parseError;
+
+      const data: ErrorMetadataType = {
+        name: this.options.name,
+        error: parseError,
+        failedAt: Date.now(),
+      };
+
+      onError(data);
+    }
+
+    return nextMatch;
   }
 }
