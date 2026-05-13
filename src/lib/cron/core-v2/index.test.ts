@@ -352,20 +352,20 @@ describe("Cron", () => {
       setSystemTime(new Date("2020-01-01T00:00:00.000Z"));
 
       const cron = new Cron({
-        name: "leap-day",
+        name: "on-error-call",
         schedule: "0 0 18 2 *",
         handler: () => Promise.resolve(),
         onError: (err) => {
           expect(err).not.toBeFalsy();
           expect(err.error).toBeInstanceOf(TypeError);
-          expect(err.name).toBe("invalid-job");
+          expect(err.name).toBe("on-error-call");
           expect(err.failedAt).toBe(Date.now());
         },
       });
 
-      expect(() => cron.next(NaN));
-      expect(() => cron.next(Infinity));
-      expect(() => cron.next(-Infinity));
+      cron.next(NaN);
+      cron.next(Infinity);
+      cron.next(-Infinity);
     });
   });
 
