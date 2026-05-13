@@ -109,8 +109,6 @@ export class Cron {
   }
 
   public next(from?: Date | number) {
-    if (!this.cron) return null;
-
     const { schedule } = this.options;
     const exprToParse = schedule === "@minutely" ? MINUTELY_EXPR : schedule;
 
