@@ -23,56 +23,62 @@ export class Cron {
   }
 
   public run() {
+    if (this.status === "running") return;
+
     const { schedule, handler } = this.options;
     const [scheduleFormatErr, cron] = mightThrowSync(() => {
       const expr = schedule === "@minutely" ? MINUTELY_EXPR : schedule;
       return Bun.cron(expr, handler);
     });
 
-    if (scheduleFormatErr) {
-      this.status = "idle";
-      if (!this.options.onError) throw scheduleFormatErr;
+    if (!scheduleFormatErr) {
+      this.status = "running";
+      this.cron = cron;
 
-      const data: ErrorMetadataType = {
-        name: this.options.name,
-        error: scheduleFormatErr as Error,
-        failedAt: Date.now(),
-      };
-
-      this.options.onError(data);
       return;
     }
 
-    this.status = "running";
-    this.cron = cron;
+    if (!this.options.onError) throw scheduleFormatErr;
+
+    const data: ErrorMetadataType = {
+      name: this.options.name,
+      error: scheduleFormatErr as Error,
+      failedAt: Date.now(),
+    };
+
+    this.options.onError(data);
   }
 
   public async runOSLevel(path: string) {
+    if (this.status === "running") return;
+
     const { schedule, name } = this.options;
     const expr = schedule === "@minutely" ? MINUTELY_EXPR : schedule;
     const osJob = Bun.cron(path, expr, name);
 
     const [osError] = await mightThrow(osJob);
-    if (!osError) return;
 
-    if (osError) {
-      this.status = "idle";
-      if (!this.options.onError) throw osError;
-
-      const data: ErrorMetadataType = {
-        name: this.options.name,
-        error: osError as Error,
-        failedAt: Date.now(),
-      };
-
-      this.options.onError(data);
+    if (!osError) {
+      this.status = "running";
       return;
     }
+
+    if (!this.options.onError) throw osError;
+
+    const data: ErrorMetadataType = {
+      name: this.options.name,
+      error: osError as Error,
+      failedAt: Date.now(),
+    };
+
+    this.options.onError(data);
   }
 
   public async stopOSLevel() {
-    this.status = "idle";
+    if (this.status !== "running") return;
+
     await Bun.cron.remove(this.options.name);
+    this.status = "idle";
   }
 
   public getExpression() {
@@ -84,8 +90,8 @@ export class Cron {
     if (this.status !== "running") return;
     if (!this.cron) return;
 
-    this.status = "idle";
     this.cron.stop();
+    this.status = "idle";
   }
 
   public ref() {
