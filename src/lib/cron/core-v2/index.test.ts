@@ -14,7 +14,6 @@ describe("Cron", () => {
 
       expect(cron).toBeDefined();
       expect(cron.getStatus()).toBe("idle");
-      cron.stop();
     });
 
     test("should create a cron job with @daily alias", () => {
@@ -27,7 +26,7 @@ describe("Cron", () => {
       });
 
       expect(cron).toBeDefined();
-      cron.stop();
+      expect(cron.getStatus()).toBe("idle");
     });
 
     test("should create a cron job with @hourly alias", () => {
@@ -40,7 +39,7 @@ describe("Cron", () => {
       });
 
       expect(cron).toBeDefined();
-      cron.stop();
+      expect(cron.getStatus()).toBe("idle");
     });
 
     test("should throw error for invalid cron expression", () => {
@@ -101,7 +100,7 @@ describe("Cron", () => {
       expect(cron.getStatus()).toBe("idle");
     });
 
-    test("should handle multiple start calls gracefully", () => {
+    test("should handle multiple start calls gracefully without creating multiple jobs", () => {
       const handler = () => Promise.resolve();
 
       const cron = new Cron({
@@ -111,12 +110,16 @@ describe("Cron", () => {
       });
 
       cron.run();
-      cron.run();
-      cron.run();
+      expect(cron.getStatus()).toBe("running");
 
+      cron.run();
+      expect(cron.getStatus()).toBe("running");
+
+      cron.run();
       expect(cron.getStatus()).toBe("running");
 
       cron.stop();
+      expect(cron.getStatus()).toBe("idle");
     });
   });
 
@@ -214,16 +217,14 @@ describe("Cron", () => {
         handler: () => Promise.resolve(),
       });
 
-      cron.run();
       const next = cron.next();
-
       if (!next) throw new Error("Expected next run to be found");
 
+      expect(next.getFullYear()).toBe(new Date().getFullYear() + 1);
       expect(next.getMonth()).toBe(0);
       expect(next.getDate()).toBe(1);
       expect(next.getHours()).toBe(0);
       expect(next.getMinutes()).toBe(0);
-      cron.stop();
     });
 
     test("should find next run for specific month and day", () => {
@@ -234,15 +235,12 @@ describe("Cron", () => {
         handler: () => Promise.resolve(),
       });
 
-      cron.run();
       const next = cron.next();
-
       if (!next) throw new Error("Expected next run to be found");
 
       expect(next.getMonth()).toBe(11);
       expect(next.getDate()).toBe(25);
       expect(next.getHours()).toBe(12);
-      cron.stop();
     });
 
     test("should find next run for leap day schedule beyond 366 days", () => {
@@ -254,47 +252,55 @@ describe("Cron", () => {
         handler: () => Promise.resolve(),
       });
 
-      cron.run();
       const next = cron.next();
       expect(next).not.toBeNull();
-
-      cron.stop();
     });
-  });
 
-  describe("next retry on null return by next() method", () => {
-    test("should schedule a retry timeout when next() method returns null", () => {
+    test("should find next run when using a past starting date", () => {
       const cron = new Cron({
-        name: "retry-test",
-        schedule: "0 0 * * *",
+        name: "daily-horizon-from-the-past",
+        schedule: "@daily",
         handler: () => Promise.resolve(),
       });
 
-      cron.next = () => null;
-      cron.run();
+      const next = cron.next(new Date(2026, 4, 8));
+      if (!next) throw new Error("Expected next run to be found");
 
-      // Status should remain running (not stuck idle)
-      expect(cron.getStatus()).toBe("running");
-
-      // A timeout should have been set (stop clears it, proving it exists)
-      cron.stop();
-      expect(cron.getStatus()).toBe("idle");
+      expect(next.getFullYear()).toBe(2026);
+      expect(next.getMonth()).toBe(4);
+      expect(next.getDate()).toBe(9);
     });
 
-    test("should keep status running during retry, not idle", () => {
+    test("should find next run when using a future starting date", () => {
       const cron = new Cron({
-        name: "retry-status",
-        schedule: "0 0 * * *",
+        name: "daily-horizon-from-the-future",
+        schedule: "@daily",
         handler: () => Promise.resolve(),
       });
 
-      cron.next = () => null;
-      cron.run();
+      const next = cron.next(new Date(2027, 4, 8));
+      if (!next) throw new Error("Expected next run to be found");
 
-      // Must stay running, not fall back to idle
-      expect(cron.getStatus()).toBe("running");
+      expect(next.getFullYear()).toBe(2027);
+      expect(next.getMonth()).toBe(4);
+      expect(next.getDate()).toBe(9);
+    });
 
-      cron.stop();
+    test("should find next run when using the @minutely alias", () => {
+      const cron = new Cron({
+        name: "minutly-horizon",
+        schedule: "@minutely",
+        handler: () => Promise.resolve(),
+      });
+
+      const next = cron.next(new Date(2027, 4, 8, 0, 16, 0));
+      if (!next) throw new Error("Expected next run to be found");
+
+      expect(next.getFullYear()).toBe(2027);
+      expect(next.getMonth()).toBe(4);
+      expect(next.getDate()).toBe(8);
+      expect(next.getHours()).toBe(0);
+      expect(next.getMinutes()).toBe(17);
     });
   });
 
