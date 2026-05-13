@@ -36,22 +36,43 @@ await orm.$raw`
 console.timeEnd("create tables");
 
 console.time("insert users");
-const now = new Date();
-const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
-const johnId = Bun.randomUUIDv7();
-const janeId = Bun.randomUUIDv7();
-const bobId = Bun.randomUUIDv7();
-const aliceId = Bun.randomUUIDv7();
-const charlieId = Bun.randomUUIDv7();
-
-await orm.$raw`
-  INSERT INTO users (id, first_name, last_name, email, created_at) VALUES
-  (${johnId}, 'John', 'Doe', 'john@example.com', ${oneHourAgo.toISOString()}),
-  (${janeId}, 'Jane', 'Smith', 'jane@example.com', ${oneHourAgo.toISOString()}),
-  (${bobId}, 'Bob', 'Johnson', 'bob@example.com', ${now.toISOString()}),
-  (${aliceId}, 'Alice', 'Williams', 'alice@example.com', ${now.toISOString()}),
-  (${charlieId}, 'Charlie', 'Brown', 'charlie@example.com', ${now.toISOString()})
-`;
+await Promise.all([
+  orm.users.create({
+    data: {
+      firstName: "John",
+      lastName: "Doe",
+      email: "john@example.com",
+    },
+  }),
+  orm.users.create({
+    data: {
+      firstName: "Jane",
+      lastName: "Smith",
+      email: "jane@example.com",
+    },
+  }),
+  orm.users.create({
+    data: {
+      firstName: "Bob",
+      lastName: "Johnson",
+      email: "bob@example.com",
+    },
+  }),
+  orm.users.create({
+    data: {
+      firstName: "Alice",
+      lastName: "Williams",
+      email: "alice@example.com",
+    },
+  }),
+  orm.users.create({
+    data: {
+      firstName: "Charlie",
+      lastName: "Brown",
+      email: "charlie@example.com",
+    },
+  }),
+]);
 console.timeEnd("insert users");
 
 console.time("findMany");
@@ -74,7 +95,7 @@ console.timeEnd("findFirst");
 console.time("findUnique");
 await orm.users.findUnique({
   where: {
-    id: johnId,
+    id: Bun.randomUUIDv7(),
   },
 });
 console.timeEnd("findUnique");
