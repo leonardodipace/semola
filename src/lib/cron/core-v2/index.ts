@@ -1,10 +1,5 @@
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
-import type {
-  CronOptions,
-  CronStatus,
-  ErrorMetadataType,
-  ScheduleType,
-} from "./types.js";
+import type { CronOptions, CronStatus, ErrorMetadataType } from "./types.js";
 
 const MINUTELY_EXPR = "* * * * *" as const;
 
