@@ -38,7 +38,7 @@ describe("ORM column builders", () => {
     expect(idColumn._meta.isNullable).toBe(false);
     expect(idColumn._meta.isPrimaryKey).toBe(true);
     expect(typeof emailColumn.unique).toBe("function");
-    expect(createdAtColumn.hasDefault).toBeTrue();
+    expect(createdAtColumn._meta.hasDefault).toBeTrue();
   });
 
   test("carry references metadata after calling references()", () => {

@@ -7,6 +7,7 @@ type ColumnBuilderState<
   TNullable extends boolean,
   TPrimaryKey extends boolean,
   TUnique extends boolean,
+  THasDefault extends boolean,
 > = {
   sqlName: string;
   type: TType;
@@ -14,8 +15,9 @@ type ColumnBuilderState<
     isNullable: TNullable;
     isPrimaryKey: TPrimaryKey;
     isUnique: TUnique;
+    hasDefault: THasDefault;
   };
-  hasDefault?: boolean;
+  _default?: () => ColumnRuntimeValueMap[TType];
   references?: {
     tableColumn: () => { sqlName: string };
   };
@@ -26,11 +28,18 @@ const createColumnBuilder = <
   TNullable extends boolean,
   TPrimaryKey extends boolean,
   TUnique extends boolean,
+  THasDefault extends boolean,
 >(
-  column: ColumnBuilderState<TType, TNullable, TPrimaryKey, TUnique>,
-): ColumnBuilder<TType, TNullable, TPrimaryKey, TUnique> => {
+  column: ColumnBuilderState<
+    TType,
+    TNullable,
+    TPrimaryKey,
+    TUnique,
+    THasDefault
+  >,
+): ColumnBuilder<TType, TNullable, TPrimaryKey, TUnique, THasDefault> => {
   const primaryKey = () => {
-    return createColumnBuilder<TType, false, true, TUnique>({
+    return createColumnBuilder<TType, false, true, TUnique, THasDefault>({
       ...column,
       _meta: {
         ...column._meta,
@@ -41,17 +50,19 @@ const createColumnBuilder = <
   };
 
   const notNull = () => {
-    return createColumnBuilder<TType, false, TPrimaryKey, TUnique>({
-      ...column,
-      _meta: {
-        ...column._meta,
-        isNullable: false,
+    return createColumnBuilder<TType, false, TPrimaryKey, TUnique, THasDefault>(
+      {
+        ...column,
+        _meta: {
+          ...column._meta,
+          isNullable: false,
+        },
       },
-    });
+    );
   };
 
   const nullable = () => {
-    return createColumnBuilder<TType, true, TPrimaryKey, TUnique>({
+    return createColumnBuilder<TType, true, TPrimaryKey, TUnique, THasDefault>({
       ...column,
       _meta: {
         ...column._meta,
@@ -61,7 +72,13 @@ const createColumnBuilder = <
   };
 
   const unique = () => {
-    return createColumnBuilder<TType, TNullable, TPrimaryKey, true>({
+    return createColumnBuilder<
+      TType,
+      TNullable,
+      TPrimaryKey,
+      true,
+      THasDefault
+    >({
       ...column,
       _meta: {
         ...column._meta,
@@ -70,15 +87,25 @@ const createColumnBuilder = <
     });
   };
 
-  const defaultHandler = (_value: () => ColumnRuntimeValueMap[TType]) => {
-    return createColumnBuilder<TType, TNullable, TPrimaryKey, TUnique>({
+  const defaultHandler = (value: () => ColumnRuntimeValueMap[TType]) => {
+    return createColumnBuilder<TType, TNullable, TPrimaryKey, TUnique, true>({
       ...column,
-      hasDefault: true,
+      _meta: {
+        ...column._meta,
+        hasDefault: true,
+      },
+      _default: value,
     });
   };
 
   const referencesBuilder = (tableColumn: () => { sqlName: string }) => {
-    return createColumnBuilder<TType, TNullable, TPrimaryKey, TUnique>({
+    return createColumnBuilder<
+      TType,
+      TNullable,
+      TPrimaryKey,
+      TUnique,
+      THasDefault
+    >({
       ...column,
       references: {
         tableColumn,
@@ -90,7 +117,8 @@ const createColumnBuilder = <
     TType,
     TNullable,
     TPrimaryKey,
-    TUnique
+    TUnique,
+    THasDefault
   >["references"] = referencesBuilder;
 
   references.tableColumn = column.references?.tableColumn;
@@ -110,17 +138,18 @@ const createBaseColumn = <TType extends ColumnType>(
   sqlName: string,
   type: TType,
 ) => {
-  const column: ColumnBuilderState<TType, true, false, false> = {
+  const column: ColumnBuilderState<TType, true, false, false, false> = {
     sqlName,
     type,
     _meta: {
       isNullable: true,
       isPrimaryKey: false,
       isUnique: false,
+      hasDefault: false,
     },
   };
 
-  return createColumnBuilder<TType, true, false, false>(column);
+  return createColumnBuilder<TType, true, false, false, false>(column);
 };
 
 export const string = (sqlName: string): ColumnBuilder<"string"> => {

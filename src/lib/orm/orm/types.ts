@@ -188,6 +188,38 @@ export type TableRow<T extends Table> = Prettify<{
   [TColumnName in keyof T["columns"]]: ColumnValue<T["columns"][TColumnName]>;
 }>;
 
+type IsRequiredCreateColumn<TColumn extends Column> =
+  TColumn["_meta"]["isNullable"] extends false
+    ? TColumn["_meta"]["hasDefault"] extends true
+      ? false
+      : true
+    : false;
+
+type CreateRequiredColumnKeys<T extends Table> = {
+  [TColumnName in keyof TableColumns<T>]: IsRequiredCreateColumn<
+    TableColumnByName<T, TColumnName>
+  > extends true
+    ? TColumnName
+    : never;
+}[keyof TableColumns<T>];
+
+export type CreateData<T extends Table> = Prettify<
+  {
+    [TColumnName in CreateRequiredColumnKeys<T>]: ColumnValue<
+      TableColumnByName<T, TColumnName>
+    >;
+  } & {
+    [TColumnName in Exclude<
+      keyof TableColumns<T>,
+      CreateRequiredColumnKeys<T>
+    >]?: ColumnValue<TableColumnByName<T, TColumnName>>;
+  }
+>;
+
+export type CreateOptions<T extends Table> = {
+  data: CreateData<T>;
+};
+
 type HasManyRelationType<R extends HasMany<Table> | HasOne<Table>> =
   R extends HasMany<infer TTable> ? Array<TableRow<TTable>> : never;
 
@@ -291,4 +323,6 @@ export type TableClient<
   findUnique<const TOptions extends FindUniqueOptions<T, TRelations>>(
     options: TOptions,
   ): Promise<FindUniqueResult<T, TRelations, TOptions>>;
+
+  create(options: CreateOptions<T>): Promise<TableRow<T>>;
 };

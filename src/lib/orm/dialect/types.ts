@@ -1,4 +1,5 @@
 import type {
+  CreateOptions,
   FindFirstOptions,
   FindFirstResult,
   FindManyOptions,
@@ -6,6 +7,7 @@ import type {
   FindUniqueOptions,
   FindUniqueResult,
   TableRelations,
+  TableRow,
 } from "../orm/types.js";
 import type { Table } from "../table/types.js";
 
@@ -30,4 +32,6 @@ export type Dialect<
     sql: Bun.SQL,
     options: TOptions,
   ): Promise<FindUniqueResult<T, TRelations, TOptions>>;
+
+  create(sql: Bun.SQL, options: CreateOptions<T>): Promise<TableRow<T>>;
 };

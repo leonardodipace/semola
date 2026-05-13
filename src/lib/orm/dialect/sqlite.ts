@@ -1,10 +1,13 @@
+import type { Column } from "../column/types.js";
 import type {
+  CreateOptions,
   FindFirstOptions,
   FindManyOptions,
   FindUniqueOptions,
   TableInclude,
   TableOrderBy,
   TableRelations,
+  TableRow,
   TableSelect,
   TableWhere,
 } from "../orm/types.js";
@@ -459,6 +462,44 @@ type SelectQuery = {
   includeDescriptors: IncludeDescriptor[];
 };
 
+type CreateQuery<T extends Table> = {
+  statement: string;
+  params: unknown[];
+  row: TableRow<T>;
+};
+
+const resolveCreateValue = (column: Column, provided: unknown) => {
+  if (provided !== undefined) return provided;
+
+  if (column._default) return column._default();
+
+  return null;
+};
+
+export const buildCreateQuery = <T extends Table>(
+  table: T,
+  options: CreateOptions<T>,
+): CreateQuery<T> => {
+  const provided = new Map<string, unknown>(Object.entries(options.data));
+  const sqlNames: string[] = [];
+  const placeholders: string[] = [];
+  const params: unknown[] = [];
+  const row: Record<string, unknown> = {};
+
+  for (const [jsKey, column] of Object.entries(table.columns)) {
+    const value = resolveCreateValue(column, provided.get(jsKey));
+
+    row[jsKey] = value;
+    sqlNames.push(column.sqlName);
+    placeholders.push("?");
+    params.push(serializeParam(value));
+  }
+
+  const statement = `INSERT INTO ${table.sqlName} (${sqlNames.join(", ")}) VALUES (${placeholders.join(", ")})`;
+
+  return { statement, params, row: row as TableRow<T> };
+};
+
 export const buildFindManyQuery = <T extends Table, R extends TableRelations>(
   table: T,
   relations: R,
@@ -610,6 +651,13 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
       const rows = await executeSelectQuery(sql, query);
 
       return getFirstRow(rows);
+    },
+    create: async (sql, options) => {
+      const query = buildCreateQuery(table, options);
+
+      await sql.unsafe(query.statement, query.params);
+
+      return query.row;
     },
   };
 };

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { string, uuid } from "../column/index.js";
+import { date, string, uuid } from "../column/index.js";
 import { defineTable } from "../table/index.js";
 import { createOrm, many, one } from "./index.js";
 
@@ -219,6 +219,141 @@ describe("relation helpers", () => {
       name: "John",
       email: "john@example.com",
     });
+
+    await orm.$raw.close();
+  });
+
+  test("create inserts a row, applies defaults, and returns it", async () => {
+    const fixedDate = new Date("2025-06-01T00:00:00.000Z");
+
+    const table = defineTable("users", {
+      id: uuid("id")
+        .primaryKey()
+        .notNull()
+        .default(() => "generated-id"),
+      name: string("name").notNull(),
+      nickname: string("nickname").nullable(),
+      createdAt: date("created_at")
+        .notNull()
+        .default(() => fixedDate),
+    });
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: {
+        users: table,
+      },
+    });
+
+    await orm.$raw.unsafe(
+      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, nickname TEXT, created_at TEXT NOT NULL)",
+    );
+
+    const created = await orm.users.create({
+      data: {
+        name: "John",
+      },
+    });
+
+    expect(created).toEqual({
+      id: "generated-id",
+      name: "John",
+      nickname: null,
+      createdAt: fixedDate,
+    });
+
+    const fromDb = await orm.users.findUnique({
+      where: { id: "generated-id" },
+    });
+
+    expect(fromDb?.id).toBe("generated-id");
+    expect(fromDb?.name).toBe("John");
+    expect(fromDb?.nickname).toBeNull();
+    expect(new Date(fromDb?.createdAt ?? 0).toISOString()).toBe(
+      fixedDate.toISOString(),
+    );
+
+    await orm.$raw.close();
+  });
+
+  test("create allows overriding defaulted fields", async () => {
+    const table = defineTable("users", {
+      id: uuid("id")
+        .primaryKey()
+        .notNull()
+        .default(() => "auto-id"),
+      name: string("name").notNull(),
+    });
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: {
+        users: table,
+      },
+    });
+
+    await orm.$raw.unsafe(
+      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL)",
+    );
+
+    const created = await orm.users.create({
+      data: {
+        id: "custom-id",
+        name: "Jane",
+      },
+    });
+
+    expect(created.id).toBe("custom-id");
+
+    await orm.$raw.close();
+  });
+
+  test("create requires non-nullable fields without defaults", async () => {
+    const table = defineTable("users", {
+      id: uuid("id")
+        .primaryKey()
+        .notNull()
+        .default(() => "auto-id"),
+      name: string("name").notNull(),
+      nickname: string("nickname").nullable(),
+    });
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: {
+        users: table,
+      },
+    });
+
+    const acceptCreateOptions = <TOptions>(_options: TOptions) => {
+      return undefined;
+    };
+
+    acceptCreateOptions<Parameters<typeof orm.users.create>[0]>({
+      data: {
+        name: "John",
+      },
+    });
+
+    acceptCreateOptions<Parameters<typeof orm.users.create>[0]>({
+      data: {
+        id: "x",
+        name: "John",
+        nickname: null,
+      },
+    });
+
+    const missingRequired: Parameters<typeof orm.users.create>[0] = {
+      // @ts-expect-error name is required
+      data: {
+        id: "x",
+      },
+    };
+
+    expect(missingRequired).toBeDefined();
 
     await orm.$raw.close();
   });
