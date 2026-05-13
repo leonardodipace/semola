@@ -42,7 +42,7 @@ export class Cron {
 
     const data: ErrorMetadataType = {
       name: this.options.name,
-      error: scheduleFormatErr as Error,
+      error: scheduleFormatErr,
       failedAt: Date.now(),
     };
 
@@ -67,7 +67,7 @@ export class Cron {
 
     const data: ErrorMetadataType = {
       name: this.options.name,
-      error: osError as Error,
+      error: osError,
       failedAt: Date.now(),
     };
 
