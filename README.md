@@ -86,6 +86,14 @@ if (error) {
 console.log("Success:", data);
 ```
 
+`mightThrow` and `mightThrowSync` default their error type to `Error`. If a promise or function can reject or throw non-Error values, pass a custom error generic.
+
+```typescript
+const [customError] = await mightThrow<never, { code: string }>(
+  Promise.reject({ code: "RATE_LIMITED" }),
+);
+```
+
 ### Process Background Jobs
 
 ```typescript
