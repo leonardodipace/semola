@@ -13,6 +13,8 @@ import type {
   Relations,
   TableClient,
   TableRelations,
+  UpdateOptions,
+  UpdateResult,
 } from "./types.js";
 
 export const many = <T extends Table>(table: () => T): HasMany<T> => {
@@ -58,6 +60,12 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
 
     create: async (options: CreateOptions<T>) => {
       return await dialect.create(sql, options);
+    },
+
+    update: async <const TOptions extends UpdateOptions<T, TRelations>>(
+      options: TOptions,
+    ): Promise<UpdateResult<T, TRelations, TOptions>> => {
+      return await dialect.update<TOptions>(sql, options);
     },
   };
 };

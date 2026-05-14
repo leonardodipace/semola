@@ -220,6 +220,28 @@ export type CreateOptions<T extends Table> = {
   data: CreateData<T>;
 };
 
+export type UpdateData<T extends Table> = Partial<{
+  [TColumnName in keyof TableColumns<T>]: ColumnValue<
+    TableColumnByName<T, TColumnName>
+  >;
+}>;
+
+export type UpdateOptions<
+  T extends Table,
+  TRelations extends TableRelations = TableRelations,
+> = {
+  where: FindUniqueWhere<T>;
+  data: UpdateData<T>;
+  select?: TableSelect<T>;
+  include?: TableInclude<TRelations>;
+};
+
+export type UpdateResult<
+  T extends Table,
+  TRelations extends TableRelations,
+  TOptions extends UpdateOptions<T, TRelations>,
+> = NonNullable<FindUniqueResult<T, TRelations, TOptions>>;
+
 type HasManyRelationType<R extends HasMany<Table> | HasOne<Table>> =
   R extends HasMany<infer TTable> ? Array<TableRow<TTable>> : never;
 
@@ -325,4 +347,8 @@ export type TableClient<
   ): Promise<FindUniqueResult<T, TRelations, TOptions>>;
 
   create(options: CreateOptions<T>): Promise<TableRow<T>>;
+
+  update<const TOptions extends UpdateOptions<T, TRelations>>(
+    options: TOptions,
+  ): Promise<UpdateResult<T, TRelations, TOptions>>;
 };

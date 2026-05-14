@@ -8,6 +8,8 @@ import type {
   FindUniqueResult,
   TableRelations,
   TableRow,
+  UpdateOptions,
+  UpdateResult,
 } from "../orm/types.js";
 import type { Table } from "../table/types.js";
 
@@ -34,4 +36,9 @@ export type Dialect<
   ): Promise<FindUniqueResult<T, TRelations, TOptions>>;
 
   create(sql: Bun.SQL, options: CreateOptions<T>): Promise<TableRow<T>>;
+
+  update<const TOptions extends UpdateOptions<T, TRelations>>(
+    sql: Bun.SQL,
+    options: TOptions,
+  ): Promise<UpdateResult<T, TRelations, TOptions>>;
 };

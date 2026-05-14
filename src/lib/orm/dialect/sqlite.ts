@@ -10,6 +10,8 @@ import type {
   TableRow,
   TableSelect,
   TableWhere,
+  UpdateOptions,
+  UpdateResult,
 } from "../orm/types.js";
 import type { Table } from "../table/types.js";
 import type { Dialect } from "./types.js";
@@ -500,6 +502,53 @@ export const buildCreateQuery = <T extends Table>(
   return { statement, params, row: row as TableRow<T> };
 };
 
+type UpdateQuery = {
+  statement: string;
+  params: unknown[];
+  includeDescriptors: IncludeDescriptor[];
+};
+
+export const buildUpdateQuery = <T extends Table, R extends TableRelations>(
+  table: T,
+  relations: R,
+  options: UpdateOptions<T, R>,
+): UpdateQuery => {
+  validateFindUniqueWhere(table, options.where);
+
+  const setClauses: string[] = [];
+  const params: unknown[] = [];
+
+  for (const [jsKey, value] of Object.entries(options.data)) {
+    const column = table.columns[jsKey];
+
+    if (!column) continue;
+
+    setClauses.push(`${column.sqlName} = ?`);
+    params.push(serializeParam(value));
+  }
+
+  if (!setClauses.length) {
+    throw new Error("update requires at least one field in data");
+  }
+
+  const where = buildWhereClause(table, options.where);
+  const columns = buildSelectColumns(table, options.select);
+  const include = buildIncludeClause(table, relations, options.include);
+  const returning = include.sql ? `${columns}, ${include.sql}` : columns;
+
+  let statement = `UPDATE ${table.sqlName} SET ${setClauses.join(", ")}`;
+
+  if (where.sql) {
+    statement = `${statement} WHERE ${where.sql}`;
+  }
+
+  statement = `${statement} RETURNING ${returning}`;
+
+  params.push(...where.params);
+
+  return { statement, params, includeDescriptors: include.descriptors };
+};
+
 export const buildFindManyQuery = <T extends Table, R extends TableRelations>(
   table: T,
   relations: R,
@@ -658,6 +707,19 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
       await sql.unsafe(query.statement, query.params);
 
       return query.row;
+    },
+    update: async (sql, options) => {
+      const query = buildUpdateQuery(table, relations, options);
+      const rows = await executeSelectQuery(sql, query);
+      const row = getFirstRow(rows);
+
+      if (!row) {
+        throw new Error(
+          `Record not found after update on table ${table.sqlName}`,
+        );
+      }
+
+      return row as UpdateResult<T, R, typeof options>;
     },
   };
 };
