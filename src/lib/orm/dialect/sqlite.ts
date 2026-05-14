@@ -151,7 +151,7 @@ const buildSelectColumns = <T extends Table>(
   table: T,
   select?: TableSelect<T>,
 ) => {
-  if (!select) {
+  if (!select || Object.keys(select).length === 0) {
     return Object.entries(table.columns)
       .map(([k, col]) => getColumnAlias(col.sqlName, k))
       .join(", ");

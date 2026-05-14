@@ -154,6 +154,16 @@ describe("buildFindManyQuery", () => {
     expect(query.params).toEqual([3]);
   });
 
+  test("falls back to full column list when select is an empty object", () => {
+    const query = buildFindManyQuery(usersTable, {}, { select: {} });
+
+    expect(query.statement).toBe(
+      "SELECT id AS id, first_name AS firstName, created_at AS createdAt FROM users",
+    );
+    expect(query.params).toEqual([]);
+    expect(query.includeDescriptors).toEqual([]);
+  });
+
   test("builds hasMany include subquery SQL", () => {
     const query = buildFindManyQuery(
       usersTable,
