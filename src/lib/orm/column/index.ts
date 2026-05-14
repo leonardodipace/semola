@@ -49,7 +49,13 @@ const createColumnBuilder = <
     });
   };
 
-  const notNull = () => {
+  const notNull: ColumnBuilder<
+    TType,
+    TNullable,
+    TPrimaryKey,
+    TUnique,
+    THasDefault
+  >["notNull"] = () => {
     return createColumnBuilder<TType, false, TPrimaryKey, TUnique, THasDefault>(
       {
         ...column,
@@ -61,7 +67,23 @@ const createColumnBuilder = <
     );
   };
 
-  const nullable = () => {
+  const nullable = (() => {
+    if (column._meta.isPrimaryKey) {
+      return createColumnBuilder<
+        TType,
+        false,
+        TPrimaryKey,
+        TUnique,
+        THasDefault
+      >({
+        ...column,
+        _meta: {
+          ...column._meta,
+          isNullable: false,
+        },
+      });
+    }
+
     return createColumnBuilder<TType, true, TPrimaryKey, TUnique, THasDefault>({
       ...column,
       _meta: {
@@ -69,7 +91,13 @@ const createColumnBuilder = <
         isNullable: true,
       },
     });
-  };
+  }) as ColumnBuilder<
+    TType,
+    TNullable,
+    TPrimaryKey,
+    TUnique,
+    THasDefault
+  >["nullable"];
 
   const unique = () => {
     return createColumnBuilder<

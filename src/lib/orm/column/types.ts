@@ -89,11 +89,23 @@ type ColumnBuilderState<
 
 type SetNullable<
   TType extends ColumnType,
-  TNullable extends boolean,
   TPrimaryKey extends boolean,
   TUnique extends boolean,
   THasDefault extends boolean,
-> = ColumnBuilder<TType, TNullable, TPrimaryKey, TUnique, THasDefault>;
+> = ColumnBuilder<
+  TType,
+  TPrimaryKey extends true ? false : true,
+  TPrimaryKey,
+  TUnique,
+  THasDefault
+>;
+
+type SetNotNull<
+  TType extends ColumnType,
+  TPrimaryKey extends boolean,
+  TUnique extends boolean,
+  THasDefault extends boolean,
+> = ColumnBuilder<TType, false, TPrimaryKey, TUnique, THasDefault>;
 
 type SetHasDefault<
   TType extends ColumnType,
@@ -104,8 +116,6 @@ type SetHasDefault<
 
 type SetPrimaryKey<
   TType extends ColumnType,
-  _TNullable extends boolean,
-  _TPrimaryKey extends boolean,
   TUnique extends boolean,
   THasDefault extends boolean,
 > = ColumnBuilder<TType, false, true, TUnique, THasDefault>;
@@ -125,15 +135,9 @@ export type ColumnBuilder<
   TUnique extends boolean = false,
   THasDefault extends boolean = false,
 > = ColumnBuilderState<TType, TNullable, TPrimaryKey, TUnique, THasDefault> & {
-  primaryKey: () => SetPrimaryKey<
-    TType,
-    TNullable,
-    TPrimaryKey,
-    TUnique,
-    THasDefault
-  >;
-  notNull: () => SetNullable<TType, false, TPrimaryKey, TUnique, THasDefault>;
-  nullable: () => SetNullable<TType, true, TPrimaryKey, TUnique, THasDefault>;
+  primaryKey: () => SetPrimaryKey<TType, TUnique, THasDefault>;
+  notNull: () => SetNotNull<TType, TPrimaryKey, TUnique, THasDefault>;
+  nullable: () => SetNullable<TType, TPrimaryKey, TUnique, THasDefault>;
   unique: () => SetUnique<TType, TNullable, TPrimaryKey, TUnique, THasDefault>;
   default: (
     value: () => ColumnRuntimeValueMap[TType],

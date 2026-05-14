@@ -41,6 +41,13 @@ describe("ORM column builders", () => {
     expect(createdAtColumn._meta.hasDefault).toBeTrue();
   });
 
+  test("does not reopen primary key columns via nullable()", () => {
+    const idColumn = uuid("id").primaryKey().nullable();
+
+    expect(idColumn._meta.isPrimaryKey).toBe(true);
+    expect(idColumn._meta.isNullable).toBe(false);
+  });
+
   test("carry references metadata after calling references()", () => {
     const usersId = uuid("id").primaryKey();
     const authorId = uuid("author_id")
