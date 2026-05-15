@@ -54,7 +54,7 @@ const escapeLikeValue = (value: unknown) => {
 };
 
 const OPERATORS = {
-  eq: {
+  equals: {
     sql: "= ?",
     transform: (v: unknown) => serializeParam(v),
   },
@@ -394,35 +394,31 @@ const validateFindUniqueWhere = (
   const keys = Object.keys(where);
 
   if (!keys.length) {
-    throw new Error("findUnique requires exactly one where key");
+    throw new Error("findUnique requires at least one where key");
   }
 
-  if (keys.length > 1) {
-    throw new Error("findUnique requires exactly one where key");
-  }
+  let hasUniqueKey = false;
 
-  const key = keys[0];
+  for (const key of keys) {
+    const columnEntry = Object.entries(table.columns).find(([columnName]) => {
+      return columnName === key;
+    });
 
-  if (!key) {
-    throw new Error("findUnique requires exactly one where key");
-  }
-
-  const columnEntry = Object.entries(table.columns).find(([columnName]) => {
-    return columnName === key;
-  });
-
-  if (!columnEntry) {
-    throw new Error(`Unknown where key ${key} on table ${table.sqlName}`);
-  }
-
-  const column = columnEntry[1];
-
-  if (!column._meta.isPrimaryKey) {
-    if (!column._meta.isUnique) {
-      throw new Error(
-        `findUnique where key ${key} must reference a unique or primary key column`,
-      );
+    if (!columnEntry) {
+      throw new Error(`Unknown where key ${key} on table ${table.sqlName}`);
     }
+
+    const column = columnEntry[1];
+
+    if (column._meta.isPrimaryKey || column._meta.isUnique) {
+      hasUniqueKey = true;
+    }
+  }
+
+  if (!hasUniqueKey) {
+    throw new Error(
+      "findUnique where must include at least one unique or primary key column",
+    );
   }
 };
 

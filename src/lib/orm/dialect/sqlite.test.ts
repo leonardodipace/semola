@@ -305,20 +305,23 @@ describe("buildFindUniqueQuery", () => {
     expect(query.includeDescriptors).toEqual([]);
   });
 
-  test("throws when runtime where payload has multiple keys", () => {
-    expect(() =>
-      buildFindUniqueQuery(
-        usersTable,
-        {},
-        {
-          where: {
-            id: "user-1",
-            // @ts-expect-error
-            firstName: "John",
-          },
+  test("allows non-unique guard fields alongside a unique key", () => {
+    const query = buildFindUniqueQuery(
+      usersTable,
+      {},
+      {
+        where: {
+          id: "user-1",
+          firstName: "John",
         },
-      ),
-    ).toThrow("findUnique requires exactly one where key");
+      },
+    );
+
+    expect(query.statement).toBe(
+      "SELECT id AS id, first_name AS firstName, created_at AS createdAt FROM users WHERE id = ? AND first_name = ? LIMIT 1",
+    );
+    expect(query.params).toEqual(["user-1", "John"]);
+    expect(query.includeDescriptors).toEqual([]);
   });
 
   test("throws when runtime where payload is empty", () => {
@@ -331,7 +334,7 @@ describe("buildFindUniqueQuery", () => {
           where: {},
         },
       ),
-    ).toThrow("findUnique requires exactly one where key");
+    ).toThrow("findUnique requires at least one where key");
   });
 
   test("throws when runtime where payload has an unknown key", () => {
@@ -349,20 +352,20 @@ describe("buildFindUniqueQuery", () => {
     ).toThrow("Unknown where key nickname on table users");
   });
 
-  test("throws when runtime where payload points to a non-unique column", () => {
+  test("throws when runtime where payload has no unique or primary key column", () => {
     expect(() =>
       buildFindUniqueQuery(
         usersTable,
         {},
         {
+          // @ts-expect-error
           where: {
-            // @ts-expect-error
             firstName: "John",
           },
         },
       ),
     ).toThrow(
-      "findUnique where key firstName must reference a unique or primary key column",
+      "findUnique where must include at least one unique or primary key column",
     );
   });
 
@@ -694,7 +697,7 @@ describe("buildUpdateQuery", () => {
           data: { firstName: "Jane" },
         },
       ),
-    ).toThrow("findUnique requires exactly one where key");
+    ).toThrow("findUnique requires at least one where key");
   });
 
   test("skips unknown data keys", () => {
@@ -970,23 +973,23 @@ describe("buildDeleteQuery", () => {
           where: {},
         },
       ),
-    ).toThrow("findUnique requires exactly one where key");
+    ).toThrow("findUnique requires at least one where key");
   });
 
-  test("throws when where points to a non-unique column", () => {
+  test("throws when where has no unique or primary key column", () => {
     expect(() =>
       buildDeleteQuery(
         usersTable,
         {},
         {
+          // @ts-expect-error
           where: {
-            // @ts-expect-error
             firstName: "John",
           },
         },
       ),
     ).toThrow(
-      "findUnique where key firstName must reference a unique or primary key column",
+      "findUnique where must include at least one unique or primary key column",
     );
   });
 });

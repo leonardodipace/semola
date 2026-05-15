@@ -72,8 +72,8 @@ describe("relation helpers", () => {
     });
 
     const invalidByName: Parameters<typeof orm.users.findUnique>[0] = {
+      // @ts-expect-error
       where: {
-        // @ts-expect-error
         name: "John",
       },
     };
@@ -101,16 +101,25 @@ describe("relation helpers", () => {
 
     expect(invalidByOperator).toBeDefined();
 
-    const invalidByEqObject: Parameters<typeof orm.users.findUnique>[0] = {
+    const invalidByEqualsObject: Parameters<typeof orm.users.findUnique>[0] = {
       where: {
         // @ts-expect-error
         id: {
-          eq: "user-1",
+          equals: "user-1",
         },
       },
     };
 
-    expect(invalidByEqObject).toBeDefined();
+    expect(invalidByEqualsObject).toBeDefined();
+
+    const validWithGuard: Parameters<typeof orm.users.findUnique>[0] = {
+      where: {
+        id: "user-1",
+        name: "John",
+      },
+    };
+
+    expect(validWithGuard).toBeDefined();
 
     await orm.$raw.close();
   });

@@ -66,14 +66,14 @@ type ColumnValue<T extends Column> = T["_meta"]["isNullable"] extends false
 type NonNullableColumnValue<T extends Column> = Exclude<ColumnValue<T>, null>;
 
 type StringWhereOperators<T extends Column> = {
-  eq?: ColumnValue<T>;
+  equals?: ColumnValue<T>;
   startsWith?: NonNullableColumnValue<T>;
   endsWith?: NonNullableColumnValue<T>;
   contains?: NonNullableColumnValue<T>;
 };
 
 type NumberWhereOperators<T extends Column> = {
-  eq?: ColumnValue<T>;
+  equals?: ColumnValue<T>;
   gt?: NonNullableColumnValue<T>;
   gte?: NonNullableColumnValue<T>;
   lt?: NonNullableColumnValue<T>;
@@ -81,11 +81,11 @@ type NumberWhereOperators<T extends Column> = {
 };
 
 type BooleanWhereOperators<T extends Column> = {
-  eq?: ColumnValue<T>;
+  equals?: ColumnValue<T>;
 };
 
 type DateWhereOperators<T extends Column> = {
-  eq?: ColumnValue<T>;
+  equals?: ColumnValue<T>;
   gt?: NonNullableColumnValue<T>;
   gte?: NonNullableColumnValue<T>;
   lt?: NonNullableColumnValue<T>;
@@ -171,9 +171,21 @@ type UniqueColumnWhereShape<T extends Table> = {
   >;
 };
 
+type NonUniqueColumnKeys<T extends Table> = {
+  [TColumnName in keyof TableColumns<T>]: IsUniqueColumn<
+    TableColumnByName<T, TColumnName>
+  > extends true
+    ? never
+    : TColumnName;
+}[keyof TableColumns<T>];
+
 export type FindUniqueWhere<T extends Table> = ExactlyOne<
   UniqueColumnWhereShape<T>
->;
+> & {
+  [TColumnName in NonUniqueColumnKeys<T>]?: ColumnWhere<
+    TableColumnByName<T, TColumnName>
+  >;
+};
 
 export type FindUniqueOptions<
   T extends Table,
