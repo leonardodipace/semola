@@ -829,7 +829,7 @@ describe("createSqliteDialect - update", () => {
     await sql.close();
   });
 
-  test("is a no-op when where clause matches no rows", async () => {
+  test("throws when where clause matches no rows", async () => {
     const sql = createMemorySql();
 
     await createUsersTable(sql);
