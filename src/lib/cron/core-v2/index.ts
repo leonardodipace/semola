@@ -104,7 +104,7 @@ export class Cron {
   }
 
   public next(from?: Date | number) {
-    const { schedule, onError } = this.options;
+    const { schedule } = this.options;
     const exprToParse = schedule === "@minutely" ? MINUTELY_EXPR : schedule;
 
     const [parseError, nextMatch] = mightThrowSync(() =>
@@ -112,7 +112,7 @@ export class Cron {
     );
 
     if (parseError) {
-      if (!onError) throw parseError;
+      if (!this.options.onError) throw parseError;
 
       const data: ErrorMetadataType = {
         name: this.options.name,
@@ -120,7 +120,7 @@ export class Cron {
         failedAt: Date.now(),
       };
 
-      onError(data);
+      this.options.onError(data);
     }
 
     return nextMatch;
