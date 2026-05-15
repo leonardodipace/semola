@@ -258,36 +258,8 @@ export type UpdateResult<
 type HasManyRelationType<R extends HasMany<Table> | HasOne<Table>> =
   R extends HasMany<infer TTable> ? Array<TableRow<TTable>> : never;
 
-type NullableRelationRow<
-  TTable extends Table,
-  TNullable extends boolean,
-> = TNullable extends false ? TableRow<TTable> : TableRow<TTable> | null;
-
-type HasOneRelationType<
-  R extends HasMany<Table> | HasOne<Table>,
-  TNullable extends boolean,
-> = R extends HasOne<infer TTable>
-  ? NullableRelationRow<TTable, TNullable>
-  : never;
-
-type RelationForeignKeyName<TRelationName extends PropertyKey> =
-  TRelationName extends string ? `${TRelationName}Id` : never;
-
-type ForeignKeyColumnForRelation<
-  TTable extends Table,
-  TRelationName extends PropertyKey,
-> = RelationForeignKeyName<TRelationName> extends keyof TTable["columns"]
-  ? TTable["columns"][RelationForeignKeyName<TRelationName>]
-  : never;
-
-type IsColumnNullable<TColumn> = TColumn extends Column
-  ? TColumn["_meta"]["isNullable"]
-  : true;
-
-type IsRelationNullable<
-  TTable extends Table,
-  TRelationName extends PropertyKey,
-> = IsColumnNullable<ForeignKeyColumnForRelation<TTable, TRelationName>>;
+type HasOneRelationType<R extends HasMany<Table> | HasOne<Table>> =
+  R extends HasOne<infer TTable> ? TableRow<TTable> | null : never;
 
 type IncludedKeys<TInclude> = {
   [K in keyof TInclude]: TInclude[K] extends true ? K : never;
@@ -304,7 +276,7 @@ type SelectResult<
   : TableRow<T>;
 
 type IncludeResult<
-  T extends Table,
+  _T extends Table,
   TRelations extends TableRelations,
   TOptions extends { include?: TableInclude<TRelations> },
 > = TOptions["include"] extends TableInclude<TRelations>
@@ -312,9 +284,7 @@ type IncludeResult<
       [K in IncludedKeys<
         NonNullable<TOptions["include"]>
       >]: K extends keyof TRelations
-        ?
-            | HasManyRelationType<TRelations[K]>
-            | HasOneRelationType<TRelations[K], IsRelationNullable<T, K>>
+        ? HasManyRelationType<TRelations[K]> | HasOneRelationType<TRelations[K]>
         : never;
     }
   : {};
