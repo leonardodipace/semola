@@ -1,6 +1,7 @@
 import type { Column } from "../column/types.js";
 import type {
   CreateOptions,
+  DeleteOptions,
   FindFirstOptions,
   FindManyOptions,
   FindUniqueOptions,
@@ -533,6 +534,31 @@ export const buildFindManyQuery = <T extends Table, R extends TableRelations>(
   };
 };
 
+export const buildDeleteQuery = <T extends Table, R extends TableRelations>(
+  table: T,
+  relations: R,
+  options: DeleteOptions<T, R>,
+): ReturningQuery => {
+  validateFindUniqueWhere(table, options.where);
+
+  const where = buildWhereClause(table, options.where);
+  const columns = buildSelectColumns(table, options.select);
+  const include = buildIncludeClause(table, relations, options.include);
+  const returning = include.sql ? `${columns}, ${include.sql}` : columns;
+
+  let statement = `DELETE FROM ${table.sqlName}`;
+
+  if (where.sql) {
+    statement = `${statement} WHERE ${where.sql}`;
+  }
+
+  statement = `${statement} RETURNING ${returning}`;
+
+  const params = [...where.params, ...include.params];
+
+  return { statement, params, includeDescriptors: include.descriptors };
+};
+
 export const buildFindFirstQuery = <T extends Table, R extends TableRelations>(
   table: T,
   relations: R,
@@ -664,6 +690,19 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
       }
 
       return row as UpdateResult<T, R, typeof options>;
+    },
+    delete: async (sql, options) => {
+      const query = buildDeleteQuery(table, relations, options);
+      const rows = await executeQuery(sql, query);
+      const row = getFirstRow(rows);
+
+      if (!row) {
+        throw new Error(
+          `Record not found after delete on table ${table.sqlName}`,
+        );
+      }
+
+      return row;
     },
   };
 };

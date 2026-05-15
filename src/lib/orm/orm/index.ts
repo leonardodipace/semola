@@ -5,6 +5,8 @@ import type {
   CreateOptions,
   CreateOrmOptions,
   CreateResult,
+  DeleteOptions,
+  DeleteResult,
   FindFirstOptions,
   FindManyOptions,
   FindUniqueOptions,
@@ -69,6 +71,12 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
       options: TOptions,
     ): Promise<UpdateResult<T, TRelations, TOptions>> => {
       return await dialect.update<TOptions>(sql, options);
+    },
+
+    delete: async <const TOptions extends DeleteOptions<T, TRelations>>(
+      options: TOptions,
+    ): Promise<DeleteResult<T, TRelations, TOptions>> => {
+      return await dialect.delete<TOptions>(sql, options);
     },
   };
 };

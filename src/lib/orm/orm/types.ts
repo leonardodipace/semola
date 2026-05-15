@@ -255,6 +255,17 @@ export type UpdateResult<
   TOptions extends UpdateOptions<T, TRelations>,
 > = NonNullable<FindUniqueResult<T, TRelations, TOptions>>;
 
+export type DeleteOptions<
+  T extends Table,
+  TRelations extends TableRelations = TableRelations,
+> = FindUniqueOptions<T, TRelations>;
+
+export type DeleteResult<
+  T extends Table,
+  TRelations extends TableRelations,
+  TOptions extends DeleteOptions<T, TRelations>,
+> = NonNullable<FindUniqueResult<T, TRelations, TOptions>>;
+
 type HasManyRelationType<R extends HasMany<Table> | HasOne<Table>> =
   R extends HasMany<infer TTable> ? Array<TableRow<TTable>> : never;
 
@@ -338,4 +349,8 @@ export type TableClient<
   update<const TOptions extends UpdateOptions<T, TRelations>>(
     options: TOptions,
   ): Promise<UpdateResult<T, TRelations, TOptions>>;
+
+  delete<const TOptions extends DeleteOptions<T, TRelations>>(
+    options: TOptions,
+  ): Promise<DeleteResult<T, TRelations, TOptions>>;
 };

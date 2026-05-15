@@ -3,6 +3,7 @@ import { date, string, uuid } from "../column/index.js";
 import { many, one } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
 import {
+  buildDeleteQuery,
   buildFindFirstQuery,
   buildFindManyQuery,
   buildFindUniqueQuery,
@@ -886,6 +887,204 @@ describe("createSqliteDialect - update", () => {
 
     expect(updated.firstName).toBe("Jane");
     expect(updated.posts).toEqual([
+      { id: "post-1", title: "Hello", authorId: "user-1" },
+    ]);
+
+    await sql.close();
+  });
+});
+
+describe("buildDeleteQuery", () => {
+  test("builds a delete statement with where clause", () => {
+    const query = buildDeleteQuery(usersTable, {}, { where: { id: "user-1" } });
+
+    expect(query.statement).toBe(
+      "DELETE FROM users WHERE id = ? RETURNING id AS id, first_name AS firstName, created_at AS createdAt",
+    );
+    expect(query.params).toEqual(["user-1"]);
+    expect(query.includeDescriptors).toEqual([]);
+  });
+
+  test("builds a delete statement with select columns in RETURNING", () => {
+    const query = buildDeleteQuery(
+      usersTable,
+      {},
+      {
+        where: { id: "user-1" },
+        select: { id: true, firstName: true },
+      },
+    );
+
+    expect(query.statement).toBe(
+      "DELETE FROM users WHERE id = ? RETURNING id AS id, first_name AS firstName",
+    );
+    expect(query.params).toEqual(["user-1"]);
+    expect(query.includeDescriptors).toEqual([]);
+  });
+
+  test("builds a delete statement with hasMany include in RETURNING", () => {
+    const query = buildDeleteQuery(
+      usersTable,
+      { posts: many(() => postsTable) },
+      {
+        where: { id: "user-1" },
+        include: { posts: true },
+      },
+    );
+
+    expect(query.statement).toBe(
+      "DELETE FROM users WHERE id = ? RETURNING id AS id, first_name AS firstName, created_at AS createdAt, COALESCE((SELECT json_group_array(json_object('id', posts__posts.id, 'title', posts__posts.title, 'authorId', posts__posts.author_id)) FROM posts AS posts__posts WHERE posts__posts.author_id = users.id), '[]') AS posts",
+    );
+    expect(query.params).toEqual(["user-1"]);
+    expect(query.includeDescriptors).toEqual([
+      { name: "posts", type: "hasMany" },
+    ]);
+  });
+
+  test("builds a delete statement with hasOne include in RETURNING", () => {
+    const query = buildDeleteQuery(
+      postsTable,
+      { author: one(() => usersTable) },
+      {
+        where: { id: "post-1" },
+        include: { author: true },
+      },
+    );
+
+    expect(query.statement).toBe(
+      "DELETE FROM posts WHERE id = ? RETURNING id AS id, title AS title, author_id AS authorId, (SELECT json_object('id', author__users.id, 'firstName', author__users.first_name, 'createdAt', author__users.created_at) FROM users AS author__users WHERE author__users.id = posts.author_id LIMIT 1) AS author",
+    );
+    expect(query.params).toEqual(["post-1"]);
+    expect(query.includeDescriptors).toEqual([
+      { name: "author", type: "hasOne" },
+    ]);
+  });
+
+  test("throws when where is empty", () => {
+    expect(() =>
+      buildDeleteQuery(
+        usersTable,
+        {},
+        {
+          // @ts-expect-error
+          where: {},
+        },
+      ),
+    ).toThrow("findUnique requires exactly one where key");
+  });
+
+  test("throws when where points to a non-unique column", () => {
+    expect(() =>
+      buildDeleteQuery(
+        usersTable,
+        {},
+        {
+          where: {
+            // @ts-expect-error
+            firstName: "John",
+          },
+        },
+      ),
+    ).toThrow(
+      "findUnique where key firstName must reference a unique or primary key column",
+    );
+  });
+});
+
+describe("createSqliteDialect - delete", () => {
+  test("deletes a row and returns the deleted record", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+
+    const dialect = createSqliteDialect(usersTable, {});
+
+    const deleted = await dialect.delete(sql, { where: { id: "user-1" } });
+
+    expect(deleted.id).toBe("user-1");
+    expect(deleted.firstName).toBe("John");
+
+    const remaining = await dialect.findUnique(sql, {
+      where: { id: "user-1" },
+    });
+
+    expect(remaining).toBeNull();
+
+    await sql.close();
+  });
+
+  test("deletes only the matching row", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+    await insertUser(sql, "user-2", "Alice", "2025-01-02T00:00:00.000Z");
+
+    const dialect = createSqliteDialect(usersTable, {});
+
+    await dialect.delete(sql, { where: { id: "user-1" } });
+
+    const remaining = await dialect.findUnique(sql, {
+      where: { id: "user-2" },
+    });
+
+    expect(remaining?.firstName).toBe("Alice");
+
+    await sql.close();
+  });
+
+  test("throws when where clause matches no rows", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+
+    const dialect = createSqliteDialect(usersTable, {});
+
+    await expect(
+      dialect.delete(sql, { where: { id: "missing" } }),
+    ).rejects.toThrow("Record not found after delete on table users");
+
+    await sql.close();
+  });
+
+  test("returns only selected fields", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+
+    const dialect = createSqliteDialect(usersTable, {});
+
+    const deleted = await dialect.delete(sql, {
+      where: { id: "user-1" },
+      select: { id: true, firstName: true },
+    });
+
+    expect(deleted).toEqual({ id: "user-1", firstName: "John" });
+
+    await sql.close();
+  });
+
+  test("returns include relations on the deleted record", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await createPostsTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+    await insertPost(sql, "post-1", "Hello", "user-1");
+
+    const dialect = createSqliteDialect(usersTable, {
+      posts: many(() => postsTable),
+    });
+
+    const deleted = await dialect.delete(sql, {
+      where: { id: "user-1" },
+      include: { posts: true },
+    });
+
+    expect(deleted.id).toBe("user-1");
+    expect(deleted.posts).toEqual([
       { id: "post-1", title: "Hello", authorId: "user-1" },
     ]);
 

@@ -1,6 +1,8 @@
 import type {
   CreateOptions,
   CreateResult,
+  DeleteOptions,
+  DeleteResult,
   FindFirstOptions,
   FindFirstResult,
   FindManyOptions,
@@ -44,4 +46,9 @@ export type Dialect<
     sql: Bun.SQL,
     options: TOptions,
   ): Promise<UpdateResult<T, TRelations, TOptions>>;
+
+  delete<const TOptions extends DeleteOptions<T, TRelations>>(
+    sql: Bun.SQL,
+    options: TOptions,
+  ): Promise<DeleteResult<T, TRelations, TOptions>>;
 };
