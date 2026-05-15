@@ -7,7 +7,6 @@ import type {
   TableInclude,
   TableOrderBy,
   TableRelations,
-  TableRow,
   TableSelect,
   TableWhere,
   UpdateOptions,
@@ -440,34 +439,10 @@ const validateFindUniqueWhere = (
   }
 };
 
-type FindManyQuery = {
+type ReturningQuery = {
   statement: string;
   params: unknown[];
   includeDescriptors: IncludeDescriptor[];
-};
-
-type FindFirstQuery = {
-  statement: string;
-  params: unknown[];
-  includeDescriptors: IncludeDescriptor[];
-};
-
-type FindUniqueQuery = {
-  statement: string;
-  params: unknown[];
-  includeDescriptors: IncludeDescriptor[];
-};
-
-type SelectQuery = {
-  statement: string;
-  params: unknown[];
-  includeDescriptors: IncludeDescriptor[];
-};
-
-type CreateQuery<T extends Table> = {
-  statement: string;
-  params: unknown[];
-  row: TableRow<T>;
 };
 
 const resolveCreateValue = (column: Column, provided: unknown) => {
@@ -478,41 +453,37 @@ const resolveCreateValue = (column: Column, provided: unknown) => {
   return null;
 };
 
-export const buildCreateQuery = <T extends Table>(
+export const buildCreateQuery = <T extends Table, R extends TableRelations>(
   table: T,
-  options: CreateOptions<T>,
-): CreateQuery<T> => {
+  relations: R,
+  options: CreateOptions<T, R>,
+): ReturningQuery => {
   const provided = new Map<string, unknown>(Object.entries(options.data));
   const sqlNames: string[] = [];
   const placeholders: string[] = [];
   const params: unknown[] = [];
-  const row: Record<string, unknown> = {};
 
   for (const [jsKey, column] of Object.entries(table.columns)) {
     const value = resolveCreateValue(column, provided.get(jsKey));
 
-    row[jsKey] = value;
     sqlNames.push(column.sqlName);
     placeholders.push("?");
     params.push(serializeParam(value));
   }
 
-  const statement = `INSERT INTO ${table.sqlName} (${sqlNames.join(", ")}) VALUES (${placeholders.join(", ")})`;
+  const columns = buildSelectColumns(table, options.select);
+  const include = buildIncludeClause(table, relations, options.include);
+  const returning = include.sql ? `${columns}, ${include.sql}` : columns;
+  const statement = `INSERT INTO ${table.sqlName} (${sqlNames.join(", ")}) VALUES (${placeholders.join(", ")}) RETURNING ${returning}`;
 
-  return { statement, params, row: row as TableRow<T> };
-};
-
-type UpdateQuery = {
-  statement: string;
-  params: unknown[];
-  includeDescriptors: IncludeDescriptor[];
+  return { statement, params, includeDescriptors: include.descriptors };
 };
 
 export const buildUpdateQuery = <T extends Table, R extends TableRelations>(
   table: T,
   relations: R,
   options: UpdateOptions<T, R>,
-): UpdateQuery => {
+): ReturningQuery => {
   validateFindUniqueWhere(table, options.where);
 
   const setClauses: string[] = [];
@@ -553,7 +524,7 @@ export const buildFindManyQuery = <T extends Table, R extends TableRelations>(
   table: T,
   relations: R,
   options?: FindManyOptions<T, R>,
-): FindManyQuery => {
+): ReturningQuery => {
   const where = buildWhereClause(table, options?.where);
   const columns = buildSelectColumns(table, options?.select);
   const orderBy = buildOrderByClause(table, options?.orderBy);
@@ -580,7 +551,7 @@ export const buildFindFirstQuery = <T extends Table, R extends TableRelations>(
   table: T,
   relations: R,
   options?: FindFirstOptions<T, R>,
-): FindFirstQuery => {
+): ReturningQuery => {
   const where = buildWhereClause(table, options?.where);
   const columns = buildSelectColumns(table, options?.select);
   const orderBy = buildOrderByClause(table, options?.orderBy);
@@ -607,7 +578,7 @@ export const buildFindUniqueQuery = <T extends Table, R extends TableRelations>(
   table: T,
   relations: R,
   options: FindUniqueOptions<T, R>,
-): FindUniqueQuery => {
+): ReturningQuery => {
   validateFindUniqueWhere(table, options.where);
 
   const where = buildWhereClause(table, options.where);
@@ -657,7 +628,7 @@ export const parseIncludeRows = (
   });
 };
 
-const executeSelectQuery = async (sql: Bun.SQL, query: SelectQuery) => {
+const executeQuery = async (sql: Bun.SQL, query: ReturningQuery) => {
   const rows = [...(await sql.unsafe(query.statement, query.params))];
 
   if (!query.includeDescriptors.length) {
@@ -686,31 +657,37 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
     findMany: async (sql, options) => {
       const query = buildFindManyQuery(table, relations, options);
 
-      return await executeSelectQuery(sql, query);
+      return await executeQuery(sql, query);
     },
     // findFirst and findUnique build different queries but share row execution/parsing.
     findFirst: async (sql, options) => {
       const query = buildFindFirstQuery(table, relations, options);
-      const rows = await executeSelectQuery(sql, query);
+      const rows = await executeQuery(sql, query);
 
       return getFirstRow(rows);
     },
     findUnique: async (sql, options) => {
       const query = buildFindUniqueQuery(table, relations, options);
-      const rows = await executeSelectQuery(sql, query);
+      const rows = await executeQuery(sql, query);
 
       return getFirstRow(rows);
     },
     create: async (sql, options) => {
-      const query = buildCreateQuery(table, options);
+      const query = buildCreateQuery(table, relations, options);
+      const rows = await executeQuery(sql, query);
+      const row = getFirstRow(rows);
 
-      await sql.unsafe(query.statement, query.params);
+      if (!row) {
+        throw new Error(
+          `Record not found after insert on table ${table.sqlName}`,
+        );
+      }
 
-      return query.row;
+      return row;
     },
     update: async (sql, options) => {
       const query = buildUpdateQuery(table, relations, options);
-      const rows = await executeSelectQuery(sql, query);
+      const rows = await executeQuery(sql, query);
       const row = getFirstRow(rows);
 
       if (!row) {

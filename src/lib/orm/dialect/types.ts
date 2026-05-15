@@ -1,5 +1,6 @@
 import type {
   CreateOptions,
+  CreateResult,
   FindFirstOptions,
   FindFirstResult,
   FindManyOptions,
@@ -7,7 +8,6 @@ import type {
   FindUniqueOptions,
   FindUniqueResult,
   TableRelations,
-  TableRow,
   UpdateOptions,
   UpdateResult,
 } from "../orm/types.js";
@@ -35,7 +35,10 @@ export type Dialect<
     options: TOptions,
   ): Promise<FindUniqueResult<T, TRelations, TOptions>>;
 
-  create(sql: Bun.SQL, options: CreateOptions<T>): Promise<TableRow<T>>;
+  create<const TOptions extends CreateOptions<T, TRelations>>(
+    sql: Bun.SQL,
+    options: TOptions,
+  ): Promise<CreateResult<T, TRelations, TOptions>>;
 
   update<const TOptions extends UpdateOptions<T, TRelations>>(
     sql: Bun.SQL,
