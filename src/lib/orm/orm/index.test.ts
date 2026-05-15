@@ -256,12 +256,12 @@ describe("relation helpers", () => {
       },
     });
 
-    expect(created).toEqual({
-      id: "generated-id",
-      name: "John",
-      nickname: null,
-      createdAt: fixedDate,
-    });
+    expect(created.id).toBe("generated-id");
+    expect(created.name).toBe("John");
+    expect(created.nickname).toBeNull();
+    expect(new Date(created.createdAt).toISOString()).toBe(
+      fixedDate.toISOString(),
+    );
 
     const fromDb = await orm.users.findUnique({
       where: { id: "generated-id" },

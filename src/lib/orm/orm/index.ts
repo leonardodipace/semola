@@ -4,6 +4,7 @@ import type { Table } from "../table/types.js";
 import type {
   CreateOptions,
   CreateOrmOptions,
+  CreateResult,
   FindFirstOptions,
   FindManyOptions,
   FindUniqueOptions,
@@ -58,8 +59,10 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
       return await dialect.findUnique<TOptions>(sql, options);
     },
 
-    create: async (options: CreateOptions<T>) => {
-      return await dialect.create(sql, options);
+    create: async <const TOptions extends CreateOptions<T, TRelations>>(
+      options: TOptions,
+    ): Promise<CreateResult<T, TRelations, TOptions>> => {
+      return await dialect.create<TOptions>(sql, options);
     },
 
     update: async <const TOptions extends UpdateOptions<T, TRelations>>(

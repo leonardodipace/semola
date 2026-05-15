@@ -216,9 +216,22 @@ export type CreateData<T extends Table> = Prettify<
   }
 >;
 
-export type CreateOptions<T extends Table> = {
+export type CreateOptions<
+  T extends Table,
+  TRelations extends TableRelations = TableRelations,
+> = {
   data: CreateData<T>;
+  select?: TableSelect<T>;
+  include?: TableInclude<TRelations>;
 };
+
+export type CreateResult<
+  T extends Table,
+  TRelations extends TableRelations,
+  TOptions extends CreateOptions<T, TRelations>,
+> = Prettify<
+  SelectResult<T, TOptions> & IncludeResult<T, TRelations, TOptions>
+>;
 
 export type UpdateData<T extends Table> = Partial<{
   [TColumnName in keyof TableColumns<T>]: ColumnValue<
@@ -346,7 +359,9 @@ export type TableClient<
     options: TOptions,
   ): Promise<FindUniqueResult<T, TRelations, TOptions>>;
 
-  create(options: CreateOptions<T>): Promise<TableRow<T>>;
+  create<const TOptions extends CreateOptions<T, TRelations>>(
+    options: TOptions,
+  ): Promise<CreateResult<T, TRelations, TOptions>>;
 
   update<const TOptions extends UpdateOptions<T, TRelations>>(
     options: TOptions,
