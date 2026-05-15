@@ -330,7 +330,7 @@ describe("buildFindUniqueQuery", () => {
         usersTable,
         {},
         {
-          // @ts-expect-error
+          // @ts-expect-error empty object is not assignable to FindUniqueWhere
           where: {},
         },
       ),
@@ -344,7 +344,7 @@ describe("buildFindUniqueQuery", () => {
         {},
         {
           where: {
-            // @ts-expect-error
+            // @ts-expect-error nickname is not a column on usersTable
             nickname: "john",
           },
         },
@@ -358,7 +358,7 @@ describe("buildFindUniqueQuery", () => {
         usersTable,
         {},
         {
-          // @ts-expect-error
+          // @ts-expect-error firstName alone does not satisfy FindUniqueWhere (no unique key)
           where: {
             firstName: "John",
           },
@@ -692,7 +692,7 @@ describe("buildUpdateQuery", () => {
         usersTable,
         {},
         {
-          // @ts-expect-error
+          // @ts-expect-error empty object is not assignable to FindUniqueWhere
           where: {},
           data: { firstName: "Jane" },
         },
@@ -706,7 +706,7 @@ describe("buildUpdateQuery", () => {
       {},
       {
         where: { id: "user-1" },
-        // @ts-expect-error
+        // @ts-expect-error nonExistent is not a column on usersTable
         data: { firstName: "Jane", nonExistent: "value" },
       },
     );
@@ -969,7 +969,7 @@ describe("buildDeleteQuery", () => {
         usersTable,
         {},
         {
-          // @ts-expect-error
+          // @ts-expect-error empty object is not assignable to FindUniqueWhere
           where: {},
         },
       ),
@@ -982,7 +982,7 @@ describe("buildDeleteQuery", () => {
         usersTable,
         {},
         {
-          // @ts-expect-error
+          // @ts-expect-error firstName alone does not satisfy FindUniqueWhere (no unique key)
           where: {
             firstName: "John",
           },
