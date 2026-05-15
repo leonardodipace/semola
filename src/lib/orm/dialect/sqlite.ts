@@ -15,7 +15,7 @@ import type {
 import type { Table } from "../table/types.js";
 import type { Dialect } from "./types.js";
 
-type WhereClause = {
+type SqlFragment = {
   sql: string;
   params: unknown[];
 };
@@ -31,9 +31,10 @@ type IncludeClause = {
   descriptors: IncludeDescriptor[];
 };
 
-type PaginationClause = {
-  sql: string;
-  params: unknown[];
+const EMPTY_INCLUDE: IncludeClause = {
+  sql: "",
+  params: [],
+  descriptors: [],
 };
 
 const serializeParam = (value: unknown) => {
@@ -107,7 +108,7 @@ const isPlainObject = (value: unknown) => {
 const buildWhereClause = <T extends Table>(
   table: T,
   where?: TableWhere<T>,
-): WhereClause => {
+): SqlFragment => {
   const clauses: string[] = [];
   const params: unknown[] = [];
 
@@ -268,25 +269,13 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
   relations: R,
   include?: TableInclude<R>,
 ) => {
-  if (!include) {
-    return {
-      sql: "",
-      params: [],
-      descriptors: [],
-    } satisfies IncludeClause;
-  }
+  if (!include) return EMPTY_INCLUDE;
 
   const enabledRelations = Object.entries(include).filter(([, enabled]) => {
     return enabled === true;
   });
 
-  if (!enabledRelations.length) {
-    return {
-      sql: "",
-      params: [],
-      descriptors: [],
-    } satisfies IncludeClause;
-  }
+  if (!enabledRelations.length) return EMPTY_INCLUDE;
 
   const sourcePrimaryKey = getPrimaryKeyColumn(table);
   const clauses: string[] = [];
@@ -343,10 +332,7 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
   } satisfies IncludeClause;
 };
 
-const buildPaginationClause = (
-  take?: number,
-  skip?: number,
-): PaginationClause => {
+const buildPaginationClause = (take?: number, skip?: number): SqlFragment => {
   const params: unknown[] = [];
 
   if (take === undefined) {
@@ -552,26 +538,7 @@ export const buildFindFirstQuery = <T extends Table, R extends TableRelations>(
   relations: R,
   options?: FindFirstOptions<T, R>,
 ): ReturningQuery => {
-  const where = buildWhereClause(table, options?.where);
-  const columns = buildSelectColumns(table, options?.select);
-  const orderBy = buildOrderByClause(table, options?.orderBy);
-  const include = buildIncludeClause(table, relations, options?.include);
-  const pagination = buildPaginationClause(1, options?.skip);
-  const selectColumns = include.sql ? `${columns}, ${include.sql}` : columns;
-  const params = [...where.params, ...include.params, ...pagination.params];
-  const statement = buildSelectStatement(
-    table.sqlName,
-    selectColumns,
-    where.sql,
-    orderBy,
-    pagination.sql,
-  );
-
-  return {
-    statement,
-    params,
-    includeDescriptors: include.descriptors,
-  };
+  return buildFindManyQuery(table, relations, { ...options, take: 1 });
 };
 
 export const buildFindUniqueQuery = <T extends Table, R extends TableRelations>(
