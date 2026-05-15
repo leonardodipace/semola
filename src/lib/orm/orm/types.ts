@@ -269,10 +269,12 @@ type SelectResult<
   T extends Table,
   TOptions extends { select?: TableSelect<T> },
 > = TOptions["select"] extends TableSelect<T>
-  ? {
-      [K in keyof NonNullable<TOptions["select"]> &
-        keyof T["columns"]]: ColumnValue<T["columns"][K]>;
-    }
+  ? keyof NonNullable<TOptions["select"]> extends never
+    ? TableRow<T>
+    : {
+        [K in keyof NonNullable<TOptions["select"]> &
+          keyof T["columns"]]: ColumnValue<T["columns"][K]>;
+      }
   : TableRow<T>;
 
 type IncludeResult<
