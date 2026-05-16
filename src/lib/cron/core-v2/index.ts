@@ -25,17 +25,9 @@ export class Cron {
       const expr = schedule === "@minutely" ? MINUTELY_EXPR : schedule;
       return Bun.cron(expr, async () => {
         const [handlerError, handlerResult] = await mightThrow(handler());
-
         if (!handlerError) return Promise.resolve(handlerResult);
-        if (!this.options.onError) return Promise.reject(handlerError);
 
-        const data: ErrorMetadataType = {
-          name: this.options.name,
-          error: handlerError,
-          failedAt: Date.now(),
-        };
-
-        this.options.onError(data);
+        this.launchError(handlerError);
       });
     });
 
@@ -46,15 +38,7 @@ export class Cron {
       return;
     }
 
-    if (!this.options.onError) throw scheduleFormatErr;
-
-    const data: ErrorMetadataType = {
-      name: this.options.name,
-      error: scheduleFormatErr,
-      failedAt: Date.now(),
-    };
-
-    this.options.onError(data);
+    this.launchError(scheduleFormatErr);
   }
 
   public async runOSLevel(path: string) {
@@ -71,15 +55,7 @@ export class Cron {
       return;
     }
 
-    if (!this.options.onError) throw osError;
-
-    const data: ErrorMetadataType = {
-      name: this.options.name,
-      error: osError,
-      failedAt: Date.now(),
-    };
-
-    this.options.onError(data);
+    this.launchError(osError);
   }
 
   public async stopOSLevel() {
@@ -124,18 +100,20 @@ export class Cron {
       Bun.cron.parse(exprToParse, from),
     );
 
-    if (parseError) {
-      if (!this.options.onError) throw parseError;
-
-      const data: ErrorMetadataType = {
-        name: this.options.name,
-        error: parseError,
-        failedAt: Date.now(),
-      };
-
-      this.options.onError(data);
-    }
+    if (parseError) this.launchError(parseError);
 
     return nextMatch;
+  }
+
+  public launchError(error: Error) {
+    if (!this.options.onError) throw error;
+
+    const data: ErrorMetadataType = {
+      name: this.options.name,
+      error: error,
+      failedAt: Date.now(),
+    };
+
+    this.options.onError(data);
   }
 }
