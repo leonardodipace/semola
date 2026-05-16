@@ -12,10 +12,9 @@ export default defineConfig({
     "lib/cron/index": "src/lib/cron/index.ts",
     "lib/logging/index": "src/lib/logging/index.ts",
     "lib/prompts/index": "src/lib/prompts/index.ts",
-    "lib/orm/index": "src/lib/orm/index.ts",
+    "lib/workflow/index": "src/lib/workflow/index.ts",
   },
   format: ["esm", "cjs"],
   dts: true,
   clean: true,
-  unbundle: true,
 });

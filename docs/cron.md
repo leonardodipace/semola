@@ -1,6 +1,6 @@
 # Cron
 
-A lightweight cron scheduler for executing periodic tasks. Supports standard cron expressions, convenient aliases, and second-level precision.
+A lightweight cron scheduler for executing periodic tasks. Supports standard cron expressions, convenient aliases, an expression builder, and second-level precision.
 
 ## Import
 
@@ -97,6 +97,38 @@ job.stop();
 // Check status: "idle" | "running" | "paused"
 const status = job.getStatus();
 ```
+
+## Expression Builder
+
+Build cron expressions programmatically with full type-safety supported by a fluent and an intuitive API.
+
+```typescript
+import { 
+  any,
+  cronJobBuilder,
+  list,
+  number,
+  range,
+  step,
+  Month, 
+  WeekDay
+} from "semola/cron";
+
+const expr = cronJobBuilder((builder) =>
+  builder
+    .second(range({ min: 10, max: 50 }))
+    .minute(any())
+    .hour(number(10))
+    .day(number(1))
+    .month(step({ step: Month.jul }))
+    .weekday(list((l) => l.number(WeekDay.mon).number(WeekDay.wed))),
+);
+
+console.log(expr);
+// Output: 10-50 * 10 1 */7 1,3
+```
+
+**Note:** If a field is not defined, it defaults to `'*'` (any).
 
 ## Examples
 

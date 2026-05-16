@@ -1,6 +1,6 @@
 {
   "name": "semola",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Zero-dependency TypeScript utilities for Bun. Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable imports.",
   "type": "module",
   "bin": {
@@ -111,14 +111,14 @@
         "default": "./dist/lib/prompts/index.cjs"
       }
     },
-    "./orm": {
+    "./workflow": {
       "import": {
-        "types": "./dist/lib/orm/index.d.mts",
-        "default": "./dist/lib/orm/index.mjs"
+        "types": "./dist/lib/workflow/index.d.mts",
+        "default": "./dist/lib/workflow/index.mjs"
       },
       "require": {
-        "types": "./dist/lib/orm/index.d.cts",
-        "default": "./dist/lib/orm/index.cjs"
+        "types": "./dist/lib/workflow/index.d.cts",
+        "default": "./dist/lib/workflow/index.cjs"
       }
     }
   },
@@ -147,6 +147,9 @@
     "cron",
     "scheduler",
     "job-scheduler",
+    "workflow",
+    "durable-workflow",
+    "resumable-workflow",
     "i18n",
     "internationalization",
     "authorization",
