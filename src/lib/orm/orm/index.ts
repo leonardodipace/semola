@@ -102,8 +102,7 @@ export const createOrm = <
 >(
   options: CreateOrmOptions<T, R>,
 ) => {
-  const sql = new Bun.SQL({
-    url: options.url,
+  const sql = new Bun.SQL(options.url, {
     adapter: options.adapter,
   });
 
