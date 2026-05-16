@@ -1,27 +1,23 @@
 # ORM
 
-Semola ORM is a type-safe data layer for Bun that combines expressive query APIs, result-pattern ergonomics, and built-in migration tooling.
+Semola ORM is a type-safe data layer for Bun built on top of the Bun SQL API.
 
 It provides:
 
 - Strong TypeScript inference from table definitions
-- Result-pattern CRUD methods (`[error, data]`)
-- SQL-style methods that map directly to Bun SQL execution
+- Full CRUD methods with precise return types
 - Lightweight relations via `include` joins
-- File-based migration workflow + CLI
 
 ## Import
 
 ```typescript
 import {
   createOrm,
-  createTable,
+  defineTable,
   string,
   number,
   boolean,
   date,
-  json,
-  jsonb,
   uuid,
   one,
   many,
@@ -31,135 +27,98 @@ import {
 ## Define tables
 
 ```typescript
-const users = createTable("users", {
-  id: uuid("id").primaryKey(),
+const users = defineTable("users", {
+  id: uuid("id").primaryKey().notNull(),
   name: string("name").notNull(),
   email: string("email").unique().notNull(),
   age: number("age"),
-  active: boolean("active").default(true),
+  active: boolean("active").default(() => true),
   createdAt: date("created_at"),
-  metadata: json<{ tags: string[] }>("metadata"),
 });
 ```
+
+Column builders support: `.primaryKey()`, `.notNull()`, `.nullable()`, `.unique()`, `.default(fn)`, `.references(fn)`.
 
 ## Create ORM client
 
 ```typescript
 const db = createOrm({
-  url: "sqlite::memory:",
+  adapter: "sqlite",
+  url: ":memory:",
   tables: { users },
 });
 ```
 
-`dialect` is inferred from `url` (or can be set explicitly to `"sqlite" | "mysql" | "postgres"`).
+`adapter` must be set explicitly. Currently `"sqlite"` is the only supported value.
+
+`$raw` on the returned client is the underlying `Bun.SQL` instance.
 
 ---
 
 ## Query API
 
-Each table client exposes two styles:
+Each table client exposes the following methods:
 
-- **Result-pattern methods** (recommended app-level DX): return `Promise<[error, data]>`
-- **SQL-style methods**: return Bun SQL query objects and execute directly with `await`
+### Read
 
-### Result-pattern methods
+- `findMany(options?)` - returns `Promise<Row[]>`
+- `findFirst(options?)` - returns `Promise<Row | null>`
+- `findUnique({ where, select?, include? })` - returns `Promise<Row | null>`
 
-- `findMany(input?)`
-- `findFirst(input?)`
-- `findUnique({ where })`
-- `create({ data })`
-- `createMany({ data: [] })`
-- `updateMany({ where, data })`
-- `deleteMany({ where })`
+`findMany` accepts `where`, `select`, `orderBy`, `include`, `take`, `skip`.
 
-Return shapes:
+`findFirst` accepts the same options as `findMany` except `take`.
 
-- `createMany` -> `[error, { count, rows }]`
-- `updateMany` -> `[error, { count, rows }]`
-- `deleteMany` -> `[error, { count, rows }]`
+`findUnique` requires exactly one unique column (primary key or `.unique()`) in `where`.
 
-Error shape:
+### Write
 
-```typescript
-type OrmResultError = {
-  type: string;
-  message: string;
-};
-```
+- `create({ data, select?, include? })` - returns `Promise<Row>`
+- `createMany({ data })` - returns `Promise<{ count: number }>`
+- `update({ where, data, select?, include? })` - returns `Promise<Row>`
+- `updateMany({ where?, data })` - returns `Promise<{ count: number }>`
+- `delete({ where, select?, include? })` - returns `Promise<Row>`
+- `deleteMany({ where? })` - returns `Promise<{ count: number }>`
+
+`update` and `delete` use the same unique-column `where` constraint as `findUnique`.
 
 Example:
 
 ```typescript
-const [err, users] = await db.users.findMany({
+const users = await db.users.findMany({
   where: { name: { contains: "john" } },
   orderBy: { name: "asc" },
   take: 20,
   skip: 0,
 });
 
-if (err) {
-  console.error(err.type, err.message);
-  return;
-}
+const user = await db.users.create({
+  data: { id: "1", name: "Alice", email: "alice@example.com" },
+});
 
-console.log(users);
-
-const [createManyErr, createdMany] = await db.users.createMany({
+const { count } = await db.users.createMany({
   data: [
-    { name: "Alice", email: "alice@example.com" },
-    { name: "Bob", email: "bob@example.com" },
+    { id: "2", name: "Bob", email: "bob@example.com" },
+    { id: "3", name: "Carol", email: "carol@example.com" },
   ],
 });
 
-if (createManyErr) {
-  console.error(createManyErr.type, createManyErr.message);
-  return;
-}
-
-console.log(createdMany.count, createdMany.rows);
-
-const [updateManyErr, updatedMany] = await db.users.updateMany({
-  where: { active: true },
-  data: { active: false },
+const updated = await db.users.update({
+  where: { id: "1" },
+  data: { name: "Alicia" },
 });
 
-if (updateManyErr) {
-  console.error(updateManyErr.type, updateManyErr.message);
-  return;
-}
-
-console.log(updatedMany.count, updatedMany.rows);
-
-const [deleteManyErr, deletedMany] = await db.users.deleteMany({
+const { count: updatedCount } = await db.users.updateMany({
   where: { active: false },
+  data: { active: true },
 });
 
-if (deleteManyErr) {
-  console.error(deleteManyErr.type, deleteManyErr.message);
-  return;
-}
-
-console.log(deletedMany.count, deletedMany.rows);
-```
-
-### SQL-style methods
-
-- `select(input?)`
-- `insert({ data, returning? })`
-- `update({ where, data, returning? })`
-- `delete({ where, returning? })`
-
-Example:
-
-```typescript
-const rows = await db.users.select({
-  where: { active: true },
-  limit: 10,
+const deleted = await db.users.delete({
+  where: { id: "1" },
 });
 
-const inserted = await db.users.insert({
-  data: { name: "Jane", email: "jane@example.com" },
-  returning: true,
+const { count: deletedCount } = await db.users.deleteMany({
+  where: { active: false },
 });
 ```
 
@@ -167,22 +126,16 @@ const inserted = await db.users.insert({
 
 ## Filters & pagination
 
-Supported `where` operators:
+Pass a direct value for equality or an operator object for other comparisons.
 
-- direct equality: `{ email: "a@b.com" }`
-- `equals`, `not`
-- `in`, `notIn`
-- `startsWith`, `endsWith`, `contains`
-- `gt`, `gte`, `lt`, `lte`
-- `isNull`
+String operators: `equals`, `startsWith`, `endsWith`, `contains`
 
-Pagination and sorting:
+Number and date operators: `equals`, `gt`, `gte`, `lt`, `lte`
 
-- SQL-style: `limit`, `offset`, `orderBy`
-- Result-style: `take`, `skip`, `orderBy`
+Boolean operators: `equals`
 
 ```typescript
-const [err, users] = await db.users.findMany({
+const users = await db.users.findMany({
   where: {
     age: { gte: 18 },
     name: { startsWith: "A" },
@@ -195,109 +148,57 @@ const [err, users] = await db.users.findMany({
 
 ---
 
+## Select
+
+Pass a `select` object to return only specific columns:
+
+```typescript
+const users = await db.users.findMany({
+  select: { id: true, name: true },
+});
+```
+
+---
+
 ## Relations (`include` joins)
 
 ```typescript
-const tasks = createTable("tasks", {
-  id: uuid("id").primaryKey(),
+const tasks = defineTable("tasks", {
+  id: uuid("id").primaryKey().notNull(),
   assigneeId: uuid("assignee_id").notNull(),
   title: string("title").notNull(),
 });
 
 const db = createOrm({
-  url: "sqlite::memory:",
+  adapter: "sqlite",
+  url: ":memory:",
   tables: { users, tasks },
   relations: {
     users: {
       tasks: many(() => tasks),
     },
     tasks: {
-      assignee: one("assignee_id", () => users),
+      assignee: one(() => users),
     },
   },
 });
 
-const joined = await db.users.select({
+const withTasks = await db.users.findMany({
   include: { tasks: true },
 });
 ```
 
-`include` produces SQL joins. It does not perform nested object hydration.
+`include` produces SQL joins. Pass `true` to include a relation, omit or pass `false` to exclude it.
 
 ---
 
-## Transactions and raw SQL
+## Raw SQL
+
+Access the underlying `Bun.SQL` instance via `$raw`:
 
 ```typescript
-await db.$transaction(async (tx) => {
-  await tx.users.insert({
-    data: { name: "A", email: "a@example.com" },
-  });
-
-  await tx.users.insert({
-    data: { name: "B", email: "b@example.com" },
-  });
-});
-
-const count = await db.$raw`SELECT COUNT(*) as count FROM users`;
+const rows = await db.$raw`SELECT COUNT(*) as count FROM users`;
 ```
-
----
-
-## Migrations
-
-Semola ORM migrations are schema-snapshot and SQL-file-based.
-
-### Config
-
-Create `semola.config.ts`:
-
-```typescript
-import { defineConfig } from "semola/orm";
-
-export default defineConfig({
-  orm: {
-    schema: "./src/db/schema.ts",
-    migrations: {
-      dir: "./migrations",
-      transactional: true,
-    },
-  },
-});
-```
-
-### Schema module
-
-Point `orm.schema` to a file exporting your ORM client (default or named export is supported):
-
-```typescript
-import { createOrm, createTable, uuid, string } from "semola/orm";
-
-const users = createTable("users", {
-  id: uuid("id").primaryKey(),
-  name: string("name").notNull(),
-});
-
-export default createOrm({
-  url: "sqlite::memory:",
-  tables: { users },
-});
-```
-
-### CLI
-
-```bash
-semola orm migrations create add-users
-semola orm migrations apply
-semola orm migrations rollback
-```
-
-- `create` diffs the current schema vs last snapshot and generates:
-  - `migrations/<id>_<name>/up.sql`
-  - `migrations/<id>_<name>/down.sql`
-  - `migrations/<id>_<name>/snapshot.json`
-- `apply` runs pending `up.sql` files and records them in `_semola_migrations`
-- `rollback` runs latest applied `down.sql` and removes it from `_semola_migrations`
 
 ---
 
@@ -306,10 +207,15 @@ semola orm migrations rollback
 Useful exported types include:
 
 - `TableRow<T>`
-- `ResultTuple<T>`
-- `OrmResultError`
-- `FindManyInput<T, TRels>`
-- `FindUniqueInput<T>`
-- `CreateInput<T>`
-- `UpdateManyInput<T>`
-- `DeleteManyInput<T>`
+- `FindManyOptions<T, TRelations>`
+- `FindFirstOptions<T, TRelations>`
+- `FindUniqueOptions<T, TRelations>`
+- `CreateOptions<T, TRelations>`
+- `CreateManyOptions<T>`
+- `UpdateOptions<T, TRelations>`
+- `UpdateManyOptions<T>`
+- `DeleteOptions<T, TRelations>`
+- `DeleteManyOptions<T>`
+- `BulkResult`
+- `CreateData<T>`
+- `UpdateData<T>`
