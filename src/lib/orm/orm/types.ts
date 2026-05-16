@@ -278,6 +278,21 @@ export type DeleteResult<
   TOptions extends DeleteOptions<T, TRelations>,
 > = NonNullable<FindUniqueResult<T, TRelations, TOptions>>;
 
+export type BulkResult = { count: number };
+
+export type CreateManyOptions<T extends Table> = {
+  data: CreateData<T>[];
+};
+
+export type UpdateManyOptions<T extends Table> = {
+  where?: TableWhere<T>;
+  data: UpdateData<T>;
+};
+
+export type DeleteManyOptions<T extends Table> = {
+  where?: TableWhere<T>;
+};
+
 type HasManyRelationType<R extends HasMany<Table> | HasOne<Table>> =
   R extends HasMany<infer TTable> ? Array<TableRow<TTable>> : never;
 
@@ -358,11 +373,17 @@ export type TableClient<
     options: TOptions,
   ): Promise<CreateResult<T, TRelations, TOptions>>;
 
+  createMany(options: CreateManyOptions<T>): Promise<BulkResult>;
+
   update<const TOptions extends UpdateOptions<T, TRelations>>(
     options: TOptions,
   ): Promise<UpdateResult<T, TRelations, TOptions>>;
 
+  updateMany(options: UpdateManyOptions<T>): Promise<BulkResult>;
+
   delete<const TOptions extends DeleteOptions<T, TRelations>>(
     options: TOptions,
   ): Promise<DeleteResult<T, TRelations, TOptions>>;
+
+  deleteMany(options: DeleteManyOptions<T>): Promise<BulkResult>;
 };

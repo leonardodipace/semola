@@ -3,10 +3,13 @@ import { date, string, uuid } from "../column/index.js";
 import { many, one } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
 import {
+  buildCreateManyQuery,
+  buildDeleteManyQuery,
   buildDeleteQuery,
   buildFindFirstQuery,
   buildFindManyQuery,
   buildFindUniqueQuery,
+  buildUpdateManyQuery,
   buildUpdateQuery,
   createSqliteDialect,
   type IncludeDescriptor,
@@ -1090,6 +1093,514 @@ describe("createSqliteDialect - delete", () => {
     expect(deleted.posts).toEqual([
       { id: "post-1", title: "Hello", authorId: "user-1" },
     ]);
+
+    await sql.close();
+  });
+});
+
+describe("buildCreateManyQuery", () => {
+  test("builds a batched INSERT with one row", () => {
+    const query = buildCreateManyQuery(usersTable, {
+      data: [
+        {
+          id: "user-1",
+          firstName: "John",
+          createdAt: new Date("2025-01-01T00:00:00.000Z"),
+        },
+      ],
+    });
+
+    expect(query.statement).toBe(
+      "INSERT INTO users (id, first_name, created_at) VALUES (?, ?, ?)",
+    );
+    expect(query.params).toEqual([
+      "user-1",
+      "John",
+      "2025-01-01T00:00:00.000Z",
+    ]);
+  });
+
+  test("builds a batched INSERT with multiple rows", () => {
+    const query = buildCreateManyQuery(usersTable, {
+      data: [
+        {
+          id: "user-1",
+          firstName: "John",
+          createdAt: new Date("2025-01-01T00:00:00.000Z"),
+        },
+        {
+          id: "user-2",
+          firstName: "Alice",
+          createdAt: new Date("2025-01-02T00:00:00.000Z"),
+        },
+      ],
+    });
+
+    expect(query.statement).toBe(
+      "INSERT INTO users (id, first_name, created_at) VALUES (?, ?, ?), (?, ?, ?)",
+    );
+    expect(query.params).toEqual([
+      "user-1",
+      "John",
+      "2025-01-01T00:00:00.000Z",
+      "user-2",
+      "Alice",
+      "2025-01-02T00:00:00.000Z",
+    ]);
+  });
+
+  test("serializes Date values across all rows", () => {
+    const d1 = new Date("2025-03-01T00:00:00.000Z");
+    const d2 = new Date("2025-04-01T00:00:00.000Z");
+
+    const query = buildCreateManyQuery(usersTable, {
+      data: [
+        { id: "a", firstName: "A", createdAt: d1 },
+        { id: "b", firstName: "B", createdAt: d2 },
+      ],
+    });
+
+    expect(query.params).toEqual([
+      "a",
+      "A",
+      d1.toISOString(),
+      "b",
+      "B",
+      d2.toISOString(),
+    ]);
+  });
+
+  test("returns empty statement and params for empty data array", () => {
+    const query = buildCreateManyQuery(usersTable, { data: [] });
+
+    expect(query.statement).toBe("");
+    expect(query.params).toEqual([]);
+  });
+
+  test("uses column defaults for omitted optional fields", () => {
+    const tableWithDefault = defineTable("items", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+      tag: string("tag").default(() => "default-tag"),
+    });
+
+    const query = buildCreateManyQuery(tableWithDefault, {
+      data: [{ id: "item-1", name: "Widget" }],
+    });
+
+    expect(query.statement).toBe(
+      "INSERT INTO items (id, name, tag) VALUES (?, ?, ?)",
+    );
+    expect(query.params).toEqual(["item-1", "Widget", "default-tag"]);
+  });
+});
+
+describe("buildUpdateManyQuery", () => {
+  test("builds an UPDATE without a WHERE clause when no where is provided", () => {
+    const query = buildUpdateManyQuery(usersTable, {
+      data: { firstName: "Everyone" },
+    });
+
+    expect(query.statement).toBe("UPDATE users SET first_name = ?");
+    expect(query.params).toEqual(["Everyone"]);
+  });
+
+  test("builds an UPDATE with a WHERE clause", () => {
+    const query = buildUpdateManyQuery(usersTable, {
+      where: { firstName: { startsWith: "Jo" } },
+      data: { firstName: "John" },
+    });
+
+    expect(query.statement).toBe(
+      "UPDATE users SET first_name = ? WHERE first_name LIKE ? ESCAPE '\\'",
+    );
+    expect(query.params).toEqual(["John", "Jo%"]);
+  });
+
+  test("builds an UPDATE with multiple SET fields", () => {
+    const query = buildUpdateManyQuery(usersTable, {
+      where: { id: "user-1" },
+      data: {
+        firstName: "Jane",
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      },
+    });
+
+    expect(query.statement).toBe(
+      "UPDATE users SET first_name = ?, created_at = ? WHERE id = ?",
+    );
+    expect(query.params).toEqual([
+      "Jane",
+      "2026-01-01T00:00:00.000Z",
+      "user-1",
+    ]);
+  });
+
+  test("serializes Date values in data", () => {
+    const d = new Date("2026-06-01T00:00:00.000Z");
+
+    const query = buildUpdateManyQuery(usersTable, {
+      data: { createdAt: d },
+    });
+
+    expect(query.params).toEqual([d.toISOString()]);
+  });
+
+  test("skips unknown data keys", () => {
+    const query = buildUpdateManyQuery(usersTable, {
+      where: { id: "user-1" },
+      // @ts-expect-error nonExistent is not a column on usersTable
+      data: { firstName: "Jane", nonExistent: "value" },
+    });
+
+    expect(query.statement).toBe(
+      "UPDATE users SET first_name = ? WHERE id = ?",
+    );
+    expect(query.params).toEqual(["Jane", "user-1"]);
+  });
+
+  test("throws when data is empty", () => {
+    expect(() =>
+      buildUpdateManyQuery(usersTable, {
+        data: {},
+      }),
+    ).toThrow("updateMany requires at least one field in data");
+  });
+});
+
+describe("buildDeleteManyQuery", () => {
+  test("builds a DELETE without a WHERE clause when no where is provided", () => {
+    const query = buildDeleteManyQuery(usersTable, {});
+
+    expect(query.statement).toBe("DELETE FROM users");
+    expect(query.params).toEqual([]);
+  });
+
+  test("builds a DELETE with a WHERE clause", () => {
+    const query = buildDeleteManyQuery(usersTable, {
+      where: { firstName: { startsWith: "Jo" } },
+    });
+
+    expect(query.statement).toBe(
+      "DELETE FROM users WHERE first_name LIKE ? ESCAPE '\\'",
+    );
+    expect(query.params).toEqual(["Jo%"]);
+  });
+
+  test("builds a DELETE with an equality WHERE clause", () => {
+    const query = buildDeleteManyQuery(usersTable, {
+      where: { firstName: "John" },
+    });
+
+    expect(query.statement).toBe("DELETE FROM users WHERE first_name = ?");
+    expect(query.params).toEqual(["John"]);
+  });
+
+  test("serializes Date values in where clause", () => {
+    const cutoff = new Date("2025-01-01T00:00:00.000Z");
+
+    const query = buildDeleteManyQuery(usersTable, {
+      where: { createdAt: { lt: cutoff } },
+    });
+
+    expect(query.statement).toBe("DELETE FROM users WHERE created_at < ?");
+    expect(query.params).toEqual([cutoff.toISOString()]);
+  });
+});
+
+describe("createSqliteDialect - createMany", () => {
+  test("inserts multiple rows and returns the count", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+
+    const dialect = createSqliteDialect(usersTable, {});
+
+    const result = await dialect.createMany(sql, {
+      data: [
+        { id: "user-1", firstName: "John", createdAt: new Date() },
+        { id: "user-2", firstName: "Alice", createdAt: new Date() },
+        { id: "user-3", firstName: "Bob", createdAt: new Date() },
+      ],
+    });
+
+    expect(result).toEqual({ count: 3 });
+
+    const rows = await dialect.findMany(sql);
+
+    expect(rows).toHaveLength(3);
+
+    await sql.close();
+  });
+
+  test("inserts a single row and returns count 1", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+
+    const dialect = createSqliteDialect(usersTable, {});
+
+    const result = await dialect.createMany(sql, {
+      data: [{ id: "user-1", firstName: "Solo", createdAt: new Date() }],
+    });
+
+    expect(result).toEqual({ count: 1 });
+
+    await sql.close();
+  });
+
+  test("returns count 0 for empty data without executing a query", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+
+    const dialect = createSqliteDialect(usersTable, {});
+
+    const result = await dialect.createMany(sql, { data: [] });
+
+    expect(result).toEqual({ count: 0 });
+
+    const rows = await dialect.findMany(sql);
+
+    expect(rows).toHaveLength(0);
+
+    await sql.close();
+  });
+
+  test("persists all inserted rows with correct values", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+
+    const dialect = createSqliteDialect(usersTable, {});
+
+    const d1 = new Date("2025-01-01T00:00:00.000Z");
+    const d2 = new Date("2025-06-01T00:00:00.000Z");
+
+    await dialect.createMany(sql, {
+      data: [
+        { id: "user-1", firstName: "John", createdAt: d1 },
+        { id: "user-2", firstName: "Alice", createdAt: d2 },
+      ],
+    });
+
+    const john = await dialect.findUnique(sql, { where: { id: "user-1" } });
+    const alice = await dialect.findUnique(sql, { where: { id: "user-2" } });
+
+    expect(john?.firstName).toBe("John");
+    expect(new Date(john?.createdAt ?? 0).toISOString()).toBe(d1.toISOString());
+    expect(alice?.firstName).toBe("Alice");
+    expect(new Date(alice?.createdAt ?? 0).toISOString()).toBe(
+      d2.toISOString(),
+    );
+
+    await sql.close();
+  });
+});
+
+describe("createSqliteDialect - updateMany", () => {
+  test("updates all rows when no where is provided and returns count", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+    await insertUser(sql, "user-2", "Alice", "2025-01-02T00:00:00.000Z");
+    await insertUser(sql, "user-3", "Bob", "2025-01-03T00:00:00.000Z");
+
+    const dialect = createSqliteDialect(usersTable, {});
+
+    const result = await dialect.updateMany(sql, {
+      data: { firstName: "Updated" },
+    });
+
+    expect(result).toEqual({ count: 3 });
+
+    const rows = await dialect.findMany(sql);
+
+    expect(rows.every((r) => r.firstName === "Updated")).toBe(true);
+
+    await sql.close();
+  });
+
+  test("updates only matching rows and returns the correct count", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+    await insertUser(sql, "user-2", "Johnny", "2025-01-02T00:00:00.000Z");
+    await insertUser(sql, "user-3", "Alice", "2025-01-03T00:00:00.000Z");
+
+    const dialect = createSqliteDialect(usersTable, {});
+
+    const result = await dialect.updateMany(sql, {
+      where: { firstName: { startsWith: "Jo" } },
+      data: { firstName: "Jo-updated" },
+    });
+
+    expect(result).toEqual({ count: 2 });
+
+    const alice = await dialect.findUnique(sql, { where: { id: "user-3" } });
+
+    expect(alice?.firstName).toBe("Alice");
+
+    await sql.close();
+  });
+
+  test("returns count 0 when where clause matches no rows", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+
+    const dialect = createSqliteDialect(usersTable, {});
+
+    const result = await dialect.updateMany(sql, {
+      where: { firstName: "Nobody" },
+      data: { firstName: "Ghost" },
+    });
+
+    expect(result).toEqual({ count: 0 });
+
+    const john = await dialect.findUnique(sql, { where: { id: "user-1" } });
+
+    expect(john?.firstName).toBe("John");
+
+    await sql.close();
+  });
+
+  test("serializes Date values in data", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+
+    const dialect = createSqliteDialect(usersTable, {});
+
+    const newDate = new Date("2026-06-01T00:00:00.000Z");
+
+    await dialect.updateMany(sql, {
+      where: { id: "user-1" },
+      data: { createdAt: newDate },
+    });
+
+    const updated = await dialect.findUnique(sql, { where: { id: "user-1" } });
+
+    expect(new Date(updated?.createdAt ?? 0).toISOString()).toBe(
+      newDate.toISOString(),
+    );
+
+    await sql.close();
+  });
+});
+
+describe("createSqliteDialect - deleteMany", () => {
+  test("deletes all rows when no where is provided and returns count", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+    await insertUser(sql, "user-2", "Alice", "2025-01-02T00:00:00.000Z");
+
+    const dialect = createSqliteDialect(usersTable, {});
+
+    const result = await dialect.deleteMany(sql, {});
+
+    expect(result).toEqual({ count: 2 });
+
+    const rows = await dialect.findMany(sql);
+
+    expect(rows).toHaveLength(0);
+
+    await sql.close();
+  });
+
+  test("deletes only matching rows and returns the correct count", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+    await insertUser(sql, "user-2", "Johnny", "2025-01-02T00:00:00.000Z");
+    await insertUser(sql, "user-3", "Alice", "2025-01-03T00:00:00.000Z");
+
+    const dialect = createSqliteDialect(usersTable, {});
+
+    const result = await dialect.deleteMany(sql, {
+      where: { firstName: { startsWith: "Jo" } },
+    });
+
+    expect(result).toEqual({ count: 2 });
+
+    const remaining = await dialect.findMany(sql);
+
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.firstName).toBe("Alice");
+
+    await sql.close();
+  });
+
+  test("returns count 0 when where clause matches no rows", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+
+    const dialect = createSqliteDialect(usersTable, {});
+
+    const result = await dialect.deleteMany(sql, {
+      where: { firstName: "Nobody" },
+    });
+
+    expect(result).toEqual({ count: 0 });
+
+    const rows = await dialect.findMany(sql);
+
+    expect(rows).toHaveLength(1);
+
+    await sql.close();
+  });
+
+  test("deletes rows matching a date range", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "Old1", "2020-01-01T00:00:00.000Z");
+    await insertUser(sql, "user-2", "Old2", "2021-01-01T00:00:00.000Z");
+    await insertUser(sql, "user-3", "New1", "2025-01-01T00:00:00.000Z");
+
+    const dialect = createSqliteDialect(usersTable, {});
+
+    const result = await dialect.deleteMany(sql, {
+      where: { createdAt: { lt: new Date("2023-01-01T00:00:00.000Z") } },
+    });
+
+    expect(result).toEqual({ count: 2 });
+
+    const remaining = await dialect.findMany(sql);
+
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.id).toBe("user-3");
+
+    await sql.close();
+  });
+
+  test("deletes rows by exact equality", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+    await insertUser(sql, "user-2", "Alice", "2025-01-02T00:00:00.000Z");
+
+    const dialect = createSqliteDialect(usersTable, {});
+
+    const result = await dialect.deleteMany(sql, {
+      where: { firstName: "John" },
+    });
+
+    expect(result).toEqual({ count: 1 });
+
+    const remaining = await dialect.findMany(sql);
+
+    expect(remaining[0]?.firstName).toBe("Alice");
 
     await sql.close();
   });

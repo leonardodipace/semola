@@ -2,9 +2,11 @@ import type { Adapter } from "../dialect/index.js";
 import { getDialect } from "../dialect/index.js";
 import type { Table } from "../table/types.js";
 import type {
+  CreateManyOptions,
   CreateOptions,
   CreateOrmOptions,
   CreateResult,
+  DeleteManyOptions,
   DeleteOptions,
   DeleteResult,
   FindFirstOptions,
@@ -16,6 +18,7 @@ import type {
   Relations,
   TableClient,
   TableRelations,
+  UpdateManyOptions,
   UpdateOptions,
   UpdateResult,
 } from "./types.js";
@@ -67,16 +70,28 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
       return await dialect.create<TOptions>(sql, options);
     },
 
+    createMany: async (options: CreateManyOptions<T>) => {
+      return await dialect.createMany(sql, options);
+    },
+
     update: async <const TOptions extends UpdateOptions<T, TRelations>>(
       options: TOptions,
     ): Promise<UpdateResult<T, TRelations, TOptions>> => {
       return await dialect.update<TOptions>(sql, options);
     },
 
+    updateMany: async (options: UpdateManyOptions<T>) => {
+      return await dialect.updateMany(sql, options);
+    },
+
     delete: async <const TOptions extends DeleteOptions<T, TRelations>>(
       options: TOptions,
     ): Promise<DeleteResult<T, TRelations, TOptions>> => {
       return await dialect.delete<TOptions>(sql, options);
+    },
+
+    deleteMany: async (options: DeleteManyOptions<T>) => {
+      return await dialect.deleteMany(sql, options);
     },
   };
 };

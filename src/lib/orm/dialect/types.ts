@@ -1,6 +1,9 @@
 import type {
+  BulkResult,
+  CreateManyOptions,
   CreateOptions,
   CreateResult,
+  DeleteManyOptions,
   DeleteOptions,
   DeleteResult,
   FindFirstOptions,
@@ -10,6 +13,7 @@ import type {
   FindUniqueOptions,
   FindUniqueResult,
   TableRelations,
+  UpdateManyOptions,
   UpdateOptions,
   UpdateResult,
 } from "../orm/types.js";
@@ -42,13 +46,19 @@ export type Dialect<
     options: TOptions,
   ): Promise<CreateResult<T, TRelations, TOptions>>;
 
+  createMany(sql: Bun.SQL, options: CreateManyOptions<T>): Promise<BulkResult>;
+
   update<const TOptions extends UpdateOptions<T, TRelations>>(
     sql: Bun.SQL,
     options: TOptions,
   ): Promise<UpdateResult<T, TRelations, TOptions>>;
 
+  updateMany(sql: Bun.SQL, options: UpdateManyOptions<T>): Promise<BulkResult>;
+
   delete<const TOptions extends DeleteOptions<T, TRelations>>(
     sql: Bun.SQL,
     options: TOptions,
   ): Promise<DeleteResult<T, TRelations, TOptions>>;
+
+  deleteMany(sql: Bun.SQL, options: DeleteManyOptions<T>): Promise<BulkResult>;
 };

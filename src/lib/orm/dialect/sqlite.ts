@@ -1,6 +1,8 @@
 import type { Column } from "../column/types.js";
 import type {
+  CreateManyOptions,
   CreateOptions,
+  DeleteManyOptions,
   DeleteOptions,
   FindFirstOptions,
   FindManyOptions,
@@ -10,6 +12,7 @@ import type {
   TableRelations,
   TableSelect,
   TableWhere,
+  UpdateManyOptions,
   UpdateOptions,
   UpdateResult,
 } from "../orm/types.js";
@@ -637,6 +640,85 @@ const getFirstRow = <TRow>(rows: Array<TRow>) => {
   return firstRow;
 };
 
+export const buildCreateManyQuery = <T extends Table>(
+  table: T,
+  options: CreateManyOptions<T>,
+) => {
+  if (!options.data.length) {
+    return { statement: "", params: [] };
+  }
+
+  const columnEntries = Object.entries(table.columns);
+  const sqlNames = columnEntries.map(([, col]) => col.sqlName);
+  const params: unknown[] = [];
+  const rowPlaceholders: string[] = [];
+
+  for (const row of options.data) {
+    const provided = new Map<string, unknown>(Object.entries(row));
+    const placeholders: string[] = [];
+
+    for (const [jsKey, column] of columnEntries) {
+      const value = resolveCreateValue(column, provided.get(jsKey));
+      placeholders.push("?");
+      params.push(serializeParam(value));
+    }
+
+    rowPlaceholders.push(`(${placeholders.join(", ")})`);
+  }
+
+  const statement = `INSERT INTO ${table.sqlName} (${sqlNames.join(", ")}) VALUES ${rowPlaceholders.join(", ")}`;
+
+  return { statement, params };
+};
+
+export const buildUpdateManyQuery = <T extends Table>(
+  table: T,
+  options: UpdateManyOptions<T>,
+) => {
+  const setClauses: string[] = [];
+  const params: unknown[] = [];
+
+  for (const [jsKey, value] of Object.entries(options.data)) {
+    const column = table.columns[jsKey];
+
+    if (!column) continue;
+
+    setClauses.push(`${column.sqlName} = ?`);
+    params.push(serializeParam(value));
+  }
+
+  if (!setClauses.length) {
+    throw new Error("updateMany requires at least one field in data");
+  }
+
+  const where = buildWhereClause(table, options.where);
+
+  let statement = `UPDATE ${table.sqlName} SET ${setClauses.join(", ")}`;
+
+  if (where.sql) {
+    statement = `${statement} WHERE ${where.sql}`;
+  }
+
+  params.push(...where.params);
+
+  return { statement, params };
+};
+
+export const buildDeleteManyQuery = <T extends Table>(
+  table: T,
+  options: DeleteManyOptions<T>,
+) => {
+  const where = buildWhereClause(table, options.where);
+
+  let statement = `DELETE FROM ${table.sqlName}`;
+
+  if (where.sql) {
+    statement = `${statement} WHERE ${where.sql}`;
+  }
+
+  return { statement, params: where.params };
+};
+
 export const createSqliteDialect = <T extends Table, R extends TableRelations>(
   table: T,
   relations: R,
@@ -674,6 +756,16 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
 
       return row;
     },
+    createMany: async (sql, options) => {
+      if (!options.data.length) {
+        return { count: 0 };
+      }
+
+      const query = buildCreateManyQuery(table, options);
+      const result = await sql.unsafe(query.statement, query.params);
+
+      return { count: result.count };
+    },
     update: async (sql, options) => {
       const query = buildUpdateQuery(table, relations, options);
       const rows = await executeQuery(sql, query);
@@ -687,6 +779,12 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
 
       return row as UpdateResult<T, R, typeof options>;
     },
+    updateMany: async (sql, options) => {
+      const query = buildUpdateManyQuery(table, options);
+      const result = await sql.unsafe(query.statement, query.params);
+
+      return { count: result.count };
+    },
     delete: async (sql, options) => {
       const query = buildDeleteQuery(table, relations, options);
       const rows = await executeQuery(sql, query);
@@ -699,6 +797,12 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
       }
 
       return row;
+    },
+    deleteMany: async (sql, options) => {
+      const query = buildDeleteManyQuery(table, options);
+      const result = await sql.unsafe(query.statement, query.params);
+
+      return { count: result.count };
     },
   };
 };
