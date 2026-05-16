@@ -1,7 +1,7 @@
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
 import type { CronOptions, CronStatus, ErrorMetadataType } from "./types.js";
 
-const MINUTELY_EXPR = "* * * * *" as const;
+const MINUTELY_EXPR = "* * * * *";
 
 export class Cron {
   private options: CronOptions;
@@ -23,7 +23,20 @@ export class Cron {
     const { schedule, handler } = this.options;
     const [scheduleFormatErr, cron] = mightThrowSync(() => {
       const expr = schedule === "@minutely" ? MINUTELY_EXPR : schedule;
-      return Bun.cron(expr, handler);
+      return Bun.cron(expr, async () => {
+        const [handlerError, handlerResult] = await mightThrow(handler());
+
+        if (!handlerError) return Promise.resolve(handlerResult);
+        if (!this.options.onError) return Promise.reject(handlerError);
+
+        const data: ErrorMetadataType = {
+          name: this.options.name,
+          error: handlerError,
+          failedAt: Date.now(),
+        };
+
+        this.options.onError(data);
+      });
     });
 
     if (!scheduleFormatErr) {
