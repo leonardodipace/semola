@@ -14,7 +14,6 @@ import type {
   TableWhere,
   UpdateManyOptions,
   UpdateOptions,
-  UpdateResult,
 } from "../orm/types.js";
 import type { Table } from "../table/types.js";
 import type { Dialect } from "./types.js";
@@ -781,7 +780,7 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
         );
       }
 
-      return row as UpdateResult<T, R, typeof options>;
+      return row;
     },
     updateMany: async (sql, options) => {
       const query = buildUpdateManyQuery(table, options);
