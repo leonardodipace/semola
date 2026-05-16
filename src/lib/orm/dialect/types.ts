@@ -19,7 +19,7 @@ import type {
 } from "../orm/types.js";
 import type { Table } from "../table/types.js";
 
-export type Adapter = Bun.SQL["options"]["adapter"];
+export type Adapter = "sqlite";
 
 export type Dialect<
   T extends Table = Table,
