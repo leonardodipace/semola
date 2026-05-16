@@ -14,8 +14,8 @@ export type ScheduleType =
 export type CronOptions = {
   name: string;
   schedule: ScheduleType;
-  handler: () => Promise<unknown>;
-  onError?: (error: ErrorMetadataType) => void;
+  handler: () => unknown;
+  onError?: (error: ErrorMetadataType) => void | Promise<void>;
 };
 
 export type CronStatus = "idle" | "running";

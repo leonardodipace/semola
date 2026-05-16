@@ -23,11 +23,15 @@ export class Cron {
     const { schedule, handler } = this.options;
     const [scheduleFormatErr, cron] = mightThrowSync(() => {
       const expr = schedule === "@minutely" ? MINUTELY_EXPR : schedule;
-      return Bun.cron(expr, async () => {
-        const [handlerError, handlerResult] = await mightThrow(handler());
-        if (!handlerError) return Promise.resolve(handlerResult);
 
-        this.launchError(handlerError);
+      return Bun.cron(expr, async () => {
+        const [handlerError] = await mightThrow(
+          Promise.resolve().then(() => handler()),
+        );
+
+        if (!handlerError) return Promise.resolve();
+
+        await Promise.resolve(this.launchError(handlerError));
       });
     });
 
