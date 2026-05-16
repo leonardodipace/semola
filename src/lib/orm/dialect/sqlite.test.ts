@@ -287,6 +287,16 @@ describe("buildFindManyQuery", () => {
       ),
     ).toThrow("Missing hasOne foreign key column profileId on users");
   });
+
+  test("throws on unknown where key", () => {
+    expect(() =>
+      buildFindManyQuery(
+        usersTable,
+        {},
+        { where: { nonExistent: "x" } as never },
+      ),
+    ).toThrow('Unknown where key "nonExistent" on table users');
+  });
 });
 
 describe("buildFindUniqueQuery", () => {

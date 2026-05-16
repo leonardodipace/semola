@@ -125,6 +125,10 @@ const buildWhereClause = <T extends Table>(
 
     const typedKey = jsKey as keyof T["columns"];
 
+    if (!(jsKey in table.columns)) {
+      throw new Error(`Unknown where key "${jsKey}" on table ${table.sqlName}`);
+    }
+
     const sqlName = table.columns[typedKey].sqlName;
 
     if (!isPlainObject(value)) {
