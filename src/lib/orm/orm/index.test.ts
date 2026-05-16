@@ -366,4 +366,151 @@ describe("relation helpers", () => {
 
     await orm.$raw.close();
   });
+
+  test("createMany inserts multiple rows and returns count", async () => {
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+    });
+
+    await orm.$raw.unsafe(
+      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
+    );
+
+    const result = await orm.users.createMany({
+      data: [
+        { id: "u1", name: "Alice", email: "alice@example.com" },
+        { id: "u2", name: "Bob", email: "bob@example.com" },
+      ],
+    });
+
+    expect(result.count).toBe(2);
+
+    const rows = await orm.users.findMany();
+
+    expect(rows).toHaveLength(2);
+
+    await orm.$raw.close();
+  });
+
+  test("update modifies a row and returns it", async () => {
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+    });
+
+    await orm.$raw.unsafe(
+      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
+    );
+
+    await orm.$raw.unsafe("INSERT INTO users VALUES (?, ?, ?)", [
+      "u1",
+      "Alice",
+      "alice@example.com",
+    ]);
+
+    const updated = await orm.users.update({
+      where: { id: "u1" },
+      data: { name: "Alice Updated" },
+    });
+
+    expect(updated.id).toBe("u1");
+    expect(updated.name).toBe("Alice Updated");
+
+    await orm.$raw.close();
+  });
+
+  test("updateMany updates matching rows and returns count", async () => {
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+    });
+
+    await orm.$raw.unsafe(
+      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
+    );
+
+    await orm.$raw.unsafe("INSERT INTO users VALUES (?, ?, ?), (?, ?, ?)", [
+      "u1",
+      "Alice",
+      "alice@example.com",
+      "u2",
+      "Bob",
+      "bob@example.com",
+    ]);
+
+    const result = await orm.users.updateMany({
+      data: { name: "Updated" },
+    });
+
+    expect(result.count).toBe(2);
+
+    await orm.$raw.close();
+  });
+
+  test("delete removes a row and returns it", async () => {
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+    });
+
+    await orm.$raw.unsafe(
+      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
+    );
+
+    await orm.$raw.unsafe("INSERT INTO users VALUES (?, ?, ?)", [
+      "u1",
+      "Alice",
+      "alice@example.com",
+    ]);
+
+    const deleted = await orm.users.delete({
+      where: { id: "u1" },
+    });
+
+    expect(deleted.id).toBe("u1");
+
+    const rows = await orm.users.findMany();
+
+    expect(rows).toHaveLength(0);
+
+    await orm.$raw.close();
+  });
+
+  test("deleteMany removes matching rows and returns count", async () => {
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+    });
+
+    await orm.$raw.unsafe(
+      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
+    );
+
+    await orm.$raw.unsafe("INSERT INTO users VALUES (?, ?, ?), (?, ?, ?)", [
+      "u1",
+      "Alice",
+      "alice@example.com",
+      "u2",
+      "Bob",
+      "bob@example.com",
+    ]);
+
+    const result = await orm.users.deleteMany({
+      where: { name: "Alice" },
+    });
+
+    expect(result.count).toBe(1);
+
+    const rows = await orm.users.findMany();
+
+    expect(rows).toHaveLength(1);
+
+    await orm.$raw.close();
+  });
 });
