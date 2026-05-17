@@ -1,4 +1,4 @@
-import { describe, expect, setSystemTime, test } from "bun:test";
+import { describe, expect, setSystemTime, test, spyOn } from "bun:test";
 import { Cron } from "./index.js";
 
 describe("Cron", () => {
@@ -390,6 +390,26 @@ describe("Cron", () => {
 
       cron.stop();
       expect(cron.getStatus()).toBe("idle");
+    });
+  });
+
+  describe("Dispose API", () => {
+    test("should stop a job automatically", () => {
+      const job = new Cron({
+        name: "disposable",
+        schedule: "@minutely",
+        handler: async () => Promise.resolve(),
+      });
+
+      const stopSpy = spyOn(job, "stop");
+
+      {
+        using scoped = job;
+        scoped.run();
+      }
+
+      expect(stopSpy).toHaveBeenCalledTimes(1);
+      expect(job.getStatus()).toBe("idle");
     });
   });
 });
