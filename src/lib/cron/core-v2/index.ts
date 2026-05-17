@@ -58,21 +58,27 @@ export class Cron implements Disposable {
 
     const { schedule, name } = this.options;
     const expr = schedule === "@minutely" ? MINUTELY_EXPR : schedule;
-    const osJob = Bun.cron(path, expr, name);
 
-    const [osError] = await mightThrow(osJob);
+    const [createError, osJob] = mightThrowSync(() =>
+      Bun.cron(path, expr, name),
+    );
 
-    if (!osError) {
-      this.status = "running";
+    if (createError) {
+      this.launchError(createError);
       return;
     }
 
-    this.launchError(osError);
+    const [osError] = await mightThrow(osJob);
+
+    if (osError) {
+      this.launchError(osError);
+      return;
+    }
+
+    this.status = "running";
   }
 
   public async stopOSLevel() {
-    if (this.status !== "running") return;
-
     await Bun.cron.remove(this.options.name);
     this.status = "idle";
   }
