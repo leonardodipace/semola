@@ -79,8 +79,17 @@ export class Cron implements Disposable {
   }
 
   public async stopOSLevel() {
-    await Bun.cron.remove(this.options.name);
-    this.status = "idle";
+    const [rmError, rmResult] = mightThrowSync(() =>
+      Bun.cron.remove(this.options.name),
+    );
+
+    if (!rmError) {
+      await rmResult;
+      this.status = "idle";
+      return;
+    }
+
+    this.launchError(rmError);
   }
 
   public getExpression() {
