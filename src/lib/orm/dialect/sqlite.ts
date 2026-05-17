@@ -217,24 +217,36 @@ const getPrimaryKeyColumn = (table: Table) => {
   return primaryKey[1];
 };
 
+type HasManyCandidate = {
+  fk: Column;
+  source: { sqlName: string };
+};
+
 const resolveHasManyForeignKeyColumn = (
   sourceTable: Table,
   targetTable: Table,
 ) => {
-  const sourcePrimaryKey = getPrimaryKeyColumn(sourceTable);
+  const sourceColumnValues = Object.values(sourceTable.columns);
 
-  const entries = Object.entries(targetTable.columns);
-  const candidates = entries.filter(([, column]) => {
-    if (!column.references) return false;
+  const candidates: HasManyCandidate[] = [];
+
+  for (const [, column] of Object.entries(targetTable.columns)) {
+    if (!column.references) continue;
 
     const getReferencedColumn = column.references.tableColumn;
 
-    if (!getReferencedColumn) return false;
+    if (!getReferencedColumn) continue;
 
     const referencedColumn = getReferencedColumn();
 
-    return referencedColumn === sourcePrimaryKey;
-  });
+    const referencesSourceColumn = sourceColumnValues.some(
+      (sourceCol) => sourceCol === referencedColumn,
+    );
+
+    if (referencesSourceColumn) {
+      candidates.push({ fk: column, source: referencedColumn });
+    }
+  }
 
   if (!candidates.length) {
     throw new Error(
@@ -256,7 +268,7 @@ const resolveHasManyForeignKeyColumn = (
     );
   }
 
-  return candidate[1];
+  return candidate;
 };
 
 const buildJsonObjectExpression = (alias: string, table: Table) => {
@@ -284,7 +296,6 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
 
   if (!enabledRelations.length) return EMPTY_INCLUDE;
 
-  const sourcePrimaryKey = getPrimaryKeyColumn(table);
   const clauses: string[] = [];
   const descriptors: IncludeDescriptor[] = [];
 
@@ -305,9 +316,10 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
     );
 
     if (relation._type === "hasMany") {
-      const foreignKey = resolveHasManyForeignKeyColumn(table, relationTable);
+      const { fk: foreignKey, source: sourceColumn } =
+        resolveHasManyForeignKeyColumn(table, relationTable);
       clauses.push(
-        `COALESCE((SELECT json_group_array(${relationJsonObject}) FROM ${relationTable.sqlName} AS ${relationAlias} WHERE ${relationAlias}.${foreignKey.sqlName} = ${table.sqlName}.${sourcePrimaryKey.sqlName}), '[]') AS ${relationName}`,
+        `COALESCE((SELECT json_group_array(${relationJsonObject}) FROM ${relationTable.sqlName} AS ${relationAlias} WHERE ${relationAlias}.${foreignKey.sqlName} = ${table.sqlName}.${sourceColumn.sqlName}), '[]') AS ${relationName}`,
       );
       descriptors.push({ name: relationName, type: "hasMany" });
       continue;
