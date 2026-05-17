@@ -189,6 +189,10 @@ const buildSelectColumns = <T extends Table>(
     selectedColumns.push(getColumnAlias(sqlName, key));
   }
 
+  if (selectedColumns.length === 0) {
+    return "*";
+  }
+
   return selectedColumns.join(", ");
 };
 
