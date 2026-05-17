@@ -1122,7 +1122,7 @@ describe("buildCreateManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      "INSERT INTO users (id, first_name, created_at) VALUES (?, ?, ?)",
+      "INSERT INTO users (id, first_name, created_at) VALUES (?, ?, ?) RETURNING id AS id, first_name AS firstName, created_at AS createdAt",
     );
     expect(query.params).toEqual([
       "user-1",
@@ -1148,7 +1148,7 @@ describe("buildCreateManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      "INSERT INTO users (id, first_name, created_at) VALUES (?, ?, ?), (?, ?, ?)",
+      "INSERT INTO users (id, first_name, created_at) VALUES (?, ?, ?), (?, ?, ?) RETURNING id AS id, first_name AS firstName, created_at AS createdAt",
     );
     expect(query.params).toEqual([
       "user-1",
@@ -1200,7 +1200,7 @@ describe("buildCreateManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      "INSERT INTO items (id, name, tag) VALUES (?, ?, ?)",
+      "INSERT INTO items (id, name, tag) VALUES (?, ?, ?) RETURNING id AS id, name AS name, tag AS tag",
     );
     expect(query.params).toEqual(["item-1", "Widget", "default-tag"]);
   });
@@ -1212,7 +1212,9 @@ describe("buildUpdateManyQuery", () => {
       data: { firstName: "Everyone" },
     });
 
-    expect(query.statement).toBe("UPDATE users SET first_name = ?");
+    expect(query.statement).toBe(
+      "UPDATE users SET first_name = ? RETURNING id AS id, first_name AS firstName, created_at AS createdAt",
+    );
     expect(query.params).toEqual(["Everyone"]);
   });
 
@@ -1223,7 +1225,7 @@ describe("buildUpdateManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      "UPDATE users SET first_name = ? WHERE first_name LIKE ? ESCAPE '\\'",
+      "UPDATE users SET first_name = ? WHERE first_name LIKE ? ESCAPE '\\' RETURNING id AS id, first_name AS firstName, created_at AS createdAt",
     );
     expect(query.params).toEqual(["John", "Jo%"]);
   });
@@ -1238,7 +1240,7 @@ describe("buildUpdateManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      "UPDATE users SET first_name = ?, created_at = ? WHERE id = ?",
+      "UPDATE users SET first_name = ?, created_at = ? WHERE id = ? RETURNING id AS id, first_name AS firstName, created_at AS createdAt",
     );
     expect(query.params).toEqual([
       "Jane",
@@ -1265,7 +1267,7 @@ describe("buildUpdateManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      "UPDATE users SET first_name = ? WHERE id = ?",
+      "UPDATE users SET first_name = ? WHERE id = ? RETURNING id AS id, first_name AS firstName, created_at AS createdAt",
     );
     expect(query.params).toEqual(["Jane", "user-1"]);
   });
@@ -1283,7 +1285,9 @@ describe("buildDeleteManyQuery", () => {
   test("builds a DELETE without a WHERE clause when no where is provided", () => {
     const query = buildDeleteManyQuery(usersTable, {});
 
-    expect(query.statement).toBe("DELETE FROM users");
+    expect(query.statement).toBe(
+      "DELETE FROM users RETURNING id AS id, first_name AS firstName, created_at AS createdAt",
+    );
     expect(query.params).toEqual([]);
   });
 
@@ -1293,7 +1297,7 @@ describe("buildDeleteManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      "DELETE FROM users WHERE first_name LIKE ? ESCAPE '\\'",
+      "DELETE FROM users WHERE first_name LIKE ? ESCAPE '\\' RETURNING id AS id, first_name AS firstName, created_at AS createdAt",
     );
     expect(query.params).toEqual(["Jo%"]);
   });
@@ -1303,7 +1307,9 @@ describe("buildDeleteManyQuery", () => {
       where: { firstName: "John" },
     });
 
-    expect(query.statement).toBe("DELETE FROM users WHERE first_name = ?");
+    expect(query.statement).toBe(
+      "DELETE FROM users WHERE first_name = ? RETURNING id AS id, first_name AS firstName, created_at AS createdAt",
+    );
     expect(query.params).toEqual(["John"]);
   });
 
@@ -1314,13 +1320,15 @@ describe("buildDeleteManyQuery", () => {
       where: { createdAt: { lt: cutoff } },
     });
 
-    expect(query.statement).toBe("DELETE FROM users WHERE created_at < ?");
+    expect(query.statement).toBe(
+      "DELETE FROM users WHERE created_at < ? RETURNING id AS id, first_name AS firstName, created_at AS createdAt",
+    );
     expect(query.params).toEqual([cutoff.toISOString()]);
   });
 });
 
 describe("createSqliteDialect - createMany", () => {
-  test("inserts multiple rows and returns the count", async () => {
+  test("inserts multiple rows and returns the inserted records", async () => {
     const sql = createMemorySql();
 
     await createUsersTable(sql);
@@ -1335,16 +1343,15 @@ describe("createSqliteDialect - createMany", () => {
       ],
     });
 
-    expect(result).toEqual({ count: 3 });
-
-    const rows = await dialect.findMany(sql);
-
-    expect(rows).toHaveLength(3);
+    expect(result).toHaveLength(3);
+    expect(result[0]?.id).toBe("user-1");
+    expect(result[1]?.id).toBe("user-2");
+    expect(result[2]?.id).toBe("user-3");
 
     await sql.close();
   });
 
-  test("inserts a single row and returns count 1", async () => {
+  test("inserts a single row and returns the inserted record", async () => {
     const sql = createMemorySql();
 
     await createUsersTable(sql);
@@ -1355,12 +1362,14 @@ describe("createSqliteDialect - createMany", () => {
       data: [{ id: "user-1", firstName: "Solo", createdAt: new Date() }],
     });
 
-    expect(result).toEqual({ count: 1 });
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe("user-1");
+    expect(result[0]?.firstName).toBe("Solo");
 
     await sql.close();
   });
 
-  test("returns count 0 for empty data without executing a query", async () => {
+  test("returns an empty array for empty data without executing a query", async () => {
     const sql = createMemorySql();
 
     await createUsersTable(sql);
@@ -1369,7 +1378,7 @@ describe("createSqliteDialect - createMany", () => {
 
     const result = await dialect.createMany(sql, { data: [] });
 
-    expect(result).toEqual({ count: 0 });
+    expect(result).toEqual([]);
 
     const rows = await dialect.findMany(sql);
 
@@ -1410,7 +1419,7 @@ describe("createSqliteDialect - createMany", () => {
 });
 
 describe("createSqliteDialect - updateMany", () => {
-  test("updates all rows when no where is provided and returns count", async () => {
+  test("updates all rows when no where is provided and returns the updated records", async () => {
     const sql = createMemorySql();
 
     await createUsersTable(sql);
@@ -1424,16 +1433,13 @@ describe("createSqliteDialect - updateMany", () => {
       data: { firstName: "Updated" },
     });
 
-    expect(result).toEqual({ count: 3 });
-
-    const rows = await dialect.findMany(sql);
-
-    expect(rows.every((r) => r.firstName === "Updated")).toBe(true);
+    expect(result).toHaveLength(3);
+    expect(result.every((r) => r.firstName === "Updated")).toBe(true);
 
     await sql.close();
   });
 
-  test("updates only matching rows and returns the correct count", async () => {
+  test("updates only matching rows and returns the updated records", async () => {
     const sql = createMemorySql();
 
     await createUsersTable(sql);
@@ -1448,7 +1454,8 @@ describe("createSqliteDialect - updateMany", () => {
       data: { firstName: "Jo-updated" },
     });
 
-    expect(result).toEqual({ count: 2 });
+    expect(result).toHaveLength(2);
+    expect(result.every((r) => r.firstName === "Jo-updated")).toBe(true);
 
     const alice = await dialect.findUnique(sql, { where: { id: "user-3" } });
 
@@ -1457,7 +1464,7 @@ describe("createSqliteDialect - updateMany", () => {
     await sql.close();
   });
 
-  test("returns count 0 when where clause matches no rows", async () => {
+  test("returns an empty array when where clause matches no rows", async () => {
     const sql = createMemorySql();
 
     await createUsersTable(sql);
@@ -1470,7 +1477,7 @@ describe("createSqliteDialect - updateMany", () => {
       data: { firstName: "Ghost" },
     });
 
-    expect(result).toEqual({ count: 0 });
+    expect(result).toEqual([]);
 
     const john = await dialect.findUnique(sql, { where: { id: "user-1" } });
 
@@ -1505,7 +1512,7 @@ describe("createSqliteDialect - updateMany", () => {
 });
 
 describe("createSqliteDialect - deleteMany", () => {
-  test("deletes all rows when no where is provided and returns count", async () => {
+  test("deletes all rows when no where is provided and returns the deleted records", async () => {
     const sql = createMemorySql();
 
     await createUsersTable(sql);
@@ -1516,7 +1523,7 @@ describe("createSqliteDialect - deleteMany", () => {
 
     const result = await dialect.deleteMany(sql, {});
 
-    expect(result).toEqual({ count: 2 });
+    expect(result).toHaveLength(2);
 
     const rows = await dialect.findMany(sql);
 
@@ -1525,7 +1532,7 @@ describe("createSqliteDialect - deleteMany", () => {
     await sql.close();
   });
 
-  test("deletes only matching rows and returns the correct count", async () => {
+  test("deletes only matching rows and returns the deleted records", async () => {
     const sql = createMemorySql();
 
     await createUsersTable(sql);
@@ -1539,7 +1546,7 @@ describe("createSqliteDialect - deleteMany", () => {
       where: { firstName: { startsWith: "Jo" } },
     });
 
-    expect(result).toEqual({ count: 2 });
+    expect(result).toHaveLength(2);
 
     const remaining = await dialect.findMany(sql);
 
@@ -1549,7 +1556,7 @@ describe("createSqliteDialect - deleteMany", () => {
     await sql.close();
   });
 
-  test("returns count 0 when where clause matches no rows", async () => {
+  test("returns an empty array when where clause matches no rows", async () => {
     const sql = createMemorySql();
 
     await createUsersTable(sql);
@@ -1561,7 +1568,7 @@ describe("createSqliteDialect - deleteMany", () => {
       where: { firstName: "Nobody" },
     });
 
-    expect(result).toEqual({ count: 0 });
+    expect(result).toEqual([]);
 
     const rows = await dialect.findMany(sql);
 
@@ -1584,7 +1591,7 @@ describe("createSqliteDialect - deleteMany", () => {
       where: { createdAt: { lt: new Date("2023-01-01T00:00:00.000Z") } },
     });
 
-    expect(result).toEqual({ count: 2 });
+    expect(result).toHaveLength(2);
 
     const remaining = await dialect.findMany(sql);
 
@@ -1607,7 +1614,8 @@ describe("createSqliteDialect - deleteMany", () => {
       where: { firstName: "John" },
     });
 
-    expect(result).toEqual({ count: 1 });
+    expect(result).toHaveLength(1);
+    expect(result[0]?.firstName).toBe("John");
 
     const remaining = await dialect.findMany(sql);
 

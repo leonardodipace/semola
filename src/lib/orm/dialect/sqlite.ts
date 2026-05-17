@@ -658,9 +658,9 @@ const getFirstRow = <TRow>(rows: Array<TRow>) => {
 export const buildCreateManyQuery = <T extends Table>(
   table: T,
   options: CreateManyOptions<T>,
-) => {
+): ReturningQuery => {
   if (!options.data.length) {
-    return { statement: "", params: [] };
+    return { statement: "", params: [], includeDescriptors: [] };
   }
 
   const columnEntries = Object.entries(table.columns);
@@ -681,15 +681,16 @@ export const buildCreateManyQuery = <T extends Table>(
     rowPlaceholders.push(`(${placeholders.join(", ")})`);
   }
 
-  const statement = `INSERT INTO ${table.sqlName} (${sqlNames.join(", ")}) VALUES ${rowPlaceholders.join(", ")}`;
+  const returning = buildSelectColumns(table, undefined);
+  const statement = `INSERT INTO ${table.sqlName} (${sqlNames.join(", ")}) VALUES ${rowPlaceholders.join(", ")} RETURNING ${returning}`;
 
-  return { statement, params };
+  return { statement, params, includeDescriptors: [] };
 };
 
 export const buildUpdateManyQuery = <T extends Table>(
   table: T,
   options: UpdateManyOptions<T>,
-) => {
+): ReturningQuery => {
   const setClauses: string[] = [];
   const params: unknown[] = [];
 
@@ -716,13 +717,16 @@ export const buildUpdateManyQuery = <T extends Table>(
 
   params.push(...where.params);
 
-  return { statement, params };
+  const returning = buildSelectColumns(table, undefined);
+  statement = `${statement} RETURNING ${returning}`;
+
+  return { statement, params, includeDescriptors: [] };
 };
 
 export const buildDeleteManyQuery = <T extends Table>(
   table: T,
   options: DeleteManyOptions<T>,
-) => {
+): ReturningQuery => {
   const where = buildWhereClause(table, options.where);
 
   let statement = `DELETE FROM ${table.sqlName}`;
@@ -731,7 +735,10 @@ export const buildDeleteManyQuery = <T extends Table>(
     statement = `${statement} WHERE ${where.sql}`;
   }
 
-  return { statement, params: where.params };
+  const returning = buildSelectColumns(table, undefined);
+  statement = `${statement} RETURNING ${returning}`;
+
+  return { statement, params: where.params, includeDescriptors: [] };
 };
 
 export const createSqliteDialect = <T extends Table, R extends TableRelations>(
@@ -773,13 +780,12 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
     },
     createMany: async (sql, options) => {
       if (!options.data.length) {
-        return { count: 0 };
+        return [];
       }
 
       const query = buildCreateManyQuery(table, options);
-      const result = await sql.unsafe(query.statement, query.params);
 
-      return { count: result.count };
+      return await executeQuery(sql, query);
     },
     update: async (sql, options) => {
       const query = buildUpdateQuery(table, relations, options);
@@ -796,9 +802,8 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
     },
     updateMany: async (sql, options) => {
       const query = buildUpdateManyQuery(table, options);
-      const result = await sql.unsafe(query.statement, query.params);
 
-      return { count: result.count };
+      return await executeQuery(sql, query);
     },
     delete: async (sql, options) => {
       const query = buildDeleteQuery(table, relations, options);
@@ -815,9 +820,8 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
     },
     deleteMany: async (sql, options) => {
       const query = buildDeleteManyQuery(table, options);
-      const result = await sql.unsafe(query.statement, query.params);
 
-      return { count: result.count };
+      return await executeQuery(sql, query);
     },
   };
 };

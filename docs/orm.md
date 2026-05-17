@@ -74,11 +74,11 @@ Each table client exposes the following methods:
 ### Write
 
 - `create({ data, select?, include? })` - returns `Promise<Row>`
-- `createMany({ data })` - returns `Promise<{ count: number }>`
+- `createMany({ data })` - returns `Promise<Row[]>`
 - `update({ where, data, select?, include? })` - returns `Promise<Row>`
-- `updateMany({ where?, data })` - returns `Promise<{ count: number }>`
+- `updateMany({ where?, data })` - returns `Promise<Row[]>`
 - `delete({ where, select?, include? })` - returns `Promise<Row>`
-- `deleteMany({ where? })` - returns `Promise<{ count: number }>`
+- `deleteMany({ where? })` - returns `Promise<Row[]>`
 
 `update` and `delete` use the same unique-column `where` constraint as `findUnique`.
 
@@ -96,7 +96,7 @@ const user = await db.users.create({
   data: { id: "1", name: "Alice", email: "alice@example.com" },
 });
 
-const { count } = await db.users.createMany({
+const createdUsers = await db.users.createMany({
   data: [
     { id: "2", name: "Bob", email: "bob@example.com" },
     { id: "3", name: "Carol", email: "carol@example.com" },
@@ -108,7 +108,7 @@ const updated = await db.users.update({
   data: { name: "Alicia" },
 });
 
-const { count: updatedCount } = await db.users.updateMany({
+const updatedUsers = await db.users.updateMany({
   where: { active: false },
   data: { active: true },
 });
@@ -117,7 +117,7 @@ const deleted = await db.users.delete({
   where: { id: "1" },
 });
 
-const { count: deletedCount } = await db.users.deleteMany({
+const deletedUsers = await db.users.deleteMany({
   where: { active: false },
 });
 ```
@@ -216,6 +216,5 @@ Useful exported types include:
 - `UpdateManyOptions<T>`
 - `DeleteOptions<T, TRelations>`
 - `DeleteManyOptions<T>`
-- `BulkResult`
 - `CreateData<T>`
 - `UpdateData<T>`

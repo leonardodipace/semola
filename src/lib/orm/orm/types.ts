@@ -278,8 +278,6 @@ export type DeleteResult<
   TOptions extends DeleteOptions<T, TRelations>,
 > = NonNullable<FindUniqueResult<T, TRelations, TOptions>>;
 
-export type BulkResult = { count: number };
-
 export type CreateManyOptions<T extends Table> = {
   data: CreateData<T>[];
 };
@@ -306,28 +304,32 @@ type IncludedKeys<TInclude> = {
 type SelectResult<
   T extends Table,
   TOptions extends { select?: TableSelect<T> },
-> = TOptions["select"] extends TableSelect<T>
-  ? keyof NonNullable<TOptions["select"]> extends never
-    ? TableRow<T>
-    : {
-        [K in keyof NonNullable<TOptions["select"]> &
-          keyof T["columns"]]: ColumnValue<T["columns"][K]>;
-      }
-  : TableRow<T>;
+> =
+  TOptions["select"] extends TableSelect<T>
+    ? keyof NonNullable<TOptions["select"]> extends never
+      ? TableRow<T>
+      : {
+          [K in keyof NonNullable<TOptions["select"]> &
+            keyof T["columns"]]: ColumnValue<T["columns"][K]>;
+        }
+    : TableRow<T>;
 
 type IncludeResult<
   _T extends Table,
   TRelations extends TableRelations,
   TOptions extends { include?: TableInclude<TRelations> },
-> = TOptions["include"] extends TableInclude<TRelations>
-  ? {
-      [K in IncludedKeys<
-        NonNullable<TOptions["include"]>
-      >]: K extends keyof TRelations
-        ? HasManyRelationType<TRelations[K]> | HasOneRelationType<TRelations[K]>
-        : never;
-    }
-  : {};
+> =
+  TOptions["include"] extends TableInclude<TRelations>
+    ? {
+        [K in IncludedKeys<
+          NonNullable<TOptions["include"]>
+        >]: K extends keyof TRelations
+          ?
+              | HasManyRelationType<TRelations[K]>
+              | HasOneRelationType<TRelations[K]>
+          : never;
+      }
+    : {};
 
 export type FindManyResult<
   T extends Table,
@@ -373,17 +375,17 @@ export type TableClient<
     options: TOptions,
   ): Promise<CreateResult<T, TRelations, TOptions>>;
 
-  createMany(options: CreateManyOptions<T>): Promise<BulkResult>;
+  createMany(options: CreateManyOptions<T>): Promise<Array<TableRow<T>>>;
 
   update<const TOptions extends UpdateOptions<T, TRelations>>(
     options: TOptions,
   ): Promise<UpdateResult<T, TRelations, TOptions>>;
 
-  updateMany(options: UpdateManyOptions<T>): Promise<BulkResult>;
+  updateMany(options: UpdateManyOptions<T>): Promise<Array<TableRow<T>>>;
 
   delete<const TOptions extends DeleteOptions<T, TRelations>>(
     options: TOptions,
   ): Promise<DeleteResult<T, TRelations, TOptions>>;
 
-  deleteMany(options: DeleteManyOptions<T>): Promise<BulkResult>;
+  deleteMany(options: DeleteManyOptions<T>): Promise<Array<TableRow<T>>>;
 };

@@ -367,7 +367,7 @@ describe("relation helpers", () => {
     await orm.$raw.close();
   });
 
-  test("createMany inserts multiple rows and returns count", async () => {
+  test("createMany inserts multiple rows and returns the inserted records", async () => {
     const orm = createOrm({
       adapter: "sqlite",
       url: ":memory:",
@@ -385,7 +385,7 @@ describe("relation helpers", () => {
       ],
     });
 
-    expect(result.count).toBe(2);
+    expect(result).toHaveLength(2);
 
     const rows = await orm.users.findMany();
 
@@ -422,7 +422,7 @@ describe("relation helpers", () => {
     await orm.$raw.close();
   });
 
-  test("updateMany updates matching rows and returns count", async () => {
+  test("updateMany updates matching rows and returns the updated records", async () => {
     const orm = createOrm({
       adapter: "sqlite",
       url: ":memory:",
@@ -446,7 +446,8 @@ describe("relation helpers", () => {
       data: { name: "Updated" },
     });
 
-    expect(result.count).toBe(2);
+    expect(result).toHaveLength(2);
+    expect(result.every((r) => r.name === "Updated")).toBe(true);
 
     await orm.$raw.close();
   });
@@ -481,7 +482,7 @@ describe("relation helpers", () => {
     await orm.$raw.close();
   });
 
-  test("deleteMany removes matching rows and returns count", async () => {
+  test("deleteMany removes matching rows and returns the deleted records", async () => {
     const orm = createOrm({
       adapter: "sqlite",
       url: ":memory:",
@@ -505,7 +506,8 @@ describe("relation helpers", () => {
       where: { name: "Alice" },
     });
 
-    expect(result.count).toBe(1);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe("u1");
 
     const rows = await orm.users.findMany();
 

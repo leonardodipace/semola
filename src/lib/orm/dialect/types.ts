@@ -1,5 +1,4 @@
 import type {
-  BulkResult,
   CreateManyOptions,
   CreateOptions,
   CreateResult,
@@ -13,6 +12,7 @@ import type {
   FindUniqueOptions,
   FindUniqueResult,
   TableRelations,
+  TableRow,
   UpdateManyOptions,
   UpdateOptions,
   UpdateResult,
@@ -46,19 +46,28 @@ export type Dialect<
     options: TOptions,
   ): Promise<CreateResult<T, TRelations, TOptions>>;
 
-  createMany(sql: Bun.SQL, options: CreateManyOptions<T>): Promise<BulkResult>;
+  createMany(
+    sql: Bun.SQL,
+    options: CreateManyOptions<T>,
+  ): Promise<Array<TableRow<T>>>;
 
   update<const TOptions extends UpdateOptions<T, TRelations>>(
     sql: Bun.SQL,
     options: TOptions,
   ): Promise<UpdateResult<T, TRelations, TOptions>>;
 
-  updateMany(sql: Bun.SQL, options: UpdateManyOptions<T>): Promise<BulkResult>;
+  updateMany(
+    sql: Bun.SQL,
+    options: UpdateManyOptions<T>,
+  ): Promise<Array<TableRow<T>>>;
 
   delete<const TOptions extends DeleteOptions<T, TRelations>>(
     sql: Bun.SQL,
     options: TOptions,
   ): Promise<DeleteResult<T, TRelations, TOptions>>;
 
-  deleteMany(sql: Bun.SQL, options: DeleteManyOptions<T>): Promise<BulkResult>;
+  deleteMany(
+    sql: Bun.SQL,
+    options: DeleteManyOptions<T>,
+  ): Promise<Array<TableRow<T>>>;
 };
