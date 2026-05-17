@@ -69,7 +69,7 @@ Each table client exposes the following methods:
 
 `findFirst` accepts the same options as `findMany` except `take`.
 
-`findUnique` requires exactly one unique column (primary key or `.unique()`) in `where`.
+`findUnique` requires at least one unique or primary key field in `where`; additional non-unique filters are allowed.
 
 ### Write
 

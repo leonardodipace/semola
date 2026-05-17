@@ -142,7 +142,9 @@ const buildWhereClause = <T extends Table>(
       const [op, operand] = entry;
       const operator = OPERATORS[op as keyof typeof OPERATORS];
 
-      if (!operator) continue;
+      if (!operator) {
+        throw new Error(`Unknown where operator: ${op} for field ${jsKey}`);
+      }
 
       clauses.push(`${sqlName} ${operator.sql}`);
       params.push(operator.transform(operand));
