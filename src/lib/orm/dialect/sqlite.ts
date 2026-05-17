@@ -132,7 +132,7 @@ const buildWhereClause = <T extends Table>(
     const sqlName = quoteIdentifier(table.columns[typedKey].sqlName);
 
     if (!isPlainObject(value)) {
-      if (value === null) {
+      if (value === null || value === undefined) {
         clauses.push(`${sqlName} IS NULL`);
       } else {
         clauses.push(`${sqlName} = ?`);
