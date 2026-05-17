@@ -484,6 +484,7 @@ describe("Cron", () => {
       });
 
       await cron.runOSLevel("not-a-path");
+      expect(cron.getStatus()).toBe("idle");
       await cron.stopOSLevel();
       expect(cron.getStatus()).toBe("idle");
       setSystemTime();
@@ -499,9 +500,9 @@ describe("Cron", () => {
       expect(async () => await cron.runOSLevel("./worker.ts")).toThrowError(
         TypeError,
       );
+      expect(cron.getStatus()).toBe("idle");
 
       expect(async () => await cron.stopOSLevel()).toThrowError(TypeError);
-
       expect(cron.getStatus()).toBe("idle");
     });
 
@@ -520,6 +521,8 @@ describe("Cron", () => {
       });
 
       await cron.runOSLevel("./worker.ts");
+      expect(cron.getStatus()).toBe("idle");
+
       await cron.stopOSLevel();
       expect(cron.getStatus()).toBe("idle");
 
