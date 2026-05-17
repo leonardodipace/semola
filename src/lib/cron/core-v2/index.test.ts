@@ -310,7 +310,7 @@ describe("Cron", () => {
 
     test("should find next run when using the @minutely alias", () => {
       const cron = new Cron({
-        name: "minutly-horizon",
+        name: "minutely-horizon",
         schedule: "@minutely",
         handler: () => Promise.resolve(),
       });
@@ -336,7 +336,7 @@ describe("Cron", () => {
       expect(next).toBeNull();
     });
 
-    test("should return null when starting date an invalid number", () => {
+    test("should raise a TypeError when starting date an invalid number", () => {
       const cron = new Cron({
         name: "leap-day",
         schedule: "0 0 2 2 *",
@@ -348,7 +348,7 @@ describe("Cron", () => {
       expect(() => cron.next(-Infinity)).toThrow(TypeError);
     });
 
-    test("should call the onError() callback when passing an invalid expression", () => {
+    test("should call the onError() callback when the received starting date is invalid", () => {
       setSystemTime(new Date("2020-01-01T00:00:00.000Z"));
 
       const cron = new Cron({
