@@ -16,6 +16,7 @@ import type {
   UpdateOptions,
 } from "../orm/types.js";
 import type { Table } from "../table/types.js";
+import { quoteIdentifier } from "../utils.js";
 import type { Dialect } from "./types.js";
 
 type SqlFragment = {
@@ -128,11 +129,15 @@ const buildWhereClause = <T extends Table>(
       throw new Error(`Unknown where key "${jsKey}" on table ${table.sqlName}`);
     }
 
-    const sqlName = table.columns[typedKey].sqlName;
+    const sqlName = quoteIdentifier(table.columns[typedKey].sqlName);
 
     if (!isPlainObject(value)) {
-      clauses.push(`${sqlName} = ?`);
-      params.push(serializeParam(value));
+      if (value === null) {
+        clauses.push(`${sqlName} IS NULL`);
+      } else {
+        clauses.push(`${sqlName} = ?`);
+        params.push(serializeParam(value));
+      }
       continue;
     }
 
@@ -146,6 +151,11 @@ const buildWhereClause = <T extends Table>(
         throw new Error(`Unknown where operator: ${op} for field ${jsKey}`);
       }
 
+      if (op === "equals" && operand === null) {
+        clauses.push(`${sqlName} IS NULL`);
+        continue;
+      }
+
       clauses.push(`${sqlName} ${operator.sql}`);
       params.push(operator.transform(operand));
     }
@@ -155,7 +165,7 @@ const buildWhereClause = <T extends Table>(
 };
 
 const getColumnAlias = (sqlName: string, jsKey: string) => {
-  return `${sqlName} AS ${jsKey}`;
+  return `${quoteIdentifier(sqlName)} AS ${jsKey}`;
 };
 
 const buildSelectColumns = <T extends Table>(
@@ -196,11 +206,11 @@ const buildOrderByClause = <T extends Table>(
     if (!sqlName) continue;
 
     if (direction === "desc") {
-      clauses.push(`${sqlName} DESC`);
+      clauses.push(`${quoteIdentifier(sqlName)} DESC`);
       continue;
     }
 
-    clauses.push(`${sqlName} ASC`);
+    clauses.push(`${quoteIdentifier(sqlName)} ASC`);
   }
 
   if (!clauses.length) return "";
@@ -278,7 +288,7 @@ const buildJsonObjectExpression = (alias: string, table: Table) => {
 
   const pairs = columns
     .flatMap(([jsKey, column]) => {
-      return [`'${jsKey}'`, `${alias}.${column.sqlName}`];
+      return [`'${jsKey}'`, `${alias}.${quoteIdentifier(column.sqlName)}`];
     })
     .join(", ");
 
@@ -321,7 +331,7 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
       const { fk: foreignKey, source: sourceColumn } =
         resolveHasManyForeignKeyColumn(table, relationTable);
       clauses.push(
-        `COALESCE((SELECT json_group_array(${relationJsonObject}) FROM ${relationTable.sqlName} AS ${relationAlias} WHERE ${relationAlias}.${foreignKey.sqlName} = ${table.sqlName}.${sourceColumn.sqlName}), '[]') AS ${relationName}`,
+        `COALESCE((SELECT json_group_array(${relationJsonObject}) FROM ${quoteIdentifier(relationTable.sqlName)} AS ${relationAlias} WHERE ${relationAlias}.${quoteIdentifier(foreignKey.sqlName)} = ${quoteIdentifier(table.sqlName)}.${quoteIdentifier(sourceColumn.sqlName)}), '[]') AS ${relationName}`,
       );
       descriptors.push({ name: relationName, type: "hasMany" });
       continue;
@@ -341,7 +351,7 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
 
     const relationPrimaryKey = getPrimaryKeyColumn(relationTable);
     clauses.push(
-      `(SELECT ${relationJsonObject} FROM ${relationTable.sqlName} AS ${relationAlias} WHERE ${relationAlias}.${relationPrimaryKey.sqlName} = ${table.sqlName}.${localForeignKey.sqlName} LIMIT 1) AS ${relationName}`,
+      `(SELECT ${relationJsonObject} FROM ${quoteIdentifier(relationTable.sqlName)} AS ${relationAlias} WHERE ${relationAlias}.${quoteIdentifier(relationPrimaryKey.sqlName)} = ${quoteIdentifier(table.sqlName)}.${quoteIdentifier(localForeignKey.sqlName)} LIMIT 1) AS ${relationName}`,
     );
     descriptors.push({ name: relationName, type: "hasOne" });
   }
@@ -469,7 +479,7 @@ export const buildCreateQuery = <T extends Table, R extends TableRelations>(
   for (const [jsKey, column] of Object.entries(table.columns)) {
     const value = resolveCreateValue(column, provided.get(jsKey));
 
-    sqlNames.push(column.sqlName);
+    sqlNames.push(quoteIdentifier(column.sqlName));
     placeholders.push("?");
     params.push(serializeParam(value));
   }
@@ -477,7 +487,7 @@ export const buildCreateQuery = <T extends Table, R extends TableRelations>(
   const columns = buildSelectColumns(table, options.select);
   const include = buildIncludeClause(table, relations, options.include);
   const returning = include.sql ? `${columns}, ${include.sql}` : columns;
-  const statement = `INSERT INTO ${table.sqlName} (${sqlNames.join(", ")}) VALUES (${placeholders.join(", ")}) RETURNING ${returning}`;
+  const statement = `INSERT INTO ${quoteIdentifier(table.sqlName)} (${sqlNames.join(", ")}) VALUES (${placeholders.join(", ")}) RETURNING ${returning}`;
 
   return { statement, params, includeDescriptors: include.descriptors };
 };
@@ -497,7 +507,7 @@ export const buildUpdateQuery = <T extends Table, R extends TableRelations>(
 
     if (!column) continue;
 
-    setClauses.push(`${column.sqlName} = ?`);
+    setClauses.push(`${quoteIdentifier(column.sqlName)} = ?`);
     params.push(serializeParam(value));
   }
 
@@ -510,7 +520,7 @@ export const buildUpdateQuery = <T extends Table, R extends TableRelations>(
   const include = buildIncludeClause(table, relations, options.include);
   const returning = include.sql ? `${columns}, ${include.sql}` : columns;
 
-  let statement = `UPDATE ${table.sqlName} SET ${setClauses.join(", ")}`;
+  let statement = `UPDATE ${quoteIdentifier(table.sqlName)} SET ${setClauses.join(", ")}`;
 
   if (where.sql) {
     statement = `${statement} WHERE ${where.sql}`;
@@ -536,7 +546,7 @@ export const buildFindManyQuery = <T extends Table, R extends TableRelations>(
   const selectColumns = include.sql ? `${columns}, ${include.sql}` : columns;
   const params = [...where.params, ...include.params, ...pagination.params];
   const statement = buildSelectStatement(
-    table.sqlName,
+    quoteIdentifier(table.sqlName),
     selectColumns,
     where.sql,
     orderBy,
@@ -562,7 +572,7 @@ export const buildDeleteQuery = <T extends Table, R extends TableRelations>(
   const include = buildIncludeClause(table, relations, options.include);
   const returning = include.sql ? `${columns}, ${include.sql}` : columns;
 
-  let statement = `DELETE FROM ${table.sqlName}`;
+  let statement = `DELETE FROM ${quoteIdentifier(table.sqlName)}`;
 
   if (where.sql) {
     statement = `${statement} WHERE ${where.sql}`;
@@ -596,7 +606,7 @@ export const buildFindUniqueQuery = <T extends Table, R extends TableRelations>(
   const selectColumns = include.sql ? `${columns}, ${include.sql}` : columns;
   const params = [...where.params, ...include.params];
   const statement = buildSelectStatement(
-    table.sqlName,
+    quoteIdentifier(table.sqlName),
     selectColumns,
     where.sql,
     "",
@@ -666,7 +676,7 @@ export const buildCreateManyQuery = <T extends Table>(
   }
 
   const columnEntries = Object.entries(table.columns);
-  const sqlNames = columnEntries.map(([, col]) => col.sqlName);
+  const sqlNames = columnEntries.map(([, col]) => quoteIdentifier(col.sqlName));
   const params: unknown[] = [];
   const rowPlaceholders: string[] = [];
 
@@ -684,7 +694,7 @@ export const buildCreateManyQuery = <T extends Table>(
   }
 
   const returning = buildSelectColumns(table, undefined);
-  const statement = `INSERT INTO ${table.sqlName} (${sqlNames.join(", ")}) VALUES ${rowPlaceholders.join(", ")} RETURNING ${returning}`;
+  const statement = `INSERT INTO ${quoteIdentifier(table.sqlName)} (${sqlNames.join(", ")}) VALUES ${rowPlaceholders.join(", ")} RETURNING ${returning}`;
 
   return { statement, params, includeDescriptors: [] };
 };
@@ -701,7 +711,7 @@ export const buildUpdateManyQuery = <T extends Table>(
 
     if (!column) continue;
 
-    setClauses.push(`${column.sqlName} = ?`);
+    setClauses.push(`${quoteIdentifier(column.sqlName)} = ?`);
     params.push(serializeParam(value));
   }
 
@@ -711,7 +721,7 @@ export const buildUpdateManyQuery = <T extends Table>(
 
   const where = buildWhereClause(table, options.where);
 
-  let statement = `UPDATE ${table.sqlName} SET ${setClauses.join(", ")}`;
+  let statement = `UPDATE ${quoteIdentifier(table.sqlName)} SET ${setClauses.join(", ")}`;
 
   if (where.sql) {
     statement = `${statement} WHERE ${where.sql}`;
@@ -731,7 +741,7 @@ export const buildDeleteManyQuery = <T extends Table>(
 ): ReturningQuery => {
   const where = buildWhereClause(table, options.where);
 
-  let statement = `DELETE FROM ${table.sqlName}`;
+  let statement = `DELETE FROM ${quoteIdentifier(table.sqlName)}`;
 
   if (where.sql) {
     statement = `${statement} WHERE ${where.sql}`;
