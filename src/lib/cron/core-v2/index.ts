@@ -109,7 +109,7 @@ export class Cron {
     return nextMatch;
   }
 
-  public launchError(error: Error) {
+  private launchError(error: Error) {
     if (!this.options.onError) throw error;
 
     const data: ErrorMetadataType = {
