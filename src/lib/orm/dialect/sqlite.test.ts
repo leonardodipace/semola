@@ -271,6 +271,33 @@ describe("buildFindManyQuery", () => {
     ).toThrow("Ambiguous hasMany foreign key from memberships to users");
   });
 
+  test("builds hasMany include subquery SQL joining on a non-PK column", () => {
+    const groupsTable = defineTable("groups", {
+      code: string("code").notNull().unique(),
+      name: string("name").notNull(),
+    });
+
+    const membersTable = defineTable("members", {
+      id: uuid("id").primaryKey().notNull(),
+      groupCode: string("group_code").references(
+        () => groupsTable.columns.code,
+      ),
+    });
+
+    const query = buildFindManyQuery(
+      groupsTable,
+      { members: many(() => membersTable) },
+      { include: { members: true } },
+    );
+
+    expect(query.statement).toBe(
+      "SELECT code AS code, name AS name, COALESCE((SELECT json_group_array(json_object('id', members__members.id, 'groupCode', members__members.group_code)) FROM members AS members__members WHERE members__members.group_code = groups.code), '[]') AS members FROM groups",
+    );
+    expect(query.includeDescriptors).toEqual([
+      { name: "members", type: "hasMany" },
+    ]);
+  });
+
   test("throws when hasOne local foreign key column is missing", () => {
     const profilesTable = defineTable("profiles", {
       id: uuid("id").primaryKey().notNull(),
@@ -380,32 +407,6 @@ describe("buildFindUniqueQuery", () => {
     ).toThrow(
       "findUnique where must include at least one unique or primary key column",
     );
-  });
-
-  test("throws when include needs a source primary key that is missing", () => {
-    const accountsTable = defineTable("accounts", {
-      id: uuid("id").notNull(),
-      name: string("name").notNull(),
-    });
-
-    const sessionsTable = defineTable("sessions", {
-      id: uuid("id").primaryKey().notNull(),
-      accountId: uuid("account_id")
-        .notNull()
-        .references(() => accountsTable.columns.id),
-    });
-
-    expect(() =>
-      buildFindManyQuery(
-        accountsTable,
-        { sessions: many(() => sessionsTable) },
-        {
-          include: {
-            sessions: true,
-          },
-        },
-      ),
-    ).toThrow("Missing primary key on table accounts");
   });
 });
 
