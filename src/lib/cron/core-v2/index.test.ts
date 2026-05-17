@@ -414,6 +414,24 @@ describe("Cron", () => {
   });
 
   describe("OS Level", () => {
+    test("should parse an alias", async () => {
+      const cron = new Cron({
+        name: "invalid-expr",
+        schedule: "@minutely",
+        handler: () => Promise.resolve(),
+      });
+
+      expect(async () => await cron.runOSLevel("not-a-path")).toThrowError(
+        TypeError,
+      );
+
+      expect(cron.getStatus()).toBe("idle");
+      await cron.stopOSLevel();
+      expect(cron.getStatus()).toBe("idle");
+
+      expect(cron.getExpression()).toBe("* * * * *");
+    });
+
     test("should raise an error when passed an invalid expression", async () => {
       const cron = new Cron({
         name: "invalid-expr",
