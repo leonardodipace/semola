@@ -1,4 +1,4 @@
-import { describe, expect, setSystemTime, test, spyOn } from "bun:test";
+import { describe, expect, setSystemTime, spyOn, test } from "bun:test";
 import { Cron } from "./index.js";
 
 describe("Cron", () => {
@@ -66,7 +66,7 @@ describe("Cron", () => {
       }).toThrow(TypeError);
     });
 
-    test("should call the onError() callback when passing an invalid expression", async () => {
+    test("should call the onError() callback when passing an invalid expression", () => {
       setSystemTime(new Date("2020-01-01T00:00:00.000Z"));
       const handler = () => Promise.resolve();
 
@@ -410,6 +410,120 @@ describe("Cron", () => {
 
       expect(stopSpy).toHaveBeenCalledTimes(1);
       expect(job.getStatus()).toBe("idle");
+    });
+  });
+
+  describe("OS Level", () => {
+    test("should raise an error when passed an invalid expression", async () => {
+      const cron = new Cron({
+        name: "invalid-expr",
+        schedule: "0 * * *",
+        handler: () => Promise.resolve(),
+      });
+
+      expect(async () => await cron.runOSLevel("./worker.ts")).toThrowError(
+        TypeError,
+      );
+
+      expect(cron.getStatus()).toBe("idle");
+      await cron.stopOSLevel();
+      expect(cron.getStatus()).toBe("idle");
+    });
+
+    test("should call the onError() callback when passed an invalid expression", async () => {
+      setSystemTime(new Date("2020-01-01T00:00:00.000Z"));
+      const cron = new Cron({
+        name: "invalid-expr",
+        schedule: "0 * * *",
+        handler: () => Promise.resolve(),
+        onError: (err) => {
+          expect(err).not.toBeFalsy();
+          expect(err.error).toBeInstanceOf(TypeError);
+          expect(err.name).toBe("invalid-expr");
+          expect(err.failedAt).toBe(Date.now());
+        },
+      });
+
+      await cron.runOSLevel("./worker.ts");
+      expect(cron.getStatus()).toBe("idle");
+
+      await cron.stopOSLevel();
+      expect(cron.getStatus()).toBe("idle");
+
+      setSystemTime();
+    });
+
+    test("should raise an error when passed an invalid path", async () => {
+      const cron = new Cron({
+        name: "invalid-path",
+        schedule: "0 0 * * *",
+        handler: () => Promise.resolve(),
+      });
+
+      expect(async () => await cron.runOSLevel("not-a-path")).toThrowError(
+        TypeError,
+      );
+
+      expect(cron.getStatus()).toBe("idle");
+      await cron.stopOSLevel();
+      expect(cron.getStatus()).toBe("idle");
+    });
+
+    test("should call the onError() callback when passed an invalid path", async () => {
+      setSystemTime(new Date("2020-01-01T00:00:00.000Z"));
+      const cron = new Cron({
+        name: "invalid-path",
+        schedule: "0 * * *",
+        handler: () => Promise.resolve(),
+        onError: (err) => {
+          expect(err).not.toBeFalsy();
+          expect(err.error).toBeInstanceOf(TypeError);
+          expect(err.name).toBe("invalid-path");
+          expect(err.failedAt).toBe(Date.now());
+        },
+      });
+
+      await cron.runOSLevel("not-a-path");
+      await cron.stopOSLevel();
+      expect(cron.getStatus()).toBe("idle");
+      setSystemTime();
+    });
+
+    test("should raise an error when using a name with illegal characters", async () => {
+      const cron = new Cron({
+        name: "invalid\\-name",
+        schedule: "0 0 * * *",
+        handler: () => Promise.resolve(),
+      });
+
+      expect(async () => await cron.runOSLevel("./worker.ts")).toThrowError(
+        TypeError,
+      );
+
+      expect(async () => await cron.stopOSLevel()).toThrowError(TypeError);
+
+      expect(cron.getStatus()).toBe("idle");
+    });
+
+    test("should call the onError() callback when using a name with illegal characters", async () => {
+      setSystemTime(new Date("2020-01-01T00:00:00.000Z"));
+      const cron = new Cron({
+        name: "invalid\\-name",
+        schedule: "0 0 * * *",
+        handler: () => Promise.resolve(),
+        onError: (err) => {
+          expect(err).not.toBeFalsy();
+          expect(err.error).toBeInstanceOf(TypeError);
+          expect(err.name).toBe("invalid\\-name");
+          expect(err.failedAt).toBe(Date.now());
+        },
+      });
+
+      await cron.runOSLevel("./worker.ts");
+      await cron.stopOSLevel();
+      expect(cron.getStatus()).toBe("idle");
+
+      setSystemTime();
     });
   });
 });
