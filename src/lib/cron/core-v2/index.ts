@@ -3,7 +3,11 @@ import type { CronOptions, CronStatus, ErrorMetadataType } from "./types.js";
 
 const MINUTELY_EXPR = "* * * * *";
 
-export class Cron {
+interface Disposable {
+  [Symbol.dispose](): void;
+}
+
+export class Cron implements Disposable {
   private options: CronOptions;
   private status: CronStatus;
   private cron: Bun.CronJob | null = null;
@@ -11,6 +15,10 @@ export class Cron {
   public constructor(options: CronOptions) {
     this.options = options;
     this.status = "idle";
+  }
+
+  public [Symbol.dispose](): void {
+    this.stop();
   }
 
   public getStatus() {
