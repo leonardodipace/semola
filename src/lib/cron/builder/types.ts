@@ -47,13 +47,7 @@ export type CronStep<T> = {
   range?: { min: NoInfer<T>; max?: NoInfer<T> };
 };
 
-export type CronField =
-  | "second"
-  | "minute"
-  | "hour"
-  | "day"
-  | "month"
-  | "weekday";
+export type CronField = "minute" | "hour" | "day" | "month" | "weekday";
 
 export type CronListExpr<T> = Exclude<CronExpr<T>, { type: "list" }>;
 
@@ -65,7 +59,6 @@ export type CronExpr<T> =
   | { type: "list"; values: CronListExpr<T>[] };
 
 interface IBuilder<Used extends CronField> {
-  second(expr: CronExpr<TimeType>): CronBuilderType<Used | "second">;
   minute(expr: CronExpr<TimeType>): CronBuilderType<Used | "minute">;
   hour(expr: CronExpr<HourType>): CronBuilderType<Used | "hour">;
   day(expr: CronExpr<DayType>): CronBuilderType<Used | "day">;
