@@ -366,6 +366,8 @@ describe("Cron", () => {
       cron.next(NaN);
       cron.next(Infinity);
       cron.next(-Infinity);
+
+      setSystemTime();
     });
   });
 
@@ -421,9 +423,8 @@ describe("Cron", () => {
         handler: () => Promise.resolve(),
       });
 
-      expect(async () => await cron.runOSLevel("not-a-path")).toThrowError(
-        TypeError,
-      );
+      expect.assertions(4);
+      expect(cron.runOSLevel("not-a-path")).rejects.toThrow(TypeError);
 
       expect(cron.getStatus()).toBe("idle");
       await cron.stopOSLevel();
@@ -439,9 +440,8 @@ describe("Cron", () => {
         handler: () => Promise.resolve(),
       });
 
-      expect(async () => await cron.runOSLevel("./worker.ts")).toThrowError(
-        TypeError,
-      );
+      expect.assertions(3);
+      expect(cron.runOSLevel("./worker.ts")).rejects.toThrow(TypeError);
 
       expect(cron.getStatus()).toBe("idle");
       await cron.stopOSLevel();
@@ -478,9 +478,8 @@ describe("Cron", () => {
         handler: () => Promise.resolve(),
       });
 
-      expect(async () => await cron.runOSLevel("not-a-path")).toThrowError(
-        TypeError,
-      );
+      expect.assertions(3);
+      expect(cron.runOSLevel("not-a-path")).rejects.toThrow(TypeError);
 
       expect(cron.getStatus()).toBe("idle");
       await cron.stopOSLevel();
@@ -515,12 +514,11 @@ describe("Cron", () => {
         handler: () => Promise.resolve(),
       });
 
-      expect(async () => await cron.runOSLevel("./worker.ts")).toThrowError(
-        TypeError,
-      );
+      expect.assertions(4);
+      expect(cron.runOSLevel("./worker.ts")).rejects.toThrow(TypeError);
       expect(cron.getStatus()).toBe("idle");
 
-      expect(async () => await cron.stopOSLevel()).toThrowError(TypeError);
+      expect(cron.stopOSLevel()).rejects.toThrow(TypeError);
       expect(cron.getStatus()).toBe("idle");
     });
 
