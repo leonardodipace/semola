@@ -570,8 +570,8 @@ describe("many to many relation", () => {
         },
 
         studentsToExams: {
-          users: many(() => studentTable),
-          exams: many(() => examsTable),
+          student: one(() => studentTable),
+          exam: one(() => examsTable),
         },
       },
     });
@@ -658,7 +658,7 @@ describe("many to many relation", () => {
 
     async function fromStudentsToExamsTable() {
       await orm.studentsToExams.findMany({
-        include: { exams: true },
+        include: { exam: true },
       });
     }
 
