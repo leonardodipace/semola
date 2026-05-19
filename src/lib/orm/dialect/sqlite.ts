@@ -41,6 +41,12 @@ const EMPTY_INCLUDE: IncludeClause = {
   descriptors: [],
 };
 
+const buildSelectList = (columns: string, include: IncludeClause) => {
+  if (include.sql) return `${columns}, ${include.sql}`;
+
+  return columns;
+};
+
 const serializeParam = (value: unknown) => {
   if (value instanceof Date) return value.toISOString();
 
@@ -490,7 +496,7 @@ export const buildCreateQuery = <T extends Table, R extends TableRelations>(
 
   const columns = buildSelectColumns(table, options.select);
   const include = buildIncludeClause(table, relations, options.include);
-  const returning = include.sql ? `${columns}, ${include.sql}` : columns;
+  const returning = buildSelectList(columns, include);
   const statement = `INSERT INTO ${quoteIdentifier(table.sqlName)} (${sqlNames.join(", ")}) VALUES (${placeholders.join(", ")}) RETURNING ${returning}`;
 
   return { statement, params, includeDescriptors: include.descriptors };
@@ -522,7 +528,7 @@ export const buildUpdateQuery = <T extends Table, R extends TableRelations>(
   const where = buildWhereClause(table, options.where);
   const columns = buildSelectColumns(table, options.select);
   const include = buildIncludeClause(table, relations, options.include);
-  const returning = include.sql ? `${columns}, ${include.sql}` : columns;
+  const returning = buildSelectList(columns, include);
 
   let statement = `UPDATE ${quoteIdentifier(table.sqlName)} SET ${setClauses.join(", ")}`;
 
@@ -547,7 +553,7 @@ export const buildFindManyQuery = <T extends Table, R extends TableRelations>(
   const orderBy = buildOrderByClause(table, options?.orderBy);
   const include = buildIncludeClause(table, relations, options?.include);
   const pagination = buildPaginationClause(options?.take, options?.skip);
-  const selectColumns = include.sql ? `${columns}, ${include.sql}` : columns;
+  const selectColumns = buildSelectList(columns, include);
   const params = [...where.params, ...include.params, ...pagination.params];
   const statement = buildSelectStatement(
     quoteIdentifier(table.sqlName),
@@ -574,7 +580,7 @@ export const buildDeleteQuery = <T extends Table, R extends TableRelations>(
   const where = buildWhereClause(table, options.where);
   const columns = buildSelectColumns(table, options.select);
   const include = buildIncludeClause(table, relations, options.include);
-  const returning = include.sql ? `${columns}, ${include.sql}` : columns;
+  const returning = buildSelectList(columns, include);
 
   let statement = `DELETE FROM ${quoteIdentifier(table.sqlName)}`;
 
@@ -607,7 +613,7 @@ export const buildFindUniqueQuery = <T extends Table, R extends TableRelations>(
   const where = buildWhereClause(table, options.where);
   const columns = buildSelectColumns(table, options.select);
   const include = buildIncludeClause(table, relations, options.include);
-  const selectColumns = include.sql ? `${columns}, ${include.sql}` : columns;
+  const selectColumns = buildSelectList(columns, include);
   const params = [...where.params, ...include.params];
   const statement = buildSelectStatement(
     quoteIdentifier(table.sqlName),
