@@ -270,19 +270,13 @@ const resolveHasManyForeignKeyColumn = (
     }
   }
 
-  if (!candidates.length) {
-    throw new Error(
-      `Missing hasMany foreign key from ${targetTable.sqlName} to ${sourceTable.sqlName}`,
-    );
-  }
-
   if (candidates.length > 1) {
     throw new Error(
       `Ambiguous hasMany foreign key from ${targetTable.sqlName} to ${sourceTable.sqlName}`,
     );
   }
 
-  const candidate = candidates[0];
+  const [candidate] = candidates;
 
   if (!candidate) {
     throw new Error(
@@ -312,9 +306,9 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
 ) => {
   if (!include) return EMPTY_INCLUDE;
 
-  const enabledRelations = Object.entries(include).filter(([, enabled]) => {
-    return enabled === true;
-  });
+  const enabledRelations = Object.entries(include).filter(
+    ([, enabled]) => enabled,
+  );
 
   if (!enabledRelations.length) return EMPTY_INCLUDE;
 
@@ -440,15 +434,11 @@ const validateFindUniqueWhere = (
   let hasUniqueKey = false;
 
   for (const key of keys) {
-    const columnEntry = Object.entries(table.columns).find(([columnName]) => {
-      return columnName === key;
-    });
+    const column = table.columns[key];
 
-    if (!columnEntry) {
+    if (!column) {
       throw new Error(`Unknown where key ${key} on table ${table.sqlName}`);
     }
-
-    const column = columnEntry[1];
 
     if (column._meta.isPrimaryKey || column._meta.isUnique) {
       hasUniqueKey = true;
