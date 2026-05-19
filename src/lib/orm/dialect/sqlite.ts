@@ -773,8 +773,7 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
     },
     create: async (sql, options) => {
       const query = buildCreateQuery(table, relations, options);
-      const rows = await executeQuery(sql, query);
-      const [row] = rows;
+      const [row] = await executeQuery(sql, query);
 
       if (!row) {
         throw new Error(
@@ -795,8 +794,7 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
     },
     update: async (sql, options) => {
       const query = buildUpdateQuery(table, relations, options);
-      const rows = await executeQuery(sql, query);
-      const [row] = rows;
+      const [row] = await executeQuery(sql, query);
 
       if (!row) {
         throw new Error(
@@ -813,8 +811,7 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
     },
     delete: async (sql, options) => {
       const query = buildDeleteQuery(table, relations, options);
-      const rows = await executeQuery(sql, query);
-      const [row] = rows;
+      const [row] = await executeQuery(sql, query);
 
       if (!row) {
         throw new Error(
