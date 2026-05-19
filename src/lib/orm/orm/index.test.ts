@@ -516,3 +516,159 @@ describe("relation helpers", () => {
     await orm.$raw.close();
   });
 });
+
+describe("many to many relation", () => {
+  test("should create a bi-directional relation", async () => {
+    const studentTable = defineTable("students", {
+      id: uuid("id").primaryKey().notNull().default(Bun.randomUUIDv7),
+      createdAt: date("created_at")
+        .notNull()
+        .default(() => new Date()),
+      updatedAt: date("updated_at")
+        .notNull()
+        .default(() => new Date()),
+      firstName: string("first_name").notNull(),
+      lastName: string("last_name").notNull(),
+    });
+
+    const examsTable = defineTable("exams", {
+      id: uuid("id").primaryKey().notNull().default(Bun.randomUUIDv7),
+      createdAt: date("created_at")
+        .notNull()
+        .default(() => new Date()),
+      updatedAt: date("updated_at")
+        .notNull()
+        .default(() => new Date()),
+      name: string("name").notNull(),
+    });
+
+    const studentsToExamsTable = defineTable("students_to_exams", {
+      studentId: uuid("student_id")
+        .primaryKey()
+        .notNull()
+        .references(() => studentTable.columns.id),
+      examId: uuid("exam_id")
+        .primaryKey()
+        .notNull()
+        .references(() => examsTable.columns.id),
+    });
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: {
+        students: studentTable,
+        exams: examsTable,
+        studentsToExams: studentsToExamsTable,
+      },
+      relations: {
+        students: {
+          studentsToExams: many(() => studentsToExamsTable),
+        },
+        exams: {
+          studentsToExams: many(() => studentsToExamsTable),
+        },
+
+        studentsToExams: {
+          users: many(() => studentTable),
+          exams: many(() => examsTable),
+        },
+      },
+    });
+
+    // Define tables and releations
+
+    await orm.$raw`PRAGMA foreign_keys = ON;`;
+    await orm.$raw`PRAGMA foreign_keys;`;
+    await orm.$raw`
+        CREATE TABLE students (
+            id TEXT PRIMARY KEY NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            first_name TEXT NOT NULL,
+            last_name TEXT NOT NULL
+        );
+    
+        CREATE TABLE exams (
+            id TEXT PRIMARY KEY NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            name TEXT NOT NULL
+        );
+    
+        CREATE TABLE students_to_exams (
+          student_id TEXT NOT NULL REFERENCES students(id),
+          exam_id TEXT NOT NULL REFERENCES exams(id),
+          PRIMARY KEY (student_id, exam_id)
+        );
+    `;
+
+    // Save data
+
+    await orm.exams.createMany({
+      data: [
+        {
+          id: "E1",
+          name: "Calcolo numerico",
+        },
+        {
+          id: "E2",
+          name: "Matematica Discreta",
+        },
+        {
+          id: "E3",
+          name: "Informatica",
+        },
+      ],
+    });
+
+    await orm.students.createMany({
+      data: [
+        {
+          id: "S1",
+          firstName: "Mario",
+          lastName: "Draghi",
+        },
+        {
+          id: "S2",
+          firstName: "Silvia",
+          lastName: "Toffanini",
+        },
+        {
+          id: "S3",
+          firstName: "Claudio",
+          lastName: "Bisio",
+        },
+      ],
+    });
+
+    await orm.studentsToExams.createMany({
+      data: [
+        { examId: "E1", studentId: "S1" },
+        { examId: "E1", studentId: "S2" },
+        { examId: "E2", studentId: "S3" },
+        { examId: "E2", studentId: "S1" },
+        { examId: "E2", studentId: "S2" },
+        { examId: "E3", studentId: "S1" },
+        { examId: "E3", studentId: "S3" },
+      ],
+    });
+
+    // Read data
+
+    async function fromStudentsToExamsTable() {
+      await orm.studentsToExams.findMany({
+        include: { exams: true },
+      });
+    }
+
+    async function fromExamTable() {
+      await orm.exams.findMany({
+        include: { studentsToExams: true },
+      });
+    }
+
+    expect(fromStudentsToExamsTable).not.toThrow();
+    expect(fromExamTable).not.toThrow();
+  });
+});
