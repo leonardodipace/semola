@@ -657,18 +657,20 @@ describe("many to many relation", () => {
     // Read data
 
     async function fromStudentsToExamsTable() {
-      await orm.studentsToExams.findMany({
+      return orm.studentsToExams.findMany({
         include: { exam: true },
       });
     }
 
     async function fromExamTable() {
-      await orm.exams.findMany({
+      return orm.exams.findMany({
         include: { studentsToExams: true },
       });
     }
 
-    expect(fromStudentsToExamsTable).not.toThrow();
-    expect(fromExamTable).not.toThrow();
+    await expect(fromStudentsToExamsTable()).resolves.toBeDefined();
+    await expect(fromExamTable()).resolves.toBeDefined();
+
+    await orm.$raw.close();
   });
 });
