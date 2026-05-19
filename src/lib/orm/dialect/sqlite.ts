@@ -661,16 +661,6 @@ const executeQuery = async (sql: Bun.SQL, query: ReturningQuery) => {
   return parseIncludeRows(rows, query.includeDescriptors);
 };
 
-const getFirstRow = <TRow>(rows: Array<TRow>) => {
-  const firstRow = rows[0];
-
-  if (!firstRow) {
-    return null;
-  }
-
-  return firstRow;
-};
-
 export const buildCreateManyQuery = <T extends Table>(
   table: T,
   options: CreateManyOptions<T>,
@@ -771,20 +761,20 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
     // findFirst and findUnique build different queries but share row execution/parsing.
     findFirst: async (sql, options) => {
       const query = buildFindFirstQuery(table, relations, options);
-      const rows = await executeQuery(sql, query);
+      const [row] = await executeQuery(sql, query);
 
-      return getFirstRow(rows);
+      return row ?? null;
     },
     findUnique: async (sql, options) => {
       const query = buildFindUniqueQuery(table, relations, options);
-      const rows = await executeQuery(sql, query);
+      const [row] = await executeQuery(sql, query);
 
-      return getFirstRow(rows);
+      return row ?? null;
     },
     create: async (sql, options) => {
       const query = buildCreateQuery(table, relations, options);
       const rows = await executeQuery(sql, query);
-      const row = getFirstRow(rows);
+      const [row] = rows;
 
       if (!row) {
         throw new Error(
@@ -806,7 +796,7 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
     update: async (sql, options) => {
       const query = buildUpdateQuery(table, relations, options);
       const rows = await executeQuery(sql, query);
-      const row = getFirstRow(rows);
+      const [row] = rows;
 
       if (!row) {
         throw new Error(
@@ -824,7 +814,7 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
     delete: async (sql, options) => {
       const query = buildDeleteQuery(table, relations, options);
       const rows = await executeQuery(sql, query);
-      const row = getFirstRow(rows);
+      const [row] = rows;
 
       if (!row) {
         throw new Error(
