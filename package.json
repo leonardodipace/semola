@@ -120,6 +120,16 @@
         "types": "./dist/lib/workflow/index.d.cts",
         "default": "./dist/lib/workflow/index.cjs"
       }
+    },
+    "./orm": {
+      "import": {
+        "types": "./dist/lib/orm/index.d.mts",
+        "default": "./dist/lib/orm/index.mjs"
+      },
+      "require": {
+        "types": "./dist/lib/orm/index.d.cts",
+        "default": "./dist/lib/orm/index.cjs"
+      }
     }
   },
   "files": [

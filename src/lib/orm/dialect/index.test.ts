@@ -1,16 +1,25 @@
 import { describe, expect, test } from "bun:test";
-import { getDialectAdapter } from "./index.js";
+import { uuid } from "../column/index.js";
+import { defineTable } from "../table/index.js";
+import { getDialect } from "./index.js";
 
-describe("getDialectAdapter", () => {
-  test("returns postgres adapter", () => {
-    expect(getDialectAdapter("postgres").dialect).toBe("postgres");
+const usersTable = defineTable("users", {
+  id: uuid("id").primaryKey().notNull(),
+});
+
+describe("getDialect", () => {
+  test("returns sqlite dialect for sqlite adapter", () => {
+    const dialect = getDialect("sqlite", usersTable, {});
+
+    expect(dialect.name).toBe("sqlite");
   });
 
-  test("returns mysql adapter", () => {
-    expect(getDialectAdapter("mysql").dialect).toBe("mysql");
-  });
+  test("throws for unsupported adapters", () => {
+    const adapter = "postgres";
 
-  test("returns sqlite adapter", () => {
-    expect(getDialectAdapter("sqlite").dialect).toBe("sqlite");
+    // @ts-expect-error - testing runtime guard for values outside the Adapter type
+    expect(() => getDialect(adapter, usersTable, {})).toThrow(
+      "Unsupported adapter: postgres",
+    );
   });
 });
