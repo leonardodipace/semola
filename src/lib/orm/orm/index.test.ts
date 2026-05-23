@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { date, string, uuid } from "../column/index.js";
+import { date, enumType, string, uuid } from "../column/index.js";
 import { defineTable } from "../table/index.js";
 import { createOrm, many, one } from "./index.js";
 
@@ -155,6 +155,64 @@ describe("relation helpers", () => {
     };
 
     expect(invalidByTake).toBeDefined();
+
+    await orm.$raw.close();
+  });
+
+  test("enumType enforces literal values and equals-only where operators", async () => {
+    const table = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      status: enumType("status", ["active", "inactive"]).notNull(),
+    });
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: {
+        users: table,
+      },
+    });
+
+    const acceptCreateOptions = <TOptions>(_options: TOptions) => {
+      return undefined;
+    };
+
+    acceptCreateOptions<Parameters<typeof orm.users.create>[0]>({
+      data: {
+        id: "user-1",
+        status: "active",
+      },
+    });
+
+    const invalidCreate: Parameters<typeof orm.users.create>[0] = {
+      data: {
+        id: "user-1",
+        // @ts-expect-error status only accepts active or inactive
+        status: "pending",
+      },
+    };
+
+    expect(invalidCreate).toBeDefined();
+
+    const invalidWhereValue: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        // @ts-expect-error status only accepts active or inactive
+        status: "pending",
+      },
+    };
+
+    expect(invalidWhereValue).toBeDefined();
+
+    const invalidWhereOperator: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        status: {
+          // @ts-expect-error enumType supports equals only
+          startsWith: "a",
+        },
+      },
+    };
+
+    expect(invalidWhereOperator).toBeDefined();
 
     await orm.$raw.close();
   });

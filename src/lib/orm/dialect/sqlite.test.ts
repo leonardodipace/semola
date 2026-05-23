@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { boolean, date, string, uuid } from "../column/index.js";
+import { boolean, date, enumType, string, uuid } from "../column/index.js";
 import { many, one } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
 import {
@@ -77,6 +77,45 @@ const insertPost = async (
 };
 
 describe("buildFindManyQuery", () => {
+  test("supports enumType direct equality and equals operator", () => {
+    const accountsTable = defineTable("accounts", {
+      id: uuid("id").primaryKey().notNull(),
+      status: enumType("status", ["active", "inactive"]).notNull(),
+    });
+
+    const directValueQuery = buildFindManyQuery(
+      accountsTable,
+      {},
+      {
+        where: {
+          status: "active",
+        },
+      },
+    );
+
+    expect(directValueQuery.statement).toBe(
+      'SELECT "id" AS id, "status" AS status FROM "accounts" WHERE "status" = ?',
+    );
+    expect(directValueQuery.params).toEqual(["active"]);
+
+    const equalsQuery = buildFindManyQuery(
+      accountsTable,
+      {},
+      {
+        where: {
+          status: {
+            equals: "inactive",
+          },
+        },
+      },
+    );
+
+    expect(equalsQuery.statement).toBe(
+      'SELECT "id" AS id, "status" AS status FROM "accounts" WHERE "status" = ?',
+    );
+    expect(equalsQuery.params).toEqual(["inactive"]);
+  });
+
   test("builds a select statement with where operators, ordering, and pagination", () => {
     const createdAfter = new Date("2025-01-01T00:00:00.000Z");
 
