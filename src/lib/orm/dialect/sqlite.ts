@@ -659,9 +659,11 @@ const coerceBooleanColumns = (
 
   for (const key of booleanKeys) {
     for (const row of rows) {
-      if (key in row) {
-        row[key] = Boolean(row[key]);
-      }
+      if (!(key in row)) continue;
+      if (row[key] === null) continue;
+      if (row[key] === undefined) continue;
+
+      row[key] = Boolean(row[key]);
     }
   }
 };

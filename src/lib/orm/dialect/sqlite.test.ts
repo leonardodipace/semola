@@ -1785,3 +1785,88 @@ describe("createSqliteDialect - deleteMany", () => {
     await sql.close();
   });
 });
+
+const nullableFlagsTable = defineTable("flags", {
+  id: uuid("id").primaryKey().notNull(),
+  isEnabled: boolean("is_enabled"),
+});
+
+const CREATE_FLAGS_TABLE_SQL =
+  "CREATE TABLE flags (id TEXT PRIMARY KEY, is_enabled INTEGER)";
+
+const createFlagsTable = async (sql: Bun.SQL) => {
+  await sql.unsafe(CREATE_FLAGS_TABLE_SQL);
+};
+
+describe("coerceBooleanColumns - nullable boolean", () => {
+  test("findMany preserves null for nullable boolean column", async () => {
+    const sql = createMemorySql();
+
+    await createFlagsTable(sql);
+    await sql.unsafe("INSERT INTO flags (id, is_enabled) VALUES (?, ?)", [
+      "flag-1",
+      null,
+    ]);
+
+    const dialect = createSqliteDialect(nullableFlagsTable, {});
+    const rows = await dialect.findMany(sql);
+
+    expect(rows[0]?.isEnabled).toBeNull();
+
+    await sql.close();
+  });
+
+  test("findMany coerces non-null integer to boolean", async () => {
+    const sql = createMemorySql();
+
+    await createFlagsTable(sql);
+    await sql.unsafe("INSERT INTO flags (id, is_enabled) VALUES (?, ?)", [
+      "flag-1",
+      0,
+    ]);
+    await sql.unsafe("INSERT INTO flags (id, is_enabled) VALUES (?, ?)", [
+      "flag-2",
+      1,
+    ]);
+
+    const dialect = createSqliteDialect(nullableFlagsTable, {});
+    const rows = await dialect.findMany(sql, { orderBy: { id: "asc" } });
+
+    expect(rows[0]?.isEnabled).toBe(false);
+    expect(rows[1]?.isEnabled).toBe(true);
+
+    await sql.close();
+  });
+
+  test("findUnique preserves null for nullable boolean column", async () => {
+    const sql = createMemorySql();
+
+    await createFlagsTable(sql);
+    await sql.unsafe("INSERT INTO flags (id, is_enabled) VALUES (?, ?)", [
+      "flag-1",
+      null,
+    ]);
+
+    const dialect = createSqliteDialect(nullableFlagsTable, {});
+    const row = await dialect.findUnique(sql, { where: { id: "flag-1" } });
+
+    expect(row?.isEnabled).toBeNull();
+
+    await sql.close();
+  });
+
+  test("create preserves null for nullable boolean column", async () => {
+    const sql = createMemorySql();
+
+    await createFlagsTable(sql);
+
+    const dialect = createSqliteDialect(nullableFlagsTable, {});
+    const row = await dialect.create(sql, {
+      data: { id: "flag-1" },
+    });
+
+    expect(row.isEnabled).toBeNull();
+
+    await sql.close();
+  });
+});
