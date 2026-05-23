@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { date, string, uuid } from "../column/index.js";
+import { boolean, date, string, uuid } from "../column/index.js";
 import { many, one } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
 import {
@@ -20,6 +20,9 @@ const usersTable = defineTable("users", {
   id: uuid("id").primaryKey().notNull(),
   firstName: string("first_name").notNull(),
   createdAt: date("created_at").notNull(),
+  isActive: boolean("is_active")
+    .notNull()
+    .default(() => true),
 });
 
 const postsTable = defineTable("posts", {
@@ -31,7 +34,7 @@ const postsTable = defineTable("posts", {
 });
 
 const CREATE_USERS_TABLE_SQL =
-  "CREATE TABLE users (id TEXT PRIMARY KEY, first_name TEXT NOT NULL, created_at TEXT NOT NULL)";
+  "CREATE TABLE users (id TEXT PRIMARY KEY, first_name TEXT NOT NULL, created_at TEXT NOT NULL, is_active INTEGER NOT NULL)";
 
 const CREATE_POSTS_TABLE_SQL =
   "CREATE TABLE posts (id TEXT PRIMARY KEY, title TEXT NOT NULL, author_id TEXT NOT NULL)";
@@ -53,10 +56,11 @@ const insertUser = async (
   id: string,
   firstName: string,
   createdAt: string,
+  isActive = true,
 ) => {
   await sql.unsafe(
-    "INSERT INTO users (id, first_name, created_at) VALUES (?, ?, ?)",
-    [id, firstName, createdAt],
+    "INSERT INTO users (id, first_name, created_at, is_active) VALUES (?, ?, ?, ?)",
+    [id, firstName, createdAt, isActive],
   );
 };
 
@@ -114,7 +118,7 @@ describe("buildFindManyQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt FROM "users" WHERE "first_name" LIKE ? ESCAPE \'\\\' AND "first_name" LIKE ? ESCAPE \'\\\' AND "first_name" LIKE ? ESCAPE \'\\\'',
+      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users" WHERE "first_name" LIKE ? ESCAPE \'\\\' AND "first_name" LIKE ? ESCAPE \'\\\' AND "first_name" LIKE ? ESCAPE \'\\\'',
     );
     expect(query.params).toEqual([
       "a\\%\\_\\\\%",
@@ -144,7 +148,7 @@ describe("buildFindManyQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt FROM "users" WHERE "id" = ? AND "created_at" = ? AND "first_name" IS NULL',
+      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users" WHERE "id" = ? AND "created_at" = ? AND "first_name" IS NULL',
     );
     expect(query.params).toEqual([idList, createdAt.toISOString()]);
     expect(query.includeDescriptors).toEqual([]);
@@ -154,7 +158,7 @@ describe("buildFindManyQuery", () => {
     const query = buildFindManyQuery(usersTable, {}, { skip: 3 });
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt FROM "users" LIMIT -1 OFFSET ?',
+      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users" LIMIT -1 OFFSET ?',
     );
     expect(query.params).toEqual([3]);
   });
@@ -163,7 +167,7 @@ describe("buildFindManyQuery", () => {
     const query = buildFindManyQuery(usersTable, {}, { select: {} });
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt FROM "users"',
+      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users"',
     );
     expect(query.params).toEqual([]);
     expect(query.includeDescriptors).toEqual([]);
@@ -179,7 +183,7 @@ describe("buildFindManyQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS posts FROM "users"',
+      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive, COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS posts FROM "users"',
     );
     expect(query.params).toEqual([]);
     expect(query.includeDescriptors).toEqual([
@@ -197,7 +201,7 @@ describe("buildFindManyQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "title" AS title, "author_id" AS authorId, (SELECT json_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS author FROM "posts"',
+      'SELECT "id" AS id, "title" AS title, "author_id" AS authorId, (SELECT json_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at", \'isActive\', author__users."is_active") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS author FROM "posts"',
     );
     expect(query.params).toEqual([]);
     expect(query.includeDescriptors).toEqual([
@@ -218,7 +222,7 @@ describe("buildFindManyQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt FROM "users" LIMIT ?',
+      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users" LIMIT ?',
     );
     expect(query.params).toEqual([2]);
     expect(query.includeDescriptors).toEqual([]);
@@ -339,7 +343,7 @@ describe("buildFindUniqueQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt FROM "users" WHERE "id" = ? LIMIT 1',
+      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users" WHERE "id" = ? LIMIT 1',
     );
     expect(query.params).toEqual(["user-1"]);
     expect(query.includeDescriptors).toEqual([]);
@@ -358,7 +362,7 @@ describe("buildFindUniqueQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt FROM "users" WHERE "id" = ? AND "first_name" = ? LIMIT 1',
+      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users" WHERE "id" = ? AND "first_name" = ? LIMIT 1',
     );
     expect(query.params).toEqual(["user-1", "John"]);
     expect(query.includeDescriptors).toEqual([]);
@@ -426,7 +430,7 @@ describe("buildFindFirstQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt FROM "users" WHERE "first_name" LIKE ? ESCAPE \'\\\' ORDER BY "created_at" DESC LIMIT ?',
+      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users" WHERE "first_name" LIKE ? ESCAPE \'\\\' ORDER BY "created_at" DESC LIMIT ?',
     );
     expect(query.params).toEqual(["Jo%", 1]);
     expect(query.includeDescriptors).toEqual([]);
@@ -445,7 +449,7 @@ describe("buildFindFirstQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS posts FROM "users" LIMIT ? OFFSET ?',
+      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive, COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS posts FROM "users" LIMIT ? OFFSET ?',
     );
     expect(query.params).toEqual([1, 2]);
     expect(query.includeDescriptors).toEqual([
@@ -506,6 +510,26 @@ describe("createSqliteDialect", () => {
     expect(new Date(row?.createdAt ?? 0).toISOString()).toBe(
       "2025-01-01T00:00:00.000Z",
     );
+
+    await sql.close();
+  });
+
+  test("findMany returns boolean fields as booleans", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z", false);
+
+    const dialect = createSqliteDialect(usersTable, {});
+    const rows = await dialect.findMany(sql, {
+      where: {
+        id: "user-1",
+      },
+    });
+
+    const [row] = rows;
+
+    expect(row?.isActive).toBe(false);
 
     await sql.close();
   });
@@ -653,7 +677,7 @@ describe("buildUpdateQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt',
+      'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
     );
     expect(query.params).toEqual(["Jane", "user-1"]);
     expect(query.includeDescriptors).toEqual([]);
@@ -673,7 +697,7 @@ describe("buildUpdateQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "first_name" = ?, "created_at" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt',
+      'UPDATE "users" SET "first_name" = ?, "created_at" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
     );
     expect(query.params).toEqual([
       "Jane",
@@ -726,7 +750,7 @@ describe("buildUpdateQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt',
+      'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
     );
     expect(query.params).toEqual(["Jane", "user-1"]);
   });
@@ -757,7 +781,7 @@ describe("buildUpdateQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "created_at" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt',
+      'UPDATE "users" SET "created_at" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
     );
     expect(query.params).toEqual(["2026-06-01T00:00:00.000Z", "user-1"]);
   });
@@ -774,7 +798,7 @@ describe("buildUpdateQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS posts',
+      'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive, COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS posts',
     );
     expect(query.params).toEqual(["Jane", "user-1"]);
     expect(query.includeDescriptors).toEqual([
@@ -794,7 +818,7 @@ describe("buildUpdateQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'UPDATE "posts" SET "title" = ? WHERE "id" = ? RETURNING "id" AS id, "title" AS title, "author_id" AS authorId, (SELECT json_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS author',
+      'UPDATE "posts" SET "title" = ? WHERE "id" = ? RETURNING "id" AS id, "title" AS title, "author_id" AS authorId, (SELECT json_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at", \'isActive\', author__users."is_active") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS author',
     );
     expect(query.params).toEqual(["Updated", "post-1"]);
     expect(query.includeDescriptors).toEqual([
@@ -916,7 +940,7 @@ describe("buildDeleteQuery", () => {
     const query = buildDeleteQuery(usersTable, {}, { where: { id: "user-1" } });
 
     expect(query.statement).toBe(
-      'DELETE FROM "users" WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt',
+      'DELETE FROM "users" WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
     );
     expect(query.params).toEqual(["user-1"]);
     expect(query.includeDescriptors).toEqual([]);
@@ -950,7 +974,7 @@ describe("buildDeleteQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'DELETE FROM "users" WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS posts',
+      'DELETE FROM "users" WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive, COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS posts',
     );
     expect(query.params).toEqual(["user-1"]);
     expect(query.includeDescriptors).toEqual([
@@ -969,7 +993,7 @@ describe("buildDeleteQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'DELETE FROM "posts" WHERE "id" = ? RETURNING "id" AS id, "title" AS title, "author_id" AS authorId, (SELECT json_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS author',
+      'DELETE FROM "posts" WHERE "id" = ? RETURNING "id" AS id, "title" AS title, "author_id" AS authorId, (SELECT json_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at", \'isActive\', author__users."is_active") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS author',
     );
     expect(query.params).toEqual(["post-1"]);
     expect(query.includeDescriptors).toEqual([
@@ -1122,12 +1146,13 @@ describe("buildCreateManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      'INSERT INTO "users" ("id", "first_name", "created_at") VALUES (?, ?, ?) RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt',
+      'INSERT INTO "users" ("id", "first_name", "created_at", "is_active") VALUES (?, ?, ?, ?) RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
     );
     expect(query.params).toEqual([
       "user-1",
       "John",
       "2025-01-01T00:00:00.000Z",
+      true,
     ]);
   });
 
@@ -1148,15 +1173,17 @@ describe("buildCreateManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      'INSERT INTO "users" ("id", "first_name", "created_at") VALUES (?, ?, ?), (?, ?, ?) RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt',
+      'INSERT INTO "users" ("id", "first_name", "created_at", "is_active") VALUES (?, ?, ?, ?), (?, ?, ?, ?) RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
     );
     expect(query.params).toEqual([
       "user-1",
       "John",
       "2025-01-01T00:00:00.000Z",
+      true,
       "user-2",
       "Alice",
       "2025-01-02T00:00:00.000Z",
+      true,
     ]);
   });
 
@@ -1175,9 +1202,11 @@ describe("buildCreateManyQuery", () => {
       "a",
       "A",
       d1.toISOString(),
+      true,
       "b",
       "B",
       d2.toISOString(),
+      true,
     ]);
   });
 
@@ -1213,7 +1242,7 @@ describe("buildUpdateManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "first_name" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt',
+      'UPDATE "users" SET "first_name" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
     );
     expect(query.params).toEqual(["Everyone"]);
   });
@@ -1225,7 +1254,7 @@ describe("buildUpdateManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "first_name" = ? WHERE "first_name" LIKE ? ESCAPE \'\\\' RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt',
+      'UPDATE "users" SET "first_name" = ? WHERE "first_name" LIKE ? ESCAPE \'\\\' RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
     );
     expect(query.params).toEqual(["John", "Jo%"]);
   });
@@ -1240,7 +1269,7 @@ describe("buildUpdateManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "first_name" = ?, "created_at" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt',
+      'UPDATE "users" SET "first_name" = ?, "created_at" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
     );
     expect(query.params).toEqual([
       "Jane",
@@ -1267,7 +1296,7 @@ describe("buildUpdateManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt',
+      'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
     );
     expect(query.params).toEqual(["Jane", "user-1"]);
   });
@@ -1286,7 +1315,7 @@ describe("buildDeleteManyQuery", () => {
     const query = buildDeleteManyQuery(usersTable, {});
 
     expect(query.statement).toBe(
-      'DELETE FROM "users" RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt',
+      'DELETE FROM "users" RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
     );
     expect(query.params).toEqual([]);
   });
@@ -1297,7 +1326,7 @@ describe("buildDeleteManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      'DELETE FROM "users" WHERE "first_name" LIKE ? ESCAPE \'\\\' RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt',
+      'DELETE FROM "users" WHERE "first_name" LIKE ? ESCAPE \'\\\' RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
     );
     expect(query.params).toEqual(["Jo%"]);
   });
@@ -1308,7 +1337,7 @@ describe("buildDeleteManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      'DELETE FROM "users" WHERE "first_name" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt',
+      'DELETE FROM "users" WHERE "first_name" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
     );
     expect(query.params).toEqual(["John"]);
   });
@@ -1321,7 +1350,7 @@ describe("buildDeleteManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      'DELETE FROM "users" WHERE "created_at" < ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt',
+      'DELETE FROM "users" WHERE "created_at" < ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
     );
     expect(query.params).toEqual([cutoff.toISOString()]);
   });
