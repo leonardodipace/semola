@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { boolean, date, number, string, uuid } from "./index.js";
+import { boolean, date, enumType, number, string, uuid } from "./index.js";
 
 describe("ORM column builders", () => {
   test("create the expected base column metadata", () => {
@@ -8,6 +8,7 @@ describe("ORM column builders", () => {
     const bool = boolean("is_active");
     const datetime = date("created_at");
     const id = uuid("id");
+    const status = enumType("status", ["active", "inactive"]);
 
     expect(text.type).toBe("string");
     expect(text.sqlName).toBe("email");
@@ -17,6 +18,8 @@ describe("ORM column builders", () => {
     expect(bool.type).toBe("boolean");
     expect(datetime.type).toBe("date");
     expect(id.type).toBe("string");
+    expect(status.type).toBe("enum");
+    expect(status.enumValues).toEqual(["active", "inactive"]);
   });
 
   test("set nullability and keep builders immutable", () => {
@@ -33,12 +36,17 @@ describe("ORM column builders", () => {
     const idColumn = uuid("id").primaryKey();
     const emailColumn = string("email").notNull().unique();
     const createdAtColumn = date("created_at").default(() => new Date());
+    const statusColumn = enumType("status", ["active", "inactive"]).default(
+      () => "active",
+    );
 
     expect(typeof idColumn.primaryKey).toBe("function");
     expect(idColumn._meta.isNullable).toBe(false);
     expect(idColumn._meta.isPrimaryKey).toBe(true);
     expect(typeof emailColumn.unique).toBe("function");
     expect(createdAtColumn._meta.hasDefault).toBeTrue();
+    expect(statusColumn._meta.hasDefault).toBeTrue();
+    expect(statusColumn._default?.()).toBe("active");
   });
 
   test("does not reopen primary key columns via nullable()", () => {

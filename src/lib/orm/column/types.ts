@@ -3,10 +3,11 @@ export type BaseColumn<
   TPrimaryKey extends boolean = boolean,
   TUnique extends boolean = boolean,
   THasDefault extends boolean = boolean,
+  TValue = unknown,
 > = {
   sqlName: string;
   _meta: ColumnTypeState<TNullable, TPrimaryKey, TUnique, THasDefault>;
-  _default?: () => unknown;
+  _default?: () => TValue;
   references?: {
     tableColumn?: () => { sqlName: string };
   };
@@ -29,6 +30,7 @@ export type ColumnRuntimeValueMap = {
   number: number;
   boolean: boolean;
   date: Date;
+  enum: string;
 };
 
 export type StringColumn<
@@ -36,7 +38,7 @@ export type StringColumn<
   TPrimaryKey extends boolean = boolean,
   TUnique extends boolean = boolean,
   THasDefault extends boolean = boolean,
-> = BaseColumn<TNullable, TPrimaryKey, TUnique, THasDefault> & {
+> = BaseColumn<TNullable, TPrimaryKey, TUnique, THasDefault, string> & {
   type: "string";
 };
 
@@ -45,7 +47,7 @@ export type NumberColumn<
   TPrimaryKey extends boolean = boolean,
   TUnique extends boolean = boolean,
   THasDefault extends boolean = boolean,
-> = BaseColumn<TNullable, TPrimaryKey, TUnique, THasDefault> & {
+> = BaseColumn<TNullable, TPrimaryKey, TUnique, THasDefault, number> & {
   type: "number";
 };
 
@@ -54,7 +56,7 @@ export type BooleanColumn<
   TPrimaryKey extends boolean = boolean,
   TUnique extends boolean = boolean,
   THasDefault extends boolean = boolean,
-> = BaseColumn<TNullable, TPrimaryKey, TUnique, THasDefault> & {
+> = BaseColumn<TNullable, TPrimaryKey, TUnique, THasDefault, boolean> & {
   type: "boolean";
 };
 
@@ -63,11 +65,27 @@ export type DateColumn<
   TPrimaryKey extends boolean = boolean,
   TUnique extends boolean = boolean,
   THasDefault extends boolean = boolean,
-> = BaseColumn<TNullable, TPrimaryKey, TUnique, THasDefault> & {
+> = BaseColumn<TNullable, TPrimaryKey, TUnique, THasDefault, Date> & {
   type: "date";
 };
 
-export type Column = StringColumn | NumberColumn | BooleanColumn | DateColumn;
+export type EnumColumn<
+  TValue extends string = string,
+  TNullable extends boolean = boolean,
+  TPrimaryKey extends boolean = boolean,
+  TUnique extends boolean = boolean,
+  THasDefault extends boolean = boolean,
+> = BaseColumn<TNullable, TPrimaryKey, TUnique, THasDefault, TValue> & {
+  type: "enum";
+  enumValues?: readonly TValue[];
+};
+
+export type Column =
+  | StringColumn
+  | NumberColumn
+  | BooleanColumn
+  | DateColumn
+  | EnumColumn;
 
 type ColumnType = Column["type"];
 
@@ -77,11 +95,13 @@ type ColumnBuilderState<
   TPrimaryKey extends boolean,
   TUnique extends boolean,
   THasDefault extends boolean,
+  TValue extends ColumnRuntimeValueMap[TType],
 > = {
   sqlName: string;
   type: TType;
   _meta: ColumnTypeState<TNullable, TPrimaryKey, TUnique, THasDefault>;
-  _default?: () => ColumnRuntimeValueMap[TType];
+  _default?: () => TValue;
+  enumValues?: readonly TValue[];
   references?: {
     tableColumn?: () => { sqlName: string };
   };
@@ -92,12 +112,14 @@ type SetNullable<
   TPrimaryKey extends boolean,
   TUnique extends boolean,
   THasDefault extends boolean,
+  TValue extends ColumnRuntimeValueMap[TType],
 > = ColumnBuilder<
   TType,
   TPrimaryKey extends true ? false : true,
   TPrimaryKey,
   TUnique,
-  THasDefault
+  THasDefault,
+  TValue
 >;
 
 type SetNotNull<
@@ -105,20 +127,23 @@ type SetNotNull<
   TPrimaryKey extends boolean,
   TUnique extends boolean,
   THasDefault extends boolean,
-> = ColumnBuilder<TType, false, TPrimaryKey, TUnique, THasDefault>;
+  TValue extends ColumnRuntimeValueMap[TType],
+> = ColumnBuilder<TType, false, TPrimaryKey, TUnique, THasDefault, TValue>;
 
 type SetHasDefault<
   TType extends ColumnType,
   TNullable extends boolean,
   TPrimaryKey extends boolean,
   TUnique extends boolean,
-> = ColumnBuilder<TType, TNullable, TPrimaryKey, TUnique, true>;
+  TValue extends ColumnRuntimeValueMap[TType],
+> = ColumnBuilder<TType, TNullable, TPrimaryKey, TUnique, true, TValue>;
 
 type SetPrimaryKey<
   TType extends ColumnType,
   TUnique extends boolean,
   THasDefault extends boolean,
-> = ColumnBuilder<TType, false, true, TUnique, THasDefault>;
+  TValue extends ColumnRuntimeValueMap[TType],
+> = ColumnBuilder<TType, false, true, TUnique, THasDefault, TValue>;
 
 type SetUnique<
   TType extends ColumnType,
@@ -126,7 +151,8 @@ type SetUnique<
   TPrimaryKey extends boolean,
   _TUnique extends boolean,
   THasDefault extends boolean,
-> = ColumnBuilder<TType, TNullable, TPrimaryKey, true, THasDefault>;
+  TValue extends ColumnRuntimeValueMap[TType],
+> = ColumnBuilder<TType, TNullable, TPrimaryKey, true, THasDefault, TValue>;
 
 export type ColumnBuilder<
   TType extends ColumnType,
@@ -134,17 +160,39 @@ export type ColumnBuilder<
   TPrimaryKey extends boolean = false,
   TUnique extends boolean = false,
   THasDefault extends boolean = false,
-> = ColumnBuilderState<TType, TNullable, TPrimaryKey, TUnique, THasDefault> & {
-  primaryKey: () => SetPrimaryKey<TType, TUnique, THasDefault>;
-  notNull: () => SetNotNull<TType, TPrimaryKey, TUnique, THasDefault>;
-  nullable: () => SetNullable<TType, TPrimaryKey, TUnique, THasDefault>;
-  unique: () => SetUnique<TType, TNullable, TPrimaryKey, TUnique, THasDefault>;
+  TValue extends ColumnRuntimeValueMap[TType] = ColumnRuntimeValueMap[TType],
+> = ColumnBuilderState<
+  TType,
+  TNullable,
+  TPrimaryKey,
+  TUnique,
+  THasDefault,
+  TValue
+> & {
+  primaryKey: () => SetPrimaryKey<TType, TUnique, THasDefault, TValue>;
+  notNull: () => SetNotNull<TType, TPrimaryKey, TUnique, THasDefault, TValue>;
+  nullable: () => SetNullable<TType, TPrimaryKey, TUnique, THasDefault, TValue>;
+  unique: () => SetUnique<
+    TType,
+    TNullable,
+    TPrimaryKey,
+    TUnique,
+    THasDefault,
+    TValue
+  >;
   default: (
-    value: () => ColumnRuntimeValueMap[TType],
-  ) => SetHasDefault<TType, TNullable, TPrimaryKey, TUnique>;
+    value: () => TValue,
+  ) => SetHasDefault<TType, TNullable, TPrimaryKey, TUnique, TValue>;
   references: ((
     tableColumn: () => { sqlName: string },
-  ) => ColumnBuilder<TType, TNullable, TPrimaryKey, TUnique, THasDefault>) & {
+  ) => ColumnBuilder<
+    TType,
+    TNullable,
+    TPrimaryKey,
+    TUnique,
+    THasDefault,
+    TValue
+  >) & {
     tableColumn?: () => { sqlName: string };
   };
 };
