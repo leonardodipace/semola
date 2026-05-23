@@ -663,6 +663,54 @@ describe("createSqliteDialect", () => {
 
     await sql.close();
   });
+
+  test("findUnique returns boolean fields as booleans", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z", false);
+
+    const dialect = createSqliteDialect(usersTable, {});
+    const row = await dialect.findUnique(sql, { where: { id: "user-1" } });
+
+    expect(row?.isActive).toBe(false);
+
+    await sql.close();
+  });
+
+  test("findFirst returns boolean fields as booleans", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z", false);
+
+    const dialect = createSqliteDialect(usersTable, {});
+    const row = await dialect.findFirst(sql, { where: { id: "user-1" } });
+
+    expect(row?.isActive).toBe(false);
+
+    await sql.close();
+  });
+
+  test("create returns boolean fields as booleans", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+
+    const dialect = createSqliteDialect(usersTable, {});
+    const row = await dialect.create(sql, {
+      data: {
+        id: "user-1",
+        firstName: "John",
+        createdAt: new Date("2025-01-01T00:00:00.000Z"),
+        isActive: false,
+      },
+    });
+
+    expect(row.isActive).toBe(false);
+
+    await sql.close();
+  });
 });
 
 describe("buildUpdateQuery", () => {
@@ -933,6 +981,23 @@ describe("createSqliteDialect - update", () => {
 
     await sql.close();
   });
+
+  test("returns boolean fields as booleans", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z", false);
+
+    const dialect = createSqliteDialect(usersTable, {});
+    const row = await dialect.update(sql, {
+      where: { id: "user-1" },
+      data: { firstName: "Jane" },
+    });
+
+    expect(row.isActive).toBe(false);
+
+    await sql.close();
+  });
 });
 
 describe("buildDeleteQuery", () => {
@@ -1128,6 +1193,20 @@ describe("createSqliteDialect - delete", () => {
     expect(deleted.posts).toEqual([
       { id: "post-1", title: "Hello", authorId: "user-1" },
     ]);
+
+    await sql.close();
+  });
+
+  test("returns boolean fields as booleans", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z", false);
+
+    const dialect = createSqliteDialect(usersTable, {});
+    const row = await dialect.delete(sql, { where: { id: "user-1" } });
+
+    expect(row.isActive).toBe(false);
 
     await sql.close();
   });
@@ -1445,6 +1524,28 @@ describe("createSqliteDialect - createMany", () => {
 
     await sql.close();
   });
+
+  test("returns boolean fields as booleans", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+
+    const dialect = createSqliteDialect(usersTable, {});
+    const rows = await dialect.createMany(sql, {
+      data: [
+        {
+          id: "user-1",
+          firstName: "John",
+          createdAt: new Date("2025-01-01T00:00:00.000Z"),
+          isActive: false,
+        },
+      ],
+    });
+
+    expect(rows[0]?.isActive).toBe(false);
+
+    await sql.close();
+  });
 });
 
 describe("createSqliteDialect - updateMany", () => {
@@ -1535,6 +1636,23 @@ describe("createSqliteDialect - updateMany", () => {
     expect(new Date(updated?.createdAt ?? 0).toISOString()).toBe(
       newDate.toISOString(),
     );
+
+    await sql.close();
+  });
+
+  test("returns boolean fields as booleans", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z", false);
+
+    const dialect = createSqliteDialect(usersTable, {});
+    const rows = await dialect.updateMany(sql, {
+      where: { id: "user-1" },
+      data: { firstName: "John" },
+    });
+
+    expect(rows[0]?.isActive).toBe(false);
 
     await sql.close();
   });
@@ -1649,6 +1767,20 @@ describe("createSqliteDialect - deleteMany", () => {
     const remaining = await dialect.findMany(sql);
 
     expect(remaining[0]?.firstName).toBe("Alice");
+
+    await sql.close();
+  });
+
+  test("returns boolean fields as booleans", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z", false);
+
+    const dialect = createSqliteDialect(usersTable, {});
+    const rows = await dialect.deleteMany(sql, { where: { id: "user-1" } });
+
+    expect(rows[0]?.isActive).toBe(false);
 
     await sql.close();
   });
