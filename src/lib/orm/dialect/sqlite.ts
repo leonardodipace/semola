@@ -647,8 +647,33 @@ export const parseIncludeRows = (
   });
 };
 
-const executeQuery = async (sql: Bun.SQL, query: ReturningQuery) => {
+const coerceBooleanColumns = (
+  table: Table,
+  rows: Record<string, unknown>[],
+) => {
+  const booleanKeys = Object.entries(table.columns)
+    .filter(([, col]) => col.type === "boolean")
+    .map(([key]) => key);
+
+  if (!booleanKeys.length) return;
+
+  for (const key of booleanKeys) {
+    for (const row of rows) {
+      if (key in row) {
+        row[key] = Boolean(row[key]);
+      }
+    }
+  }
+};
+
+const executeQuery = async (
+  sql: Bun.SQL,
+  table: Table,
+  query: ReturningQuery,
+) => {
   const rows = [...(await sql.unsafe(query.statement, query.params))];
+
+  coerceBooleanColumns(table, rows);
 
   if (!query.includeDescriptors.length) {
     return rows;
@@ -752,24 +777,24 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
     findMany: async (sql, options) => {
       const query = buildFindManyQuery(table, relations, options);
 
-      return await executeQuery(sql, query);
+      return await executeQuery(sql, table, query);
     },
     // findFirst and findUnique build different queries but share row execution/parsing.
     findFirst: async (sql, options) => {
       const query = buildFindFirstQuery(table, relations, options);
-      const [row] = await executeQuery(sql, query);
+      const [row] = await executeQuery(sql, table, query);
 
       return row ?? null;
     },
     findUnique: async (sql, options) => {
       const query = buildFindUniqueQuery(table, relations, options);
-      const [row] = await executeQuery(sql, query);
+      const [row] = await executeQuery(sql, table, query);
 
       return row ?? null;
     },
     create: async (sql, options) => {
       const query = buildCreateQuery(table, relations, options);
-      const [row] = await executeQuery(sql, query);
+      const [row] = await executeQuery(sql, table, query);
 
       if (!row) {
         throw new Error(
@@ -786,11 +811,11 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
 
       const query = buildCreateManyQuery(table, options);
 
-      return await executeQuery(sql, query);
+      return await executeQuery(sql, table, query);
     },
     update: async (sql, options) => {
       const query = buildUpdateQuery(table, relations, options);
-      const [row] = await executeQuery(sql, query);
+      const [row] = await executeQuery(sql, table, query);
 
       if (!row) {
         throw new Error(
@@ -803,11 +828,11 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
     updateMany: async (sql, options) => {
       const query = buildUpdateManyQuery(table, options);
 
-      return await executeQuery(sql, query);
+      return await executeQuery(sql, table, query);
     },
     delete: async (sql, options) => {
       const query = buildDeleteQuery(table, relations, options);
-      const [row] = await executeQuery(sql, query);
+      const [row] = await executeQuery(sql, table, query);
 
       if (!row) {
         throw new Error(
@@ -820,7 +845,7 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
     deleteMany: async (sql, options) => {
       const query = buildDeleteManyQuery(table, options);
 
-      return await executeQuery(sql, query);
+      return await executeQuery(sql, table, query);
     },
   };
 };
