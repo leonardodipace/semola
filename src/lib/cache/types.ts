@@ -1,5 +1,3 @@
-export type CacheError = "CacheError" | "InvalidTTLError" | "NotFoundError";
-
 export type CacheOptions<T> = {
   redis: Bun.RedisClient;
   ttl?: number | ((key: string, value: T) => number);
