@@ -30,13 +30,13 @@ describe("relation helpers", () => {
     expect(relation._foreignKey).toBe("userId");
   });
 
-  test("one() foreign key must be a column on the source table", () => {
+  test("one() foreign key must be a column on the source table", async () => {
     const profilesTable = defineTable("profiles", {
       id: uuid("id").primaryKey().notNull(),
       userId: uuid("user_id").notNull(),
     });
 
-    createOrm({
+    const ormA = createOrm({
       adapter: "sqlite",
       url: ":memory:",
       tables: { users: usersTable, profiles: profilesTable },
@@ -47,7 +47,7 @@ describe("relation helpers", () => {
       },
     });
 
-    createOrm({
+    const ormB = createOrm({
       adapter: "sqlite",
       url: ":memory:",
       tables: { users: usersTable, profiles: profilesTable },
@@ -58,6 +58,9 @@ describe("relation helpers", () => {
         },
       },
     });
+
+    await ormA.$raw.close();
+    await ormB.$raw.close();
   });
 
   test("createOrm() wires table clients and exposes raw SQL client", async () => {
