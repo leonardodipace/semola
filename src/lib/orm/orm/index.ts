@@ -30,10 +30,14 @@ export const many = <T extends Table>(table: () => T): HasMany<T> => {
   };
 };
 
-export const one = <T extends Table>(table: () => T): HasOne<T> => {
+export const one = <T extends Table>(
+  foreignKey: string,
+  table: () => T,
+): HasOne<T> => {
   return {
     _type: "hasOne",
     _table: table(),
+    _foreignKey: foreignKey,
   };
 };
 

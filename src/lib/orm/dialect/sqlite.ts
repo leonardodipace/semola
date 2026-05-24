@@ -346,15 +346,11 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
       continue;
     }
 
-    const localForeignKeyName = `${relationName}Id`;
-    const localForeignKeyEntry = Object.entries(table.columns).find(
-      ([columnName]) => columnName === localForeignKeyName,
-    );
-    const localForeignKey = localForeignKeyEntry?.[1];
+    const localForeignKey = table.columns[relation._foreignKey];
 
     if (!localForeignKey) {
       throw new Error(
-        `Missing hasOne foreign key column ${localForeignKeyName} on ${table.sqlName}`,
+        `Missing hasOne foreign key column ${relation._foreignKey} on ${table.sqlName}`,
       );
     }
 
