@@ -226,7 +226,7 @@ describe("buildFindManyQuery", () => {
     );
     expect(query.params).toEqual([]);
     expect(query.includeDescriptors).toEqual([
-      { name: "posts", type: "hasMany" },
+      expect.objectContaining({ name: "posts", type: "hasMany" }),
     ]);
   });
 
@@ -244,7 +244,7 @@ describe("buildFindManyQuery", () => {
     );
     expect(query.params).toEqual([]);
     expect(query.includeDescriptors).toEqual([
-      { name: "author", type: "hasOne" },
+      expect.objectContaining({ name: "author", type: "hasOne" }),
     ]);
   });
 
@@ -337,7 +337,7 @@ describe("buildFindManyQuery", () => {
       'SELECT "code" AS code, "name" AS name, COALESCE((SELECT json_group_array(json_object(\'id\', members__members."id", \'groupCode\', members__members."group_code")) FROM "members" AS members__members WHERE members__members."group_code" = "groups"."code"), \'[]\') AS members FROM "groups"',
     );
     expect(query.includeDescriptors).toEqual([
-      { name: "members", type: "hasMany" },
+      expect.objectContaining({ name: "members", type: "hasMany" }),
     ]);
   });
 
@@ -492,7 +492,7 @@ describe("buildFindFirstQuery", () => {
     );
     expect(query.params).toEqual([1, 2]);
     expect(query.includeDescriptors).toEqual([
-      { name: "posts", type: "hasMany" },
+      expect.objectContaining({ name: "posts", type: "hasMany" }),
     ]);
   });
 });
@@ -500,11 +500,11 @@ describe("buildFindFirstQuery", () => {
 describe("parseIncludeRows", () => {
   test("parses JSON include values and normalizes null hasMany values", () => {
     const descriptors = [
-      { name: "posts", type: "hasMany" },
-      { name: "author", type: "hasOne" },
+      { name: "posts", type: "hasMany", table: postsTable },
+      { name: "author", type: "hasOne", table: usersTable },
     ] satisfies Array<IncludeDescriptor>;
 
-    const rows = [
+    const rows: Array<Record<string, unknown>> = [
       { id: "u1", posts: null, author: null },
       {
         id: "u2",
@@ -513,9 +513,9 @@ describe("parseIncludeRows", () => {
       },
     ];
 
-    const parsed = parseIncludeRows(rows, descriptors);
+    parseIncludeRows(usersTable, rows, descriptors);
 
-    expect(parsed).toEqual([
+    expect(rows).toEqual([
       { id: "u1", posts: [], author: null },
       {
         id: "u2",
@@ -889,7 +889,7 @@ describe("buildUpdateQuery", () => {
     );
     expect(query.params).toEqual(["Jane", "user-1"]);
     expect(query.includeDescriptors).toEqual([
-      { name: "posts", type: "hasMany" },
+      expect.objectContaining({ name: "posts", type: "hasMany" }),
     ]);
   });
 
@@ -909,7 +909,7 @@ describe("buildUpdateQuery", () => {
     );
     expect(query.params).toEqual(["Updated", "post-1"]);
     expect(query.includeDescriptors).toEqual([
-      { name: "author", type: "hasOne" },
+      expect.objectContaining({ name: "author", type: "hasOne" }),
     ]);
   });
 });
@@ -1082,7 +1082,7 @@ describe("buildDeleteQuery", () => {
     );
     expect(query.params).toEqual(["user-1"]);
     expect(query.includeDescriptors).toEqual([
-      { name: "posts", type: "hasMany" },
+      expect.objectContaining({ name: "posts", type: "hasMany" }),
     ]);
   });
 
@@ -1101,7 +1101,7 @@ describe("buildDeleteQuery", () => {
     );
     expect(query.params).toEqual(["post-1"]);
     expect(query.includeDescriptors).toEqual([
-      { name: "author", type: "hasOne" },
+      expect.objectContaining({ name: "author", type: "hasOne" }),
     ]);
   });
 

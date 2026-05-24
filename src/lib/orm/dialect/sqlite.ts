@@ -27,6 +27,7 @@ type SqlFragment = {
 export type IncludeDescriptor = {
   name: string;
   type: "hasMany" | "hasOne";
+  table: Table;
 };
 
 type IncludeClause = {
@@ -337,7 +338,11 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
       clauses.push(
         `COALESCE((SELECT json_group_array(${relationJsonObject}) FROM ${quoteIdentifier(relationTable.sqlName)} AS ${relationAlias} WHERE ${relationAlias}.${quoteIdentifier(foreignKey.sqlName)} = ${quoteIdentifier(table.sqlName)}.${quoteIdentifier(sourceColumn.sqlName)}), '[]') AS ${relationName}`,
       );
-      descriptors.push({ name: relationName, type: "hasMany" });
+      descriptors.push({
+        name: relationName,
+        type: "hasMany",
+        table: relationTable,
+      });
       continue;
     }
 
@@ -357,7 +362,11 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
     clauses.push(
       `(SELECT ${relationJsonObject} FROM ${quoteIdentifier(relationTable.sqlName)} AS ${relationAlias} WHERE ${relationAlias}.${quoteIdentifier(relationPrimaryKey.sqlName)} = ${quoteIdentifier(table.sqlName)}.${quoteIdentifier(localForeignKey.sqlName)} LIMIT 1) AS ${relationName}`,
     );
-    descriptors.push({ name: relationName, type: "hasOne" });
+    descriptors.push({
+      name: relationName,
+      type: "hasOne",
+      table: relationTable,
+    });
   }
 
   return {
@@ -620,19 +629,39 @@ export const buildFindUniqueQuery = <T extends Table, R extends TableRelations>(
   };
 };
 
+const getBooleanKeys = (table: Table) => {
+  const entries = Object.entries(table.columns);
+  const booleanColumns = entries.filter(([, col]) => col.type === "boolean");
+  const booleanKeys = booleanColumns.map(([key]) => key);
+
+  return new Set(booleanKeys);
+};
+
+const coerceBooleanValue = (val: unknown) => {
+  if (val === null) return val;
+  if (val === undefined) return val;
+
+  return Boolean(val);
+};
+
 export const parseIncludeRows = (
+  table: Table,
   rows: Array<Record<string, unknown>>,
   descriptors: IncludeDescriptor[],
 ) => {
-  return rows.map((row) => {
-    const result = { ...row };
+  const mainBoolKeys = getBooleanKeys(table);
+
+  for (const row of rows) {
+    for (const key of mainBoolKeys) {
+      row[key] = coerceBooleanValue(row[key]);
+    }
 
     for (const descriptor of descriptors) {
       const value = row[descriptor.name];
 
       if (value === null) {
         if (descriptor.type === "hasMany") {
-          result[descriptor.name] = [];
+          row[descriptor.name] = [];
         }
 
         continue;
@@ -640,30 +669,13 @@ export const parseIncludeRows = (
 
       if (typeof value !== "string") continue;
 
-      result[descriptor.name] = JSON.parse(value);
-    }
+      const boolKeys = getBooleanKeys(descriptor.table);
 
-    return result;
-  });
-};
+      row[descriptor.name] = JSON.parse(value, (key, val) => {
+        if (!boolKeys.has(key)) return val;
 
-const coerceBooleanColumns = (
-  table: Table,
-  rows: Record<string, unknown>[],
-) => {
-  const booleanKeys = Object.entries(table.columns)
-    .filter(([, col]) => col.type === "boolean")
-    .map(([key]) => key);
-
-  if (!booleanKeys.length) return;
-
-  for (const key of booleanKeys) {
-    for (const row of rows) {
-      if (!(key in row)) continue;
-      if (row[key] === null) continue;
-      if (row[key] === undefined) continue;
-
-      row[key] = Boolean(row[key]);
+        return coerceBooleanValue(val);
+      });
     }
   }
 };
@@ -675,13 +687,9 @@ const executeQuery = async (
 ) => {
   const rows = [...(await sql.unsafe(query.statement, query.params))];
 
-  coerceBooleanColumns(table, rows);
+  parseIncludeRows(table, rows, query.includeDescriptors);
 
-  if (!query.includeDescriptors.length) {
-    return rows;
-  }
-
-  return parseIncludeRows(rows, query.includeDescriptors);
+  return rows;
 };
 
 export const buildCreateManyQuery = <T extends Table>(
