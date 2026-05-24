@@ -13,6 +13,7 @@ export default defineConfig({
     "lib/logging/index": "src/lib/logging/index.ts",
     "lib/prompts/index": "src/lib/prompts/index.ts",
     "lib/workflow/index": "src/lib/workflow/index.ts",
+    "lib/orm/index": "src/lib/orm/index.ts",
   },
   format: ["esm", "cjs"],
   dts: true,
