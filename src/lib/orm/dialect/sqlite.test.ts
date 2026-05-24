@@ -358,6 +358,23 @@ describe("buildFindManyQuery", () => {
     ).toThrow("Missing hasOne foreign key column profileId on users");
   });
 
+  test("throws when hasOne column is not a foreign key", () => {
+    const profilesTable = defineTable("profiles", {
+      id: uuid("id").primaryKey().notNull(),
+      bio: string("bio").notNull(),
+    });
+
+    expect(() =>
+      buildFindManyQuery(
+        usersTable,
+        { profile: one("firstName", () => profilesTable) },
+        {
+          include: { profile: true },
+        },
+      ),
+    ).toThrow("Column firstName on users is not a foreign key");
+  });
+
   test("throws on unknown where key", () => {
     expect(() =>
       buildFindManyQuery(

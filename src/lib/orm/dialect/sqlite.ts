@@ -354,6 +354,12 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
       );
     }
 
+    if (!localForeignKey.references?.tableColumn) {
+      throw new Error(
+        `Column ${relation._foreignKey} on ${table.sqlName} is not a foreign key - call .references() on it`,
+      );
+    }
+
     const relationPrimaryKey = getPrimaryKeyColumn(relationTable);
     clauses.push(
       `(SELECT ${relationJsonObject} FROM ${quoteIdentifier(relationTable.sqlName)} AS ${relationAlias} WHERE ${relationAlias}.${quoteIdentifier(relationPrimaryKey.sqlName)} = ${quoteIdentifier(table.sqlName)}.${quoteIdentifier(localForeignKey.sqlName)} LIMIT 1) AS ${relationName}`,
