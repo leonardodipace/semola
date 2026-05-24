@@ -27,6 +27,7 @@ type SqlFragment = {
 export type IncludeDescriptor = {
   name: string;
   type: "hasMany" | "hasOne";
+  table: Table;
 };
 
 type IncludeClause = {
@@ -337,7 +338,11 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
       clauses.push(
         `COALESCE((SELECT json_group_array(${relationJsonObject}) FROM ${quoteIdentifier(relationTable.sqlName)} AS ${relationAlias} WHERE ${relationAlias}.${quoteIdentifier(foreignKey.sqlName)} = ${quoteIdentifier(table.sqlName)}.${quoteIdentifier(sourceColumn.sqlName)}), '[]') AS ${relationName}`,
       );
-      descriptors.push({ name: relationName, type: "hasMany" });
+      descriptors.push({
+        name: relationName,
+        type: "hasMany",
+        table: relationTable,
+      });
       continue;
     }
 
@@ -357,7 +362,11 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
     clauses.push(
       `(SELECT ${relationJsonObject} FROM ${quoteIdentifier(relationTable.sqlName)} AS ${relationAlias} WHERE ${relationAlias}.${quoteIdentifier(relationPrimaryKey.sqlName)} = ${quoteIdentifier(table.sqlName)}.${quoteIdentifier(localForeignKey.sqlName)} LIMIT 1) AS ${relationName}`,
     );
-    descriptors.push({ name: relationName, type: "hasOne" });
+    descriptors.push({
+      name: relationName,
+      type: "hasOne",
+      table: relationTable,
+    });
   }
 
   return {
@@ -620,19 +629,41 @@ export const buildFindUniqueQuery = <T extends Table, R extends TableRelations>(
   };
 };
 
+const getBooleanKeys = (table: Table) => {
+  const entries = Object.entries(table.columns);
+  const booleanColumns = entries.filter(([, col]) => col.type === "boolean");
+  const booleanKeys = booleanColumns.map(([key]) => key);
+
+  return new Set(booleanKeys);
+};
+
+const coerceBooleanValue = (val: unknown) => {
+  if (val === null) return val;
+  if (val === undefined) return val;
+
+  return Boolean(val);
+};
+
 export const parseIncludeRows = (
+  table: Table,
   rows: Array<Record<string, unknown>>,
   descriptors: IncludeDescriptor[],
 ) => {
-  return rows.map((row) => {
-    const result = { ...row };
+  const mainBoolKeys = getBooleanKeys(table);
+
+  for (const row of rows) {
+    for (const key of mainBoolKeys) {
+      if (!(key in row)) continue;
+
+      row[key] = coerceBooleanValue(row[key]);
+    }
 
     for (const descriptor of descriptors) {
       const value = row[descriptor.name];
 
       if (value === null) {
         if (descriptor.type === "hasMany") {
-          result[descriptor.name] = [];
+          row[descriptor.name] = [];
         }
 
         continue;
@@ -640,21 +671,27 @@ export const parseIncludeRows = (
 
       if (typeof value !== "string") continue;
 
-      result[descriptor.name] = JSON.parse(value);
-    }
+      const boolKeys = getBooleanKeys(descriptor.table);
 
-    return result;
-  });
+      row[descriptor.name] = JSON.parse(value, (key, val) => {
+        if (!boolKeys.has(key)) return val;
+
+        return coerceBooleanValue(val);
+      });
+    }
+  }
 };
 
-const executeQuery = async (sql: Bun.SQL, query: ReturningQuery) => {
+const executeQuery = async (
+  sql: Bun.SQL,
+  table: Table,
+  query: ReturningQuery,
+) => {
   const rows = [...(await sql.unsafe(query.statement, query.params))];
 
-  if (!query.includeDescriptors.length) {
-    return rows;
-  }
+  parseIncludeRows(table, rows, query.includeDescriptors);
 
-  return parseIncludeRows(rows, query.includeDescriptors);
+  return rows;
 };
 
 export const buildCreateManyQuery = <T extends Table>(
@@ -752,24 +789,24 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
     findMany: async (sql, options) => {
       const query = buildFindManyQuery(table, relations, options);
 
-      return await executeQuery(sql, query);
+      return await executeQuery(sql, table, query);
     },
     // findFirst and findUnique build different queries but share row execution/parsing.
     findFirst: async (sql, options) => {
       const query = buildFindFirstQuery(table, relations, options);
-      const [row] = await executeQuery(sql, query);
+      const [row] = await executeQuery(sql, table, query);
 
       return row ?? null;
     },
     findUnique: async (sql, options) => {
       const query = buildFindUniqueQuery(table, relations, options);
-      const [row] = await executeQuery(sql, query);
+      const [row] = await executeQuery(sql, table, query);
 
       return row ?? null;
     },
     create: async (sql, options) => {
       const query = buildCreateQuery(table, relations, options);
-      const [row] = await executeQuery(sql, query);
+      const [row] = await executeQuery(sql, table, query);
 
       if (!row) {
         throw new Error(
@@ -786,11 +823,11 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
 
       const query = buildCreateManyQuery(table, options);
 
-      return await executeQuery(sql, query);
+      return await executeQuery(sql, table, query);
     },
     update: async (sql, options) => {
       const query = buildUpdateQuery(table, relations, options);
-      const [row] = await executeQuery(sql, query);
+      const [row] = await executeQuery(sql, table, query);
 
       if (!row) {
         throw new Error(
@@ -803,11 +840,11 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
     updateMany: async (sql, options) => {
       const query = buildUpdateManyQuery(table, options);
 
-      return await executeQuery(sql, query);
+      return await executeQuery(sql, table, query);
     },
     delete: async (sql, options) => {
       const query = buildDeleteQuery(table, relations, options);
-      const [row] = await executeQuery(sql, query);
+      const [row] = await executeQuery(sql, table, query);
 
       if (!row) {
         throw new Error(
@@ -820,7 +857,7 @@ export const createSqliteDialect = <T extends Table, R extends TableRelations>(
     deleteMany: async (sql, options) => {
       const query = buildDeleteManyQuery(table, options);
 
-      return await executeQuery(sql, query);
+      return await executeQuery(sql, table, query);
     },
   };
 };
