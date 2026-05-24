@@ -524,6 +524,53 @@ describe("parseIncludeRows", () => {
       },
     ]);
   });
+
+  test("coerces boolean fields in a hasOne included relation", () => {
+    const descriptors = [
+      { name: "author", type: "hasOne", table: usersTable },
+    ] satisfies Array<IncludeDescriptor>;
+
+    const rows: Array<Record<string, unknown>> = [
+      {
+        id: "p1",
+        title: "Hello",
+        author:
+          '{"id":"u1","firstName":"John","createdAt":"2025-01-01","isActive":1}',
+      },
+      {
+        id: "p2",
+        title: "World",
+        author:
+          '{"id":"u2","firstName":"Jane","createdAt":"2025-01-01","isActive":0}',
+      },
+    ];
+
+    parseIncludeRows(postsTable, rows, descriptors);
+
+    expect((rows[0]?.author as Record<string, unknown>)?.isActive).toBe(true);
+    expect((rows[1]?.author as Record<string, unknown>)?.isActive).toBe(false);
+  });
+
+  test("coerces boolean fields in a hasMany included relation", () => {
+    const descriptors = [
+      { name: "members", type: "hasMany", table: usersTable },
+    ] satisfies Array<IncludeDescriptor>;
+
+    const rows: Array<Record<string, unknown>> = [
+      {
+        id: "g1",
+        members:
+          '[{"id":"u1","firstName":"Alice","createdAt":"2025-01-01","isActive":1},{"id":"u2","firstName":"Bob","createdAt":"2025-01-01","isActive":0}]',
+      },
+    ];
+
+    parseIncludeRows(postsTable, rows, descriptors);
+
+    const members = rows[0]?.members as Array<Record<string, unknown>>;
+
+    expect(members[0]?.isActive).toBe(true);
+    expect(members[1]?.isActive).toBe(false);
+  });
 });
 
 describe("createSqliteDialect", () => {
@@ -1825,6 +1872,37 @@ describe("createSqliteDialect - deleteMany", () => {
   });
 });
 
+const postsWithFeaturedTable = defineTable("posts_with_featured", {
+  id: uuid("id").primaryKey().notNull(),
+  title: string("title").notNull(),
+  isFeatured: boolean("is_featured")
+    .notNull()
+    .default(() => false),
+  authorId: uuid("author_id")
+    .notNull()
+    .references(() => usersTable.columns.id),
+});
+
+const CREATE_POSTS_WITH_FEATURED_TABLE_SQL =
+  "CREATE TABLE posts_with_featured (id TEXT PRIMARY KEY, title TEXT NOT NULL, is_featured INTEGER NOT NULL, author_id TEXT NOT NULL)";
+
+const createPostsWithFeaturedTable = async (sql: Bun.SQL) => {
+  await sql.unsafe(CREATE_POSTS_WITH_FEATURED_TABLE_SQL);
+};
+
+const insertPostWithFeatured = async (
+  sql: Bun.SQL,
+  id: string,
+  title: string,
+  isFeatured: boolean,
+  authorId: string,
+) => {
+  await sql.unsafe(
+    "INSERT INTO posts_with_featured (id, title, is_featured, author_id) VALUES (?, ?, ?, ?)",
+    [id, title, isFeatured, authorId],
+  );
+};
+
 const nullableFlagsTable = defineTable("flags", {
   id: uuid("id").primaryKey().notNull(),
   isEnabled: boolean("is_enabled"),
@@ -1905,6 +1983,52 @@ describe("coerceBooleanColumns - nullable boolean", () => {
     });
 
     expect(row.isEnabled).toBeNull();
+
+    await sql.close();
+  });
+});
+
+describe("boolean coercion in included relations", () => {
+  test("findMany coerces booleans in a hasMany relation", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await createPostsWithFeaturedTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+    await insertPostWithFeatured(sql, "post-1", "Hello", true, "user-1");
+    await insertPostWithFeatured(sql, "post-2", "World", false, "user-1");
+
+    const dialect = createSqliteDialect(usersTable, {
+      posts: many(() => postsWithFeaturedTable),
+    });
+
+    const rows = await dialect.findMany(sql, { include: { posts: true } });
+
+    const posts = rows[0]?.posts as Array<Record<string, unknown>>;
+
+    expect(posts[0]?.isFeatured).toBe(true);
+    expect(posts[1]?.isFeatured).toBe(false);
+
+    await sql.close();
+  });
+
+  test("findMany coerces booleans in a hasOne relation", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await createPostsWithFeaturedTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z", false);
+    await insertPostWithFeatured(sql, "post-1", "Hello", true, "user-1");
+
+    const dialect = createSqliteDialect(postsWithFeaturedTable, {
+      author: one(() => usersTable),
+    });
+
+    const rows = await dialect.findMany(sql, { include: { author: true } });
+
+    const author = rows[0]?.author as Record<string, unknown>;
+
+    expect(author.isActive).toBe(false);
 
     await sql.close();
   });
