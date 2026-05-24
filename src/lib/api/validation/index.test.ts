@@ -20,10 +20,12 @@ describe("Validation Module", () => {
 
       const invalid = { user: { email: "invalid" } };
 
-      await expect(validateSchema(schema, invalid)).rejects.toMatchObject({
+      const promise1 = validateSchema(schema, invalid);
+      await expect(promise1).rejects.toMatchObject({
         message: expect.stringContaining("user.email:"),
       });
-      await expect(validateSchema(schema, invalid)).rejects.toMatchObject({
+      const promise2 = validateSchema(schema, invalid);
+      await expect(promise2).rejects.toMatchObject({
         message: expect.stringContaining("age:"),
       });
     });
@@ -50,7 +52,8 @@ describe("Validation Module", () => {
         body: "{ invalid json }",
       });
 
-      await expect(validateBody(req, z.any())).rejects.toMatchObject({
+      const promise = validateBody(req, z.any());
+      await expect(promise).rejects.toMatchObject({
         name: "ParseError",
       });
     });
@@ -157,7 +160,8 @@ describe("Validation Module", () => {
       const schema = z.object({ requiredCookie: z.string() });
       const req = new Request("http://localhost");
 
-      await expect(validateCookies(req, schema)).rejects.toMatchObject({
+      const promise = validateCookies(req, schema);
+      await expect(promise).rejects.toMatchObject({
         message: expect.stringContaining("requiredCookie:"),
       });
     });
