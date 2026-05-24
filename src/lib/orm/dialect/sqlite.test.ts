@@ -233,7 +233,7 @@ describe("buildFindManyQuery", () => {
   test("builds hasOne include subquery SQL", () => {
     const query = buildFindManyQuery(
       postsTable,
-      { author: one(() => usersTable) },
+      { author: one("authorId", () => usersTable) },
       {
         include: { author: true },
       },
@@ -350,7 +350,7 @@ describe("buildFindManyQuery", () => {
     expect(() =>
       buildFindManyQuery(
         usersTable,
-        { profile: one(() => profilesTable) },
+        { profile: one("profileId", () => profilesTable) },
         {
           include: { profile: true },
         },
@@ -944,7 +944,7 @@ describe("buildUpdateQuery", () => {
   test("builds an update statement with hasOne include in RETURNING", () => {
     const query = buildUpdateQuery(
       postsTable,
-      { author: one(() => usersTable) },
+      { author: one("authorId", () => usersTable) },
       {
         where: { id: "post-1" },
         data: { title: "Updated" },
@@ -1137,7 +1137,7 @@ describe("buildDeleteQuery", () => {
   test("builds a delete statement with hasOne include in RETURNING", () => {
     const query = buildDeleteQuery(
       postsTable,
-      { author: one(() => usersTable) },
+      { author: one("authorId", () => usersTable) },
       {
         where: { id: "post-1" },
         include: { author: true },
@@ -2024,7 +2024,7 @@ describe("boolean coercion in included relations", () => {
     await insertPostWithFeatured(sql, "post-1", "Hello", true, "user-1");
 
     const dialect = createSqliteDialect(postsWithFeaturedTable, {
-      author: one(() => usersTable),
+      author: one("authorId", () => usersTable),
     });
 
     const rows = await dialect.findMany(sql, { include: { author: true } });
