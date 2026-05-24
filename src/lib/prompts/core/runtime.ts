@@ -1,6 +1,7 @@
-import { err, mightThrowSync, ok } from "../../errors/index.js";
+import { mightThrowSync } from "../../errors/index.js";
+import { PromptEnvironmentError, PromptIOError } from "../errors.js";
 import { parseKeys } from "./keys.js";
-import type { Key, PromptResultLike, PromptRuntime } from "./types.js";
+import type { Key, PromptRuntime, Waiter } from "./types.js";
 
 const HIDE_CURSOR = "\u001B[?25l";
 const SHOW_CURSOR = "\u001B[?25h";
@@ -36,7 +37,7 @@ export class NodePromptRuntime implements PromptRuntime {
   private readonly stdin: StdinLike;
   private readonly stdout: StdoutLike;
   private readonly queue: Key[] = [];
-  private readonly waiters: Array<(result: PromptResultLike<Key>) => void> = [];
+  private readonly waiters: Waiter[] = [];
   private initialized = false;
   private previousLines = 0;
   private buffer = "";
@@ -59,14 +60,13 @@ export class NodePromptRuntime implements PromptRuntime {
 
   public init() {
     if (!this.isInteractive()) {
-      return err(
-        "PromptEnvironmentError",
+      throw new PromptEnvironmentError(
         "Interactive prompts require a TTY with raw mode support",
       );
     }
 
     if (this.initialized) {
-      return ok(undefined);
+      return;
     }
 
     const [initError] = mightThrowSync(() => {
@@ -78,22 +78,22 @@ export class NodePromptRuntime implements PromptRuntime {
     });
 
     if (initError) {
-      return err("PromptIOError", "Unable to initialize prompt runtime");
+      throw new PromptIOError("Unable to initialize prompt runtime");
     }
 
     this.initialized = true;
-    return ok(undefined);
+    return;
   }
 
-  public readKey(): Promise<PromptResultLike<Key>> {
+  public readKey(): Promise<Key> {
     const queued = this.queue.shift();
 
     if (queued) {
-      return Promise.resolve(ok(queued));
+      return Promise.resolve(queued);
     }
 
-    return new Promise<PromptResultLike<Key>>((resolve) => {
-      this.waiters.push(resolve);
+    return new Promise<Key>((resolve, reject) => {
+      this.waiters.push({ resolve, reject });
     });
   }
 
@@ -110,10 +110,10 @@ export class NodePromptRuntime implements PromptRuntime {
     });
 
     if (renderError) {
-      return err("PromptIOError", "Unable to render prompt frame");
+      throw new PromptIOError("Unable to render prompt frame");
     }
 
-    return ok(undefined);
+    return;
   }
 
   public done(frame: string) {
@@ -128,15 +128,15 @@ export class NodePromptRuntime implements PromptRuntime {
     });
 
     if (doneError) {
-      return err("PromptIOError", "Unable to finalize prompt frame");
+      throw new PromptIOError("Unable to finalize prompt frame");
     }
 
-    return ok(undefined);
+    return;
   }
 
   public close() {
     if (!this.initialized) {
-      return ok(undefined);
+      return;
     }
 
     this.initialized = false;
@@ -149,10 +149,10 @@ export class NodePromptRuntime implements PromptRuntime {
     });
 
     if (closeError) {
-      return err("PromptIOError", "Unable to close prompt runtime");
+      throw new PromptIOError("Unable to close prompt runtime");
     }
 
-    return ok(undefined);
+    return;
   }
 
   public interrupt(): never {
@@ -169,7 +169,7 @@ export class NodePromptRuntime implements PromptRuntime {
 
     if (parseError || !result) {
       for (const waiter of this.waiters.splice(0)) {
-        waiter(err("PromptIOError", "Failed to parse input"));
+        waiter.reject(new PromptIOError("Failed to parse input"));
       }
 
       return;
@@ -181,7 +181,7 @@ export class NodePromptRuntime implements PromptRuntime {
       const waiter = this.waiters.shift();
 
       if (waiter) {
-        waiter(ok(key));
+        waiter.resolve(key);
       } else {
         this.queue.push(key);
       }
