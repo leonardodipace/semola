@@ -178,7 +178,7 @@ const db = createOrm({
       tasks: many(() => tasks),
     },
     tasks: {
-      assignee: one(() => users),
+      assignee: one("assigneeId", () => users),
     },
   },
 });
