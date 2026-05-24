@@ -1,5 +1,8 @@
-import { err, ok } from "../../errors/index.js";
-import type { CronScannerError } from "./types.js";
+import {
+  CronExpressionError,
+  CronLengthError,
+  EmptyCronExpressionError,
+} from "../errors.js";
 
 export const FieldAmount = {
   min: 5,
@@ -86,10 +89,7 @@ export class Scanner {
 
   public scan() {
     if (this.expression.length === 0) {
-      return err<CronScannerError>(
-        "EmptyCronExpressionError",
-        "Cron expression have zero length",
-      );
+      throw new EmptyCronExpressionError("Cron expression have zero length");
     }
 
     const fields = this.expression.trim().split(/\s+/);
@@ -97,8 +97,7 @@ export class Scanner {
     const hasMaxLen = fields.length === FieldAmount.max;
 
     if (!hasMinLen && !hasMaxLen) {
-      return err<CronScannerError>(
-        "CronLengthError",
+      throw new CronLengthError(
         `Invalid number of fields for '${this.expression}'. Expected 5 or 6 fields but got ${fields.length} field(s)`,
       );
     }
@@ -108,19 +107,17 @@ export class Scanner {
     for (let idx = 0; idx < components.length; idx++) {
       const component = components[idx];
       if (!component) {
-        return err<CronScannerError>(
-          "CronExpressionError",
+        throw new CronExpressionError(
           `Invalid cron expression: ${this.expression}`,
         );
       }
 
       this.current = 0;
       this.start = 0;
-      const [error, _] = this.scanComponent(component);
-      if (error) return err<CronScannerError>(error.type, error.message);
+      this.scanComponent(component);
     }
 
-    return ok(this.tokens);
+    return this.tokens;
   }
 
   private scanComponent(component: ComponentType) {
@@ -132,13 +129,11 @@ export class Scanner {
         case "*": {
           const ch = this.peek(content);
           if (this.match(content, "/")) {
-            const [error, _] = this.handleStep(component);
-            if (error) return err<CronScannerError>(error.type, error.message);
+            this.handleStep(component);
           } else if (!ch || ch === ",") {
             this.addToken("*", "any", "*", field);
           } else {
-            return err<CronScannerError>(
-              "CronExpressionError",
+            throw new CronExpressionError(
               `Invalid any expression '${content}' for field '${field}'`,
             );
           }
@@ -147,29 +142,27 @@ export class Scanner {
         }
         case "-": {
           currentCh = this.advance(content);
+
           if (this.isDigit(currentCh)) {
-            const [error, _] = this.handleRangeWithStep(component);
-            if (error) return err<CronScannerError>(error.type, error.message);
+            this.handleRangeWithStep(component);
           } else {
-            return err<CronScannerError>(
-              "CronExpressionError",
+            throw new CronExpressionError(
               `Invalid range expression '${content}' for field '${field}'`,
             );
           }
+
           break;
         }
         case ",": {
           if (this.current === 1 && this.start === 0) {
-            return err<CronScannerError>(
-              "CronExpressionError",
+            throw new CronExpressionError(
               `Invalid list expression '${content}' for field '${field}'`,
             );
           }
 
           const next = this.peek(content);
           if (!next || next === ",") {
-            return err<CronScannerError>(
-              "CronExpressionError",
+            throw new CronExpressionError(
               `Invalid list expression '${content}' for field '${field}'`,
             );
           }
@@ -178,11 +171,9 @@ export class Scanner {
         }
         default: {
           if (this.isDigit(currentCh)) {
-            const [error, _] = this.handleNumber(component);
-            if (error) return err<CronScannerError>(error.type, error.message);
+            this.handleNumber(component);
           } else {
-            return err<CronScannerError>(
-              "CronExpressionError",
+            throw new CronExpressionError(
               `Invalid cron expression '${this.expression}' in field '${field}'`,
             );
           }
@@ -194,7 +185,7 @@ export class Scanner {
       this.start = this.current;
     }
 
-    return ok(true);
+    return true;
   }
 
   private addToken(
@@ -239,8 +230,7 @@ export class Scanner {
     }
 
     if (ch && ch !== ",") {
-      return err<CronScannerError>(
-        "CronExpressionError",
+      throw new CronExpressionError(
         `Invalid step expression '${content}' for field '${field}'`,
       );
     }
@@ -249,14 +239,13 @@ export class Scanner {
     const value = content.slice(slashIdx + 1, this.current);
 
     if (value.length === 0) {
-      return err<CronScannerError>(
-        "CronExpressionError",
+      throw new CronExpressionError(
         `Invalid step expression '${content}' for field '${field}'`,
       );
     }
 
     this.addToken(tokenContent, "step", Number(value), field);
-    return ok(true);
+    return true;
   }
 
   private handleRangeWithStep(component: ComponentType) {
@@ -269,21 +258,18 @@ export class Scanner {
     }
 
     if (!ch) {
-      return err<CronScannerError>(
-        "CronExpressionError",
+      throw new CronExpressionError(
         `Invalid range expression '${content}' for field '${field}'`,
       );
     }
 
     if (this.match(content, "/")) {
-      const [error, _] = this.handleStep(component);
-      if (error) return err<CronScannerError>(error.type, error.message);
+      this.handleStep(component);
 
-      return ok(true);
+      return true;
     }
 
-    return err<CronScannerError>(
-      "CronExpressionError",
+    throw new CronExpressionError(
       `Invalid range expression '${content}' for field '${field}'`,
     );
   }
@@ -302,33 +288,30 @@ export class Scanner {
       // Reached the end of the component
       const item = content.substring(this.start);
       this.addToken(item, "number", Number(item), field);
-      return ok(true);
+      return true;
     }
 
     if (this.match(content, "-")) {
-      const [error, _] = this.handleRange(component);
-      if (error) return err<CronScannerError>(error.type, error.message);
+      this.handleRange(component);
 
-      return ok(true);
+      return true;
     }
 
     if (this.match(content, "/")) {
-      const [error, _] = this.handleStep(component);
-      if (error) return err<CronScannerError>(error.type, error.message);
+      this.handleStep(component);
 
-      return ok(true);
+      return true;
     }
 
     if (!this.isDigit(ch) && ch !== ",") {
-      return err<CronScannerError>(
-        "CronExpressionError",
+      throw new CronExpressionError(
         `Invalid number '${content}' for field '${field}'`,
       );
     }
 
     const item = content.substring(this.start, this.current);
     this.addToken(item, "number", Number(item), field);
-    return ok(true);
+    return true;
   }
 
   private handleRange(component: ComponentType) {
@@ -336,8 +319,7 @@ export class Scanner {
     let ch = this.peek(content);
 
     if (!ch) {
-      return err<CronScannerError>(
-        "CronExpressionError",
+      throw new CronExpressionError(
         `Invalid range expression '${content}' for field '${field}'`,
       );
     }
@@ -352,26 +334,24 @@ export class Scanner {
       const tokenContent = content.substring(this.start);
       this.addToken(tokenContent, "range", tokenContent, field);
 
-      return ok(true);
+      return true;
     }
 
     if (this.match(content, "/")) {
-      const [error, _] = this.handleStep(component);
-      if (error) return err<CronScannerError>(error.type, error.message);
+      this.handleStep(component);
 
-      return ok(true);
+      return true;
     }
 
     if (ch && ch !== ",") {
-      return err<CronScannerError>(
-        "CronExpressionError",
+      throw new CronExpressionError(
         `Invalid range expression '${content}' for field '${field}'`,
       );
     }
 
     const tokenContent = content.substring(this.start, this.current);
     this.addToken(tokenContent, "range", tokenContent, field);
-    return ok(true);
+    return true;
   }
 
   private isDigit(ch: string) {
