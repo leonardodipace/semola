@@ -15,7 +15,7 @@ import type {
   HasMany,
   HasOne,
   OrmClient,
-  Relations,
+  RelationsFor,
   TableClient,
   TableRelations,
   UpdateManyOptions,
@@ -30,10 +30,10 @@ export const many = <T extends Table>(table: () => T): HasMany<T> => {
   };
 };
 
-export const one = <T extends Table>(
-  foreignKey: string,
+export const one = <T extends Table, const TKey extends string>(
+  foreignKey: TKey,
   table: () => T,
-): HasOne<T> => {
+): HasOne<T, TKey> => {
   return {
     _type: "hasOne",
     _table: table(),
@@ -102,7 +102,7 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
 
 export const createOrm = <
   const T extends Record<string, Table>,
-  const R extends Relations,
+  const R extends RelationsFor<T>,
 >(
   options: CreateOrmOptions<T, R>,
 ) => {

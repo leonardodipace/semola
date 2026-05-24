@@ -7,15 +7,23 @@ export type HasMany<T extends Table> = {
   _table: T;
 };
 
-export type HasOne<T extends Table> = {
+export type HasOne<T extends Table, TKey extends string = string> = {
   _type: "hasOne";
   _table: T;
-  _foreignKey: string;
+  _foreignKey: TKey;
 };
 
 export type TableRelations = Record<string, HasMany<Table> | HasOne<Table>>;
 
 export type Relations = Record<string, TableRelations>;
+
+export type RelationsFor<T extends Record<string, Table>> = {
+  [TTableName in keyof T]?: {
+    [key: string]:
+      | HasMany<Table>
+      | HasOne<Table, keyof T[TTableName]["columns"] & string>;
+  };
+};
 
 type Prettify<T> = {
   [TKey in keyof T]: T[TKey];
@@ -31,7 +39,7 @@ type ExactlyOne<T extends Record<PropertyKey, unknown>> = {
 
 export type CreateOrmOptions<
   T extends Record<string, Table> = Record<string, Table>,
-  R extends Relations = Relations,
+  R extends RelationsFor<T> = RelationsFor<T>,
 > = {
   adapter: Adapter;
   url: string;
@@ -41,7 +49,7 @@ export type CreateOrmOptions<
 
 export type OrmClient<
   T extends Record<string, Table> = Record<string, Table>,
-  R extends Relations = Relations,
+  R extends RelationsFor<T> = RelationsFor<T>,
 > = {
   [TTableName in keyof T]: TableClient<
     T[TTableName],
@@ -52,10 +60,10 @@ export type OrmClient<
 };
 
 type TableRelationsFor<
-  TRelations extends Relations,
+  TRelations,
   TTableName extends PropertyKey,
 > = TTableName extends keyof TRelations
-  ? TRelations[TTableName]
+  ? NonNullable<TRelations[TTableName]>
   : Record<never, never>;
 
 type ColumnRuntimeValue<T extends Column> =
@@ -313,28 +321,32 @@ type IncludedKeys<TInclude> = {
 type SelectResult<
   T extends Table,
   TOptions extends { select?: TableSelect<T> },
-> = TOptions["select"] extends TableSelect<T>
-  ? keyof NonNullable<TOptions["select"]> extends never
-    ? TableRow<T>
-    : {
-        [K in keyof NonNullable<TOptions["select"]> &
-          keyof T["columns"]]: ColumnValue<T["columns"][K]>;
-      }
-  : TableRow<T>;
+> =
+  TOptions["select"] extends TableSelect<T>
+    ? keyof NonNullable<TOptions["select"]> extends never
+      ? TableRow<T>
+      : {
+          [K in keyof NonNullable<TOptions["select"]> &
+            keyof T["columns"]]: ColumnValue<T["columns"][K]>;
+        }
+    : TableRow<T>;
 
 type IncludeResult<
   _T extends Table,
   TRelations extends TableRelations,
   TOptions extends { include?: TableInclude<TRelations> },
-> = TOptions["include"] extends TableInclude<TRelations>
-  ? {
-      [K in IncludedKeys<
-        NonNullable<TOptions["include"]>
-      >]: K extends keyof TRelations
-        ? HasManyRelationType<TRelations[K]> | HasOneRelationType<TRelations[K]>
-        : never;
-    }
-  : {};
+> =
+  TOptions["include"] extends TableInclude<TRelations>
+    ? {
+        [K in IncludedKeys<
+          NonNullable<TOptions["include"]>
+        >]: K extends keyof TRelations
+          ?
+              | HasManyRelationType<TRelations[K]>
+              | HasOneRelationType<TRelations[K]>
+          : never;
+      }
+    : {};
 
 export type FindManyResult<
   T extends Table,

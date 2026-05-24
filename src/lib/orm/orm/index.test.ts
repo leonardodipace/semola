@@ -30,6 +30,36 @@ describe("relation helpers", () => {
     expect(relation._foreignKey).toBe("userId");
   });
 
+  test("one() foreign key must be a column on the source table", () => {
+    const profilesTable = defineTable("profiles", {
+      id: uuid("id").primaryKey().notNull(),
+      userId: uuid("user_id").notNull(),
+    });
+
+    createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable, profiles: profilesTable },
+      relations: {
+        profiles: {
+          user: one("userId", () => usersTable),
+        },
+      },
+    });
+
+    createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable, profiles: profilesTable },
+      relations: {
+        profiles: {
+          // @ts-expect-error "badKey" is not a column on profilesTable
+          user: one("badKey", () => usersTable),
+        },
+      },
+    });
+  });
+
   test("createOrm() wires table clients and exposes raw SQL client", async () => {
     const orm = createOrm({
       adapter: "sqlite",
