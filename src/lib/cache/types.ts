@@ -7,5 +7,4 @@ export type CacheOptions<T> = {
   prefix?: string;
   serializer?: (value: T) => string;
   deserializer?: (raw: string) => T;
-  onError?: (error: { type: CacheError; message: string }) => void;
 };
