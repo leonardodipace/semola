@@ -653,6 +653,8 @@ export const parseIncludeRows = (
 
   for (const row of rows) {
     for (const key of mainBoolKeys) {
+      if (!(key in row)) continue;
+
       row[key] = coerceBooleanValue(row[key]);
     }
 

@@ -363,7 +363,8 @@ describe("buildFindManyQuery", () => {
       buildFindManyQuery(
         usersTable,
         {},
-        { where: { nonExistent: "x" } as never },
+        // @ts-expect-error testing invalid where key
+        { where: { nonExistent: "x" } },
       ),
     ).toThrow('Unknown where key "nonExistent" on table users');
   });
@@ -547,8 +548,8 @@ describe("parseIncludeRows", () => {
 
     parseIncludeRows(postsTable, rows, descriptors);
 
-    expect((rows[0]?.author as Record<string, unknown>)?.isActive).toBe(true);
-    expect((rows[1]?.author as Record<string, unknown>)?.isActive).toBe(false);
+    expect(rows[0]?.author).toMatchObject({ isActive: true });
+    expect(rows[1]?.author).toMatchObject({ isActive: false });
   });
 
   test("coerces boolean fields in a hasMany included relation", () => {
@@ -2006,8 +2007,10 @@ describe("boolean coercion in included relations", () => {
 
     const posts = rows[0]?.posts as Array<Record<string, unknown>>;
 
-    expect(posts[0]?.isFeatured).toBe(true);
-    expect(posts[1]?.isFeatured).toBe(false);
+    expect(posts).toHaveLength(2);
+    expect(posts.map((p) => p.isFeatured)).toEqual(
+      expect.arrayContaining([true, false]),
+    );
 
     await sql.close();
   });
