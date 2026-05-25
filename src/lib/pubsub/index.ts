@@ -1,4 +1,10 @@
-import { err, mightThrow, mightThrowSync, ok } from "../errors/index.js";
+import { mightThrow, mightThrowSync } from "../errors/index.js";
+import {
+  PublishError,
+  SerializationError,
+  SubscribeError,
+  UnsubscribeError,
+} from "./errors.js";
 import type { MessageHandler, PubSubOptions } from "./types.js";
 
 export class PubSub<T extends Record<string, unknown>> {
@@ -40,13 +46,13 @@ export class PubSub<T extends Record<string, unknown>> {
     const handler = this.handlers.get(handlerId);
 
     if (!handler) {
-      return err("UnsubscribeError", "Not subscribed");
+      throw new UnsubscribeError("Not subscribed");
     }
 
     this.handlers.delete(handlerId);
 
     if (this.handlers.size > 0) {
-      return ok(true);
+      return true;
     }
 
     this.isSubscribed = false;
@@ -61,8 +67,7 @@ export class PubSub<T extends Record<string, unknown>> {
       this.handlers.set(handlerId, handler);
       this.isSubscribed = true;
 
-      return err(
-        "UnsubscribeError",
+      throw new UnsubscribeError(
         `Unable to unsubscribe from ${this.options.channel}`,
       );
     }
@@ -74,15 +79,14 @@ export class PubSub<T extends Record<string, unknown>> {
       this.isSubscribed = true;
       this.unsubscribeInFlight = null;
 
-      return err(
-        "UnsubscribeError",
+      throw new UnsubscribeError(
         `Unable to unsubscribe from ${this.options.channel}`,
       );
     }
 
     this.unsubscribeInFlight = null;
 
-    return ok(true);
+    return true;
   }
 
   public async publish(message: T) {
@@ -91,7 +95,7 @@ export class PubSub<T extends Record<string, unknown>> {
     );
 
     if (stringifyError || !stringified) {
-      return err("SerializationError", "Unable to serialize message");
+      throw new SerializationError("Unable to serialize message");
     }
 
     const [publishError, count] = await mightThrow(
@@ -99,13 +103,10 @@ export class PubSub<T extends Record<string, unknown>> {
     );
 
     if (publishError) {
-      return err(
-        "PublishError",
-        `Unable to publish to ${this.options.channel}`,
-      );
+      throw new PublishError(`Unable to publish to ${this.options.channel}`);
     }
 
-    return ok(count);
+    return count;
   }
 
   public async subscribe(handler: MessageHandler<T>) {
@@ -121,7 +122,7 @@ export class PubSub<T extends Record<string, unknown>> {
     this.handlers.set(handlerId, handler);
 
     if (this.isActive()) {
-      return ok(() => this.unsubscribeHandler(handlerId));
+      return () => this.unsubscribeHandler(handlerId);
     }
 
     const inFlightSubscribe = this.subscribeInFlight;
@@ -132,13 +133,12 @@ export class PubSub<T extends Record<string, unknown>> {
       if (inFlightError || !this.isSubscribed) {
         this.handlers.delete(handlerId);
 
-        return err(
-          "SubscribeError",
+        throw new SubscribeError(
           `Unable to subscribe to ${this.options.channel}`,
         );
       }
 
-      return ok(() => this.unsubscribeHandler(handlerId));
+      return () => this.unsubscribeHandler(handlerId);
     }
 
     this.subscribeInFlight = mightThrow(
@@ -153,8 +153,7 @@ export class PubSub<T extends Record<string, unknown>> {
     if (!subscribeInFlight) {
       this.handlers.delete(handlerId);
 
-      return err(
-        "SubscribeError",
+      throw new SubscribeError(
         `Unable to subscribe to ${this.options.channel}`,
       );
     }
@@ -166,8 +165,7 @@ export class PubSub<T extends Record<string, unknown>> {
     if (subscribeError) {
       this.handlers.delete(handlerId);
 
-      return err(
-        "SubscribeError",
+      throw new SubscribeError(
         `Unable to subscribe to ${this.options.channel}`,
       );
     }
@@ -175,15 +173,14 @@ export class PubSub<T extends Record<string, unknown>> {
     if (!count) {
       this.handlers.delete(handlerId);
 
-      return err(
-        "SubscribeError",
+      throw new SubscribeError(
         `Unable to subscribe to ${this.options.channel}`,
       );
     }
 
     this.isSubscribed = true;
 
-    return ok(() => this.unsubscribeHandler(handlerId));
+    return () => this.unsubscribeHandler(handlerId);
   }
 
   public async unsubscribe() {
@@ -194,7 +191,7 @@ export class PubSub<T extends Record<string, unknown>> {
     }
 
     if (!this.isActive()) {
-      return err("UnsubscribeError", "Not subscribed");
+      throw new UnsubscribeError("Not subscribed");
     }
 
     const handlers = new Map(this.handlers);
@@ -213,8 +210,7 @@ export class PubSub<T extends Record<string, unknown>> {
       this.handlers = handlers;
       this.isSubscribed = true;
 
-      return err(
-        "UnsubscribeError",
+      throw new UnsubscribeError(
         `Unable to unsubscribe from ${this.options.channel}`,
       );
     }
@@ -226,15 +222,14 @@ export class PubSub<T extends Record<string, unknown>> {
       this.isSubscribed = true;
       this.unsubscribeInFlight = null;
 
-      return err(
-        "UnsubscribeError",
+      throw new UnsubscribeError(
         `Unable to unsubscribe from ${this.options.channel}`,
       );
     }
 
     this.unsubscribeInFlight = null;
 
-    return ok(true);
+    return true;
   }
 
   public isActive() {
