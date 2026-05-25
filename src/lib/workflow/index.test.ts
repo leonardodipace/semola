@@ -304,9 +304,8 @@ describe("workflow", () => {
       },
     });
 
-    const [error, result] = await workflow.run({ id: 1 });
+    const result = await workflow.run({ id: 1 });
 
-    expect(error).toBeNull();
     expect(result).toBe("done");
   });
 
@@ -319,13 +318,10 @@ describe("workflow", () => {
       handler: async () => "ok",
     });
 
-    const [error, execution] = await workflow.get("unknown");
-
-    expect(error).toEqual({
-      type: "WorkflowNotFoundError",
+    await expect(workflow.get("unknown")).rejects.toMatchObject({
+      name: "NotFoundError",
       message: "Workflow execution unknown not found",
     });
-    expect(execution).toBeNull();
   });
 
   test("rejects duplicate execution ids", async () => {
@@ -337,23 +333,19 @@ describe("workflow", () => {
       handler: async () => "ok",
     });
 
-    const [firstError, firstStart] = await workflow.start(
+    const firstStart = await workflow.start(
       { id: 1 },
       { executionId: "exec-1" },
     );
 
-    const [secondError, secondStart] = await workflow.start(
-      { id: 2 },
-      { executionId: "exec-1" },
-    );
+    expect(firstStart.status).toBe("completed");
 
-    expect(firstError).toBeNull();
-    expect(firstStart?.status).toBe("completed");
-    expect(secondError).toEqual({
-      type: "WorkflowStateError",
+    await expect(
+      workflow.start({ id: 2 }, { executionId: "exec-1" }),
+    ).rejects.toMatchObject({
+      name: "StateError",
       message: "Workflow execution exec-1 already exists",
     });
-    expect(secondStart).toBeNull();
   });
 
   test("resumes from next step after failure", async () => {
@@ -386,17 +378,13 @@ describe("workflow", () => {
       },
     });
 
-    const [startError] = await workflow.start(
-      { id: 10 },
-      { executionId: "exec-1" },
-    );
+    await expect(
+      workflow.start({ id: 10 }, { executionId: "exec-1" }),
+    ).rejects.toMatchObject({ name: "ExecutionError" });
 
-    expect(startError).not.toBeNull();
+    const resumeData = await workflow.resume("exec-1");
 
-    const [resumeError, resumeData] = await workflow.resume("exec-1");
-
-    expect(resumeError).toBeNull();
-    expect(resumeData?.status).toBe("completed");
+    expect(resumeData.status).toBe("completed");
     expect(executedSteps).toEqual(["step-1:10", "step-2:10", "step-2:10"]);
   });
 
@@ -414,10 +402,10 @@ describe("workflow", () => {
     });
 
     await workflow.start({ id: 1 }, { executionId: "complete-1" });
-    const [resumeError, resumeData] = await workflow.resume("complete-1");
 
-    expect(resumeError).toBeNull();
-    expect(resumeData?.status).toBe("completed");
+    const resumeData = await workflow.resume("complete-1");
+
+    expect(resumeData.status).toBe("completed");
     expect(handlerCalls).toBe(1);
   });
 
@@ -444,14 +432,15 @@ describe("workflow", () => {
       },
     });
 
-    await workflow.start({ id: 1 }, { executionId: "cancel-1" });
+    await expect(
+      workflow.start({ id: 1 }, { executionId: "cancel-1" }),
+    ).rejects.toMatchObject({ name: "ExecutionError" });
 
-    const [cancelError] = await workflow.cancel("cancel-1");
-    const [resumeError, resumeData] = await workflow.resume("cancel-1");
+    await workflow.cancel("cancel-1");
 
-    expect(cancelError).toBeNull();
-    expect(resumeError).toBeNull();
-    expect(resumeData?.status).toBe("cancelled");
+    const resumeData = await workflow.resume("cancel-1");
+
+    expect(resumeData.status).toBe("cancelled");
   });
 
   test("rejects cancel for completed workflow", async () => {
@@ -465,13 +454,10 @@ describe("workflow", () => {
 
     await workflow.start({ id: 1 }, { executionId: "done-1" });
 
-    const [cancelError, cancelData] = await workflow.cancel("done-1");
-
-    expect(cancelError).toEqual({
-      type: "WorkflowStateError",
+    await expect(workflow.cancel("done-1")).rejects.toMatchObject({
+      name: "StateError",
       message: "Workflow execution done-1 is already completed",
     });
-    expect(cancelData).toBeNull();
   });
 
   test("fails with lock error when resumed while execution is running", async () => {
@@ -498,20 +484,16 @@ describe("workflow", () => {
 
     await sleep(15);
 
-    const [resumeError, resumeData] = await workflow.resume("lock-1");
-
-    expect(resumeError).toEqual({
-      type: "WorkflowLockError",
+    await expect(workflow.resume("lock-1")).rejects.toMatchObject({
+      name: "LockError",
       message: "Workflow execution lock-1 is already running",
     });
-    expect(resumeData).toBeNull();
 
     release = true;
 
-    const [startError, startData] = await startPromise;
+    const startData = await startPromise;
 
-    expect(startError).toBeNull();
-    expect(startData?.status).toBe("completed");
+    expect(startData.status).toBe("completed");
   });
 
   test("uses custom input and result serializers", async () => {
@@ -546,12 +528,8 @@ describe("workflow", () => {
       },
     });
 
-    const [runError, runData] = await workflow.run(
-      { id: 7 },
-      { executionId: "ser-1" },
-    );
+    const runData = await workflow.run({ id: 7 }, { executionId: "ser-1" });
 
-    expect(runError).toBeNull();
     expect(runData).toEqual({ ok: true });
     expect(serializedInputCalled).toBe(1);
     expect(deserializedInputCalled).toBe(1);
@@ -571,13 +549,10 @@ describe("workflow", () => {
       handler: async () => "ok",
     });
 
-    const [startError, startData] = await workflow.start({ id: 1 });
-
-    expect(startError?.type).toBe("WorkflowSerializationError");
-    expect(
-      startError?.message.includes("Unable to serialize workflow input for"),
-    ).toBe(true);
-    expect(startData).toBeNull();
+    await expect(workflow.start({ id: 1 })).rejects.toMatchObject({
+      name: "SerializationError",
+      message: expect.stringContaining("Unable to serialize workflow input"),
+    });
   });
 
   test("returns workflow error when redis read fails", async () => {
@@ -590,13 +565,10 @@ describe("workflow", () => {
       handler: async () => "ok",
     });
 
-    const [error, data] = await workflow.get("any");
-
-    expect(error).toEqual({
-      type: "WorkflowError",
+    await expect(workflow.get("any")).rejects.toMatchObject({
+      name: "WorkflowError",
       message: "Unable to read status for execution any",
     });
-    expect(data).toBeNull();
   });
 
   test("returns state error when step index is invalid", async () => {
@@ -616,13 +588,10 @@ describe("workflow", () => {
       "{not-json}",
     );
 
-    const [error, data] = await workflow.get("bad-steps-1");
-
-    expect(error).toEqual({
-      type: "WorkflowStateError",
+    await expect(workflow.get("bad-steps-1")).rejects.toMatchObject({
+      name: "StateError",
       message: "Invalid step index for execution bad-steps-1",
     });
-    expect(data).toBeNull();
   });
 
   test("get returns completed steps with timestamps", async () => {
@@ -640,14 +609,13 @@ describe("workflow", () => {
 
     await workflow.start({ id: 1 }, { executionId: "snap-1" });
 
-    const [error, execution] = await workflow.get("snap-1");
+    const execution = await workflow.get("snap-1");
 
-    expect(error).toBeNull();
-    expect(execution?.steps.length).toBe(2);
-    expect(execution?.steps[0]?.name).toBe("one");
-    expect(execution?.steps[1]?.name).toBe("two");
-    expect(typeof execution?.steps[0]?.completedAt).toBe("number");
-    expect(typeof execution?.steps[1]?.completedAt).toBe("number");
+    expect(execution.steps.length).toBe(2);
+    expect(execution.steps[0]?.name).toBe("one");
+    expect(execution.steps[1]?.name).toBe("two");
+    expect(typeof execution.steps[0]?.completedAt).toBe("number");
+    expect(typeof execution.steps[1]?.completedAt).toBe("number");
   });
 
   describe("run matrix", () => {
@@ -656,12 +624,11 @@ describe("workflow", () => {
         const redis = createRedis();
         const workflow = createWorkflowWithEchoResult(`run-matrix-${i}`, redis);
 
-        const [error, result] = await workflow.run(
+        const result = await workflow.run(
           { id: i },
           { executionId: `run-matrix-exec-${i}` },
         );
 
-        expect(error).toBeNull();
         expect(result).toBe(`echo:${i}`);
       });
     }
@@ -681,13 +648,12 @@ describe("workflow", () => {
         const executionId = `resume-matrix-exec-${i}`;
 
         await workflow.start({ id: i }, { executionId });
-        const [resumeError, resumeData] = await workflow.resume(executionId);
-        const [getError, execution] = await workflow.get(executionId);
 
-        expect(resumeError).toBeNull();
-        expect(resumeData?.status).toBe("completed");
-        expect(getError).toBeNull();
-        expect(execution?.result).toBe(`echo:${i}`);
+        const resumeData = await workflow.resume(executionId);
+        const execution = await workflow.get(executionId);
+
+        expect(resumeData.status).toBe("completed");
+        expect(execution.result).toBe(`echo:${i}`);
         expect(calls.value).toBe(1);
       });
     }
@@ -703,15 +669,11 @@ describe("workflow", () => {
         );
         const executionId = `dupe-matrix-exec-${i}`;
 
-        const [firstError] = await workflow.start({ id: i }, { executionId });
-        const [secondError, secondData] = await workflow.start(
-          { id: i + 100 },
-          { executionId },
-        );
+        await workflow.start({ id: i }, { executionId });
 
-        expect(firstError).toBeNull();
-        expect(secondError?.type).toBe("WorkflowStateError");
-        expect(secondData).toBeNull();
+        await expect(
+          workflow.start({ id: i + 100 }, { executionId }),
+        ).rejects.toMatchObject({ name: "StateError" });
       });
     }
   });
@@ -740,21 +702,17 @@ describe("workflow", () => {
         await workflow.start({ id: 1 }, { executionId });
         redis.seedHashField(metaKey, "status", status);
 
-        const [error, data] = await workflow.get(executionId);
-
         if (status.length === 0) {
-          expect(error).toEqual({
-            type: "WorkflowNotFoundError",
+          await expect(workflow.get(executionId)).rejects.toMatchObject({
+            name: "NotFoundError",
             message: `Workflow execution ${executionId} not found`,
           });
         } else {
-          expect(error?.type).toBe("WorkflowStateError");
-          expect(error?.message).toBe(
-            `Workflow execution ${executionId} has invalid status ${status}`,
-          );
+          await expect(workflow.get(executionId)).rejects.toMatchObject({
+            name: "StateError",
+            message: `Workflow execution ${executionId} has invalid status ${status}`,
+          });
         }
-
-        expect(data).toBeNull();
       });
     }
   });
@@ -773,13 +731,10 @@ describe("workflow", () => {
         await workflow.start({ id: 1 }, { executionId });
         redis.seedHashField(metaKey, field, "abc");
 
-        const [error, data] = await workflow.get(executionId);
-
-        expect(error).toEqual({
-          type: "WorkflowStateError",
+        await expect(workflow.get(executionId)).rejects.toMatchObject({
+          name: "StateError",
           message: `Invalid ${field} value for execution ${executionId}`,
         });
-        expect(data).toBeNull();
       });
     }
   });
@@ -820,13 +775,10 @@ describe("workflow", () => {
         redis.seedHashField(metaKey, "steps", JSON.stringify(["one"]));
         redis.seedHashField(stepsKey, "one", payloads[i] ?? "");
 
-        const [error, data] = await workflow.get(executionId);
-
-        expect(error?.type).toBe("WorkflowStateError");
-        expect(error?.message).toBe(
-          `Invalid step payload for one in execution ${executionId}`,
-        );
-        expect(data).toBeNull();
+        await expect(workflow.get(executionId)).rejects.toMatchObject({
+          name: "StateError",
+          message: `Invalid step payload for one in execution ${executionId}`,
+        });
       });
     }
   });
@@ -844,39 +796,34 @@ describe("workflow", () => {
           redis,
         );
 
-        const [error, data] = await workflow.start({ id: 1 });
-
         if (command === "hset") {
-          expect(error?.type).toBe("WorkflowError");
-          expect(
-            error?.message.includes(
-              "Unable to persist metadata for execution ",
+          await expect(workflow.start({ id: 1 })).rejects.toMatchObject({
+            name: "WorkflowError",
+            message: expect.stringContaining(
+              "Unable to persist metadata for execution",
             ),
-          ).toBe(true);
+          });
         } else {
-          expect(error?.type).toBe("WorkflowLockError");
+          await expect(workflow.start({ id: 1 })).rejects.toMatchObject({
+            name: "LockError",
+          });
         }
-
-        expect(data).toBeNull();
       });
     }
   });
 
   describe("execute hset failure matrix", () => {
-    // execute() writes "status":"running" as the 1st hset call
     test("fails when hset fails during running status write", async () => {
       const redis = createRedis() as MockRedisClient & Bun.RedisClient;
       redis.failHsetAfterNCalls(0);
 
       const workflow = createWorkflowWithEchoResult("hset-running-fail", redis);
 
-      const [error, data] = await workflow.start({ id: 1 });
-
-      expect(error?.type).toBe("WorkflowError");
-      expect(data).toBeNull();
+      await expect(workflow.start({ id: 1 })).rejects.toMatchObject({
+        name: "WorkflowError",
+      });
     });
 
-    // 2 running writes + 1 result = 3; 4th is "status":"completed"
     test("fails when hset fails during completed status write", async () => {
       const redis = createRedis() as MockRedisClient & Bun.RedisClient;
       redis.failHsetAfterNCalls(3);
@@ -887,10 +834,9 @@ describe("workflow", () => {
         handler: async () => "done",
       });
 
-      const [error, data] = await workflow.start({ id: 1 });
-
-      expect(error?.type).toBe("WorkflowError");
-      expect(data).toBeNull();
+      await expect(workflow.start({ id: 1 })).rejects.toMatchObject({
+        name: "WorkflowError",
+      });
     });
   });
 
@@ -899,13 +845,10 @@ describe("workflow", () => {
       const redis = createRedis();
       const workflow = createWorkflowWithEchoResult("cancel-unknown", redis);
 
-      const [error, data] = await workflow.cancel("nonexistent");
-
-      expect(error).toEqual({
-        type: "WorkflowNotFoundError",
+      await expect(workflow.cancel("nonexistent")).rejects.toMatchObject({
+        name: "NotFoundError",
         message: "Workflow execution nonexistent not found",
       });
-      expect(data).toBeNull();
     });
 
     test("succeeds silently when cancelling already-cancelled execution", async () => {
@@ -929,25 +872,20 @@ describe("workflow", () => {
         },
       });
 
-      await workflow.start({ id: 1 }, { executionId: "cancel-twice-1" });
-      const [firstCancelError, firstCancelData] =
-        await workflow.cancel("cancel-twice-1");
-      const [secondCancelError, secondCancelData] =
-        await workflow.cancel("cancel-twice-1");
+      await expect(
+        workflow.start({ id: 1 }, { executionId: "cancel-twice-1" }),
+      ).rejects.toMatchObject({ name: "ExecutionError" });
 
-      expect(firstCancelError).toBeNull();
-      expect(firstCancelData).not.toBeNull();
+      const firstCancelData = await workflow.cancel("cancel-twice-1");
+      const secondCancelData = await workflow.cancel("cancel-twice-1");
 
-      expect(secondCancelError).toBeNull();
-      expect(secondCancelData).not.toBeNull();
+      expect(firstCancelData.executionId).toEqual("cancel-twice-1");
+      expect(secondCancelData.executionId).toEqual("cancel-twice-1");
 
-      expect(firstCancelData?.executionId).toEqual("cancel-twice-1");
-      expect(secondCancelData?.executionId).toEqual("cancel-twice-1");
+      expect(firstCancelData.status).toEqual("cancelled");
+      expect(secondCancelData.status).toEqual("cancelled");
 
-      expect(firstCancelData?.status).toEqual("cancelled");
-      expect(secondCancelData?.status).toEqual("cancelled");
-
-      expect(firstCancelData?.createdAt).toEqual(secondCancelData?.createdAt);
+      expect(firstCancelData.createdAt).toEqual(secondCancelData.createdAt);
     });
   });
 
@@ -956,13 +894,10 @@ describe("workflow", () => {
       const redis = createRedis();
       const workflow = createWorkflowWithEchoResult("resume-unknown", redis);
 
-      const [error, data] = await workflow.resume("nonexistent");
-
-      expect(error).toEqual({
-        type: "WorkflowNotFoundError",
+      await expect(workflow.resume("nonexistent")).rejects.toMatchObject({
+        name: "NotFoundError",
         message: "Workflow execution nonexistent not found",
       });
-      expect(data).toBeNull();
     });
   });
 
@@ -978,11 +913,10 @@ describe("workflow", () => {
         },
       });
 
-      const [error, result] = await workflow.run({ id: 1 });
-
-      expect(error?.type).toBe("WorkflowExecutionError");
-      expect(error?.message.includes("handler crashed")).toBe(true);
-      expect(result).toBeNull();
+      await expect(workflow.run({ id: 1 })).rejects.toMatchObject({
+        name: "ExecutionError",
+        message: expect.stringContaining("handler crashed"),
+      });
     });
 
     test("returns WorkflowCancelledError when cancelled during execution", async () => {
@@ -1003,10 +937,9 @@ describe("workflow", () => {
         },
       });
 
-      const [error, result] = await workflow.run({ id: 1 });
-
-      expect(error?.type).toBe("WorkflowCancelledError");
-      expect(result).toBeNull();
+      await expect(workflow.run({ id: 1 })).rejects.toMatchObject({
+        name: "CancelledError",
+      });
     });
   });
 
@@ -1022,16 +955,17 @@ describe("workflow", () => {
         },
       });
 
-      await workflow.start({ id: 1 }, { executionId: "get-failed-1" });
+      await expect(
+        workflow.start({ id: 1 }, { executionId: "get-failed-1" }),
+      ).rejects.toMatchObject({ name: "ExecutionError" });
 
-      const [error, execution] = await workflow.get("get-failed-1");
+      const execution = await workflow.get("get-failed-1");
 
-      expect(error).toBeNull();
-      expect(execution?.status).toBe("failed");
-      expect(execution?.error).toBe("something went wrong");
-      expect(typeof execution?.failedAt).toBe("number");
-      expect(execution?.completedAt).toBeNull();
-      expect(execution?.cancelledAt).toBeNull();
+      expect(execution.status).toBe("failed");
+      expect(execution.error).toBe("something went wrong");
+      expect(typeof execution.failedAt).toBe("number");
+      expect(execution.completedAt).toBeNull();
+      expect(execution.cancelledAt).toBeNull();
     });
 
     test("returns cancelledAt on cancelled workflow", async () => {
@@ -1055,15 +989,17 @@ describe("workflow", () => {
         },
       });
 
-      await workflow.start({ id: 1 }, { executionId: "get-cancelled-1" });
+      await expect(
+        workflow.start({ id: 1 }, { executionId: "get-cancelled-1" }),
+      ).rejects.toMatchObject({ name: "ExecutionError" });
+
       await workflow.cancel("get-cancelled-1");
 
-      const [error, execution] = await workflow.get("get-cancelled-1");
+      const execution = await workflow.get("get-cancelled-1");
 
-      expect(error).toBeNull();
-      expect(execution?.status).toBe("cancelled");
-      expect(typeof execution?.cancelledAt).toBe("number");
-      expect(execution?.completedAt).toBeNull();
+      expect(execution.status).toBe("cancelled");
+      expect(typeof execution.cancelledAt).toBe("number");
+      expect(execution.completedAt).toBeNull();
     });
   });
 
@@ -1101,18 +1037,17 @@ describe("workflow", () => {
 
         const executionId = `falsy-${label}-exec`;
 
-        const [startError] = await workflow.start({ id: 1 }, { executionId });
+        await expect(
+          workflow.start({ id: 1 }, { executionId }),
+        ).rejects.toMatchObject({ name: "ExecutionError" });
 
-        expect(startError).not.toBeNull();
         expect(stepRuns).toBe(1);
 
-        const [resumeError, resumeData] = await workflow.resume(executionId);
-        const [getError, execution] = await workflow.get(executionId);
+        const resumeData = await workflow.resume(executionId);
+        const execution = await workflow.get(executionId);
 
-        expect(resumeError).toBeNull();
-        expect(resumeData?.status).toBe("completed");
-        expect(getError).toBeNull();
-        expect(execution?.result).toStrictEqual(value);
+        expect(resumeData.status).toBe("completed");
+        expect(execution.result).toStrictEqual(value);
         expect(stepRuns).toBe(1);
       });
     }
@@ -1148,14 +1083,15 @@ describe("workflow", () => {
         },
       });
 
-      await workflow.start({ id: 1 }, { executionId: "step-ser-1" });
+      await expect(
+        workflow.start({ id: 1 }, { executionId: "step-ser-1" }),
+      ).rejects.toMatchObject({ name: "ExecutionError" });
 
       expect(serializeCalled).toBe(1);
       expect(deserializeCalled).toBe(0);
 
-      const [resumeError] = await workflow.resume("step-ser-1");
+      await workflow.resume("step-ser-1");
 
-      expect(resumeError).toBeNull();
       expect(serializeCalled).toBe(1);
       expect(deserializeCalled).toBe(1);
     });
@@ -1177,10 +1113,9 @@ describe("workflow", () => {
 
       await workflow.start({ id: 1 }, { executionId: "deser-1" });
 
-      const [error, data] = await workflow.get("deser-1");
-
-      expect(error?.type).toBe("WorkflowSerializationError");
-      expect(data).toBeNull();
+      await expect(workflow.get("deser-1")).rejects.toMatchObject({
+        name: "SerializationError",
+      });
     });
   });
 
@@ -1208,7 +1143,9 @@ describe("workflow", () => {
         },
       });
 
-      await workflow.run({ id: 1 });
+      await expect(workflow.run({ id: 1 })).rejects.toMatchObject({
+        name: "CancelledError",
+      });
 
       expect(signalAborted).toBe(true);
     });
