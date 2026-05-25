@@ -744,6 +744,7 @@ const corsMiddleware = new Middleware({
 #### Database Transaction Middleware
 
 ```typescript
+import { mightThrow } from "semola/errors";
 const transactionMiddleware = new Middleware({
   handler: async (c) => {
     const tx = await db.beginTransaction();
@@ -769,16 +770,23 @@ api.defineRoute({
   handler: async (c) => {
     const tx = c.get("transaction");
 
-    try {
-      await debit(tx, c.req.body.from, c.req.body.amount);
-      await credit(tx, c.req.body.to, c.req.body.amount);
-      await tx.commit();
+    const [debitError] = await mightThrow(debit(tx, c.req.body.from, c.req.body.amount));
 
-      return c.json(200, { success: true });
-    } catch (error) {
+    if (debitError) {
       await tx.rollback();
-      throw error;
+      throw debitError;
     }
+
+    const [creditError] = await mightThrow(credit(tx, c.req.body.to, c.req.body.amount));
+
+    if (creditError) {
+      await tx.rollback();
+      throw creditError;
+    }
+
+    await tx.commit();
+
+    return c.json(200, { success: true });
   },
 });
 ```

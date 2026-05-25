@@ -156,13 +156,12 @@ const name = await input({
 
 ```typescript
 import { PromptCancelledError } from "semola/prompts";
+import { mightThrow } from "semola/errors";
 
-try {
-  const name = await input({ message: "Project name" });
-} catch (error) {
-  if (error instanceof PromptCancelledError) {
-    console.log("Cancelled");
-  }
+const [error, name] = await mightThrow(input({ message: "Project name" }));
+
+if (error instanceof PromptCancelledError) {
+  console.log("Cancelled");
 }
 ```
 
@@ -279,12 +278,11 @@ If interactive mode is unavailable, a `PromptEnvironmentError` is thrown:
 
 ```typescript
 import { PromptEnvironmentError } from "semola/prompts";
+import { mightThrow } from "semola/errors";
 
-try {
-  const name = await input({ message: "Name" });
-} catch (error) {
-  if (error instanceof PromptEnvironmentError) {
-    console.error("Not running in an interactive terminal");
-  }
+const [error] = await mightThrow(input({ message: "Name" }));
+
+if (error instanceof PromptEnvironmentError) {
+  console.error("Not running in an interactive terminal");
 }
 ```

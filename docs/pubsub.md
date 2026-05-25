@@ -153,7 +153,7 @@ await unsubscribeMetrics();
 ### Error Handling
 
 ```typescript
-import { PublishError, PubSub, SerializationError } from "semola/pubsub";
+import { PubSub } from "semola/pubsub";
 
 const subscriber = new Bun.RedisClient("redis://localhost:6379");
 const publisher = new Bun.RedisClient("redis://localhost:6379");
@@ -173,16 +173,8 @@ const unsubscribeHandler = await pubsub.subscribe(
 );
 
 // Publish
-try {
-  const count = await pubsub.publish({ notification: "Hello!" });
-  console.log(`Delivered to ${count} subscribers`);
-} catch (error) {
-  if (error instanceof SerializationError) {
-    console.error("Invalid message format");
-  } else if (error instanceof PublishError) {
-    console.error("Redis connection failed");
-  }
-}
+const count = await pubsub.publish({ notification: "Hello!" });
+console.log(`Delivered to ${count} subscribers`);
 
 // Clean up
 await unsubscribeHandler();
