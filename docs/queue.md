@@ -20,7 +20,7 @@ const queue = new Queue({
 });
 
 // Add a job
-const [error, jobId] = await queue.enqueue({ message: "Hello!" });
+const jobId = await queue.enqueue({ message: "Hello!" });
 
 // Graceful shutdown
 await queue.stop();
@@ -65,14 +65,10 @@ const taskQueue = new Queue({
 });
 
 // Add a job
-const [error, jobId] = await taskQueue.enqueue({
+const jobId = await taskQueue.enqueue({
   taskId: "task-123",
   userId: "user-456",
 });
-
-if (error) {
-  console.error("Failed to enqueue:", error.message);
-}
 
 // Graceful shutdown
 process.on("SIGTERM", async () => {
