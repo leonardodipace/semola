@@ -97,16 +97,18 @@ export class Cron {
         values[i] = 1;
       }
 
-      return true;
+      return;
     }
 
     if (rangePart.includes("-")) {
       // Range with step: delegate to specialized handler
-      return this.handleStepRange(rangePart, step, values, min, max);
+      this.handleStepRange(rangePart, step, values, min, max);
+
+      return;
     }
 
     // Single value with step: delegate to specialized handler
-    return this.handleStepSingle(rangePart, step, values, min, max);
+    this.handleStepSingle(rangePart, step, values, min, max);
   }
 
   private handleStepRange(
@@ -155,8 +157,6 @@ export class Cron {
     for (let i = start; i <= end; i += step) {
       values[i] = 1;
     }
-
-    return true;
   }
 
   private handleStepSingle(
@@ -185,8 +185,6 @@ export class Cron {
     for (let i = start; i <= max; i += step) {
       values[i] = 1;
     }
-
-    return true;
   }
 
   private handleRange(
@@ -234,8 +232,6 @@ export class Cron {
     for (let i = start; i <= end; i++) {
       values[i] = 1;
     }
-
-    return true;
   }
 
   private handleNumber(
@@ -259,8 +255,6 @@ export class Cron {
     }
 
     values[n] = 1;
-
-    return true;
   }
 
   public constructor(options: CronOptions) {
@@ -360,8 +354,6 @@ export class Cron {
           throw new InvalidValueError(`Invalid field '${token.getField()}'`);
       }
     }
-
-    return true;
   }
 
   private handleField(token: Token, field: number[], min: number, max: number) {
@@ -392,8 +384,6 @@ export class Cron {
           `Invalid token type '${token.getTokenType()}'`,
         );
     }
-
-    return true;
   }
 
   public matches(date: Date) {

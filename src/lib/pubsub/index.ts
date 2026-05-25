@@ -52,7 +52,7 @@ export class PubSub<T extends Record<string, unknown>> {
     this.handlers.delete(handlerId);
 
     if (this.handlers.size > 0) {
-      return true;
+      return;
     }
 
     this.isSubscribed = false;
@@ -85,8 +85,6 @@ export class PubSub<T extends Record<string, unknown>> {
     }
 
     this.unsubscribeInFlight = null;
-
-    return true;
   }
 
   public async publish(message: T) {
@@ -228,8 +226,6 @@ export class PubSub<T extends Record<string, unknown>> {
     }
 
     this.unsubscribeInFlight = null;
-
-    return true;
   }
 
   public isActive() {
