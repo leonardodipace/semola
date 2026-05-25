@@ -65,10 +65,17 @@ const taskQueue = new Queue({
 });
 
 // Add a job
-const jobId = await taskQueue.enqueue({
+import { mightThrow } from "semola/errors";
+
+const [enqueueError, jobId] = await mightThrow(taskQueue.enqueue({
   taskId: "task-123",
   userId: "user-456",
-});
+}));
+
+if (enqueueError) {
+  console.error("Failed to enqueue task:", enqueueError);
+  throw enqueueError;
+}
 
 // Graceful shutdown
 process.on("SIGTERM", async () => {
