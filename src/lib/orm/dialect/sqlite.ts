@@ -54,6 +54,15 @@ const serializeParam = (value: unknown) => {
   return value;
 };
 
+const serializeColumnValue = (column: Column, value: unknown) => {
+  if (column.type !== "json" && column.type !== "jsonb")
+    return serializeParam(value);
+  if (value === null) return value;
+  if (value === undefined) return value;
+
+  return JSON.stringify(value);
+};
+
 const escapeLikeValue = (value: unknown) => {
   const escaped = `${serializeParam(value)}`
     .replaceAll("\\", "\\\\")
@@ -492,7 +501,7 @@ export const buildCreateQuery = <T extends Table, R extends TableRelations>(
 
     sqlNames.push(quoteIdentifier(column.sqlName));
     placeholders.push("?");
-    params.push(serializeParam(value));
+    params.push(serializeColumnValue(column, value));
   }
 
   const columns = buildSelectColumns(table, options.select);
@@ -519,7 +528,7 @@ export const buildUpdateQuery = <T extends Table, R extends TableRelations>(
     if (!column) continue;
 
     setClauses.push(`${quoteIdentifier(column.sqlName)} = ?`);
-    params.push(serializeParam(value));
+    params.push(serializeColumnValue(column, value));
   }
 
   if (!setClauses.length) {
@@ -639,6 +648,18 @@ const getBooleanKeys = (table: Table) => {
   return new Set(booleanKeys);
 };
 
+const getJsonKeys = (table: Table) => {
+  const entries = Object.entries(table.columns);
+  const jsonColumns = entries.filter(([, col]) => {
+    if (col.type === "json") return true;
+    if (col.type === "jsonb") return true;
+
+    return false;
+  });
+
+  return new Set(jsonColumns.map(([key]) => key));
+};
+
 const coerceBooleanValue = (val: unknown) => {
   if (val === null) return val;
   if (val === undefined) return val;
@@ -652,12 +673,23 @@ export const parseIncludeRows = (
   descriptors: IncludeDescriptor[],
 ) => {
   const mainBoolKeys = getBooleanKeys(table);
+  const mainJsonKeys = getJsonKeys(table);
 
   for (const row of rows) {
     for (const key of mainBoolKeys) {
       if (!(key in row)) continue;
 
       row[key] = coerceBooleanValue(row[key]);
+    }
+
+    for (const key of mainJsonKeys) {
+      if (!(key in row)) continue;
+
+      const val = row[key];
+
+      if (typeof val === "string") {
+        row[key] = JSON.parse(val);
+      }
     }
 
     for (const descriptor of descriptors) {
@@ -674,11 +706,16 @@ export const parseIncludeRows = (
       if (typeof value !== "string") continue;
 
       const boolKeys = getBooleanKeys(descriptor.table);
+      const jsonKeys = getJsonKeys(descriptor.table);
 
       row[descriptor.name] = JSON.parse(value, (key, val) => {
-        if (!boolKeys.has(key)) return val;
+        if (boolKeys.has(key)) return coerceBooleanValue(val);
 
-        return coerceBooleanValue(val);
+        if (jsonKeys.has(key) && typeof val === "string") {
+          return JSON.parse(val);
+        }
+
+        return val;
       });
     }
   }
@@ -716,7 +753,7 @@ export const buildCreateManyQuery = <T extends Table>(
     for (const [jsKey, column] of columnEntries) {
       const value = resolveCreateValue(column, provided.get(jsKey));
       placeholders.push("?");
-      params.push(serializeParam(value));
+      params.push(serializeColumnValue(column, value));
     }
 
     rowPlaceholders.push(`(${placeholders.join(", ")})`);
@@ -741,7 +778,7 @@ export const buildUpdateManyQuery = <T extends Table>(
     if (!column) continue;
 
     setClauses.push(`${quoteIdentifier(column.sqlName)} = ?`);
-    params.push(serializeParam(value));
+    params.push(serializeColumnValue(column, value));
   }
 
   if (!setClauses.length) {
