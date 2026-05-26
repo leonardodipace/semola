@@ -152,7 +152,7 @@ const buildWhereClause = <T extends Table>(
         clauses.push(`${sqlName} IS NULL`);
       } else {
         clauses.push(`${sqlName} = ?`);
-        params.push(serializeParam(value));
+        params.push(serializeColumnValue(table.columns[typedKey], value));
       }
       continue;
     }
@@ -173,7 +173,11 @@ const buildWhereClause = <T extends Table>(
       }
 
       clauses.push(`${sqlName} ${operator.sql}`);
-      params.push(operator.transform(operand));
+      params.push(
+        operator.transform(
+          serializeColumnValue(table.columns[typedKey], operand),
+        ),
+      );
     }
   }
 

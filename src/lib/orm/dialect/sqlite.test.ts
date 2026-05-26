@@ -394,6 +394,33 @@ describe("buildFindManyQuery", () => {
       ),
     ).toThrow('Unknown where key "nonExistent" on table users');
   });
+
+  test("JSON.stringifies objects/arrays in json and jsonb where clauses", () => {
+    const eventsTable = defineTable("events", {
+      id: uuid("id").primaryKey().notNull(),
+      payload: json("payload").notNull(),
+      meta: jsonb("meta").notNull(),
+    });
+
+    const obj = { type: "click", x: 10 };
+    const arr = [1, 2, 3];
+
+    const query = buildFindManyQuery(
+      eventsTable,
+      {},
+      {
+        where: {
+          payload: arr,
+          meta: { equals: obj },
+        },
+      },
+    );
+
+    expect(query.statement).toBe(
+      'SELECT "id" AS id, "payload" AS payload, "meta" AS meta FROM "events" WHERE "payload" = ? AND "meta" = ?',
+    );
+    expect(query.params).toEqual([JSON.stringify(arr), JSON.stringify(obj)]);
+  });
 });
 
 describe("buildFindUniqueQuery", () => {
