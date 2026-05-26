@@ -172,12 +172,13 @@ cleanup.start();
 ### Query a Database
 
 ```typescript
-import { createOrm, defineTable, string, uuid } from "semola/orm";
+import { createOrm, defineTable, json, string, uuid } from "semola/orm";
 
 const users = defineTable("users", {
   id: uuid("id").primaryKey().notNull(),
   name: string("name").notNull(),
   email: string("email").unique().notNull(),
+  metadata: json<{ plan: string }>("metadata"),
 });
 
 const db = createOrm({
