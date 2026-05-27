@@ -217,6 +217,8 @@ describe("runPromptSession", () => {
       name: "PromptIOError",
       message: "Prompt validate callback failed unexpectedly",
     });
+
+    expect(runtime.closed).toBe(true);
   });
 
   test("should apply transform callback", async () => {
