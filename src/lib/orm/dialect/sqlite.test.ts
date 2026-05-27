@@ -375,6 +375,59 @@ describe("buildFindManyQuery", () => {
     ).toThrow("Column firstName on users is not a foreign key");
   });
 
+  test("throws when hasOne foreign key references a different table", () => {
+    const groupsTable = defineTable("groups", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+
+    const profilesTable = defineTable("profiles", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+
+    const usersWithGroupTable = defineTable("users_with_group", {
+      id: uuid("id").primaryKey().notNull(),
+      groupId: uuid("group_id")
+        .notNull()
+        .references(() => groupsTable.columns.id),
+    });
+
+    expect(() =>
+      buildFindManyQuery(
+        usersWithGroupTable,
+        { profile: one("groupId", () => profilesTable) },
+        {
+          include: { profile: true },
+        },
+      ),
+    ).toThrow("Column groupId on users_with_group does not reference profiles");
+  });
+
+  test("builds hasOne include subquery SQL joining on a non-PK column", () => {
+    const accountsTable = defineTable("accounts", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").notNull().unique(),
+    });
+
+    const sessionsTable = defineTable("sessions", {
+      id: uuid("id").primaryKey().notNull(),
+      userEmail: string("user_email")
+        .notNull()
+        .references(() => accountsTable.columns.email),
+    });
+
+    const query = buildFindManyQuery(
+      sessionsTable,
+      { account: one("userEmail", () => accountsTable) },
+      {
+        include: { account: true },
+      },
+    );
+
+    expect(query.statement).toBe(
+      'SELECT "id" AS id, "user_email" AS userEmail, (SELECT json_object(\'id\', account__accounts."id", \'email\', account__accounts."email") FROM "accounts" AS account__accounts WHERE account__accounts."email" = "sessions"."user_email" LIMIT 1) AS account FROM "sessions"',
+    );
+  });
+
   test("throws on unknown where key", () => {
     expect(() =>
       buildFindManyQuery(
