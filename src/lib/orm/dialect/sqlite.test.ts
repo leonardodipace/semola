@@ -233,7 +233,7 @@ describe("buildFindManyQuery", () => {
   test("builds hasOne include subquery SQL", () => {
     const query = buildFindManyQuery(
       postsTable,
-      { author: one(() => usersTable) },
+      { author: one("authorId", () => usersTable) },
       {
         include: { author: true },
       },
@@ -350,12 +350,82 @@ describe("buildFindManyQuery", () => {
     expect(() =>
       buildFindManyQuery(
         usersTable,
-        { profile: one(() => profilesTable) },
+        { profile: one("profileId", () => profilesTable) },
         {
           include: { profile: true },
         },
       ),
     ).toThrow("Missing hasOne foreign key column profileId on users");
+  });
+
+  test("throws when hasOne column is not a foreign key", () => {
+    const profilesTable = defineTable("profiles", {
+      id: uuid("id").primaryKey().notNull(),
+      bio: string("bio").notNull(),
+    });
+
+    expect(() =>
+      buildFindManyQuery(
+        usersTable,
+        { profile: one("firstName", () => profilesTable) },
+        {
+          include: { profile: true },
+        },
+      ),
+    ).toThrow("Column firstName on users is not a foreign key");
+  });
+
+  test("throws when hasOne foreign key references a different table", () => {
+    const groupsTable = defineTable("groups", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+
+    const profilesTable = defineTable("profiles", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+
+    const usersWithGroupTable = defineTable("users_with_group", {
+      id: uuid("id").primaryKey().notNull(),
+      groupId: uuid("group_id")
+        .notNull()
+        .references(() => groupsTable.columns.id),
+    });
+
+    expect(() =>
+      buildFindManyQuery(
+        usersWithGroupTable,
+        { profile: one("groupId", () => profilesTable) },
+        {
+          include: { profile: true },
+        },
+      ),
+    ).toThrow("Column groupId on users_with_group does not reference profiles");
+  });
+
+  test("builds hasOne include subquery SQL joining on a non-PK column", () => {
+    const accountsTable = defineTable("accounts", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").notNull().unique(),
+    });
+
+    const sessionsTable = defineTable("sessions", {
+      id: uuid("id").primaryKey().notNull(),
+      userEmail: string("user_email")
+        .notNull()
+        .references(() => accountsTable.columns.email),
+    });
+
+    const query = buildFindManyQuery(
+      sessionsTable,
+      { account: one("userEmail", () => accountsTable) },
+      {
+        include: { account: true },
+      },
+    );
+
+    expect(query.statement).toBe(
+      'SELECT "id" AS id, "user_email" AS userEmail, (SELECT json_object(\'id\', account__accounts."id", \'email\', account__accounts."email") FROM "accounts" AS account__accounts WHERE account__accounts."email" = "sessions"."user_email" LIMIT 1) AS account FROM "sessions"',
+    );
   });
 
   test("throws on unknown where key", () => {
@@ -944,7 +1014,7 @@ describe("buildUpdateQuery", () => {
   test("builds an update statement with hasOne include in RETURNING", () => {
     const query = buildUpdateQuery(
       postsTable,
-      { author: one(() => usersTable) },
+      { author: one("authorId", () => usersTable) },
       {
         where: { id: "post-1" },
         data: { title: "Updated" },
@@ -1137,7 +1207,7 @@ describe("buildDeleteQuery", () => {
   test("builds a delete statement with hasOne include in RETURNING", () => {
     const query = buildDeleteQuery(
       postsTable,
-      { author: one(() => usersTable) },
+      { author: one("authorId", () => usersTable) },
       {
         where: { id: "post-1" },
         include: { author: true },
@@ -2024,7 +2094,7 @@ describe("boolean coercion in included relations", () => {
     await insertPostWithFeatured(sql, "post-1", "Hello", true, "user-1");
 
     const dialect = createSqliteDialect(postsWithFeaturedTable, {
-      author: one(() => usersTable),
+      author: one("authorId", () => usersTable),
     });
 
     const rows = await dialect.findMany(sql, { include: { author: true } });
