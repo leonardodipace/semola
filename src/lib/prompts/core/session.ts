@@ -101,72 +101,82 @@ export const runPromptSession = async <
     params.runtime.done(message);
   };
 
-  while (true) {
-    params.runtime.render(
-      params.render({
-        options: params.options,
-        state,
-        errorMessage,
-      }),
-    );
+  const [sessionError, finalValue] = await mightThrow(
+    (async () => {
+      while (true) {
+        params.runtime.render(
+          params.render({
+            options: params.options,
+            state,
+            errorMessage,
+          }),
+        );
 
-    const key = await params.runtime.readKey();
+        const key = await params.runtime.readKey();
 
-    if (!key) {
-      params.runtime.close();
-      throw new PromptIOError("Unable to read prompt input");
-    }
+        if (!key) {
+          throw new PromptIOError("Unable to read prompt input");
+        }
 
-    if (isCancelKey(key)) {
-      params.runtime.close();
-      params.runtime.done(`✖ ${CANCEL_MESSAGE}`);
+        if (isCancelKey(key)) {
+          params.runtime.close();
+          params.runtime.done(`✖ ${CANCEL_MESSAGE}`);
 
-      if (params.runtime.interrupt) {
-        params.runtime.interrupt(CANCEL_MESSAGE);
+          if (params.runtime.interrupt) {
+            params.runtime.interrupt(CANCEL_MESSAGE);
+          }
+
+          throw new PromptCancelledError(CANCEL_MESSAGE);
+        }
+
+        if (key.name !== "enter") {
+          state = params.onKey(state, key);
+          errorMessage = null;
+          continue;
+        }
+
+        const submitResult = params.onSubmit(state);
+
+        if ("errorMessage" in submitResult) {
+          errorMessage = submitResult.errorMessage;
+          continue;
+        }
+
+        const rawValue = submitResult.value;
+
+        const validationErrorMessage = await runValidation(
+          params.options,
+          rawValue,
+        );
+
+        if (validationErrorMessage) {
+          errorMessage = validationErrorMessage;
+          continue;
+        }
+
+        const outputValue = await resolveOutput(params.options, rawValue);
+
+        if (outputValue === null) {
+          throw new PromptIOError("Unable to transform prompt value");
+        }
+
+        closeAndDone(
+          params.complete({
+            options: params.options,
+            state,
+            value: outputValue,
+          }),
+        );
+
+        return outputValue;
       }
+    })(),
+  );
 
-      throw new PromptCancelledError(CANCEL_MESSAGE);
-    }
-
-    if (key.name !== "enter") {
-      state = params.onKey(state, key);
-      errorMessage = null;
-      continue;
-    }
-
-    const submitResult = params.onSubmit(state);
-
-    if ("errorMessage" in submitResult) {
-      errorMessage = submitResult.errorMessage;
-      continue;
-    }
-
-    const rawValue = submitResult.value;
-
-    const validationErrorMessage = await runValidation(
-      params.options,
-      rawValue,
-    );
-
-    if (validationErrorMessage) {
-      errorMessage = validationErrorMessage;
-      continue;
-    }
-
-    const finalValue = await resolveOutput(params.options, rawValue);
-
-    if (finalValue === null) {
-      throw new PromptIOError("Unable to transform prompt value");
-    }
-
-    closeAndDone(
-      params.complete({
-        options: params.options,
-        state,
-        value: finalValue,
-      }),
-    );
-
-    return finalValue;
+  if (sessionError) {
+    params.runtime.close();
+    throw sessionError;
   }
+
+  return finalValue;
 };
