@@ -229,20 +229,14 @@ const buildOrderByClause = <T extends Table>(
   return clauses.join(", ");
 };
 
-const getPrimaryKeyColumn = (table: Table) => {
-  const entries = Object.entries(table.columns);
-  const primaryKey = entries.find(([, column]) => column._meta.isPrimaryKey);
-
-  if (!primaryKey) {
-    throw new Error(`Missing primary key on table ${table.sqlName}`);
-  }
-
-  return primaryKey[1];
-};
-
 type HasManyCandidate = {
   fk: Column;
   source: { sqlName: string };
+};
+
+type HasOneCandidate = {
+  localForeignKey: Column;
+  target: { sqlName: string };
 };
 
 const resolveHasManyForeignKeyColumn = (
@@ -286,6 +280,44 @@ const resolveHasManyForeignKeyColumn = (
   }
 
   return candidate;
+};
+
+const resolveHasOneForeignKeyColumn = (
+  sourceTable: Table,
+  relationTable: Table,
+  relationForeignKey: string,
+): HasOneCandidate => {
+  const localForeignKey = sourceTable.columns[relationForeignKey];
+
+  if (!localForeignKey) {
+    throw new Error(
+      `Missing hasOne foreign key column ${relationForeignKey} on ${sourceTable.sqlName}`,
+    );
+  }
+
+  if (!localForeignKey.references?.tableColumn) {
+    throw new Error(
+      `Column ${relationForeignKey} on ${sourceTable.sqlName} is not a foreign key - call .references() on it`,
+    );
+  }
+
+  const referencedColumn = localForeignKey.references.tableColumn();
+  const relationColumns = Object.values(relationTable.columns);
+
+  const referencesRelationTable = relationColumns.some((column) => {
+    return column === referencedColumn;
+  });
+
+  if (!referencesRelationTable) {
+    throw new Error(
+      `Column ${relationForeignKey} on ${sourceTable.sqlName} does not reference ${relationTable.sqlName}`,
+    );
+  }
+
+  return {
+    localForeignKey,
+    target: referencedColumn,
+  };
 };
 
 const buildJsonObjectExpression = (alias: string, table: Table) => {
@@ -346,23 +378,14 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
       continue;
     }
 
-    const localForeignKey = table.columns[relation._foreignKey];
+    const { localForeignKey, target } = resolveHasOneForeignKeyColumn(
+      table,
+      relationTable,
+      relation._foreignKey,
+    );
 
-    if (!localForeignKey) {
-      throw new Error(
-        `Missing hasOne foreign key column ${relation._foreignKey} on ${table.sqlName}`,
-      );
-    }
-
-    if (!localForeignKey.references?.tableColumn) {
-      throw new Error(
-        `Column ${relation._foreignKey} on ${table.sqlName} is not a foreign key - call .references() on it`,
-      );
-    }
-
-    const relationPrimaryKey = getPrimaryKeyColumn(relationTable);
     clauses.push(
-      `(SELECT ${relationJsonObject} FROM ${quoteIdentifier(relationTable.sqlName)} AS ${relationAlias} WHERE ${relationAlias}.${quoteIdentifier(relationPrimaryKey.sqlName)} = ${quoteIdentifier(table.sqlName)}.${quoteIdentifier(localForeignKey.sqlName)} LIMIT 1) AS ${relationName}`,
+      `(SELECT ${relationJsonObject} FROM ${quoteIdentifier(relationTable.sqlName)} AS ${relationAlias} WHERE ${relationAlias}.${quoteIdentifier(target.sqlName)} = ${quoteIdentifier(table.sqlName)}.${quoteIdentifier(localForeignKey.sqlName)} LIMIT 1) AS ${relationName}`,
     );
     descriptors.push({
       name: relationName,
