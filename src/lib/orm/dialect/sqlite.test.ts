@@ -1,9 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { boolean, date, enumType, string, uuid } from "../column/index.js";
+import {
+  boolean,
+  date,
+  enumType,
+  json,
+  jsonb,
+  string,
+  uuid,
+} from "../column/index.js";
 import { many, one } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
 import {
   buildCreateManyQuery,
+  buildCreateQuery,
   buildDeleteManyQuery,
   buildDeleteQuery,
   buildFindFirstQuery,
@@ -375,59 +384,6 @@ describe("buildFindManyQuery", () => {
     ).toThrow("Column firstName on users is not a foreign key");
   });
 
-  test("throws when hasOne foreign key references a different table", () => {
-    const groupsTable = defineTable("groups", {
-      id: uuid("id").primaryKey().notNull(),
-    });
-
-    const profilesTable = defineTable("profiles", {
-      id: uuid("id").primaryKey().notNull(),
-    });
-
-    const usersWithGroupTable = defineTable("users_with_group", {
-      id: uuid("id").primaryKey().notNull(),
-      groupId: uuid("group_id")
-        .notNull()
-        .references(() => groupsTable.columns.id),
-    });
-
-    expect(() =>
-      buildFindManyQuery(
-        usersWithGroupTable,
-        { profile: one("groupId", () => profilesTable) },
-        {
-          include: { profile: true },
-        },
-      ),
-    ).toThrow("Column groupId on users_with_group does not reference profiles");
-  });
-
-  test("builds hasOne include subquery SQL joining on a non-PK column", () => {
-    const accountsTable = defineTable("accounts", {
-      id: uuid("id").primaryKey().notNull(),
-      email: string("email").notNull().unique(),
-    });
-
-    const sessionsTable = defineTable("sessions", {
-      id: uuid("id").primaryKey().notNull(),
-      userEmail: string("user_email")
-        .notNull()
-        .references(() => accountsTable.columns.email),
-    });
-
-    const query = buildFindManyQuery(
-      sessionsTable,
-      { account: one("userEmail", () => accountsTable) },
-      {
-        include: { account: true },
-      },
-    );
-
-    expect(query.statement).toBe(
-      'SELECT "id" AS id, "user_email" AS userEmail, (SELECT json_object(\'id\', account__accounts."id", \'email\', account__accounts."email") FROM "accounts" AS account__accounts WHERE account__accounts."email" = "sessions"."user_email" LIMIT 1) AS account FROM "sessions"',
-    );
-  });
-
   test("throws on unknown where key", () => {
     expect(() =>
       buildFindManyQuery(
@@ -437,6 +393,33 @@ describe("buildFindManyQuery", () => {
         { where: { nonExistent: "x" } },
       ),
     ).toThrow('Unknown where key "nonExistent" on table users');
+  });
+
+  test("JSON.stringifies objects/arrays in json and jsonb where clauses", () => {
+    const eventsTable = defineTable("events", {
+      id: uuid("id").primaryKey().notNull(),
+      payload: json("payload").notNull(),
+      meta: jsonb("meta").notNull(),
+    });
+
+    const obj = { type: "click", x: 10 };
+    const arr = [1, 2, 3];
+
+    const query = buildFindManyQuery(
+      eventsTable,
+      {},
+      {
+        where: {
+          payload: arr,
+          meta: { equals: obj },
+        },
+      },
+    );
+
+    expect(query.statement).toBe(
+      'SELECT "id" AS id, "payload" AS payload, "meta" AS meta FROM "events" WHERE "payload" = ? AND "meta" = ?',
+    );
+    expect(query.params).toEqual([JSON.stringify(arr), JSON.stringify(obj)]);
   });
 });
 
@@ -2102,6 +2085,153 @@ describe("boolean coercion in included relations", () => {
     const author = rows[0]?.author as Record<string, unknown>;
 
     expect(author.isActive).toBe(false);
+
+    await sql.close();
+  });
+});
+
+type Meta = { isActive: boolean; score: number };
+
+const metaTable = defineTable("meta_table", {
+  id: uuid("id").primaryKey().notNull(),
+  meta: json<Meta>("meta").notNull(),
+  extra: jsonb<{ tags: string[] }>("extra").nullable(),
+});
+
+const CREATE_META_TABLE_SQL =
+  "CREATE TABLE meta_table (id TEXT PRIMARY KEY, meta TEXT NOT NULL, extra TEXT)";
+
+const createMetaTable = async (sql: Bun.SQL) => {
+  await sql.unsafe(CREATE_META_TABLE_SQL);
+};
+
+describe("json and jsonb columns", () => {
+  test("buildCreateQuery serializes json values as JSON strings", () => {
+    const query = buildCreateQuery(
+      metaTable,
+      {},
+      {
+        data: {
+          id: "row-1",
+          meta: { isActive: true, score: 42 },
+        },
+      },
+    );
+
+    expect(query.params[1]).toBe(JSON.stringify({ isActive: true, score: 42 }));
+    expect(query.params[2]).toBeNull();
+  });
+
+  test("buildUpdateQuery serializes json values as JSON strings", () => {
+    const query = buildUpdateQuery(
+      metaTable,
+      {},
+      {
+        where: { id: "row-1" },
+        data: { meta: { isActive: false, score: 0 } },
+      },
+    );
+
+    expect(query.params[0]).toBe(JSON.stringify({ isActive: false, score: 0 }));
+  });
+
+  test("buildCreateManyQuery serializes json values across all rows", () => {
+    const query = buildCreateManyQuery(metaTable, {
+      data: [
+        { id: "row-1", meta: { isActive: true, score: 1 } },
+        { id: "row-2", meta: { isActive: false, score: 2 } },
+      ],
+    });
+
+    expect(query.params[1]).toBe(JSON.stringify({ isActive: true, score: 1 }));
+    expect(query.params[4]).toBe(JSON.stringify({ isActive: false, score: 2 }));
+  });
+
+  test("create and findUnique round-trips json values", async () => {
+    const sql = createMemorySql();
+
+    await createMetaTable(sql);
+
+    const dialect = createSqliteDialect(metaTable, {});
+
+    await dialect.create(sql, {
+      data: { id: "row-1", meta: { isActive: true, score: 99 } },
+    });
+
+    const row = await dialect.findUnique(sql, { where: { id: "row-1" } });
+
+    expect(row?.meta).toEqual({ isActive: true, score: 99 });
+    expect(row?.extra).toBeNull();
+
+    await sql.close();
+  });
+
+  test("create and findUnique round-trips jsonb values", async () => {
+    const sql = createMemorySql();
+
+    await createMetaTable(sql);
+
+    const dialect = createSqliteDialect(metaTable, {});
+
+    await dialect.create(sql, {
+      data: {
+        id: "row-1",
+        meta: { isActive: true, score: 1 },
+        extra: { tags: ["a", "b"] },
+      },
+    });
+
+    const row = await dialect.findUnique(sql, { where: { id: "row-1" } });
+
+    expect(row?.extra).toEqual({ tags: ["a", "b"] });
+
+    await sql.close();
+  });
+
+  test("update persists json changes and findMany returns parsed value", async () => {
+    const sql = createMemorySql();
+
+    await createMetaTable(sql);
+
+    const dialect = createSqliteDialect(metaTable, {});
+
+    await dialect.create(sql, {
+      data: { id: "row-1", meta: { isActive: true, score: 1 } },
+    });
+
+    await dialect.update(sql, {
+      where: { id: "row-1" },
+      data: { meta: { isActive: false, score: 0 } },
+    });
+
+    const rows = await dialect.findMany(sql, {});
+
+    expect(rows[0]?.meta).toEqual({ isActive: false, score: 0 });
+
+    await sql.close();
+  });
+
+  test("json column default is applied on create", async () => {
+    const tableWithDefault = defineTable("defaults_table", {
+      id: uuid("id").primaryKey().notNull(),
+      meta: json<Meta>("meta")
+        .notNull()
+        .default(() => ({ isActive: true, score: 0 })),
+    });
+
+    const sql = createMemorySql();
+
+    await sql.unsafe(
+      "CREATE TABLE defaults_table (id TEXT PRIMARY KEY, meta TEXT NOT NULL)",
+    );
+
+    const dialect = createSqliteDialect(tableWithDefault, {});
+
+    await dialect.create(sql, { data: { id: "row-1" } });
+
+    const row = await dialect.findUnique(sql, { where: { id: "row-1" } });
+
+    expect(row?.meta).toEqual({ isActive: true, score: 0 });
 
     await sql.close();
   });

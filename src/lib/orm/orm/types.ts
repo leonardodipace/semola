@@ -108,12 +108,18 @@ type EnumWhereOperators<T extends Column> = {
   equals?: ColumnValue<T>;
 };
 
+type JsonWhereOperators<T extends Column> = {
+  equals?: ColumnValue<T>;
+};
+
 type ColumnWhereOperatorsMap<T extends Column> = {
   string: StringWhereOperators<T>;
   number: NumberWhereOperators<T>;
   boolean: BooleanWhereOperators<T>;
   date: DateWhereOperators<T>;
   enum: EnumWhereOperators<T>;
+  json: JsonWhereOperators<T>;
+  jsonb: JsonWhereOperators<T>;
 };
 
 type ColumnWhereOperators<T extends Column> =

@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { boolean, date, enumType, number, string, uuid } from "./index.js";
+import {
+  boolean,
+  date,
+  enumType,
+  json,
+  jsonb,
+  number,
+  string,
+  uuid,
+} from "./index.js";
 
 describe("ORM column builders", () => {
   test("create the expected base column metadata", () => {
@@ -20,6 +29,30 @@ describe("ORM column builders", () => {
     expect(id.type).toBe("string");
     expect(status.type).toBe("enum");
     expect(status.enumValues).toEqual(["active", "inactive"]);
+  });
+
+  test("json and jsonb builders create expected column metadata", () => {
+    const meta = json("meta");
+    const extra = jsonb("extra");
+
+    expect(meta.type).toBe("json");
+    expect(meta.sqlName).toBe("meta");
+    expect(meta._meta.isNullable).toBe(true);
+
+    expect(extra.type).toBe("jsonb");
+    expect(extra.sqlName).toBe("extra");
+  });
+
+  test("json column supports default, notNull, and nullable chaining", () => {
+    type Meta = { isActive: boolean };
+
+    const col = json<Meta>("meta")
+      .notNull()
+      .default(() => ({ isActive: true }));
+
+    expect(col._meta.isNullable).toBe(false);
+    expect(col._meta.hasDefault).toBe(true);
+    expect(col._default?.()).toEqual({ isActive: true });
   });
 
   test("set nullability and keep builders immutable", () => {
