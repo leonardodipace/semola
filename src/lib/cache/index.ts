@@ -1,5 +1,12 @@
-import { err, mightThrow, mightThrowSync, ok } from "../errors/index.js";
-import type { CacheError, CacheOptions } from "./types.js";
+import { mightThrow, mightThrowSync } from "../errors/index.js";
+import {
+  CacheError,
+  DeserializationError,
+  InvalidTTLError,
+  NotFoundError,
+  SerializationError,
+} from "./errors.js";
+import type { CacheOptions } from "./types.js";
 
 export class Cache<T> {
   private options: CacheOptions<T>;
@@ -14,7 +21,7 @@ export class Cache<T> {
 
   public async get(key: string) {
     if (!this.isEnabled) {
-      return this.fail("NotFoundError", `Key ${key} not found`);
+      throw new NotFoundError(`Key ${key} not found`);
     }
 
     const resolvedKey = this.resolveKey(key);
@@ -24,11 +31,11 @@ export class Cache<T> {
     );
 
     if (error) {
-      return this.fail("CacheError", `Unable to get value for key ${key}`);
+      throw new CacheError(`Unable to get value for key ${key}`);
     }
 
     if (value === null || value === undefined) {
-      return this.fail("NotFoundError", `Key ${key} not found`);
+      throw new NotFoundError(`Key ${key} not found`);
     }
 
     const [deserializeErr, deserialized] = mightThrowSync<T>(() =>
@@ -36,18 +43,17 @@ export class Cache<T> {
     );
 
     if (deserializeErr) {
-      return this.fail(
-        "CacheError",
+      throw new DeserializationError(
         `Unable to deserialize value for key ${key}`,
       );
     }
 
-    return ok(deserialized);
+    return deserialized;
   }
 
   public async set(key: string, value: T) {
     if (!this.isEnabled) {
-      return ok(value);
+      return value;
     }
 
     const [serializeErr, serialized] = mightThrowSync(() =>
@@ -55,31 +61,21 @@ export class Cache<T> {
     );
 
     if (serializeErr) {
-      return this.fail(
-        "CacheError",
-        `Unable to serialize value for key ${key}`,
-      );
+      throw new SerializationError(`Unable to serialize value for key ${key}`);
     }
 
     if (serialized === null || serialized === undefined) {
-      return this.fail(
-        "CacheError",
-        `Unable to serialize value for key ${key}`,
-      );
+      throw new SerializationError(`Unable to serialize value for key ${key}`);
     }
 
     const [ttlErr, ttl] = mightThrowSync(() => this.resolveTTL(key, value));
 
     if (ttlErr) {
-      return this.fail(
-        "InvalidTTLError",
-        `Unable to resolve ttl for key ${key}`,
-      );
+      throw new InvalidTTLError(`Unable to resolve ttl for key ${key}`);
     }
 
     if (!this.isTTLValid(ttl)) {
-      return this.fail(
-        "InvalidTTLError",
+      throw new InvalidTTLError(
         `Unable to save records with ttl equal to ${ttl}`,
       );
     }
@@ -91,15 +87,15 @@ export class Cache<T> {
     const [setError] = await mightThrow(setPromise);
 
     if (setError) {
-      return this.fail("CacheError", `Unable to set value for key ${key}`);
+      throw new CacheError(`Unable to set value for key ${key}`);
     }
 
-    return ok(value);
+    return value;
   }
 
   public async delete(key: string) {
     if (!this.isEnabled) {
-      return ok(0);
+      return 0;
     }
 
     const resolvedKey = this.resolveKey(key);
@@ -107,16 +103,10 @@ export class Cache<T> {
     const [error, data] = await mightThrow(this.options.redis.del(resolvedKey));
 
     if (error) {
-      return this.fail("CacheError", `Unable to delete key ${key}`);
+      throw new CacheError(`Unable to delete key ${key}`);
     }
 
-    return ok(data);
-  }
-
-  private fail<E extends CacheError>(type: E, message: string) {
-    this.options.onError?.({ type, message });
-
-    return err(type, message);
+    return data;
   }
 
   private get isEnabled() {

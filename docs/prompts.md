@@ -26,10 +26,13 @@ import {
 | `select(options)`      | `TValue`   | Single choice from a list - environments, regions |
 | `multiselect(options)` | `TValue[]` | Multiple choices from a list - features, tags     |
 
-All prompt functions return result tuples using `ok/err` pattern:
+All prompt functions throw on failure and return the value directly on success.
 
-- success: `[null, value]`
-- failure: `[{ type, message }, null]`
+Thrown errors extend `Error` and have a `name` property identifying the error class:
+
+- `PromptEnvironmentError` - runtime is not interactive (no TTY)
+- `PromptCancelledError` - user pressed Escape or Ctrl+C
+- `PromptIOError` - unexpected I/O failure
 
 ## Common options
 
@@ -59,16 +62,12 @@ All prompt functions return result tuples using `ok/err` pattern:
 ### Input
 
 ```typescript
-const [nameError, name] = await input({
+const name = await input({
   message: "Project name",
   required: true,
   placeholder: "my-app",
   validate: (value) => (value.length < 2 ? "Too short" : null),
 });
-
-if (nameError) {
-  console.error(nameError.type, nameError.message);
-}
 ```
 
 ### Password
@@ -77,10 +76,10 @@ When `mask` is omitted, the cursor stays still while typing and nothing is shown
 
 ```typescript
 // hidden mode - cursor stays still, nothing shown on submit
-const [err1, secret] = await password({ message: "Enter password" });
+const secret = await password({ message: "Enter password" });
 
 // masked mode - each character shown as "*", same count shown on submit
-const [err2, secret2] = await password({
+const secret2 = await password({
   message: "Enter password",
   mask: "*",
   validate: (value) =>
@@ -91,35 +90,27 @@ const [err2, secret2] = await password({
 ### Confirm
 
 ```typescript
-const [confirmError, shouldDeploy] = await confirm({
+const shouldDeploy = await confirm({
   message: "Deploy now?",
   defaultValue: true,
 });
-
-if (confirmError) {
-  console.error(confirmError.type, confirmError.message);
-}
 ```
 
 ### Number
 
 ```typescript
-const [portError, port] = await number({
+const port = await number({
   message: "Port",
   defaultValue: 3000,
   min: 1,
   max: 65535,
 });
-
-if (portError) {
-  console.error(portError.type, portError.message);
-}
 ```
 
 ### Select
 
 ```typescript
-const [environmentError, environment] = await select({
+const environment = await select({
   message: "Choose environment",
   choices: [
     { value: "dev", label: "Development" },
@@ -127,30 +118,22 @@ const [environmentError, environment] = await select({
     { value: "prod", label: "Production", hint: "irreversible" },
   ],
 });
-
-if (environmentError) {
-  console.error(environmentError.type, environmentError.message);
-}
 ```
 
 ### Multiselect
 
 ```typescript
-const [toolsError, tools] = await multiselect({
+const tools = await multiselect({
   message: "Enable tools",
   choices: [{ value: "lint" }, { value: "test" }, { value: "build" }],
   min: 1,
 });
-
-if (toolsError) {
-  console.error(toolsError.type, toolsError.message);
-}
 ```
 
 ### Transform
 
 ```typescript
-const [portError, port] = await number({
+const port = await number({
   message: "Port",
   defaultValue: 3000,
   transform: (value) => Math.floor(value),
@@ -160,13 +143,26 @@ const [portError, port] = await number({
 ### Async validate
 
 ```typescript
-const [nameError, name] = await input({
+const name = await input({
   message: "Username",
   validate: async (value) => {
     const taken = await checkUsernameExists(value);
     return taken ? "Username already taken" : null;
   },
 });
+```
+
+### Error handling
+
+```typescript
+import { PromptCancelledError } from "semola/prompts";
+import { mightThrow } from "semola/errors";
+
+const [error, name] = await mightThrow(input({ message: "Project name" }));
+
+if (error instanceof PromptCancelledError) {
+  console.log("Cancelled");
+}
 ```
 
 ## Types
@@ -271,21 +267,22 @@ import type { PromptRuntime } from "semola/prompts";
 
 const runtime: PromptRuntime = { ... };
 
-const [error, value] = await input({ message: "Name" }, runtime);
+const value = await input({ message: "Name" }, runtime);
 ```
 
 ## Interactive-only behavior
 
 Prompts require a TTY with raw mode support.
 
-If interactive mode is unavailable, prompt functions return:
+If interactive mode is unavailable, a `PromptEnvironmentError` is thrown:
 
 ```typescript
-[
-  {
-    type: "PromptEnvironmentError",
-    message: "Interactive prompts require a TTY with raw mode support",
-  },
-  null,
-];
+import { PromptEnvironmentError } from "semola/prompts";
+import { mightThrow } from "semola/errors";
+
+const [error] = await mightThrow(input({ message: "Name" }));
+
+if (error instanceof PromptEnvironmentError) {
+  console.error("Not running in an interactive terminal");
+}
 ```

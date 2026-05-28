@@ -1,5 +1,6 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { err, mightThrow, ok } from "../../errors/index.js";
+import { mightThrow } from "../../errors/index.js";
+import { ParseError, ValidationError } from "../errors.js";
 
 export const validateSchema = async <T>(
   schema: StandardSchemaV1,
@@ -8,7 +9,7 @@ export const validateSchema = async <T>(
   const result = await schema["~standard"].validate(data);
 
   if (!result.issues) {
-    return ok(result.value as T);
+    return result.value as T;
   }
 
   const issues = result.issues.map((issue) => {
@@ -23,7 +24,7 @@ export const validateSchema = async <T>(
 
   const message = issues.join(", ");
 
-  return err("ValidationError", message);
+  throw new ValidationError(message);
 };
 
 export type BodyCache = { parsed: boolean; value: unknown };
@@ -35,13 +36,13 @@ export const validateBody = async (
   bodyCache?: BodyCache,
 ) => {
   if (!bodySchema) {
-    return ok(true);
+    return true;
   }
 
   const contentType = req.headers.get("content-type") ?? "";
 
   if (!contentType.includes("application/json")) {
-    return ok(undefined);
+    return undefined;
   }
 
   if (bodyCache?.parsed) {
@@ -51,7 +52,7 @@ export const validateBody = async (
   const [parseError, parsedBody] = await mightThrow(req.json());
 
   if (parseError) {
-    return err("ParseError", "Invalid JSON body");
+    throw new ParseError("Invalid JSON body");
   }
 
   if (bodyCache) {
@@ -67,7 +68,7 @@ export const validateQuery = async (
   querySchema?: StandardSchemaV1,
 ) => {
   if (!querySchema) {
-    return ok(true);
+    return true;
   }
 
   const qIndex = req.url.indexOf("?");
@@ -105,7 +106,7 @@ export const validateHeaders = async (
   headersSchema?: StandardSchemaV1,
 ) => {
   if (!headersSchema) {
-    return ok(true);
+    return true;
   }
 
   const headers: Record<string, string> = {};
@@ -122,7 +123,7 @@ export const validateCookies = async (
   cookiesSchema?: StandardSchemaV1,
 ) => {
   if (!cookiesSchema) {
-    return ok(true);
+    return true;
   }
 
   // Use Bun's native CookieMap for efficient cookie parsing
@@ -138,7 +139,7 @@ export const validateParams = async (
   paramsSchema?: StandardSchemaV1,
 ) => {
   if (!paramsSchema) {
-    return ok(true);
+    return true;
   }
 
   return validateSchema(paramsSchema, req.params);

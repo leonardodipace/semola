@@ -60,9 +60,8 @@ describe("Queue", () => {
       const handler = () => {};
       const queue = new Queue({ name: "test", redis, retries: 3, handler });
 
-      const [error, jobId] = await queue.enqueue({ message: "hello" });
+      const jobId = await queue.enqueue({ message: "hello" });
 
-      expect(error).toBeNull();
       expect(jobId).toBeDefined();
       expect(typeof jobId).toBe("string");
 
@@ -76,14 +75,12 @@ describe("Queue", () => {
 
       redis.setShouldFail(true);
 
-      const [error, jobId] = await queue.enqueue({ message: "hello" });
+      const promise = queue.enqueue({ message: "hello" });
 
-      expect(error).toEqual({
-        type: "QueueError",
+      await expect(promise).rejects.toMatchObject({
+        name: "EnqueueError",
         message: "Unable to enqueue job",
       });
-
-      expect(jobId).toBeNull();
 
       await queue.stop();
     });
@@ -99,14 +96,12 @@ describe("Queue", () => {
 
       circular.self = circular;
 
-      const [error, jobId] = await queue.enqueue(circular);
+      const promise = queue.enqueue(circular);
 
-      expect(error).toEqual({
-        type: "QueueError",
+      await expect(promise).rejects.toMatchObject({
+        name: "SerializationError",
         message: "Unable to serialize job data",
       });
-
-      expect(jobId).toBeNull();
 
       await queue.stop();
     });
@@ -176,15 +171,11 @@ describe("Queue", () => {
         onSuccess,
       });
 
-      const [, jobId] = await queue.enqueue({ message: "hello" });
+      const jobId = await queue.enqueue({ message: "hello" });
 
       await sleep(200);
 
-      expect(jobId).not.toBeNull();
-
-      if (jobId) {
-        expect(successJobs).toContain(jobId);
-      }
+      expect(successJobs).toContain(jobId);
 
       await queue.stop();
     });
@@ -226,20 +217,16 @@ describe("Queue", () => {
         onRetry,
       });
 
-      const [, jobId] = await queue.enqueue({ message: "hello" });
+      const jobId = await queue.enqueue({ message: "hello" });
 
       await sleep(2500);
 
-      expect(jobId).not.toBeNull();
       expect(retryContexts.length).toBe(1);
-
-      if (jobId) {
-        expect(retryContexts[0]?.id).toBe(jobId);
-        expect(retryContexts[0]?.error).toBe("First attempt fails");
-        expect(retryContexts[0]?.attempts).toBe(1);
-        expect(retryContexts[0]?.nextRetryDelayMs).toBe(1000);
-        expect(retryContexts[0]?.retriesRemaining).toBe(1);
-      }
+      expect(retryContexts[0]?.id).toBe(jobId);
+      expect(retryContexts[0]?.error).toBe("First attempt fails");
+      expect(retryContexts[0]?.attempts).toBe(1);
+      expect(retryContexts[0]?.nextRetryDelayMs).toBe(1000);
+      expect(retryContexts[0]?.retriesRemaining).toBe(1);
 
       await queue.stop();
     });
@@ -315,16 +302,12 @@ describe("Queue", () => {
         onSuccess,
       });
 
-      const [, jobId] = await queue.enqueue({ message: "hello" });
+      const jobId = await queue.enqueue({ message: "hello" });
 
       await sleep(200);
 
-      expect(jobId).not.toBeNull();
       expect(retryJobs.length).toBe(0);
-
-      if (jobId) {
-        expect(successJobs).toContain(jobId);
-      }
+      expect(successJobs).toContain(jobId);
 
       await queue.stop();
     });
@@ -356,18 +339,14 @@ describe("Queue", () => {
         onError,
       });
 
-      const [, jobId] = await queue.enqueue({ message: "hello" });
+      const jobId = await queue.enqueue({ message: "hello" });
 
       await sleep(4000);
 
-      expect(jobId).not.toBeNull();
       expect(retryJobs.length).toBe(2);
       expect(errorJobs.length).toBe(1);
-
-      if (jobId) {
-        expect(retryJobs).toContain(jobId);
-        expect(errorJobs).toContain(jobId);
-      }
+      expect(retryJobs).toContain(jobId);
+      expect(errorJobs).toContain(jobId);
 
       await queue.stop();
     });
@@ -421,17 +400,12 @@ describe("Queue", () => {
         onError,
       });
 
-      const [, jobId] = await queue.enqueue({ message: "hello" });
+      const jobId = await queue.enqueue({ message: "hello" });
 
       await sleep(4000);
 
       expect(attempts).toBe(3);
-
-      expect(jobId).not.toBeNull();
-
-      if (jobId) {
-        expect(errorJobs).toContain(jobId);
-      }
+      expect(errorJobs).toContain(jobId);
 
       await queue.stop();
     });
@@ -469,21 +443,17 @@ describe("Queue", () => {
         onError,
       });
 
-      const [, jobId] = await queue.enqueue({ message: "hello" });
+      const jobId = await queue.enqueue({ message: "hello" });
 
       await sleep(3000);
 
       expect(errorContexts.length).toBe(1);
-      expect(jobId).not.toBeNull();
-
-      if (jobId) {
-        expect(errorContexts[0]?.id).toBe(jobId);
-        expect(errorContexts[0]?.lastError).toBe("Processing failed");
-        expect(errorContexts[0]?.totalAttempts).toBe(2);
-        expect(errorContexts[0]?.totalDurationMs).toBeGreaterThan(0);
-        expect(errorContexts[0]?.errorHistory).toBeDefined();
-        expect(errorContexts[0]?.errorHistory.length).toBeGreaterThan(0);
-      }
+      expect(errorContexts[0]?.id).toBe(jobId);
+      expect(errorContexts[0]?.lastError).toBe("Processing failed");
+      expect(errorContexts[0]?.totalAttempts).toBe(2);
+      expect(errorContexts[0]?.totalDurationMs).toBeGreaterThan(0);
+      expect(errorContexts[0]?.errorHistory).toBeDefined();
+      expect(errorContexts[0]?.errorHistory.length).toBeGreaterThan(0);
 
       await queue.stop();
     });
@@ -509,15 +479,11 @@ describe("Queue", () => {
         onError,
       });
 
-      const [, jobId] = await queue.enqueue({ message: "hello" });
+      const jobId = await queue.enqueue({ message: "hello" });
 
       await sleep(3000);
 
-      expect(jobId).not.toBeNull();
-
-      if (jobId) {
-        expect(errorJobs).toContain(jobId);
-      }
+      expect(errorJobs).toContain(jobId);
 
       await queue.stop();
     });
@@ -932,17 +898,13 @@ describe("Queue", () => {
         onError,
       });
 
-      const [, jobId] = await queue.enqueue({ message: "hello" });
+      const jobId = await queue.enqueue({ message: "hello" });
 
       await sleep(3000);
 
       // Should have retried once due to timeout
       expect(attempts).toBeGreaterThanOrEqual(2);
-      expect(jobId).not.toBeNull();
-
-      if (jobId) {
-        expect(errorJobs).toContain(jobId);
-      }
+      expect(errorJobs).toContain(jobId);
 
       // Verify signal was received and got aborted after timeout
       expect(signalStates.length).toBeGreaterThan(0);

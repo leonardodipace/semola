@@ -122,16 +122,14 @@ const pubsub = new PubSub({
 });
 
 // Subscribe to messages
-const [, unsubscribeHandler] = await pubsub.subscribe((message) => {
+const unsubscribe = await pubsub.subscribe((message) => {
   console.log("Received:", message);
 });
 
 // Publish a message
 await pubsub.publish({ userId: 123, text: "New alert!" });
 
-if (unsubscribeHandler) {
-  await unsubscribeHandler();
-}
+await unsubscribe();
 ```
 
 ### Cache Data with TTL
@@ -148,8 +146,8 @@ const cache = new Cache({
 await cache.set("user:123", { name: "John", age: 30 });
 
 // Retrieve data
-const [error, user] = await cache.get("user:123");
-if (!error) console.log(user);
+const user = await cache.get("user:123");
+console.log(user);
 ```
 
 ### Schedule Recurring Tasks

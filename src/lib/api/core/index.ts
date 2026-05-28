@@ -112,7 +112,9 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     const v: Record<string, unknown> = {};
 
     if (schema.body) {
-      const [err, val] = await validateBody(req, schema.body, bodyCache);
+      const [err, val] = await mightThrow(
+        validateBody(req, schema.body, bodyCache),
+      );
 
       if (err) {
         return {
@@ -125,7 +127,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     }
 
     if (schema.query) {
-      const [err, val] = await validateQuery(req, schema.query);
+      const [err, val] = await mightThrow(validateQuery(req, schema.query));
 
       if (err) {
         return {
@@ -138,7 +140,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     }
 
     if (schema.headers) {
-      const [err, val] = await validateHeaders(req, schema.headers);
+      const [err, val] = await mightThrow(validateHeaders(req, schema.headers));
 
       if (err) {
         return {
@@ -151,7 +153,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     }
 
     if (schema.cookies) {
-      const [err, val] = await validateCookies(req, schema.cookies);
+      const [err, val] = await mightThrow(validateCookies(req, schema.cookies));
 
       if (err) {
         return {
@@ -164,7 +166,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     }
 
     if (schema.params) {
-      const [err, val] = await validateParams(req, schema.params);
+      const [err, val] = await mightThrow(validateParams(req, schema.params));
 
       if (err) {
         return {
@@ -212,7 +214,9 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
       return responseHelpers.json(400, { message: "Invalid response body" });
     }
 
-    const [validationError] = await validateSchema(statusSchema, body);
+    const [validationError] = await mightThrow(
+      validateSchema(statusSchema, body),
+    );
 
     if (validationError) {
       return responseHelpers.json(400, { message: validationError.message });

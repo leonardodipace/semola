@@ -30,7 +30,7 @@ const onboardUser = defineWorkflow<User>({
   },
 });
 
-const [startError, started] = await onboardUser.start({
+const started = await onboardUser.start({
   id: 1,
   email: "leo@example.com",
 });

@@ -1,6 +1,6 @@
 # PubSub
 
-A type-safe Redis pub/sub wrapper for real-time messaging with result-based error handling. Built on Bun's native Redis client.
+A type-safe Redis pub/sub wrapper for real-time messaging. Built on Bun's native Redis client.
 
 ## Import
 
@@ -32,56 +32,42 @@ Use two separate `Bun.RedisClient` instances when you both subscribe and publish
 
 **`pubsub.publish(message: T)`**
 
-Publishes a message to the channel or pattern. Returns a result tuple with the number of subscribers who received the message.
+Publishes a message to the channel. Returns the number of subscribers who received the message. Throws `SerializationError` if the message cannot be serialized, or `PublishError` on Redis failure.
 
 ```typescript
-const [error, count] = await pubsub.publish({
+const count = await pubsub.publish({
   userId: "123",
   action: "login",
   timestamp: Date.now(),
 });
 
-if (error) {
-  console.error("Failed to publish:", error.message);
-} else {
-  console.log(`Message delivered to ${count} subscribers`);
-}
+console.log(`Message delivered to ${count} subscribers`);
 ```
 
 **`pubsub.subscribe(handler: MessageHandler<T>)`**
 
-Registers a local handler for messages on this PubSub instance. Returns a result tuple with a handler-level unsubscribe function.
+Registers a local handler for messages on this PubSub instance. Returns a handler-level unsubscribe function. Throws `SubscribeError` on Redis failure.
 
 ```typescript
 type MessageHandler<T> = (message: T, channel: string) => void | Promise<void>;
 
-const [error, unsubscribeHandler] = await pubsub.subscribe(
+const unsubscribeHandler = await pubsub.subscribe(
   async (message, channel) => {
     console.log(`Received on ${channel}:`, message);
     await processMessage(message);
   },
 );
 
-if (error) {
-  console.error("Failed to subscribe:", error.message);
-}
-
-if (unsubscribeHandler) {
-  // Removes only this handler.
-  await unsubscribeHandler();
-}
+// Removes only this handler.
+await unsubscribeHandler();
 ```
 
 **`pubsub.unsubscribe()`**
 
-Unsubscribes all local handlers for this instance and removes the Redis subscription.
+Unsubscribes all local handlers for this instance and removes the Redis subscription. Throws `UnsubscribeError` if not currently subscribed.
 
 ```typescript
-const [error] = await pubsub.unsubscribe();
-
-if (error) {
-  console.error("Failed to unsubscribe:", error.message);
-}
+await pubsub.unsubscribe();
 ```
 
 **`pubsub.isActive()`**
@@ -118,7 +104,7 @@ const events = new PubSub<UserEvent>({
 });
 
 // Subscribe to events
-const [, unsubscribeEvents] = await events.subscribe(async (event) => {
+const unsubscribeEvents = await events.subscribe(async (event) => {
   console.log(`User ${event.userId} performed ${event.action}`);
   await logToDatabase(event);
 });
@@ -130,9 +116,7 @@ await events.publish({
   timestamp: Date.now(),
 });
 
-if (unsubscribeEvents) {
-  await unsubscribeEvents();
-}
+await unsubscribeEvents();
 ```
 
 ### Multiple Handlers On One Instance
@@ -149,25 +133,21 @@ const pubsub = new PubSub<{ text: string }>({
   channel: "notifications",
 });
 
-const [, unsubscribeLogger] = await pubsub.subscribe(async (message) => {
+const unsubscribeLogger = await pubsub.subscribe(async (message) => {
   console.log("logger:", message.text);
 });
 
-const [, unsubscribeMetrics] = await pubsub.subscribe(async (message) => {
+const unsubscribeMetrics = await pubsub.subscribe(async (message) => {
   await metrics.increment("notifications.received", { text: message.text });
 });
 
 await pubsub.publish({ text: "New alert" });
 
 // Remove one handler, keep the other active
-if (unsubscribeLogger) {
-  await unsubscribeLogger();
-}
+await unsubscribeLogger();
 
 // Redis unsubscribe happens only when the last local handler is removed
-if (unsubscribeMetrics) {
-  await unsubscribeMetrics();
-}
+await unsubscribeMetrics();
 ```
 
 ### Error Handling
@@ -185,38 +165,19 @@ const pubsub = new PubSub<{ notification: string }>({
 });
 
 // Subscribe with error handling
-const [subscribeError, unsubscribeHandler] = await pubsub.subscribe(
+const unsubscribeHandler = await pubsub.subscribe(
   async (message) => {
     // Handler errors are caught automatically; subscription remains active even if handler throws
     await processNotification(message.notification);
   },
 );
 
-if (subscribeError) {
-  console.error("Failed to subscribe:", subscribeError.message);
-  return;
-}
-
-// Publish with error handling
-const [publishError, count] = await pubsub.publish({ notification: "Hello!" });
-
-if (publishError) {
-  switch (publishError.type) {
-    case "SerializationError":
-      console.error("Invalid message format");
-      break;
-    case "PublishError":
-      console.error("Redis connection failed");
-      break;
-  }
-} else {
-  console.log(`Delivered to ${count} subscribers`);
-}
+// Publish
+const count = await pubsub.publish({ notification: "Hello!" });
+console.log(`Delivered to ${count} subscribers`);
 
 // Clean up
-if (unsubscribeHandler) {
-  await unsubscribeHandler();
-}
+await unsubscribeHandler();
 ```
 
 ### Multiple Instances
