@@ -1,4 +1,5 @@
-import { err, mightThrow, mightThrowSync, ok } from "../errors/index.js";
+import { mightThrow, mightThrowSync } from "../errors/index.js";
+import { EnqueueError, SerializationError } from "./errors.js";
 import type { Job, JobState, QueueOptions } from "./types.js";
 
 const toMinimalJob = <T>(jobState: JobState<T>): Job<T> => ({
@@ -46,16 +47,18 @@ export class Queue<T> {
     };
 
     const [serializeError, serialized] = this.serializeJob(job);
+
     if (serializeError || !serialized) {
-      return err("QueueError", "Unable to serialize job data");
+      throw new SerializationError("Unable to serialize job data");
     }
 
     const [enqueueError] = await this.enqueueJobData(serialized);
+
     if (enqueueError) {
-      return err("QueueError", "Unable to enqueue job");
+      throw new EnqueueError("Unable to enqueue job");
     }
 
-    return ok(job.id);
+    return job.id;
   }
 
   public async stop() {
@@ -82,7 +85,7 @@ export class Queue<T> {
     return mightThrow(this.options.redis.lpush(queueKey, serialized));
   }
 
-  private async moveToDeadLetterQueue(jobData: string, parseError: unknown) {
+  private async moveToDeadLetterQueue(jobData: string, parseError: Error) {
     const deadLetterKey = `queue:${this.options.name}:dead-letter`;
     const deadLetterEntry = JSON.stringify({
       jobData,
@@ -93,8 +96,10 @@ export class Queue<T> {
     return mightThrow(this.options.redis.lpush(deadLetterKey, deadLetterEntry));
   }
 
-  private formatErrorMessage(error: unknown) {
-    return error instanceof Error ? error.message : String(error);
+  private formatErrorMessage(error: Error | null) {
+    if (!error) return "Unknown error";
+
+    return error.message;
   }
 
   private startWorkers() {
@@ -129,7 +134,6 @@ export class Queue<T> {
         // Handle malformed payload: preserve to dead-letter queue and notify
         await this.callOnErrorForParseFailure(jobData, parseError);
         await this.moveToDeadLetterQueue(jobData, parseError);
-
         await this.waitForPollInterval();
         continue;
       }
@@ -248,10 +252,7 @@ export class Queue<T> {
     );
   }
 
-  private async callOnErrorForParseFailure(
-    jobData: string,
-    parseError: unknown,
-  ) {
+  private async callOnErrorForParseFailure(jobData: string, parseError: Error) {
     if (!this.options.onParseError) {
       return;
     }

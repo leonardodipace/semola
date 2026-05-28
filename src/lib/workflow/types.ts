@@ -5,20 +5,6 @@ export type WorkflowStatus =
   | "failed"
   | "cancelled";
 
-export type WorkflowErrorType =
-  | "WorkflowError"
-  | "WorkflowNotFoundError"
-  | "WorkflowStateError"
-  | "WorkflowSerializationError"
-  | "WorkflowLockError"
-  | "WorkflowExecutionError"
-  | "WorkflowCancelledError";
-
-export type WorkflowError = {
-  type: WorkflowErrorType;
-  message: string;
-};
-
 export type StepSnapshot = {
   name: string;
   completedAt: number;
@@ -108,20 +94,12 @@ export type Workflow<TInput, TResult> = {
   start: (
     input: TInput,
     options?: WorkflowStartOptions,
-  ) => Promise<readonly [WorkflowError | null, WorkflowStartResult | null]>;
+  ) => Promise<WorkflowStartResult>;
   run: (
     input: TInput,
     options?: WorkflowStartOptions,
-  ) => Promise<readonly [WorkflowError | null, TResult | null]>;
-  resume: (
-    executionId: string,
-  ) => Promise<readonly [WorkflowError | null, WorkflowStartResult | null]>;
-  get: (
-    executionId: string,
-  ) => Promise<
-    readonly [WorkflowError | null, WorkflowExecution<TInput, TResult> | null]
-  >;
-  cancel: (
-    executionId: string,
-  ) => Promise<readonly [WorkflowError | null, WorkflowCancelResult | null]>;
+  ) => Promise<TResult | null>;
+  resume: (executionId: string) => Promise<WorkflowStartResult>;
+  get: (executionId: string) => Promise<WorkflowExecution<TInput, TResult>>;
+  cancel: (executionId: string) => Promise<WorkflowCancelResult>;
 };

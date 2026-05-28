@@ -1,6 +1,7 @@
-import { err, mightThrow, ok } from "../../errors/index.js";
+import { mightThrow } from "../../errors/index.js";
+import { InvalidValueError, OutOfBoundError } from "../errors.js";
 import { FieldAmount, Scanner, type Token } from "./scanner.js";
-import type { CronOptions, CronParsingError, CronStatus } from "./types.js";
+import type { CronOptions, CronStatus } from "./types.js";
 
 const RETRY_DELAY_MS = 60 * 60 * 1000; // 1 hour
 const MAX_YEARS = 4;
@@ -72,31 +73,22 @@ export class Cron {
     const [rangePart, stepStr] = part.split("/");
 
     if (!rangePart) {
-      return err<CronParsingError>(
-        "InvalidValueError",
-        `'${rangePart}' is empty`,
-      );
+      throw new InvalidValueError(`'${rangePart}' is empty`);
     }
 
     if (!stepStr) {
-      return err<CronParsingError>(
-        "InvalidValueError",
-        `'${stepStr}' is empty`,
-      );
+      throw new InvalidValueError(`'${stepStr}' is empty`);
     }
 
     const step = Number(stepStr);
 
     // Validate step is a positive integer
     if (!Number.isInteger(step)) {
-      return err<CronParsingError>(
-        "InvalidValueError",
-        `'${step}' is not a valid number`,
-      );
+      throw new InvalidValueError(`'${step}' is not a valid number`);
     }
 
     if (step <= 0) {
-      return err<CronParsingError>("OutOfBoundError", `Expected ${step} > 0`);
+      throw new OutOfBoundError(`Expected ${step} > 0`);
     }
 
     if (rangePart === "*") {
@@ -105,16 +97,18 @@ export class Cron {
         values[i] = 1;
       }
 
-      return ok(true);
+      return;
     }
 
     if (rangePart.includes("-")) {
       // Range with step: delegate to specialized handler
-      return this.handleStepRange(rangePart, step, values, min, max);
+      this.handleStepRange(rangePart, step, values, min, max);
+
+      return;
     }
 
     // Single value with step: delegate to specialized handler
-    return this.handleStepSingle(rangePart, step, values, min, max);
+    this.handleStepSingle(rangePart, step, values, min, max);
   }
 
   private handleStepRange(
@@ -128,7 +122,7 @@ export class Cron {
     const [startStr, endStr] = range.split("-");
 
     if (!endStr) {
-      return err<CronParsingError>("InvalidValueError", `'${endStr}' is empty`);
+      throw new InvalidValueError(`'${endStr}' is empty`);
     }
 
     let start = min;
@@ -140,46 +134,29 @@ export class Cron {
 
     // Validate range boundaries are integers within bounds
     if (!Number.isInteger(start)) {
-      return err<CronParsingError>(
-        "InvalidValueError",
-        `'${start}' is not a valid number`,
-      );
+      throw new InvalidValueError(`'${start}' is not a valid number`);
     }
 
     if (!Number.isInteger(end)) {
-      return err<CronParsingError>(
-        "InvalidValueError",
-        `'${end}' is not a valid number`,
-      );
+      throw new InvalidValueError(`'${end}' is not a valid number`);
     }
 
     if (start < min) {
-      return err<CronParsingError>(
-        "OutOfBoundError",
-        `Expected ${start} >= ${min}`,
-      );
+      throw new OutOfBoundError(`Expected ${start} >= ${min}`);
     }
 
     if (end > max) {
-      return err<CronParsingError>(
-        "OutOfBoundError",
-        `Expected ${end} <= ${max}`,
-      );
+      throw new OutOfBoundError(`Expected ${end} <= ${max}`);
     }
 
     if (start > end) {
-      return err<CronParsingError>(
-        "OutOfBoundError",
-        `Expected ${start} <= ${end}`,
-      );
+      throw new OutOfBoundError(`Expected ${start} <= ${end}`);
     }
 
     // Apply step through range
     for (let i = start; i <= end; i += step) {
       values[i] = 1;
     }
-
-    return ok(true);
   }
 
   private handleStepSingle(
@@ -193,32 +170,21 @@ export class Cron {
 
     // Validate starting value is an integer within bounds
     if (!Number.isInteger(start)) {
-      return err<CronParsingError>(
-        "InvalidValueError",
-        `'${start}' is not a valid number`,
-      );
+      throw new InvalidValueError(`'${start}' is not a valid number`);
     }
 
     if (start < min) {
-      return err<CronParsingError>(
-        "OutOfBoundError",
-        `Expected ${start} >= ${min}`,
-      );
+      throw new OutOfBoundError(`Expected ${start} >= ${min}`);
     }
 
     if (start > max) {
-      return err<CronParsingError>(
-        "OutOfBoundError",
-        `Expected ${start} <= ${max}`,
-      );
+      throw new OutOfBoundError(`Expected ${start} <= ${max}`);
     }
 
     // Apply step from start to end of range
     for (let i = start; i <= max; i += step) {
       values[i] = 1;
     }
-
-    return ok(true);
   }
 
   private handleRange(
@@ -231,14 +197,11 @@ export class Cron {
     const [startStr, endStr] = part.split("-");
 
     if (!startStr) {
-      return err<CronParsingError>(
-        "InvalidValueError",
-        `'${startStr}' is empty`,
-      );
+      throw new InvalidValueError(`'${startStr}' is empty`);
     }
 
     if (!endStr) {
-      return err<CronParsingError>("InvalidValueError", `'${endStr}' is empty`);
+      throw new InvalidValueError(`'${endStr}' is empty`);
     }
 
     const start = Number(startStr);
@@ -246,46 +209,29 @@ export class Cron {
 
     // Validate range boundaries are integers within bounds
     if (!Number.isInteger(start)) {
-      return err<CronParsingError>(
-        "InvalidValueError",
-        `'${start}' is not a valid number`,
-      );
+      throw new InvalidValueError(`'${start}' is not a valid number`);
     }
 
     if (!Number.isInteger(end)) {
-      return err<CronParsingError>(
-        "InvalidValueError",
-        `'${end}' is not a valid number`,
-      );
+      throw new InvalidValueError(`'${end}' is not a valid number`);
     }
 
     if (start < min) {
-      return err<CronParsingError>(
-        "OutOfBoundError",
-        `Expected ${start} >= ${min}`,
-      );
+      throw new OutOfBoundError(`Expected ${start} >= ${min}`);
     }
 
     if (end > max) {
-      return err<CronParsingError>(
-        "OutOfBoundError",
-        `Expected ${end} <= ${max}`,
-      );
+      throw new OutOfBoundError(`Expected ${end} <= ${max}`);
     }
 
     if (start > end) {
-      return err<CronParsingError>(
-        "OutOfBoundError",
-        `Expected ${start} <= ${end}`,
-      );
+      throw new OutOfBoundError(`Expected ${start} <= ${end}`);
     }
 
     // Mark all values in the range
     for (let i = start; i <= end; i++) {
       values[i] = 1;
     }
-
-    return ok(true);
   }
 
   private handleNumber(
@@ -298,28 +244,17 @@ export class Cron {
 
     // Validate value is an integer within bounds
     if (!Number.isInteger(n)) {
-      return err<CronParsingError>(
-        "InvalidValueError",
-        `'${value}' is not a valid number`,
-      );
+      throw new InvalidValueError(`'${value}' is not a valid number`);
     }
 
     if (n < min) {
-      return err<CronParsingError>(
-        "OutOfBoundError",
-        `Expected ${n} >= ${min}`,
-      );
+      throw new OutOfBoundError(`Expected ${n} >= ${min}`);
     }
     if (n > max) {
-      return err<CronParsingError>(
-        "OutOfBoundError",
-        `Expected ${n} <= ${max}`,
-      );
+      throw new OutOfBoundError(`Expected ${n} <= ${max}`);
     }
 
     values[n] = 1;
-
-    return ok(true);
   }
 
   public constructor(options: CronOptions) {
@@ -327,18 +262,13 @@ export class Cron {
 
     // Resolve alias or use raw expression
     const expr = this.resolveAlias(options.schedule);
-    const [error, tokens] = new Scanner(expr).scan();
-    if (error) throw new Error(`${error.type}: ${error.message}`);
+    const tokens = new Scanner(expr).scan();
 
     const fields = expr.trim().split(/\s+/);
     this.hasSeconds = fields.length === FieldAmount.max;
 
     // Parse and validate the cron expression
-    const [parsingError, _] = this.parse(tokens);
-
-    if (parsingError) {
-      throw new Error(`${parsingError.type}: ${parsingError.message}`);
-    }
+    this.parse(tokens);
   }
 
   // Map alias to standard cron expression if present
@@ -351,60 +281,39 @@ export class Cron {
       const token = tokens[i];
 
       if (!token) {
-        return err<CronParsingError>("InvalidValueError", "Undefined token");
+        throw new InvalidValueError("Undefined token");
       }
 
       const tokenType = token.getTokenType();
 
       switch (token.getField()) {
         case "second": {
-          const [error, _] = this.handleField(
+          this.handleField(
             token,
             this.second,
             CronSecondRange.min,
             CronSecondRange.max,
           );
 
-          if (error) {
-            return err<CronParsingError>(
-              error.type,
-              `${error.message} in field '${token.getField()}'`,
-            );
-          }
-
           break;
         }
         case "minute": {
-          const [error, _] = this.handleField(
+          this.handleField(
             token,
             this.minute,
             CronMinuteRange.min,
             CronMinuteRange.max,
           );
 
-          if (error) {
-            return err<CronParsingError>(
-              error.type,
-              `${error.message} in field '${token.getField()}'`,
-            );
-          }
-
           break;
         }
         case "hour": {
-          const [error, _] = this.handleField(
+          this.handleField(
             token,
             this.hour,
             CronHourRange.min,
             CronHourRange.max,
           );
-
-          if (error) {
-            return err<CronParsingError>(
-              error.type,
-              `${error.message} in field '${token.getField()}'`,
-            );
-          }
 
           break;
         }
@@ -413,36 +322,17 @@ export class Cron {
             this._dayWildcard = true;
           }
 
-          const [error, _] = this.handleField(
-            token,
-            this.day,
-            CronDayRange.min,
-            CronDayRange.max,
-          );
-
-          if (error) {
-            return err<CronParsingError>(
-              error.type,
-              `${error.message} in field '${token.getField()}'`,
-            );
-          }
+          this.handleField(token, this.day, CronDayRange.min, CronDayRange.max);
 
           break;
         }
         case "month": {
-          const [error, _] = this.handleField(
+          this.handleField(
             token,
             this.month,
             CronMonthRange.min,
             CronMonthRange.max,
           );
-
-          if (error) {
-            return err<CronParsingError>(
-              error.type,
-              `${error.message} in field '${token.getField()}'`,
-            );
-          }
 
           break;
         }
@@ -451,31 +341,19 @@ export class Cron {
             this._dowWildcard = true;
           }
 
-          const [error, _] = this.handleField(
+          this.handleField(
             token,
             this.dayOfWeek,
             CronDayOfWeekRange.min,
             CronDayOfWeekRange.max,
           );
 
-          if (error) {
-            return err<CronParsingError>(
-              error.type,
-              `${error.message} in field '${token.getField()}'`,
-            );
-          }
-
           break;
         }
         default:
-          return err<CronParsingError>(
-            "InvalidValueError",
-            `Invalid field '${token.getField()}'`,
-          );
+          throw new InvalidValueError(`Invalid field '${token.getField()}'`);
       }
     }
-
-    return ok(true);
   }
 
   private handleField(token: Token, field: number[], min: number, max: number) {
@@ -485,38 +363,27 @@ export class Cron {
         break;
       }
       case "number": {
-        const [error, _] = this.handleNumber(
-          token.getComponent(),
-          field,
-          min,
-          max,
-        );
-        if (error) return err<CronParsingError>(error.type, error.message);
+        this.handleNumber(token.getComponent(), field, min, max);
 
         break;
       }
       case "range": {
         const component = token.getComponent();
-        const [error, _] = this.handleRange(component, field, min, max);
-        if (error) return err<CronParsingError>(error.type, error.message);
+        this.handleRange(component, field, min, max);
 
         break;
       }
       case "step": {
         const component = token.getComponent();
-        const [error, _] = this.handleStep(component, field, min, max);
-        if (error) return err<CronParsingError>(error.type, error.message);
+        this.handleStep(component, field, min, max);
 
         break;
       }
       default:
-        return err<CronParsingError>(
-          "InvalidValueError",
+        throw new InvalidValueError(
           `Invalid token type '${token.getTokenType()}'`,
         );
     }
-
-    return ok(true);
   }
 
   public matches(date: Date) {

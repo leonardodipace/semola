@@ -218,13 +218,15 @@ process.on("SIGTERM", async () => {
 If the handler throws an error, the job continues to the next scheduled execution. Handle errors in your handler.
 
 ```typescript
+import { mightThrow } from "semola/errors";
+
 const job = new Cron({
   name: "fragile-task",
   schedule: "0 * * * *",
   handler: async () => {
-    try {
-      await riskyOperation();
-    } catch (error) {
+    const [error] = await mightThrow(riskyOperation());
+
+    if (error) {
       // Handle error here - execution continues to next schedule
       console.error("Task failed:", error);
       await sendAlert(error);
