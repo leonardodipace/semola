@@ -69,7 +69,7 @@ const db = createOrm({
 });
 ```
 
-`adapter` must be set explicitly. Currently `"sqlite"` is the only supported value.
+`adapter` must be set explicitly. Supported values are `"sqlite"` and `"postgres"`.
 
 `$raw` on the returned client is the underlying `Bun.SQL` instance.
 

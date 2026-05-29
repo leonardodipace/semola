@@ -19,7 +19,7 @@ import type {
 } from "../orm/types.js";
 import type { Table } from "../table/types.js";
 
-export type Adapter = "sqlite";
+export type Adapter = "sqlite" | "postgres";
 
 export type Dialect<
   T extends Table = Table,
