@@ -20,10 +20,10 @@ import {
   buildFindUniqueQuery,
   buildUpdateManyQuery,
   buildUpdateQuery,
-  createSqliteDialect,
   type IncludeDescriptor,
   parseIncludeRows,
-} from "./sqlite.js";
+} from "./shared.js";
+import { createSqliteDialect, SQLITE_SPEC } from "./sqlite.js";
 
 const usersTable = defineTable("users", {
   id: uuid("id").primaryKey().notNull(),
@@ -93,6 +93,7 @@ describe("buildFindManyQuery", () => {
     });
 
     const directValueQuery = buildFindManyQuery(
+      SQLITE_SPEC,
       accountsTable,
       {},
       {
@@ -108,6 +109,7 @@ describe("buildFindManyQuery", () => {
     expect(directValueQuery.params).toEqual(["active"]);
 
     const equalsQuery = buildFindManyQuery(
+      SQLITE_SPEC,
       accountsTable,
       {},
       {
@@ -129,6 +131,7 @@ describe("buildFindManyQuery", () => {
     const createdAfter = new Date("2025-01-01T00:00:00.000Z");
 
     const query = buildFindManyQuery(
+      SQLITE_SPEC,
       usersTable,
       { posts: many(() => postsTable) },
       {
@@ -152,6 +155,7 @@ describe("buildFindManyQuery", () => {
 
   test("escapes LIKE metacharacters for startsWith, endsWith, and contains", () => {
     const query = buildFindManyQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -181,6 +185,7 @@ describe("buildFindManyQuery", () => {
     const idList = ["user-1"];
 
     const query = buildFindManyQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -203,7 +208,7 @@ describe("buildFindManyQuery", () => {
   });
 
   test("builds offset-only pagination with LIMIT -1 OFFSET", () => {
-    const query = buildFindManyQuery(usersTable, {}, { skip: 3 });
+    const query = buildFindManyQuery(SQLITE_SPEC, usersTable, {}, { skip: 3 });
 
     expect(query.statement).toBe(
       'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users" LIMIT -1 OFFSET ?',
@@ -212,7 +217,12 @@ describe("buildFindManyQuery", () => {
   });
 
   test("falls back to full column list when select is an empty object", () => {
-    const query = buildFindManyQuery(usersTable, {}, { select: {} });
+    const query = buildFindManyQuery(
+      SQLITE_SPEC,
+      usersTable,
+      {},
+      { select: {} },
+    );
 
     expect(query.statement).toBe(
       'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users"',
@@ -223,6 +233,7 @@ describe("buildFindManyQuery", () => {
 
   test("builds hasMany include subquery SQL", () => {
     const query = buildFindManyQuery(
+      SQLITE_SPEC,
       usersTable,
       { posts: many(() => postsTable) },
       {
@@ -241,6 +252,7 @@ describe("buildFindManyQuery", () => {
 
   test("builds hasOne include subquery SQL", () => {
     const query = buildFindManyQuery(
+      SQLITE_SPEC,
       postsTable,
       { author: one("authorId", () => usersTable) },
       {
@@ -259,6 +271,7 @@ describe("buildFindManyQuery", () => {
 
   test("ignores disabled include flags and supports take-only pagination", () => {
     const query = buildFindManyQuery(
+      SQLITE_SPEC,
       usersTable,
       { posts: many(() => postsTable) },
       {
@@ -279,6 +292,7 @@ describe("buildFindManyQuery", () => {
   test("throws for unknown relation names", () => {
     expect(() =>
       buildFindManyQuery(
+        SQLITE_SPEC,
         usersTable,
         {},
         {
@@ -296,6 +310,7 @@ describe("buildFindManyQuery", () => {
 
     expect(() =>
       buildFindManyQuery(
+        SQLITE_SPEC,
         usersTable,
         { comments: many(() => commentsTable) },
         {
@@ -314,6 +329,7 @@ describe("buildFindManyQuery", () => {
 
     expect(() =>
       buildFindManyQuery(
+        SQLITE_SPEC,
         usersTable,
         { memberships: many(() => membershipsTable) },
         {
@@ -337,6 +353,7 @@ describe("buildFindManyQuery", () => {
     });
 
     const query = buildFindManyQuery(
+      SQLITE_SPEC,
       groupsTable,
       { members: many(() => membersTable) },
       { include: { members: true } },
@@ -358,6 +375,7 @@ describe("buildFindManyQuery", () => {
 
     expect(() =>
       buildFindManyQuery(
+        SQLITE_SPEC,
         usersTable,
         { profile: one("profileId", () => profilesTable) },
         {
@@ -375,6 +393,7 @@ describe("buildFindManyQuery", () => {
 
     expect(() =>
       buildFindManyQuery(
+        SQLITE_SPEC,
         usersTable,
         { profile: one("firstName", () => profilesTable) },
         {
@@ -387,6 +406,7 @@ describe("buildFindManyQuery", () => {
   test("throws on unknown where key", () => {
     expect(() =>
       buildFindManyQuery(
+        SQLITE_SPEC,
         usersTable,
         {},
         // @ts-expect-error testing invalid where key
@@ -406,6 +426,7 @@ describe("buildFindManyQuery", () => {
     const arr = [1, 2, 3];
 
     const query = buildFindManyQuery(
+      SQLITE_SPEC,
       eventsTable,
       {},
       {
@@ -426,6 +447,7 @@ describe("buildFindManyQuery", () => {
 describe("buildFindUniqueQuery", () => {
   test("builds a select statement with LIMIT 1", () => {
     const query = buildFindUniqueQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -444,6 +466,7 @@ describe("buildFindUniqueQuery", () => {
 
   test("allows non-unique guard fields alongside a unique key", () => {
     const query = buildFindUniqueQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -464,6 +487,7 @@ describe("buildFindUniqueQuery", () => {
   test("throws when runtime where payload is empty", () => {
     expect(() =>
       buildFindUniqueQuery(
+        SQLITE_SPEC,
         usersTable,
         {},
         {
@@ -477,6 +501,7 @@ describe("buildFindUniqueQuery", () => {
   test("throws when runtime where payload has an unknown key", () => {
     expect(() =>
       buildFindUniqueQuery(
+        SQLITE_SPEC,
         usersTable,
         {},
         {
@@ -492,6 +517,7 @@ describe("buildFindUniqueQuery", () => {
   test("throws when runtime where payload has no unique or primary key column", () => {
     expect(() =>
       buildFindUniqueQuery(
+        SQLITE_SPEC,
         usersTable,
         {},
         {
@@ -510,6 +536,7 @@ describe("buildFindUniqueQuery", () => {
 describe("buildFindFirstQuery", () => {
   test("builds a select statement with LIMIT 1", () => {
     const query = buildFindFirstQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -531,6 +558,7 @@ describe("buildFindFirstQuery", () => {
 
   test("supports include and skip while limiting to one row", () => {
     const query = buildFindFirstQuery(
+      SQLITE_SPEC,
       usersTable,
       { posts: many(() => postsTable) },
       {
@@ -856,6 +884,7 @@ describe("createSqliteDialect", () => {
 describe("buildUpdateQuery", () => {
   test("builds an update statement with where clause", () => {
     const query = buildUpdateQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -873,6 +902,7 @@ describe("buildUpdateQuery", () => {
 
   test("builds an update statement with multiple set fields", () => {
     const query = buildUpdateQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -896,6 +926,7 @@ describe("buildUpdateQuery", () => {
 
   test("builds an update statement with select columns in RETURNING", () => {
     const query = buildUpdateQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -915,6 +946,7 @@ describe("buildUpdateQuery", () => {
   test("throws when where is empty", () => {
     expect(() =>
       buildUpdateQuery(
+        SQLITE_SPEC,
         usersTable,
         {},
         {
@@ -928,6 +960,7 @@ describe("buildUpdateQuery", () => {
 
   test("skips unknown data keys", () => {
     const query = buildUpdateQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -946,6 +979,7 @@ describe("buildUpdateQuery", () => {
   test("throws when data is empty", () => {
     expect(() =>
       buildUpdateQuery(
+        SQLITE_SPEC,
         usersTable,
         {},
         {
@@ -960,6 +994,7 @@ describe("buildUpdateQuery", () => {
     const date = new Date("2026-06-01T00:00:00.000Z");
 
     const query = buildUpdateQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -976,6 +1011,7 @@ describe("buildUpdateQuery", () => {
 
   test("builds an update statement with hasMany include in RETURNING", () => {
     const query = buildUpdateQuery(
+      SQLITE_SPEC,
       usersTable,
       { posts: many(() => postsTable) },
       {
@@ -996,6 +1032,7 @@ describe("buildUpdateQuery", () => {
 
   test("builds an update statement with hasOne include in RETURNING", () => {
     const query = buildUpdateQuery(
+      SQLITE_SPEC,
       postsTable,
       { author: one("authorId", () => usersTable) },
       {
@@ -1142,7 +1179,12 @@ describe("createSqliteDialect - update", () => {
 
 describe("buildDeleteQuery", () => {
   test("builds a delete statement with where clause", () => {
-    const query = buildDeleteQuery(usersTable, {}, { where: { id: "user-1" } });
+    const query = buildDeleteQuery(
+      SQLITE_SPEC,
+      usersTable,
+      {},
+      { where: { id: "user-1" } },
+    );
 
     expect(query.statement).toBe(
       'DELETE FROM "users" WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
@@ -1153,6 +1195,7 @@ describe("buildDeleteQuery", () => {
 
   test("builds a delete statement with select columns in RETURNING", () => {
     const query = buildDeleteQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -1170,6 +1213,7 @@ describe("buildDeleteQuery", () => {
 
   test("builds a delete statement with hasMany include in RETURNING", () => {
     const query = buildDeleteQuery(
+      SQLITE_SPEC,
       usersTable,
       { posts: many(() => postsTable) },
       {
@@ -1189,6 +1233,7 @@ describe("buildDeleteQuery", () => {
 
   test("builds a delete statement with hasOne include in RETURNING", () => {
     const query = buildDeleteQuery(
+      SQLITE_SPEC,
       postsTable,
       { author: one("authorId", () => usersTable) },
       {
@@ -1209,6 +1254,7 @@ describe("buildDeleteQuery", () => {
   test("throws when where is empty", () => {
     expect(() =>
       buildDeleteQuery(
+        SQLITE_SPEC,
         usersTable,
         {},
         {
@@ -1222,6 +1268,7 @@ describe("buildDeleteQuery", () => {
   test("throws when where has no unique or primary key column", () => {
     expect(() =>
       buildDeleteQuery(
+        SQLITE_SPEC,
         usersTable,
         {},
         {
@@ -1354,7 +1401,7 @@ describe("createSqliteDialect - delete", () => {
 
 describe("buildCreateManyQuery", () => {
   test("builds a batched INSERT with one row", () => {
-    const query = buildCreateManyQuery(usersTable, {
+    const query = buildCreateManyQuery(SQLITE_SPEC, usersTable, {
       data: [
         {
           id: "user-1",
@@ -1376,7 +1423,7 @@ describe("buildCreateManyQuery", () => {
   });
 
   test("builds a batched INSERT with multiple rows", () => {
-    const query = buildCreateManyQuery(usersTable, {
+    const query = buildCreateManyQuery(SQLITE_SPEC, usersTable, {
       data: [
         {
           id: "user-1",
@@ -1410,7 +1457,7 @@ describe("buildCreateManyQuery", () => {
     const d1 = new Date("2025-03-01T00:00:00.000Z");
     const d2 = new Date("2025-04-01T00:00:00.000Z");
 
-    const query = buildCreateManyQuery(usersTable, {
+    const query = buildCreateManyQuery(SQLITE_SPEC, usersTable, {
       data: [
         { id: "a", firstName: "A", createdAt: d1 },
         { id: "b", firstName: "B", createdAt: d2 },
@@ -1430,7 +1477,7 @@ describe("buildCreateManyQuery", () => {
   });
 
   test("returns empty statement and params for empty data array", () => {
-    const query = buildCreateManyQuery(usersTable, { data: [] });
+    const query = buildCreateManyQuery(SQLITE_SPEC, usersTable, { data: [] });
 
     expect(query.statement).toBe("");
     expect(query.params).toEqual([]);
@@ -1443,7 +1490,7 @@ describe("buildCreateManyQuery", () => {
       tag: string("tag").default(() => "default-tag"),
     });
 
-    const query = buildCreateManyQuery(tableWithDefault, {
+    const query = buildCreateManyQuery(SQLITE_SPEC, tableWithDefault, {
       data: [{ id: "item-1", name: "Widget" }],
     });
 
@@ -1456,7 +1503,7 @@ describe("buildCreateManyQuery", () => {
 
 describe("buildUpdateManyQuery", () => {
   test("builds an UPDATE without a WHERE clause when no where is provided", () => {
-    const query = buildUpdateManyQuery(usersTable, {
+    const query = buildUpdateManyQuery(SQLITE_SPEC, usersTable, {
       data: { firstName: "Everyone" },
     });
 
@@ -1467,7 +1514,7 @@ describe("buildUpdateManyQuery", () => {
   });
 
   test("builds an UPDATE with a WHERE clause", () => {
-    const query = buildUpdateManyQuery(usersTable, {
+    const query = buildUpdateManyQuery(SQLITE_SPEC, usersTable, {
       where: { firstName: { startsWith: "Jo" } },
       data: { firstName: "John" },
     });
@@ -1479,7 +1526,7 @@ describe("buildUpdateManyQuery", () => {
   });
 
   test("builds an UPDATE with multiple SET fields", () => {
-    const query = buildUpdateManyQuery(usersTable, {
+    const query = buildUpdateManyQuery(SQLITE_SPEC, usersTable, {
       where: { id: "user-1" },
       data: {
         firstName: "Jane",
@@ -1500,7 +1547,7 @@ describe("buildUpdateManyQuery", () => {
   test("serializes Date values in data", () => {
     const d = new Date("2026-06-01T00:00:00.000Z");
 
-    const query = buildUpdateManyQuery(usersTable, {
+    const query = buildUpdateManyQuery(SQLITE_SPEC, usersTable, {
       data: { createdAt: d },
     });
 
@@ -1508,7 +1555,7 @@ describe("buildUpdateManyQuery", () => {
   });
 
   test("skips unknown data keys", () => {
-    const query = buildUpdateManyQuery(usersTable, {
+    const query = buildUpdateManyQuery(SQLITE_SPEC, usersTable, {
       where: { id: "user-1" },
       // @ts-expect-error nonExistent is not a column on usersTable
       data: { firstName: "Jane", nonExistent: "value" },
@@ -1522,7 +1569,7 @@ describe("buildUpdateManyQuery", () => {
 
   test("throws when data is empty", () => {
     expect(() =>
-      buildUpdateManyQuery(usersTable, {
+      buildUpdateManyQuery(SQLITE_SPEC, usersTable, {
         data: {},
       }),
     ).toThrow("updateMany requires at least one field in data");
@@ -1531,7 +1578,7 @@ describe("buildUpdateManyQuery", () => {
 
 describe("buildDeleteManyQuery", () => {
   test("builds a DELETE without a WHERE clause when no where is provided", () => {
-    const query = buildDeleteManyQuery(usersTable, {});
+    const query = buildDeleteManyQuery(SQLITE_SPEC, usersTable, {});
 
     expect(query.statement).toBe(
       'DELETE FROM "users" RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
@@ -1540,7 +1587,7 @@ describe("buildDeleteManyQuery", () => {
   });
 
   test("builds a DELETE with a WHERE clause", () => {
-    const query = buildDeleteManyQuery(usersTable, {
+    const query = buildDeleteManyQuery(SQLITE_SPEC, usersTable, {
       where: { firstName: { startsWith: "Jo" } },
     });
 
@@ -1551,7 +1598,7 @@ describe("buildDeleteManyQuery", () => {
   });
 
   test("builds a DELETE with an equality WHERE clause", () => {
-    const query = buildDeleteManyQuery(usersTable, {
+    const query = buildDeleteManyQuery(SQLITE_SPEC, usersTable, {
       where: { firstName: "John" },
     });
 
@@ -1564,7 +1611,7 @@ describe("buildDeleteManyQuery", () => {
   test("serializes Date values in where clause", () => {
     const cutoff = new Date("2025-01-01T00:00:00.000Z");
 
-    const query = buildDeleteManyQuery(usersTable, {
+    const query = buildDeleteManyQuery(SQLITE_SPEC, usersTable, {
       where: { createdAt: { lt: cutoff } },
     });
 
@@ -2108,6 +2155,7 @@ const createMetaTable = async (sql: Bun.SQL) => {
 describe("json and jsonb columns", () => {
   test("buildCreateQuery serializes json values as JSON strings", () => {
     const query = buildCreateQuery(
+      SQLITE_SPEC,
       metaTable,
       {},
       {
@@ -2124,6 +2172,7 @@ describe("json and jsonb columns", () => {
 
   test("buildUpdateQuery serializes json values as JSON strings", () => {
     const query = buildUpdateQuery(
+      SQLITE_SPEC,
       metaTable,
       {},
       {
@@ -2136,7 +2185,7 @@ describe("json and jsonb columns", () => {
   });
 
   test("buildCreateManyQuery serializes json values across all rows", () => {
-    const query = buildCreateManyQuery(metaTable, {
+    const query = buildCreateManyQuery(SQLITE_SPEC, metaTable, {
       data: [
         { id: "row-1", meta: { isActive: true, score: 1 } },
         { id: "row-2", meta: { isActive: false, score: 2 } },
