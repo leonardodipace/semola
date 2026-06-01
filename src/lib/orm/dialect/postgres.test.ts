@@ -58,7 +58,7 @@ describe("postgres dialect", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users" WHERE "first_name" LIKE $1 ESCAPE \'\\\' AND "created_at" >= $2 ORDER BY "created_at" DESC LIMIT $3 OFFSET $4',
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" WHERE "first_name" LIKE $1 ESCAPE \'\\\' AND "created_at" >= $2 ORDER BY "created_at" DESC LIMIT $3 OFFSET $4',
     );
     expect(query.params).toEqual(["Jo%", createdAfter.toISOString(), 10, 5]);
   });
@@ -72,7 +72,7 @@ describe("postgres dialect", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users" LIMIT ALL OFFSET $1',
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" LIMIT ALL OFFSET $1',
     );
     expect(query.params).toEqual([3]);
   });
@@ -86,7 +86,7 @@ describe("postgres dialect", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive, COALESCE((SELECT jsonb_agg(jsonb_build_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\'::jsonb) AS posts FROM "users"',
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive", COALESCE((SELECT jsonb_agg(jsonb_build_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\'::jsonb) AS "posts" FROM "users"',
     );
   });
 
@@ -99,7 +99,7 @@ describe("postgres dialect", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "title" AS title, "author_id" AS authorId, (SELECT jsonb_build_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at", \'isActive\', author__users."is_active") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS author FROM "posts"',
+      'SELECT "id" AS "id", "title" AS "title", "author_id" AS "authorId", (SELECT jsonb_build_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at", \'isActive\', author__users."is_active") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS "author" FROM "posts"',
     );
   });
 
@@ -119,7 +119,7 @@ describe("postgres dialect", () => {
     );
 
     expect(query.statement).toBe(
-      'INSERT INTO "users" ("id", "first_name", "created_at", "is_active") VALUES ($1, $2, $3, $4) RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'INSERT INTO "users" ("id", "first_name", "created_at", "is_active") VALUES ($1, $2, $3, $4) RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
     expect(query.params).toEqual([
       "u-1",
@@ -141,7 +141,7 @@ describe("postgres dialect", () => {
     );
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "first_name" = $1 WHERE "id" = $2 RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'UPDATE "users" SET "first_name" = $1 WHERE "id" = $2 RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
     expect(query.params).toEqual(["Grace", "u-1"]);
   });
@@ -155,7 +155,7 @@ describe("postgres dialect", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users" WHERE "id" = $1 LIMIT 1',
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" WHERE "id" = $1 LIMIT 1',
     );
     expect(query.params).toEqual(["u-1"]);
   });
@@ -169,7 +169,7 @@ describe("postgres dialect", () => {
     );
 
     expect(query.statement).toBe(
-      'DELETE FROM "users" WHERE "id" = $1 RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'DELETE FROM "users" WHERE "id" = $1 RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
     expect(query.params).toEqual(["u-1"]);
   });
@@ -193,7 +193,7 @@ describe("postgres dialect", () => {
     });
 
     expect(query.statement).toBe(
-      'INSERT INTO "users" ("id", "first_name", "created_at", "is_active") VALUES ($1, $2, $3, $4), ($5, $6, $7, $8) RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'INSERT INTO "users" ("id", "first_name", "created_at", "is_active") VALUES ($1, $2, $3, $4), ($5, $6, $7, $8) RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
   });
 
@@ -204,7 +204,7 @@ describe("postgres dialect", () => {
     });
 
     expect(updateQuery.statement).toBe(
-      'UPDATE "users" SET "first_name" = $1 WHERE "is_active" = $2 RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'UPDATE "users" SET "first_name" = $1 WHERE "is_active" = $2 RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
 
     const deleteQuery = buildDeleteManyQuery(POSTGRES_SPEC, usersTable, {
@@ -212,7 +212,7 @@ describe("postgres dialect", () => {
     });
 
     expect(deleteQuery.statement).toBe(
-      'DELETE FROM "users" WHERE "is_active" = $1 RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'DELETE FROM "users" WHERE "is_active" = $1 RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
   });
 

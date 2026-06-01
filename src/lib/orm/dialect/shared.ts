@@ -89,7 +89,7 @@ const serializeColumnValue = (column: Column, value: unknown) => {
   if (column.type !== "json" && column.type !== "jsonb")
     return serializeParam(value);
   if (value === null) return value;
-  if (value === undefined) return value;
+  if (value === undefined) return null;
 
   return JSON.stringify(value);
 };
@@ -171,6 +171,8 @@ const buildWhereClause = <T extends Table>(
   for (const entry of whereEntries) {
     const [jsKey, value] = entry;
 
+    if (value === undefined) continue;
+
     const typedKey = jsKey as keyof T["columns"];
 
     if (!(jsKey in table.columns)) {
@@ -180,7 +182,7 @@ const buildWhereClause = <T extends Table>(
     const sqlName = quoteIdentifier(table.columns[typedKey].sqlName);
 
     if (!isPlainObject(value)) {
-      if (value === null || value === undefined) {
+      if (value === null) {
         clauses.push(`${sqlName} IS NULL`);
       } else {
         clauses.push(`${sqlName} = ${nextPlaceholder()}`);
@@ -217,7 +219,7 @@ const buildWhereClause = <T extends Table>(
 };
 
 const getColumnAlias = (sqlName: string, jsKey: string) => {
-  return `${quoteIdentifier(sqlName)} AS ${jsKey}`;
+  return `${quoteIdentifier(sqlName)} AS ${quoteIdentifier(jsKey)}`;
 };
 
 const buildSelectColumns = <T extends Table>(
@@ -234,15 +236,13 @@ const buildSelectColumns = <T extends Table>(
   const keys = Object.keys(select);
 
   for (const key of keys) {
-    const sqlName = table.columns[key]?.sqlName;
+    const column = table.columns[key];
 
-    if (!sqlName) continue;
+    if (!column) {
+      throw new Error(`Unknown select key "${key}" on table ${table.sqlName}`);
+    }
 
-    selectedColumns.push(getColumnAlias(sqlName, key));
-  }
-
-  if (selectedColumns.length === 0) {
-    return "*";
+    selectedColumns.push(getColumnAlias(column.sqlName, key));
   }
 
   return selectedColumns.join(", ");
@@ -257,16 +257,20 @@ const buildOrderByClause = <T extends Table>(
   const clauses: string[] = [];
 
   for (const [jsKey, direction] of Object.entries(orderBy)) {
-    const sqlName = table.columns[jsKey as keyof T["columns"]]?.sqlName;
+    const column = table.columns[jsKey];
 
-    if (!sqlName) continue;
+    if (!column) {
+      throw new Error(
+        `Unknown orderBy key "${jsKey}" on table ${table.sqlName}`,
+      );
+    }
 
     if (direction === "desc") {
-      clauses.push(`${quoteIdentifier(sqlName)} DESC`);
+      clauses.push(`${quoteIdentifier(column.sqlName)} DESC`);
       continue;
     }
 
-    clauses.push(`${quoteIdentifier(sqlName)} ASC`);
+    clauses.push(`${quoteIdentifier(column.sqlName)} ASC`);
   }
 
   if (!clauses.length) return "";
@@ -420,7 +424,7 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
       const { fk: foreignKey, source: sourceColumn } =
         resolveHasManyForeignKeyColumn(table, relationTable);
       clauses.push(
-        `COALESCE((SELECT ${spec.jsonArrayAggregateFunctionName}(${relationJsonObject}) FROM ${quoteIdentifier(relationTable.sqlName)} AS ${relationAlias} WHERE ${relationAlias}.${quoteIdentifier(foreignKey.sqlName)} = ${quoteIdentifier(table.sqlName)}.${quoteIdentifier(sourceColumn.sqlName)}), ${spec.emptyJsonArrayLiteral}) AS ${relationName}`,
+        `COALESCE((SELECT ${spec.jsonArrayAggregateFunctionName}(${relationJsonObject}) FROM ${quoteIdentifier(relationTable.sqlName)} AS ${relationAlias} WHERE ${relationAlias}.${quoteIdentifier(foreignKey.sqlName)} = ${quoteIdentifier(table.sqlName)}.${quoteIdentifier(sourceColumn.sqlName)}), ${spec.emptyJsonArrayLiteral}) AS ${quoteIdentifier(relationName)}`,
       );
       descriptors.push({
         name: relationName,
@@ -437,7 +441,7 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
     );
 
     clauses.push(
-      `(SELECT ${relationJsonObject} FROM ${quoteIdentifier(relationTable.sqlName)} AS ${relationAlias} WHERE ${relationAlias}.${quoteIdentifier(target.sqlName)} = ${quoteIdentifier(table.sqlName)}.${quoteIdentifier(localForeignKey.sqlName)} LIMIT 1) AS ${relationName}`,
+      `(SELECT ${relationJsonObject} FROM ${quoteIdentifier(relationTable.sqlName)} AS ${relationAlias} WHERE ${relationAlias}.${quoteIdentifier(target.sqlName)} = ${quoteIdentifier(table.sqlName)}.${quoteIdentifier(localForeignKey.sqlName)} LIMIT 1) AS ${quoteIdentifier(relationName)}`,
     );
     descriptors.push({
       name: relationName,
@@ -605,6 +609,8 @@ export const buildUpdateQuery = <T extends Table, R extends TableRelations>(
   const params: unknown[] = [];
 
   for (const [jsKey, value] of Object.entries(options.data)) {
+    if (value === undefined) continue;
+
     const column = table.columns[jsKey];
 
     if (!column) continue;
@@ -881,6 +887,8 @@ export const buildUpdateManyQuery = <T extends Table>(
   const params: unknown[] = [];
 
   for (const [jsKey, value] of Object.entries(options.data)) {
+    if (value === undefined) continue;
+
     const column = table.columns[jsKey];
 
     if (!column) continue;
