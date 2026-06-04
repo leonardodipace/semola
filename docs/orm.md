@@ -19,6 +19,8 @@ import {
   boolean,
   date,
   uuid,
+  json,
+  jsonb,
   one,
   many,
 } from "semola/orm";
@@ -39,6 +41,24 @@ const users = defineTable("users", {
 
 Column builders support: `.primaryKey()`, `.notNull()`, `.nullable()`, `.unique()`, `.default(fn)`, `.references(fn)`.
 
+### JSON columns
+
+Use `json<T>` or `jsonb<T>` for structured JSON values. The type parameter defines the TypeScript type of the column value. Values are automatically serialized with `JSON.stringify` on write and parsed with `JSON.parse` on read.
+
+```typescript
+type Meta = {
+  isActive: boolean;
+};
+
+const table = defineTable("table", {
+  id: uuid("id").primaryKey().notNull(),
+  meta: json<Meta>("meta").default(() => ({ isActive: true })),
+  extra: jsonb<{ tags: string[] }>("extra").nullable(),
+});
+```
+
+`json` and `jsonb` are semantically equivalent in SQLite (both stored as TEXT). Use `jsonb` when targeting PostgreSQL for native binary JSON storage.
+
 ## Create ORM client
 
 ```typescript
@@ -49,7 +69,7 @@ const db = createOrm({
 });
 ```
 
-`adapter` must be set explicitly. Currently `"sqlite"` is the only supported value.
+`adapter` must be set explicitly. Supported values are `"sqlite"` and `"postgres"`.
 
 `$raw` on the returned client is the underlying `Bun.SQL` instance.
 
@@ -134,6 +154,8 @@ Number and date operators: `equals`, `gt`, `gte`, `lt`, `lte`
 
 Boolean operators: `equals`
 
+JSON operators: `equals`
+
 ```typescript
 const users = await db.users.findMany({
   where: {
@@ -178,7 +200,7 @@ const db = createOrm({
       tasks: many(() => tasks),
     },
     tasks: {
-      assignee: one(() => users),
+      assignee: one("assigneeId", () => users),
     },
   },
 });

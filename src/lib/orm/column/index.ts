@@ -275,3 +275,15 @@ export const enumType = <const TValues extends readonly string[]>(
 ): ColumnBuilder<"enum", true, false, false, false, TValues[number]> => {
   return createBaseColumn<"enum", TValues[number]>(sqlName, "enum", values);
 };
+
+export const json = <T = unknown>(
+  sqlName: string,
+): ColumnBuilder<"json", true, false, false, false, T> => {
+  return createBaseColumn<"json", T>(sqlName, "json");
+};
+
+export const jsonb = <T = unknown>(
+  sqlName: string,
+): ColumnBuilder<"jsonb", true, false, false, false, T> => {
+  return createBaseColumn<"jsonb", T>(sqlName, "jsonb");
+};

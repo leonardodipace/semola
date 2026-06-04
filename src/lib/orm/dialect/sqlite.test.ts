@@ -1,9 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { boolean, date, enumType, string, uuid } from "../column/index.js";
+import {
+  boolean,
+  date,
+  enumType,
+  json,
+  jsonb,
+  string,
+  uuid,
+} from "../column/index.js";
 import { many, one } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
 import {
   buildCreateManyQuery,
+  buildCreateQuery,
   buildDeleteManyQuery,
   buildDeleteQuery,
   buildFindFirstQuery,
@@ -11,10 +20,10 @@ import {
   buildFindUniqueQuery,
   buildUpdateManyQuery,
   buildUpdateQuery,
-  createSqliteDialect,
   type IncludeDescriptor,
   parseIncludeRows,
-} from "./sqlite.js";
+} from "./shared.js";
+import { createSqliteDialect, SQLITE_SPEC } from "./sqlite.js";
 
 const usersTable = defineTable("users", {
   id: uuid("id").primaryKey().notNull(),
@@ -84,6 +93,7 @@ describe("buildFindManyQuery", () => {
     });
 
     const directValueQuery = buildFindManyQuery(
+      SQLITE_SPEC,
       accountsTable,
       {},
       {
@@ -94,11 +104,12 @@ describe("buildFindManyQuery", () => {
     );
 
     expect(directValueQuery.statement).toBe(
-      'SELECT "id" AS id, "status" AS status FROM "accounts" WHERE "status" = ?',
+      'SELECT "id" AS "id", "status" AS "status" FROM "accounts" WHERE "status" = ?',
     );
     expect(directValueQuery.params).toEqual(["active"]);
 
     const equalsQuery = buildFindManyQuery(
+      SQLITE_SPEC,
       accountsTable,
       {},
       {
@@ -111,7 +122,7 @@ describe("buildFindManyQuery", () => {
     );
 
     expect(equalsQuery.statement).toBe(
-      'SELECT "id" AS id, "status" AS status FROM "accounts" WHERE "status" = ?',
+      'SELECT "id" AS "id", "status" AS "status" FROM "accounts" WHERE "status" = ?',
     );
     expect(equalsQuery.params).toEqual(["inactive"]);
   });
@@ -120,6 +131,7 @@ describe("buildFindManyQuery", () => {
     const createdAfter = new Date("2025-01-01T00:00:00.000Z");
 
     const query = buildFindManyQuery(
+      SQLITE_SPEC,
       usersTable,
       { posts: many(() => postsTable) },
       {
@@ -135,7 +147,7 @@ describe("buildFindManyQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName FROM "users" WHERE "first_name" LIKE ? ESCAPE \'\\\' AND "created_at" >= ? ORDER BY "created_at" DESC, "first_name" ASC LIMIT ? OFFSET ?',
+      'SELECT "id" AS "id", "first_name" AS "firstName" FROM "users" WHERE "first_name" LIKE ? ESCAPE \'\\\' AND "created_at" >= ? ORDER BY "created_at" DESC, "first_name" ASC LIMIT ? OFFSET ?',
     );
     expect(query.params).toEqual(["Jo%", createdAfter.toISOString(), 10, 5]);
     expect(query.includeDescriptors).toEqual([]);
@@ -143,6 +155,7 @@ describe("buildFindManyQuery", () => {
 
   test("escapes LIKE metacharacters for startsWith, endsWith, and contains", () => {
     const query = buildFindManyQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -157,7 +170,7 @@ describe("buildFindManyQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users" WHERE "first_name" LIKE ? ESCAPE \'\\\' AND "first_name" LIKE ? ESCAPE \'\\\' AND "first_name" LIKE ? ESCAPE \'\\\'',
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" WHERE "first_name" LIKE ? ESCAPE \'\\\' AND "first_name" LIKE ? ESCAPE \'\\\' AND "first_name" LIKE ? ESCAPE \'\\\'',
     );
     expect(query.params).toEqual([
       "a\\%\\_\\\\%",
@@ -172,6 +185,7 @@ describe("buildFindManyQuery", () => {
     const idList = ["user-1"];
 
     const query = buildFindManyQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -187,26 +201,31 @@ describe("buildFindManyQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users" WHERE "id" = ? AND "created_at" = ? AND "first_name" IS NULL',
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" WHERE "id" = ? AND "created_at" = ? AND "first_name" IS NULL',
     );
     expect(query.params).toEqual([idList, createdAt.toISOString()]);
     expect(query.includeDescriptors).toEqual([]);
   });
 
   test("builds offset-only pagination with LIMIT -1 OFFSET", () => {
-    const query = buildFindManyQuery(usersTable, {}, { skip: 3 });
+    const query = buildFindManyQuery(SQLITE_SPEC, usersTable, {}, { skip: 3 });
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users" LIMIT -1 OFFSET ?',
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" LIMIT -1 OFFSET ?',
     );
     expect(query.params).toEqual([3]);
   });
 
   test("falls back to full column list when select is an empty object", () => {
-    const query = buildFindManyQuery(usersTable, {}, { select: {} });
+    const query = buildFindManyQuery(
+      SQLITE_SPEC,
+      usersTable,
+      {},
+      { select: {} },
+    );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users"',
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users"',
     );
     expect(query.params).toEqual([]);
     expect(query.includeDescriptors).toEqual([]);
@@ -214,6 +233,7 @@ describe("buildFindManyQuery", () => {
 
   test("builds hasMany include subquery SQL", () => {
     const query = buildFindManyQuery(
+      SQLITE_SPEC,
       usersTable,
       { posts: many(() => postsTable) },
       {
@@ -222,7 +242,7 @@ describe("buildFindManyQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive, COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS posts FROM "users"',
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive", COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS "posts" FROM "users"',
     );
     expect(query.params).toEqual([]);
     expect(query.includeDescriptors).toEqual([
@@ -232,15 +252,16 @@ describe("buildFindManyQuery", () => {
 
   test("builds hasOne include subquery SQL", () => {
     const query = buildFindManyQuery(
+      SQLITE_SPEC,
       postsTable,
-      { author: one(() => usersTable) },
+      { author: one("authorId", () => usersTable) },
       {
         include: { author: true },
       },
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "title" AS title, "author_id" AS authorId, (SELECT json_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at", \'isActive\', author__users."is_active") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS author FROM "posts"',
+      'SELECT "id" AS "id", "title" AS "title", "author_id" AS "authorId", (SELECT json_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at", \'isActive\', author__users."is_active") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS "author" FROM "posts"',
     );
     expect(query.params).toEqual([]);
     expect(query.includeDescriptors).toEqual([
@@ -250,6 +271,7 @@ describe("buildFindManyQuery", () => {
 
   test("ignores disabled include flags and supports take-only pagination", () => {
     const query = buildFindManyQuery(
+      SQLITE_SPEC,
       usersTable,
       { posts: many(() => postsTable) },
       {
@@ -261,7 +283,7 @@ describe("buildFindManyQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users" LIMIT ?',
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" LIMIT ?',
     );
     expect(query.params).toEqual([2]);
     expect(query.includeDescriptors).toEqual([]);
@@ -270,6 +292,7 @@ describe("buildFindManyQuery", () => {
   test("throws for unknown relation names", () => {
     expect(() =>
       buildFindManyQuery(
+        SQLITE_SPEC,
         usersTable,
         {},
         {
@@ -287,6 +310,7 @@ describe("buildFindManyQuery", () => {
 
     expect(() =>
       buildFindManyQuery(
+        SQLITE_SPEC,
         usersTable,
         { comments: many(() => commentsTable) },
         {
@@ -305,6 +329,7 @@ describe("buildFindManyQuery", () => {
 
     expect(() =>
       buildFindManyQuery(
+        SQLITE_SPEC,
         usersTable,
         { memberships: many(() => membershipsTable) },
         {
@@ -328,13 +353,14 @@ describe("buildFindManyQuery", () => {
     });
 
     const query = buildFindManyQuery(
+      SQLITE_SPEC,
       groupsTable,
       { members: many(() => membersTable) },
       { include: { members: true } },
     );
 
     expect(query.statement).toBe(
-      'SELECT "code" AS code, "name" AS name, COALESCE((SELECT json_group_array(json_object(\'id\', members__members."id", \'groupCode\', members__members."group_code")) FROM "members" AS members__members WHERE members__members."group_code" = "groups"."code"), \'[]\') AS members FROM "groups"',
+      'SELECT "code" AS "code", "name" AS "name", COALESCE((SELECT json_group_array(json_object(\'id\', members__members."id", \'groupCode\', members__members."group_code")) FROM "members" AS members__members WHERE members__members."group_code" = "groups"."code"), \'[]\') AS "members" FROM "groups"',
     );
     expect(query.includeDescriptors).toEqual([
       expect.objectContaining({ name: "members", type: "hasMany" }),
@@ -349,8 +375,9 @@ describe("buildFindManyQuery", () => {
 
     expect(() =>
       buildFindManyQuery(
+        SQLITE_SPEC,
         usersTable,
-        { profile: one(() => profilesTable) },
+        { profile: one("profileId", () => profilesTable) },
         {
           include: { profile: true },
         },
@@ -358,9 +385,28 @@ describe("buildFindManyQuery", () => {
     ).toThrow("Missing hasOne foreign key column profileId on users");
   });
 
+  test("throws when hasOne column is not a foreign key", () => {
+    const profilesTable = defineTable("profiles", {
+      id: uuid("id").primaryKey().notNull(),
+      bio: string("bio").notNull(),
+    });
+
+    expect(() =>
+      buildFindManyQuery(
+        SQLITE_SPEC,
+        usersTable,
+        { profile: one("firstName", () => profilesTable) },
+        {
+          include: { profile: true },
+        },
+      ),
+    ).toThrow("Column firstName on users is not a foreign key");
+  });
+
   test("throws on unknown where key", () => {
     expect(() =>
       buildFindManyQuery(
+        SQLITE_SPEC,
         usersTable,
         {},
         // @ts-expect-error testing invalid where key
@@ -368,11 +414,40 @@ describe("buildFindManyQuery", () => {
       ),
     ).toThrow('Unknown where key "nonExistent" on table users');
   });
+
+  test("JSON.stringifies objects/arrays in json and jsonb where clauses", () => {
+    const eventsTable = defineTable("events", {
+      id: uuid("id").primaryKey().notNull(),
+      payload: json("payload").notNull(),
+      meta: jsonb("meta").notNull(),
+    });
+
+    const obj = { type: "click", x: 10 };
+    const arr = [1, 2, 3];
+
+    const query = buildFindManyQuery(
+      SQLITE_SPEC,
+      eventsTable,
+      {},
+      {
+        where: {
+          payload: arr,
+          meta: { equals: obj },
+        },
+      },
+    );
+
+    expect(query.statement).toBe(
+      'SELECT "id" AS "id", "payload" AS "payload", "meta" AS "meta" FROM "events" WHERE "payload" = ? AND "meta" = ?',
+    );
+    expect(query.params).toEqual([JSON.stringify(arr), JSON.stringify(obj)]);
+  });
 });
 
 describe("buildFindUniqueQuery", () => {
   test("builds a select statement with LIMIT 1", () => {
     const query = buildFindUniqueQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -383,7 +458,7 @@ describe("buildFindUniqueQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users" WHERE "id" = ? LIMIT 1',
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" WHERE "id" = ? LIMIT 1',
     );
     expect(query.params).toEqual(["user-1"]);
     expect(query.includeDescriptors).toEqual([]);
@@ -391,6 +466,7 @@ describe("buildFindUniqueQuery", () => {
 
   test("allows non-unique guard fields alongside a unique key", () => {
     const query = buildFindUniqueQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -402,7 +478,7 @@ describe("buildFindUniqueQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users" WHERE "id" = ? AND "first_name" = ? LIMIT 1',
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" WHERE "id" = ? AND "first_name" = ? LIMIT 1',
     );
     expect(query.params).toEqual(["user-1", "John"]);
     expect(query.includeDescriptors).toEqual([]);
@@ -411,6 +487,7 @@ describe("buildFindUniqueQuery", () => {
   test("throws when runtime where payload is empty", () => {
     expect(() =>
       buildFindUniqueQuery(
+        SQLITE_SPEC,
         usersTable,
         {},
         {
@@ -424,6 +501,7 @@ describe("buildFindUniqueQuery", () => {
   test("throws when runtime where payload has an unknown key", () => {
     expect(() =>
       buildFindUniqueQuery(
+        SQLITE_SPEC,
         usersTable,
         {},
         {
@@ -439,6 +517,7 @@ describe("buildFindUniqueQuery", () => {
   test("throws when runtime where payload has no unique or primary key column", () => {
     expect(() =>
       buildFindUniqueQuery(
+        SQLITE_SPEC,
         usersTable,
         {},
         {
@@ -457,6 +536,7 @@ describe("buildFindUniqueQuery", () => {
 describe("buildFindFirstQuery", () => {
   test("builds a select statement with LIMIT 1", () => {
     const query = buildFindFirstQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -470,7 +550,7 @@ describe("buildFindFirstQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive FROM "users" WHERE "first_name" LIKE ? ESCAPE \'\\\' ORDER BY "created_at" DESC LIMIT ?',
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" WHERE "first_name" LIKE ? ESCAPE \'\\\' ORDER BY "created_at" DESC LIMIT ?',
     );
     expect(query.params).toEqual(["Jo%", 1]);
     expect(query.includeDescriptors).toEqual([]);
@@ -478,6 +558,7 @@ describe("buildFindFirstQuery", () => {
 
   test("supports include and skip while limiting to one row", () => {
     const query = buildFindFirstQuery(
+      SQLITE_SPEC,
       usersTable,
       { posts: many(() => postsTable) },
       {
@@ -489,7 +570,7 @@ describe("buildFindFirstQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'SELECT "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive, COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS posts FROM "users" LIMIT ? OFFSET ?',
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive", COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS "posts" FROM "users" LIMIT ? OFFSET ?',
     );
     expect(query.params).toEqual([1, 2]);
     expect(query.includeDescriptors).toEqual([
@@ -803,6 +884,7 @@ describe("createSqliteDialect", () => {
 describe("buildUpdateQuery", () => {
   test("builds an update statement with where clause", () => {
     const query = buildUpdateQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -812,7 +894,7 @@ describe("buildUpdateQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
     expect(query.params).toEqual(["Jane", "user-1"]);
     expect(query.includeDescriptors).toEqual([]);
@@ -820,6 +902,7 @@ describe("buildUpdateQuery", () => {
 
   test("builds an update statement with multiple set fields", () => {
     const query = buildUpdateQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -832,7 +915,7 @@ describe("buildUpdateQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "first_name" = ?, "created_at" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'UPDATE "users" SET "first_name" = ?, "created_at" = ? WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
     expect(query.params).toEqual([
       "Jane",
@@ -843,6 +926,7 @@ describe("buildUpdateQuery", () => {
 
   test("builds an update statement with select columns in RETURNING", () => {
     const query = buildUpdateQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -853,7 +937,7 @@ describe("buildUpdateQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName',
+      'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName"',
     );
     expect(query.params).toEqual(["Jane", "user-1"]);
     expect(query.includeDescriptors).toEqual([]);
@@ -862,6 +946,7 @@ describe("buildUpdateQuery", () => {
   test("throws when where is empty", () => {
     expect(() =>
       buildUpdateQuery(
+        SQLITE_SPEC,
         usersTable,
         {},
         {
@@ -875,6 +960,7 @@ describe("buildUpdateQuery", () => {
 
   test("skips unknown data keys", () => {
     const query = buildUpdateQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -885,7 +971,7 @@ describe("buildUpdateQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
     expect(query.params).toEqual(["Jane", "user-1"]);
   });
@@ -893,6 +979,7 @@ describe("buildUpdateQuery", () => {
   test("throws when data is empty", () => {
     expect(() =>
       buildUpdateQuery(
+        SQLITE_SPEC,
         usersTable,
         {},
         {
@@ -907,6 +994,7 @@ describe("buildUpdateQuery", () => {
     const date = new Date("2026-06-01T00:00:00.000Z");
 
     const query = buildUpdateQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -916,13 +1004,14 @@ describe("buildUpdateQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "created_at" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'UPDATE "users" SET "created_at" = ? WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
     expect(query.params).toEqual(["2026-06-01T00:00:00.000Z", "user-1"]);
   });
 
   test("builds an update statement with hasMany include in RETURNING", () => {
     const query = buildUpdateQuery(
+      SQLITE_SPEC,
       usersTable,
       { posts: many(() => postsTable) },
       {
@@ -933,7 +1022,7 @@ describe("buildUpdateQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive, COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS posts',
+      'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive", COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS "posts"',
     );
     expect(query.params).toEqual(["Jane", "user-1"]);
     expect(query.includeDescriptors).toEqual([
@@ -943,8 +1032,9 @@ describe("buildUpdateQuery", () => {
 
   test("builds an update statement with hasOne include in RETURNING", () => {
     const query = buildUpdateQuery(
+      SQLITE_SPEC,
       postsTable,
-      { author: one(() => usersTable) },
+      { author: one("authorId", () => usersTable) },
       {
         where: { id: "post-1" },
         data: { title: "Updated" },
@@ -953,7 +1043,7 @@ describe("buildUpdateQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'UPDATE "posts" SET "title" = ? WHERE "id" = ? RETURNING "id" AS id, "title" AS title, "author_id" AS authorId, (SELECT json_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at", \'isActive\', author__users."is_active") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS author',
+      'UPDATE "posts" SET "title" = ? WHERE "id" = ? RETURNING "id" AS "id", "title" AS "title", "author_id" AS "authorId", (SELECT json_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at", \'isActive\', author__users."is_active") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS "author"',
     );
     expect(query.params).toEqual(["Updated", "post-1"]);
     expect(query.includeDescriptors).toEqual([
@@ -1089,10 +1179,15 @@ describe("createSqliteDialect - update", () => {
 
 describe("buildDeleteQuery", () => {
   test("builds a delete statement with where clause", () => {
-    const query = buildDeleteQuery(usersTable, {}, { where: { id: "user-1" } });
+    const query = buildDeleteQuery(
+      SQLITE_SPEC,
+      usersTable,
+      {},
+      { where: { id: "user-1" } },
+    );
 
     expect(query.statement).toBe(
-      'DELETE FROM "users" WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'DELETE FROM "users" WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
     expect(query.params).toEqual(["user-1"]);
     expect(query.includeDescriptors).toEqual([]);
@@ -1100,6 +1195,7 @@ describe("buildDeleteQuery", () => {
 
   test("builds a delete statement with select columns in RETURNING", () => {
     const query = buildDeleteQuery(
+      SQLITE_SPEC,
       usersTable,
       {},
       {
@@ -1109,7 +1205,7 @@ describe("buildDeleteQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'DELETE FROM "users" WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName',
+      'DELETE FROM "users" WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName"',
     );
     expect(query.params).toEqual(["user-1"]);
     expect(query.includeDescriptors).toEqual([]);
@@ -1117,6 +1213,7 @@ describe("buildDeleteQuery", () => {
 
   test("builds a delete statement with hasMany include in RETURNING", () => {
     const query = buildDeleteQuery(
+      SQLITE_SPEC,
       usersTable,
       { posts: many(() => postsTable) },
       {
@@ -1126,7 +1223,7 @@ describe("buildDeleteQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'DELETE FROM "users" WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive, COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS posts',
+      'DELETE FROM "users" WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive", COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS "posts"',
     );
     expect(query.params).toEqual(["user-1"]);
     expect(query.includeDescriptors).toEqual([
@@ -1136,8 +1233,9 @@ describe("buildDeleteQuery", () => {
 
   test("builds a delete statement with hasOne include in RETURNING", () => {
     const query = buildDeleteQuery(
+      SQLITE_SPEC,
       postsTable,
-      { author: one(() => usersTable) },
+      { author: one("authorId", () => usersTable) },
       {
         where: { id: "post-1" },
         include: { author: true },
@@ -1145,7 +1243,7 @@ describe("buildDeleteQuery", () => {
     );
 
     expect(query.statement).toBe(
-      'DELETE FROM "posts" WHERE "id" = ? RETURNING "id" AS id, "title" AS title, "author_id" AS authorId, (SELECT json_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at", \'isActive\', author__users."is_active") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS author',
+      'DELETE FROM "posts" WHERE "id" = ? RETURNING "id" AS "id", "title" AS "title", "author_id" AS "authorId", (SELECT json_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at", \'isActive\', author__users."is_active") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS "author"',
     );
     expect(query.params).toEqual(["post-1"]);
     expect(query.includeDescriptors).toEqual([
@@ -1156,6 +1254,7 @@ describe("buildDeleteQuery", () => {
   test("throws when where is empty", () => {
     expect(() =>
       buildDeleteQuery(
+        SQLITE_SPEC,
         usersTable,
         {},
         {
@@ -1169,6 +1268,7 @@ describe("buildDeleteQuery", () => {
   test("throws when where has no unique or primary key column", () => {
     expect(() =>
       buildDeleteQuery(
+        SQLITE_SPEC,
         usersTable,
         {},
         {
@@ -1301,7 +1401,7 @@ describe("createSqliteDialect - delete", () => {
 
 describe("buildCreateManyQuery", () => {
   test("builds a batched INSERT with one row", () => {
-    const query = buildCreateManyQuery(usersTable, {
+    const query = buildCreateManyQuery(SQLITE_SPEC, usersTable, {
       data: [
         {
           id: "user-1",
@@ -1312,7 +1412,7 @@ describe("buildCreateManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      'INSERT INTO "users" ("id", "first_name", "created_at", "is_active") VALUES (?, ?, ?, ?) RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'INSERT INTO "users" ("id", "first_name", "created_at", "is_active") VALUES (?, ?, ?, ?) RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
     expect(query.params).toEqual([
       "user-1",
@@ -1323,7 +1423,7 @@ describe("buildCreateManyQuery", () => {
   });
 
   test("builds a batched INSERT with multiple rows", () => {
-    const query = buildCreateManyQuery(usersTable, {
+    const query = buildCreateManyQuery(SQLITE_SPEC, usersTable, {
       data: [
         {
           id: "user-1",
@@ -1339,7 +1439,7 @@ describe("buildCreateManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      'INSERT INTO "users" ("id", "first_name", "created_at", "is_active") VALUES (?, ?, ?, ?), (?, ?, ?, ?) RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'INSERT INTO "users" ("id", "first_name", "created_at", "is_active") VALUES (?, ?, ?, ?), (?, ?, ?, ?) RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
     expect(query.params).toEqual([
       "user-1",
@@ -1357,7 +1457,7 @@ describe("buildCreateManyQuery", () => {
     const d1 = new Date("2025-03-01T00:00:00.000Z");
     const d2 = new Date("2025-04-01T00:00:00.000Z");
 
-    const query = buildCreateManyQuery(usersTable, {
+    const query = buildCreateManyQuery(SQLITE_SPEC, usersTable, {
       data: [
         { id: "a", firstName: "A", createdAt: d1 },
         { id: "b", firstName: "B", createdAt: d2 },
@@ -1377,7 +1477,7 @@ describe("buildCreateManyQuery", () => {
   });
 
   test("returns empty statement and params for empty data array", () => {
-    const query = buildCreateManyQuery(usersTable, { data: [] });
+    const query = buildCreateManyQuery(SQLITE_SPEC, usersTable, { data: [] });
 
     expect(query.statement).toBe("");
     expect(query.params).toEqual([]);
@@ -1390,12 +1490,12 @@ describe("buildCreateManyQuery", () => {
       tag: string("tag").default(() => "default-tag"),
     });
 
-    const query = buildCreateManyQuery(tableWithDefault, {
+    const query = buildCreateManyQuery(SQLITE_SPEC, tableWithDefault, {
       data: [{ id: "item-1", name: "Widget" }],
     });
 
     expect(query.statement).toBe(
-      'INSERT INTO "items" ("id", "name", "tag") VALUES (?, ?, ?) RETURNING "id" AS id, "name" AS name, "tag" AS tag',
+      'INSERT INTO "items" ("id", "name", "tag") VALUES (?, ?, ?) RETURNING "id" AS "id", "name" AS "name", "tag" AS "tag"',
     );
     expect(query.params).toEqual(["item-1", "Widget", "default-tag"]);
   });
@@ -1403,30 +1503,30 @@ describe("buildCreateManyQuery", () => {
 
 describe("buildUpdateManyQuery", () => {
   test("builds an UPDATE without a WHERE clause when no where is provided", () => {
-    const query = buildUpdateManyQuery(usersTable, {
+    const query = buildUpdateManyQuery(SQLITE_SPEC, usersTable, {
       data: { firstName: "Everyone" },
     });
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "first_name" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'UPDATE "users" SET "first_name" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
     expect(query.params).toEqual(["Everyone"]);
   });
 
   test("builds an UPDATE with a WHERE clause", () => {
-    const query = buildUpdateManyQuery(usersTable, {
+    const query = buildUpdateManyQuery(SQLITE_SPEC, usersTable, {
       where: { firstName: { startsWith: "Jo" } },
       data: { firstName: "John" },
     });
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "first_name" = ? WHERE "first_name" LIKE ? ESCAPE \'\\\' RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'UPDATE "users" SET "first_name" = ? WHERE "first_name" LIKE ? ESCAPE \'\\\' RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
     expect(query.params).toEqual(["John", "Jo%"]);
   });
 
   test("builds an UPDATE with multiple SET fields", () => {
-    const query = buildUpdateManyQuery(usersTable, {
+    const query = buildUpdateManyQuery(SQLITE_SPEC, usersTable, {
       where: { id: "user-1" },
       data: {
         firstName: "Jane",
@@ -1435,7 +1535,7 @@ describe("buildUpdateManyQuery", () => {
     });
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "first_name" = ?, "created_at" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'UPDATE "users" SET "first_name" = ?, "created_at" = ? WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
     expect(query.params).toEqual([
       "Jane",
@@ -1447,7 +1547,7 @@ describe("buildUpdateManyQuery", () => {
   test("serializes Date values in data", () => {
     const d = new Date("2026-06-01T00:00:00.000Z");
 
-    const query = buildUpdateManyQuery(usersTable, {
+    const query = buildUpdateManyQuery(SQLITE_SPEC, usersTable, {
       data: { createdAt: d },
     });
 
@@ -1455,21 +1555,21 @@ describe("buildUpdateManyQuery", () => {
   });
 
   test("skips unknown data keys", () => {
-    const query = buildUpdateManyQuery(usersTable, {
+    const query = buildUpdateManyQuery(SQLITE_SPEC, usersTable, {
       where: { id: "user-1" },
       // @ts-expect-error nonExistent is not a column on usersTable
       data: { firstName: "Jane", nonExistent: "value" },
     });
 
     expect(query.statement).toBe(
-      'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
     expect(query.params).toEqual(["Jane", "user-1"]);
   });
 
   test("throws when data is empty", () => {
     expect(() =>
-      buildUpdateManyQuery(usersTable, {
+      buildUpdateManyQuery(SQLITE_SPEC, usersTable, {
         data: {},
       }),
     ).toThrow("updateMany requires at least one field in data");
@@ -1478,32 +1578,32 @@ describe("buildUpdateManyQuery", () => {
 
 describe("buildDeleteManyQuery", () => {
   test("builds a DELETE without a WHERE clause when no where is provided", () => {
-    const query = buildDeleteManyQuery(usersTable, {});
+    const query = buildDeleteManyQuery(SQLITE_SPEC, usersTable, {});
 
     expect(query.statement).toBe(
-      'DELETE FROM "users" RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'DELETE FROM "users" RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
     expect(query.params).toEqual([]);
   });
 
   test("builds a DELETE with a WHERE clause", () => {
-    const query = buildDeleteManyQuery(usersTable, {
+    const query = buildDeleteManyQuery(SQLITE_SPEC, usersTable, {
       where: { firstName: { startsWith: "Jo" } },
     });
 
     expect(query.statement).toBe(
-      'DELETE FROM "users" WHERE "first_name" LIKE ? ESCAPE \'\\\' RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'DELETE FROM "users" WHERE "first_name" LIKE ? ESCAPE \'\\\' RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
     expect(query.params).toEqual(["Jo%"]);
   });
 
   test("builds a DELETE with an equality WHERE clause", () => {
-    const query = buildDeleteManyQuery(usersTable, {
+    const query = buildDeleteManyQuery(SQLITE_SPEC, usersTable, {
       where: { firstName: "John" },
     });
 
     expect(query.statement).toBe(
-      'DELETE FROM "users" WHERE "first_name" = ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'DELETE FROM "users" WHERE "first_name" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
     expect(query.params).toEqual(["John"]);
   });
@@ -1511,12 +1611,12 @@ describe("buildDeleteManyQuery", () => {
   test("serializes Date values in where clause", () => {
     const cutoff = new Date("2025-01-01T00:00:00.000Z");
 
-    const query = buildDeleteManyQuery(usersTable, {
+    const query = buildDeleteManyQuery(SQLITE_SPEC, usersTable, {
       where: { createdAt: { lt: cutoff } },
     });
 
     expect(query.statement).toBe(
-      'DELETE FROM "users" WHERE "created_at" < ? RETURNING "id" AS id, "first_name" AS firstName, "created_at" AS createdAt, "is_active" AS isActive',
+      'DELETE FROM "users" WHERE "created_at" < ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
     expect(query.params).toEqual([cutoff.toISOString()]);
   });
@@ -2024,7 +2124,7 @@ describe("boolean coercion in included relations", () => {
     await insertPostWithFeatured(sql, "post-1", "Hello", true, "user-1");
 
     const dialect = createSqliteDialect(postsWithFeaturedTable, {
-      author: one(() => usersTable),
+      author: one("authorId", () => usersTable),
     });
 
     const rows = await dialect.findMany(sql, { include: { author: true } });
@@ -2032,6 +2132,155 @@ describe("boolean coercion in included relations", () => {
     const author = rows[0]?.author as Record<string, unknown>;
 
     expect(author.isActive).toBe(false);
+
+    await sql.close();
+  });
+});
+
+type Meta = { isActive: boolean; score: number };
+
+const metaTable = defineTable("meta_table", {
+  id: uuid("id").primaryKey().notNull(),
+  meta: json<Meta>("meta").notNull(),
+  extra: jsonb<{ tags: string[] }>("extra").nullable(),
+});
+
+const CREATE_META_TABLE_SQL =
+  "CREATE TABLE meta_table (id TEXT PRIMARY KEY, meta TEXT NOT NULL, extra TEXT)";
+
+const createMetaTable = async (sql: Bun.SQL) => {
+  await sql.unsafe(CREATE_META_TABLE_SQL);
+};
+
+describe("json and jsonb columns", () => {
+  test("buildCreateQuery serializes json values as JSON strings", () => {
+    const query = buildCreateQuery(
+      SQLITE_SPEC,
+      metaTable,
+      {},
+      {
+        data: {
+          id: "row-1",
+          meta: { isActive: true, score: 42 },
+        },
+      },
+    );
+
+    expect(query.params[1]).toBe(JSON.stringify({ isActive: true, score: 42 }));
+    expect(query.params[2]).toBeNull();
+  });
+
+  test("buildUpdateQuery serializes json values as JSON strings", () => {
+    const query = buildUpdateQuery(
+      SQLITE_SPEC,
+      metaTable,
+      {},
+      {
+        where: { id: "row-1" },
+        data: { meta: { isActive: false, score: 0 } },
+      },
+    );
+
+    expect(query.params[0]).toBe(JSON.stringify({ isActive: false, score: 0 }));
+  });
+
+  test("buildCreateManyQuery serializes json values across all rows", () => {
+    const query = buildCreateManyQuery(SQLITE_SPEC, metaTable, {
+      data: [
+        { id: "row-1", meta: { isActive: true, score: 1 } },
+        { id: "row-2", meta: { isActive: false, score: 2 } },
+      ],
+    });
+
+    expect(query.params[1]).toBe(JSON.stringify({ isActive: true, score: 1 }));
+    expect(query.params[4]).toBe(JSON.stringify({ isActive: false, score: 2 }));
+  });
+
+  test("create and findUnique round-trips json values", async () => {
+    const sql = createMemorySql();
+
+    await createMetaTable(sql);
+
+    const dialect = createSqliteDialect(metaTable, {});
+
+    await dialect.create(sql, {
+      data: { id: "row-1", meta: { isActive: true, score: 99 } },
+    });
+
+    const row = await dialect.findUnique(sql, { where: { id: "row-1" } });
+
+    expect(row?.meta).toEqual({ isActive: true, score: 99 });
+    expect(row?.extra).toBeNull();
+
+    await sql.close();
+  });
+
+  test("create and findUnique round-trips jsonb values", async () => {
+    const sql = createMemorySql();
+
+    await createMetaTable(sql);
+
+    const dialect = createSqliteDialect(metaTable, {});
+
+    await dialect.create(sql, {
+      data: {
+        id: "row-1",
+        meta: { isActive: true, score: 1 },
+        extra: { tags: ["a", "b"] },
+      },
+    });
+
+    const row = await dialect.findUnique(sql, { where: { id: "row-1" } });
+
+    expect(row?.extra).toEqual({ tags: ["a", "b"] });
+
+    await sql.close();
+  });
+
+  test("update persists json changes and findMany returns parsed value", async () => {
+    const sql = createMemorySql();
+
+    await createMetaTable(sql);
+
+    const dialect = createSqliteDialect(metaTable, {});
+
+    await dialect.create(sql, {
+      data: { id: "row-1", meta: { isActive: true, score: 1 } },
+    });
+
+    await dialect.update(sql, {
+      where: { id: "row-1" },
+      data: { meta: { isActive: false, score: 0 } },
+    });
+
+    const rows = await dialect.findMany(sql, {});
+
+    expect(rows[0]?.meta).toEqual({ isActive: false, score: 0 });
+
+    await sql.close();
+  });
+
+  test("json column default is applied on create", async () => {
+    const tableWithDefault = defineTable("defaults_table", {
+      id: uuid("id").primaryKey().notNull(),
+      meta: json<Meta>("meta")
+        .notNull()
+        .default(() => ({ isActive: true, score: 0 })),
+    });
+
+    const sql = createMemorySql();
+
+    await sql.unsafe(
+      "CREATE TABLE defaults_table (id TEXT PRIMARY KEY, meta TEXT NOT NULL)",
+    );
+
+    const dialect = createSqliteDialect(tableWithDefault, {});
+
+    await dialect.create(sql, { data: { id: "row-1" } });
+
+    const row = await dialect.findUnique(sql, { where: { id: "row-1" } });
+
+    expect(row?.meta).toEqual({ isActive: true, score: 0 });
 
     await sql.close();
   });

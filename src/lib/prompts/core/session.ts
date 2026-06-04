@@ -1,4 +1,5 @@
-import { err, mightThrow, ok } from "../../errors/index.js";
+import { mightThrow } from "../../errors/index.js";
+import { PromptCancelledError, PromptIOError } from "../errors.js";
 import type { BasePromptOptions } from "../types.js";
 import type { Key, PromptRuntime } from "./types.js";
 
@@ -39,7 +40,7 @@ const resolveOutput = async <TValue>(
   value: TValue,
 ) => {
   if (!options.transform) {
-    return ok(value);
+    return value;
   }
 
   const [transformError, transformed] = await mightThrow(
@@ -47,13 +48,10 @@ const resolveOutput = async <TValue>(
   );
 
   if (transformError || transformed === null || transformed === undefined) {
-    return err(
-      "PromptIOError",
-      "Prompt transform callback failed unexpectedly",
-    );
+    throw new PromptIOError("Prompt transform callback failed unexpectedly");
   }
 
-  return ok(transformed);
+  return transformed;
 };
 
 const runValidation = async <TValue>(
@@ -61,7 +59,7 @@ const runValidation = async <TValue>(
   value: TValue,
 ) => {
   if (!options.validate) {
-    return ok(null);
+    return null;
   }
 
   const [validationError, validationMessage] = await mightThrow(
@@ -69,14 +67,14 @@ const runValidation = async <TValue>(
   );
 
   if (validationError) {
-    return err("PromptIOError", "Prompt validate callback failed unexpectedly");
+    throw new PromptIOError("Prompt validate callback failed unexpectedly");
   }
 
   if (typeof validationMessage === "string" && validationMessage.length > 0) {
-    return ok(validationMessage);
+    return validationMessage;
   }
 
-  return ok(null);
+  return null;
 };
 
 const isCancelKey = (key: Key) => {
@@ -93,145 +91,92 @@ export const runPromptSession = async <
 >(
   params: SessionOptions<TState, TValue, TOptions>,
 ) => {
-  const [initError] = params.runtime.init();
-
-  if (initError) {
-    return err(initError.type, initError.message);
-  }
+  params.runtime.init();
 
   let state = params.initialState;
   let errorMessage: string | null = null;
 
   const closeAndDone = (message: string) => {
-    const [closeErr] = params.runtime.close();
-
-    if (closeErr) {
-      return err(closeErr.type, closeErr.message);
-    }
-
-    const [doneErr] = params.runtime.done(message);
-
-    if (doneErr) {
-      return err(doneErr.type, doneErr.message);
-    }
-
-    return null;
+    params.runtime.close();
+    params.runtime.done(message);
   };
 
-  while (true) {
-    const [renderError] = params.runtime.render(
-      params.render({
-        options: params.options,
-        state,
-        errorMessage,
-      }),
-    );
+  const [sessionError, finalValue] = await mightThrow(
+    (async () => {
+      while (true) {
+        params.runtime.render(
+          params.render({
+            options: params.options,
+            state,
+            errorMessage,
+          }),
+        );
 
-    if (renderError) {
-      params.runtime.close();
-      return err(renderError.type, renderError.message);
-    }
+        const key = await params.runtime.readKey();
 
-    const [readError, key] = await params.runtime.readKey();
-
-    if (readError || !key) {
-      params.runtime.close();
-      return err(
-        readError?.type ?? "PromptIOError",
-        readError?.message ?? "Unable to read prompt input",
-      );
-    }
-
-    if (isCancelKey(key)) {
-      const [closeError] = params.runtime.close();
-
-      if (closeError) {
-        return err(closeError.type, closeError.message);
-      }
-
-      const [doneError] = params.runtime.done(`✖ ${CANCEL_MESSAGE}`);
-
-      if (doneError) {
-        return err(doneError.type, doneError.message);
-      }
-
-      if (params.runtime.interrupt) {
-        const [interruptError] = params.runtime.interrupt(CANCEL_MESSAGE);
-
-        if (interruptError) {
-          return err(interruptError.type, interruptError.message);
+        if (!key) {
+          throw new PromptIOError("Unable to read prompt input");
         }
+
+        if (isCancelKey(key)) {
+          params.runtime.close();
+          params.runtime.done(`✖ ${CANCEL_MESSAGE}`);
+
+          if (params.runtime.interrupt) {
+            params.runtime.interrupt(CANCEL_MESSAGE);
+          }
+
+          throw new PromptCancelledError(CANCEL_MESSAGE);
+        }
+
+        if (key.name !== "enter") {
+          state = params.onKey(state, key);
+          errorMessage = null;
+          continue;
+        }
+
+        const submitResult = params.onSubmit(state);
+
+        if ("errorMessage" in submitResult) {
+          errorMessage = submitResult.errorMessage;
+          continue;
+        }
+
+        const rawValue = submitResult.value;
+
+        const validationErrorMessage = await runValidation(
+          params.options,
+          rawValue,
+        );
+
+        if (validationErrorMessage) {
+          errorMessage = validationErrorMessage;
+          continue;
+        }
+
+        const outputValue = await resolveOutput(params.options, rawValue);
+
+        if (outputValue === null) {
+          throw new PromptIOError("Unable to transform prompt value");
+        }
+
+        closeAndDone(
+          params.complete({
+            options: params.options,
+            state,
+            value: outputValue,
+          }),
+        );
+
+        return outputValue;
       }
+    })(),
+  );
 
-      return err("PromptCancelledError", CANCEL_MESSAGE);
-    }
-
-    if (key.name !== "enter") {
-      state = params.onKey(state, key);
-      errorMessage = null;
-      continue;
-    }
-
-    const submitResult = params.onSubmit(state);
-
-    if ("errorMessage" in submitResult) {
-      errorMessage = submitResult.errorMessage;
-      continue;
-    }
-
-    const rawValue = submitResult.value;
-
-    const [validationRunError, validationErrorMessage] = await runValidation(
-      params.options,
-      rawValue,
-    );
-
-    if (validationRunError) {
-      const closeDoneErr = closeAndDone(`✖ ${params.options.message}`);
-
-      if (closeDoneErr) {
-        return closeDoneErr;
-      }
-
-      return err(validationRunError.type, validationRunError.message);
-    }
-
-    if (validationErrorMessage) {
-      errorMessage = validationErrorMessage;
-      continue;
-    }
-
-    const [transformError, finalValue] = await resolveOutput(
-      params.options,
-      rawValue,
-    );
-
-    if (transformError) {
-      const closeDoneErr = closeAndDone(`✖ ${params.options.message}`);
-
-      if (closeDoneErr) {
-        return closeDoneErr;
-      }
-
-      return err(transformError.type, transformError.message);
-    }
-
-    if (finalValue === null) {
-      return err("PromptIOError", "Unable to transform prompt value");
-    }
-
-    const closeDoneErr = closeAndDone(
-      params.complete({
-        options: params.options,
-        state,
-        value: finalValue,
-      }),
-    );
-
-    if (closeDoneErr) {
-      return closeDoneErr;
-    }
-
-    return ok(finalValue);
+  if (sessionError) {
+    params.runtime.close();
+    throw sessionError;
   }
+
+  return finalValue;
 };

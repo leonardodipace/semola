@@ -138,22 +138,18 @@ describe("PubSub", () => {
 
       const messages: Array<{ userId: string; action: string }> = [];
 
-      const [subscribeError, unsubscribeHandler] = await pubsub.subscribe(
-        async (message) => {
-          messages.push(message);
-        },
-      );
+      const unsubscribeHandler = await pubsub.subscribe(async (message) => {
+        messages.push(message);
+      });
 
-      expect(subscribeError).toBeNull();
       expect(typeof unsubscribeHandler).toBe("function");
       expect(pubsub.isActive()).toBe(true);
 
-      const [publishError, count] = await pubsub.publish({
+      const count = await pubsub.publish({
         userId: "123",
         action: "login",
       });
 
-      expect(publishError).toBeNull();
       expect(count).toBe(1);
 
       // Wait for async message handling
@@ -196,9 +192,8 @@ describe("PubSub", () => {
 
       expect(pubsub.isActive()).toBe(true);
 
-      const [error] = await pubsub.unsubscribe();
+      await pubsub.unsubscribe();
 
-      expect(error).toBeNull();
       expect(pubsub.isActive()).toBe(false);
       expect(redis.getSubscriptions().size).toBe(0);
     });
@@ -214,22 +209,18 @@ describe("PubSub", () => {
       const handler1Messages: string[] = [];
       const handler2Messages: string[] = [];
 
-      const [error1] = await pubsub.subscribe(async (message) => {
+      await pubsub.subscribe(async (message) => {
         handler1Messages.push(message.message);
       });
 
-      const [error2] = await pubsub.subscribe(async (message) => {
+      await pubsub.subscribe(async (message) => {
         handler2Messages.push(message.message);
       });
 
-      expect(error1).toBeNull();
-      expect(error2).toBeNull();
-
-      const [publishError, publishCount] = await pubsub.publish({
+      const publishCount = await pubsub.publish({
         message: "hello",
       });
 
-      expect(publishError).toBeNull();
       expect(publishCount).toBe(1);
 
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -247,15 +238,12 @@ describe("PubSub", () => {
         channel: "test",
       });
 
-      const [error, unsubscribeHandler] = await pubsub.subscribe(
-        async () => {},
-      );
+      const unsubscribeHandler = await pubsub.subscribe(async () => {});
 
-      expect(error).toBeNull();
       expect(typeof unsubscribeHandler).toBe("function");
     });
 
-    test("should return null unsubscribe function on subscribe error", async () => {
+    test("should throw on subscribe error", async () => {
       const redis = createMockRedis();
       const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
@@ -265,15 +253,12 @@ describe("PubSub", () => {
 
       redis.setShouldFail(true);
 
-      const [error, unsubscribeHandler] = await pubsub.subscribe(
-        async () => {},
-      );
+      const promise = pubsub.subscribe(async () => {});
 
-      expect(error).toEqual({
-        type: "SubscribeError",
+      await expect(promise).rejects.toMatchObject({
+        name: "SubscribeError",
         message: "Unable to subscribe to test",
       });
-      expect(unsubscribeHandler).toBeNull();
     });
 
     test("should increment subscriber count with multiple PubSub instances", async () => {
@@ -297,20 +282,16 @@ describe("PubSub", () => {
         channel: "shared-channel",
       });
 
-      const [error1] = await pubsub1.subscribe(async () => {});
-      const [error2] = await pubsub2.subscribe(async () => {});
-      const [error3] = await pubsub3.subscribe(async () => {});
-
-      expect(error1).toBeNull();
-      expect(error2).toBeNull();
-      expect(error3).toBeNull();
+      await pubsub1.subscribe(async () => {});
+      await pubsub2.subscribe(async () => {});
+      await pubsub3.subscribe(async () => {});
 
       const subscribers = redis.getSubscriptions().get("shared-channel") ?? [];
 
       expect(subscribers).toHaveLength(3);
     });
 
-    test("should return error when unsubscribing without subscription", async () => {
+    test("should throw when unsubscribing without subscription", async () => {
       const redis = createMockRedis();
       const pubsub = new PubSub<{ message: string }>({
         subscriber: redis,
@@ -318,10 +299,10 @@ describe("PubSub", () => {
         channel: "test",
       });
 
-      const [error] = await pubsub.unsubscribe();
+      const promise = pubsub.unsubscribe();
 
-      expect(error).toEqual({
-        type: "UnsubscribeError",
+      await expect(promise).rejects.toMatchObject({
+        name: "UnsubscribeError",
         message: "Not subscribed",
       });
     });
@@ -525,14 +506,12 @@ describe("PubSub", () => {
 
       circular.self = circular;
 
-      const [error, data] = await pubsub.publish(circular);
+      const promise = pubsub.publish(circular);
 
-      expect(error).toEqual({
-        type: "SerializationError",
+      await expect(promise).rejects.toMatchObject({
+        name: "SerializationError",
         message: "Unable to serialize message",
       });
-
-      expect(data).toBeNull();
     });
 
     test("should handle publish errors", async () => {
@@ -545,14 +524,12 @@ describe("PubSub", () => {
 
       redis.setShouldFail(true);
 
-      const [error, data] = await pubsub.publish({ message: "message" });
+      const promise = pubsub.publish({ message: "message" });
 
-      expect(error).toEqual({
-        type: "PublishError",
+      await expect(promise).rejects.toMatchObject({
+        name: "PublishError",
         message: "Unable to publish to test",
       });
-
-      expect(data).toBeNull();
     });
 
     test("should handle subscribe errors", async () => {
@@ -565,16 +542,13 @@ describe("PubSub", () => {
 
       redis.setShouldFail(true);
 
-      const [error, unsubscribeHandler] = await pubsub.subscribe(
-        async () => {},
-      );
+      const promise = pubsub.subscribe(async () => {});
 
-      expect(error).toEqual({
-        type: "SubscribeError",
+      await expect(promise).rejects.toMatchObject({
+        name: "SubscribeError",
         message: "Unable to subscribe to test",
       });
 
-      expect(unsubscribeHandler).toBeNull();
       expect(pubsub.isActive()).toBe(false);
     });
 
@@ -590,14 +564,12 @@ describe("PubSub", () => {
 
       redis.setShouldFail(true);
 
-      const [error, data] = await pubsub.unsubscribe();
+      const promise = pubsub.unsubscribe();
 
-      expect(error).toEqual({
-        type: "UnsubscribeError",
+      await expect(promise).rejects.toMatchObject({
+        name: "UnsubscribeError",
         message: "Unable to unsubscribe from test",
       });
-
-      expect(data).toBeNull();
     });
 
     test("should handle invalid JSON gracefully", async () => {
@@ -673,11 +645,10 @@ describe("PubSub", () => {
         throw new Error("Synchronous handler error");
       });
 
-      const [publishError, count] = await pubsub.publish({ message: "test" });
+      const count = await pubsub.publish({ message: "test" });
 
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      expect(publishError).toBeNull();
       expect(count).toBe(1);
 
       // Handler was called and threw error
@@ -816,19 +787,13 @@ describe("PubSub", () => {
       const handler1Messages: string[] = [];
       const handler2Messages: string[] = [];
 
-      const [, unsubscribeHandler1] = await pubsub.subscribe(
-        async (message) => {
-          handler1Messages.push(message.message);
-        },
-      );
+      const unsubscribeHandler1 = await pubsub.subscribe(async (message) => {
+        handler1Messages.push(message.message);
+      });
 
       await pubsub.subscribe(async (message) => {
         handler2Messages.push(message.message);
       });
-
-      if (!unsubscribeHandler1) {
-        throw new Error("Expected unsubscribe handler");
-      }
 
       await unsubscribeHandler1();
 
@@ -848,16 +813,8 @@ describe("PubSub", () => {
         channel: "test",
       });
 
-      const [, unsubscribeHandler1] = await pubsub.subscribe(async () => {});
-      const [, unsubscribeHandler2] = await pubsub.subscribe(async () => {});
-
-      if (!unsubscribeHandler1) {
-        throw new Error("Expected unsubscribe handlers");
-      }
-
-      if (!unsubscribeHandler2) {
-        throw new Error("Expected unsubscribe handlers");
-      }
+      const unsubscribeHandler1 = await pubsub.subscribe(async () => {});
+      const unsubscribeHandler2 = await pubsub.subscribe(async () => {});
 
       expect(redis.getSubscribeCallCount("test")).toBe(1);
       expect(redis.getUnsubscribeCallCount("test")).toBe(0);
@@ -885,18 +842,19 @@ describe("PubSub", () => {
 
       expect(pubsub.isActive()).toBe(true);
 
-      // Attempt two concurrent unsubscribe calls using Promise.all
-      const results = await Promise.all([
+      // Attempt two concurrent unsubscribe calls
+      const results = await Promise.allSettled([
         pubsub.unsubscribe(),
         pubsub.unsubscribe(),
       ]);
 
-      const [error1] = results[0];
-      const [error2] = results[1];
-
-      // Only one should succeed (null error), the other should fail
-      const successCount = [error1, error2].filter((e) => e === null).length;
-      const failureCount = [error1, error2].filter((e) => e !== null).length;
+      // Only one should succeed, the other should throw
+      const successCount = results.filter(
+        (r) => r.status === "fulfilled",
+      ).length;
+      const failureCount = results.filter(
+        (r) => r.status === "rejected",
+      ).length;
 
       expect(successCount).toBe(1);
       expect(failureCount).toBe(1);
@@ -919,18 +877,15 @@ describe("PubSub", () => {
 
       expect(pubsub.isActive()).toBe(false);
 
-      const [unsubscribeError] = await pubsub.unsubscribe();
-
-      expect(unsubscribeError).toEqual({
-        type: "UnsubscribeError",
+      await expect(pubsub.unsubscribe()).rejects.toMatchObject({
+        name: "UnsubscribeError",
         message: "Not subscribed",
       });
 
       redis.unblockNextSubscribe();
 
-      const [subscribeError, unsubscribeHandler] = await subscribePromise;
+      const unsubscribeHandler = await subscribePromise;
 
-      expect(subscribeError).toBeNull();
       expect(typeof unsubscribeHandler).toBe("function");
       expect(pubsub.isActive()).toBe(true);
     });
@@ -945,11 +900,7 @@ describe("PubSub", () => {
 
       const received: string[] = [];
 
-      const [, unsubscribeHandler] = await pubsub.subscribe(async () => {});
-
-      if (!unsubscribeHandler) {
-        throw new Error("Expected unsubscribe handler");
-      }
+      const unsubscribeHandler = await pubsub.subscribe(async () => {});
 
       redis.blockNextUnsubscribe();
 
@@ -970,19 +921,14 @@ describe("PubSub", () => {
 
       redis.unblockNextUnsubscribe();
 
-      const [unsubscribeError] = await unsubscribePromise;
+      await unsubscribePromise;
 
-      expect(unsubscribeError).toBeNull();
+      await subscribePromise;
 
-      const [subscribeError] = await subscribePromise;
-
-      expect(subscribeError).toBeNull();
-
-      const [publishError, count] = await pubsub.publish({
+      const count = await pubsub.publish({
         message: "after-race",
       });
 
-      expect(publishError).toBeNull();
       expect(count).toBe(1);
 
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1009,23 +955,20 @@ describe("PubSub", () => {
       redis.setShouldFail(true);
       redis.unblockNextSubscribe();
 
-      const [subscribeError, unsubscribeHandler] = await subscribePromise;
-
-      expect(subscribeError).toEqual({
-        type: "SubscribeError",
+      await expect(subscribePromise).rejects.toMatchObject({
+        name: "SubscribeError",
         message: "Unable to subscribe to test",
       });
-      expect(unsubscribeHandler).toBeNull();
+
       expect(pubsub.isActive()).toBe(false);
       expect(redis.getSubscribeCallCount("test")).toBe(0);
 
       redis.setShouldFail(false);
 
-      const [publishError, count] = await pubsub.publish({
+      const count = await pubsub.publish({
         message: "should-not-deliver",
       });
 
-      expect(publishError).toBeNull();
       expect(count).toBe(0);
     });
   });

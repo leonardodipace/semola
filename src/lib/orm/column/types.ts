@@ -31,6 +31,8 @@ export type ColumnRuntimeValueMap = {
   boolean: boolean;
   date: Date;
   enum: string;
+  json: unknown;
+  jsonb: unknown;
 };
 
 export type StringColumn<
@@ -80,12 +82,34 @@ export type EnumColumn<
   enumValues?: readonly TValue[];
 };
 
+export type JsonColumn<
+  TValue = unknown,
+  TNullable extends boolean = boolean,
+  TPrimaryKey extends boolean = boolean,
+  TUnique extends boolean = boolean,
+  THasDefault extends boolean = boolean,
+> = BaseColumn<TNullable, TPrimaryKey, TUnique, THasDefault, TValue> & {
+  type: "json";
+};
+
+export type JsonbColumn<
+  TValue = unknown,
+  TNullable extends boolean = boolean,
+  TPrimaryKey extends boolean = boolean,
+  TUnique extends boolean = boolean,
+  THasDefault extends boolean = boolean,
+> = BaseColumn<TNullable, TPrimaryKey, TUnique, THasDefault, TValue> & {
+  type: "jsonb";
+};
+
 export type Column =
   | StringColumn
   | NumberColumn
   | BooleanColumn
   | DateColumn
-  | EnumColumn;
+  | EnumColumn
+  | JsonColumn
+  | JsonbColumn;
 
 type ColumnType = Column["type"];
 

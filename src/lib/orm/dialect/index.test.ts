@@ -14,12 +14,18 @@ describe("getDialect", () => {
     expect(dialect.name).toBe("sqlite");
   });
 
+  test("returns postgres dialect for postgres adapter", () => {
+    const dialect = getDialect("postgres", usersTable, {});
+
+    expect(dialect.name).toBe("postgres");
+  });
+
   test("throws for unsupported adapters", () => {
-    const adapter = "postgres";
+    const adapter = "mysql";
 
     // @ts-expect-error - testing runtime guard for values outside the Adapter type
     expect(() => getDialect(adapter, usersTable, {})).toThrow(
-      "Unsupported adapter: postgres",
+      "Unsupported adapter: mysql",
     );
   });
 });

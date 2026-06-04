@@ -23,10 +23,44 @@ describe("relation helpers", () => {
   });
 
   test("one() returns a hasOne descriptor", () => {
-    const relation = one(() => usersTable);
+    const relation = one("userId", () => usersTable);
 
     expect(relation._type).toBe("hasOne");
     expect(relation._table).toBe(usersTable);
+    expect(relation._foreignKey).toBe("userId");
+  });
+
+  test("one() foreign key must be a column on the source table", async () => {
+    const profilesTable = defineTable("profiles", {
+      id: uuid("id").primaryKey().notNull(),
+      userId: uuid("user_id").notNull(),
+    });
+
+    const ormA = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable, profiles: profilesTable },
+      relations: {
+        profiles: {
+          user: one("userId", () => usersTable),
+        },
+      },
+    });
+
+    const ormB = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable, profiles: profilesTable },
+      relations: {
+        profiles: {
+          // @ts-expect-error "badKey" is not a column on profilesTable
+          user: one("badKey", () => usersTable),
+        },
+      },
+    });
+
+    await ormA.$raw.close();
+    await ormB.$raw.close();
   });
 
   test("createOrm() wires table clients and exposes raw SQL client", async () => {
@@ -628,8 +662,8 @@ describe("many to many relation", () => {
         },
 
         studentsToExams: {
-          student: one(() => studentTable),
-          exam: one(() => examsTable),
+          student: one("studentId", () => studentTable),
+          exam: one("examId", () => examsTable),
         },
       },
     });
@@ -728,6 +762,69 @@ describe("many to many relation", () => {
 
     await expect(fromStudentsToExamsTable()).resolves.toBeDefined();
     await expect(fromExamTable()).resolves.toBeDefined();
+
+    await orm.$raw.close();
+  });
+
+  test("relation name matching a table name does not cause a conflict", async () => {
+    const studentTable = defineTable("students", {
+      id: uuid("id").primaryKey().notNull(),
+      firstName: string("first_name").notNull(),
+    });
+
+    const examsTable = defineTable("exams", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+    });
+
+    const studentsToExamsTable = defineTable("students_to_exams", {
+      studentId: uuid("student_id")
+        .primaryKey()
+        .notNull()
+        .references(() => studentTable.columns.id),
+      examId: uuid("exam_id")
+        .primaryKey()
+        .notNull()
+        .references(() => examsTable.columns.id),
+    });
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: {
+        students: studentTable,
+        exams: examsTable,
+        studentsToExams: studentsToExamsTable,
+      },
+      relations: {
+        studentsToExams: {
+          exams: one("examId", () => examsTable),
+        },
+      },
+    });
+
+    await orm.$raw`
+      CREATE TABLE students (id TEXT PRIMARY KEY NOT NULL, first_name TEXT NOT NULL);
+      CREATE TABLE exams (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL);
+      CREATE TABLE students_to_exams (
+        student_id TEXT NOT NULL REFERENCES students(id),
+        exam_id TEXT NOT NULL REFERENCES exams(id),
+        PRIMARY KEY (student_id, exam_id)
+      );
+    `;
+
+    await orm.students.createMany({ data: [{ id: "S1", firstName: "John" }] });
+    await orm.exams.createMany({ data: [{ id: "E1", name: "Math" }] });
+    await orm.studentsToExams.createMany({
+      data: [{ studentId: "S1", examId: "E1" }],
+    });
+
+    const rows = await orm.studentsToExams.findMany({
+      include: { exams: true },
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.exams).toMatchObject({ id: "E1", name: "Math" });
 
     await orm.$raw.close();
   });

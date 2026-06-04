@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { CronLengthError, OutOfBoundError } from "../errors.js";
 import { Cron } from "./index.js";
 
 describe("Cron", () => {
@@ -49,7 +50,7 @@ describe("Cron", () => {
           schedule: "invalid",
           handler,
         });
-      }).toThrow("CronLengthError");
+      }).toThrow(CronLengthError);
     });
 
     test("should throw error for cron expression with wrong field count", () => {
@@ -61,7 +62,7 @@ describe("Cron", () => {
           schedule: "0 0 * *",
           handler,
         });
-      }).toThrow("CronLengthError");
+      }).toThrow(CronLengthError);
     });
   });
 
@@ -75,7 +76,7 @@ describe("Cron", () => {
           schedule: "10000000 0 * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow(OutOfBoundError);
     });
 
     test("should reject an out-of-bounds number in second (100)", () => {
@@ -87,7 +88,7 @@ describe("Cron", () => {
           schedule: "100 * * * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow(OutOfBoundError);
     });
 
     test("should reject an out-of-bounds step range in minute field (50-70/5)", () => {
@@ -99,7 +100,7 @@ describe("Cron", () => {
           schedule: "* 50-70/5  * * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow(OutOfBoundError);
     });
 
     test("should accept a step range in minute field without the starting value", () => {
@@ -135,7 +136,7 @@ describe("Cron", () => {
           schedule: "* -70/5  * * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow(OutOfBoundError);
     });
 
     test("should reject an out-of-bounds step range in minute field (70/5)", () => {
@@ -147,7 +148,7 @@ describe("Cron", () => {
           schedule: "* 70/5  * * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow(OutOfBoundError);
     });
 
     test("should reject an out-of-bounds step range in day of the week field (7)", () => {
@@ -159,7 +160,7 @@ describe("Cron", () => {
           schedule: "0 0 * * 7",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow(OutOfBoundError);
     });
 
     test("should reject an out-of-bounds list value in hour field (1,15,40)", () => {
@@ -171,7 +172,7 @@ describe("Cron", () => {
           schedule: "0 1,15,40 * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow(OutOfBoundError);
     });
 
     test("should reject an out-of-bounds range value in day field (1-33)", () => {
@@ -183,7 +184,7 @@ describe("Cron", () => {
           schedule: "0 * 1-33 * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow(OutOfBoundError);
     });
 
     test("inverted range with step inside a list passes scanner", () => {
@@ -195,7 +196,7 @@ describe("Cron", () => {
           schedule: "30-10/5 * * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow(OutOfBoundError);
     });
 
     test("inverted range inside a list passes scanner", () => {
@@ -207,7 +208,7 @@ describe("Cron", () => {
           schedule: "30-10 * * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow(OutOfBoundError);
     });
 
     test("wildcard-with-step = 0 should fail", () => {
@@ -219,7 +220,7 @@ describe("Cron", () => {
           schedule: "*/0,30 * * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow(OutOfBoundError);
     });
 
     test("should reject an out-of-bounds step range in minute field (2-70/5)", () => {
@@ -231,7 +232,7 @@ describe("Cron", () => {
           schedule: "2-70/5 * * * *",
           handler,
         });
-      }).toThrow("OutOfBoundError");
+      }).toThrow(OutOfBoundError);
     });
   });
 

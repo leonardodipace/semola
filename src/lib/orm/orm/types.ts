@@ -7,14 +7,23 @@ export type HasMany<T extends Table> = {
   _table: T;
 };
 
-export type HasOne<T extends Table> = {
+export type HasOne<T extends Table, TKey extends string = string> = {
   _type: "hasOne";
   _table: T;
+  _foreignKey: TKey;
 };
 
 export type TableRelations = Record<string, HasMany<Table> | HasOne<Table>>;
 
 export type Relations = Record<string, TableRelations>;
+
+export type RelationsFor<T extends Record<string, Table>> = {
+  [TTableName in keyof T]?: {
+    [key: string]:
+      | HasMany<Table>
+      | HasOne<Table, keyof T[TTableName]["columns"] & string>;
+  };
+};
 
 type Prettify<T> = {
   [TKey in keyof T]: T[TKey];
@@ -30,7 +39,7 @@ type ExactlyOne<T extends Record<PropertyKey, unknown>> = {
 
 export type CreateOrmOptions<
   T extends Record<string, Table> = Record<string, Table>,
-  R extends Relations = Relations,
+  R extends RelationsFor<T> = RelationsFor<T>,
 > = {
   adapter: Adapter;
   url: string;
@@ -40,7 +49,7 @@ export type CreateOrmOptions<
 
 export type OrmClient<
   T extends Record<string, Table> = Record<string, Table>,
-  R extends Relations = Relations,
+  R extends RelationsFor<T> = RelationsFor<T>,
 > = {
   [TTableName in keyof T]: TableClient<
     T[TTableName],
@@ -51,10 +60,10 @@ export type OrmClient<
 };
 
 type TableRelationsFor<
-  TRelations extends Relations,
+  TRelations,
   TTableName extends PropertyKey,
 > = TTableName extends keyof TRelations
-  ? TRelations[TTableName]
+  ? NonNullable<TRelations[TTableName]>
   : Record<never, never>;
 
 type ColumnRuntimeValue<T extends Column> =
@@ -99,12 +108,18 @@ type EnumWhereOperators<T extends Column> = {
   equals?: ColumnValue<T>;
 };
 
+type JsonWhereOperators<T extends Column> = {
+  equals?: ColumnValue<T>;
+};
+
 type ColumnWhereOperatorsMap<T extends Column> = {
   string: StringWhereOperators<T>;
   number: NumberWhereOperators<T>;
   boolean: BooleanWhereOperators<T>;
   date: DateWhereOperators<T>;
   enum: EnumWhereOperators<T>;
+  json: JsonWhereOperators<T>;
+  jsonb: JsonWhereOperators<T>;
 };
 
 type ColumnWhereOperators<T extends Column> =
