@@ -53,7 +53,7 @@ export class Cron {
 
         if (!handlerError) return Promise.resolve();
 
-        await Promise.resolve(this.launchError(handlerError));
+        await Promise.reject(this.launchError(handlerError));
       });
     });
 
