@@ -1,12 +1,9 @@
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
-import {
-  type CronOptions,
-  type CronStatus,
-  type ErrorMetadataType,
-  type JobPublisher,
-  JobWithRetry,
-  type RetryObserver,
-  type ScheduleType,
+import type {
+  CronOptions,
+  CronStatus,
+  ErrorMetadataType,
+  ScheduleType,
 } from "./types.js";
 
 const MINUTELY_EXPR = "* * * * *";
@@ -22,73 +19,16 @@ const ALIASES: Record<ScheduleType, string> = {
   "@minutely": "* * * * *",
 } as const;
 
-class RetryManager implements JobPublisher {
-  private listener: RetryObserver | null = null;
-
-  public subscribe(listener: RetryObserver): void {
-    this.listener = listener;
-  }
-
-  public unsubscribe(): void {
-    this.listener = null;
-  }
-
-  public notify(job: JobWithRetry): void {
-    if (!this.listener) return;
-
-    this.listener.update(job);
-  }
-}
-
-export class RetryCronJob implements RetryObserver {
-  private maxAttempts: number;
-
-  public constructor(maxAttempts?: number) {
-    this.maxAttempts = maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
-  }
-
-  public update(job: Cron): void {
-    if (job.getCurrentAttempt() < this.maxAttempts) {
-      return;
-    }
-
-    job.stop();
-  }
-}
-
-export class RetryOSCronJob implements RetryObserver {
-  private maxAttempts: number;
-
-  public constructor(maxAttempts?: number) {
-    this.maxAttempts = maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
-  }
-
-  public update(job: Cron): void {
-    if (job.getCurrentAttempt() < this.maxAttempts) {
-      return;
-    }
-
-    job.stopOSLevel();
-  }
-}
-
-export class Cron extends JobWithRetry {
+export class Cron {
   private options: CronOptions;
   private status: CronStatus;
   private cron: Bun.CronJob | null = null;
-  private manager: RetryManager;
   private attempt: number;
 
   public constructor(options: CronOptions) {
-    super();
     this.options = options;
     this.status = "idle";
     this.attempt = 1;
-    this.manager = new RetryManager();
-
-    if (this.options.retryHandler) {
-      this.manager.subscribe(this.options.retryHandler);
-    }
   }
 
   public [Symbol.dispose](): void {
@@ -135,52 +75,8 @@ export class Cron extends JobWithRetry {
     this.status = "idle";
   }
 
-  public async runOSLevel(path: string) {
-    if (this.status === "running") return;
-
-    const { schedule, name } = this.options;
-    const expr = schedule === "@minutely" ? MINUTELY_EXPR : schedule;
-
-    const [createError, osJob] = mightThrowSync(() =>
-      Bun.cron(path, expr, name),
-    );
-
-    if (createError) {
-      this.launchError(createError);
-      return;
-    }
-
-    const [osError] = await mightThrow(osJob);
-
-    if (osError) {
-      this.launchError(osError);
-      return;
-    }
-
-    this.status = "running";
-  }
-
-  public async stopOSLevel() {
-    const [rmError, rmResult] = mightThrowSync(() =>
-      Bun.cron.remove(this.options.name),
-    );
-
-    if (!rmError) {
-      await rmResult;
-      this.status = "idle";
-      return;
-    }
-
-    this.launchError(rmError);
-  }
-
   public getExpression() {
-    if (!this.cron) {
-      // Used in case we are running an OS-level job
-      return ALIASES[this.options.schedule] || this.options.schedule;
-    }
-
-    return this.cron.cron;
+    return ALIASES[this.options.schedule] || this.options.schedule;
   }
 
   public getCurrentAttempt() {
@@ -215,8 +111,6 @@ export class Cron extends JobWithRetry {
   }
 
   private launchError(error: Error) {
-    this.manager.notify(this);
-    this.attempt += 1;
     if (!this.options.onError) throw error;
 
     const data: ErrorMetadataType = {
