@@ -3,6 +3,7 @@ import type {
   CronOptions,
   CronStatus,
   ErrorMetadataType,
+  RetryOptions,
   ScheduleType,
 } from "./types.js";
 
@@ -23,12 +24,12 @@ export class Cron {
   private options: CronOptions;
   private status: CronStatus;
   private cron: Bun.CronJob | null = null;
-  private attempt: number;
+  private currentAttempt: number;
 
   public constructor(options: CronOptions) {
     this.options = options;
     this.status = "idle";
-    this.attempt = 1;
+    this.currentAttempt = 1;
   }
 
   public [Symbol.dispose](): void {
@@ -42,7 +43,9 @@ export class Cron {
   public run() {
     if (this.status === "running") return;
 
-    const { schedule, handler } = this.options;
+    const { schedule, handler, maxAttempts } = this.options;
+    const avaiableAttempts = maxAttempts ? maxAttempts : DEFAULT_MAX_ATTEMPTS;
+
     const [scheduleFormatErr, cron] = mightThrowSync(() => {
       const expr = schedule === "@minutely" ? MINUTELY_EXPR : schedule;
 
@@ -53,7 +56,12 @@ export class Cron {
 
         if (!handlerError) return Promise.resolve();
 
-        await Promise.reject(this.launchError(handlerError));
+        this.currentAttempt += 1;
+        if (this.currentAttempt > avaiableAttempts) {
+          await Promise.reject(this.launchError(handlerError));
+        }
+
+        console.log(this.currentAttempt);
       });
     });
 
@@ -77,10 +85,6 @@ export class Cron {
 
   public getExpression() {
     return ALIASES[this.options.schedule] || this.options.schedule;
-  }
-
-  public getCurrentAttempt() {
-    return this.attempt;
   }
 
   public ref() {
