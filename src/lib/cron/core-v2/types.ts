@@ -1,9 +1,5 @@
 type MinutelyAlias = "@minutely";
 
-export type RetryOptions = {
-  maxAttempts: number;
-};
-
 export type ErrorMetadataType = {
   name: string;
   failedAt: number;
@@ -15,12 +11,38 @@ export type ScheduleType =
   | MinutelyAlias
   | (string & {});
 
+export type OnFailedAttemptContextType = {
+  error: Error;
+  attemptNumber: number;
+  retriesLeft: number;
+  delay: number;
+};
+
+export type RetryOptions = {
+  maxAttempts: number;
+  onError?: (error: ErrorMetadataType) => void | Promise<void>;
+  onFailedAttempt?: (ctx: OnFailedAttemptContextType) => void | Promise<void>;
+};
+
 export type CronOptions = {
   name: string;
   schedule: ScheduleType;
   handler: () => unknown;
-  maxAttempts?: number;
-  onError?: (error: ErrorMetadataType) => void | Promise<void>;
+  retry?: RetryObserver;
 };
 
 export type CronStatus = "idle" | "running";
+
+export abstract class JobWithRetry {
+  protected constructor() {}
+}
+
+export interface RetryObserver {
+  update(job: JobWithRetry, error: Error): Promise<void>;
+}
+
+export interface JobPublisher {
+  subscribe(retry: RetryObserver): void;
+  unsubscribe(): void;
+  notify(job: JobWithRetry, error: Error): Promise<void>;
+}
