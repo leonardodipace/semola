@@ -609,6 +609,363 @@ describe("relation helpers", () => {
   });
 });
 
+describe("nested include options", () => {
+  const authoredPostsTable = defineTable("posts", {
+    id: uuid("id").primaryKey().notNull(),
+    title: string("title").notNull(),
+    content: string("content").notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => usersTable.columns.id),
+  });
+
+  const createOrmWithPosts = () =>
+    createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable, posts: authoredPostsTable },
+      relations: {
+        users: { posts: many(() => authoredPostsTable) },
+      },
+    });
+
+  test("select in nested include returns only requested columns at runtime", async () => {
+    const orm = createOrmWithPosts();
+
+    await orm.$raw.unsafe(
+      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE)",
+    );
+    await orm.$raw.unsafe(
+      "CREATE TABLE posts (id TEXT PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL, user_id TEXT NOT NULL)",
+    );
+
+    await orm.users.create({
+      data: { id: "u1", name: "John", email: "john@example.com" },
+    });
+    await orm.posts.create({
+      data: { id: "p1", title: "Hello", content: "World", userId: "u1" },
+    });
+
+    const rows = await orm.users.findMany({
+      include: { posts: { select: { title: true } } },
+    });
+
+    const post = rows[0]?.posts[0];
+
+    expect(post?.title).toBe("Hello");
+    expect(Object.keys(post ?? {})).toEqual(["title"]);
+
+    await orm.$raw.close();
+  });
+
+  test("nested include select rejects invalid column names", () => {
+    const orm = createOrmWithPosts();
+
+    const _invalid: Parameters<typeof orm.users.findMany>[0] = {
+      include: {
+        posts: {
+          select: {
+            // @ts-expect-error "nonExistent" is not a column on posts
+            nonExistent: true,
+          },
+        },
+      },
+    };
+
+    expect(_invalid).toBeDefined();
+    void orm.$raw.close();
+  });
+
+  test("nested include options accept valid types and reject invalid ones", () => {
+    const orm = createOrmWithPosts();
+
+    const _valid: Parameters<typeof orm.users.findMany>[0] = {
+      include: {
+        posts: {
+          where: { title: "Hello" },
+          orderBy: { title: "asc" },
+          take: 5,
+          skip: 0,
+          select: { id: true, title: true },
+        },
+      },
+    };
+
+    const _invalidWhere: Parameters<typeof orm.users.findMany>[0] = {
+      include: {
+        posts: {
+          where: {
+            // @ts-expect-error "badCol" is not a column on posts
+            badCol: "x",
+          },
+        },
+      },
+    };
+
+    const _invalidOrderDir: Parameters<typeof orm.users.findMany>[0] = {
+      include: {
+        posts: {
+          orderBy: {
+            // @ts-expect-error invalid direction
+            title: "badDir",
+          },
+        },
+      },
+    };
+
+    expect(_valid).toBeDefined();
+    expect(_invalidWhere).toBeDefined();
+    expect(_invalidOrderDir).toBeDefined();
+    void orm.$raw.close();
+  });
+
+  test("nested include propagates relation types (posts include author)", async () => {
+    const postsWithAuthorTable = defineTable("posts_with_author", {
+      id: uuid("id").primaryKey().notNull(),
+      title: string("title").notNull(),
+      userId: uuid("user_id")
+        .notNull()
+        .references(() => usersTable.columns.id),
+    });
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable, posts: postsWithAuthorTable },
+      relations: {
+        users: { posts: many(() => postsWithAuthorTable) },
+        posts: { author: one("userId", () => usersTable) },
+      },
+    });
+
+    await orm.$raw.unsafe(
+      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE)",
+    );
+    await orm.$raw.unsafe(
+      "CREATE TABLE posts_with_author (id TEXT PRIMARY KEY, title TEXT NOT NULL, user_id TEXT NOT NULL)",
+    );
+
+    await orm.users.create({
+      data: { id: "u1", name: "John", email: "john@example.com" },
+    });
+    await orm.posts.create({
+      data: { id: "p1", title: "Hello", userId: "u1" },
+    });
+
+    const rows = await orm.users.findMany({
+      include: { posts: { include: { author: true } } },
+    });
+
+    const post = rows[0]?.posts[0];
+    const author = post?.author;
+
+    // runtime: nested include data is present
+    expect(author?.name).toBe("John");
+
+    // type: author column is accessible (TypeScript would flag unknown columns)
+    const _nameCheck: string | null | undefined = author?.name;
+    expect(_nameCheck).toBeDefined();
+
+    await orm.$raw.close();
+  });
+
+  test("depth-3 nested include with select shows correct type (not never or missing)", async () => {
+    const postsWithAuthorTable = defineTable("posts_depth3", {
+      id: uuid("id").primaryKey().notNull(),
+      title: string("title").notNull(),
+      content: string("content").notNull(),
+      userId: uuid("user_id")
+        .notNull()
+        .references(() => usersTable.columns.id),
+    });
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable, posts: postsWithAuthorTable },
+      relations: {
+        users: { posts: many(() => postsWithAuthorTable) },
+        posts: { author: one("userId", () => usersTable) },
+      },
+    });
+
+    await orm.$raw.unsafe(
+      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE)",
+    );
+    await orm.$raw.unsafe(
+      "CREATE TABLE posts_depth3 (id TEXT PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL, user_id TEXT NOT NULL)",
+    );
+
+    await orm.users.create({
+      data: { id: "u1", name: "John", email: "john@example.com" },
+    });
+    await orm.posts.create({
+      data: { id: "p1", title: "Hello", content: "World", userId: "u1" },
+    });
+
+    const rows = await orm.users.findMany({
+      include: {
+        posts: {
+          include: {
+            author: {
+              include: {
+                posts: { select: { title: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // depth-3: author.posts should be Array<{ title: string }>, not never or missing
+    const authorPosts = rows[0]?.posts[0]?.author?.posts;
+
+    expect(authorPosts).toBeDefined();
+    expect(authorPosts?.[0]?.title).toBe("Hello");
+    expect(Object.keys(authorPosts?.[0] ?? {})).toEqual(["title"]);
+
+    await orm.$raw.close();
+  });
+
+  test("select on depth-3 nested include narrows type correctly", () => {
+    const postsWithAuthorTable = defineTable("posts_select_depth3", {
+      id: uuid("id").primaryKey().notNull(),
+      title: string("title").notNull(),
+      content: string("content").notNull(),
+      userId: uuid("user_id")
+        .notNull()
+        .references(() => usersTable.columns.id),
+    });
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable, posts: postsWithAuthorTable },
+      relations: {
+        users: { posts: many(() => postsWithAuthorTable) },
+        posts: { author: one("userId", () => usersTable) },
+      },
+    });
+
+    // "author.posts" with select — type must only contain selected columns.
+    // Before the fix, the intersection `TIncludeValue & { select?: TableSelect<T> }`
+    // added all optional columns, so keyof picked up id, title, content, userId.
+    const _typed: Parameters<typeof orm.users.findMany>[0] = {
+      include: {
+        posts: {
+          include: {
+            author: {
+              include: {
+                posts: { select: { title: true, content: true } },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    type AuthorPosts = NonNullable<
+      ReturnType<typeof orm.users.findMany> extends Promise<infer U>
+        ? U extends Array<infer Row>
+          ? Row extends { posts: Array<infer Post> }
+            ? Post extends { author: infer Author | null }
+              ? Author extends { posts: Array<infer AuthorPost> }
+                ? AuthorPost
+                : never
+              : never
+            : never
+          : never
+        : never
+    >;
+
+    // AuthorPosts should only have title and content, not id or userId.
+    // @ts-expect-error id should not exist when select: { title, content }
+    const _badId: AuthorPosts = { id: "", title: "", content: "" };
+
+    expect(_typed).toBeDefined();
+    expect(_badId).toBeDefined();
+    void orm.$raw.close();
+  });
+
+  test("nested include with select does not produce never in sibling relation type", () => {
+    const postsWithAuthorTable = defineTable("posts_never_check", {
+      id: uuid("id").primaryKey().notNull(),
+      title: string("title").notNull(),
+      userId: uuid("user_id")
+        .notNull()
+        .references(() => usersTable.columns.id),
+    });
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable, posts: postsWithAuthorTable },
+      relations: {
+        users: { posts: many(() => postsWithAuthorTable) },
+        posts: { author: one("userId", () => usersTable) },
+      },
+    });
+
+    // "author" appears in type (depth 2) — must be a proper type, not never
+    const _check: Parameters<typeof orm.users.findMany>[0] = {
+      include: {
+        posts: {
+          include: {
+            author: {
+              // author.posts is depth 3 — no type info but MUST NOT produce `posts: never`
+              include: { posts: { select: { title: true } } },
+            },
+          },
+        },
+      },
+    };
+
+    expect(_check).toBeDefined();
+    void orm.$raw.close();
+  });
+
+  test("nested include type rejects invalid columns at each level", () => {
+    const postsWithAuthorTable = defineTable("posts_nested_type_check", {
+      id: uuid("id").primaryKey().notNull(),
+      title: string("title").notNull(),
+      userId: uuid("user_id")
+        .notNull()
+        .references(() => usersTable.columns.id),
+    });
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable, posts: postsWithAuthorTable },
+      relations: {
+        users: { posts: many(() => postsWithAuthorTable) },
+        posts: { author: one("userId", () => usersTable) },
+      },
+    });
+
+    // valid: include author (a known relation on posts)
+    const _valid: Parameters<typeof orm.users.findMany>[0] = {
+      include: { posts: { include: { author: true } } },
+    };
+
+    // invalid: "badCol" in nested where is not a column on posts
+    const _invalidNestedWhere: Parameters<typeof orm.users.findMany>[0] = {
+      include: {
+        posts: {
+          where: {
+            // @ts-expect-error "badCol" is not a column on posts
+            badCol: "x",
+          },
+        },
+      },
+    };
+
+    expect(_valid).toBeDefined();
+    expect(_invalidNestedWhere).toBeDefined();
+    void orm.$raw.close();
+  });
+});
+
 describe("many to many relation", () => {
   test("should create a bi-directional relation", async () => {
     const studentTable = defineTable("students", {

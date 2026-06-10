@@ -1,6 +1,7 @@
 import type { TableRelations } from "../orm/types.js";
 import type { Table } from "../table/types.js";
-import { createDialect, type DialectSpec } from "./shared.js";
+import { createDialect } from "./shared.js";
+import type { CreateNamedDialectInput, DialectSpec } from "./types.js";
 
 export const SQLITE_SPEC: DialectSpec = {
   name: "sqlite",
@@ -12,6 +13,14 @@ export const SQLITE_SPEC: DialectSpec = {
 };
 
 export const createSqliteDialect = <T extends Table, R extends TableRelations>(
-  table: T,
-  relations: R,
-) => createDialect(SQLITE_SPEC, table, relations);
+  input: CreateNamedDialectInput<T, R>,
+) => {
+  const { table, relations, tableRelationsMap = new Map() } = input;
+
+  return createDialect({
+    spec: SQLITE_SPEC,
+    table,
+    relations,
+    tableRelationsMap,
+  });
+};

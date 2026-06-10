@@ -1,3 +1,4 @@
+import type { Column } from "../column/types.js";
 import type {
   CreateManyOptions,
   CreateOptions,
@@ -11,8 +12,13 @@ import type {
   FindManyResult,
   FindUniqueOptions,
   FindUniqueResult,
+  HasMany,
+  HasOne,
+  TableInclude,
   TableRelations,
   TableRow,
+  TableSelect,
+  TableWhere,
   UpdateManyOptions,
   UpdateOptions,
   UpdateResult,
@@ -20,6 +26,288 @@ import type {
 import type { Table } from "../table/types.js";
 
 export type Adapter = "sqlite" | "postgres";
+
+export type DialectSpec = {
+  name: Adapter;
+  // SQLite: ignores index, returns `?`. Postgres: returns `$${index}`.
+  formatPlaceholder: (index: number) => string;
+  // Pagination for skip without take. SQLite: `LIMIT -1 OFFSET`. Postgres: `LIMIT ALL OFFSET`.
+  // The builder appends the placeholder itself.
+  unlimitedOffsetKeyword: string;
+  // Builds a JSON object from key/value args inside include subqueries.
+  // SQLite: `json_object`. Postgres: `jsonb_build_object`.
+  jsonObjectFunctionName: string;
+  // Aggregates per-row JSON objects into a JSON array for `hasMany` includes.
+  // SQLite: `json_group_array`. Postgres: `jsonb_agg`.
+  jsonArrayAggregateFunctionName: string;
+  // COALESCE fallback when a `hasMany` subquery returns no rows.
+  // SQLite: `'[]'`. Postgres: `'[]'::jsonb`.
+  emptyJsonArrayLiteral: string;
+};
+
+export type SqlFragment = {
+  sql: string;
+  params: unknown[];
+};
+
+export type IncludeDescriptor = {
+  name: string;
+  type: "hasMany" | "hasOne";
+  table: Table;
+  nested?: IncludeDescriptor[];
+};
+
+export type IncludeClause = {
+  sql: string;
+  params: unknown[];
+  descriptors: IncludeDescriptor[];
+};
+
+export type HasManyCandidate = {
+  fk: Column;
+  source: { sqlName: string };
+};
+
+export type HasOneCandidate = {
+  localForeignKey: Column;
+  target: { sqlName: string };
+};
+
+export type RelationQueryOptions = {
+  where?: Record<string, unknown>;
+  orderBy?: Record<string, unknown>;
+  take?: number;
+  skip?: number;
+  select?: Record<string, boolean>;
+  include?: TableInclude;
+};
+
+export type RelationSubqueryResult = {
+  sql: string;
+  params: unknown[];
+  descriptor: IncludeDescriptor;
+};
+
+export type ReturningQuery = {
+  statement: string;
+  params: unknown[];
+  includeDescriptors: IncludeDescriptor[];
+};
+
+export type ParseIncludeRowsInput = {
+  table: Table;
+  rows: Array<Record<string, unknown>>;
+  descriptors: IncludeDescriptor[];
+};
+
+export type CreateDialectInput<T extends Table, R extends TableRelations> = {
+  spec: DialectSpec;
+  table: T;
+  relations: R;
+  tableRelationsMap?: Map<Table, TableRelations>;
+};
+
+export type CreateNamedDialectInput<
+  T extends Table,
+  R extends TableRelations,
+> = {
+  table: T;
+  relations: R;
+  tableRelationsMap?: Map<Table, TableRelations>;
+};
+
+export type GetDialectInput<T extends Table, R extends TableRelations> = {
+  adapter: Adapter;
+  table: T;
+  relations: R;
+  tableRelationsMap?: Map<Table, TableRelations>;
+};
+
+export type BuildFindManyQueryInput<
+  T extends Table,
+  R extends TableRelations,
+> = {
+  spec: DialectSpec;
+  table: T;
+  relations: R;
+  options?: FindManyOptions<T, R>;
+  tableRelationsMap?: Map<Table, TableRelations>;
+};
+
+export type BuildFindFirstQueryInput<
+  T extends Table,
+  R extends TableRelations,
+> = {
+  spec: DialectSpec;
+  table: T;
+  relations: R;
+  options?: FindFirstOptions<T, R>;
+  tableRelationsMap?: Map<Table, TableRelations>;
+};
+
+export type BuildFindUniqueQueryInput<
+  T extends Table,
+  R extends TableRelations,
+> = {
+  spec: DialectSpec;
+  table: T;
+  relations: R;
+  options: FindUniqueOptions<T, R>;
+  tableRelationsMap?: Map<Table, TableRelations>;
+};
+
+export type BuildCreateQueryInput<T extends Table, R extends TableRelations> = {
+  spec: DialectSpec;
+  table: T;
+  relations: R;
+  options: CreateOptions<T, R>;
+  tableRelationsMap?: Map<Table, TableRelations>;
+};
+
+export type BuildUpdateQueryInput<T extends Table, R extends TableRelations> = {
+  spec: DialectSpec;
+  table: T;
+  relations: R;
+  options: UpdateOptions<T, R>;
+  tableRelationsMap?: Map<Table, TableRelations>;
+};
+
+export type BuildDeleteQueryInput<T extends Table, R extends TableRelations> = {
+  spec: DialectSpec;
+  table: T;
+  relations: R;
+  options: DeleteOptions<T, R>;
+  tableRelationsMap?: Map<Table, TableRelations>;
+};
+
+export type BuildCreateManyQueryInput<T extends Table> = {
+  spec: DialectSpec;
+  table: T;
+  options: CreateManyOptions<T>;
+};
+
+export type BuildUpdateManyQueryInput<T extends Table> = {
+  spec: DialectSpec;
+  table: T;
+  options: UpdateManyOptions<T>;
+};
+
+export type BuildDeleteManyQueryInput<T extends Table> = {
+  spec: DialectSpec;
+  table: T;
+  options: DeleteManyOptions<T>;
+};
+
+export type BuildSetClausesInput<T extends Table> = {
+  nextPlaceholder: () => string;
+  table: T;
+  data: Record<string, unknown>;
+};
+
+export type BuildWhereIncludeReturningInput<
+  T extends Table,
+  R extends TableRelations,
+> = {
+  spec: DialectSpec;
+  nextPlaceholder: () => string;
+  table: T;
+  relations: R;
+  tableRelationsMap: Map<Table, TableRelations>;
+  where: TableWhere<T>;
+  select?: TableSelect<T>;
+  include?: TableInclude<R>;
+};
+
+export type BuildSelectIncludeWhereInput<
+  T extends Table,
+  R extends TableRelations,
+> = {
+  spec: DialectSpec;
+  nextPlaceholder: () => string;
+  table: T;
+  relations: R;
+  tableRelationsMap: Map<Table, TableRelations>;
+  where?: TableWhere<T>;
+  select?: TableSelect<T>;
+  include?: TableInclude<R>;
+};
+
+export type BuildWhereClauseInput<T extends Table> = {
+  nextPlaceholder: () => string;
+  table: T;
+  where?: TableWhere<T>;
+};
+
+export type ResolveHasOneForeignKeyColumnInput = {
+  sourceTable: Table;
+  relationTable: Table;
+  relationForeignKey: string;
+};
+
+export type BuildJsonObjectExpressionInput = {
+  spec: DialectSpec;
+  alias: string;
+  table: Table;
+  extraPairs?: string[];
+  select?: Record<string, boolean>;
+};
+
+export type BuildRelationSubqueryInput = {
+  spec: DialectSpec;
+  nextPlaceholder: () => string;
+  parentTable: Table;
+  parentAlias: string;
+  relation: HasMany<Table> | HasOne<Table>;
+  relationName: string;
+  includeValue: unknown;
+  tableRelationsMap: Map<Table, TableRelations>;
+};
+
+export type BuildIncludeClauseInput<
+  T extends Table,
+  R extends TableRelations,
+> = {
+  spec: DialectSpec;
+  nextPlaceholder: () => string;
+  table: T;
+  parentAlias: string;
+  relations: R;
+  tableRelationsMap: Map<Table, TableRelations>;
+  include?: TableInclude<R>;
+};
+
+export type BuildPaginationClauseInput = {
+  spec: DialectSpec;
+  nextPlaceholder: () => string;
+  take?: number;
+  skip?: number;
+};
+
+export type BuildSelectStatementInput = {
+  tableName: string;
+  columns: string;
+  where: string;
+  orderBy: string;
+  pagination: string;
+};
+
+export type CoerceRelationItemsInput = {
+  value: unknown;
+  table: Table;
+  nested: IncludeDescriptor[];
+};
+
+export type CoerceRowInput = {
+  row: Record<string, unknown>;
+  table: Table;
+  descriptors: IncludeDescriptor[];
+};
+
+export type ExecuteQueryInput = {
+  sql: Bun.SQL;
+  table: Table;
+  query: ReturningQuery;
+};
 
 export type Dialect<
   T extends Table = Table,

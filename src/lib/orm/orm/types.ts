@@ -15,8 +15,6 @@ export type HasOne<T extends Table, TKey extends string = string> = {
 
 export type TableRelations = Record<string, HasMany<Table> | HasOne<Table>>;
 
-export type Relations = Record<string, TableRelations>;
-
 export type RelationsFor<T extends Record<string, Table>> = {
   [TTableName in keyof T]?: {
     [key: string]:
@@ -47,24 +45,47 @@ export type CreateOrmOptions<
   relations?: R;
 };
 
-export type OrmClient<
-  T extends Record<string, Table> = Record<string, Table>,
-  R extends RelationsFor<T> = RelationsFor<T>,
+// Look up the raw relations for a table by matching its structural type against all tables.
+// Uses bidirectional extends check to require exact structural match.
+type RelationsForTableByType<
+  TTable extends Table,
+  TAllTables extends Record<string, Table>,
+  TAllRelations,
 > = {
-  [TTableName in keyof T]: TableClient<
-    T[TTableName],
-    TableRelationsFor<R, TTableName>
-  >;
-} & {
-  $raw: Bun.SQL;
-};
+  [K in keyof TAllTables]: TAllTables[K] extends TTable
+    ? TTable extends TAllTables[K]
+      ? K extends keyof TAllRelations
+        ? NonNullable<TAllRelations[K]>
+        : Record<never, never>
+      : never
+    : never;
+}[keyof TAllTables] extends infer R
+  ? [R] extends [TableRelations]
+    ? R
+    : Record<never, never>
+  : Record<never, never>;
 
+// Raw relations lookup for a table by its JS name key.
 type TableRelationsFor<
   TRelations,
   TTableName extends PropertyKey,
 > = TTableName extends keyof TRelations
   ? NonNullable<TRelations[TTableName]>
   : Record<never, never>;
+
+export type OrmClient<
+  T extends Record<string, Table> = Record<string, Table>,
+  R extends RelationsFor<T> = RelationsFor<T>,
+> = {
+  [TTableName in keyof T]: TableClient<
+    T[TTableName],
+    TableRelationsFor<R, TTableName>,
+    T,
+    R
+  >;
+} & {
+  $raw: Bun.SQL;
+};
 
 type ColumnRuntimeValue<T extends Column> =
   T extends BaseColumn<boolean, boolean, boolean, boolean, infer TValue>
@@ -142,8 +163,24 @@ export type TableOrderBy<T extends Table> = {
   [TColumnName in keyof T["columns"]]?: "asc" | "desc";
 };
 
+type RelationTable<R extends HasMany<Table> | HasOne<Table>> =
+  R extends HasMany<infer T> ? T : R extends HasOne<infer T> ? T : never;
+
+// TAllTables/TAllRelations thread through include options so nested include keys
+// are validated and result types are inferred correctly at any depth.
+export type RelationIncludeOptions<R extends HasMany<Table> | HasOne<Table>> = {
+  where?: TableWhere<RelationTable<R>>;
+  orderBy?: TableOrderBy<RelationTable<R>>;
+  take?: number;
+  skip?: number;
+  select?: TableSelect<RelationTable<R>>;
+  include?: TableInclude<TableRelations>;
+};
+
 export type TableInclude<TRelations extends TableRelations = TableRelations> =
-  Partial<Record<keyof TRelations, boolean>>;
+  Partial<{
+    [K in keyof TRelations]: boolean | RelationIncludeOptions<TRelations[K]>;
+  }>;
 
 export type FindManyOptions<
   T extends Table,
@@ -263,9 +300,15 @@ export type CreateOptions<
 export type CreateResult<
   T extends Table,
   TRelations extends TableRelations,
-  TOptions extends CreateOptions<T, TRelations>,
+  TOptions extends {
+    select?: TableSelect<T>;
+    include?: TableInclude<TRelations>;
+  },
+  TAllTables extends Record<string, Table> = Record<string, Table>,
+  TAllRelations = Record<string, unknown>,
 > = Prettify<
-  SelectResult<T, TOptions> & IncludeResult<T, TRelations, TOptions>
+  SelectResult<T, TOptions> &
+    IncludeResult<T, TRelations, TOptions, TAllTables, TAllRelations>
 >;
 
 export type UpdateData<T extends Table> = Partial<{
@@ -287,8 +330,16 @@ export type UpdateOptions<
 export type UpdateResult<
   T extends Table,
   TRelations extends TableRelations,
-  TOptions extends UpdateOptions<T, TRelations>,
-> = NonNullable<FindUniqueResult<T, TRelations, TOptions>>;
+  TOptions extends {
+    where: FindUniqueWhere<T>;
+    select?: TableSelect<T>;
+    include?: TableInclude<TRelations>;
+  },
+  TAllTables extends Record<string, Table> = Record<string, Table>,
+  TAllRelations = Record<string, unknown>,
+> = NonNullable<
+  FindUniqueResult<T, TRelations, TOptions, TAllTables, TAllRelations>
+>;
 
 export type DeleteOptions<
   T extends Table,
@@ -298,8 +349,16 @@ export type DeleteOptions<
 export type DeleteResult<
   T extends Table,
   TRelations extends TableRelations,
-  TOptions extends DeleteOptions<T, TRelations>,
-> = NonNullable<FindUniqueResult<T, TRelations, TOptions>>;
+  TOptions extends {
+    where: FindUniqueWhere<T>;
+    select?: TableSelect<T>;
+    include?: TableInclude<TRelations>;
+  },
+  TAllTables extends Record<string, Table> = Record<string, Table>,
+  TAllRelations = Record<string, unknown>,
+> = NonNullable<
+  FindUniqueResult<T, TRelations, TOptions, TAllTables, TAllRelations>
+>;
 
 export type CreateManyOptions<T extends Table> = {
   data: CreateData<T>[];
@@ -314,14 +373,8 @@ export type DeleteManyOptions<T extends Table> = {
   where?: TableWhere<T>;
 };
 
-type HasManyRelationType<R extends HasMany<Table> | HasOne<Table>> =
-  R extends HasMany<infer TTable> ? Array<TableRow<TTable>> : never;
-
-type HasOneRelationType<R extends HasMany<Table> | HasOne<Table>> =
-  R extends HasOne<infer TTable> ? TableRow<TTable> | null : never;
-
 type IncludedKeys<TInclude> = {
-  [K in keyof TInclude]: TInclude[K] extends true ? K : never;
+  [K in keyof TInclude]: TInclude[K] extends false | undefined ? never : K;
 }[keyof TInclude];
 
 type SelectResult<
@@ -336,75 +389,162 @@ type SelectResult<
       }
   : TableRow<T>;
 
+// Non-recursive: handles select narrowing only.
+// Use `infer` to extract the exact select literal — avoids the bug where
+// `& { select?: TableSelect<T> }` would add all optional columns to the intersection.
+type RelationBaseRow<
+  TTable extends Table,
+  TIncludeValue,
+> = TIncludeValue extends { select: infer TSelect }
+  ? TSelect extends TableSelect<TTable>
+    ? SelectResult<TTable, { select: TSelect }>
+    : TableRow<TTable>
+  : TableRow<TTable>;
+
+// Dynamic nested relation lookup — works at any depth without phantom types.
+// TAllTables + TAllRelations are threaded from OrmClient so RelationsForTableByType
+// can resolve the related table's relations at every level of recursion.
+type RelationResultType<
+  R extends HasMany<Table> | HasOne<Table>,
+  TIncludeValue,
+  TAllTables extends Record<string, Table>,
+  TAllRelations,
+> = R extends HasMany<infer TTable>
+  ? Array<
+      Prettify<
+        RelationBaseRow<TTable, TIncludeValue> &
+          (TIncludeValue extends { include?: infer TNestedInclude }
+            ? IncludeResult<
+                TTable,
+                RelationsForTableByType<TTable, TAllTables, TAllRelations>,
+                TNestedInclude extends TableInclude<
+                  RelationsForTableByType<TTable, TAllTables, TAllRelations>
+                >
+                  ? { include: TNestedInclude }
+                  : {},
+                TAllTables,
+                TAllRelations
+              >
+            : {})
+      >
+    >
+  : R extends HasOne<infer TTable>
+    ? Prettify<
+        RelationBaseRow<TTable, TIncludeValue> &
+          (TIncludeValue extends { include?: infer TNestedInclude }
+            ? IncludeResult<
+                TTable,
+                RelationsForTableByType<TTable, TAllTables, TAllRelations>,
+                TNestedInclude extends TableInclude<
+                  RelationsForTableByType<TTable, TAllTables, TAllRelations>
+                >
+                  ? { include: TNestedInclude }
+                  : {},
+                TAllTables,
+                TAllRelations
+              >
+            : {})
+      > | null
+    : never;
+
 type IncludeResult<
   _T extends Table,
   TRelations extends TableRelations,
   TOptions extends { include?: TableInclude<TRelations> },
-> = TOptions["include"] extends TableInclude<TRelations>
-  ? {
-      [K in IncludedKeys<
-        NonNullable<TOptions["include"]>
-      >]: K extends keyof TRelations
-        ? HasManyRelationType<TRelations[K]> | HasOneRelationType<TRelations[K]>
-        : never;
-    }
-  : {};
+  TAllTables extends Record<string, Table>,
+  TAllRelations,
+> = [keyof TRelations] extends [never]
+  ? {}
+  : TOptions["include"] extends TableInclude<TRelations>
+    ? {
+        [K in IncludedKeys<
+          NonNullable<TOptions["include"]>
+        >]: K extends keyof TRelations
+          ? RelationResultType<
+              TRelations[K],
+              NonNullable<TOptions["include"]>[K],
+              TAllTables,
+              TAllRelations
+            >
+          : never;
+      }
+    : {};
 
 export type FindManyResult<
   T extends Table,
   TRelations extends TableRelations,
   TOptions extends FindManyOptions<T, TRelations>,
+  TAllTables extends Record<string, Table> = Record<string, Table>,
+  TAllRelations = Record<string, unknown>,
 > = Prettify<
-  SelectResult<T, TOptions> & IncludeResult<T, TRelations, TOptions>
+  SelectResult<T, TOptions> &
+    IncludeResult<T, TRelations, TOptions, TAllTables, TAllRelations>
 >;
 
 export type FindFirstResult<
   T extends Table,
   TRelations extends TableRelations,
   TOptions extends FindFirstOptions<T, TRelations>,
+  TAllTables extends Record<string, Table> = Record<string, Table>,
+  TAllRelations = Record<string, unknown>,
 > = Prettify<
-  SelectResult<T, TOptions> & IncludeResult<T, TRelations, TOptions>
+  SelectResult<T, TOptions> &
+    IncludeResult<T, TRelations, TOptions, TAllTables, TAllRelations>
 > | null;
 
 export type FindUniqueResult<
   T extends Table,
   TRelations extends TableRelations,
   TOptions extends FindUniqueOptions<T, TRelations>,
+  TAllTables extends Record<string, Table> = Record<string, Table>,
+  TAllRelations = Record<string, unknown>,
 > = Prettify<
-  SelectResult<T, TOptions> & IncludeResult<T, TRelations, TOptions>
+  SelectResult<T, TOptions> &
+    IncludeResult<T, TRelations, TOptions, TAllTables, TAllRelations>
 > | null;
 
 export type TableClient<
   T extends Table,
   TRelations extends TableRelations = TableRelations,
+  TAllTables extends Record<string, Table> = Record<string, Table>,
+  TAllRelations = Record<string, unknown>,
 > = {
+  // Constraints use simple option types (no TAllTables/TAllRelations) to avoid
+  // TypeScript variance issues. TAllTables/TAllRelations are used only in result
+  // types for dynamic nested relation inference at any depth.
   findMany<const TOptions extends FindManyOptions<T, TRelations>>(
     options?: TOptions,
-  ): Promise<Array<FindManyResult<T, TRelations, TOptions>>>;
+  ): Promise<
+    Array<FindManyResult<T, TRelations, TOptions, TAllTables, TAllRelations>>
+  >;
 
   findFirst<const TOptions extends FindFirstOptions<T, TRelations>>(
     options?: TOptions,
-  ): Promise<FindFirstResult<T, TRelations, TOptions>>;
+  ): Promise<
+    FindFirstResult<T, TRelations, TOptions, TAllTables, TAllRelations>
+  >;
 
   findUnique<const TOptions extends FindUniqueOptions<T, TRelations>>(
     options: TOptions,
-  ): Promise<FindUniqueResult<T, TRelations, TOptions>>;
+  ): Promise<
+    FindUniqueResult<T, TRelations, TOptions, TAllTables, TAllRelations>
+  >;
 
   create<const TOptions extends CreateOptions<T, TRelations>>(
     options: TOptions,
-  ): Promise<CreateResult<T, TRelations, TOptions>>;
+  ): Promise<CreateResult<T, TRelations, TOptions, TAllTables, TAllRelations>>;
 
   createMany(options: CreateManyOptions<T>): Promise<Array<TableRow<T>>>;
 
   update<const TOptions extends UpdateOptions<T, TRelations>>(
     options: TOptions,
-  ): Promise<UpdateResult<T, TRelations, TOptions>>;
+  ): Promise<UpdateResult<T, TRelations, TOptions, TAllTables, TAllRelations>>;
 
   updateMany(options: UpdateManyOptions<T>): Promise<Array<TableRow<T>>>;
 
   delete<const TOptions extends DeleteOptions<T, TRelations>>(
     options: TOptions,
-  ): Promise<DeleteResult<T, TRelations, TOptions>>;
+  ): Promise<DeleteResult<T, TRelations, TOptions, TAllTables, TAllRelations>>;
 
   deleteMany(options: DeleteManyOptions<T>): Promise<Array<TableRow<T>>>;
 };

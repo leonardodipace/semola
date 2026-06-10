@@ -1,44 +1,48 @@
 import type { Column } from "../column/types.js";
 import type {
-  CreateManyOptions,
-  CreateOptions,
-  DeleteManyOptions,
-  DeleteOptions,
-  FindFirstOptions,
-  FindManyOptions,
-  FindUniqueOptions,
-  TableInclude,
   TableOrderBy,
   TableRelations,
   TableSelect,
   TableWhere,
-  UpdateManyOptions,
-  UpdateOptions,
 } from "../orm/types.js";
 import type { Table } from "../table/types.js";
 import { quoteIdentifier } from "../utils.js";
-import type { Adapter, Dialect } from "./types.js";
-
-// Each top-level builder creates a `nextPlaceholder` closure via
-// `createNextPlaceholder(spec)` and calls it per parameter to emit
-// dialect-native placeholders directly into the SQL string.
-export type DialectSpec = {
-  name: Adapter;
-  // SQLite: ignores index, returns `?`. Postgres: returns `$${index}`.
-  formatPlaceholder: (index: number) => string;
-  // Pagination for skip without take. SQLite: `LIMIT -1 OFFSET`. Postgres: `LIMIT ALL OFFSET`.
-  // The builder appends the placeholder itself.
-  unlimitedOffsetKeyword: string;
-  // Builds a JSON object from key/value args inside include subqueries.
-  // SQLite: `json_object`. Postgres: `jsonb_build_object`.
-  jsonObjectFunctionName: string;
-  // Aggregates per-row JSON objects into a JSON array for `hasMany` includes.
-  // SQLite: `json_group_array`. Postgres: `jsonb_agg`.
-  jsonArrayAggregateFunctionName: string;
-  // COALESCE fallback when a `hasMany` subquery returns no rows.
-  // SQLite: `'[]'`. Postgres: `'[]'::jsonb`.
-  emptyJsonArrayLiteral: string;
-};
+import type {
+  BuildCreateManyQueryInput,
+  BuildCreateQueryInput,
+  BuildDeleteManyQueryInput,
+  BuildDeleteQueryInput,
+  BuildFindFirstQueryInput,
+  BuildFindManyQueryInput,
+  BuildFindUniqueQueryInput,
+  BuildIncludeClauseInput,
+  BuildJsonObjectExpressionInput,
+  BuildPaginationClauseInput,
+  BuildRelationSubqueryInput,
+  BuildSelectIncludeWhereInput,
+  BuildSelectStatementInput,
+  BuildSetClausesInput,
+  BuildUpdateManyQueryInput,
+  BuildUpdateQueryInput,
+  BuildWhereClauseInput,
+  BuildWhereIncludeReturningInput,
+  CoerceRelationItemsInput,
+  CoerceRowInput,
+  CreateDialectInput,
+  Dialect,
+  DialectSpec,
+  ExecuteQueryInput,
+  HasManyCandidate,
+  HasOneCandidate,
+  IncludeClause,
+  IncludeDescriptor,
+  ParseIncludeRowsInput,
+  RelationQueryOptions,
+  RelationSubqueryResult,
+  ResolveHasOneForeignKeyColumnInput,
+  ReturningQuery,
+  SqlFragment,
+} from "./types.js";
 
 const createNextPlaceholder = (spec: DialectSpec) => {
   let index = 0;
@@ -48,23 +52,6 @@ const createNextPlaceholder = (spec: DialectSpec) => {
 
     return spec.formatPlaceholder(index);
   };
-};
-
-type SqlFragment = {
-  sql: string;
-  params: unknown[];
-};
-
-export type IncludeDescriptor = {
-  name: string;
-  type: "hasMany" | "hasOne";
-  table: Table;
-};
-
-type IncludeClause = {
-  sql: string;
-  params: unknown[];
-  descriptors: IncludeDescriptor[];
 };
 
 const EMPTY_INCLUDE: IncludeClause = {
@@ -156,11 +143,12 @@ const isPlainObject = (value: unknown) => {
   return false;
 };
 
+// fallow-ignore-next-line complexity
 const buildWhereClause = <T extends Table>(
-  nextPlaceholder: () => string,
-  table: T,
-  where?: TableWhere<T>,
+  input: BuildWhereClauseInput<T>,
 ): SqlFragment => {
+  const { nextPlaceholder, table, where } = input;
+
   const clauses: string[] = [];
   const params: unknown[] = [];
 
@@ -278,16 +266,6 @@ const buildOrderByClause = <T extends Table>(
   return clauses.join(", ");
 };
 
-type HasManyCandidate = {
-  fk: Column;
-  source: { sqlName: string };
-};
-
-type HasOneCandidate = {
-  localForeignKey: Column;
-  target: { sqlName: string };
-};
-
 const resolveHasManyForeignKeyColumn = (
   sourceTable: Table,
   targetTable: Table,
@@ -332,10 +310,10 @@ const resolveHasManyForeignKeyColumn = (
 };
 
 const resolveHasOneForeignKeyColumn = (
-  sourceTable: Table,
-  relationTable: Table,
-  relationForeignKey: string,
+  input: ResolveHasOneForeignKeyColumnInput,
 ): HasOneCandidate => {
+  const { sourceTable, relationTable, relationForeignKey } = input;
+
   const localForeignKey = sourceTable.columns[relationForeignKey];
 
   if (!localForeignKey) {
@@ -369,41 +347,212 @@ const resolveHasOneForeignKeyColumn = (
   };
 };
 
-// Builds e.g. `json_object('id', alias."id", 'title', alias."title")`.
-const buildJsonObjectExpression = (
-  spec: DialectSpec,
-  alias: string,
-  table: Table,
-) => {
-  const columns = Object.entries(table.columns);
+// Builds e.g. `json_object('id', alias."id", 'title', alias."title", ...extraPairs)`.
+const buildJsonObjectExpression = (input: BuildJsonObjectExpressionInput) => {
+  const { spec, alias, table, extraPairs = [], select } = input;
 
-  const pairs = columns
-    .flatMap(([jsKey, column]) => {
-      return [`'${jsKey}'`, `${alias}.${quoteIdentifier(column.sqlName)}`];
-    })
-    .join(", ");
+  const allEntries = Object.entries(table.columns);
+  const hasSelect = select !== undefined && Object.keys(select).length > 0;
 
-  return `${spec.jsonObjectFunctionName}(${pairs})`;
+  if (hasSelect) {
+    const selectedPairs = allEntries
+      .filter(([key]) => key in select)
+      .flatMap(([jsKey, column]) => [
+        `'${jsKey}'`,
+        `${alias}.${quoteIdentifier(column.sqlName)}`,
+      ]);
+
+    return `${spec.jsonObjectFunctionName}(${[...selectedPairs, ...extraPairs].join(", ")})`;
+  }
+
+  const pairs = allEntries.flatMap(([jsKey, column]) => [
+    `'${jsKey}'`,
+    `${alias}.${quoteIdentifier(column.sqlName)}`,
+  ]);
+
+  return `${spec.jsonObjectFunctionName}(${[...pairs, ...extraPairs].join(", ")})`;
+};
+
+// fallow-ignore-next-line complexity
+const buildRelationSubquery = (
+  input: BuildRelationSubqueryInput,
+): RelationSubqueryResult => {
+  const {
+    spec,
+    nextPlaceholder,
+    parentTable,
+    parentAlias,
+    relation,
+    relationName,
+    includeValue,
+    tableRelationsMap,
+  } = input;
+
+  let options: RelationQueryOptions = {};
+
+  if (typeof includeValue === "object" && includeValue !== null) {
+    options = includeValue as RelationQueryOptions;
+  }
+
+  const relationTable = relation._table;
+  const relationAlias = `${relationName}__${relationTable.sqlName}`;
+  const nestedRelations = tableRelationsMap.get(relationTable) ?? {};
+
+  const nestedExtraPairs: string[] = [];
+  const nestedParams: unknown[] = [];
+  const nestedDescriptors: IncludeDescriptor[] = [];
+
+  if (options.include) {
+    for (const [nestedName, nestedValue] of Object.entries(options.include)) {
+      if (!nestedValue) continue;
+
+      const nestedRelation = nestedRelations[nestedName];
+
+      if (!nestedRelation) continue;
+
+      const result = buildRelationSubquery({
+        spec,
+        nextPlaceholder,
+        parentTable: relationTable,
+        parentAlias: relationAlias,
+        relation: nestedRelation,
+        relationName: nestedName,
+        includeValue: nestedValue,
+        tableRelationsMap,
+      });
+
+      nestedExtraPairs.push(`'${nestedName}'`, result.sql);
+      nestedParams.push(...result.params);
+      nestedDescriptors.push(result.descriptor);
+    }
+  }
+
+  const jsonObj = buildJsonObjectExpression({
+    spec,
+    alias: relationAlias,
+    table: relationTable,
+    extraPairs: nestedExtraPairs,
+    select: options.select,
+  });
+
+  // buildWhereClause/buildOrderByClause/buildPaginationClause all handle undefined, always call them
+  const where = buildWhereClause({
+    nextPlaceholder,
+    table: relationTable,
+    where: options.where as TableWhere<Table>,
+  });
+
+  const orderBy = buildOrderByClause(
+    relationTable,
+    options.orderBy as TableOrderBy<Table>,
+  );
+
+  const pagination = buildPaginationClause({
+    spec,
+    nextPlaceholder,
+    take: options.take,
+    skip: options.skip,
+  });
+
+  const allParams: unknown[] = [...nestedParams];
+
+  allParams.push(...where.params);
+  allParams.push(...pagination.params);
+
+  if (relation._type === "hasMany") {
+    const { fk: foreignKey, source: sourceColumn } =
+      resolveHasManyForeignKeyColumn(parentTable, relationTable);
+
+    const fkCondition = `${relationAlias}.${quoteIdentifier(foreignKey.sqlName)} = ${parentAlias}.${quoteIdentifier(sourceColumn.sqlName)}`;
+
+    let whereSql = fkCondition;
+
+    if (where.sql) {
+      whereSql = `${fkCondition} AND ${where.sql}`;
+    }
+
+    let subquery: string;
+
+    if (orderBy || pagination.sql) {
+      // Nested form: ORDER BY / LIMIT must go on the inner query so they affect
+      // the rows fed to the aggregate, not the (single) aggregate result row
+      let innerQuery = `SELECT * FROM ${quoteIdentifier(relationTable.sqlName)} AS ${relationAlias} WHERE ${whereSql}`;
+
+      if (orderBy) innerQuery = `${innerQuery} ORDER BY ${orderBy}`;
+
+      if (pagination.sql) innerQuery = `${innerQuery} ${pagination.sql}`;
+
+      subquery = `SELECT ${spec.jsonArrayAggregateFunctionName}(${jsonObj}) FROM (${innerQuery}) AS ${relationAlias}`;
+    } else {
+      subquery = `SELECT ${spec.jsonArrayAggregateFunctionName}(${jsonObj}) FROM ${quoteIdentifier(relationTable.sqlName)} AS ${relationAlias} WHERE ${whereSql}`;
+    }
+
+    return {
+      sql: `COALESCE((${subquery}), ${spec.emptyJsonArrayLiteral})`,
+      params: allParams,
+      descriptor: {
+        name: relationName,
+        type: "hasMany",
+        table: relationTable,
+        nested: nestedDescriptors,
+      },
+    };
+  }
+
+  const { localForeignKey, target } = resolveHasOneForeignKeyColumn({
+    sourceTable: parentTable,
+    relationTable,
+    relationForeignKey: relation._foreignKey,
+  });
+
+  const fkCondition = `${relationAlias}.${quoteIdentifier(target.sqlName)} = ${parentAlias}.${quoteIdentifier(localForeignKey.sqlName)}`;
+
+  let whereSql = fkCondition;
+
+  if (where.sql) {
+    whereSql = `${fkCondition} AND ${where.sql}`;
+  }
+
+  const subquery = `SELECT ${jsonObj} FROM ${quoteIdentifier(relationTable.sqlName)} AS ${relationAlias} WHERE ${whereSql} LIMIT 1`;
+
+  return {
+    sql: `(${subquery})`,
+    params: allParams,
+    descriptor: {
+      name: relationName,
+      type: "hasOne",
+      table: relationTable,
+      nested: nestedDescriptors,
+    },
+  };
 };
 
 const buildIncludeClause = <T extends Table, R extends TableRelations>(
-  spec: DialectSpec,
-  table: T,
-  relations: R,
-  include?: TableInclude<R>,
+  input: BuildIncludeClauseInput<T, R>,
 ) => {
+  const {
+    spec,
+    nextPlaceholder,
+    table,
+    parentAlias,
+    relations,
+    tableRelationsMap,
+    include,
+  } = input;
+
   if (!include) return EMPTY_INCLUDE;
 
-  const enabledRelations = Object.entries(include).filter(
-    ([, enabled]) => enabled,
+  const enabledRelations = Object.entries(include).filter(([, v]) =>
+    Boolean(v),
   );
 
   if (!enabledRelations.length) return EMPTY_INCLUDE;
 
   const clauses: string[] = [];
+  const params: unknown[] = [];
   const descriptors: IncludeDescriptor[] = [];
 
-  for (const [relationName] of enabledRelations) {
+  for (const [relationName, includeValue] of enabledRelations) {
     const relation = relations[relationName as keyof R];
 
     if (!relation) {
@@ -412,57 +561,34 @@ const buildIncludeClause = <T extends Table, R extends TableRelations>(
       );
     }
 
-    const relationTable = relation._table;
-    const relationAlias = `${relationName}__${relationTable.sqlName}`;
-    const relationJsonObject = buildJsonObjectExpression(
+    const result = buildRelationSubquery({
       spec,
-      relationAlias,
-      relationTable,
-    );
-
-    if (relation._type === "hasMany") {
-      const { fk: foreignKey, source: sourceColumn } =
-        resolveHasManyForeignKeyColumn(table, relationTable);
-      clauses.push(
-        `COALESCE((SELECT ${spec.jsonArrayAggregateFunctionName}(${relationJsonObject}) FROM ${quoteIdentifier(relationTable.sqlName)} AS ${relationAlias} WHERE ${relationAlias}.${quoteIdentifier(foreignKey.sqlName)} = ${quoteIdentifier(table.sqlName)}.${quoteIdentifier(sourceColumn.sqlName)}), ${spec.emptyJsonArrayLiteral}) AS ${quoteIdentifier(relationName)}`,
-      );
-      descriptors.push({
-        name: relationName,
-        type: "hasMany",
-        table: relationTable,
-      });
-      continue;
-    }
-
-    const { localForeignKey, target } = resolveHasOneForeignKeyColumn(
-      table,
-      relationTable,
-      relation._foreignKey,
-    );
-
-    clauses.push(
-      `(SELECT ${relationJsonObject} FROM ${quoteIdentifier(relationTable.sqlName)} AS ${relationAlias} WHERE ${relationAlias}.${quoteIdentifier(target.sqlName)} = ${quoteIdentifier(table.sqlName)}.${quoteIdentifier(localForeignKey.sqlName)} LIMIT 1) AS ${quoteIdentifier(relationName)}`,
-    );
-    descriptors.push({
-      name: relationName,
-      type: "hasOne",
-      table: relationTable,
+      nextPlaceholder,
+      parentTable: table,
+      parentAlias,
+      relation,
+      relationName,
+      includeValue,
+      tableRelationsMap,
     });
+
+    clauses.push(`${result.sql} AS ${quoteIdentifier(relationName)}`);
+    params.push(...result.params);
+    descriptors.push(result.descriptor);
   }
 
   return {
     sql: clauses.join(", "),
-    params: [],
+    params,
     descriptors,
   } satisfies IncludeClause;
 };
 
 const buildPaginationClause = (
-  spec: DialectSpec,
-  nextPlaceholder: () => string,
-  take?: number,
-  skip?: number,
+  input: BuildPaginationClauseInput,
 ): SqlFragment => {
+  const { spec, nextPlaceholder, take, skip } = input;
+
   const params: unknown[] = [];
 
   if (take === undefined) {
@@ -501,13 +627,9 @@ const buildPaginationClause = (
   };
 };
 
-const buildSelectStatement = (
-  tableName: string,
-  columns: string,
-  where: string,
-  orderBy: string,
-  pagination: string,
-) => {
+const buildSelectStatement = (input: BuildSelectStatementInput) => {
+  const { tableName, columns, where, orderBy, pagination } = input;
+
   let query = `SELECT ${columns} FROM ${tableName}`;
 
   if (where) query = `${query} WHERE ${where}`;
@@ -550,12 +672,6 @@ const validateFindUniqueWhere = (
   }
 };
 
-export type ReturningQuery = {
-  statement: string;
-  params: unknown[];
-  includeDescriptors: IncludeDescriptor[];
-};
-
 const resolveCreateValue = (column: Column, provided: unknown) => {
   if (provided !== undefined) return provided;
 
@@ -564,12 +680,85 @@ const resolveCreateValue = (column: Column, provided: unknown) => {
   return null;
 };
 
+const buildSetClauses = <T extends Table>(input: BuildSetClausesInput<T>) => {
+  const { nextPlaceholder, table, data } = input;
+
+  const setClauses: string[] = [];
+  const params: unknown[] = [];
+
+  for (const [jsKey, value] of Object.entries(data)) {
+    if (value === undefined) continue;
+
+    const column = table.columns[jsKey];
+
+    if (!column) continue;
+
+    setClauses.push(
+      `${quoteIdentifier(column.sqlName)} = ${nextPlaceholder()}`,
+    );
+    params.push(serializeColumnValue(column, value));
+  }
+
+  return { setClauses, params };
+};
+
+const buildWhereIncludeReturning = <T extends Table, R extends TableRelations>(
+  input: BuildWhereIncludeReturningInput<T, R>,
+) => {
+  const { spec, nextPlaceholder, table, relations, tableRelationsMap } = input;
+  const { where: whereInput, select, include: includeInput } = input;
+
+  const where = buildWhereClause({ nextPlaceholder, table, where: whereInput });
+  const columns = buildSelectColumns(table, select);
+  // Include is in RETURNING (after WHERE), so call after where is assigned
+  const include = buildIncludeClause({
+    spec,
+    nextPlaceholder,
+    table,
+    parentAlias: quoteIdentifier(table.sqlName),
+    relations,
+    tableRelationsMap,
+    include: includeInput,
+  });
+  const returning = buildSelectList(columns, include);
+
+  return { where, include, returning };
+};
+
+const buildSelectIncludeWhere = <T extends Table, R extends TableRelations>(
+  input: BuildSelectIncludeWhereInput<T, R>,
+) => {
+  const { spec, nextPlaceholder, table, relations, tableRelationsMap } = input;
+  const { where: whereInput, select, include: includeInput } = input;
+
+  // Include must consume placeholders before where - it appears in SELECT
+  const include = buildIncludeClause({
+    spec,
+    nextPlaceholder,
+    table,
+    parentAlias: quoteIdentifier(table.sqlName),
+    relations,
+    tableRelationsMap,
+    include: includeInput,
+  });
+  const where = buildWhereClause({ nextPlaceholder, table, where: whereInput });
+  const columns = buildSelectColumns(table, select);
+  const selectColumns = buildSelectList(columns, include);
+
+  return { include, where, selectColumns };
+};
+
 export const buildCreateQuery = <T extends Table, R extends TableRelations>(
-  spec: DialectSpec,
-  table: T,
-  relations: R,
-  options: CreateOptions<T, R>,
+  input: BuildCreateQueryInput<T, R>,
 ): ReturningQuery => {
+  const {
+    spec,
+    table,
+    relations,
+    options,
+    tableRelationsMap = new Map(),
+  } = input;
+
   const nextPlaceholder = createNextPlaceholder(spec);
   const provided = new Map<string, unknown>(Object.entries(options.data));
   const sqlNames: string[] = [];
@@ -585,50 +774,60 @@ export const buildCreateQuery = <T extends Table, R extends TableRelations>(
   }
 
   const columns = buildSelectColumns(table, options.select);
-  const include = buildIncludeClause(spec, table, relations, options.include);
+  // Include is in RETURNING (after VALUES), so call after values are assigned
+  const include = buildIncludeClause({
+    spec,
+    nextPlaceholder,
+    table,
+    parentAlias: quoteIdentifier(table.sqlName),
+    relations,
+    tableRelationsMap,
+    include: options.include,
+  });
   const returning = buildSelectList(columns, include);
   const statement = `INSERT INTO ${quoteIdentifier(table.sqlName)} (${sqlNames.join(", ")}) VALUES (${placeholders.join(", ")}) RETURNING ${returning}`;
 
   return {
     statement,
-    params,
+    params: [...params, ...include.params],
     includeDescriptors: include.descriptors,
   };
 };
 
 export const buildUpdateQuery = <T extends Table, R extends TableRelations>(
-  spec: DialectSpec,
-  table: T,
-  relations: R,
-  options: UpdateOptions<T, R>,
+  input: BuildUpdateQueryInput<T, R>,
 ): ReturningQuery => {
+  const {
+    spec,
+    table,
+    relations,
+    options,
+    tableRelationsMap = new Map(),
+  } = input;
+
   validateFindUniqueWhere(table, options.where);
 
   const nextPlaceholder = createNextPlaceholder(spec);
-  const setClauses: string[] = [];
-  const params: unknown[] = [];
-
-  for (const [jsKey, value] of Object.entries(options.data)) {
-    if (value === undefined) continue;
-
-    const column = table.columns[jsKey];
-
-    if (!column) continue;
-
-    setClauses.push(
-      `${quoteIdentifier(column.sqlName)} = ${nextPlaceholder()}`,
-    );
-    params.push(serializeColumnValue(column, value));
-  }
+  const { setClauses, params } = buildSetClauses({
+    nextPlaceholder,
+    table,
+    data: options.data,
+  });
 
   if (!setClauses.length) {
     throw new Error("update requires at least one field in data");
   }
 
-  const where = buildWhereClause(nextPlaceholder, table, options.where);
-  const columns = buildSelectColumns(table, options.select);
-  const include = buildIncludeClause(spec, table, relations, options.include);
-  const returning = buildSelectList(columns, include);
+  const { where, include, returning } = buildWhereIncludeReturning({
+    spec,
+    nextPlaceholder,
+    table,
+    relations,
+    tableRelationsMap,
+    where: options.where,
+    select: options.select,
+    include: options.include,
+  });
 
   let statement = `UPDATE ${quoteIdentifier(table.sqlName)} SET ${setClauses.join(", ")}`;
 
@@ -638,7 +837,7 @@ export const buildUpdateQuery = <T extends Table, R extends TableRelations>(
 
   statement = `${statement} RETURNING ${returning}`;
 
-  params.push(...where.params);
+  params.push(...where.params, ...include.params);
 
   return {
     statement,
@@ -648,31 +847,42 @@ export const buildUpdateQuery = <T extends Table, R extends TableRelations>(
 };
 
 export const buildFindManyQuery = <T extends Table, R extends TableRelations>(
-  spec: DialectSpec,
-  table: T,
-  relations: R,
-  options?: FindManyOptions<T, R>,
+  input: BuildFindManyQueryInput<T, R>,
 ): ReturningQuery => {
+  const {
+    spec,
+    table,
+    relations,
+    options,
+    tableRelationsMap = new Map(),
+  } = input;
+
   const nextPlaceholder = createNextPlaceholder(spec);
-  const where = buildWhereClause(nextPlaceholder, table, options?.where);
-  const columns = buildSelectColumns(table, options?.select);
-  const orderBy = buildOrderByClause(table, options?.orderBy);
-  const include = buildIncludeClause(spec, table, relations, options?.include);
-  const pagination = buildPaginationClause(
+  const { include, where, selectColumns } = buildSelectIncludeWhere({
     spec,
     nextPlaceholder,
-    options?.take,
-    options?.skip,
-  );
-  const selectColumns = buildSelectList(columns, include);
-  const params = [...where.params, ...include.params, ...pagination.params];
-  const statement = buildSelectStatement(
-    quoteIdentifier(table.sqlName),
-    selectColumns,
-    where.sql,
+    table,
+    relations,
+    tableRelationsMap,
+    where: options?.where,
+    select: options?.select,
+    include: options?.include,
+  });
+  const orderBy = buildOrderByClause(table, options?.orderBy);
+  const pagination = buildPaginationClause({
+    spec,
+    nextPlaceholder,
+    take: options?.take,
+    skip: options?.skip,
+  });
+  const params = [...include.params, ...where.params, ...pagination.params];
+  const statement = buildSelectStatement({
+    tableName: quoteIdentifier(table.sqlName),
+    columns: selectColumns,
+    where: where.sql,
     orderBy,
-    pagination.sql,
-  );
+    pagination: pagination.sql,
+  });
 
   return {
     statement,
@@ -682,18 +892,29 @@ export const buildFindManyQuery = <T extends Table, R extends TableRelations>(
 };
 
 export const buildDeleteQuery = <T extends Table, R extends TableRelations>(
-  spec: DialectSpec,
-  table: T,
-  relations: R,
-  options: DeleteOptions<T, R>,
+  input: BuildDeleteQueryInput<T, R>,
 ): ReturningQuery => {
+  const {
+    spec,
+    table,
+    relations,
+    options,
+    tableRelationsMap = new Map(),
+  } = input;
+
   validateFindUniqueWhere(table, options.where);
 
   const nextPlaceholder = createNextPlaceholder(spec);
-  const where = buildWhereClause(nextPlaceholder, table, options.where);
-  const columns = buildSelectColumns(table, options.select);
-  const include = buildIncludeClause(spec, table, relations, options.include);
-  const returning = buildSelectList(columns, include);
+  const { where, include, returning } = buildWhereIncludeReturning({
+    spec,
+    nextPlaceholder,
+    table,
+    relations,
+    tableRelationsMap,
+    where: options.where,
+    select: options.select,
+    include: options.include,
+  });
 
   let statement = `DELETE FROM ${quoteIdentifier(table.sqlName)}`;
 
@@ -703,49 +924,68 @@ export const buildDeleteQuery = <T extends Table, R extends TableRelations>(
 
   statement = `${statement} RETURNING ${returning}`;
 
-  const params = [...where.params, ...include.params];
-
   return {
     statement,
-    params,
+    params: [...where.params, ...include.params],
     includeDescriptors: include.descriptors,
   };
 };
 
 export const buildFindFirstQuery = <T extends Table, R extends TableRelations>(
-  spec: DialectSpec,
-  table: T,
-  relations: R,
-  options?: FindFirstOptions<T, R>,
+  input: BuildFindFirstQueryInput<T, R>,
 ): ReturningQuery => {
-  return buildFindManyQuery(spec, table, relations, { ...options, take: 1 });
+  const {
+    spec,
+    table,
+    relations,
+    options,
+    tableRelationsMap = new Map(),
+  } = input;
+
+  return buildFindManyQuery({
+    spec,
+    table,
+    relations,
+    options: { ...options, take: 1 },
+    tableRelationsMap,
+  });
 };
 
 export const buildFindUniqueQuery = <T extends Table, R extends TableRelations>(
-  spec: DialectSpec,
-  table: T,
-  relations: R,
-  options: FindUniqueOptions<T, R>,
+  input: BuildFindUniqueQueryInput<T, R>,
 ): ReturningQuery => {
+  const {
+    spec,
+    table,
+    relations,
+    options,
+    tableRelationsMap = new Map(),
+  } = input;
+
   validateFindUniqueWhere(table, options.where);
 
   const nextPlaceholder = createNextPlaceholder(spec);
-  const where = buildWhereClause(nextPlaceholder, table, options.where);
-  const columns = buildSelectColumns(table, options.select);
-  const include = buildIncludeClause(spec, table, relations, options.include);
-  const selectColumns = buildSelectList(columns, include);
-  const params = [...where.params, ...include.params];
-  const statement = buildSelectStatement(
-    quoteIdentifier(table.sqlName),
-    selectColumns,
-    where.sql,
-    "",
-    "LIMIT 1",
-  );
+  const { include, where, selectColumns } = buildSelectIncludeWhere({
+    spec,
+    nextPlaceholder,
+    table,
+    relations,
+    tableRelationsMap,
+    where: options.where,
+    select: options.select,
+    include: options.include,
+  });
+  const statement = buildSelectStatement({
+    tableName: quoteIdentifier(table.sqlName),
+    columns: selectColumns,
+    where: where.sql,
+    orderBy: "",
+    pagination: "LIMIT 1",
+  });
 
   return {
     statement,
-    params,
+    params: [...include.params, ...where.params],
     includeDescriptors: include.descriptors,
   };
 };
@@ -777,77 +1017,98 @@ const coerceBooleanValue = (val: unknown) => {
   return Boolean(val);
 };
 
-export const parseIncludeRows = (
-  table: Table,
-  rows: Array<Record<string, unknown>>,
-  descriptors: IncludeDescriptor[],
-) => {
-  const mainBoolKeys = getBooleanKeys(table);
-  const mainJsonKeys = getJsonKeys(table);
+const coerceRelationItems = (input: CoerceRelationItemsInput) => {
+  const { value, table, nested } = input;
 
-  for (const row of rows) {
-    for (const key of mainBoolKeys) {
-      if (!(key in row)) continue;
-
-      row[key] = coerceBooleanValue(row[key]);
-    }
-
-    for (const key of mainJsonKeys) {
-      if (!(key in row)) continue;
-
-      const val = row[key];
-
-      if (typeof val === "string") {
-        row[key] = JSON.parse(val);
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (typeof item === "object" && item !== null) {
+        coerceRow({
+          row: item as Record<string, unknown>,
+          table,
+          descriptors: nested,
+        });
       }
     }
 
-    for (const descriptor of descriptors) {
-      const value = row[descriptor.name];
+    return;
+  }
 
-      if (value === null) {
-        if (descriptor.type === "hasMany") {
-          row[descriptor.name] = [];
-        }
-
-        continue;
-      }
-
-      if (typeof value !== "string") continue;
-
-      const boolKeys = getBooleanKeys(descriptor.table);
-      const jsonKeys = getJsonKeys(descriptor.table);
-
-      row[descriptor.name] = JSON.parse(value, (key, val) => {
-        if (boolKeys.has(key)) return coerceBooleanValue(val);
-
-        if (jsonKeys.has(key) && typeof val === "string") {
-          return JSON.parse(val);
-        }
-
-        return val;
-      });
-    }
+  if (typeof value === "object" && value !== null) {
+    coerceRow({
+      row: value as Record<string, unknown>,
+      table,
+      descriptors: nested,
+    });
   }
 };
 
-const executeQuery = async (
-  sql: Bun.SQL,
-  table: Table,
-  query: ReturningQuery,
-) => {
+// fallow-ignore-next-line complexity
+const coerceRow = (input: CoerceRowInput) => {
+  const { row, table, descriptors } = input;
+
+  const boolKeys = getBooleanKeys(table);
+  const jsonKeys = getJsonKeys(table);
+
+  for (const key of boolKeys) {
+    if (key in row) row[key] = coerceBooleanValue(row[key]);
+  }
+
+  for (const key of jsonKeys) {
+    if (!(key in row)) continue;
+
+    const val = row[key];
+
+    if (typeof val !== "string") continue;
+
+    row[key] = JSON.parse(val);
+  }
+
+  for (const descriptor of descriptors) {
+    const value = row[descriptor.name];
+
+    if (value === null) {
+      if (descriptor.type === "hasMany") row[descriptor.name] = [];
+      continue;
+    }
+
+    const nested = descriptor.nested ?? [];
+
+    if (typeof value === "string") {
+      const parsed: unknown = JSON.parse(value);
+      coerceRelationItems({ value: parsed, table: descriptor.table, nested });
+      row[descriptor.name] = parsed;
+      continue;
+    }
+
+    // Already parsed (embedded inline in parent JSON)
+    coerceRelationItems({ value, table: descriptor.table, nested });
+  }
+};
+
+export const parseIncludeRows = (input: ParseIncludeRowsInput) => {
+  const { table, rows, descriptors } = input;
+
+  for (const row of rows) {
+    coerceRow({ row, table, descriptors });
+  }
+};
+
+const executeQuery = async (input: ExecuteQueryInput) => {
+  const { sql, table, query } = input;
+
   const rows = [...(await sql.unsafe(query.statement, query.params))];
 
-  parseIncludeRows(table, rows, query.includeDescriptors);
+  parseIncludeRows({ table, rows, descriptors: query.includeDescriptors });
 
   return rows;
 };
 
 export const buildCreateManyQuery = <T extends Table>(
-  spec: DialectSpec,
-  table: T,
-  options: CreateManyOptions<T>,
+  input: BuildCreateManyQueryInput<T>,
 ): ReturningQuery => {
+  const { spec, table, options } = input;
+
   if (!options.data.length) {
     return { statement: "", params: [], includeDescriptors: [] };
   }
@@ -878,32 +1139,26 @@ export const buildCreateManyQuery = <T extends Table>(
 };
 
 export const buildUpdateManyQuery = <T extends Table>(
-  spec: DialectSpec,
-  table: T,
-  options: UpdateManyOptions<T>,
+  input: BuildUpdateManyQueryInput<T>,
 ): ReturningQuery => {
+  const { spec, table, options } = input;
+
   const nextPlaceholder = createNextPlaceholder(spec);
-  const setClauses: string[] = [];
-  const params: unknown[] = [];
-
-  for (const [jsKey, value] of Object.entries(options.data)) {
-    if (value === undefined) continue;
-
-    const column = table.columns[jsKey];
-
-    if (!column) continue;
-
-    setClauses.push(
-      `${quoteIdentifier(column.sqlName)} = ${nextPlaceholder()}`,
-    );
-    params.push(serializeColumnValue(column, value));
-  }
+  const { setClauses, params } = buildSetClauses({
+    nextPlaceholder,
+    table,
+    data: options.data,
+  });
 
   if (!setClauses.length) {
     throw new Error("updateMany requires at least one field in data");
   }
 
-  const where = buildWhereClause(nextPlaceholder, table, options.where);
+  const where = buildWhereClause({
+    nextPlaceholder,
+    table,
+    where: options.where,
+  });
 
   let statement = `UPDATE ${quoteIdentifier(table.sqlName)} SET ${setClauses.join(", ")}`;
 
@@ -920,12 +1175,16 @@ export const buildUpdateManyQuery = <T extends Table>(
 };
 
 export const buildDeleteManyQuery = <T extends Table>(
-  spec: DialectSpec,
-  table: T,
-  options: DeleteManyOptions<T>,
+  input: BuildDeleteManyQueryInput<T>,
 ): ReturningQuery => {
+  const { spec, table, options } = input;
+
   const nextPlaceholder = createNextPlaceholder(spec);
-  const where = buildWhereClause(nextPlaceholder, table, options.where);
+  const where = buildWhereClause({
+    nextPlaceholder,
+    table,
+    where: options.where,
+  });
 
   let statement = `DELETE FROM ${quoteIdentifier(table.sqlName)}`;
 
@@ -944,83 +1203,114 @@ export const buildDeleteManyQuery = <T extends Table>(
 };
 
 export const createDialect = <T extends Table, R extends TableRelations>(
-  spec: DialectSpec,
-  table: T,
-  relations: R,
+  input: CreateDialectInput<T, R>,
 ): Dialect<T, R> => {
+  const { spec, table, relations, tableRelationsMap = new Map() } = input;
+
+  const executeAndUnwrap = async (
+    sql: Bun.SQL,
+    query: ReturningQuery,
+    operation: string,
+  ) => {
+    const [row] = await executeQuery({ sql, table, query });
+
+    if (!row) {
+      throw new Error(
+        `Record not found after ${operation} on table ${table.sqlName}`,
+      );
+    }
+
+    return row;
+  };
+
   return {
     name: spec.name,
     findMany: async (sql, options) => {
-      const query = buildFindManyQuery(spec, table, relations, options);
+      const query = buildFindManyQuery({
+        spec,
+        table,
+        relations,
+        options,
+        tableRelationsMap,
+      });
 
-      return await executeQuery(sql, table, query);
+      return await executeQuery({ sql, table, query });
     },
     findFirst: async (sql, options) => {
-      const query = buildFindFirstQuery(spec, table, relations, options);
-      const [row] = await executeQuery(sql, table, query);
+      const query = buildFindFirstQuery({
+        spec,
+        table,
+        relations,
+        options,
+        tableRelationsMap,
+      });
+      const [row] = await executeQuery({ sql, table, query });
 
       return row ?? null;
     },
     findUnique: async (sql, options) => {
-      const query = buildFindUniqueQuery(spec, table, relations, options);
-      const [row] = await executeQuery(sql, table, query);
+      const query = buildFindUniqueQuery({
+        spec,
+        table,
+        relations,
+        options,
+        tableRelationsMap,
+      });
+      const [row] = await executeQuery({ sql, table, query });
 
       return row ?? null;
     },
     create: async (sql, options) => {
-      const query = buildCreateQuery(spec, table, relations, options);
-      const [row] = await executeQuery(sql, table, query);
+      const query = buildCreateQuery({
+        spec,
+        table,
+        relations,
+        options,
+        tableRelationsMap,
+      });
 
-      if (!row) {
-        throw new Error(
-          `Record not found after insert on table ${table.sqlName}`,
-        );
-      }
-
-      return row;
+      return executeAndUnwrap(sql, query, "insert");
     },
     createMany: async (sql, options) => {
       if (!options.data.length) {
         return [];
       }
 
-      const query = buildCreateManyQuery(spec, table, options);
+      const query = buildCreateManyQuery({ spec, table, options });
 
-      return await executeQuery(sql, table, query);
+      return await executeQuery({ sql, table, query });
     },
     update: async (sql, options) => {
-      const query = buildUpdateQuery(spec, table, relations, options);
-      const [row] = await executeQuery(sql, table, query);
+      const query = buildUpdateQuery({
+        spec,
+        table,
+        relations,
+        options,
+        tableRelationsMap,
+      });
 
-      if (!row) {
-        throw new Error(
-          `Record not found after update on table ${table.sqlName}`,
-        );
-      }
-
-      return row;
+      return executeAndUnwrap(sql, query, "update");
     },
     updateMany: async (sql, options) => {
-      const query = buildUpdateManyQuery(spec, table, options);
+      const query = buildUpdateManyQuery({ spec, table, options });
 
-      return await executeQuery(sql, table, query);
+      return await executeQuery({ sql, table, query });
     },
     delete: async (sql, options) => {
-      const query = buildDeleteQuery(spec, table, relations, options);
-      const [row] = await executeQuery(sql, table, query);
+      const query = buildDeleteQuery({
+        spec,
+        table,
+        relations,
+        options,
+        tableRelationsMap,
+      });
 
-      if (!row) {
-        throw new Error(
-          `Record not found after delete on table ${table.sqlName}`,
-        );
-      }
-
-      return row;
+      return executeAndUnwrap(sql, query, "delete");
     },
     deleteMany: async (sql, options) => {
-      const query = buildDeleteManyQuery(spec, table, options);
+      const query = buildDeleteManyQuery({ spec, table, options });
 
-      return await executeQuery(sql, table, query);
+      return await executeQuery({ sql, table, query });
     },
   };
 };

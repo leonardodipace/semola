@@ -20,10 +20,10 @@ import {
   buildFindUniqueQuery,
   buildUpdateManyQuery,
   buildUpdateQuery,
-  type IncludeDescriptor,
   parseIncludeRows,
 } from "./shared.js";
 import { createSqliteDialect, SQLITE_SPEC } from "./sqlite.js";
+import type { IncludeDescriptor } from "./types.js";
 
 const usersTable = defineTable("users", {
   id: uuid("id").primaryKey().notNull(),
@@ -92,34 +92,34 @@ describe("buildFindManyQuery", () => {
       status: enumType("status", ["active", "inactive"]).notNull(),
     });
 
-    const directValueQuery = buildFindManyQuery(
-      SQLITE_SPEC,
-      accountsTable,
-      {},
-      {
+    const directValueQuery = buildFindManyQuery({
+      spec: SQLITE_SPEC,
+      table: accountsTable,
+      relations: {},
+      options: {
         where: {
           status: "active",
         },
       },
-    );
+    });
 
     expect(directValueQuery.statement).toBe(
       'SELECT "id" AS "id", "status" AS "status" FROM "accounts" WHERE "status" = ?',
     );
     expect(directValueQuery.params).toEqual(["active"]);
 
-    const equalsQuery = buildFindManyQuery(
-      SQLITE_SPEC,
-      accountsTable,
-      {},
-      {
+    const equalsQuery = buildFindManyQuery({
+      spec: SQLITE_SPEC,
+      table: accountsTable,
+      relations: {},
+      options: {
         where: {
           status: {
             equals: "inactive",
           },
         },
       },
-    );
+    });
 
     expect(equalsQuery.statement).toBe(
       'SELECT "id" AS "id", "status" AS "status" FROM "accounts" WHERE "status" = ?',
@@ -130,11 +130,11 @@ describe("buildFindManyQuery", () => {
   test("builds a select statement with where operators, ordering, and pagination", () => {
     const createdAfter = new Date("2025-01-01T00:00:00.000Z");
 
-    const query = buildFindManyQuery(
-      SQLITE_SPEC,
-      usersTable,
-      { posts: many(() => postsTable) },
-      {
+    const query = buildFindManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: { posts: many(() => postsTable) },
+      options: {
         select: { id: true, firstName: true },
         where: {
           firstName: { startsWith: "Jo" },
@@ -144,7 +144,7 @@ describe("buildFindManyQuery", () => {
         take: 10,
         skip: 5,
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'SELECT "id" AS "id", "first_name" AS "firstName" FROM "users" WHERE "first_name" LIKE ? ESCAPE \'\\\' AND "created_at" >= ? ORDER BY "created_at" DESC, "first_name" ASC LIMIT ? OFFSET ?',
@@ -154,11 +154,11 @@ describe("buildFindManyQuery", () => {
   });
 
   test("escapes LIKE metacharacters for startsWith, endsWith, and contains", () => {
-    const query = buildFindManyQuery(
-      SQLITE_SPEC,
-      usersTable,
-      {},
-      {
+    const query = buildFindManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: {},
+      options: {
         where: {
           firstName: {
             startsWith: "a%_\\",
@@ -167,7 +167,7 @@ describe("buildFindManyQuery", () => {
           },
         },
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" WHERE "first_name" LIKE ? ESCAPE \'\\\' AND "first_name" LIKE ? ESCAPE \'\\\' AND "first_name" LIKE ? ESCAPE \'\\\'',
@@ -184,11 +184,11 @@ describe("buildFindManyQuery", () => {
     const createdAt = new Date("2025-01-01T00:00:00.000Z");
     const idList = ["user-1"];
 
-    const query = buildFindManyQuery(
-      SQLITE_SPEC,
-      usersTable,
-      {},
-      {
+    const query = buildFindManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: {},
+      options: {
         where: {
           // @ts-expect-error runtime guard for non-plain object inputs
           id: idList,
@@ -198,7 +198,7 @@ describe("buildFindManyQuery", () => {
           firstName: null,
         },
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" WHERE "id" = ? AND "created_at" = ? AND "first_name" IS NULL',
@@ -208,7 +208,12 @@ describe("buildFindManyQuery", () => {
   });
 
   test("builds offset-only pagination with LIMIT -1 OFFSET", () => {
-    const query = buildFindManyQuery(SQLITE_SPEC, usersTable, {}, { skip: 3 });
+    const query = buildFindManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: {},
+      options: { skip: 3 },
+    });
 
     expect(query.statement).toBe(
       'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" LIMIT -1 OFFSET ?',
@@ -217,12 +222,12 @@ describe("buildFindManyQuery", () => {
   });
 
   test("falls back to full column list when select is an empty object", () => {
-    const query = buildFindManyQuery(
-      SQLITE_SPEC,
-      usersTable,
-      {},
-      { select: {} },
-    );
+    const query = buildFindManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: {},
+      options: { select: {} },
+    });
 
     expect(query.statement).toBe(
       'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users"',
@@ -232,14 +237,14 @@ describe("buildFindManyQuery", () => {
   });
 
   test("builds hasMany include subquery SQL", () => {
-    const query = buildFindManyQuery(
-      SQLITE_SPEC,
-      usersTable,
-      { posts: many(() => postsTable) },
-      {
+    const query = buildFindManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: { posts: many(() => postsTable) },
+      options: {
         include: { posts: true },
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive", COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS "posts" FROM "users"',
@@ -251,14 +256,14 @@ describe("buildFindManyQuery", () => {
   });
 
   test("builds hasOne include subquery SQL", () => {
-    const query = buildFindManyQuery(
-      SQLITE_SPEC,
-      postsTable,
-      { author: one("authorId", () => usersTable) },
-      {
+    const query = buildFindManyQuery({
+      spec: SQLITE_SPEC,
+      table: postsTable,
+      relations: { author: one("authorId", () => usersTable) },
+      options: {
         include: { author: true },
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'SELECT "id" AS "id", "title" AS "title", "author_id" AS "authorId", (SELECT json_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at", \'isActive\', author__users."is_active") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS "author" FROM "posts"',
@@ -270,17 +275,17 @@ describe("buildFindManyQuery", () => {
   });
 
   test("ignores disabled include flags and supports take-only pagination", () => {
-    const query = buildFindManyQuery(
-      SQLITE_SPEC,
-      usersTable,
-      { posts: many(() => postsTable) },
-      {
+    const query = buildFindManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: { posts: many(() => postsTable) },
+      options: {
         include: {
           posts: false,
         },
         take: 2,
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" LIMIT ?',
@@ -289,16 +294,114 @@ describe("buildFindManyQuery", () => {
     expect(query.includeDescriptors).toEqual([]);
   });
 
+  test("builds hasMany include subquery with nested select", () => {
+    const query = buildFindManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: { posts: many(() => postsTable) },
+      options: {
+        include: { posts: { select: { id: true, title: true } } },
+      },
+    });
+
+    expect(query.statement).toBe(
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive", COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS "posts" FROM "users"',
+    );
+    expect(query.params).toEqual([]);
+  });
+
+  test("builds hasMany include subquery with nested where option", () => {
+    const query = buildFindManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: { posts: many(() => postsTable) },
+      options: {
+        include: { posts: { where: { title: "Hello" } } },
+      },
+    });
+
+    expect(query.statement).toBe(
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive", COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id" AND "title" = ?), \'[]\') AS "posts" FROM "users"',
+    );
+    expect(query.params).toEqual(["Hello"]);
+  });
+
+  test("builds hasMany include subquery with nested take and skip", () => {
+    const query = buildFindManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: { posts: many(() => postsTable) },
+      options: {
+        include: { posts: { take: 3, skip: 1 } },
+      },
+    });
+
+    expect(query.statement).toBe(
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive", COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM (SELECT * FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id" LIMIT ? OFFSET ?) AS posts__posts), \'[]\') AS "posts" FROM "users"',
+    );
+    expect(query.params).toEqual([3, 1]);
+  });
+
+  test("builds hasMany include subquery with nested orderBy", () => {
+    const query = buildFindManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: { posts: many(() => postsTable) },
+      options: {
+        include: { posts: { orderBy: { title: "asc" } } },
+      },
+    });
+
+    expect(query.statement).toBe(
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive", COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM (SELECT * FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id" ORDER BY "title" ASC) AS posts__posts), \'[]\') AS "posts" FROM "users"',
+    );
+    expect(query.params).toEqual([]);
+  });
+
+  test("include params come before main where params in param array", () => {
+    const query = buildFindManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: { posts: many(() => postsTable) },
+      options: {
+        where: { firstName: "Alice" },
+        include: { posts: { where: { title: "Hello" } } },
+      },
+    });
+
+    expect(query.params).toEqual(["Hello", "Alice"]);
+  });
+
+  test("builds deeply nested include (posts include author)", () => {
+    const postsRelations = { author: one("authorId", () => usersTable) };
+    const tableRelationsMap = new Map([[postsTable, postsRelations]]);
+
+    const query = buildFindManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: { posts: many(() => postsTable) },
+      options: {
+        include: { posts: { include: { author: true } } },
+      },
+      tableRelationsMap,
+    });
+
+    expect(query.statement).toBe(
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive", COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id", \'author\', (SELECT json_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at", \'isActive\', author__users."is_active") FROM "users" AS author__users WHERE author__users."id" = posts__posts."author_id" LIMIT 1))) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS "posts" FROM "users"',
+    );
+    expect(query.params).toEqual([]);
+  });
+
   test("throws for unknown relation names", () => {
     expect(() =>
-      buildFindManyQuery(
-        SQLITE_SPEC,
-        usersTable,
-        {},
-        {
+      buildFindManyQuery({
+        spec: SQLITE_SPEC,
+        table: usersTable,
+        relations: {},
+        options: {
           include: { posts: true },
         },
-      ),
+      }),
     ).toThrow("Unknown relation posts on table users");
   });
 
@@ -309,14 +412,14 @@ describe("buildFindManyQuery", () => {
     });
 
     expect(() =>
-      buildFindManyQuery(
-        SQLITE_SPEC,
-        usersTable,
-        { comments: many(() => commentsTable) },
-        {
+      buildFindManyQuery({
+        spec: SQLITE_SPEC,
+        table: usersTable,
+        relations: { comments: many(() => commentsTable) },
+        options: {
           include: { comments: true },
         },
-      ),
+      }),
     ).toThrow("Missing hasMany foreign key from comments to users");
   });
 
@@ -328,14 +431,14 @@ describe("buildFindManyQuery", () => {
     });
 
     expect(() =>
-      buildFindManyQuery(
-        SQLITE_SPEC,
-        usersTable,
-        { memberships: many(() => membershipsTable) },
-        {
+      buildFindManyQuery({
+        spec: SQLITE_SPEC,
+        table: usersTable,
+        relations: { memberships: many(() => membershipsTable) },
+        options: {
           include: { memberships: true },
         },
-      ),
+      }),
     ).toThrow("Ambiguous hasMany foreign key from memberships to users");
   });
 
@@ -352,12 +455,12 @@ describe("buildFindManyQuery", () => {
       ),
     });
 
-    const query = buildFindManyQuery(
-      SQLITE_SPEC,
-      groupsTable,
-      { members: many(() => membersTable) },
-      { include: { members: true } },
-    );
+    const query = buildFindManyQuery({
+      spec: SQLITE_SPEC,
+      table: groupsTable,
+      relations: { members: many(() => membersTable) },
+      options: { include: { members: true } },
+    });
 
     expect(query.statement).toBe(
       'SELECT "code" AS "code", "name" AS "name", COALESCE((SELECT json_group_array(json_object(\'id\', members__members."id", \'groupCode\', members__members."group_code")) FROM "members" AS members__members WHERE members__members."group_code" = "groups"."code"), \'[]\') AS "members" FROM "groups"',
@@ -374,14 +477,14 @@ describe("buildFindManyQuery", () => {
     });
 
     expect(() =>
-      buildFindManyQuery(
-        SQLITE_SPEC,
-        usersTable,
-        { profile: one("profileId", () => profilesTable) },
-        {
+      buildFindManyQuery({
+        spec: SQLITE_SPEC,
+        table: usersTable,
+        relations: { profile: one("profileId", () => profilesTable) },
+        options: {
           include: { profile: true },
         },
-      ),
+      }),
     ).toThrow("Missing hasOne foreign key column profileId on users");
   });
 
@@ -392,26 +495,26 @@ describe("buildFindManyQuery", () => {
     });
 
     expect(() =>
-      buildFindManyQuery(
-        SQLITE_SPEC,
-        usersTable,
-        { profile: one("firstName", () => profilesTable) },
-        {
+      buildFindManyQuery({
+        spec: SQLITE_SPEC,
+        table: usersTable,
+        relations: { profile: one("firstName", () => profilesTable) },
+        options: {
           include: { profile: true },
         },
-      ),
+      }),
     ).toThrow("Column firstName on users is not a foreign key");
   });
 
   test("throws on unknown where key", () => {
     expect(() =>
-      buildFindManyQuery(
-        SQLITE_SPEC,
-        usersTable,
-        {},
+      buildFindManyQuery({
+        spec: SQLITE_SPEC,
+        table: usersTable,
+        relations: {},
         // @ts-expect-error testing invalid where key
-        { where: { nonExistent: "x" } },
-      ),
+        options: { where: { nonExistent: "x" } },
+      }),
     ).toThrow('Unknown where key "nonExistent" on table users');
   });
 
@@ -425,17 +528,17 @@ describe("buildFindManyQuery", () => {
     const obj = { type: "click", x: 10 };
     const arr = [1, 2, 3];
 
-    const query = buildFindManyQuery(
-      SQLITE_SPEC,
-      eventsTable,
-      {},
-      {
+    const query = buildFindManyQuery({
+      spec: SQLITE_SPEC,
+      table: eventsTable,
+      relations: {},
+      options: {
         where: {
           payload: arr,
           meta: { equals: obj },
         },
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'SELECT "id" AS "id", "payload" AS "payload", "meta" AS "meta" FROM "events" WHERE "payload" = ? AND "meta" = ?',
@@ -446,16 +549,16 @@ describe("buildFindManyQuery", () => {
 
 describe("buildFindUniqueQuery", () => {
   test("builds a select statement with LIMIT 1", () => {
-    const query = buildFindUniqueQuery(
-      SQLITE_SPEC,
-      usersTable,
-      {},
-      {
+    const query = buildFindUniqueQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: {},
+      options: {
         where: {
           id: "user-1",
         },
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" WHERE "id" = ? LIMIT 1',
@@ -465,17 +568,17 @@ describe("buildFindUniqueQuery", () => {
   });
 
   test("allows non-unique guard fields alongside a unique key", () => {
-    const query = buildFindUniqueQuery(
-      SQLITE_SPEC,
-      usersTable,
-      {},
-      {
+    const query = buildFindUniqueQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: {},
+      options: {
         where: {
           id: "user-1",
           firstName: "John",
         },
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" WHERE "id" = ? AND "first_name" = ? LIMIT 1',
@@ -486,47 +589,47 @@ describe("buildFindUniqueQuery", () => {
 
   test("throws when runtime where payload is empty", () => {
     expect(() =>
-      buildFindUniqueQuery(
-        SQLITE_SPEC,
-        usersTable,
-        {},
-        {
+      buildFindUniqueQuery({
+        spec: SQLITE_SPEC,
+        table: usersTable,
+        relations: {},
+        options: {
           // @ts-expect-error empty object is not assignable to FindUniqueWhere
           where: {},
         },
-      ),
+      }),
     ).toThrow("findUnique requires at least one where key");
   });
 
   test("throws when runtime where payload has an unknown key", () => {
     expect(() =>
-      buildFindUniqueQuery(
-        SQLITE_SPEC,
-        usersTable,
-        {},
-        {
+      buildFindUniqueQuery({
+        spec: SQLITE_SPEC,
+        table: usersTable,
+        relations: {},
+        options: {
           where: {
             // @ts-expect-error nickname is not a column on usersTable
             nickname: "john",
           },
         },
-      ),
+      }),
     ).toThrow("Unknown where key nickname on table users");
   });
 
   test("throws when runtime where payload has no unique or primary key column", () => {
     expect(() =>
-      buildFindUniqueQuery(
-        SQLITE_SPEC,
-        usersTable,
-        {},
-        {
+      buildFindUniqueQuery({
+        spec: SQLITE_SPEC,
+        table: usersTable,
+        relations: {},
+        options: {
           // @ts-expect-error firstName alone does not satisfy FindUniqueWhere (no unique key)
           where: {
             firstName: "John",
           },
         },
-      ),
+      }),
     ).toThrow(
       "findUnique where must include at least one unique or primary key column",
     );
@@ -535,11 +638,11 @@ describe("buildFindUniqueQuery", () => {
 
 describe("buildFindFirstQuery", () => {
   test("builds a select statement with LIMIT 1", () => {
-    const query = buildFindFirstQuery(
-      SQLITE_SPEC,
-      usersTable,
-      {},
-      {
+    const query = buildFindFirstQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: {},
+      options: {
         where: {
           firstName: { startsWith: "Jo" },
         },
@@ -547,7 +650,7 @@ describe("buildFindFirstQuery", () => {
           createdAt: "desc",
         },
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" WHERE "first_name" LIKE ? ESCAPE \'\\\' ORDER BY "created_at" DESC LIMIT ?',
@@ -557,17 +660,17 @@ describe("buildFindFirstQuery", () => {
   });
 
   test("supports include and skip while limiting to one row", () => {
-    const query = buildFindFirstQuery(
-      SQLITE_SPEC,
-      usersTable,
-      { posts: many(() => postsTable) },
-      {
+    const query = buildFindFirstQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: { posts: many(() => postsTable) },
+      options: {
         include: {
           posts: true,
         },
         skip: 2,
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive", COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS "posts" FROM "users" LIMIT ? OFFSET ?',
@@ -595,7 +698,7 @@ describe("parseIncludeRows", () => {
       },
     ];
 
-    parseIncludeRows(usersTable, rows, descriptors);
+    parseIncludeRows({ table: usersTable, rows, descriptors });
 
     expect(rows).toEqual([
       { id: "u1", posts: [], author: null },
@@ -627,10 +730,38 @@ describe("parseIncludeRows", () => {
       },
     ];
 
-    parseIncludeRows(postsTable, rows, descriptors);
+    parseIncludeRows({ table: postsTable, rows, descriptors });
 
     expect(rows[0]?.author).toMatchObject({ isActive: true });
     expect(rows[1]?.author).toMatchObject({ isActive: false });
+  });
+
+  test("coerces boolean fields in deeply nested includes", () => {
+    const descriptors = [
+      {
+        name: "posts",
+        type: "hasMany",
+        table: postsTable,
+        nested: [
+          { name: "author", type: "hasOne", table: usersTable, nested: [] },
+        ],
+      },
+    ] as Array<IncludeDescriptor>;
+
+    const rows: Array<Record<string, unknown>> = [
+      {
+        id: "u1",
+        posts:
+          '[{"id":"p1","title":"Hello","authorId":"u1","author":{"id":"u1","firstName":"John","createdAt":"2025-01-01","isActive":1}}]',
+      },
+    ];
+
+    parseIncludeRows({ table: usersTable, rows, descriptors });
+
+    const posts = rows[0]?.posts as Array<Record<string, unknown>>;
+    const author = posts[0]?.author as Record<string, unknown>;
+
+    expect(author?.isActive).toBe(true);
   });
 
   test("coerces boolean fields in a hasMany included relation", () => {
@@ -646,7 +777,7 @@ describe("parseIncludeRows", () => {
       },
     ];
 
-    parseIncludeRows(postsTable, rows, descriptors);
+    parseIncludeRows({ table: postsTable, rows, descriptors });
 
     const members = rows[0]?.members as Array<Record<string, unknown>>;
 
@@ -662,7 +793,7 @@ describe("createSqliteDialect", () => {
     await createUsersTable(sql);
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
     const rows = await dialect.findMany(sql, {
       where: {
         id: "user-1",
@@ -688,7 +819,7 @@ describe("createSqliteDialect", () => {
     await createUsersTable(sql);
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z", false);
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
     const rows = await dialect.findMany(sql, {
       where: {
         id: "user-1",
@@ -702,12 +833,116 @@ describe("createSqliteDialect", () => {
     await sql.close();
   });
 
+  test("findMany returns nested include with where filter", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await createPostsTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+    await insertPost(sql, "post-1", "Hello", "user-1");
+    await insertPost(sql, "post-2", "World", "user-1");
+
+    const dialect = createSqliteDialect({
+      table: usersTable,
+      relations: {
+        posts: many(() => postsTable),
+      },
+    });
+
+    const rows = await dialect.findMany(sql, {
+      include: { posts: { where: { title: "Hello" } } },
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.posts).toHaveLength(1);
+    expect(rows[0]?.posts[0]?.title).toBe("Hello");
+
+    await sql.close();
+  });
+
+  test("findMany returns nested include with select (only requested columns)", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await createPostsTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+    await insertPost(sql, "post-1", "Hello", "user-1");
+
+    const dialect = createSqliteDialect({
+      table: usersTable,
+      relations: { posts: many(() => postsTable) },
+    });
+
+    const rows = await dialect.findMany(sql, {
+      include: { posts: { select: { title: true } } },
+    });
+
+    const post = rows[0]?.posts[0];
+
+    expect(rows[0]?.posts).toHaveLength(1);
+    expect(post?.title).toBe("Hello");
+    // select filters to only the requested columns at runtime
+    expect(Object.keys(post ?? {})).toEqual(["title"]);
+
+    await sql.close();
+  });
+
+  test("findMany returns nested include with take and skip", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await createPostsTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+    await insertPost(sql, "post-1", "Alpha", "user-1");
+    await insertPost(sql, "post-2", "Beta", "user-1");
+    await insertPost(sql, "post-3", "Gamma", "user-1");
+
+    const dialect = createSqliteDialect({
+      table: usersTable,
+      relations: { posts: many(() => postsTable) },
+    });
+
+    const rows = await dialect.findMany(sql, {
+      include: { posts: { take: 2, skip: 1 } },
+    });
+
+    expect(rows[0]?.posts).toHaveLength(2);
+
+    await sql.close();
+  });
+
+  test("findMany returns nested include with orderBy", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await createPostsTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
+    await insertPost(sql, "post-1", "Zebra", "user-1");
+    await insertPost(sql, "post-2", "Alpha", "user-1");
+
+    const dialect = createSqliteDialect({
+      table: usersTable,
+      relations: { posts: many(() => postsTable) },
+    });
+
+    const rows = await dialect.findMany(sql, {
+      include: { posts: { orderBy: { title: "asc" } } },
+    });
+
+    const posts = rows[0]?.posts ?? [];
+
+    expect(posts[0]?.title).toBe("Alpha");
+    expect(posts[1]?.title).toBe("Zebra");
+
+    await sql.close();
+  });
+
   test("findUnique returns null when row is missing without include", async () => {
     const sql = createMemorySql();
 
     await createUsersTable(sql);
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
     const row = await dialect.findUnique(sql, {
       where: {
         id: "missing",
@@ -727,8 +962,11 @@ describe("createSqliteDialect", () => {
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
     await insertPost(sql, "post-1", "Hello", "user-1");
 
-    const dialect = createSqliteDialect(usersTable, {
-      posts: many(() => postsTable),
+    const dialect = createSqliteDialect({
+      table: usersTable,
+      relations: {
+        posts: many(() => postsTable),
+      },
     });
 
     const existing = await dialect.findUnique(sql, {
@@ -774,7 +1012,7 @@ describe("createSqliteDialect", () => {
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
     await insertUser(sql, "user-2", "Alice", "2025-01-02T00:00:00.000Z");
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const firstByDate = await dialect.findFirst(sql, {
       orderBy: {
@@ -803,8 +1041,11 @@ describe("createSqliteDialect", () => {
     await insertUser(sql, "user-2", "Alice", "2025-01-02T00:00:00.000Z");
     await insertPost(sql, "post-1", "Hello", "user-1");
 
-    const dialect = createSqliteDialect(usersTable, {
-      posts: many(() => postsTable),
+    const dialect = createSqliteDialect({
+      table: usersTable,
+      relations: {
+        posts: many(() => postsTable),
+      },
     });
 
     const first = await dialect.findFirst(sql, {
@@ -838,7 +1079,7 @@ describe("createSqliteDialect", () => {
     await createUsersTable(sql);
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z", false);
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
     const row = await dialect.findUnique(sql, { where: { id: "user-1" } });
 
     expect(row?.isActive).toBe(false);
@@ -852,7 +1093,7 @@ describe("createSqliteDialect", () => {
     await createUsersTable(sql);
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z", false);
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
     const row = await dialect.findFirst(sql, { where: { id: "user-1" } });
 
     expect(row?.isActive).toBe(false);
@@ -865,7 +1106,7 @@ describe("createSqliteDialect", () => {
 
     await createUsersTable(sql);
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
     const row = await dialect.create(sql, {
       data: {
         id: "user-1",
@@ -883,15 +1124,15 @@ describe("createSqliteDialect", () => {
 
 describe("buildUpdateQuery", () => {
   test("builds an update statement with where clause", () => {
-    const query = buildUpdateQuery(
-      SQLITE_SPEC,
-      usersTable,
-      {},
-      {
+    const query = buildUpdateQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: {},
+      options: {
         where: { id: "user-1" },
         data: { firstName: "Jane" },
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
@@ -901,18 +1142,18 @@ describe("buildUpdateQuery", () => {
   });
 
   test("builds an update statement with multiple set fields", () => {
-    const query = buildUpdateQuery(
-      SQLITE_SPEC,
-      usersTable,
-      {},
-      {
+    const query = buildUpdateQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: {},
+      options: {
         where: { id: "user-1" },
         data: {
           firstName: "Jane",
           createdAt: new Date("2026-01-01T00:00:00.000Z"),
         },
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'UPDATE "users" SET "first_name" = ?, "created_at" = ? WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
@@ -925,16 +1166,16 @@ describe("buildUpdateQuery", () => {
   });
 
   test("builds an update statement with select columns in RETURNING", () => {
-    const query = buildUpdateQuery(
-      SQLITE_SPEC,
-      usersTable,
-      {},
-      {
+    const query = buildUpdateQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: {},
+      options: {
         where: { id: "user-1" },
         data: { firstName: "Jane" },
         select: { id: true, firstName: true },
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName"',
@@ -945,30 +1186,30 @@ describe("buildUpdateQuery", () => {
 
   test("throws when where is empty", () => {
     expect(() =>
-      buildUpdateQuery(
-        SQLITE_SPEC,
-        usersTable,
-        {},
-        {
+      buildUpdateQuery({
+        spec: SQLITE_SPEC,
+        table: usersTable,
+        relations: {},
+        options: {
           // @ts-expect-error empty object is not assignable to FindUniqueWhere
           where: {},
           data: { firstName: "Jane" },
         },
-      ),
+      }),
     ).toThrow("findUnique requires at least one where key");
   });
 
   test("skips unknown data keys", () => {
-    const query = buildUpdateQuery(
-      SQLITE_SPEC,
-      usersTable,
-      {},
-      {
+    const query = buildUpdateQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: {},
+      options: {
         where: { id: "user-1" },
         // @ts-expect-error nonExistent is not a column on usersTable
         data: { firstName: "Jane", nonExistent: "value" },
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
@@ -978,30 +1219,30 @@ describe("buildUpdateQuery", () => {
 
   test("throws when data is empty", () => {
     expect(() =>
-      buildUpdateQuery(
-        SQLITE_SPEC,
-        usersTable,
-        {},
-        {
+      buildUpdateQuery({
+        spec: SQLITE_SPEC,
+        table: usersTable,
+        relations: {},
+        options: {
           where: { id: "user-1" },
           data: {},
         },
-      ),
+      }),
     ).toThrow("update requires at least one field in data");
   });
 
   test("serializes Date values in data", () => {
     const date = new Date("2026-06-01T00:00:00.000Z");
 
-    const query = buildUpdateQuery(
-      SQLITE_SPEC,
-      usersTable,
-      {},
-      {
+    const query = buildUpdateQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: {},
+      options: {
         where: { id: "user-1" },
         data: { createdAt: date },
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'UPDATE "users" SET "created_at" = ? WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
@@ -1010,16 +1251,16 @@ describe("buildUpdateQuery", () => {
   });
 
   test("builds an update statement with hasMany include in RETURNING", () => {
-    const query = buildUpdateQuery(
-      SQLITE_SPEC,
-      usersTable,
-      { posts: many(() => postsTable) },
-      {
+    const query = buildUpdateQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: { posts: many(() => postsTable) },
+      options: {
         where: { id: "user-1" },
         data: { firstName: "Jane" },
         include: { posts: true },
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive", COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS "posts"',
@@ -1031,16 +1272,16 @@ describe("buildUpdateQuery", () => {
   });
 
   test("builds an update statement with hasOne include in RETURNING", () => {
-    const query = buildUpdateQuery(
-      SQLITE_SPEC,
-      postsTable,
-      { author: one("authorId", () => usersTable) },
-      {
+    const query = buildUpdateQuery({
+      spec: SQLITE_SPEC,
+      table: postsTable,
+      relations: { author: one("authorId", () => usersTable) },
+      options: {
         where: { id: "post-1" },
         data: { title: "Updated" },
         include: { author: true },
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'UPDATE "posts" SET "title" = ? WHERE "id" = ? RETURNING "id" AS "id", "title" AS "title", "author_id" AS "authorId", (SELECT json_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at", \'isActive\', author__users."is_active") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS "author"',
@@ -1059,7 +1300,7 @@ describe("createSqliteDialect - update", () => {
     await createUsersTable(sql);
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const updated = await dialect.update(sql, {
       where: { id: "user-1" },
@@ -1079,7 +1320,7 @@ describe("createSqliteDialect - update", () => {
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
     await insertUser(sql, "user-2", "Alice", "2025-01-02T00:00:00.000Z");
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const updated = await dialect.update(sql, {
       where: { id: "user-1" },
@@ -1102,7 +1343,7 @@ describe("createSqliteDialect - update", () => {
     await createUsersTable(sql);
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     await expect(
       dialect.update(sql, {
@@ -1120,7 +1361,7 @@ describe("createSqliteDialect - update", () => {
     await createUsersTable(sql);
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const updated = await dialect.update(sql, {
       where: { id: "user-1" },
@@ -1141,8 +1382,11 @@ describe("createSqliteDialect - update", () => {
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
     await insertPost(sql, "post-1", "Hello", "user-1");
 
-    const dialect = createSqliteDialect(usersTable, {
-      posts: many(() => postsTable),
+    const dialect = createSqliteDialect({
+      table: usersTable,
+      relations: {
+        posts: many(() => postsTable),
+      },
     });
 
     const updated = await dialect.update(sql, {
@@ -1165,7 +1409,7 @@ describe("createSqliteDialect - update", () => {
     await createUsersTable(sql);
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z", false);
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
     const row = await dialect.update(sql, {
       where: { id: "user-1" },
       data: { firstName: "Jane" },
@@ -1179,12 +1423,12 @@ describe("createSqliteDialect - update", () => {
 
 describe("buildDeleteQuery", () => {
   test("builds a delete statement with where clause", () => {
-    const query = buildDeleteQuery(
-      SQLITE_SPEC,
-      usersTable,
-      {},
-      { where: { id: "user-1" } },
-    );
+    const query = buildDeleteQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: {},
+      options: { where: { id: "user-1" } },
+    });
 
     expect(query.statement).toBe(
       'DELETE FROM "users" WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
@@ -1194,15 +1438,15 @@ describe("buildDeleteQuery", () => {
   });
 
   test("builds a delete statement with select columns in RETURNING", () => {
-    const query = buildDeleteQuery(
-      SQLITE_SPEC,
-      usersTable,
-      {},
-      {
+    const query = buildDeleteQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: {},
+      options: {
         where: { id: "user-1" },
         select: { id: true, firstName: true },
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'DELETE FROM "users" WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName"',
@@ -1212,15 +1456,15 @@ describe("buildDeleteQuery", () => {
   });
 
   test("builds a delete statement with hasMany include in RETURNING", () => {
-    const query = buildDeleteQuery(
-      SQLITE_SPEC,
-      usersTable,
-      { posts: many(() => postsTable) },
-      {
+    const query = buildDeleteQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: { posts: many(() => postsTable) },
+      options: {
         where: { id: "user-1" },
         include: { posts: true },
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'DELETE FROM "users" WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive", COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id"), \'[]\') AS "posts"',
@@ -1232,15 +1476,15 @@ describe("buildDeleteQuery", () => {
   });
 
   test("builds a delete statement with hasOne include in RETURNING", () => {
-    const query = buildDeleteQuery(
-      SQLITE_SPEC,
-      postsTable,
-      { author: one("authorId", () => usersTable) },
-      {
+    const query = buildDeleteQuery({
+      spec: SQLITE_SPEC,
+      table: postsTable,
+      relations: { author: one("authorId", () => usersTable) },
+      options: {
         where: { id: "post-1" },
         include: { author: true },
       },
-    );
+    });
 
     expect(query.statement).toBe(
       'DELETE FROM "posts" WHERE "id" = ? RETURNING "id" AS "id", "title" AS "title", "author_id" AS "authorId", (SELECT json_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at", \'isActive\', author__users."is_active") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS "author"',
@@ -1253,31 +1497,31 @@ describe("buildDeleteQuery", () => {
 
   test("throws when where is empty", () => {
     expect(() =>
-      buildDeleteQuery(
-        SQLITE_SPEC,
-        usersTable,
-        {},
-        {
+      buildDeleteQuery({
+        spec: SQLITE_SPEC,
+        table: usersTable,
+        relations: {},
+        options: {
           // @ts-expect-error empty object is not assignable to FindUniqueWhere
           where: {},
         },
-      ),
+      }),
     ).toThrow("findUnique requires at least one where key");
   });
 
   test("throws when where has no unique or primary key column", () => {
     expect(() =>
-      buildDeleteQuery(
-        SQLITE_SPEC,
-        usersTable,
-        {},
-        {
+      buildDeleteQuery({
+        spec: SQLITE_SPEC,
+        table: usersTable,
+        relations: {},
+        options: {
           // @ts-expect-error firstName alone does not satisfy FindUniqueWhere (no unique key)
           where: {
             firstName: "John",
           },
         },
-      ),
+      }),
     ).toThrow(
       "findUnique where must include at least one unique or primary key column",
     );
@@ -1291,7 +1535,7 @@ describe("createSqliteDialect - delete", () => {
     await createUsersTable(sql);
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const deleted = await dialect.delete(sql, { where: { id: "user-1" } });
 
@@ -1314,7 +1558,7 @@ describe("createSqliteDialect - delete", () => {
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
     await insertUser(sql, "user-2", "Alice", "2025-01-02T00:00:00.000Z");
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     await dialect.delete(sql, { where: { id: "user-1" } });
 
@@ -1332,7 +1576,7 @@ describe("createSqliteDialect - delete", () => {
 
     await createUsersTable(sql);
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     await expect(
       dialect.delete(sql, { where: { id: "missing" } }),
@@ -1347,7 +1591,7 @@ describe("createSqliteDialect - delete", () => {
     await createUsersTable(sql);
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const deleted = await dialect.delete(sql, {
       where: { id: "user-1" },
@@ -1367,8 +1611,11 @@ describe("createSqliteDialect - delete", () => {
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
     await insertPost(sql, "post-1", "Hello", "user-1");
 
-    const dialect = createSqliteDialect(usersTable, {
-      posts: many(() => postsTable),
+    const dialect = createSqliteDialect({
+      table: usersTable,
+      relations: {
+        posts: many(() => postsTable),
+      },
     });
 
     const deleted = await dialect.delete(sql, {
@@ -1390,7 +1637,7 @@ describe("createSqliteDialect - delete", () => {
     await createUsersTable(sql);
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z", false);
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
     const row = await dialect.delete(sql, { where: { id: "user-1" } });
 
     expect(row.isActive).toBe(false);
@@ -1401,14 +1648,18 @@ describe("createSqliteDialect - delete", () => {
 
 describe("buildCreateManyQuery", () => {
   test("builds a batched INSERT with one row", () => {
-    const query = buildCreateManyQuery(SQLITE_SPEC, usersTable, {
-      data: [
-        {
-          id: "user-1",
-          firstName: "John",
-          createdAt: new Date("2025-01-01T00:00:00.000Z"),
-        },
-      ],
+    const query = buildCreateManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      options: {
+        data: [
+          {
+            id: "user-1",
+            firstName: "John",
+            createdAt: new Date("2025-01-01T00:00:00.000Z"),
+          },
+        ],
+      },
     });
 
     expect(query.statement).toBe(
@@ -1423,19 +1674,23 @@ describe("buildCreateManyQuery", () => {
   });
 
   test("builds a batched INSERT with multiple rows", () => {
-    const query = buildCreateManyQuery(SQLITE_SPEC, usersTable, {
-      data: [
-        {
-          id: "user-1",
-          firstName: "John",
-          createdAt: new Date("2025-01-01T00:00:00.000Z"),
-        },
-        {
-          id: "user-2",
-          firstName: "Alice",
-          createdAt: new Date("2025-01-02T00:00:00.000Z"),
-        },
-      ],
+    const query = buildCreateManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      options: {
+        data: [
+          {
+            id: "user-1",
+            firstName: "John",
+            createdAt: new Date("2025-01-01T00:00:00.000Z"),
+          },
+          {
+            id: "user-2",
+            firstName: "Alice",
+            createdAt: new Date("2025-01-02T00:00:00.000Z"),
+          },
+        ],
+      },
     });
 
     expect(query.statement).toBe(
@@ -1457,11 +1712,15 @@ describe("buildCreateManyQuery", () => {
     const d1 = new Date("2025-03-01T00:00:00.000Z");
     const d2 = new Date("2025-04-01T00:00:00.000Z");
 
-    const query = buildCreateManyQuery(SQLITE_SPEC, usersTable, {
-      data: [
-        { id: "a", firstName: "A", createdAt: d1 },
-        { id: "b", firstName: "B", createdAt: d2 },
-      ],
+    const query = buildCreateManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      options: {
+        data: [
+          { id: "a", firstName: "A", createdAt: d1 },
+          { id: "b", firstName: "B", createdAt: d2 },
+        ],
+      },
     });
 
     expect(query.params).toEqual([
@@ -1477,7 +1736,11 @@ describe("buildCreateManyQuery", () => {
   });
 
   test("returns empty statement and params for empty data array", () => {
-    const query = buildCreateManyQuery(SQLITE_SPEC, usersTable, { data: [] });
+    const query = buildCreateManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      options: { data: [] },
+    });
 
     expect(query.statement).toBe("");
     expect(query.params).toEqual([]);
@@ -1490,8 +1753,12 @@ describe("buildCreateManyQuery", () => {
       tag: string("tag").default(() => "default-tag"),
     });
 
-    const query = buildCreateManyQuery(SQLITE_SPEC, tableWithDefault, {
-      data: [{ id: "item-1", name: "Widget" }],
+    const query = buildCreateManyQuery({
+      spec: SQLITE_SPEC,
+      table: tableWithDefault,
+      options: {
+        data: [{ id: "item-1", name: "Widget" }],
+      },
     });
 
     expect(query.statement).toBe(
@@ -1503,8 +1770,12 @@ describe("buildCreateManyQuery", () => {
 
 describe("buildUpdateManyQuery", () => {
   test("builds an UPDATE without a WHERE clause when no where is provided", () => {
-    const query = buildUpdateManyQuery(SQLITE_SPEC, usersTable, {
-      data: { firstName: "Everyone" },
+    const query = buildUpdateManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      options: {
+        data: { firstName: "Everyone" },
+      },
     });
 
     expect(query.statement).toBe(
@@ -1514,9 +1785,13 @@ describe("buildUpdateManyQuery", () => {
   });
 
   test("builds an UPDATE with a WHERE clause", () => {
-    const query = buildUpdateManyQuery(SQLITE_SPEC, usersTable, {
-      where: { firstName: { startsWith: "Jo" } },
-      data: { firstName: "John" },
+    const query = buildUpdateManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      options: {
+        where: { firstName: { startsWith: "Jo" } },
+        data: { firstName: "John" },
+      },
     });
 
     expect(query.statement).toBe(
@@ -1526,11 +1801,15 @@ describe("buildUpdateManyQuery", () => {
   });
 
   test("builds an UPDATE with multiple SET fields", () => {
-    const query = buildUpdateManyQuery(SQLITE_SPEC, usersTable, {
-      where: { id: "user-1" },
-      data: {
-        firstName: "Jane",
-        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    const query = buildUpdateManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      options: {
+        where: { id: "user-1" },
+        data: {
+          firstName: "Jane",
+          createdAt: new Date("2026-01-01T00:00:00.000Z"),
+        },
       },
     });
 
@@ -1547,18 +1826,26 @@ describe("buildUpdateManyQuery", () => {
   test("serializes Date values in data", () => {
     const d = new Date("2026-06-01T00:00:00.000Z");
 
-    const query = buildUpdateManyQuery(SQLITE_SPEC, usersTable, {
-      data: { createdAt: d },
+    const query = buildUpdateManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      options: {
+        data: { createdAt: d },
+      },
     });
 
     expect(query.params).toEqual([d.toISOString()]);
   });
 
   test("skips unknown data keys", () => {
-    const query = buildUpdateManyQuery(SQLITE_SPEC, usersTable, {
-      where: { id: "user-1" },
-      // @ts-expect-error nonExistent is not a column on usersTable
-      data: { firstName: "Jane", nonExistent: "value" },
+    const query = buildUpdateManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      options: {
+        where: { id: "user-1" },
+        // @ts-expect-error nonExistent is not a column on usersTable
+        data: { firstName: "Jane", nonExistent: "value" },
+      },
     });
 
     expect(query.statement).toBe(
@@ -1569,8 +1856,12 @@ describe("buildUpdateManyQuery", () => {
 
   test("throws when data is empty", () => {
     expect(() =>
-      buildUpdateManyQuery(SQLITE_SPEC, usersTable, {
-        data: {},
+      buildUpdateManyQuery({
+        spec: SQLITE_SPEC,
+        table: usersTable,
+        options: {
+          data: {},
+        },
       }),
     ).toThrow("updateMany requires at least one field in data");
   });
@@ -1578,7 +1869,11 @@ describe("buildUpdateManyQuery", () => {
 
 describe("buildDeleteManyQuery", () => {
   test("builds a DELETE without a WHERE clause when no where is provided", () => {
-    const query = buildDeleteManyQuery(SQLITE_SPEC, usersTable, {});
+    const query = buildDeleteManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      options: {},
+    });
 
     expect(query.statement).toBe(
       'DELETE FROM "users" RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
@@ -1587,8 +1882,12 @@ describe("buildDeleteManyQuery", () => {
   });
 
   test("builds a DELETE with a WHERE clause", () => {
-    const query = buildDeleteManyQuery(SQLITE_SPEC, usersTable, {
-      where: { firstName: { startsWith: "Jo" } },
+    const query = buildDeleteManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      options: {
+        where: { firstName: { startsWith: "Jo" } },
+      },
     });
 
     expect(query.statement).toBe(
@@ -1598,8 +1897,12 @@ describe("buildDeleteManyQuery", () => {
   });
 
   test("builds a DELETE with an equality WHERE clause", () => {
-    const query = buildDeleteManyQuery(SQLITE_SPEC, usersTable, {
-      where: { firstName: "John" },
+    const query = buildDeleteManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      options: {
+        where: { firstName: "John" },
+      },
     });
 
     expect(query.statement).toBe(
@@ -1611,8 +1914,12 @@ describe("buildDeleteManyQuery", () => {
   test("serializes Date values in where clause", () => {
     const cutoff = new Date("2025-01-01T00:00:00.000Z");
 
-    const query = buildDeleteManyQuery(SQLITE_SPEC, usersTable, {
-      where: { createdAt: { lt: cutoff } },
+    const query = buildDeleteManyQuery({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      options: {
+        where: { createdAt: { lt: cutoff } },
+      },
     });
 
     expect(query.statement).toBe(
@@ -1628,7 +1935,7 @@ describe("createSqliteDialect - createMany", () => {
 
     await createUsersTable(sql);
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const result = await dialect.createMany(sql, {
       data: [
@@ -1651,7 +1958,7 @@ describe("createSqliteDialect - createMany", () => {
 
     await createUsersTable(sql);
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const result = await dialect.createMany(sql, {
       data: [{ id: "user-1", firstName: "Solo", createdAt: new Date() }],
@@ -1669,7 +1976,7 @@ describe("createSqliteDialect - createMany", () => {
 
     await createUsersTable(sql);
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const result = await dialect.createMany(sql, { data: [] });
 
@@ -1687,7 +1994,7 @@ describe("createSqliteDialect - createMany", () => {
 
     await createUsersTable(sql);
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const d1 = new Date("2025-01-01T00:00:00.000Z");
     const d2 = new Date("2025-06-01T00:00:00.000Z");
@@ -1717,7 +2024,7 @@ describe("createSqliteDialect - createMany", () => {
 
     await createUsersTable(sql);
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
     const rows = await dialect.createMany(sql, {
       data: [
         {
@@ -1744,7 +2051,7 @@ describe("createSqliteDialect - updateMany", () => {
     await insertUser(sql, "user-2", "Alice", "2025-01-02T00:00:00.000Z");
     await insertUser(sql, "user-3", "Bob", "2025-01-03T00:00:00.000Z");
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const result = await dialect.updateMany(sql, {
       data: { firstName: "Updated" },
@@ -1764,7 +2071,7 @@ describe("createSqliteDialect - updateMany", () => {
     await insertUser(sql, "user-2", "Johnny", "2025-01-02T00:00:00.000Z");
     await insertUser(sql, "user-3", "Alice", "2025-01-03T00:00:00.000Z");
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const result = await dialect.updateMany(sql, {
       where: { firstName: { startsWith: "Jo" } },
@@ -1787,7 +2094,7 @@ describe("createSqliteDialect - updateMany", () => {
     await createUsersTable(sql);
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const result = await dialect.updateMany(sql, {
       where: { firstName: "Nobody" },
@@ -1809,7 +2116,7 @@ describe("createSqliteDialect - updateMany", () => {
     await createUsersTable(sql);
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const newDate = new Date("2026-06-01T00:00:00.000Z");
 
@@ -1833,7 +2140,7 @@ describe("createSqliteDialect - updateMany", () => {
     await createUsersTable(sql);
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z", false);
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
     const rows = await dialect.updateMany(sql, {
       where: { id: "user-1" },
       data: { firstName: "John" },
@@ -1853,7 +2160,7 @@ describe("createSqliteDialect - deleteMany", () => {
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
     await insertUser(sql, "user-2", "Alice", "2025-01-02T00:00:00.000Z");
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const result = await dialect.deleteMany(sql, {});
 
@@ -1874,7 +2181,7 @@ describe("createSqliteDialect - deleteMany", () => {
     await insertUser(sql, "user-2", "Johnny", "2025-01-02T00:00:00.000Z");
     await insertUser(sql, "user-3", "Alice", "2025-01-03T00:00:00.000Z");
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const result = await dialect.deleteMany(sql, {
       where: { firstName: { startsWith: "Jo" } },
@@ -1896,7 +2203,7 @@ describe("createSqliteDialect - deleteMany", () => {
     await createUsersTable(sql);
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const result = await dialect.deleteMany(sql, {
       where: { firstName: "Nobody" },
@@ -1919,7 +2226,7 @@ describe("createSqliteDialect - deleteMany", () => {
     await insertUser(sql, "user-2", "Old2", "2021-01-01T00:00:00.000Z");
     await insertUser(sql, "user-3", "New1", "2025-01-01T00:00:00.000Z");
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const result = await dialect.deleteMany(sql, {
       where: { createdAt: { lt: new Date("2023-01-01T00:00:00.000Z") } },
@@ -1942,7 +2249,7 @@ describe("createSqliteDialect - deleteMany", () => {
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
     await insertUser(sql, "user-2", "Alice", "2025-01-02T00:00:00.000Z");
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
 
     const result = await dialect.deleteMany(sql, {
       where: { firstName: "John" },
@@ -1964,7 +2271,7 @@ describe("createSqliteDialect - deleteMany", () => {
     await createUsersTable(sql);
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z", false);
 
-    const dialect = createSqliteDialect(usersTable, {});
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
     const rows = await dialect.deleteMany(sql, { where: { id: "user-1" } });
 
     expect(rows[0]?.isActive).toBe(false);
@@ -2026,7 +2333,10 @@ describe("coerceBooleanColumns - nullable boolean", () => {
       null,
     ]);
 
-    const dialect = createSqliteDialect(nullableFlagsTable, {});
+    const dialect = createSqliteDialect({
+      table: nullableFlagsTable,
+      relations: {},
+    });
     const rows = await dialect.findMany(sql);
 
     expect(rows[0]?.isEnabled).toBeNull();
@@ -2047,7 +2357,10 @@ describe("coerceBooleanColumns - nullable boolean", () => {
       1,
     ]);
 
-    const dialect = createSqliteDialect(nullableFlagsTable, {});
+    const dialect = createSqliteDialect({
+      table: nullableFlagsTable,
+      relations: {},
+    });
     const rows = await dialect.findMany(sql, { orderBy: { id: "asc" } });
 
     expect(rows[0]?.isEnabled).toBe(false);
@@ -2065,7 +2378,10 @@ describe("coerceBooleanColumns - nullable boolean", () => {
       null,
     ]);
 
-    const dialect = createSqliteDialect(nullableFlagsTable, {});
+    const dialect = createSqliteDialect({
+      table: nullableFlagsTable,
+      relations: {},
+    });
     const row = await dialect.findUnique(sql, { where: { id: "flag-1" } });
 
     expect(row?.isEnabled).toBeNull();
@@ -2078,7 +2394,10 @@ describe("coerceBooleanColumns - nullable boolean", () => {
 
     await createFlagsTable(sql);
 
-    const dialect = createSqliteDialect(nullableFlagsTable, {});
+    const dialect = createSqliteDialect({
+      table: nullableFlagsTable,
+      relations: {},
+    });
     const row = await dialect.create(sql, {
       data: { id: "flag-1" },
     });
@@ -2099,8 +2418,11 @@ describe("boolean coercion in included relations", () => {
     await insertPostWithFeatured(sql, "post-1", "Hello", true, "user-1");
     await insertPostWithFeatured(sql, "post-2", "World", false, "user-1");
 
-    const dialect = createSqliteDialect(usersTable, {
-      posts: many(() => postsWithFeaturedTable),
+    const dialect = createSqliteDialect({
+      table: usersTable,
+      relations: {
+        posts: many(() => postsWithFeaturedTable),
+      },
     });
 
     const rows = await dialect.findMany(sql, { include: { posts: true } });
@@ -2123,8 +2445,11 @@ describe("boolean coercion in included relations", () => {
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z", false);
     await insertPostWithFeatured(sql, "post-1", "Hello", true, "user-1");
 
-    const dialect = createSqliteDialect(postsWithFeaturedTable, {
-      author: one("authorId", () => usersTable),
+    const dialect = createSqliteDialect({
+      table: postsWithFeaturedTable,
+      relations: {
+        author: one("authorId", () => usersTable),
+      },
     });
 
     const rows = await dialect.findMany(sql, { include: { author: true } });
@@ -2154,42 +2479,46 @@ const createMetaTable = async (sql: Bun.SQL) => {
 
 describe("json and jsonb columns", () => {
   test("buildCreateQuery serializes json values as JSON strings", () => {
-    const query = buildCreateQuery(
-      SQLITE_SPEC,
-      metaTable,
-      {},
-      {
+    const query = buildCreateQuery({
+      spec: SQLITE_SPEC,
+      table: metaTable,
+      relations: {},
+      options: {
         data: {
           id: "row-1",
           meta: { isActive: true, score: 42 },
         },
       },
-    );
+    });
 
     expect(query.params[1]).toBe(JSON.stringify({ isActive: true, score: 42 }));
     expect(query.params[2]).toBeNull();
   });
 
   test("buildUpdateQuery serializes json values as JSON strings", () => {
-    const query = buildUpdateQuery(
-      SQLITE_SPEC,
-      metaTable,
-      {},
-      {
+    const query = buildUpdateQuery({
+      spec: SQLITE_SPEC,
+      table: metaTable,
+      relations: {},
+      options: {
         where: { id: "row-1" },
         data: { meta: { isActive: false, score: 0 } },
       },
-    );
+    });
 
     expect(query.params[0]).toBe(JSON.stringify({ isActive: false, score: 0 }));
   });
 
   test("buildCreateManyQuery serializes json values across all rows", () => {
-    const query = buildCreateManyQuery(SQLITE_SPEC, metaTable, {
-      data: [
-        { id: "row-1", meta: { isActive: true, score: 1 } },
-        { id: "row-2", meta: { isActive: false, score: 2 } },
-      ],
+    const query = buildCreateManyQuery({
+      spec: SQLITE_SPEC,
+      table: metaTable,
+      options: {
+        data: [
+          { id: "row-1", meta: { isActive: true, score: 1 } },
+          { id: "row-2", meta: { isActive: false, score: 2 } },
+        ],
+      },
     });
 
     expect(query.params[1]).toBe(JSON.stringify({ isActive: true, score: 1 }));
@@ -2201,7 +2530,7 @@ describe("json and jsonb columns", () => {
 
     await createMetaTable(sql);
 
-    const dialect = createSqliteDialect(metaTable, {});
+    const dialect = createSqliteDialect({ table: metaTable, relations: {} });
 
     await dialect.create(sql, {
       data: { id: "row-1", meta: { isActive: true, score: 99 } },
@@ -2220,7 +2549,7 @@ describe("json and jsonb columns", () => {
 
     await createMetaTable(sql);
 
-    const dialect = createSqliteDialect(metaTable, {});
+    const dialect = createSqliteDialect({ table: metaTable, relations: {} });
 
     await dialect.create(sql, {
       data: {
@@ -2242,7 +2571,7 @@ describe("json and jsonb columns", () => {
 
     await createMetaTable(sql);
 
-    const dialect = createSqliteDialect(metaTable, {});
+    const dialect = createSqliteDialect({ table: metaTable, relations: {} });
 
     await dialect.create(sql, {
       data: { id: "row-1", meta: { isActive: true, score: 1 } },
@@ -2274,7 +2603,10 @@ describe("json and jsonb columns", () => {
       "CREATE TABLE defaults_table (id TEXT PRIMARY KEY, meta TEXT NOT NULL)",
     );
 
-    const dialect = createSqliteDialect(tableWithDefault, {});
+    const dialect = createSqliteDialect({
+      table: tableWithDefault,
+      relations: {},
+    });
 
     await dialect.create(sql, { data: { id: "row-1" } });
 

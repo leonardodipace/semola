@@ -9,13 +9,21 @@ const usersTable = defineTable("users", {
 
 describe("getDialect", () => {
   test("returns sqlite dialect for sqlite adapter", () => {
-    const dialect = getDialect("sqlite", usersTable, {});
+    const dialect = getDialect({
+      adapter: "sqlite",
+      table: usersTable,
+      relations: {},
+    });
 
     expect(dialect.name).toBe("sqlite");
   });
 
   test("returns postgres dialect for postgres adapter", () => {
-    const dialect = getDialect("postgres", usersTable, {});
+    const dialect = getDialect({
+      adapter: "postgres",
+      table: usersTable,
+      relations: {},
+    });
 
     expect(dialect.name).toBe("postgres");
   });
@@ -23,9 +31,9 @@ describe("getDialect", () => {
   test("throws for unsupported adapters", () => {
     const adapter = "mysql";
 
-    // @ts-expect-error - testing runtime guard for values outside the Adapter type
-    expect(() => getDialect(adapter, usersTable, {})).toThrow(
-      "Unsupported adapter: mysql",
-    );
+    expect(() =>
+      // @ts-expect-error - testing runtime guard for values outside the Adapter type
+      getDialect({ adapter, table: usersTable, relations: {} }),
+    ).toThrow("Unsupported adapter: mysql");
   });
 });
