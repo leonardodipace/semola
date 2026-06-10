@@ -168,28 +168,43 @@ type RelationTable<R extends HasMany<Table> | HasOne<Table>> =
 
 // TAllTables/TAllRelations thread through include options so nested include keys
 // are validated and result types are inferred correctly at any depth.
-export type RelationIncludeOptions<R extends HasMany<Table> | HasOne<Table>> = {
+export type RelationIncludeOptions<
+  R extends HasMany<Table> | HasOne<Table>,
+  TAllTables extends Record<string, Table> = Record<string, Table>,
+  TAllRelations = Record<string, unknown>,
+> = {
   where?: TableWhere<RelationTable<R>>;
   orderBy?: TableOrderBy<RelationTable<R>>;
   take?: number;
   skip?: number;
   select?: TableSelect<RelationTable<R>>;
-  include?: TableInclude<TableRelations>;
+  include?: TableInclude<
+    RelationsForTableByType<RelationTable<R>, TAllTables, TAllRelations>,
+    TAllTables,
+    TAllRelations
+  >;
 };
 
-export type TableInclude<TRelations extends TableRelations = TableRelations> =
-  Partial<{
-    [K in keyof TRelations]: boolean | RelationIncludeOptions<TRelations[K]>;
-  }>;
+export type TableInclude<
+  TRelations extends TableRelations = TableRelations,
+  TAllTables extends Record<string, Table> = Record<string, Table>,
+  TAllRelations = Record<string, unknown>,
+> = Partial<{
+  [K in keyof TRelations]:
+    | boolean
+    | RelationIncludeOptions<TRelations[K], TAllTables, TAllRelations>;
+}>;
 
 export type FindManyOptions<
   T extends Table,
   TRelations extends TableRelations = TableRelations,
+  TAllTables extends Record<string, Table> = Record<string, Table>,
+  TAllRelations = Record<string, unknown>,
 > = {
   where?: TableWhere<T>;
   select?: TableSelect<T>;
   orderBy?: TableOrderBy<T>;
-  include?: TableInclude<TRelations>;
+  include?: TableInclude<TRelations, TAllTables, TAllRelations>;
   take?: number;
   skip?: number;
 };
@@ -197,7 +212,9 @@ export type FindManyOptions<
 export type FindFirstOptions<
   T extends Table,
   TRelations extends TableRelations = TableRelations,
-> = Omit<FindManyOptions<T, TRelations>, "take">;
+  TAllTables extends Record<string, Table> = Record<string, Table>,
+  TAllRelations = Record<string, unknown>,
+> = Omit<FindManyOptions<T, TRelations, TAllTables, TAllRelations>, "take">;
 
 type TableColumns<T extends Table> = T["columns"];
 
@@ -250,10 +267,12 @@ export type FindUniqueWhere<T extends Table> = ExactlyOne<
 export type FindUniqueOptions<
   T extends Table,
   TRelations extends TableRelations = TableRelations,
+  TAllTables extends Record<string, Table> = Record<string, Table>,
+  TAllRelations = Record<string, unknown>,
 > = {
   where: FindUniqueWhere<T>;
   select?: TableSelect<T>;
-  include?: TableInclude<TRelations>;
+  include?: TableInclude<TRelations, TAllTables, TAllRelations>;
 };
 
 export type TableRow<T extends Table> = Prettify<{
@@ -291,10 +310,12 @@ export type CreateData<T extends Table> = Prettify<
 export type CreateOptions<
   T extends Table,
   TRelations extends TableRelations = TableRelations,
+  TAllTables extends Record<string, Table> = Record<string, Table>,
+  TAllRelations = Record<string, unknown>,
 > = {
   data: CreateData<T>;
   select?: TableSelect<T>;
-  include?: TableInclude<TRelations>;
+  include?: TableInclude<TRelations, TAllTables, TAllRelations>;
 };
 
 export type CreateResult<
@@ -302,7 +323,7 @@ export type CreateResult<
   TRelations extends TableRelations,
   TOptions extends {
     select?: TableSelect<T>;
-    include?: TableInclude<TRelations>;
+    include?: TableInclude<TRelations, TAllTables, TAllRelations>;
   },
   TAllTables extends Record<string, Table> = Record<string, Table>,
   TAllRelations = Record<string, unknown>,
@@ -320,11 +341,13 @@ export type UpdateData<T extends Table> = Partial<{
 export type UpdateOptions<
   T extends Table,
   TRelations extends TableRelations = TableRelations,
+  TAllTables extends Record<string, Table> = Record<string, Table>,
+  TAllRelations = Record<string, unknown>,
 > = {
   where: FindUniqueWhere<T>;
   data: UpdateData<T>;
   select?: TableSelect<T>;
-  include?: TableInclude<TRelations>;
+  include?: TableInclude<TRelations, TAllTables, TAllRelations>;
 };
 
 export type UpdateResult<
@@ -333,7 +356,7 @@ export type UpdateResult<
   TOptions extends {
     where: FindUniqueWhere<T>;
     select?: TableSelect<T>;
-    include?: TableInclude<TRelations>;
+    include?: TableInclude<TRelations, TAllTables, TAllRelations>;
   },
   TAllTables extends Record<string, Table> = Record<string, Table>,
   TAllRelations = Record<string, unknown>,
@@ -344,7 +367,9 @@ export type UpdateResult<
 export type DeleteOptions<
   T extends Table,
   TRelations extends TableRelations = TableRelations,
-> = FindUniqueOptions<T, TRelations>;
+  TAllTables extends Record<string, Table> = Record<string, Table>,
+  TAllRelations = Record<string, unknown>,
+> = FindUniqueOptions<T, TRelations, TAllTables, TAllRelations>;
 
 export type DeleteResult<
   T extends Table,
@@ -352,7 +377,7 @@ export type DeleteResult<
   TOptions extends {
     where: FindUniqueWhere<T>;
     select?: TableSelect<T>;
-    include?: TableInclude<TRelations>;
+    include?: TableInclude<TRelations, TAllTables, TAllRelations>;
   },
   TAllTables extends Record<string, Table> = Record<string, Table>,
   TAllRelations = Record<string, unknown>,
@@ -418,7 +443,9 @@ type RelationResultType<
                 TTable,
                 RelationsForTableByType<TTable, TAllTables, TAllRelations>,
                 TNestedInclude extends TableInclude<
-                  RelationsForTableByType<TTable, TAllTables, TAllRelations>
+                  RelationsForTableByType<TTable, TAllTables, TAllRelations>,
+                  TAllTables,
+                  TAllRelations
                 >
                   ? { include: TNestedInclude }
                   : {},
@@ -436,7 +463,9 @@ type RelationResultType<
                 TTable,
                 RelationsForTableByType<TTable, TAllTables, TAllRelations>,
                 TNestedInclude extends TableInclude<
-                  RelationsForTableByType<TTable, TAllTables, TAllRelations>
+                  RelationsForTableByType<TTable, TAllTables, TAllRelations>,
+                  TAllTables,
+                  TAllRelations
                 >
                   ? { include: TNestedInclude }
                   : {},
@@ -450,12 +479,18 @@ type RelationResultType<
 type IncludeResult<
   _T extends Table,
   TRelations extends TableRelations,
-  TOptions extends { include?: TableInclude<TRelations> },
+  TOptions extends {
+    include?: TableInclude<TRelations, TAllTables, TAllRelations>;
+  },
   TAllTables extends Record<string, Table>,
   TAllRelations,
 > = [keyof TRelations] extends [never]
   ? {}
-  : TOptions["include"] extends TableInclude<TRelations>
+  : TOptions["include"] extends TableInclude<
+        TRelations,
+        TAllTables,
+        TAllRelations
+      >
     ? {
         [K in IncludedKeys<
           NonNullable<TOptions["include"]>
@@ -473,7 +508,7 @@ type IncludeResult<
 export type FindManyResult<
   T extends Table,
   TRelations extends TableRelations,
-  TOptions extends FindManyOptions<T, TRelations>,
+  TOptions extends FindManyOptions<T, TRelations, TAllTables, TAllRelations>,
   TAllTables extends Record<string, Table> = Record<string, Table>,
   TAllRelations = Record<string, unknown>,
 > = Prettify<
@@ -484,7 +519,7 @@ export type FindManyResult<
 export type FindFirstResult<
   T extends Table,
   TRelations extends TableRelations,
-  TOptions extends FindFirstOptions<T, TRelations>,
+  TOptions extends FindFirstOptions<T, TRelations, TAllTables, TAllRelations>,
   TAllTables extends Record<string, Table> = Record<string, Table>,
   TAllRelations = Record<string, unknown>,
 > = Prettify<
@@ -495,7 +530,7 @@ export type FindFirstResult<
 export type FindUniqueResult<
   T extends Table,
   TRelations extends TableRelations,
-  TOptions extends FindUniqueOptions<T, TRelations>,
+  TOptions extends FindUniqueOptions<T, TRelations, TAllTables, TAllRelations>,
   TAllTables extends Record<string, Table> = Record<string, Table>,
   TAllRelations = Record<string, unknown>,
 > = Prettify<
@@ -509,40 +544,79 @@ export type TableClient<
   TAllTables extends Record<string, Table> = Record<string, Table>,
   TAllRelations = Record<string, unknown>,
 > = {
-  // Constraints use simple option types (no TAllTables/TAllRelations) to avoid
-  // TypeScript variance issues. TAllTables/TAllRelations are used only in result
-  // types for dynamic nested relation inference at any depth.
-  findMany<const TOptions extends FindManyOptions<T, TRelations>>(
+  findMany<
+    const TOptions extends FindManyOptions<
+      T,
+      TRelations,
+      TAllTables,
+      TAllRelations
+    >,
+  >(
     options?: TOptions,
   ): Promise<
     Array<FindManyResult<T, TRelations, TOptions, TAllTables, TAllRelations>>
   >;
 
-  findFirst<const TOptions extends FindFirstOptions<T, TRelations>>(
+  findFirst<
+    const TOptions extends FindFirstOptions<
+      T,
+      TRelations,
+      TAllTables,
+      TAllRelations
+    >,
+  >(
     options?: TOptions,
   ): Promise<
     FindFirstResult<T, TRelations, TOptions, TAllTables, TAllRelations>
   >;
 
-  findUnique<const TOptions extends FindUniqueOptions<T, TRelations>>(
+  findUnique<
+    const TOptions extends FindUniqueOptions<
+      T,
+      TRelations,
+      TAllTables,
+      TAllRelations
+    >,
+  >(
     options: TOptions,
   ): Promise<
     FindUniqueResult<T, TRelations, TOptions, TAllTables, TAllRelations>
   >;
 
-  create<const TOptions extends CreateOptions<T, TRelations>>(
+  create<
+    const TOptions extends CreateOptions<
+      T,
+      TRelations,
+      TAllTables,
+      TAllRelations
+    >,
+  >(
     options: TOptions,
   ): Promise<CreateResult<T, TRelations, TOptions, TAllTables, TAllRelations>>;
 
   createMany(options: CreateManyOptions<T>): Promise<Array<TableRow<T>>>;
 
-  update<const TOptions extends UpdateOptions<T, TRelations>>(
+  update<
+    const TOptions extends UpdateOptions<
+      T,
+      TRelations,
+      TAllTables,
+      TAllRelations
+    >,
+  >(
     options: TOptions,
   ): Promise<UpdateResult<T, TRelations, TOptions, TAllTables, TAllRelations>>;
 
   updateMany(options: UpdateManyOptions<T>): Promise<Array<TableRow<T>>>;
 
-  delete<const TOptions extends DeleteOptions<T, TRelations>>(
+  delete<
+    const TOptions extends DeleteOptions<
+      T,
+      TRelations,
+      TAllTables,
+      TAllRelations
+    >,
+  >(
     options: TOptions,
   ): Promise<DeleteResult<T, TRelations, TOptions, TAllTables, TAllRelations>>;
 
