@@ -178,11 +178,15 @@ export type RelationIncludeOptions<
   take?: number;
   skip?: number;
   select?: TableSelect<RelationTable<R>>;
-  include?: TableInclude<
+  include?: [
     RelationsForTableByType<RelationTable<R>, TAllTables, TAllRelations>,
-    TAllTables,
-    TAllRelations
-  >;
+  ] extends [never]
+    ? TableInclude<TableRelations, TAllTables, TAllRelations>
+    : TableInclude<
+        RelationsForTableByType<RelationTable<R>, TAllTables, TAllRelations>,
+        TAllTables,
+        TAllRelations
+      >;
 };
 
 export type TableInclude<
