@@ -354,18 +354,13 @@ const buildJsonObjectExpression = (input: BuildJsonObjectExpressionInput) => {
   const allEntries = Object.entries(table.columns);
   const hasSelect = select !== undefined && Object.keys(select).length > 0;
 
-  if (hasSelect) {
-    const selectedPairs = allEntries
-      .filter(([key]) => key in select)
-      .flatMap(([jsKey, column]) => [
-        `'${jsKey}'`,
-        `${alias}.${quoteIdentifier(column.sqlName)}`,
-      ]);
+  let visibleEntries = allEntries;
 
-    return `${spec.jsonObjectFunctionName}(${[...selectedPairs, ...extraPairs].join(", ")})`;
+  if (hasSelect) {
+    visibleEntries = allEntries.filter(([key]) => key in select);
   }
 
-  const pairs = allEntries.flatMap(([jsKey, column]) => [
+  const pairs = visibleEntries.flatMap(([jsKey, column]) => [
     `'${jsKey}'`,
     `${alias}.${quoteIdentifier(column.sqlName)}`,
   ]);
@@ -454,10 +449,7 @@ const buildRelationSubquery = (
     skip: options.skip,
   });
 
-  const allParams: unknown[] = [...nestedParams];
-
-  allParams.push(...where.params);
-  allParams.push(...pagination.params);
+  const allParams = [...nestedParams, ...where.params, ...pagination.params];
 
   if (relation._type === "hasMany") {
     const { fk: foreignKey, source: sourceColumn } =
@@ -990,26 +982,6 @@ export const buildFindUniqueQuery = <T extends Table, R extends TableRelations>(
   };
 };
 
-const getBooleanKeys = (table: Table) => {
-  const entries = Object.entries(table.columns);
-  const booleanColumns = entries.filter(([, col]) => col.type === "boolean");
-  const booleanKeys = booleanColumns.map(([key]) => key);
-
-  return new Set(booleanKeys);
-};
-
-const getJsonKeys = (table: Table) => {
-  const entries = Object.entries(table.columns);
-  const jsonColumns = entries.filter(([, col]) => {
-    if (col.type === "json") return true;
-    if (col.type === "jsonb") return true;
-
-    return false;
-  });
-
-  return new Set(jsonColumns.map(([key]) => key));
-};
-
 const coerceBooleanValue = (val: unknown) => {
   if (val === null) return val;
   if (val === undefined) return val;
@@ -1047,8 +1019,14 @@ const coerceRelationItems = (input: CoerceRelationItemsInput) => {
 const coerceRow = (input: CoerceRowInput) => {
   const { row, table, descriptors } = input;
 
-  const boolKeys = getBooleanKeys(table);
-  const jsonKeys = getJsonKeys(table);
+  const boolKeys = new Set<string>();
+  const jsonKeys = new Set<string>();
+
+  for (const [key, col] of Object.entries(table.columns)) {
+    if (col.type === "boolean") boolKeys.add(key);
+    if (col.type === "json") jsonKeys.add(key);
+    if (col.type === "jsonb") jsonKeys.add(key);
+  }
 
   for (const key of boolKeys) {
     if (key in row) row[key] = coerceBooleanValue(row[key]);
@@ -1120,11 +1098,11 @@ export const buildCreateManyQuery = <T extends Table>(
   const rowPlaceholders: string[] = [];
 
   for (const row of options.data) {
-    const provided = new Map<string, unknown>(Object.entries(row));
+    const rowRecord = row as Record<string, unknown>;
     const placeholders: string[] = [];
 
     for (const [jsKey, column] of columnEntries) {
-      const value = resolveCreateValue(column, provided.get(jsKey));
+      const value = resolveCreateValue(column, rowRecord[jsKey]);
       placeholders.push(nextPlaceholder());
       params.push(serializeColumnValue(column, value));
     }

@@ -112,30 +112,24 @@ export const createOrm = <
   });
 
   const tableRelationsMap = new Map<Table, TableRelations>();
+  const resultEntries: [string, TableClient<Table, TableRelations>][] = [];
 
   for (const [tableName, table] of Object.entries(options.tables)) {
-    tableRelationsMap.set(
-      table,
-      (options.relations?.[tableName] ?? {}) as TableRelations,
-    );
-  }
+    const tableRelations = (options.relations?.[tableName] ??
+      {}) as TableRelations;
 
-  const resultEntries = Object.entries(options.tables).map(
-    ([tableName, table]) => {
-      const tableRelations =
-        tableRelationsMap.get(table) ?? ({} as TableRelations);
-      return [
-        tableName,
-        createTableClient(
-          sql,
-          table,
-          options.adapter,
-          tableRelations,
-          tableRelationsMap,
-        ),
-      ];
-    },
-  );
+    tableRelationsMap.set(table, tableRelations);
+    resultEntries.push([
+      tableName,
+      createTableClient(
+        sql,
+        table,
+        options.adapter,
+        tableRelations,
+        tableRelationsMap,
+      ),
+    ]);
+  }
 
   const orm = Object.fromEntries(resultEntries) as OrmClient<T, R>;
 

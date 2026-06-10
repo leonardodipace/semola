@@ -17,13 +17,4 @@ export const createPostgresDialect = <
   R extends TableRelations,
 >(
   input: CreateNamedDialectInput<T, R>,
-) => {
-  const { table, relations, tableRelationsMap = new Map() } = input;
-
-  return createDialect({
-    spec: POSTGRES_SPEC,
-    table,
-    relations,
-    tableRelationsMap,
-  });
-};
+) => createDialect({ spec: POSTGRES_SPEC, ...input });

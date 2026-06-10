@@ -14,13 +14,4 @@ export const SQLITE_SPEC: DialectSpec = {
 
 export const createSqliteDialect = <T extends Table, R extends TableRelations>(
   input: CreateNamedDialectInput<T, R>,
-) => {
-  const { table, relations, tableRelationsMap = new Map() } = input;
-
-  return createDialect({
-    spec: SQLITE_SPEC,
-    table,
-    relations,
-    tableRelationsMap,
-  });
-};
+) => createDialect({ spec: SQLITE_SPEC, ...input });
