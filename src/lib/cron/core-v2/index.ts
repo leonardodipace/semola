@@ -13,6 +13,10 @@ import {
 
 const MINUTELY_EXPR = "* * * * *";
 const DEFAULT_MAX_ATTEMPTS = 5;
+const BASE_BACKOFF_DELAY = 1000;
+const MAX_BACKOFF_DELAY = 1000 * 60; // 1 minute
+const BACKOFF_MULTIPLIER = 2;
+
 const ALIASES: Record<ScheduleType, string> = {
   "@yearly": "0 0 1 1 *",
   "@annually": "0 0 1 1 *",
@@ -37,10 +41,12 @@ export class RetryCronJob implements RetryObserver {
 
   public async update(job: Cron, error: Error): Promise<void> {
     if (this.currentAttempt < this.maxAttempts) {
+      const delay = this.calculateDelay();
+
       if (this.options.onFailedAttempt) {
         const context: OnFailedAttemptContextType = {
           attemptNumber: this.currentAttempt,
-          delay: 0,
+          delay,
           error,
           retriesLeft: this.maxAttempts - (this.currentAttempt + 1),
         };
@@ -48,6 +54,7 @@ export class RetryCronJob implements RetryObserver {
         await this.options.onFailedAttempt(context);
       }
 
+      await this.runDelay(delay);
       this.currentAttempt += 1;
 
       return;
@@ -55,6 +62,7 @@ export class RetryCronJob implements RetryObserver {
 
     job.stop();
     if (!this.options.onError) throw error;
+
     const data: ErrorMetadataType = {
       name: job.getJobName(),
       error: error,
@@ -62,6 +70,20 @@ export class RetryCronJob implements RetryObserver {
     };
 
     await this.options.onError(data);
+  }
+
+  private async runDelay(delay: number) {
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+
+  private calculateDelay() {
+    // exponential backoff with "Full Jitter" algorithm
+
+    const deltaTime =
+      BASE_BACKOFF_DELAY * BACKOFF_MULTIPLIER ** (this.currentAttempt - 1);
+
+    const minDeltaTime = Math.min(deltaTime, MAX_BACKOFF_DELAY);
+    return Math.round(Math.random() * (minDeltaTime + 1));
   }
 }
 
