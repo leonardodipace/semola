@@ -1,4 +1,4 @@
-import { err, mightThrow, mightThrowSync } from "../../errors/index.js";
+import { mightThrow, mightThrowSync } from "../../errors/index.js";
 import {
   type CronOptions,
   type CronStatus,
@@ -53,6 +53,7 @@ export class RetryCronJob implements RetryObserver {
       return;
     }
 
+    job.stop();
     if (!this.options.onError) throw error;
     const data: ErrorMetadataType = {
       name: job.getJobName(),
