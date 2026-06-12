@@ -12,6 +12,10 @@ beforeAll(() => {
   setSystemTime(new Date("2020-01-10T00:00:00.000Z"));
 });
 
+beforeAll(() => {
+  setSystemTime();
+});
+
 const logTypes: LogLevelType[] = [
   "debug",
   "info",
