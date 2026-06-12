@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, setSystemTime, spyOn, test } from "bun:test";
 import { mightThrowSync } from "../../errors/index.js";
 import { Cron } from "./index.js";
 
@@ -240,6 +240,8 @@ describe("Cron", () => {
 
   describe("next() search horizon", () => {
     test("should find next run for yearly schedule", () => {
+      setSystemTime();
+
       const cron = new Cron({
         name: "yearly-horizon",
         schedule: "@yearly",
