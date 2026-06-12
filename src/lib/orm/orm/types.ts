@@ -163,8 +163,11 @@ export type TableOrderBy<T extends Table> = {
   [TColumnName in keyof T["columns"]]?: "asc" | "desc";
 };
 
-type RelationTable<R extends HasMany<Table> | HasOne<Table>> =
-  R extends HasMany<infer T> ? T : R extends HasOne<infer T> ? T : never;
+type RelationTable<R extends HasMany<Table> | HasOne<Table>> = R extends {
+  _table: infer T extends Table;
+}
+  ? T
+  : never;
 
 // Resolves a relation's target table's known relations, falling back to TableRelations
 // when none exist — prevents TypeScript from collapsing include options to never.
@@ -258,13 +261,10 @@ type UniqueColumnWhereShape<T extends Table> = {
   >;
 };
 
-type NonUniqueColumnKeys<T extends Table> = {
-  [TColumnName in keyof TableColumns<T>]: IsUniqueColumn<
-    TableColumnByName<T, TColumnName>
-  > extends true
-    ? never
-    : TColumnName;
-}[keyof TableColumns<T>];
+type NonUniqueColumnKeys<T extends Table> = Exclude<
+  keyof TableColumns<T>,
+  UniqueColumnKeys<T>
+>;
 
 export type FindUniqueWhere<T extends Table> = ExactlyOne<
   UniqueColumnWhereShape<T>
@@ -408,9 +408,11 @@ export type DeleteManyOptions<T extends Table> = {
   where?: TableWhere<T>;
 };
 
-type IncludedKeys<TInclude> = {
-  [K in keyof TInclude]: TInclude[K] extends false | undefined ? never : K;
-}[keyof TInclude];
+type IncludedKeys<TInclude> = keyof {
+  [K in keyof TInclude as TInclude[K] extends false | undefined
+    ? never
+    : K]: unknown;
+};
 
 type SelectResult<
   T extends Table,
