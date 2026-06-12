@@ -155,7 +155,7 @@ export class Cron extends JobWithRetry {
         if (!handlerError) return Promise.resolve();
 
         if (this.manager) {
-          this.manager.notify(this, handlerError);
+          await this.manager.notify(this, handlerError);
           return;
         }
 
