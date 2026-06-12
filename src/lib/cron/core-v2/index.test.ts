@@ -1,4 +1,5 @@
-import { describe, expect, setSystemTime, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { mightThrowSync } from "../../errors/index.js";
 import { Cron } from "./index.js";
 
 describe("Cron", () => {
@@ -42,7 +43,7 @@ describe("Cron", () => {
       expect(cron.getStatus()).toBe("idle");
     });
 
-    test("should throw error for invalid cron expression", () => {
+    test("should throw an error for invalid cron expression", () => {
       const handler = () => Promise.resolve();
 
       expect(() => {
@@ -54,7 +55,7 @@ describe("Cron", () => {
       }).toThrow(TypeError);
     });
 
-    test("should throw error for cron expression with wrong field count", () => {
+    test("should throw an error for cron expression with wrong field count", () => {
       const handler = () => Promise.resolve();
 
       expect(() => {
@@ -66,26 +67,32 @@ describe("Cron", () => {
       }).toThrow(TypeError);
     });
 
-    test("should call the onError() callback when passing an invalid expression", () => {
-      setSystemTime(new Date("2020-01-01T00:00:00.000Z"));
+    test("should throw an error when passing an invalid expression", () => {
       const handler = () => Promise.resolve();
-
       const cron = new Cron({
         name: "invalid-job",
         schedule: "0 0 * *",
         handler,
-        onError: (err) => {
-          expect(err).not.toBeFalsy();
-          expect(err.error).toBeInstanceOf(TypeError);
-          expect(err.name).toBe("invalid-job");
-          expect(err.failedAt).toBe(Date.now());
-        },
       });
 
-      cron.run();
-      cron.stop();
+      const [scheduleFormatError] = mightThrowSync(() => cron.run());
+      expect(cron).toBeDefined();
+      expect(cron.getStatus()).toBe("idle");
+      expect(scheduleFormatError).toBeDefined();
+    });
 
-      setSystemTime();
+    test("should throw an error when passing an invalid alias", () => {
+      const handler = () => Promise.resolve();
+      const cron = new Cron({
+        name: "invalid-alias",
+        schedule: "@invalid-alias",
+        handler,
+      });
+
+      const [invalidAliasError] = mightThrowSync(() => cron.run());
+      expect(cron).toBeDefined();
+      expect(cron.getStatus()).toBe("idle");
+      expect(invalidAliasError).toBeDefined();
     });
   });
 
@@ -348,26 +355,28 @@ describe("Cron", () => {
       expect(() => cron.next(-Infinity)).toThrow(TypeError);
     });
 
-    test("should call the onError() callback when the received starting date is invalid", () => {
-      setSystemTime(new Date("2020-01-01T00:00:00.000Z"));
-
+    test("should raise an error when the received starting date is invalid", () => {
       const cron = new Cron({
         name: "on-error-call",
         schedule: "0 0 18 2 *",
         handler: () => Promise.resolve(),
-        onError: (err) => {
-          expect(err).not.toBeFalsy();
-          expect(err.error).toBeInstanceOf(TypeError);
-          expect(err.name).toBe("on-error-call");
-          expect(err.failedAt).toBe(Date.now());
-        },
       });
 
-      cron.next(NaN);
-      cron.next(Infinity);
-      cron.next(-Infinity);
+      const [nanError, nanDate] = mightThrowSync(() => cron.next(NaN));
+      const [infinityError, infinityDate] = mightThrowSync(() =>
+        cron.next(Infinity),
+      );
+      const [negativeInfinityError, negativeInfinityDate] = mightThrowSync(() =>
+        cron.next(-Infinity),
+      );
 
-      setSystemTime();
+      expect(nanDate).toBeNull();
+      expect(infinityDate).toBeNull();
+      expect(negativeInfinityDate).toBeNull();
+
+      expect(nanError).toBeDefined();
+      expect(infinityError).toBeDefined();
+      expect(negativeInfinityError).toBeDefined();
     });
   });
 
