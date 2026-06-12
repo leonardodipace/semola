@@ -40,7 +40,11 @@ export class RetryCronJob implements RetryObserver {
   }
 
   public async update(job: Cron, error: Error): Promise<void> {
-    if (this.currentAttempt < this.maxAttempts) {
+    const onRetryErrorResult = this.runOnRetryError(error);
+    const hasMoreAttempts = this.currentAttempt < this.maxAttempts;
+    const canRetry = hasMoreAttempts && onRetryErrorResult;
+
+    if (canRetry) {
       const delay = this.calculateDelay();
 
       if (this.options.onFailedAttempt) {
@@ -70,6 +74,12 @@ export class RetryCronJob implements RetryObserver {
     };
 
     await this.options.onError(data);
+  }
+
+  private runOnRetryError(error: Error) {
+    if (!this.options.retryOnError) return true;
+
+    return this.options.retryOnError(error);
   }
 
   private async runDelay(delay: number) {

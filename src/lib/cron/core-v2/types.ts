@@ -22,6 +22,7 @@ export type RetryOptions = {
   maxAttempts: number;
   onError?: (error: ErrorMetadataType) => void | Promise<void>;
   onFailedAttempt?: (ctx: OnFailedAttemptContextType) => void | Promise<void>;
+  retryOnError?: (error: Error) => boolean;
 };
 
 export type CronOptions = {
