@@ -156,6 +156,14 @@ Boolean operators: `equals`
 
 JSON operators: `equals`
 
+Logical operators:
+
+- `$and`: all nested filters must match. Accepts a single `where` object or an array of `where` objects.
+- `$or`: at least one nested filter must match. Accepts an array of `where` objects.
+- `$not`: nested filters must not match. Accepts a single `where` object or an array of `where` objects.
+
+Logical operators can be nested recursively and can be combined with column filters at any level.
+
 ```typescript
 const users = await db.users.findMany({
   where: {
@@ -165,6 +173,26 @@ const users = await db.users.findMany({
   orderBy: { name: "desc" },
   take: 50,
   skip: 0,
+});
+```
+
+```typescript
+const users = await db.users.findMany({
+  where: {
+    active: true,
+    $or: [
+      { name: { contains: "Ada" } },
+      {
+        $and: [
+          { age: { gte: 18 } },
+          { createdAt: { gt: new Date("2025-01-01") } },
+        ],
+      },
+    ],
+    $not: {
+      email: { endsWith: "@example.test" },
+    },
+  },
 });
 ```
 
@@ -187,7 +215,9 @@ const users = await db.users.findMany({
 ```typescript
 const tasks = defineTable("tasks", {
   id: uuid("id").primaryKey().notNull(),
-  assigneeId: uuid("assignee_id").notNull(),
+  assigneeId: uuid("assignee_id")
+    .references(() => users.columns.id)
+    .notNull(),
   title: string("title").notNull(),
 });
 
@@ -211,6 +241,37 @@ const withTasks = await db.users.findMany({
 ```
 
 `include` produces SQL joins. Pass `true` to include a relation, omit or pass `false` to exclude it.
+
+You can also pass relation query options. Nested `include` is recursive, and every nested relation can define its own `where`, `orderBy`, `take`, `skip`, `select`, and `include`.
+
+```typescript
+const usersWithOpenTasks = await db.users.findMany({
+  where: {
+    active: true,
+  },
+  include: {
+    tasks: {
+      where: {
+        $or: [
+          { title: { contains: "release" } },
+          { title: { startsWith: "fix" } },
+        ],
+      },
+      orderBy: { title: "asc" },
+      take: 10,
+      select: { id: true, title: true },
+      include: {
+        assignee: {
+          where: {
+            $not: { active: false },
+          },
+          select: { id: true, name: true },
+        },
+      },
+    },
+  },
+});
+```
 
 ---
 
