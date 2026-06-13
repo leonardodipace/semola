@@ -29,18 +29,17 @@ const ALIASES: Record<ScheduleType, string> = {
 
 export class RetryCronJob implements RetryObserver {
   private options: RetryOptions;
-  private maxAttempts: number;
   private currentAttempt: number;
 
   public constructor(options: RetryOptions) {
     this.options = options;
-    this.maxAttempts = options.maxAttempts;
     this.currentAttempt = 1;
   }
 
   public async update(job: Cron, error: Error): Promise<void> {
+    const { maxAttempts } = this.options;
     const onRetryErrorResult = this.runOnRetryError(error);
-    const hasMoreAttempts = this.currentAttempt < this.maxAttempts;
+    const hasMoreAttempts = this.currentAttempt < maxAttempts;
     const canRetry = hasMoreAttempts && onRetryErrorResult;
 
     if (canRetry) {
@@ -51,7 +50,7 @@ export class RetryCronJob implements RetryObserver {
           attemptNumber: this.currentAttempt,
           delay,
           error,
-          retriesLeft: this.maxAttempts - (this.currentAttempt + 1),
+          retriesLeft: maxAttempts - (this.currentAttempt + 1),
         };
 
         await this.options.onFailedAttempt(context);
