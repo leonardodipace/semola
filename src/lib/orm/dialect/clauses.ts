@@ -223,7 +223,12 @@ export const buildWhereClause = <T extends Table>(
   for (const [jsKey, value] of Object.entries(where)) {
     if (value === undefined) continue;
 
-    if (jsKey === "$or" || jsKey === "$and" || jsKey === "$not") {
+    const isAnd = jsKey === "$and";
+    const isNot = jsKey === "$not";
+    const isOr = jsKey === "$or";
+    const isLogicalOperator = isAnd || isNot || isOr;
+
+    if (isLogicalOperator) {
       appendLogicalWhereClause({ ...input, clauses, params, jsKey, value });
       continue;
     }
