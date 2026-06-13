@@ -1,6 +1,8 @@
 import { describe, expect, setSystemTime, spyOn, test } from "bun:test";
-import { mightThrowSync } from "../../errors/index.js";
-import { Cron } from "./index.js";
+import { mightThrow, mightThrowSync } from "../../errors/index.js";
+import { Cron, RetryCronJob } from "./index.js";
+
+class UserDefinedError extends Error {}
 
 describe("Cron", () => {
   describe("constructor", () => {
@@ -423,6 +425,172 @@ describe("Cron", () => {
 
       expect(stopSpy).toHaveBeenCalledTimes(1);
       expect(job.getStatus()).toBe("idle");
+    });
+  });
+
+  describe("Retry", () => {
+    test("should successfully call onError() callback", async () => {
+      setSystemTime(new Date("2020-01-10T00:00:00.000Z"));
+      const handler = () => Promise.resolve();
+
+      const retry = new RetryCronJob({
+        maxAttempts: 1,
+        onError: (err) => {
+          expect(err.error).toBeInstanceOf(Error);
+          expect(err.error.message).toBe("A generic error");
+          expect(err.failedAt).toBe(Date.now());
+          expect(err.name).toBe("retry-job");
+        },
+      });
+
+      const cron = new Cron({
+        name: "retry-job",
+        schedule: "0 0 * * *",
+        handler,
+        retry,
+      });
+
+      expect(cron).toBeDefined();
+      expect(cron.getStatus()).toBe("idle");
+
+      cron.run();
+      expect(cron.getStatus()).toBe("running");
+
+      await retry.update(cron, new Error("A generic error"));
+      expect(cron.getStatus()).toBe("idle");
+
+      setSystemTime();
+    });
+
+    test("should successfully throw an erro when onError() callback is not defined", async () => {
+      const handler = () => Promise.resolve();
+      const retry = new RetryCronJob({
+        maxAttempts: 1,
+      });
+
+      const cron = new Cron({
+        name: "retry-job",
+        schedule: "0 0 * * *",
+        handler,
+        retry,
+      });
+
+      expect(cron).toBeDefined();
+      expect(cron.getStatus()).toBe("idle");
+
+      cron.run();
+      expect(cron.getStatus()).toBe("running");
+
+      const [theError] = await mightThrow(
+        retry.update(cron, new Error("A generic error")),
+      );
+
+      expect(cron.getStatus()).toBe("idle");
+      expect(theError).toBeDefined();
+      expect(theError?.message).toBe("A generic error");
+    });
+
+    test("should successfully call onFailedAttempt() callback", async () => {
+      const handler = () => Promise.resolve();
+
+      const retry = new RetryCronJob({
+        maxAttempts: 3,
+        onFailedAttempt: ({ attemptNumber, delay, error, retriesLeft }) => {
+          expect(attemptNumber).toBe(1);
+          expect(delay).toBeGreaterThan(0);
+          expect(error).toBeInstanceOf(Error);
+          expect(error.message).toBe("A generic error");
+          expect(retriesLeft).toBe(1);
+        },
+      });
+
+      const cron = new Cron({
+        name: "retry-job",
+        schedule: "0 0 * * *",
+        handler,
+        retry,
+      });
+
+      expect(cron).toBeDefined();
+      expect(cron.getStatus()).toBe("idle");
+
+      cron.run();
+      expect(cron.getStatus()).toBe("running");
+
+      await retry.update(cron, new Error("A generic error"));
+      expect(cron.getStatus()).toBe("running");
+
+      cron.stop();
+    });
+
+    test("should not retry when retryOnError() callback return false", async () => {
+      const handler = () => Promise.resolve();
+
+      const retry = new RetryCronJob({
+        maxAttempts: 5,
+        retryOnError: (err) => !(err instanceof UserDefinedError),
+      });
+
+      const cron = new Cron({
+        name: "retry-job",
+        schedule: "0 0 * * *",
+        handler,
+        retry,
+      });
+
+      expect(cron).toBeDefined();
+      expect(cron.getStatus()).toBe("idle");
+
+      cron.run();
+      expect(cron.getStatus()).toBe("running");
+
+      await retry.update(cron, new Error("Generic error"));
+      expect(cron.getStatus()).toBe("running");
+
+      const [userDefinedError] = await mightThrow(
+        retry.update(cron, new UserDefinedError("User defined error")),
+      );
+
+      expect(cron.getStatus()).toBe("idle");
+      expect(userDefinedError).toBeDefined();
+      expect(userDefinedError?.message).toBe("User defined error");
+    });
+
+    test("should not retry when retryOnError() callback return false and also call onError() callback", async () => {
+      setSystemTime(new Date("2020-01-10T00:00:00.000Z"));
+      const handler = () => Promise.resolve();
+
+      const retry = new RetryCronJob({
+        maxAttempts: 2,
+        retryOnError: (err) => !(err instanceof UserDefinedError),
+        onError: (err) => {
+          expect(err.error).toBeInstanceOf(Error);
+          expect(err.error.message).toBe("User defined error");
+          expect(err.failedAt).toBe(Date.now());
+          expect(err.name).toBe("retry-job");
+        },
+      });
+
+      const cron = new Cron({
+        name: "retry-job",
+        schedule: "0 0 * * *",
+        handler,
+        retry,
+      });
+
+      expect(cron).toBeDefined();
+      expect(cron.getStatus()).toBe("idle");
+
+      cron.run();
+      expect(cron.getStatus()).toBe("running");
+
+      await retry.update(cron, new Error("Generic error"));
+      expect(cron.getStatus()).toBe("running");
+
+      await retry.update(cron, new UserDefinedError("User defined error"));
+      expect(cron.getStatus()).toBe("idle");
+
+      setSystemTime();
     });
   });
 });
