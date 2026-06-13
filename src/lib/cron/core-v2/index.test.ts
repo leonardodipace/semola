@@ -521,6 +521,7 @@ describe("Cron", () => {
       expect(cron.getStatus()).toBe("running");
 
       cron.stop();
+      expect(cron.getStatus()).toBe("idle");
     });
 
     test("should not retry when retryOnError() callback return false", async () => {
@@ -561,7 +562,7 @@ describe("Cron", () => {
       const handler = () => Promise.resolve();
 
       const retry = new RetryCronJob({
-        maxAttempts: 2,
+        maxAttempts: 5,
         retryOnError: (err) => !(err instanceof UserDefinedError),
         onError: (err) => {
           expect(err.error).toBeInstanceOf(Error);
