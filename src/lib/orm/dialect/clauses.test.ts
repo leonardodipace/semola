@@ -68,6 +68,33 @@ describe("clauses", () => {
     ]);
   });
 
+  test("builds logical where clauses with nested params in order", () => {
+    const createdBefore = new Date("2025-02-01T00:00:00.000Z");
+    const createdAfter = new Date("2025-01-01T00:00:00.000Z");
+    const where = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      where: {
+        firstName: { startsWith: "A" },
+        $or: [{ firstName: { contains: "da" } }, { isActive: false }],
+        $not: { createdAt: { lt: createdBefore } },
+        $and: [{ id: "u-1" }, { createdAt: { gte: createdAfter } }],
+      },
+    });
+
+    expect(where.sql).toBe(
+      '"first_name" LIKE ? ESCAPE \'\\\' AND (("first_name" LIKE ? ESCAPE \'\\\') OR ("is_active" = ?)) AND NOT (("created_at" < ?)) AND (("id" = ?) AND ("created_at" >= ?))',
+    );
+    expect(where.params).toEqual([
+      "A%",
+      "%da%",
+      false,
+      createdBefore.toISOString(),
+      "u-1",
+      createdAfter.toISOString(),
+    ]);
+  });
+
   test("handles direct equality, null, JSON columns, and enum values", () => {
     const eventsTable = defineTable("events", {
       id: uuid("id").primaryKey().notNull(),

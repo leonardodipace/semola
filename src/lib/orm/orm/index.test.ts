@@ -208,6 +208,8 @@ describe("relation helpers", () => {
         name: {
           startsWith: "J",
         },
+        $or: [{ email: { endsWith: "@example.com" } }, { name: "Jane" }],
+        $not: { name: "Blocked" },
       },
       orderBy: {
         name: "asc",
@@ -699,9 +701,14 @@ describe("nested include options", () => {
     const orm = createOrmWithPosts();
 
     const _valid: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        $and: [{ name: { contains: "Jo" } }],
+      },
       include: {
         posts: {
-          where: { title: "Hello" },
+          where: {
+            $or: [{ title: "Hello" }, { content: { contains: "World" } }],
+          },
           orderBy: { title: "asc" },
           take: 5,
           skip: 0,
@@ -714,8 +721,12 @@ describe("nested include options", () => {
       include: {
         posts: {
           where: {
-            // @ts-expect-error "badCol" is not a column on posts
-            badCol: "x",
+            $or: [
+              {
+                // @ts-expect-error "badCol" is not a column on posts
+                badCol: "x",
+              },
+            ],
           },
         },
       },
