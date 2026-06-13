@@ -170,7 +170,7 @@ type RelationTable<R extends HasMany<Table> | HasOne<Table>> = R extends {
   : never;
 
 // Resolves a relation's target table's known relations, falling back to TableRelations
-// when none exist — prevents TypeScript from collapsing include options to never.
+// when none exist - prevents TypeScript from collapsing include options to never.
 type RelationTableRelations<
   R extends HasMany<Table> | HasOne<Table>,
   TAllTables extends Record<string, Table>,
