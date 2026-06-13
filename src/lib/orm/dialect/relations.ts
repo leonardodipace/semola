@@ -109,6 +109,14 @@ const buildJsonObjectExpression = (input: BuildJsonObjectExpressionInput) => {
   let visibleEntries = allEntries;
 
   if (hasSelect) {
+    for (const key of Object.keys(select)) {
+      if (!(key in table.columns)) {
+        throw new Error(
+          `Unknown select key "${key}" on table ${table.sqlName}`,
+        );
+      }
+    }
+
     visibleEntries = allEntries.filter(([key]) => key in select);
   }
 
@@ -159,7 +167,11 @@ const buildNestedIncludePairs = (
 
     const nestedRelation = nestedRelations[nestedName];
 
-    if (!nestedRelation) continue;
+    if (!nestedRelation) {
+      throw new Error(
+        `Unknown relation ${nestedName} on table ${relationTable.sqlName}`,
+      );
+    }
 
     const result = buildRelationSubquery({
       spec,

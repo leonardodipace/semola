@@ -111,6 +111,41 @@ describe("relations", () => {
     ).toThrow("Unknown relation posts on table users");
   });
 
+  test("throws for unknown nested relation names", () => {
+    expect(() =>
+      buildIncludeClause({
+        spec: SQLITE_SPEC,
+        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        table: usersTable,
+        parentAlias: '"users"',
+        relations: { posts: many(() => postsTable) },
+        tableRelationsMap: new Map([[postsTable, {}]]),
+        include: { posts: { include: { author: true } } },
+      }),
+    ).toThrow("Unknown relation author on table posts");
+  });
+
+  test("throws for unknown nested select keys", () => {
+    expect(() =>
+      buildIncludeClause({
+        spec: SQLITE_SPEC,
+        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        table: usersTable,
+        parentAlias: '"users"',
+        relations: { posts: many(() => postsTable) },
+        tableRelationsMap: new Map(),
+        include: {
+          posts: {
+            select: {
+              // @ts-expect-error runtime guard for invalid nested select key
+              missing: true,
+            },
+          },
+        },
+      }),
+    ).toThrow('Unknown select key "missing" on table posts');
+  });
+
   test("throws for missing or ambiguous hasMany foreign keys", () => {
     const commentsTable = defineTable("comments", {
       id: uuid("id").primaryKey().notNull(),
