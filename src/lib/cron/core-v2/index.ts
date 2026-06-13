@@ -12,7 +12,6 @@ import {
 } from "./types.js";
 
 const MINUTELY_EXPR = "* * * * *";
-const DEFAULT_MAX_ATTEMPTS = 5;
 const BASE_BACKOFF_DELAY = 1000;
 const MAX_BACKOFF_DELAY = 1000 * 60; // 1 minute
 const BACKOFF_MULTIPLIER = 2;
@@ -35,7 +34,7 @@ export class RetryCronJob implements RetryObserver {
 
   public constructor(options: RetryOptions) {
     this.options = options;
-    this.maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+    this.maxAttempts = options.maxAttempts;
     this.currentAttempt = 1;
   }
 
