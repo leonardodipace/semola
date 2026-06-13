@@ -817,8 +817,10 @@ describe("nested include options", () => {
       },
     });
 
-    // depth-3: author.posts should be Array<{ title: string }>, not never or missing
-    const authorPosts = rows[0]?.posts[0]?.author?.posts;
+    const firstUser = rows[0];
+    const firstPost = firstUser?.posts[0];
+    const author = firstPost?.author;
+    const authorPosts = author?.posts;
 
     expect(authorPosts).toBeDefined();
     expect(authorPosts?.[0]?.title).toBe("Hello");
@@ -963,6 +965,123 @@ describe("nested include options", () => {
     expect(_valid).toBeDefined();
     expect(_invalidNestedWhere).toBeDefined();
     void orm.$raw.close();
+  });
+
+  test("deep bidirectional include matches runtime and inferred type", async () => {
+    const exampleUsersTable = defineTable("users", {
+      id: uuid("id").primaryKey().notNull().default(Bun.randomUUIDv7),
+      firstName: string("first_name").notNull(),
+      lastName: string("last_name").notNull(),
+    });
+
+    const examplePostsTable = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull().default(Bun.randomUUIDv7),
+      title: string("title").notNull(),
+      content: string("content").notNull(),
+      authorId: uuid("author_id")
+        .notNull()
+        .references(() => exampleUsersTable.columns.id),
+    });
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: {
+        users: exampleUsersTable,
+        posts: examplePostsTable,
+      },
+      relations: {
+        users: {
+          posts: many(() => examplePostsTable),
+        },
+        posts: {
+          author: one("authorId", () => exampleUsersTable),
+        },
+      },
+    });
+
+    await orm.$raw`
+      CREATE TABLE users (
+        id TEXT PRIMARY KEY NOT NULL,
+        first_name TEXT NOT NULL,
+        last_name TEXT NOT NULL
+      );
+
+      CREATE TABLE posts (
+        id TEXT PRIMARY KEY NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        author_id TEXT NOT NULL REFERENCES users(id)
+      );
+    `;
+
+    const leo = await orm.users.create({
+      data: {
+        firstName: "Leonardo",
+        lastName: "Dipace",
+      },
+    });
+
+    await orm.posts.create({
+      data: {
+        title: "Hello World",
+        content: "Hello World",
+        authorId: leo.id,
+      },
+    });
+
+    const result = await orm.users.findMany({
+      include: {
+        posts: {
+          include: {
+            author: {
+              include: {
+                posts: {
+                  include: {
+                    author: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const firstUser = result[0];
+    const firstPost = firstUser?.posts[0];
+    const author = firstPost?.author;
+    const nestedPost = author?.posts[0];
+    const nestedAuthor = nestedPost?.author;
+    const nestedName: string | undefined = nestedAuthor?.firstName;
+
+    expect(nestedName).toBe("Leonardo");
+    expect(author?.posts).toHaveLength(1);
+    expect(author?.lastName).toBe("Dipace");
+
+    const selected = await orm.users.findMany({
+      include: {
+        posts: {
+          select: {
+            title: true,
+          },
+          include: {
+            author: true,
+          },
+        },
+      },
+    });
+
+    const selectedUser = selected[0];
+    const selectedPost = selectedUser?.posts[0];
+    const selectedTitle: string | undefined = selectedPost?.title;
+    // @ts-expect-error content is not selected on posts
+    const selectedContent = selectedPost?.content;
+
+    expect(selectedTitle).toBe("Hello World");
+    expect(selectedContent).toBeUndefined();
+
+    await orm.$raw.close();
   });
 });
 
