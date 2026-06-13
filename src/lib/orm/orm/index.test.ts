@@ -677,7 +677,7 @@ describe("nested include options", () => {
     await orm.$raw.close();
   });
 
-  test("nested include select rejects invalid column names", () => {
+  test("nested include select rejects invalid column names", async () => {
     const orm = createOrmWithPosts();
 
     const _invalid: Parameters<typeof orm.users.findMany>[0] = {
@@ -692,10 +692,10 @@ describe("nested include options", () => {
     };
 
     expect(_invalid).toBeDefined();
-    void orm.$raw.close();
+    await orm.$raw.close();
   });
 
-  test("nested include options accept valid types and reject invalid ones", () => {
+  test("nested include options accept valid types and reject invalid ones", async () => {
     const orm = createOrmWithPosts();
 
     const _valid: Parameters<typeof orm.users.findMany>[0] = {
@@ -735,7 +735,7 @@ describe("nested include options", () => {
     expect(_valid).toBeDefined();
     expect(_invalidWhere).toBeDefined();
     expect(_invalidOrderDir).toBeDefined();
-    void orm.$raw.close();
+    await orm.$raw.close();
   });
 
   test("nested include propagates relation types (posts include author)", async () => {
@@ -806,7 +806,7 @@ describe("nested include options", () => {
     await orm.$raw.close();
   });
 
-  test("select on depth-3 nested include narrows type correctly", () => {
+  test("select on depth-3 nested include narrows type correctly", async () => {
     const postsWithAuthorTable = definePostWithAuthorAndContentTable(
       "posts_select_depth3",
     );
@@ -849,10 +849,10 @@ describe("nested include options", () => {
 
     expect(_typed).toBeDefined();
     expect(_badId).toBeDefined();
-    void orm.$raw.close();
+    await orm.$raw.close();
   });
 
-  test("nested include with select does not produce never in sibling relation type", () => {
+  test("nested include with select does not produce never in sibling relation type", async () => {
     const postsWithAuthorTable = definePostWithAuthorTable("posts_never_check");
     const orm = createOrmWithAuthorRelation(postsWithAuthorTable);
 
@@ -871,10 +871,10 @@ describe("nested include options", () => {
     };
 
     expect(_check).toBeDefined();
-    void orm.$raw.close();
+    await orm.$raw.close();
   });
 
-  test("nested include type rejects invalid columns at each level", () => {
+  test("nested include type rejects invalid columns at each level", async () => {
     const postsWithAuthorTable = definePostWithAuthorTable(
       "posts_nested_type_check",
     );
@@ -899,7 +899,7 @@ describe("nested include options", () => {
 
     expect(_valid).toBeDefined();
     expect(_invalidNestedWhere).toBeDefined();
-    void orm.$raw.close();
+    await orm.$raw.close();
   });
 
   test("deep bidirectional include matches runtime and inferred type", async () => {
