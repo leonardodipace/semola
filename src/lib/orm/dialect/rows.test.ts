@@ -1,22 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { boolean, json, jsonb, string, uuid } from "../column/index.js";
+import { boolean, json, jsonb, uuid } from "../column/index.js";
 import { defineTable } from "../table/index.js";
 import { parseIncludeRows } from "./rows.js";
+import { postsTable, usersTable } from "./test-fixtures.js";
 import type { IncludeDescriptor } from "./types.js";
-
-const usersTable = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
-  firstName: string("first_name").notNull(),
-  isActive: boolean("is_active").notNull(),
-});
-
-const postsTable = defineTable("posts", {
-  id: uuid("id").primaryKey().notNull(),
-  title: string("title").notNull(),
-  authorId: uuid("author_id")
-    .notNull()
-    .references(() => usersTable.columns.id),
-});
 
 const eventsTable = defineTable("events", {
   id: uuid("id").primaryKey().notNull(),

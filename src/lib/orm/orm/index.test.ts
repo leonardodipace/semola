@@ -14,6 +14,38 @@ const postsTable = defineTable("posts", {
   title: string("title").notNull(),
 });
 
+const createUsersOrm = () =>
+  createOrm({
+    adapter: "sqlite",
+    url: ":memory:",
+    tables: { users: usersTable },
+  });
+
+const createUsersSchema = async (sql: Bun.SQL) => {
+  await sql.unsafe(
+    "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
+  );
+};
+
+const seedSingleUser = async (sql: Bun.SQL) => {
+  await sql.unsafe("INSERT INTO users VALUES (?, ?, ?)", [
+    "u1",
+    "Alice",
+    "alice@example.com",
+  ]);
+};
+
+const seedTwoUsers = async (sql: Bun.SQL) => {
+  await sql.unsafe("INSERT INTO users VALUES (?, ?, ?), (?, ?, ?)", [
+    "u1",
+    "Alice",
+    "alice@example.com",
+    "u2",
+    "Bob",
+    "bob@example.com",
+  ]);
+};
+
 describe("relation helpers", () => {
   test("many() returns a hasMany descriptor", () => {
     const relation = many(() => postsTable);
@@ -460,15 +492,9 @@ describe("relation helpers", () => {
   });
 
   test("createMany inserts multiple rows and returns the inserted records", async () => {
-    const orm = createOrm({
-      adapter: "sqlite",
-      url: ":memory:",
-      tables: { users: usersTable },
-    });
+    const orm = createUsersOrm();
 
-    await orm.$raw.unsafe(
-      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
-    );
+    await createUsersSchema(orm.$raw);
 
     const result = await orm.users.createMany({
       data: [
@@ -487,21 +513,10 @@ describe("relation helpers", () => {
   });
 
   test("update modifies a row and returns it", async () => {
-    const orm = createOrm({
-      adapter: "sqlite",
-      url: ":memory:",
-      tables: { users: usersTable },
-    });
+    const orm = createUsersOrm();
 
-    await orm.$raw.unsafe(
-      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
-    );
-
-    await orm.$raw.unsafe("INSERT INTO users VALUES (?, ?, ?)", [
-      "u1",
-      "Alice",
-      "alice@example.com",
-    ]);
+    await createUsersSchema(orm.$raw);
+    await seedSingleUser(orm.$raw);
 
     const updated = await orm.users.update({
       where: { id: "u1" },
@@ -515,24 +530,10 @@ describe("relation helpers", () => {
   });
 
   test("updateMany updates matching rows and returns the updated records", async () => {
-    const orm = createOrm({
-      adapter: "sqlite",
-      url: ":memory:",
-      tables: { users: usersTable },
-    });
+    const orm = createUsersOrm();
 
-    await orm.$raw.unsafe(
-      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
-    );
-
-    await orm.$raw.unsafe("INSERT INTO users VALUES (?, ?, ?), (?, ?, ?)", [
-      "u1",
-      "Alice",
-      "alice@example.com",
-      "u2",
-      "Bob",
-      "bob@example.com",
-    ]);
+    await createUsersSchema(orm.$raw);
+    await seedTwoUsers(orm.$raw);
 
     const result = await orm.users.updateMany({
       data: { name: "Updated" },
@@ -545,21 +546,10 @@ describe("relation helpers", () => {
   });
 
   test("delete removes a row and returns it", async () => {
-    const orm = createOrm({
-      adapter: "sqlite",
-      url: ":memory:",
-      tables: { users: usersTable },
-    });
+    const orm = createUsersOrm();
 
-    await orm.$raw.unsafe(
-      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
-    );
-
-    await orm.$raw.unsafe("INSERT INTO users VALUES (?, ?, ?)", [
-      "u1",
-      "Alice",
-      "alice@example.com",
-    ]);
+    await createUsersSchema(orm.$raw);
+    await seedSingleUser(orm.$raw);
 
     const deleted = await orm.users.delete({
       where: { id: "u1" },
@@ -575,24 +565,10 @@ describe("relation helpers", () => {
   });
 
   test("deleteMany removes matching rows and returns the deleted records", async () => {
-    const orm = createOrm({
-      adapter: "sqlite",
-      url: ":memory:",
-      tables: { users: usersTable },
-    });
+    const orm = createUsersOrm();
 
-    await orm.$raw.unsafe(
-      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
-    );
-
-    await orm.$raw.unsafe("INSERT INTO users VALUES (?, ?, ?), (?, ?, ?)", [
-      "u1",
-      "Alice",
-      "alice@example.com",
-      "u2",
-      "Bob",
-      "bob@example.com",
-    ]);
+    await createUsersSchema(orm.$raw);
+    await seedTwoUsers(orm.$raw);
 
     const result = await orm.users.deleteMany({
       where: { name: "Alice" },
@@ -629,22 +605,65 @@ describe("nested include options", () => {
       },
     });
 
+  const definePostWithAuthorTable = (sqlName: string) =>
+    defineTable(sqlName, {
+      id: uuid("id").primaryKey().notNull(),
+      title: string("title").notNull(),
+      userId: uuid("user_id")
+        .notNull()
+        .references(() => usersTable.columns.id),
+    });
+
+  const definePostWithAuthorAndContentTable = (sqlName: string) =>
+    defineTable(sqlName, {
+      id: uuid("id").primaryKey().notNull(),
+      title: string("title").notNull(),
+      content: string("content").notNull(),
+      userId: uuid("user_id")
+        .notNull()
+        .references(() => usersTable.columns.id),
+    });
+
+  const createOrmWithAuthorRelation = <
+    TPostsTable extends ReturnType<typeof definePostWithAuthorTable>,
+  >(
+    postsTable: TPostsTable,
+  ) =>
+    createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable, posts: postsTable },
+      relations: {
+        users: { posts: many(() => postsTable) },
+        posts: { author: one("userId", () => usersTable) },
+      },
+    });
+
+  const createNestedIncludeSchemaAndRows = async (
+    sql: Bun.SQL,
+    postsSqlName: string,
+  ) => {
+    await sql.unsafe(
+      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE)",
+    );
+    await sql.unsafe(
+      `CREATE TABLE ${postsSqlName} (id TEXT PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL, user_id TEXT NOT NULL)`,
+    );
+    await sql.unsafe("INSERT INTO users VALUES (?, ?, ?)", [
+      "u1",
+      "John",
+      "john@example.com",
+    ]);
+    await sql.unsafe(
+      `INSERT INTO ${postsSqlName} (id, title, content, user_id) VALUES (?, ?, ?, ?)`,
+      ["p1", "Hello", "World", "u1"],
+    );
+  };
+
   test("select in nested include returns only requested columns at runtime", async () => {
     const orm = createOrmWithPosts();
 
-    await orm.$raw.unsafe(
-      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE)",
-    );
-    await orm.$raw.unsafe(
-      "CREATE TABLE posts (id TEXT PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL, user_id TEXT NOT NULL)",
-    );
-
-    await orm.users.create({
-      data: { id: "u1", name: "John", email: "john@example.com" },
-    });
-    await orm.posts.create({
-      data: { id: "p1", title: "Hello", content: "World", userId: "u1" },
-    });
+    await createNestedIncludeSchemaAndRows(orm.$raw, "posts");
 
     const rows = await orm.users.findMany({
       include: { posts: { select: { title: true } } },
@@ -720,23 +739,8 @@ describe("nested include options", () => {
   });
 
   test("nested include propagates relation types (posts include author)", async () => {
-    const postsWithAuthorTable = defineTable("posts_with_author", {
-      id: uuid("id").primaryKey().notNull(),
-      title: string("title").notNull(),
-      userId: uuid("user_id")
-        .notNull()
-        .references(() => usersTable.columns.id),
-    });
-
-    const orm = createOrm({
-      adapter: "sqlite",
-      url: ":memory:",
-      tables: { users: usersTable, posts: postsWithAuthorTable },
-      relations: {
-        users: { posts: many(() => postsWithAuthorTable) },
-        posts: { author: one("userId", () => usersTable) },
-      },
-    });
+    const postsWithAuthorTable = definePostWithAuthorTable("posts_with_author");
+    const orm = createOrmWithAuthorRelation(postsWithAuthorTable);
 
     await orm.$raw.unsafe(
       "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE)",
@@ -770,38 +774,11 @@ describe("nested include options", () => {
   });
 
   test("depth-3 nested include with select shows correct type (not never or missing)", async () => {
-    const postsWithAuthorTable = defineTable("posts_depth3", {
-      id: uuid("id").primaryKey().notNull(),
-      title: string("title").notNull(),
-      content: string("content").notNull(),
-      userId: uuid("user_id")
-        .notNull()
-        .references(() => usersTable.columns.id),
-    });
+    const postsWithAuthorTable =
+      definePostWithAuthorAndContentTable("posts_depth3");
+    const orm = createOrmWithAuthorRelation(postsWithAuthorTable);
 
-    const orm = createOrm({
-      adapter: "sqlite",
-      url: ":memory:",
-      tables: { users: usersTable, posts: postsWithAuthorTable },
-      relations: {
-        users: { posts: many(() => postsWithAuthorTable) },
-        posts: { author: one("userId", () => usersTable) },
-      },
-    });
-
-    await orm.$raw.unsafe(
-      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE)",
-    );
-    await orm.$raw.unsafe(
-      "CREATE TABLE posts_depth3 (id TEXT PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL, user_id TEXT NOT NULL)",
-    );
-
-    await orm.users.create({
-      data: { id: "u1", name: "John", email: "john@example.com" },
-    });
-    await orm.posts.create({
-      data: { id: "p1", title: "Hello", content: "World", userId: "u1" },
-    });
+    await createNestedIncludeSchemaAndRows(orm.$raw, "posts_depth3");
 
     const rows = await orm.users.findMany({
       include: {
@@ -830,24 +807,10 @@ describe("nested include options", () => {
   });
 
   test("select on depth-3 nested include narrows type correctly", () => {
-    const postsWithAuthorTable = defineTable("posts_select_depth3", {
-      id: uuid("id").primaryKey().notNull(),
-      title: string("title").notNull(),
-      content: string("content").notNull(),
-      userId: uuid("user_id")
-        .notNull()
-        .references(() => usersTable.columns.id),
-    });
-
-    const orm = createOrm({
-      adapter: "sqlite",
-      url: ":memory:",
-      tables: { users: usersTable, posts: postsWithAuthorTable },
-      relations: {
-        users: { posts: many(() => postsWithAuthorTable) },
-        posts: { author: one("userId", () => usersTable) },
-      },
-    });
+    const postsWithAuthorTable = definePostWithAuthorAndContentTable(
+      "posts_select_depth3",
+    );
+    const orm = createOrmWithAuthorRelation(postsWithAuthorTable);
 
     // "author.posts" with select — type must only contain selected columns.
     // Before the fix, the intersection `TIncludeValue & { select?: TableSelect<T> }`
@@ -890,23 +853,8 @@ describe("nested include options", () => {
   });
 
   test("nested include with select does not produce never in sibling relation type", () => {
-    const postsWithAuthorTable = defineTable("posts_never_check", {
-      id: uuid("id").primaryKey().notNull(),
-      title: string("title").notNull(),
-      userId: uuid("user_id")
-        .notNull()
-        .references(() => usersTable.columns.id),
-    });
-
-    const orm = createOrm({
-      adapter: "sqlite",
-      url: ":memory:",
-      tables: { users: usersTable, posts: postsWithAuthorTable },
-      relations: {
-        users: { posts: many(() => postsWithAuthorTable) },
-        posts: { author: one("userId", () => usersTable) },
-      },
-    });
+    const postsWithAuthorTable = definePostWithAuthorTable("posts_never_check");
+    const orm = createOrmWithAuthorRelation(postsWithAuthorTable);
 
     // "author" appears in type (depth 2) — must be a proper type, not never
     const _check: Parameters<typeof orm.users.findMany>[0] = {
@@ -927,23 +875,10 @@ describe("nested include options", () => {
   });
 
   test("nested include type rejects invalid columns at each level", () => {
-    const postsWithAuthorTable = defineTable("posts_nested_type_check", {
-      id: uuid("id").primaryKey().notNull(),
-      title: string("title").notNull(),
-      userId: uuid("user_id")
-        .notNull()
-        .references(() => usersTable.columns.id),
-    });
-
-    const orm = createOrm({
-      adapter: "sqlite",
-      url: ":memory:",
-      tables: { users: usersTable, posts: postsWithAuthorTable },
-      relations: {
-        users: { posts: many(() => postsWithAuthorTable) },
-        posts: { author: one("userId", () => usersTable) },
-      },
-    });
+    const postsWithAuthorTable = definePostWithAuthorTable(
+      "posts_nested_type_check",
+    );
+    const orm = createOrmWithAuthorRelation(postsWithAuthorTable);
 
     // valid: include author (a known relation on posts)
     const _valid: Parameters<typeof orm.users.findMany>[0] = {

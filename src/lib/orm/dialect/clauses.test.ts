@@ -1,13 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  boolean,
-  date,
-  enumType,
-  json,
-  jsonb,
-  string,
-  uuid,
-} from "../column/index.js";
+import { enumType, json, jsonb, uuid } from "../column/index.js";
 import { defineTable } from "../table/index.js";
 import {
   buildOrderByClause,
@@ -23,15 +15,7 @@ import {
 } from "./clauses.js";
 import { POSTGRES_SPEC } from "./postgres.js";
 import { SQLITE_SPEC } from "./sqlite.js";
-
-const usersTable = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
-  firstName: string("first_name").notNull(),
-  createdAt: date("created_at").notNull(),
-  isActive: boolean("is_active")
-    .notNull()
-    .default(() => true),
-});
+import { usersTable } from "./test-fixtures.js";
 
 describe("clauses", () => {
   test("creates dialect placeholders", () => {

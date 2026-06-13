@@ -34,7 +34,7 @@ export const buildSelectList = (columns: string, include: IncludeClause) => {
   return columns;
 };
 
-export const serializeParam = (value: unknown) => {
+const serializeParam = (value: unknown) => {
   if (value instanceof Date) return value.toISOString();
 
   return value;

@@ -1,27 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { boolean, date, string, uuid } from "../column/index.js";
 import { many, one } from "../orm/index.js";
-import { defineTable } from "../table/index.js";
 import { createPostgresDialect, POSTGRES_SPEC } from "./postgres.js";
 import { DialectQueryBuilder } from "./query-builder.js";
 import { createDialect } from "./shared.js";
-
-const usersTable = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
-  firstName: string("first_name").notNull(),
-  createdAt: date("created_at").notNull(),
-  isActive: boolean("is_active")
-    .notNull()
-    .default(() => true),
-});
-
-const postsTable = defineTable("posts", {
-  id: uuid("id").primaryKey().notNull(),
-  title: string("title").notNull(),
-  authorId: uuid("author_id")
-    .notNull()
-    .references(() => usersTable.columns.id),
-});
+import {
+  buildUserPostMutationQueries,
+  postsTable,
+  usersTable,
+} from "./test-fixtures.js";
 
 describe("postgres dialect", () => {
   test("reports postgres as its name", () => {
@@ -102,15 +88,7 @@ describe("postgres dialect", () => {
       'INSERT INTO "users" ("id", "first_name", "created_at", "is_active") VALUES ($1, $2, $3, $4) RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
     );
 
-    const update = builder.buildUpdate({
-      where: { id: "u-1" },
-      data: { firstName: "Grace" },
-      include: { posts: { where: { title: "Hello" } } },
-    });
-    const remove = builder.buildDelete({
-      where: { id: "u-1" },
-      include: { posts: { where: { title: "Hello" } } },
-    });
+    const { update, remove } = buildUserPostMutationQueries(builder);
 
     expect(update.statement).toContain(
       'UPDATE "users" SET "first_name" = $1 WHERE "id" = $2 RETURNING',

@@ -1,25 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { boolean, date, json, jsonb, string, uuid } from "../column/index.js";
+import { json, jsonb, uuid } from "../column/index.js";
 import { many, one } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
 import { createSqliteDialect } from "./sqlite.js";
-
-const usersTable = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
-  firstName: string("first_name").notNull(),
-  createdAt: date("created_at").notNull(),
-  isActive: boolean("is_active")
-    .notNull()
-    .default(() => true),
-});
-
-const postsTable = defineTable("posts", {
-  id: uuid("id").primaryKey().notNull(),
-  title: string("title").notNull(),
-  authorId: uuid("author_id")
-    .notNull()
-    .references(() => usersTable.columns.id),
-});
+import { postsTable, usersTable } from "./test-fixtures.js";
 
 const metaTable = defineTable("meta", {
   id: uuid("id").primaryKey().notNull(),

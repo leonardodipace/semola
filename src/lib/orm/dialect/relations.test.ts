@@ -5,19 +5,7 @@ import { defineTable } from "../table/index.js";
 import { createNextPlaceholder } from "./clauses.js";
 import { buildIncludeClause } from "./relations.js";
 import { SQLITE_SPEC } from "./sqlite.js";
-
-const usersTable = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
-  firstName: string("first_name").notNull(),
-});
-
-const postsTable = defineTable("posts", {
-  id: uuid("id").primaryKey().notNull(),
-  title: string("title").notNull(),
-  authorId: uuid("author_id")
-    .notNull()
-    .references(() => usersTable.columns.id),
-});
+import { postsTable, usersTable } from "./test-fixtures.js";
 
 describe("relations", () => {
   test("builds hasMany include SQL and descriptors", () => {
@@ -52,7 +40,7 @@ describe("relations", () => {
     });
 
     expect(include.sql).toBe(
-      '(SELECT json_object(\'id\', author__users."id", \'firstName\', author__users."first_name") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS "author"',
+      '(SELECT json_object(\'id\', author__users."id", \'firstName\', author__users."first_name", \'createdAt\', author__users."created_at", \'isActive\', author__users."is_active") FROM "users" AS author__users WHERE author__users."id" = "posts"."author_id" LIMIT 1) AS "author"',
     );
     expect(include.params).toEqual([]);
   });

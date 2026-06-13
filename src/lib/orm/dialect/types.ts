@@ -17,7 +17,6 @@ import type {
   TableInclude,
   TableRelations,
   TableRow,
-  TableSelect,
   TableWhere,
   UpdateManyOptions,
   UpdateOptions,
@@ -123,113 +122,10 @@ export type GetDialectInput<T extends Table, R extends TableRelations> = {
   tableRelationsMap?: Map<Table, TableRelations>;
 };
 
-export type BuildFindManyQueryInput<
-  T extends Table,
-  R extends TableRelations,
-> = {
-  spec: DialectSpec;
-  table: T;
-  relations: R;
-  options?: FindManyOptions<T, R>;
-  tableRelationsMap?: Map<Table, TableRelations>;
-};
-
-export type BuildFindFirstQueryInput<
-  T extends Table,
-  R extends TableRelations,
-> = {
-  spec: DialectSpec;
-  table: T;
-  relations: R;
-  options?: FindFirstOptions<T, R>;
-  tableRelationsMap?: Map<Table, TableRelations>;
-};
-
-export type BuildFindUniqueQueryInput<
-  T extends Table,
-  R extends TableRelations,
-> = {
-  spec: DialectSpec;
-  table: T;
-  relations: R;
-  options: FindUniqueOptions<T, R>;
-  tableRelationsMap?: Map<Table, TableRelations>;
-};
-
-export type BuildCreateQueryInput<T extends Table, R extends TableRelations> = {
-  spec: DialectSpec;
-  table: T;
-  relations: R;
-  options: CreateOptions<T, R>;
-  tableRelationsMap?: Map<Table, TableRelations>;
-};
-
-export type BuildUpdateQueryInput<T extends Table, R extends TableRelations> = {
-  spec: DialectSpec;
-  table: T;
-  relations: R;
-  options: UpdateOptions<T, R>;
-  tableRelationsMap?: Map<Table, TableRelations>;
-};
-
-export type BuildDeleteQueryInput<T extends Table, R extends TableRelations> = {
-  spec: DialectSpec;
-  table: T;
-  relations: R;
-  options: DeleteOptions<T, R>;
-  tableRelationsMap?: Map<Table, TableRelations>;
-};
-
-export type BuildCreateManyQueryInput<T extends Table> = {
-  spec: DialectSpec;
-  table: T;
-  options: CreateManyOptions<T>;
-};
-
-export type BuildUpdateManyQueryInput<T extends Table> = {
-  spec: DialectSpec;
-  table: T;
-  options: UpdateManyOptions<T>;
-};
-
-export type BuildDeleteManyQueryInput<T extends Table> = {
-  spec: DialectSpec;
-  table: T;
-  options: DeleteManyOptions<T>;
-};
-
 export type BuildSetClausesInput<T extends Table> = {
   nextPlaceholder: () => string;
   table: T;
   data: Record<string, unknown>;
-};
-
-export type BuildWhereIncludeReturningInput<
-  T extends Table,
-  R extends TableRelations,
-> = {
-  spec: DialectSpec;
-  nextPlaceholder: () => string;
-  table: T;
-  relations: R;
-  tableRelationsMap: Map<Table, TableRelations>;
-  where: TableWhere<T>;
-  select?: TableSelect<T>;
-  include?: TableInclude<R>;
-};
-
-export type BuildSelectIncludeWhereInput<
-  T extends Table,
-  R extends TableRelations,
-> = {
-  spec: DialectSpec;
-  nextPlaceholder: () => string;
-  table: T;
-  relations: R;
-  tableRelationsMap: Map<Table, TableRelations>;
-  where?: TableWhere<T>;
-  select?: TableSelect<T>;
-  include?: TableInclude<R>;
 };
 
 export type BuildWhereClauseInput<T extends Table> = {
@@ -301,12 +197,6 @@ export type CoerceRowInput = {
   row: Record<string, unknown>;
   table: Table;
   descriptors: IncludeDescriptor[];
-};
-
-export type ExecuteQueryInput = {
-  sql: Bun.SQL;
-  table: Table;
-  query: ReturningQuery;
 };
 
 export type Dialect<

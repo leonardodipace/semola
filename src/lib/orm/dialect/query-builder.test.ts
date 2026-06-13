@@ -1,32 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { boolean, date, json, jsonb, string, uuid } from "../column/index.js";
 import { many } from "../orm/index.js";
-import { defineTable } from "../table/index.js";
 import { DialectQueryBuilder } from "./query-builder.js";
 import { SQLITE_SPEC } from "./sqlite.js";
-
-const usersTable = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
-  firstName: string("first_name").notNull(),
-  createdAt: date("created_at").notNull(),
-  isActive: boolean("is_active")
-    .notNull()
-    .default(() => true),
-});
-
-const postsTable = defineTable("posts", {
-  id: uuid("id").primaryKey().notNull(),
-  title: string("title").notNull(),
-  authorId: uuid("author_id")
-    .notNull()
-    .references(() => usersTable.columns.id),
-});
-
-const eventsTable = defineTable("events", {
-  id: uuid("id").primaryKey().notNull(),
-  payload: json("payload").notNull(),
-  meta: jsonb("meta").notNull(),
-});
+import {
+  buildUserPostMutationQueries,
+  eventsTable,
+  postsTable,
+  usersTable,
+} from "./test-fixtures.js";
 
 describe("DialectQueryBuilder", () => {
   test("builds findMany with select, include, where, order, and pagination", () => {
@@ -103,15 +84,7 @@ describe("DialectQueryBuilder", () => {
       table: usersTable,
       relations: { posts: many(() => postsTable) },
     });
-    const update = builder.buildUpdate({
-      where: { id: "u-1" },
-      data: { firstName: "Grace" },
-      include: { posts: { where: { title: "Hello" } } },
-    });
-    const remove = builder.buildDelete({
-      where: { id: "u-1" },
-      include: { posts: { where: { title: "Hello" } } },
-    });
+    const { update, remove } = buildUserPostMutationQueries(builder);
 
     expect(update.statement).toBe(
       'UPDATE "users" SET "first_name" = ? WHERE "id" = ? RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive", COALESCE((SELECT json_group_array(json_object(\'id\', posts__posts."id", \'title\', posts__posts."title", \'authorId\', posts__posts."author_id")) FROM "posts" AS posts__posts WHERE posts__posts."author_id" = "users"."id" AND "title" = ?), \'[]\') AS "posts"',
