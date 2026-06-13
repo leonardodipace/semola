@@ -46,8 +46,9 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
   table: T,
   adapter: Adapter,
   relations: TRelations,
+  tableRelationsMap: Map<Table, TableRelations>,
 ): TableClient<T, TRelations> => {
-  const dialect = getDialect(adapter, table, relations);
+  const dialect = getDialect({ adapter, table, relations, tableRelationsMap });
 
   return {
     findMany: async <const TOptions extends FindManyOptions<T, TRelations>>(
@@ -110,16 +111,25 @@ export const createOrm = <
     adapter: options.adapter,
   });
 
-  const resultEntries = Object.entries(options.tables).map(
-    ([tableName, table]) => {
-      const tableRelations = (options.relations?.[tableName] ??
-        {}) as TableRelations;
-      return [
-        tableName,
-        createTableClient(sql, table, options.adapter, tableRelations),
-      ];
-    },
-  );
+  const tableRelationsMap = new Map<Table, TableRelations>();
+  const resultEntries: [string, TableClient<Table, TableRelations>][] = [];
+
+  for (const [tableName, table] of Object.entries(options.tables)) {
+    const tableRelations = (options.relations?.[tableName] ??
+      {}) as TableRelations;
+
+    tableRelationsMap.set(table, tableRelations);
+    resultEntries.push([
+      tableName,
+      createTableClient(
+        sql,
+        table,
+        options.adapter,
+        tableRelations,
+        tableRelationsMap,
+      ),
+    ]);
+  }
 
   const orm = Object.fromEntries(resultEntries) as OrmClient<T, R>;
 
