@@ -49,6 +49,16 @@ export type SqlFragment = {
   params: unknown[];
 };
 
+export type LogicalWhereKey = "$and" | "$not" | "$or";
+
+export type LogicalWhereJoinKey = Exclude<LogicalWhereKey, "$not">;
+
+export type LogicalSqlOperator = "AND" | "NOT" | "OR";
+
+export type LogicalJoinOperator = Exclude<LogicalSqlOperator, "NOT">;
+
+export type LogicalNotOperator = Extract<LogicalSqlOperator, "NOT">;
+
 export type IncludeDescriptor = {
   name: string;
   type: "hasMany" | "hasOne";

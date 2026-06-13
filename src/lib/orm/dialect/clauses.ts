@@ -9,6 +9,10 @@ import type {
   BuildWhereClauseInput,
   DialectSpec,
   IncludeClause,
+  LogicalJoinOperator,
+  LogicalNotOperator,
+  LogicalWhereJoinKey,
+  LogicalWhereKey,
   SqlFragment,
 } from "./types.js";
 
@@ -223,27 +227,58 @@ export const buildWhereClause = <T extends Table>(
   for (const [jsKey, value] of Object.entries(where)) {
     if (value === undefined) continue;
 
-    const isAnd = jsKey === "$and";
-    const isNot = jsKey === "$not";
-    const isOr = jsKey === "$or";
-    const isLogicalOperator = isAnd || isNot || isOr;
+    const logicalWhereKey = getLogicalWhereKey(jsKey);
 
-    if (isLogicalOperator) {
-      appendLogicalWhereClause({ ...input, clauses, params, jsKey, value });
+    if (logicalWhereKey) {
+      appendLogicalWhereClause({
+        ...input,
+        clauses,
+        params,
+        jsKey: logicalWhereKey,
+        value,
+      });
       continue;
     }
 
     appendWhereClause({ ...input, clauses, params, jsKey, value });
   }
 
-  return { sql: clauses.join(" AND "), params };
+  const operator: LogicalJoinOperator = "AND";
+
+  return { sql: clauses.join(` ${operator} `), params };
+};
+
+const getLogicalWhereKey = (jsKey: string): LogicalWhereKey | null => {
+  if (jsKey === "$and") return jsKey;
+  if (jsKey === "$not") return jsKey;
+  if (jsKey === "$or") return jsKey;
+
+  return null;
+};
+
+const getLogicalOperator = (
+  jsKey: LogicalWhereJoinKey,
+): LogicalJoinOperator => {
+  if (jsKey === "$or") return "OR";
+
+  return "AND";
+};
+
+const getLogicalWhereValues = (jsKey: LogicalWhereKey, value: unknown) => {
+  if (jsKey === "$or" && !Array.isArray(value)) {
+    throw new Error("$or where value must be an array");
+  }
+
+  if (Array.isArray(value)) return value;
+
+  return [value];
 };
 
 const appendLogicalWhereClause = <T extends Table>(
   input: BuildWhereClauseInput<T> & {
     clauses: string[];
     params: unknown[];
-    jsKey: "$or" | "$and" | "$not";
+    jsKey: LogicalWhereKey;
     value: unknown;
   },
 ) => {
@@ -254,16 +289,19 @@ const appendLogicalWhereClause = <T extends Table>(
   if (!nestedClauses.length) return;
 
   if (jsKey === "$not") {
-    clauses.push(
-      nestedClauses
-        .map((nestedClause) => `NOT (${nestedClause})`)
-        .join(" AND "),
+    const operator: LogicalNotOperator = "NOT";
+    const joinOperator: LogicalJoinOperator = "AND";
+    const negatedClauses = nestedClauses.map(
+      (nestedClause) => `${operator} (${nestedClause})`,
     );
+    const combinedNegatedClause = negatedClauses.join(` ${joinOperator} `);
+
+    clauses.push(combinedNegatedClause);
 
     return;
   }
 
-  const operator = jsKey === "$or" ? "OR" : "AND";
+  const operator = getLogicalOperator(jsKey);
 
   clauses.push(`(${nestedClauses.join(` ${operator} `)})`);
 };
@@ -271,17 +309,13 @@ const appendLogicalWhereClause = <T extends Table>(
 const collectLogicalWhereClauses = <T extends Table>(
   input: BuildWhereClauseInput<T> & {
     params: unknown[];
-    jsKey: "$or" | "$and" | "$not";
+    jsKey: LogicalWhereKey;
     value: unknown;
   },
 ) => {
   const { params, jsKey, value } = input;
 
-  if (jsKey === "$or" && !Array.isArray(value)) {
-    throw new Error("$or where value must be an array");
-  }
-
-  const values = Array.isArray(value) ? value : [value];
+  const values = getLogicalWhereValues(jsKey, value);
   const nestedClauses: string[] = [];
 
   for (const nestedValue of values) {
@@ -312,9 +346,12 @@ export const buildSelectColumns = <T extends Table>(
   select?: TableSelect<T>,
 ) => {
   if (!select || Object.keys(select).length === 0) {
-    return Object.entries(table.columns)
-      .map(([k, col]) => getColumnAlias(col.sqlName, k))
-      .join(", ");
+    const columnEntries = Object.entries(table.columns);
+    const columnAliases = columnEntries.map(([key, column]) =>
+      getColumnAlias(column.sqlName, key),
+    );
+
+    return columnAliases.join(", ");
   }
 
   const selectedColumns: string[] = [];
