@@ -462,7 +462,7 @@ describe("Cron", () => {
       setSystemTime();
     });
 
-    test("should successfully throw an erro when onError() callback is not defined", async () => {
+    test("should successfully throw an error when onError() callback is not defined", async () => {
       const handler = () => Promise.resolve();
       const retry = new RetryCronJob({
         maxAttempts: 1,
