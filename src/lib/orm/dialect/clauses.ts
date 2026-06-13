@@ -1,5 +1,5 @@
 import type { Column } from "../column/types.js";
-import type { TableOrderBy, TableSelect } from "../orm/types.js";
+import type { TableOrderBy, TableSelect, TableWhere } from "../orm/types.js";
 import type { Table } from "../table/types.js";
 import { quoteIdentifier } from "../utils.js";
 import type {
@@ -223,10 +223,79 @@ export const buildWhereClause = <T extends Table>(
   for (const [jsKey, value] of Object.entries(where)) {
     if (value === undefined) continue;
 
+    if (jsKey === "$or" || jsKey === "$and" || jsKey === "$not") {
+      appendLogicalWhereClause({ ...input, clauses, params, jsKey, value });
+      continue;
+    }
+
     appendWhereClause({ ...input, clauses, params, jsKey, value });
   }
 
   return { sql: clauses.join(" AND "), params };
+};
+
+const appendLogicalWhereClause = <T extends Table>(
+  input: BuildWhereClauseInput<T> & {
+    clauses: string[];
+    params: unknown[];
+    jsKey: "$or" | "$and" | "$not";
+    value: unknown;
+  },
+) => {
+  const { clauses, jsKey } = input;
+
+  const nestedClauses = collectLogicalWhereClauses(input);
+
+  if (!nestedClauses.length) return;
+
+  if (jsKey === "$not") {
+    clauses.push(
+      nestedClauses
+        .map((nestedClause) => `NOT (${nestedClause})`)
+        .join(" AND "),
+    );
+
+    return;
+  }
+
+  const operator = jsKey === "$or" ? "OR" : "AND";
+
+  clauses.push(`(${nestedClauses.join(` ${operator} `)})`);
+};
+
+const collectLogicalWhereClauses = <T extends Table>(
+  input: BuildWhereClauseInput<T> & {
+    params: unknown[];
+    jsKey: "$or" | "$and" | "$not";
+    value: unknown;
+  },
+) => {
+  const { params, jsKey, value } = input;
+
+  if (jsKey === "$or" && !Array.isArray(value)) {
+    throw new Error("$or where value must be an array");
+  }
+
+  const values = Array.isArray(value) ? value : [value];
+  const nestedClauses: string[] = [];
+
+  for (const nestedValue of values) {
+    if (!isPlainObject(nestedValue)) {
+      throw new Error(`${jsKey} where value must contain object filters`);
+    }
+
+    const nested = buildWhereClause({
+      ...input,
+      where: nestedValue as TableWhere<T>,
+    });
+
+    if (!nested.sql) continue;
+
+    nestedClauses.push(`(${nested.sql})`);
+    params.push(...nested.params);
+  }
+
+  return nestedClauses;
 };
 
 const getColumnAlias = (sqlName: string, jsKey: string) => {
