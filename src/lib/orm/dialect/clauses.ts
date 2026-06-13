@@ -142,7 +142,13 @@ const appendOperatorWhereClauses = (input: {
   const { clauses, params, nextPlaceholder, column, sqlName, jsKey, value } =
     input;
 
-  for (const [op, operand] of Object.entries(value)) {
+  const entries = Object.entries(value);
+
+  if (!entries.length) {
+    throw new Error(`Missing where operator for field ${jsKey}`);
+  }
+
+  for (const [op, operand] of entries) {
     const operator = OPERATORS[op as keyof typeof OPERATORS];
 
     if (!operator) {
@@ -275,7 +281,14 @@ export const buildOrderByClause = <T extends Table>(
       continue;
     }
 
-    clauses.push(`${quoteIdentifier(column.sqlName)} ASC`);
+    if (direction === "asc") {
+      clauses.push(`${quoteIdentifier(column.sqlName)} ASC`);
+      continue;
+    }
+
+    throw new Error(
+      `Unknown orderBy direction "${direction}" for key "${jsKey}" on table ${table.sqlName}`,
+    );
   }
 
   if (!clauses.length) return "";
@@ -344,7 +357,10 @@ export const validateFindUniqueWhere = (
   table: Table,
   where: Record<string, unknown>,
 ) => {
-  const keys = Object.keys(where);
+  const entries = Object.entries(where).filter(
+    ([, value]) => value !== undefined,
+  );
+  const keys = entries.map(([key]) => key);
 
   if (!keys.length) {
     throw new Error("findUnique requires at least one where key");
@@ -352,7 +368,7 @@ export const validateFindUniqueWhere = (
 
   let hasUniqueKey = false;
 
-  for (const key of keys) {
+  for (const [key] of entries) {
     const column = table.columns[key];
 
     if (!column) {
