@@ -49,6 +49,61 @@ export type SqlFragment = {
   params: unknown[];
 };
 
+export type LogicalWhereKey = "$and" | "$not" | "$or";
+
+export type LogicalWhereJoinKey = Exclude<LogicalWhereKey, "$not">;
+
+export type LogicalSqlOperator = "AND" | "NOT" | "OR";
+
+export type LogicalJoinOperator = Exclude<LogicalSqlOperator, "NOT">;
+
+export type LogicalNotOperator = Extract<LogicalSqlOperator, "NOT">;
+
+export type CollectedLogicalWhere =
+  | { nestedClauses: string[]; nestedParams: unknown[] }
+  | string;
+
+export type AppendDirectWhereClauseInput = {
+  clauses: string[];
+  params: unknown[];
+  nextPlaceholder: () => string;
+  column: Column;
+  sqlName: string;
+  value: unknown;
+};
+
+export type AppendOperatorWhereClausesInput = {
+  clauses: string[];
+  params: unknown[];
+  nextPlaceholder: () => string;
+  column: Column;
+  sqlName: string;
+  jsKey: string;
+  value: Record<string, unknown>;
+};
+
+export type AppendWhereClauseInput<T extends Table> =
+  BuildWhereClauseInput<T> & {
+    clauses: string[];
+    params: unknown[];
+    jsKey: string;
+    value: unknown;
+  };
+
+export type AppendLogicalWhereClauseInput<T extends Table> =
+  BuildWhereClauseInput<T> & {
+    clauses: string[];
+    params: unknown[];
+    jsKey: LogicalWhereKey;
+    value: unknown;
+  };
+
+export type CollectLogicalWhereClausesInput<T extends Table> =
+  BuildWhereClauseInput<T> & {
+    jsKey: LogicalWhereKey;
+    value: unknown;
+  };
+
 export type IncludeDescriptor = {
   name: string;
   type: "hasMany" | "hasOne";

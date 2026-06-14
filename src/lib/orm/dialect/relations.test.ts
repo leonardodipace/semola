@@ -71,6 +71,31 @@ describe("relations", () => {
     );
   });
 
+  test("builds include SQL with logical where clauses", () => {
+    const include = buildIncludeClause({
+      spec: SQLITE_SPEC,
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      parentAlias: '"users"',
+      relations: { posts: many(() => postsTable) },
+      tableRelationsMap: new Map(),
+      include: {
+        posts: {
+          where: {
+            $or: [
+              { title: { contains: "release" } },
+              { title: { startsWith: "fix" } },
+            ],
+          },
+        },
+      },
+    });
+
+    expect(include.sql).toContain(" OR ");
+    expect(include.sql).toContain("LIKE ? ESCAPE");
+    expect(include.params).toEqual(["%release%", "fix%"]);
+  });
+
   test("ignores disabled include flags", () => {
     const include = buildIncludeClause({
       spec: SQLITE_SPEC,

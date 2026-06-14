@@ -1,26 +1,30 @@
 import type { Column } from "../column/types.js";
-import type { TableOrderBy, TableSelect } from "../orm/types.js";
+import type { TableOrderBy, TableSelect, TableWhere } from "../orm/types.js";
 import type { Table } from "../table/types.js";
 import { quoteIdentifier } from "../utils.js";
 import type {
+  AppendDirectWhereClauseInput,
+  AppendLogicalWhereClauseInput,
+  AppendOperatorWhereClausesInput,
+  AppendWhereClauseInput,
   BuildPaginationClauseInput,
   BuildSelectStatementInput,
   BuildSetClausesInput,
   BuildWhereClauseInput,
+  CollectedLogicalWhere,
+  CollectLogicalWhereClausesInput,
   DialectSpec,
   IncludeClause,
+  LogicalJoinOperator,
+  LogicalNotOperator,
+  LogicalWhereJoinKey,
+  LogicalWhereKey,
   SqlFragment,
 } from "./types.js";
 
-export const createNextPlaceholder = (spec: DialectSpec) => {
-  let index = 0;
+const FALSE_WHERE_SQL = "(1 = 0)";
 
-  return () => {
-    index += 1;
-
-    return spec.formatPlaceholder(index);
-  };
-};
+const TRUE_WHERE_SQL = "(1 = 1)";
 
 export const EMPTY_INCLUDE: IncludeClause = {
   sql: "",
@@ -28,25 +32,10 @@ export const EMPTY_INCLUDE: IncludeClause = {
   descriptors: [],
 };
 
-export const buildSelectList = (columns: string, include: IncludeClause) => {
-  if (include.sql) return `${columns}, ${include.sql}`;
-
-  return columns;
-};
-
 const serializeParam = (value: unknown) => {
   if (value instanceof Date) return value.toISOString();
 
   return value;
-};
-
-export const serializeColumnValue = (column: Column, value: unknown) => {
-  if (column.type !== "json" && column.type !== "jsonb")
-    return serializeParam(value);
-  if (value === null) return value;
-  if (value === undefined) return null;
-
-  return JSON.stringify(value);
 };
 
 const escapeLikeValue = (value: unknown) => {
@@ -93,6 +82,31 @@ const OPERATORS = {
   },
 } as const;
 
+export const createNextPlaceholder = (spec: DialectSpec) => {
+  let index = 0;
+
+  return () => {
+    index += 1;
+
+    return spec.formatPlaceholder(index);
+  };
+};
+
+export const buildSelectList = (columns: string, include: IncludeClause) => {
+  if (include.sql) return `${columns}, ${include.sql}`;
+
+  return columns;
+};
+
+export const serializeColumnValue = (column: Column, value: unknown) => {
+  if (column.type !== "json" && column.type !== "jsonb")
+    return serializeParam(value);
+  if (value === null) return value;
+  if (value === undefined) return null;
+
+  return JSON.stringify(value);
+};
+
 const isPlainObject = (value: unknown) => {
   if (value === null) return false;
 
@@ -111,14 +125,7 @@ const isPlainObject = (value: unknown) => {
   return false;
 };
 
-const appendDirectWhereClause = (input: {
-  clauses: string[];
-  params: unknown[];
-  nextPlaceholder: () => string;
-  column: Column;
-  sqlName: string;
-  value: unknown;
-}) => {
+const appendDirectWhereClause = (input: AppendDirectWhereClauseInput) => {
   const { clauses, params, nextPlaceholder, column, sqlName, value } = input;
 
   if (value === null) {
@@ -130,15 +137,7 @@ const appendDirectWhereClause = (input: {
   params.push(serializeColumnValue(column, value));
 };
 
-const appendOperatorWhereClauses = (input: {
-  clauses: string[];
-  params: unknown[];
-  nextPlaceholder: () => string;
-  column: Column;
-  sqlName: string;
-  jsKey: string;
-  value: Record<string, unknown>;
-}) => {
+const appendOperatorWhereClauses = (input: AppendOperatorWhereClausesInput) => {
   const { clauses, params, nextPlaceholder, column, sqlName, jsKey, value } =
     input;
 
@@ -166,12 +165,7 @@ const appendOperatorWhereClauses = (input: {
 };
 
 const appendWhereClause = <T extends Table>(
-  input: BuildWhereClauseInput<T> & {
-    clauses: string[];
-    params: unknown[];
-    jsKey: string;
-    value: unknown;
-  },
+  input: AppendWhereClauseInput<T>,
 ) => {
   const { clauses, params, nextPlaceholder, table, jsKey, value } = input;
 
@@ -223,10 +217,119 @@ export const buildWhereClause = <T extends Table>(
   for (const [jsKey, value] of Object.entries(where)) {
     if (value === undefined) continue;
 
+    const logicalWhereKey = getLogicalWhereKey(jsKey);
+
+    if (logicalWhereKey) {
+      appendLogicalWhereClause({
+        ...input,
+        clauses,
+        params,
+        jsKey: logicalWhereKey,
+        value,
+      });
+      continue;
+    }
+
     appendWhereClause({ ...input, clauses, params, jsKey, value });
   }
 
-  return { sql: clauses.join(" AND "), params };
+  const operator: LogicalJoinOperator = "AND";
+
+  return { sql: clauses.join(` ${operator} `), params };
+};
+
+const getLogicalWhereKey = (jsKey: string): LogicalWhereKey | null => {
+  if (jsKey === "$and") return jsKey;
+  if (jsKey === "$not") return jsKey;
+  if (jsKey === "$or") return jsKey;
+
+  return null;
+};
+
+const getLogicalOperator = (
+  jsKey: LogicalWhereJoinKey,
+): LogicalJoinOperator => {
+  if (jsKey === "$or") return "OR";
+
+  return "AND";
+};
+
+const getLogicalWhereValues = (jsKey: LogicalWhereKey, value: unknown) => {
+  if (jsKey === "$or" && !Array.isArray(value)) {
+    throw new Error("$or where value must be an array");
+  }
+
+  if (Array.isArray(value)) return value;
+
+  return [value];
+};
+
+const appendLogicalWhereClause = <T extends Table>(
+  input: AppendLogicalWhereClauseInput<T>,
+) => {
+  const { clauses, params, jsKey } = input;
+
+  const collected = collectLogicalWhereClauses(input);
+
+  if (typeof collected === "string") {
+    clauses.push(collected);
+    return;
+  }
+
+  if (!collected.nestedClauses.length) return;
+
+  params.push(...collected.nestedParams);
+
+  if (jsKey === "$not") {
+    const operator: LogicalNotOperator = "NOT";
+    const joinOperator: LogicalJoinOperator = "AND";
+    const negatedClauses = collected.nestedClauses.map(
+      (nestedClause) => `${operator} (${nestedClause})`,
+    );
+    const combinedNegatedClause = negatedClauses.join(` ${joinOperator} `);
+
+    clauses.push(combinedNegatedClause);
+
+    return;
+  }
+
+  const operator = getLogicalOperator(jsKey);
+
+  clauses.push(`(${collected.nestedClauses.join(` ${operator} `)})`);
+};
+
+const collectLogicalWhereClauses = <T extends Table>(
+  input: CollectLogicalWhereClausesInput<T>,
+): CollectedLogicalWhere => {
+  const { jsKey, value } = input;
+
+  const values = getLogicalWhereValues(jsKey, value);
+  const nestedClauses: string[] = [];
+  const nestedParams: unknown[] = [];
+
+  for (const nestedValue of values) {
+    if (!isPlainObject(nestedValue)) {
+      throw new Error(`${jsKey} where value must contain object filters`);
+    }
+
+    const nested = buildWhereClause({
+      ...input,
+      where: nestedValue as TableWhere<T>,
+    });
+
+    if (!nested.sql) {
+      if (jsKey === "$or") return TRUE_WHERE_SQL;
+
+      continue;
+    }
+
+    nestedClauses.push(`(${nested.sql})`);
+    nestedParams.push(...nested.params);
+  }
+
+  if (jsKey === "$or" && !nestedClauses.length) return FALSE_WHERE_SQL;
+
+  return { nestedClauses, nestedParams };
 };
 
 const getColumnAlias = (sqlName: string, jsKey: string) => {
@@ -238,9 +341,12 @@ export const buildSelectColumns = <T extends Table>(
   select?: TableSelect<T>,
 ) => {
   if (!select || Object.keys(select).length === 0) {
-    return Object.entries(table.columns)
-      .map(([k, col]) => getColumnAlias(col.sqlName, k))
-      .join(", ");
+    const columnEntries = Object.entries(table.columns);
+    const columnAliases = columnEntries.map(([key, column]) =>
+      getColumnAlias(column.sqlName, key),
+    );
+
+    return columnAliases.join(", ");
   }
 
   const selectedColumns: string[] = [];

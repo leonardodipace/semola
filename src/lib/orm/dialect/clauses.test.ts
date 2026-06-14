@@ -68,6 +68,88 @@ describe("clauses", () => {
     ]);
   });
 
+  test("treats empty $or as unsatisfiable", () => {
+    const where = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      where: {
+        $or: [],
+      },
+    });
+
+    expect(where.sql).toBe("(1 = 0)");
+    expect(where.params).toEqual([]);
+  });
+
+  test("treats tautological $or branches as always true", () => {
+    const where = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      where: {
+        $or: [{}, { id: "u-1" }],
+      },
+    });
+
+    expect(where.sql).toBe("(1 = 1)");
+    expect(where.params).toEqual([]);
+  });
+
+  test("accepts $and and $not as single objects", () => {
+    const where = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      where: {
+        $and: { id: "u-1", isActive: true },
+        $not: { firstName: "Blocked" },
+      },
+    });
+
+    expect(where.sql).toBe(
+      '(("id" = ? AND "is_active" = ?)) AND NOT (("first_name" = ?))',
+    );
+    expect(where.params).toEqual(["u-1", true, "Blocked"]);
+  });
+
+  test("negates each $not array entry separately", () => {
+    const where = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      where: {
+        $not: [{ id: "u-1" }, { isActive: false }],
+      },
+    });
+
+    expect(where.sql).toBe('NOT (("id" = ?)) AND NOT (("is_active" = ?))');
+    expect(where.params).toEqual(["u-1", false]);
+  });
+
+  test("builds logical where clauses with nested params in order", () => {
+    const createdBefore = new Date("2025-02-01T00:00:00.000Z");
+    const createdAfter = new Date("2025-01-01T00:00:00.000Z");
+    const where = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      where: {
+        firstName: { startsWith: "A" },
+        $or: [{ firstName: { contains: "da" } }, { isActive: false }],
+        $not: { createdAt: { lt: createdBefore } },
+        $and: [{ id: "u-1" }, { createdAt: { gte: createdAfter } }],
+      },
+    });
+
+    expect(where.sql).toBe(
+      '"first_name" LIKE ? ESCAPE \'\\\' AND (("first_name" LIKE ? ESCAPE \'\\\') OR ("is_active" = ?)) AND NOT (("created_at" < ?)) AND (("id" = ?) AND ("created_at" >= ?))',
+    );
+    expect(where.params).toEqual([
+      "A%",
+      "%da%",
+      false,
+      createdBefore.toISOString(),
+      "u-1",
+      createdAfter.toISOString(),
+    ]);
+  });
+
   test("handles direct equality, null, JSON columns, and enum values", () => {
     const eventsTable = defineTable("events", {
       id: uuid("id").primaryKey().notNull(),
@@ -129,6 +211,32 @@ describe("clauses", () => {
         },
       }),
     ).toThrow("Unknown where operator: near for field firstName");
+  });
+
+  test("rejects invalid logical where values", () => {
+    expect(() =>
+      buildWhereClause({
+        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        table: usersTable,
+        where: {
+          // @ts-expect-error runtime guard
+          $or: { id: "u-1" },
+        },
+      }),
+    ).toThrow("$or where value must be an array");
+
+    expect(() =>
+      buildWhereClause({
+        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        table: usersTable,
+        where: {
+          $or: [
+            // @ts-expect-error runtime guard
+            "bad",
+          ],
+        },
+      }),
+    ).toThrow("$or where value must contain object filters");
   });
 
   test("builds order and pagination fragments", () => {

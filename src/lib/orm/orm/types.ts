@@ -151,7 +151,13 @@ type ColumnWhere<T extends Column> =
     ? ColumnWhereOperators<T>
     : ColumnValue<T> | ColumnWhereOperators<T>;
 
-export type TableWhere<T extends Table> = {
+type TableLogicalWhere<T extends Table> = {
+  [TKey in "$or"]?: TableWhere<T>[];
+} & {
+  [TKey in "$and" | "$not"]?: TableWhere<T> | TableWhere<T>[];
+};
+
+export type TableWhere<T extends Table> = TableLogicalWhere<T> & {
   [TColumnName in keyof T["columns"]]?: ColumnWhere<T["columns"][TColumnName]>;
 };
 

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { date, enumType, string, uuid } from "../column/index.js";
+import type { Column } from "../column/types.js";
 import { defineTable } from "../table/index.js";
+import type { Table } from "../table/types.js";
 import { createOrm, many, one } from "./index.js";
 
 const usersTable = defineTable("users", {
@@ -45,6 +47,23 @@ const seedTwoUsers = async (sql: Bun.SQL) => {
     "bob@example.com",
   ]);
 };
+
+type TableWithId = Table<{ id: Column }>;
+
+const defineStudentsToExamsTable = (
+  studentTable: TableWithId,
+  examsTable: TableWithId,
+) =>
+  defineTable("students_to_exams", {
+    studentId: uuid("student_id")
+      .primaryKey()
+      .notNull()
+      .references(() => studentTable.columns.id),
+    examId: uuid("exam_id")
+      .primaryKey()
+      .notNull()
+      .references(() => examsTable.columns.id),
+  });
 
 describe("relation helpers", () => {
   test("many() returns a hasMany descriptor", () => {
@@ -208,6 +227,8 @@ describe("relation helpers", () => {
         name: {
           startsWith: "J",
         },
+        $or: [{ email: { endsWith: "@example.com" } }, { name: "Jane" }],
+        $not: { name: "Blocked" },
       },
       orderBy: {
         name: "asc",
@@ -699,9 +720,14 @@ describe("nested include options", () => {
     const orm = createOrmWithPosts();
 
     const _valid: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        $and: [{ name: { contains: "Jo" } }],
+      },
       include: {
         posts: {
-          where: { title: "Hello" },
+          where: {
+            $or: [{ title: "Hello" }, { content: { contains: "World" } }],
+          },
           orderBy: { title: "asc" },
           take: 5,
           skip: 0,
@@ -714,8 +740,12 @@ describe("nested include options", () => {
       include: {
         posts: {
           where: {
-            // @ts-expect-error "badCol" is not a column on posts
-            badCol: "x",
+            $or: [
+              {
+                // @ts-expect-error "badCol" is not a column on posts
+                badCol: "x",
+              },
+            ],
           },
         },
       },
@@ -1045,16 +1075,10 @@ describe("many to many relation", () => {
       name: string("name").notNull(),
     });
 
-    const studentsToExamsTable = defineTable("students_to_exams", {
-      studentId: uuid("student_id")
-        .primaryKey()
-        .notNull()
-        .references(() => studentTable.columns.id),
-      examId: uuid("exam_id")
-        .primaryKey()
-        .notNull()
-        .references(() => examsTable.columns.id),
-    });
+    const studentsToExamsTable = defineStudentsToExamsTable(
+      studentTable,
+      examsTable,
+    );
 
     const orm = createOrm({
       adapter: "sqlite",
@@ -1188,16 +1212,10 @@ describe("many to many relation", () => {
       name: string("name").notNull(),
     });
 
-    const studentsToExamsTable = defineTable("students_to_exams", {
-      studentId: uuid("student_id")
-        .primaryKey()
-        .notNull()
-        .references(() => studentTable.columns.id),
-      examId: uuid("exam_id")
-        .primaryKey()
-        .notNull()
-        .references(() => examsTable.columns.id),
-    });
+    const studentsToExamsTable = defineStudentsToExamsTable(
+      studentTable,
+      examsTable,
+    );
 
     const orm = createOrm({
       adapter: "sqlite",

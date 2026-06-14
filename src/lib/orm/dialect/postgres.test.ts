@@ -44,6 +44,44 @@ describe("postgres dialect", () => {
     expect(query.params).toEqual(["Jo%", createdAfter.toISOString(), 5]);
   });
 
+  test("uses unsatisfiable sql for empty $or", () => {
+    const builder = new DialectQueryBuilder({
+      spec: POSTGRES_SPEC,
+      table: usersTable,
+      relations: {},
+    });
+    const query = builder.buildFindMany({
+      where: {
+        $or: [],
+      },
+    });
+
+    expect(query.statement).toBe(
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" WHERE (1 = 0)',
+    );
+    expect(query.params).toEqual([]);
+  });
+
+  test("numbers placeholders through logical where clauses", () => {
+    const builder = new DialectQueryBuilder({
+      spec: POSTGRES_SPEC,
+      table: usersTable,
+      relations: {},
+    });
+    const createdAfter = new Date("2025-01-01T00:00:00.000Z");
+    const query = builder.buildFindMany({
+      where: {
+        $or: [{ firstName: { startsWith: "Jo" } }, { isActive: false }],
+        $not: { createdAt: { lt: createdAfter } },
+      },
+    });
+
+    expect(query.statement).toBe(
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" WHERE (("first_name" LIKE $1 ESCAPE \'\\\') OR ("is_active" = $2)) AND NOT (("created_at" < $3))',
+    );
+    expect(query.params).toEqual(["Jo%", false, createdAfter.toISOString()]);
+  });
+
   test("uses jsonb functions for hasMany and hasOne includes", () => {
     const usersBuilder = new DialectQueryBuilder({
       spec: POSTGRES_SPEC,
