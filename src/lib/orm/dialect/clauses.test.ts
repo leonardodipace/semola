@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { enumType, json, jsonb, uuid } from "../column/index.js";
+import { enumType, json, jsonb, string, uuid } from "../column/index.js";
 import { many } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
 import {
@@ -430,6 +430,49 @@ describe("clauses", () => {
       '"is_active" = ? AND EXISTS (SELECT 1 FROM "posts" AS where_posts__posts WHERE where_posts__posts."author_id" = "users"."id" AND ("title" = ?))',
     );
     expect(where.params).toEqual([true, "Hello"]);
+  });
+
+  test("prefers column filters when a relation shares the same key", () => {
+    const itemsTable = defineTable("items", {
+      id: uuid("id").primaryKey().notNull(),
+      tags: json<string[]>("tags").notNull(),
+    });
+    const tagsTable = defineTable("tags", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+      itemId: uuid("item_id")
+        .notNull()
+        .references(() => itemsTable.columns.id),
+    });
+    const itemRelations = { tags: many(() => tagsTable) };
+
+    const columnWhere = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: itemsTable,
+      relations: itemRelations,
+      parentAlias: '"items"',
+      where: {
+        tags: ["alpha", "beta"],
+      },
+    });
+
+    expect(columnWhere.sql).toBe('"tags" = ?');
+    expect(columnWhere.params).toEqual(['["alpha","beta"]']);
+
+    const relationWhere = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: itemsTable,
+      relations: itemRelations,
+      parentAlias: '"items"',
+      where: {
+        tags: { some: { name: "alpha" } },
+      },
+    });
+
+    expect(relationWhere.sql).toBe(
+      'EXISTS (SELECT 1 FROM "tags" AS where_tags__tags WHERE where_tags__tags."item_id" = "items"."id" AND ("name" = ?))',
+    );
+    expect(relationWhere.params).toEqual(["alpha"]);
   });
 
   test("rejects invalid relation where filters", () => {
