@@ -27,6 +27,8 @@ const ALIASES: Record<ScheduleType, string> = {
   "@minutely": "* * * * *",
 } as const;
 
+class InvalidRetryError extends TypeError {}
+
 export class RetryCronJob implements RetryObserver {
   private options: RetryOptions;
   private currentAttempt: number;
@@ -37,6 +39,13 @@ export class RetryCronJob implements RetryObserver {
   }
 
   public async update(job: Cron, error: Error): Promise<void> {
+    if (!this.checkAttempts()) {
+      job.stop();
+      throw new InvalidRetryError(
+        "Exppected 'maxRetries' to be greater or equal than zero or not NaN",
+      );
+    }
+
     const { maxAttempts } = this.options;
     const onRetryErrorResult = this.runOnRetryError(error);
     const hasMoreAttempts = this.currentAttempt < maxAttempts;
@@ -72,6 +81,16 @@ export class RetryCronJob implements RetryObserver {
     };
 
     await this.options.onError(data);
+  }
+
+  private checkAttempts() {
+    const { maxAttempts } = this.options;
+
+    const isNegativeZero = Object.is(maxAttempts, -0);
+    const isNaturalNumber = maxAttempts >= 0;
+    const isNan = Number.isNaN(maxAttempts);
+
+    return isNaturalNumber && !isNan && !isNegativeZero;
   }
 
   private runOnRetryError(error: Error) {

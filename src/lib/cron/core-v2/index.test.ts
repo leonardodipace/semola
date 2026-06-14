@@ -606,5 +606,75 @@ describe("Cron", () => {
 
       setSystemTime();
     });
+
+    describe("Validate attempts", () => {
+      test("should raise an error when passing a negative number", async () => {
+        const handler = () => Promise.resolve();
+        const retryNegativeNumber = new RetryCronJob({
+          maxAttempts: -10,
+        });
+
+        const cron = new Cron({
+          name: "retry-job",
+          schedule: "0 0 * * *",
+          handler,
+        });
+
+        expect(cron).toBeDefined();
+        expect(cron.getStatus()).toBe("idle");
+
+        const [negativeNumberError] = await mightThrow(
+          retryNegativeNumber.update(cron, new Error("A generic error")),
+        );
+
+        expect(negativeNumberError).toBeDefined();
+        expect(negativeNumberError).toBeInstanceOf(TypeError);
+
+        const retryNegativeZero = new RetryCronJob({
+          maxAttempts: -0,
+        });
+
+        const [negativeZeroError] = await mightThrow(
+          retryNegativeZero.update(cron, new Error("A generic error")),
+        );
+
+        expect(negativeZeroError).toBeDefined();
+        expect(negativeZeroError).toBeInstanceOf(TypeError);
+
+        const retryNegativeInfinity = new RetryCronJob({
+          maxAttempts: -Infinity,
+        });
+
+        const [negativeInfinityError] = await mightThrow(
+          retryNegativeInfinity.update(cron, new Error("A generic error")),
+        );
+
+        expect(negativeInfinityError).toBeDefined();
+        expect(negativeInfinityError).toBeInstanceOf(TypeError);
+      });
+
+      test("should raise an error when passing NaN", async () => {
+        const handler = () => Promise.resolve();
+        const retryNan = new RetryCronJob({
+          maxAttempts: NaN,
+        });
+
+        const cron = new Cron({
+          name: "retry-job",
+          schedule: "0 0 * * *",
+          handler,
+        });
+
+        expect(cron).toBeDefined();
+        expect(cron.getStatus()).toBe("idle");
+
+        const [nanError] = await mightThrow(
+          retryNan.update(cron, new Error("A generic error")),
+        );
+
+        expect(nanError).toBeDefined();
+        expect(nanError).toBeInstanceOf(TypeError);
+      });
+    });
   });
 });
