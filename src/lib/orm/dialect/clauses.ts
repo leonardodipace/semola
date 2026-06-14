@@ -240,6 +240,18 @@ const getRelationFilter = (
   return { key, where: nestedWhere as TableWhere<Table> };
 };
 
+const isRelationFilterValue = (value: unknown) => {
+  if (!isPlainObject(value)) return false;
+
+  const filter = value as Record<string, unknown>;
+
+  for (const key of RELATION_FILTER_KEYS) {
+    if (key in filter) return true;
+  }
+
+  return false;
+};
+
 const buildRelationForeignKeyCondition = (
   input: BuildRelationForeignKeyConditionInput,
 ) => {
@@ -400,7 +412,7 @@ export const buildWhereClause = <
 
     const relation = relations?.[jsKey];
 
-    if (relation) {
+    if (relation && isRelationFilterValue(value)) {
       appendRelationWhereClause({
         ...input,
         clauses,
