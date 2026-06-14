@@ -94,6 +94,35 @@ describe("clauses", () => {
     expect(where.params).toEqual([]);
   });
 
+  test("accepts $and and $not as single objects", () => {
+    const where = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      where: {
+        $and: { id: "u-1", isActive: true },
+        $not: { firstName: "Blocked" },
+      },
+    });
+
+    expect(where.sql).toBe(
+      '(("id" = ? AND "is_active" = ?)) AND NOT (("first_name" = ?))',
+    );
+    expect(where.params).toEqual(["u-1", true, "Blocked"]);
+  });
+
+  test("negates each $not array entry separately", () => {
+    const where = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      where: {
+        $not: [{ id: "u-1" }, { isActive: false }],
+      },
+    });
+
+    expect(where.sql).toBe('NOT (("id" = ?)) AND NOT (("is_active" = ?))');
+    expect(where.params).toEqual(["u-1", false]);
+  });
+
   test("builds logical where clauses with nested params in order", () => {
     const createdBefore = new Date("2025-02-01T00:00:00.000Z");
     const createdAfter = new Date("2025-01-01T00:00:00.000Z");
@@ -182,6 +211,32 @@ describe("clauses", () => {
         },
       }),
     ).toThrow("Unknown where operator: near for field firstName");
+  });
+
+  test("rejects invalid logical where values", () => {
+    expect(() =>
+      buildWhereClause({
+        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        table: usersTable,
+        where: {
+          // @ts-expect-error runtime guard
+          $or: { id: "u-1" },
+        },
+      }),
+    ).toThrow("$or where value must be an array");
+
+    expect(() =>
+      buildWhereClause({
+        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        table: usersTable,
+        where: {
+          $or: [
+            // @ts-expect-error runtime guard
+            "bad",
+          ],
+        },
+      }),
+    ).toThrow("$or where value must contain object filters");
   });
 
   test("builds order and pagination fragments", () => {

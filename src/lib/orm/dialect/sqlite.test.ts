@@ -210,6 +210,94 @@ describe("sqlite dialect", () => {
     await sql.close();
   });
 
+  test("findMany filters rows with logical where clauses", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z", true);
+    await insertUser(sql, "user-2", "Jane", "2025-01-02T00:00:00.000Z", false);
+    await insertUser(sql, "user-3", "Joao", "2025-01-03T00:00:00.000Z", true);
+
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
+    const rows = await dialect.findMany(sql, {
+      where: {
+        $or: [{ firstName: { startsWith: "Jo" } }, { isActive: false }],
+        $not: { firstName: "Jane" },
+      },
+      orderBy: { id: "asc" },
+    });
+
+    expect(rows.map((row) => row.id)).toEqual(["user-1", "user-3"]);
+
+    await sql.close();
+  });
+
+  test("updateMany and deleteMany with empty $or affect no rows", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await insertUser(sql, "user-1", "Ada", "2025-01-01T00:00:00.000Z");
+    await insertUser(sql, "user-2", "Grace", "2025-01-02T00:00:00.000Z");
+
+    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
+    const updatedMany = await dialect.updateMany(sql, {
+      where: { $or: [] },
+      data: { firstName: "Changed" },
+    });
+    const deletedMany = await dialect.deleteMany(sql, {
+      where: { $or: [] },
+    });
+    const rows = await dialect.findMany(sql, {
+      orderBy: { firstName: "asc" },
+    });
+
+    expect(updatedMany).toHaveLength(0);
+    expect(deletedMany).toHaveLength(0);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.firstName).toBe("Ada");
+    expect(rows[1]?.firstName).toBe("Grace");
+
+    await sql.close();
+  });
+
+  test("findMany applies logical where clauses in nested includes", async () => {
+    const sql = createMemorySql();
+
+    await createUsersTable(sql);
+    await createPostsTable(sql);
+    await insertUser(sql, "user-1", "Ada", "2025-01-01T00:00:00.000Z");
+    await insertPost(sql, "post-1", "Hello", "user-1");
+    await insertPost(sql, "post-2", "World", "user-1");
+    await insertPost(sql, "post-3", "release notes", "user-1");
+
+    const dialect = createSqliteDialect({
+      table: usersTable,
+      relations: { posts: many(() => postsTable) },
+    });
+    const rows = await dialect.findMany(sql, {
+      where: { id: "user-1" },
+      include: {
+        posts: {
+          where: {
+            $or: [
+              { title: { contains: "release" } },
+              { title: { startsWith: "Hello" } },
+            ],
+          },
+          orderBy: { title: "asc" },
+        },
+      },
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.posts?.map((post) => post.title)).toEqual([
+      "Hello",
+      "release notes",
+    ]);
+
+    await sql.close();
+  });
+
   test("hasOne includes execute and return null when missing", async () => {
     const sql = createMemorySql();
 
