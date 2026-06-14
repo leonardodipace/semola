@@ -164,6 +164,12 @@ Logical operators:
 
 Logical operators can be nested recursively and can be combined with column filters at any level.
 
+Edge cases:
+
+- `$or: []` matches no rows.
+- `$and: []` is ignored and matches all rows when used alone.
+- An empty filter object inside `$or` (for example `{}`) matches all rows for that branch.
+
 ```typescript
 const users = await db.users.findMany({
   where: {
@@ -275,6 +281,32 @@ const usersWithOpenTasks = await db.users.findMany({
 
 ---
 
+## Transactions
+
+Use `$transaction` to run multiple operations in a single database transaction. The callback receives a transaction client with the same table clients as the root ORM client, plus `$raw` bound to the transactional connection.
+
+On success, the transaction commits. If the callback throws, the transaction rolls back and the error is rethrown.
+
+```typescript
+const { user, account } = await db.$transaction(async (tx) => {
+  const user = await tx.users.create({
+    data: { id: "1", name: "Alice", email: "alice@example.com" },
+  });
+
+  const account = await tx.accounts.create({
+    data: { id: "a1", userId: user.id, balance: "1000" },
+  });
+
+  return { user, account };
+});
+```
+
+The transaction client does not expose `$transaction`. Starting another transaction from inside a callback (for example by calling `db.$transaction` via closure) is not supported and throws from the underlying driver.
+
+Within a transaction, use the `tx` table clients or `tx.$raw` for all reads and writes. Using the root `db` client inside the callback runs outside the transaction.
+
+---
+
 ## Raw SQL
 
 Access the underlying `Bun.SQL` instance via `$raw`:
@@ -301,3 +333,4 @@ Useful exported types include:
 - `DeleteManyOptions<T>`
 - `CreateData<T>`
 - `UpdateData<T>`
+- `TransactionClient<T, R>`
