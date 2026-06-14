@@ -68,6 +68,32 @@ describe("clauses", () => {
     ]);
   });
 
+  test("treats empty $or as unsatisfiable", () => {
+    const where = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      where: {
+        $or: [],
+      },
+    });
+
+    expect(where.sql).toBe("(1 = 0)");
+    expect(where.params).toEqual([]);
+  });
+
+  test("treats tautological $or branches as always true", () => {
+    const where = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      where: {
+        $or: [{}, { id: "u-1" }],
+      },
+    });
+
+    expect(where.sql).toBe("(1 = 1)");
+    expect(where.params).toEqual([]);
+  });
+
   test("builds logical where clauses with nested params in order", () => {
     const createdBefore = new Date("2025-02-01T00:00:00.000Z");
     const createdAfter = new Date("2025-01-01T00:00:00.000Z");
