@@ -128,6 +128,41 @@ describe("$transaction", () => {
     await orm.$raw.close();
   });
 
+  test("sqlite only supports Serializable isolation level", async () => {
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+    });
+
+    await orm.$raw.unsafe(
+      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
+    );
+
+    try {
+      await orm.$transaction(
+        async (tx) => {
+          return await tx.users.create({
+            data: {
+              id: "u1",
+              name: "Alice",
+              email: "alice@example.com",
+            },
+          });
+        },
+        { isolationLevel: "ReadCommitted" },
+      );
+
+      expect(true).toBe(false);
+    } catch (error) {
+      expect((error as Error).message).toContain(
+        "Isolation level ReadCommitted is not supported by sqlite",
+      );
+    }
+
+    await orm.$raw.close();
+  });
+
   test("transaction client has $raw access", async () => {
     const orm = createOrm({
       adapter: "sqlite",

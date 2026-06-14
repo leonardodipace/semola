@@ -1,5 +1,6 @@
 import type { BaseColumn, Column } from "../column/types.js";
 import type { Adapter } from "../dialect/index.js";
+import type { IsolationLevel } from "../dialect/types.js";
 import type { Table } from "../table/types.js";
 
 export type HasMany<T extends Table> = {
@@ -104,12 +105,6 @@ export type TransactionClient<
 } & {
   $raw: Bun.SQL;
 };
-
-export type IsolationLevel =
-  | "ReadUncommitted"
-  | "ReadCommitted"
-  | "RepeatableRead"
-  | "Serializable";
 
 export type TransactionOptions = {
   isolationLevel?: IsolationLevel;

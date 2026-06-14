@@ -1,11 +1,6 @@
+import type { IsolationLevel } from "../dialect/types.js";
 import type { TableClient, TableRelations } from "../orm/types.js";
 import type { Table } from "../table/types.js";
-
-export type IsolationLevel =
-  | "ReadUncommitted"
-  | "ReadCommitted"
-  | "RepeatableRead"
-  | "Serializable";
 
 export type TransactionOptions = {
   isolationLevel?: IsolationLevel;

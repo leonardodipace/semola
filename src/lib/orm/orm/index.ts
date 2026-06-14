@@ -1,5 +1,7 @@
 import type { Adapter } from "../dialect/index.js";
 import { getDialect } from "../dialect/index.js";
+import { POSTGRES_SPEC } from "../dialect/postgres.js";
+import { SQLITE_SPEC } from "../dialect/sqlite.js";
 import type { Table } from "../table/types.js";
 import type {
   CreateManyOptions,
@@ -141,14 +143,22 @@ export const createOrm = <
     callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
     transactionOptions?: TransactionOptions,
   ): Promise<TResult> => {
-    const isolationLevel = transactionOptions?.isolationLevel
-      ? isolationLevelToSQL(transactionOptions.isolationLevel, options.adapter)
-      : undefined;
-
     let beginOptions = "";
 
-    if (isolationLevel) {
-      beginOptions = isolationLevel;
+    if (transactionOptions?.isolationLevel) {
+      const spec = options.adapter === "sqlite" ? SQLITE_SPEC : POSTGRES_SPEC;
+
+      const isolationSQL = spec.formatIsolationLevel(
+        transactionOptions.isolationLevel,
+      );
+
+      if (isolationSQL === null) {
+        throw new Error(
+          `Isolation level ${transactionOptions.isolationLevel} is not supported by ${options.adapter}`,
+        );
+      }
+
+      beginOptions = isolationSQL;
     }
 
     return await sql.begin(beginOptions, async (txSql) => {
@@ -183,34 +193,4 @@ export const createOrm = <
   };
 
   return orm;
-};
-
-const isolationLevelToSQL = (level: string, adapter: Adapter): string => {
-  if (adapter === "sqlite") {
-    switch (level) {
-      case "ReadUncommitted":
-        return "DEFERRED";
-      case "ReadCommitted":
-        return "DEFERRED";
-      case "RepeatableRead":
-        return "IMMEDIATE";
-      case "Serializable":
-        return "EXCLUSIVE";
-      default:
-        return "";
-    }
-  }
-
-  switch (level) {
-    case "ReadUncommitted":
-      return "ISOLATION LEVEL READ UNCOMMITTED";
-    case "ReadCommitted":
-      return "ISOLATION LEVEL READ COMMITTED";
-    case "RepeatableRead":
-      return "ISOLATION LEVEL REPEATABLE READ";
-    case "Serializable":
-      return "ISOLATION LEVEL SERIALIZABLE";
-    default:
-      return "";
-  }
 };
