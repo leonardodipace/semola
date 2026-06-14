@@ -148,6 +148,34 @@ const appendOperatorWhereClauses = (input: AppendOperatorWhereClausesInput) => {
   }
 
   for (const [op, operand] of entries) {
+    if (op === "in" || op === "notIn") {
+      if (!Array.isArray(operand)) {
+        throw new Error(
+          `Expected array for where operator: ${op} for field ${jsKey}`,
+        );
+      }
+
+      if (op === "in" && operand.length === 0) {
+        clauses.push(FALSE_WHERE_SQL);
+        continue;
+      }
+
+      if (op === "notIn" && operand.length === 0) {
+        continue;
+      }
+
+      const placeholders = operand.map(() => nextPlaceholder());
+      const keyword = op === "in" ? "IN" : "NOT IN";
+
+      clauses.push(`${sqlName} ${keyword} (${placeholders.join(", ")})`);
+
+      for (const item of operand) {
+        params.push(serializeColumnValue(column, item));
+      }
+
+      continue;
+    }
+
     const operator = OPERATORS[op as keyof typeof OPERATORS];
 
     if (!operator) {

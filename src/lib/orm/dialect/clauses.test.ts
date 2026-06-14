@@ -216,6 +216,128 @@ describe("clauses", () => {
     expect(nullWhere.params).toEqual([]);
   });
 
+  test("builds in and notIn operators with serialization", () => {
+    const createdAt = new Date("2025-01-01T00:00:00.000Z");
+    const where = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      where: {
+        id: { in: ["u-1", "u-2", "u-3"] },
+        firstName: { notIn: ["Blocked", "Deleted"] },
+        createdAt: { in: [createdAt] },
+        isActive: { notIn: [false] },
+      },
+    });
+
+    expect(where.sql).toBe(
+      '"id" IN (?, ?, ?) AND "first_name" NOT IN (?, ?) AND "created_at" IN (?) AND "is_active" NOT IN (?)',
+    );
+    expect(where.params).toEqual([
+      "u-1",
+      "u-2",
+      "u-3",
+      "Blocked",
+      "Deleted",
+      createdAt.toISOString(),
+      false,
+    ]);
+  });
+
+  test("builds in and notIn for enum and json columns", () => {
+    const eventsTable = defineTable("events", {
+      id: uuid("id").primaryKey().notNull(),
+      status: enumType("status", ["active", "inactive"]).notNull(),
+      payload: json("payload").notNull(),
+      meta: jsonb("meta").notNull(),
+    });
+    const payload = { type: "click" };
+    const meta = { source: "web" };
+    const where = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(POSTGRES_SPEC),
+      table: eventsTable,
+      where: {
+        status: { in: ["active", "inactive"], notIn: ["inactive"] },
+        payload: { in: [payload] },
+        meta: { notIn: [meta] },
+      },
+    });
+
+    expect(where.sql).toBe(
+      '"status" IN ($1, $2) AND "status" NOT IN ($3) AND "payload" IN ($4) AND "meta" NOT IN ($5)',
+    );
+    expect(where.params).toEqual([
+      "active",
+      "inactive",
+      "inactive",
+      JSON.stringify(payload),
+      JSON.stringify(meta),
+    ]);
+  });
+
+  test("treats empty in as unsatisfiable and empty notIn as a no-op", () => {
+    const emptyIn = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      where: {
+        id: { in: [] },
+      },
+    });
+
+    expect(emptyIn.sql).toBe("(1 = 0)");
+    expect(emptyIn.params).toEqual([]);
+
+    const emptyNotIn = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      where: {
+        id: { notIn: [] },
+      },
+    });
+
+    expect(emptyNotIn.sql).toBe("");
+    expect(emptyNotIn.params).toEqual([]);
+
+    const combined = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      where: {
+        id: "u-1",
+        firstName: { notIn: [] },
+      },
+    });
+
+    expect(combined.sql).toBe('"id" = ?');
+    expect(combined.params).toEqual(["u-1"]);
+  });
+
+  test("rejects non-array operands for in and notIn", () => {
+    expect(() =>
+      buildWhereClause({
+        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        table: usersTable,
+        where: {
+          id: {
+            // @ts-expect-error runtime guard
+            in: "u-1",
+          },
+        },
+      }),
+    ).toThrow("Expected array for where operator: in for field id");
+
+    expect(() =>
+      buildWhereClause({
+        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        table: usersTable,
+        where: {
+          id: {
+            // @ts-expect-error runtime guard
+            notIn: "u-1",
+          },
+        },
+      }),
+    ).toThrow("Expected array for where operator: notIn for field id");
+  });
+
   test("rejects unknown where keys and operators", () => {
     expect(() =>
       buildWhereClause({
