@@ -293,13 +293,38 @@ describe("relation helpers", () => {
     const invalidWhereOperator: Parameters<typeof orm.users.findMany>[0] = {
       where: {
         status: {
-          // @ts-expect-error enumType supports equals only
+          // @ts-expect-error enumType supports equals, in, and notIn only
           startsWith: "a",
         },
       },
     };
 
     expect(invalidWhereOperator).toBeDefined();
+
+    acceptCreateOptions<Parameters<typeof orm.users.findMany>[0]>({
+      where: {
+        status: { in: ["active", "inactive"] },
+      },
+    });
+
+    acceptCreateOptions<Parameters<typeof orm.users.findMany>[0]>({
+      where: {
+        status: { notIn: ["inactive"] },
+      },
+    });
+
+    const invalidInValue: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        status: {
+          in: [
+            // @ts-expect-error status only accepts active or inactive
+            "pending",
+          ],
+        },
+      },
+    };
+
+    expect(invalidInValue).toBeDefined();
 
     await orm.$raw.close();
   });
