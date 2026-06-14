@@ -186,15 +186,39 @@ type ColumnWhere<T extends Column> =
     ? ColumnWhereOperators<T>
     : ColumnValue<T> | ColumnWhereOperators<T>;
 
-type TableLogicalWhere<T extends Table> = {
-  [TKey in "$or"]?: TableWhere<T>[];
+type TableLogicalWhere<
+  T extends Table,
+  TRelations extends TableRelations = Record<never, never>,
+> = {
+  [TKey in "$or"]?: TableWhere<T, TRelations>[];
 } & {
-  [TKey in "$and" | "$not"]?: TableWhere<T> | TableWhere<T>[];
+  [TKey in "$and" | "$not"]?:
+    | TableWhere<T, TRelations>
+    | TableWhere<T, TRelations>[];
 };
 
-export type TableWhere<T extends Table> = TableLogicalWhere<T> & {
-  [TColumnName in keyof T["columns"]]?: ColumnWhere<T["columns"][TColumnName]>;
+type RelationWhereFilter<R extends HasMany<Table> | HasOne<Table>> = {
+  every?: TableWhere<RelationTable<R>>;
+  some?: TableWhere<RelationTable<R>>;
+  none?: TableWhere<RelationTable<R>>;
 };
+
+type IsOpenTableRelations<TRelations extends TableRelations> =
+  string extends keyof TRelations ? true : false;
+
+type TableRelationWhere<TRelations extends TableRelations> =
+  IsOpenTableRelations<TRelations> extends true
+    ? Record<never, never>
+    : {
+        [K in keyof TRelations]?: RelationWhereFilter<TRelations[K]>;
+      };
+
+export type TableWhere<
+  T extends Table,
+  TRelations extends TableRelations = Record<never, never>,
+> = TableLogicalWhere<T, TRelations> & {
+  [TColumnName in keyof T["columns"]]?: ColumnWhere<T["columns"][TColumnName]>;
+} & TableRelationWhere<TRelations>;
 
 export type TableSelect<T extends Table> = {
   [TColumnName in keyof T["columns"]]?: true;
@@ -257,7 +281,7 @@ export type FindManyOptions<
   TAllTables extends Record<string, Table> = Record<string, Table>,
   TAllRelations = Record<string, unknown>,
 > = {
-  where?: TableWhere<T>;
+  where?: TableWhere<T, TRelations>;
   select?: TableSelect<T>;
   orderBy?: TableOrderBy<T>;
   include?: TableInclude<TRelations, TAllTables, TAllRelations>;
@@ -440,13 +464,19 @@ export type CreateManyOptions<T extends Table> = {
   data: CreateData<T>[];
 };
 
-export type UpdateManyOptions<T extends Table> = {
-  where?: TableWhere<T>;
+export type UpdateManyOptions<
+  T extends Table,
+  TRelations extends TableRelations = TableRelations,
+> = {
+  where?: TableWhere<T, TRelations>;
   data: UpdateData<T>;
 };
 
-export type DeleteManyOptions<T extends Table> = {
-  where?: TableWhere<T>;
+export type DeleteManyOptions<
+  T extends Table,
+  TRelations extends TableRelations = TableRelations,
+> = {
+  where?: TableWhere<T, TRelations>;
 };
 
 type IncludedKeys<TInclude> = keyof {
@@ -646,7 +676,9 @@ export type TableClient<
     options: TOptions,
   ): Promise<UpdateResult<T, TRelations, TOptions, TAllTables, TAllRelations>>;
 
-  updateMany(options: UpdateManyOptions<T>): Promise<Array<TableRow<T>>>;
+  updateMany(
+    options: UpdateManyOptions<T, TRelations>,
+  ): Promise<Array<TableRow<T>>>;
 
   delete<
     const TOptions extends DeleteOptions<
@@ -659,5 +691,7 @@ export type TableClient<
     options: TOptions,
   ): Promise<DeleteResult<T, TRelations, TOptions, TAllTables, TAllRelations>>;
 
-  deleteMany(options: DeleteManyOptions<T>): Promise<Array<TableRow<T>>>;
+  deleteMany(
+    options: DeleteManyOptions<T, TRelations>,
+  ): Promise<Array<TableRow<T>>>;
 };
