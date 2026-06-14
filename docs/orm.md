@@ -148,13 +148,15 @@ const deletedUsers = await db.users.deleteMany({
 
 Pass a direct value for equality or an operator object for other comparisons.
 
-String operators: `equals`, `startsWith`, `endsWith`, `contains`
+String operators: `equals`, `startsWith`, `endsWith`, `contains`, `in`, `notIn`
 
-Number and date operators: `equals`, `gt`, `gte`, `lt`, `lte`
+Number and date operators: `equals`, `gt`, `gte`, `lt`, `lte`, `in`, `notIn`
 
-Boolean operators: `equals`
+Boolean operators: `equals`, `in`, `notIn`
 
-JSON operators: `equals`
+Enum operators: `equals`, `in`, `notIn`
+
+JSON operators: `equals`, `in`, `notIn`
 
 Logical operators:
 
