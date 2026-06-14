@@ -33,7 +33,7 @@ export class RetryCronJob implements RetryObserver {
 
   public constructor(options: RetryOptions) {
     this.options = options;
-    this.currentAttempt = 1;
+    this.currentAttempt = 0;
   }
 
   public async update(job: Cron, error: Error): Promise<void> {
@@ -47,17 +47,17 @@ export class RetryCronJob implements RetryObserver {
 
       if (this.options.onFailedAttempt) {
         const context: OnFailedAttemptContextType = {
-          attemptNumber: this.currentAttempt,
+          attemptNumber: this.currentAttempt + 1,
           delay,
           error,
-          retriesLeft: maxAttempts - (this.currentAttempt + 1),
+          retriesLeft: maxAttempts - this.currentAttempt,
         };
 
         await this.options.onFailedAttempt(context);
+        this.currentAttempt += 1;
       }
 
       await this.runDelay(delay);
-      this.currentAttempt += 1;
 
       return;
     }
