@@ -128,14 +128,19 @@ type ColumnValue<T extends Column> = T["_meta"]["isNullable"] extends false
 
 type NonNullableColumnValue<T extends Column> = Exclude<ColumnValue<T>, null>;
 
-type StringWhereOperators<T extends Column> = {
+type InWhereOperators<T extends Column> = {
+  in?: NonNullableColumnValue<T>[];
+  notIn?: NonNullableColumnValue<T>[];
+};
+
+type StringWhereOperators<T extends Column> = InWhereOperators<T> & {
   equals?: ColumnValue<T>;
   startsWith?: NonNullableColumnValue<T>;
   endsWith?: NonNullableColumnValue<T>;
   contains?: NonNullableColumnValue<T>;
 };
 
-type NumberWhereOperators<T extends Column> = {
+type NumberWhereOperators<T extends Column> = InWhereOperators<T> & {
   equals?: ColumnValue<T>;
   gt?: NonNullableColumnValue<T>;
   gte?: NonNullableColumnValue<T>;
@@ -143,11 +148,11 @@ type NumberWhereOperators<T extends Column> = {
   lte?: NonNullableColumnValue<T>;
 };
 
-type BooleanWhereOperators<T extends Column> = {
+type BooleanWhereOperators<T extends Column> = InWhereOperators<T> & {
   equals?: ColumnValue<T>;
 };
 
-type DateWhereOperators<T extends Column> = {
+type DateWhereOperators<T extends Column> = InWhereOperators<T> & {
   equals?: ColumnValue<T>;
   gt?: NonNullableColumnValue<T>;
   gte?: NonNullableColumnValue<T>;
@@ -155,11 +160,11 @@ type DateWhereOperators<T extends Column> = {
   lte?: NonNullableColumnValue<T>;
 };
 
-type EnumWhereOperators<T extends Column> = {
+type EnumWhereOperators<T extends Column> = InWhereOperators<T> & {
   equals?: ColumnValue<T>;
 };
 
-type JsonWhereOperators<T extends Column> = {
+type JsonWhereOperators<T extends Column> = InWhereOperators<T> & {
   equals?: ColumnValue<T>;
 };
 
