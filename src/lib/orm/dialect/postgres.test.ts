@@ -176,4 +176,65 @@ describe("postgres dialect", () => {
       'DELETE FROM "users" WHERE "is_active" = $1',
     );
   });
+
+  test("builds postgres statements for typical transaction operations", () => {
+    const usersBuilder = new DialectQueryBuilder({
+      spec: POSTGRES_SPEC,
+      table: usersTable,
+      relations: {},
+    });
+    const postsBuilder = new DialectQueryBuilder({
+      spec: POSTGRES_SPEC,
+      table: postsTable,
+      relations: {},
+    });
+
+    const createUser = usersBuilder.buildCreate({
+      data: {
+        id: "u-1",
+        firstName: "Alice",
+        createdAt: new Date("2025-01-01T00:00:00.000Z"),
+        isActive: true,
+      },
+    });
+    const createPost = postsBuilder.buildCreate({
+      data: {
+        id: "p-1",
+        title: "Hello",
+        authorId: "u-1",
+      },
+    });
+    const createManyPosts = postsBuilder.buildCreateMany({
+      data: [
+        { id: "p-1", title: "First", authorId: "u-1" },
+        { id: "p-2", title: "Second", authorId: "u-1" },
+      ],
+    });
+    const updateUser = usersBuilder.buildUpdate({
+      where: { id: "u-1" },
+      data: { firstName: "Alice Updated" },
+    });
+    const deleteUser = usersBuilder.buildDelete({
+      where: { id: "u-1" },
+    });
+
+    expect(createUser.statement).toBe(
+      'INSERT INTO "users" ("id", "first_name", "created_at", "is_active") VALUES ($1, $2, $3, $4) RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
+    );
+    expect(createPost.statement).toBe(
+      'INSERT INTO "posts" ("id", "title", "author_id") VALUES ($1, $2, $3) RETURNING "id" AS "id", "title" AS "title", "author_id" AS "authorId"',
+    );
+    expect(createPost.params).toEqual(["p-1", "Hello", "u-1"]);
+    expect(createManyPosts.statement).toBe(
+      'INSERT INTO "posts" ("id", "title", "author_id") VALUES ($1, $2, $3), ($4, $5, $6) RETURNING "id" AS "id", "title" AS "title", "author_id" AS "authorId"',
+    );
+    expect(updateUser.statement).toBe(
+      'UPDATE "users" SET "first_name" = $1 WHERE "id" = $2 RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
+    );
+    expect(updateUser.params).toEqual(["Alice Updated", "u-1"]);
+    expect(deleteUser.statement).toBe(
+      'DELETE FROM "users" WHERE "id" = $1 RETURNING "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
+    );
+    expect(deleteUser.params).toEqual(["u-1"]);
+  });
 });
