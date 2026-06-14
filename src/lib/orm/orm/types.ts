@@ -85,6 +85,36 @@ export type OrmClient<
   >;
 } & {
   $raw: Bun.SQL;
+  $transaction: <TResult>(
+    callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
+    options?: TransactionOptions,
+  ) => Promise<TResult>;
+};
+
+export type TransactionClient<
+  T extends Record<string, Table>,
+  R extends RelationsFor<T> = RelationsFor<T>,
+> = {
+  [TTableName in keyof T]: TableClient<
+    T[TTableName],
+    TableRelationsFor<R, TTableName>,
+    T,
+    R
+  >;
+} & {
+  $raw: Bun.SQL;
+};
+
+export type IsolationLevel =
+  | "ReadUncommitted"
+  | "ReadCommitted"
+  | "RepeatableRead"
+  | "Serializable";
+
+export type TransactionOptions = {
+  isolationLevel?: IsolationLevel;
+  timeout?: number;
+  maxWait?: number;
 };
 
 type ColumnRuntimeValue<T extends Column> =

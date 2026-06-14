@@ -18,6 +18,8 @@ import type {
   RelationsFor,
   TableClient,
   TableRelations,
+  TransactionClient,
+  TransactionOptions,
   UpdateManyOptions,
   UpdateOptions,
   UpdateResult,
@@ -135,5 +137,80 @@ export const createOrm = <
 
   orm.$raw = sql;
 
+  orm.$transaction = async <TResult>(
+    callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
+    transactionOptions?: TransactionOptions,
+  ): Promise<TResult> => {
+    const isolationLevel = transactionOptions?.isolationLevel
+      ? isolationLevelToSQL(transactionOptions.isolationLevel, options.adapter)
+      : undefined;
+
+    let beginOptions = "";
+
+    if (isolationLevel) {
+      beginOptions = isolationLevel;
+    }
+
+    return await sql.begin(beginOptions, async (txSql) => {
+      const txResultEntries: [string, TableClient<Table, TableRelations>][] =
+        [];
+
+      for (const [tableName, table] of Object.entries(options.tables)) {
+        const tableRelations = (options.relations?.[tableName] ??
+          {}) as TableRelations;
+
+        txResultEntries.push([
+          tableName,
+          createTableClient(
+            txSql,
+            table,
+            options.adapter,
+            tableRelations,
+            tableRelationsMap,
+          ),
+        ]);
+      }
+
+      const txClient = Object.fromEntries(txResultEntries) as TransactionClient<
+        T,
+        R
+      >;
+
+      txClient.$raw = txSql;
+
+      return await callback(txClient);
+    });
+  };
+
   return orm;
+};
+
+const isolationLevelToSQL = (level: string, adapter: Adapter): string => {
+  if (adapter === "sqlite") {
+    switch (level) {
+      case "ReadUncommitted":
+        return "DEFERRED";
+      case "ReadCommitted":
+        return "DEFERRED";
+      case "RepeatableRead":
+        return "IMMEDIATE";
+      case "Serializable":
+        return "EXCLUSIVE";
+      default:
+        return "";
+    }
+  }
+
+  switch (level) {
+    case "ReadUncommitted":
+      return "ISOLATION LEVEL READ UNCOMMITTED";
+    case "ReadCommitted":
+      return "ISOLATION LEVEL READ COMMITTED";
+    case "RepeatableRead":
+      return "ISOLATION LEVEL REPEATABLE READ";
+    case "Serializable":
+      return "ISOLATION LEVEL SERIALIZABLE";
+    default:
+      return "";
+  }
 };
