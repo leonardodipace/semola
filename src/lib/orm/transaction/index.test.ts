@@ -257,4 +257,38 @@ describe("$transaction", () => {
 
     await orm.$raw.close();
   });
+
+  test("rejects nested transactions started from the root client", async () => {
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+    });
+
+    await orm.$raw.unsafe(
+      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
+    );
+
+    await expect(
+      orm.$transaction(async (tx) => {
+        await tx.users.create({
+          data: {
+            id: "u1",
+            name: "Alice",
+            email: "alice@example.com",
+          },
+        });
+
+        await orm.$transaction(async () => {
+          return undefined;
+        });
+      }),
+    ).rejects.toThrow("cannot start a transaction within a transaction");
+
+    const users = await orm.users.findMany();
+
+    expect(users).toHaveLength(0);
+
+    await orm.$raw.close();
+  });
 });
