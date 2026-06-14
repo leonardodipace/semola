@@ -89,7 +89,7 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
       return await dialect.update<TOptions>(sql, options);
     },
 
-    updateMany: async (options: UpdateManyOptions<T>) => {
+    updateMany: async (options: UpdateManyOptions<T, TRelations>) => {
       return await dialect.updateMany(sql, options);
     },
 
@@ -99,7 +99,7 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
       return await dialect.delete<TOptions>(sql, options);
     },
 
-    deleteMany: async (options: DeleteManyOptions<T>) => {
+    deleteMany: async (options: DeleteManyOptions<T, TRelations>) => {
       return await dialect.deleteMany(sql, options);
     },
   };
