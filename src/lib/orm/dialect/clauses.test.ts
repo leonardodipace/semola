@@ -81,6 +81,33 @@ describe("clauses", () => {
     expect(where.params).toEqual([]);
   });
 
+  test("treats empty $and as a no-op", () => {
+    const where = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      where: {
+        $and: [],
+      },
+    });
+
+    expect(where.sql).toBe("");
+    expect(where.params).toEqual([]);
+  });
+
+  test("ignores empty $and when combined with column filters", () => {
+    const where = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      where: {
+        id: "u-1",
+        $and: [],
+      },
+    });
+
+    expect(where.sql).toBe('"id" = ?');
+    expect(where.params).toEqual(["u-1"]);
+  });
+
   test("treats tautological $or branches as always true", () => {
     const where = buildWhereClause({
       nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
