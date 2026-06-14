@@ -76,8 +76,8 @@ describe("$transaction", () => {
       "CREATE TABLE accounts (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, balance TEXT NOT NULL)",
     );
 
-    try {
-      await orm.$transaction(async (tx) => {
+    await expect(
+      orm.$transaction(async (tx) => {
         await tx.users.create({
           data: {
             id: "u1",
@@ -87,10 +87,8 @@ describe("$transaction", () => {
         });
 
         throw new Error("Rollback transaction");
-      });
-    } catch (error) {
-      expect((error as Error).message).toBe("Rollback transaction");
-    }
+      }),
+    ).rejects.toThrow("Rollback transaction");
 
     const users = await orm.users.findMany();
 
@@ -200,18 +198,24 @@ describe("$transaction", () => {
 
       expect(updated.name).toBe("Alice Updated");
 
+      const deleted = await tx.users.delete({
+        where: { id: "u1" },
+      });
+
+      expect(deleted.name).toBe("Alice Updated");
+
       const user = await tx.users.findUnique({
         where: { id: "u1" },
       });
 
-      expect(user?.name).toBe("Alice Updated");
+      expect(user).toBeNull();
     });
 
     const user = await orm.users.findUnique({
       where: { id: "u1" },
     });
 
-    expect(user?.name).toBe("Alice Updated");
+    expect(user).toBeNull();
 
     await orm.$raw.close();
   });

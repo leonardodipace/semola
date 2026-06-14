@@ -18,6 +18,7 @@ import type {
   RelationsFor,
   TableClient,
   TableRelations,
+  TableRelationsFor,
   TransactionClient,
   UpdateManyOptions,
   UpdateOptions,
@@ -102,6 +103,119 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
   };
 };
 
+type StringKeyOf<T extends object> = Extract<keyof T, string>;
+
+type ObjectEntries<T extends object> = {
+  [K in StringKeyOf<T>]: [K, T[K]];
+}[StringKeyOf<T>][];
+
+const toObjectEntries = <T extends object>(object: T): ObjectEntries<T> => {
+  const result: ObjectEntries<T> = [];
+
+  for (const key in object) {
+    if (!Object.hasOwn(object, key)) {
+      continue;
+    }
+
+    result.push([key, object[key]]);
+  }
+
+  return result;
+};
+
+const getTableRelations = <
+  T extends Record<string, Table>,
+  R extends RelationsFor<T>,
+  K extends StringKeyOf<T>,
+>(
+  relations: R | undefined,
+  tableName: K,
+): TableRelations => {
+  if (!relations) {
+    return {};
+  }
+
+  if (!Object.hasOwn(relations, tableName)) {
+    return {};
+  }
+
+  const tableRelations = relations[tableName];
+
+  if (!tableRelations) {
+    return {};
+  }
+
+  return tableRelations;
+};
+
+type OrmTableClients<
+  T extends Record<string, Table>,
+  R extends RelationsFor<T>,
+> = {
+  [K in keyof T]: TableClient<T[K], TableRelationsFor<R, K>>;
+};
+
+const buildTableClients = <
+  T extends Record<string, Table>,
+  R extends RelationsFor<T>,
+>(
+  tables: T,
+  relations: R | undefined,
+  sql: Bun.SQL,
+  adapter: Adapter,
+  tableRelationsMap: Map<Table, TableRelations>,
+): OrmTableClients<T, R> => {
+  const clients = Object.create(null);
+
+  for (const entry of toObjectEntries(tables)) {
+    const setTableClient = <K extends StringKeyOf<T>>(
+      tableName: K,
+      table: T[K],
+    ) => {
+      const tableRelations = getTableRelations(relations, tableName);
+
+      tableRelationsMap.set(table, tableRelations);
+      clients[tableName] = createTableClient(
+        sql,
+        table,
+        adapter,
+        tableRelations,
+        tableRelationsMap,
+      );
+    };
+
+    setTableClient(entry[0], entry[1]);
+  }
+
+  return clients;
+};
+
+const buildOrmClient = <
+  T extends Record<string, Table>,
+  R extends RelationsFor<T>,
+>(
+  tableClients: OrmTableClients<T, R>,
+  sql: Bun.SQL,
+  transaction: <TResult>(
+    callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
+  ) => Promise<TResult>,
+): OrmClient<T, R> => ({
+  ...tableClients,
+  $raw: sql,
+  $transaction: transaction,
+});
+
+const buildTransactionClient = <
+  T extends Record<string, Table>,
+  R extends RelationsFor<T>,
+>(
+  tableClients: OrmTableClients<T, R>,
+  sql: Bun.SQL,
+): TransactionClient<T, R> => ({
+  ...tableClients,
+  $raw: sql,
+});
+
 export const createOrm = <
   const T extends Record<string, Table>,
   const R extends RelationsFor<T>,
@@ -113,62 +227,35 @@ export const createOrm = <
   });
 
   const tableRelationsMap = new Map<Table, TableRelations>();
-  const resultEntries: [string, TableClient<Table, TableRelations>][] = [];
+  const tableClients = buildTableClients(
+    options.tables,
+    options.relations,
+    sql,
+    options.adapter,
+    tableRelationsMap,
+  );
 
-  for (const [tableName, table] of Object.entries(options.tables)) {
-    const tableRelations = (options.relations?.[tableName] ??
-      {}) as TableRelations;
+  const orm = buildOrmClient<T, R>(
+    tableClients,
+    sql,
+    async <TResult>(
+      callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
+    ): Promise<TResult> => {
+      return await sql.begin(async (txSql) => {
+        const txTableClients = buildTableClients(
+          options.tables,
+          options.relations,
+          txSql,
+          options.adapter,
+          tableRelationsMap,
+        );
 
-    tableRelationsMap.set(table, tableRelations);
-    resultEntries.push([
-      tableName,
-      createTableClient(
-        sql,
-        table,
-        options.adapter,
-        tableRelations,
-        tableRelationsMap,
-      ),
-    ]);
-  }
+        const txClient = buildTransactionClient<T, R>(txTableClients, txSql);
 
-  const orm = Object.fromEntries(resultEntries) as OrmClient<T, R>;
-
-  orm.$raw = sql;
-
-  orm.$transaction = async <TResult>(
-    callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
-  ): Promise<TResult> => {
-    return await sql.begin(async (txSql) => {
-      const txResultEntries: [string, TableClient<Table, TableRelations>][] =
-        [];
-
-      for (const [tableName, table] of Object.entries(options.tables)) {
-        const tableRelations = (options.relations?.[tableName] ??
-          {}) as TableRelations;
-
-        txResultEntries.push([
-          tableName,
-          createTableClient(
-            txSql,
-            table,
-            options.adapter,
-            tableRelations,
-            tableRelationsMap,
-          ),
-        ]);
-      }
-
-      const txClient = Object.fromEntries(txResultEntries) as TransactionClient<
-        T,
-        R
-      >;
-
-      txClient.$raw = txSql;
-
-      return await callback(txClient);
-    });
-  };
+        return await callback(txClient);
+      });
+    },
+  );
 
   return orm;
 };

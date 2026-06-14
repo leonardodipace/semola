@@ -66,7 +66,7 @@ type RelationsForTableByType<
   : Record<never, never>;
 
 // Raw relations lookup for a table by its JS name key.
-type TableRelationsFor<
+export type TableRelationsFor<
   TRelations,
   TTableName extends PropertyKey,
 > = TTableName extends keyof TRelations
