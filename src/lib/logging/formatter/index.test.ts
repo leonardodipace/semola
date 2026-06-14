@@ -1,4 +1,11 @@
-import { beforeAll, describe, expect, setSystemTime, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  describe,
+  expect,
+  setSystemTime,
+  test,
+} from "bun:test";
 import type { LogDataType, LogLevelType } from "../core/types.js";
 import {
   BaseFormatter,
@@ -10,6 +17,10 @@ import {
 
 beforeAll(() => {
   setSystemTime(new Date("2020-01-10T00:00:00.000Z"));
+});
+
+afterAll(() => {
+  setSystemTime();
 });
 
 const logTypes: LogLevelType[] = [
