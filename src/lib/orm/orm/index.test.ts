@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { date, enumType, string, uuid } from "../column/index.js";
+import {
+  boolean,
+  date,
+  enumType,
+  number,
+  string,
+  uuid,
+} from "../column/index.js";
 import type { Column } from "../column/types.js";
 import { defineTable } from "../table/index.js";
 import type { Table } from "../table/types.js";
@@ -626,6 +633,181 @@ describe("relation helpers", () => {
     const rows = await orm.users.findMany();
 
     expect(rows).toHaveLength(1);
+
+    await orm.$raw.close();
+  });
+});
+
+describe("relation where filters", () => {
+  const postsTable = defineTable("posts", {
+    id: uuid("id").primaryKey().notNull(),
+    title: string("title").notNull(),
+    published: boolean("published")
+      .notNull()
+      .default(() => false),
+    views: number("views")
+      .notNull()
+      .default(() => 0),
+    authorId: uuid("author_id")
+      .notNull()
+      .references(() => usersTable.columns.id),
+  });
+
+  const createOrmWithPosts = () =>
+    createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable, posts: postsTable },
+      relations: {
+        users: { posts: many(() => postsTable) },
+      },
+    });
+
+  const seedRelationFilterData = async (sql: Bun.SQL) => {
+    await sql.unsafe(
+      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE)",
+    );
+    await sql.unsafe(
+      "CREATE TABLE posts (id TEXT PRIMARY KEY, title TEXT NOT NULL, published INTEGER NOT NULL, views INTEGER NOT NULL, author_id TEXT NOT NULL)",
+    );
+    await sql.unsafe(
+      "INSERT INTO users VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?)",
+      [
+        "u1",
+        "Alice",
+        "alice@example.com",
+        "u2",
+        "Bob",
+        "bob@example.com",
+        "u3",
+        "Carol",
+        "carol@example.com",
+      ],
+    );
+    await sql.unsafe(
+      "INSERT INTO posts (id, title, published, views, author_id) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
+      [
+        "p1",
+        "Draft",
+        0,
+        10,
+        "u1",
+        "p2",
+        "Published",
+        1,
+        150,
+        "u1",
+        "p3",
+        "Popular",
+        1,
+        200,
+        "u2",
+        "p4",
+        "Quiet",
+        1,
+        5,
+        "u2",
+      ],
+    );
+  };
+
+  test("filters users where every post is published", async () => {
+    const orm = createOrmWithPosts();
+
+    await seedRelationFilterData(orm.$raw);
+
+    const users = await orm.users.findMany({
+      where: {
+        posts: { every: { published: true } },
+      },
+      select: { id: true },
+    });
+
+    expect(users.map((user) => user.id).sort()).toEqual(["u2", "u3"]);
+
+    await orm.$raw.close();
+  });
+
+  test("filters users where some post has more than 100 views", async () => {
+    const orm = createOrmWithPosts();
+
+    await seedRelationFilterData(orm.$raw);
+
+    const users = await orm.users.findMany({
+      where: {
+        posts: { some: { views: { gt: 100 } } },
+      },
+      select: { id: true },
+    });
+
+    expect(users.map((user) => user.id).sort()).toEqual(["u1", "u2"]);
+
+    await orm.$raw.close();
+  });
+
+  test("filters users with no posts", async () => {
+    const orm = createOrmWithPosts();
+
+    await seedRelationFilterData(orm.$raw);
+
+    const users = await orm.users.findMany({
+      where: {
+        posts: { none: {} },
+      },
+      select: { id: true },
+    });
+
+    expect(users).toEqual([{ id: "u3" }]);
+
+    await orm.$raw.close();
+  });
+
+  test("composes relation filters with column filters", async () => {
+    const orm = createOrmWithPosts();
+
+    await seedRelationFilterData(orm.$raw);
+
+    const users = await orm.users.findMany({
+      where: {
+        name: { startsWith: "A" },
+        posts: { some: { published: true } },
+      },
+      select: { id: true },
+    });
+
+    expect(users).toEqual([{ id: "u1" }]);
+
+    await orm.$raw.close();
+  });
+
+  test("relation where filters are typed on findMany", async () => {
+    const orm = createOrmWithPosts();
+
+    const valid: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        posts: { none: { published: false } },
+      },
+    };
+
+    const invalidRelation: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        // @ts-expect-error tasks is not a relation on users
+        tasks: { some: {} },
+      },
+    };
+
+    const invalidFilter: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        posts: {
+          // @ts-expect-error views is not a column on users
+          views: { gt: 1 },
+        },
+      },
+    };
+
+    expect(valid).toBeDefined();
+    expect(invalidRelation).toBeDefined();
+    expect(invalidFilter).toBeDefined();
 
     await orm.$raw.close();
   });

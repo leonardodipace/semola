@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { enumType, json, jsonb, uuid } from "../column/index.js";
+import { many } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
 import {
   buildOrderByClause,
@@ -15,7 +16,7 @@ import {
 } from "./clauses.js";
 import { POSTGRES_SPEC } from "./postgres.js";
 import { SQLITE_SPEC } from "./sqlite.js";
-import { usersTable } from "./test-fixtures.js";
+import { postsTable, usersTable } from "./test-fixtures.js";
 
 describe("clauses", () => {
   test("creates dialect placeholders", () => {
@@ -362,6 +363,93 @@ describe("clauses", () => {
     ).toThrow("Unknown where operator: near for field firstName");
   });
 
+  test("builds relation where filters with every, some, and none", () => {
+    const postsRelations = { posts: many(() => postsTable) };
+    const nextPlaceholder = createNextPlaceholder(SQLITE_SPEC);
+
+    const everyWhere = buildWhereClause({
+      nextPlaceholder,
+      table: usersTable,
+      relations: postsRelations,
+      parentAlias: '"users"',
+      where: {
+        posts: { every: { title: "Published" } },
+      },
+    });
+
+    expect(everyWhere.sql).toBe(
+      'NOT EXISTS (SELECT 1 FROM "posts" AS where_posts__posts WHERE where_posts__posts."author_id" = "users"."id" AND NOT ("title" = ?))',
+    );
+    expect(everyWhere.params).toEqual(["Published"]);
+
+    const someWhere = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      relations: postsRelations,
+      parentAlias: '"users"',
+      where: {
+        posts: { some: { title: "Hello" } },
+      },
+    });
+
+    expect(someWhere.sql).toBe(
+      'EXISTS (SELECT 1 FROM "posts" AS where_posts__posts WHERE where_posts__posts."author_id" = "users"."id" AND ("title" = ?))',
+    );
+    expect(someWhere.params).toEqual(["Hello"]);
+
+    const noneWhere = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      relations: postsRelations,
+      parentAlias: '"users"',
+      where: {
+        posts: { none: {} },
+      },
+    });
+
+    expect(noneWhere.sql).toBe(
+      'NOT EXISTS (SELECT 1 FROM "posts" AS where_posts__posts WHERE where_posts__posts."author_id" = "users"."id" AND ((1 = 1)))',
+    );
+    expect(noneWhere.params).toEqual([]);
+  });
+
+  test("composes relation where filters with column filters", () => {
+    const postsRelations = { posts: many(() => postsTable) };
+    const where = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      relations: postsRelations,
+      parentAlias: '"users"',
+      where: {
+        isActive: true,
+        posts: { some: { title: "Hello" } },
+      },
+    });
+
+    expect(where.sql).toBe(
+      '"is_active" = ? AND EXISTS (SELECT 1 FROM "posts" AS where_posts__posts WHERE where_posts__posts."author_id" = "users"."id" AND ("title" = ?))',
+    );
+    expect(where.params).toEqual([true, "Hello"]);
+  });
+
+  test("rejects invalid relation where filters", () => {
+    const postsRelations = { posts: many(() => postsTable) };
+
+    expect(() =>
+      buildWhereClause({
+        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        table: usersTable,
+        relations: postsRelations,
+        parentAlias: '"users"',
+        where: {
+          posts: { every: { title: "A" }, some: { title: "B" } },
+        },
+      }),
+    ).toThrow(
+      "Relation where filter for posts must include exactly one of every, some, or none",
+    );
+  });
+
   test("rejects invalid logical where values", () => {
     expect(() =>
       buildWhereClause({
@@ -379,10 +467,7 @@ describe("clauses", () => {
         nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
         table: usersTable,
         where: {
-          $or: [
-            // @ts-expect-error runtime guard
-            "bad",
-          ],
+          $or: ["bad"],
         },
       }),
     ).toThrow("$or where value must contain object filters");
