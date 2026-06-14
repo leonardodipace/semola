@@ -204,10 +204,10 @@ const appendOperatorWhereClauses = (input: AppendOperatorWhereClausesInput) => {
   }
 };
 
-const getRelationFilter = (
+const parseRelationFilters = (
   relationName: string,
   value: unknown,
-): ParsedRelationFilter => {
+): ParsedRelationFilter[] => {
   if (!isPlainObject(value)) {
     throw new Error(
       `Relation where filter for ${relationName} must be an object`,
@@ -215,29 +215,27 @@ const getRelationFilter = (
   }
 
   const filter = value as Record<string, unknown>;
-  const keys = RELATION_FILTER_KEYS.filter((key) => key in filter);
+  const filters: ParsedRelationFilter[] = [];
 
-  if (keys.length !== 1) {
+  for (const filterKey of RELATION_FILTER_KEYS) {
+    if (!(filterKey in filter)) continue;
+
+    const nestedWhere = filter[filterKey];
+
+    if (!isPlainObject(nestedWhere)) {
+      throw new Error(`Relation where filter ${filterKey} must be an object`);
+    }
+
+    filters.push({ key: filterKey, where: nestedWhere as TableWhere<Table> });
+  }
+
+  if (filters.length === 0) {
     throw new Error(
-      `Relation where filter for ${relationName} must include exactly one of every, some, or none`,
+      `Relation where filter for ${relationName} must include at least one of every, some, or none`,
     );
   }
 
-  const key = keys[0];
-
-  if (!key) {
-    throw new Error(
-      `Relation where filter for ${relationName} must include exactly one of every, some, or none`,
-    );
-  }
-
-  const nestedWhere = filter[key];
-
-  if (!isPlainObject(nestedWhere)) {
-    throw new Error(`Relation where filter ${key} must be an object`);
-  }
-
-  return { key, where: nestedWhere as TableWhere<Table> };
+  return filters;
 };
 
 const isRelationFilterValue = (value: unknown) => {
@@ -249,7 +247,7 @@ const isRelationFilterValue = (value: unknown) => {
     if (key in filter) return true;
   }
 
-  return false;
+  return Object.keys(filter).length === 0;
 };
 
 const buildRelationForeignKeyCondition = (
@@ -278,11 +276,11 @@ const buildRelationForeignKeyCondition = (
   return `${relationAlias}.${quoteIdentifier(target.sqlName)} = ${parentAlias}.${quoteIdentifier(localForeignKey.sqlName)}`;
 };
 
-const appendRelationWhereClause = <
+const appendRelationFilterClause = <
   T extends Table,
   R extends TableRelations = Record<never, never>,
 >(
-  input: AppendRelationWhereClauseInput<T, R>,
+  input: AppendRelationWhereClauseInput<T, R> & ParsedRelationFilter,
 ) => {
   const {
     clauses,
@@ -292,14 +290,14 @@ const appendRelationWhereClause = <
     table,
     relation,
     relationName,
-    value,
+    key,
+    where: nestedWhere,
   } = input;
 
   if (!parentAlias) {
     throw new Error("parentAlias is required for relation where filters");
   }
 
-  const { key, where: nestedWhere } = getRelationFilter(relationName, value);
   const relationTable = relation._table;
   const relationAlias = `where_${relationName}__${relationTable.sqlName}`;
   const fkCondition = buildRelationForeignKeyCondition({
@@ -339,6 +337,25 @@ const appendRelationWhereClause = <
   clauses.push(
     `NOT EXISTS (SELECT 1 FROM ${relationFrom} WHERE ${fkCondition} AND NOT (${nestedCondition}))`,
   );
+};
+
+const appendRelationWhereClause = <
+  T extends Table,
+  R extends TableRelations = Record<never, never>,
+>(
+  input: AppendRelationWhereClauseInput<T, R>,
+) => {
+  const { parentAlias, relationName, value } = input;
+
+  if (!parentAlias) {
+    throw new Error("parentAlias is required for relation where filters");
+  }
+
+  const filters = parseRelationFilters(relationName, value);
+
+  for (const filter of filters) {
+    appendRelationFilterClause({ ...input, ...filter, parentAlias });
+  }
 };
 
 const appendWhereClause = <T extends Table, R extends TableRelations>(

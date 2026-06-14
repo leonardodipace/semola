@@ -475,6 +475,27 @@ describe("clauses", () => {
     expect(relationWhere.params).toEqual(["alpha"]);
   });
 
+  test("combines multiple relation where filters on the same relation", () => {
+    const postsRelations = { posts: many(() => postsTable) };
+    const where = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      relations: postsRelations,
+      parentAlias: '"users"',
+      where: {
+        posts: {
+          none: { title: "Spam" },
+          every: { title: "Published" },
+        },
+      },
+    });
+
+    expect(where.sql).toBe(
+      'NOT EXISTS (SELECT 1 FROM "posts" AS where_posts__posts WHERE where_posts__posts."author_id" = "users"."id" AND NOT ("title" = ?)) AND NOT EXISTS (SELECT 1 FROM "posts" AS where_posts__posts WHERE where_posts__posts."author_id" = "users"."id" AND ("title" = ?))',
+    );
+    expect(where.params).toEqual(["Published", "Spam"]);
+  });
+
   test("rejects invalid relation where filters", () => {
     const postsRelations = { posts: many(() => postsTable) };
 
@@ -485,11 +506,12 @@ describe("clauses", () => {
         relations: postsRelations,
         parentAlias: '"users"',
         where: {
-          posts: { every: { title: "A" }, some: { title: "B" } },
+          // @ts-expect-error relation filter must include a quantifier
+          posts: {},
         },
       }),
     ).toThrow(
-      "Relation where filter for posts must include exactly one of every, some, or none",
+      "Relation where filter for posts must include at least one of every, some, or none",
     );
   });
 

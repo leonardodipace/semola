@@ -204,7 +204,7 @@ const users = await db.users.findMany({
 });
 ```
 
-Relation filters filter parent rows based on related records. Use exactly one of `every`, `some`, or `none` per relation:
+Relation filters filter parent rows based on related records. Use one or more of `every`, `some`, and `none` per relation; multiple quantifiers are combined with AND:
 
 - `every`: all related records match the nested filter (parents with no related records also match)
 - `some`: at least one related record matches
@@ -226,6 +226,15 @@ const popularAuthors = await db.users.findMany({
 const usersWithoutPosts = await db.users.findMany({
   where: {
     posts: { none: {} },
+  },
+});
+
+const carefulAuthors = await db.users.findMany({
+  where: {
+    posts: {
+      none: { views: { gt: 100 } },
+      every: { likes: { lte: 50 } },
+    },
   },
 });
 ```

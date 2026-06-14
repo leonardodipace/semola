@@ -201,7 +201,11 @@ type RelationWhereFilter<R extends HasMany<Table> | HasOne<Table>> = {
   every?: TableWhere<RelationTable<R>>;
   some?: TableWhere<RelationTable<R>>;
   none?: TableWhere<RelationTable<R>>;
-};
+} & (
+  | { every: TableWhere<RelationTable<R>> }
+  | { some: TableWhere<RelationTable<R>> }
+  | { none: TableWhere<RelationTable<R>> }
+);
 
 type IsOpenTableRelations<TRelations extends TableRelations> =
   string extends keyof TRelations ? true : false;
