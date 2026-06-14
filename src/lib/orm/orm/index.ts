@@ -1,7 +1,5 @@
 import type { Adapter } from "../dialect/index.js";
 import { getDialect } from "../dialect/index.js";
-import { POSTGRES_SPEC } from "../dialect/postgres.js";
-import { SQLITE_SPEC } from "../dialect/sqlite.js";
 import type { Table } from "../table/types.js";
 import type {
   CreateManyOptions,
@@ -21,7 +19,6 @@ import type {
   TableClient,
   TableRelations,
   TransactionClient,
-  TransactionOptions,
   UpdateManyOptions,
   UpdateOptions,
   UpdateResult,
@@ -141,27 +138,8 @@ export const createOrm = <
 
   orm.$transaction = async <TResult>(
     callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
-    transactionOptions?: TransactionOptions,
   ): Promise<TResult> => {
-    let beginOptions = "";
-
-    if (transactionOptions?.isolationLevel) {
-      const spec = options.adapter === "sqlite" ? SQLITE_SPEC : POSTGRES_SPEC;
-
-      const isolationSQL = spec.formatIsolationLevel(
-        transactionOptions.isolationLevel,
-      );
-
-      if (isolationSQL === null) {
-        throw new Error(
-          `Isolation level ${transactionOptions.isolationLevel} is not supported by ${options.adapter}`,
-        );
-      }
-
-      beginOptions = isolationSQL;
-    }
-
-    return await sql.begin(beginOptions, async (txSql) => {
+    return await sql.begin(async (txSql) => {
       const txResultEntries: [string, TableClient<Table, TableRelations>][] =
         [];
 

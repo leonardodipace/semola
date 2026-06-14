@@ -26,12 +26,6 @@ import type { Table } from "../table/types.js";
 
 export type Adapter = "sqlite" | "postgres";
 
-export type IsolationLevel =
-  | "ReadUncommitted"
-  | "ReadCommitted"
-  | "RepeatableRead"
-  | "Serializable";
-
 export type DialectSpec = {
   name: Adapter;
   // SQLite: ignores index, returns `?`. Postgres: returns `$${index}`.
@@ -48,9 +42,6 @@ export type DialectSpec = {
   // COALESCE fallback when a `hasMany` subquery returns no rows.
   // SQLite: `'[]'`. Postgres: `'[]'::jsonb`.
   emptyJsonArrayLiteral: string;
-  // Maps isolation level to database-specific transaction options.
-  // SQLite: only supports Serializable. Postgres: supports all levels.
-  formatIsolationLevel: (level: IsolationLevel) => string | null;
 };
 
 export type SqlFragment = {

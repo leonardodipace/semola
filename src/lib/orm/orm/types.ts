@@ -1,6 +1,5 @@
 import type { BaseColumn, Column } from "../column/types.js";
 import type { Adapter } from "../dialect/index.js";
-import type { IsolationLevel } from "../dialect/types.js";
 import type { Table } from "../table/types.js";
 
 export type HasMany<T extends Table> = {
@@ -88,7 +87,6 @@ export type OrmClient<
   $raw: Bun.SQL;
   $transaction: <TResult>(
     callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
-    options?: TransactionOptions,
   ) => Promise<TResult>;
 };
 
@@ -104,12 +102,6 @@ export type TransactionClient<
   >;
 } & {
   $raw: Bun.SQL;
-};
-
-export type TransactionOptions = {
-  isolationLevel?: IsolationLevel;
-  timeout?: number;
-  maxWait?: number;
 };
 
 type ColumnRuntimeValue<T extends Column> =
