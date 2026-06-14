@@ -434,7 +434,7 @@ describe("Cron", () => {
       const handler = () => Promise.resolve();
 
       const retry = new RetryCronJob({
-        maxAttempts: 1,
+        maxAttempts: 0,
         onError: (err) => {
           expect(err.error).toBeInstanceOf(Error);
           expect(err.error.message).toBe("A generic error");
@@ -465,7 +465,7 @@ describe("Cron", () => {
     test("should successfully throw an error when onError() callback is not defined", async () => {
       const handler = () => Promise.resolve();
       const retry = new RetryCronJob({
-        maxAttempts: 1,
+        maxAttempts: 0,
       });
 
       const cron = new Cron({
@@ -496,11 +496,21 @@ describe("Cron", () => {
       const retry = new RetryCronJob({
         maxAttempts: 3,
         onFailedAttempt: ({ attemptNumber, delay, error, retriesLeft }) => {
-          expect(attemptNumber).toBe(1);
+          if (attemptNumber === 1) {
+            expect(attemptNumber).toBe(1);
+            expect(delay).toBeGreaterThan(0);
+            expect(error).toBeInstanceOf(Error);
+            expect(error.message).toBe("A generic error");
+            expect(retriesLeft).toBe(3);
+
+            return;
+          }
+
+          expect(attemptNumber).toBe(2);
           expect(delay).toBeGreaterThan(0);
           expect(error).toBeInstanceOf(Error);
           expect(error.message).toBe("A generic error");
-          expect(retriesLeft).toBe(1);
+          expect(retriesLeft).toBe(2);
         },
       });
 
@@ -515,6 +525,9 @@ describe("Cron", () => {
       expect(cron.getStatus()).toBe("idle");
 
       cron.run();
+      expect(cron.getStatus()).toBe("running");
+
+      await retry.update(cron, new Error("A generic error"));
       expect(cron.getStatus()).toBe("running");
 
       await retry.update(cron, new Error("A generic error"));
