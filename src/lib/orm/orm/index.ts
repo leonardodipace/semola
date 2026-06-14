@@ -14,11 +14,13 @@ import type {
   FindUniqueOptions,
   HasMany,
   HasOne,
+  ObjectEntries,
   OrmClient,
+  OrmTableClients,
   RelationsFor,
+  StringKeyOf,
   TableClient,
   TableRelations,
-  TableRelationsFor,
   TransactionClient,
   UpdateManyOptions,
   UpdateOptions,
@@ -103,12 +105,6 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
   };
 };
 
-type StringKeyOf<T extends object> = Extract<keyof T, string>;
-
-type ObjectEntries<T extends object> = {
-  [K in StringKeyOf<T>]: [K, T[K]];
-}[StringKeyOf<T>][];
-
 const toObjectEntries = <T extends object>(object: T): ObjectEntries<T> => {
   const result: ObjectEntries<T> = [];
 
@@ -146,13 +142,6 @@ const getTableRelations = <
   }
 
   return tableRelations;
-};
-
-type OrmTableClients<
-  T extends Record<string, Table>,
-  R extends RelationsFor<T>,
-> = {
-  [K in keyof T]: TableClient<T[K], TableRelationsFor<R, K>>;
 };
 
 const buildTableClients = <

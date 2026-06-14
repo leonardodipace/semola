@@ -104,6 +104,19 @@ export type TransactionClient<
   $raw: Bun.SQL;
 };
 
+export type StringKeyOf<T extends object> = Extract<keyof T, string>;
+
+export type ObjectEntries<T extends object> = {
+  [K in StringKeyOf<T>]: [K, T[K]];
+}[StringKeyOf<T>][];
+
+export type OrmTableClients<
+  T extends Record<string, Table>,
+  R extends RelationsFor<T>,
+> = {
+  [K in keyof T]: TableClient<T[K], TableRelationsFor<R, K>>;
+};
+
 type ColumnRuntimeValue<T extends Column> =
   T extends BaseColumn<boolean, boolean, boolean, boolean, infer TValue>
     ? TValue
