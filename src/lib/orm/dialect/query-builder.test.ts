@@ -41,6 +41,25 @@ describe("DialectQueryBuilder", () => {
     ]);
   });
 
+  test("builds findMany with relation where filters", () => {
+    const builder = new DialectQueryBuilder({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: { posts: many(() => postsTable) },
+    });
+    const query = builder.buildFindMany({
+      where: {
+        posts: { none: {} },
+        isActive: true,
+      },
+    });
+
+    expect(query.statement).toBe(
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" WHERE NOT EXISTS (SELECT 1 FROM "posts" AS where_posts__posts WHERE where_posts__posts."author_id" = "users"."id" AND ((1 = 1))) AND "is_active" = ?',
+    );
+    expect(query.params).toEqual([true]);
+  });
+
   test("builds findUnique and findFirst with LIMIT 1", () => {
     const builder = new DialectQueryBuilder({
       spec: SQLITE_SPEC,

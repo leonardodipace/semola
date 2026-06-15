@@ -17,6 +17,7 @@ import type {
   TableInclude,
   TableRelations,
   TableRow,
+  TableSelect,
   TableWhere,
   UpdateManyOptions,
   UpdateOptions,
@@ -82,27 +83,33 @@ export type AppendOperatorWhereClausesInput = {
   value: Record<string, unknown>;
 };
 
-export type AppendWhereClauseInput<T extends Table> =
-  BuildWhereClauseInput<T> & {
-    clauses: string[];
-    params: unknown[];
-    jsKey: string;
-    value: unknown;
-  };
+export type AppendWhereClauseInput<
+  T extends Table,
+  R extends TableRelations = Record<never, never>,
+> = BuildWhereClauseInput<T, R> & {
+  clauses: string[];
+  params: unknown[];
+  jsKey: string;
+  value: unknown;
+};
 
-export type AppendLogicalWhereClauseInput<T extends Table> =
-  BuildWhereClauseInput<T> & {
-    clauses: string[];
-    params: unknown[];
-    jsKey: LogicalWhereKey;
-    value: unknown;
-  };
+export type AppendLogicalWhereClauseInput<
+  T extends Table,
+  R extends TableRelations = Record<never, never>,
+> = BuildWhereClauseInput<T, R> & {
+  clauses: string[];
+  params: unknown[];
+  jsKey: LogicalWhereKey;
+  value: unknown;
+};
 
-export type CollectLogicalWhereClausesInput<T extends Table> =
-  BuildWhereClauseInput<T> & {
-    jsKey: LogicalWhereKey;
-    value: unknown;
-  };
+export type CollectLogicalWhereClausesInput<
+  T extends Table,
+  R extends TableRelations = Record<never, never>,
+> = BuildWhereClauseInput<T, R> & {
+  jsKey: LogicalWhereKey;
+  value: unknown;
+};
 
 export type IncludeDescriptor = {
   name: string;
@@ -183,10 +190,38 @@ export type BuildSetClausesInput<T extends Table> = {
   data: Record<string, unknown>;
 };
 
-export type BuildWhereClauseInput<T extends Table> = {
+export type BuildWhereClauseInput<
+  T extends Table,
+  R extends TableRelations = Record<never, never>,
+> = {
   nextPlaceholder: () => string;
   table: T;
-  where?: TableWhere<T>;
+  where?: TableWhere<T, R>;
+  relations?: R;
+  parentAlias?: string;
+};
+
+export type RelationFilterKey = "every" | "none" | "some";
+
+export type ParsedRelationFilter = {
+  key: RelationFilterKey;
+  where: TableWhere<Table>;
+};
+
+export type BuildRelationForeignKeyConditionInput = {
+  parentTable: Table;
+  parentAlias: string;
+  relation: HasMany<Table> | HasOne<Table>;
+  relationTable: Table;
+  relationAlias: string;
+};
+
+export type AppendRelationWhereClauseInput<
+  T extends Table,
+  R extends TableRelations = Record<never, never>,
+> = AppendWhereClauseInput<T, R> & {
+  relation: HasMany<Table> | HasOne<Table>;
+  relationName: string;
 };
 
 export type ResolveHasOneForeignKeyColumnInput = {
@@ -242,6 +277,31 @@ export type BuildSelectStatementInput = {
   pagination: string;
 };
 
+export type QueryBuilderInput<T extends Table, R extends TableRelations> = {
+  spec: DialectSpec;
+  table: T;
+  relations: R;
+  tableRelationsMap?: Map<Table, TableRelations>;
+};
+
+export type QueryBuilderSelectInput<
+  T extends Table,
+  R extends TableRelations,
+> = {
+  where?: TableWhere<T, R>;
+  select?: TableSelect<T>;
+  include?: TableInclude<R>;
+};
+
+export type QueryBuilderReturningInput<
+  T extends Table,
+  R extends TableRelations,
+> = {
+  where: TableWhere<T, R>;
+  select?: TableSelect<T>;
+  include?: TableInclude<R>;
+};
+
 export type CoerceRelationItemsInput = {
   value: unknown;
   table: Table;
@@ -291,7 +351,7 @@ export type Dialect<
 
   updateMany(
     sql: Bun.SQL,
-    options: UpdateManyOptions<T>,
+    options: UpdateManyOptions<T, TRelations>,
   ): Promise<Array<TableRow<T>>>;
 
   delete<const TOptions extends DeleteOptions<T, TRelations>>(
@@ -301,6 +361,6 @@ export type Dialect<
 
   deleteMany(
     sql: Bun.SQL,
-    options: DeleteManyOptions<T>,
+    options: DeleteManyOptions<T, TRelations>,
   ): Promise<Array<TableRow<T>>>;
 };

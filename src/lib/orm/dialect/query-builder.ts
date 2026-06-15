@@ -8,8 +8,6 @@ import type {
   FindUniqueOptions,
   TableInclude,
   TableRelations,
-  TableSelect,
-  TableWhere,
   UpdateManyOptions,
   UpdateOptions,
 } from "../orm/types.js";
@@ -29,26 +27,13 @@ import {
   validateFindUniqueWhere,
 } from "./clauses.js";
 import { buildIncludeClause } from "./relations.js";
-import type { DialectSpec, ReturningQuery } from "./types.js";
-
-type QueryBuilderInput<T extends Table, R extends TableRelations> = {
-  spec: DialectSpec;
-  table: T;
-  relations: R;
-  tableRelationsMap?: Map<Table, TableRelations>;
-};
-
-type SelectInput<T extends Table, R extends TableRelations> = {
-  where?: TableWhere<T>;
-  select?: TableSelect<T>;
-  include?: TableInclude<R>;
-};
-
-type ReturningInput<T extends Table, R extends TableRelations> = {
-  where: TableWhere<T>;
-  select?: TableSelect<T>;
-  include?: TableInclude<R>;
-};
+import type {
+  DialectSpec,
+  QueryBuilderInput,
+  QueryBuilderReturningInput,
+  QueryBuilderSelectInput,
+  ReturningQuery,
+} from "./types.js";
 
 export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
   public readonly spec: DialectSpec;
@@ -257,7 +242,7 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
     return { statement, params, includeDescriptors: [] };
   }
 
-  public buildUpdateMany(options: UpdateManyOptions<T>): ReturningQuery {
+  public buildUpdateMany(options: UpdateManyOptions<T, R>): ReturningQuery {
     const nextPlaceholder = createNextPlaceholder(this.spec);
     const { setClauses, params } = buildSetClauses({
       nextPlaceholder,
@@ -273,6 +258,8 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
       nextPlaceholder,
       table: this.table,
       where: options.where,
+      relations: this.relations,
+      parentAlias: quoteIdentifier(this.table.sqlName),
     });
 
     let statement = `UPDATE ${quoteIdentifier(this.table.sqlName)} SET ${setClauses.join(", ")}`;
@@ -289,12 +276,14 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
     return { statement, params, includeDescriptors: [] };
   }
 
-  public buildDeleteMany(options: DeleteManyOptions<T>): ReturningQuery {
+  public buildDeleteMany(options: DeleteManyOptions<T, R>): ReturningQuery {
     const nextPlaceholder = createNextPlaceholder(this.spec);
     const where = buildWhereClause({
       nextPlaceholder,
       table: this.table,
       where: options.where,
+      relations: this.relations,
+      parentAlias: quoteIdentifier(this.table.sqlName),
     });
 
     let statement = `DELETE FROM ${quoteIdentifier(this.table.sqlName)}`;
@@ -330,13 +319,15 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
 
   private buildSelectIncludeWhere(
     nextPlaceholder: () => string,
-    input: SelectInput<T, R>,
+    input: QueryBuilderSelectInput<T, R>,
   ) {
     const include = this.buildInclude(nextPlaceholder, input.include);
     const where = buildWhereClause({
       nextPlaceholder,
       table: this.table,
       where: input.where,
+      relations: this.relations,
+      parentAlias: quoteIdentifier(this.table.sqlName),
     });
     const columns = buildSelectColumns(this.table, input.select);
     const selectColumns = buildSelectList(columns, include);
@@ -346,12 +337,14 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
 
   private buildWhereIncludeReturning(
     nextPlaceholder: () => string,
-    input: ReturningInput<T, R>,
+    input: QueryBuilderReturningInput<T, R>,
   ) {
     const where = buildWhereClause({
       nextPlaceholder,
       table: this.table,
       where: input.where,
+      relations: this.relations,
+      parentAlias: quoteIdentifier(this.table.sqlName),
     });
     const columns = buildSelectColumns(this.table, input.select);
     const include = this.buildInclude(nextPlaceholder, input.include);
