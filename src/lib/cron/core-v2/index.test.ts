@@ -642,7 +642,7 @@ describe("Cron", () => {
         expect(negativeZeroError).toBeInstanceOf(TypeError);
 
         const retryNegativeInfinity = new RetryCronJob({
-          maxAttempts: -Infinity,
+          maxAttempts: Number.NEGATIVE_INFINITY,
         });
 
         const [negativeInfinityError] = await mightThrow(
@@ -674,6 +674,83 @@ describe("Cron", () => {
 
         expect(nanError).toBeDefined();
         expect(nanError).toBeInstanceOf(TypeError);
+      });
+
+      test("should raise an error when passing a non-integer number", async () => {
+        const handler = () => Promise.resolve();
+        const decimalNumberRetry = new RetryCronJob({
+          maxAttempts: 1.5,
+        });
+
+        const cron = new Cron({
+          name: "retry-job",
+          schedule: "0 0 * * *",
+          handler,
+        });
+
+        expect(cron).toBeDefined();
+        expect(cron.getStatus()).toBe("idle");
+
+        const [decimalNumberError] = await mightThrow(
+          decimalNumberRetry.update(cron, new Error("A generic error")),
+        );
+
+        expect(decimalNumberError).toBeDefined();
+        expect(decimalNumberError).toBeInstanceOf(TypeError);
+      });
+
+      test("should not raise an error when passing a floating point numbers that can be represented as integer", async () => {
+        const handler = () => Promise.resolve();
+        const decimalNumberRetry = new RetryCronJob({
+          maxAttempts: 5.0,
+        });
+
+        const cron = new Cron({
+          name: "retry-job",
+          schedule: "0 0 * * *",
+          handler,
+        });
+
+        expect(cron).toBeDefined();
+        expect(cron.getStatus()).toBe("idle");
+
+        const [decimalNumberError] = await mightThrow(
+          decimalNumberRetry.update(cron, new Error("A generic error")),
+        );
+
+        expect(decimalNumberError).toBeNull();
+      });
+
+      test("should not raise an error when passing 'Infinity'", async () => {
+        const handler = () => Promise.resolve();
+        const infinityRetry = new RetryCronJob({
+          maxAttempts: Number.POSITIVE_INFINITY,
+        });
+
+        const cron = new Cron({
+          name: "retry-job",
+          schedule: "0 0 * * *",
+          handler,
+        });
+
+        expect(cron).toBeDefined();
+        expect(cron.getStatus()).toBe("idle");
+
+        const [infinityError] = await mightThrow(
+          infinityRetry.update(cron, new Error("A generic error")),
+        );
+
+        expect(infinityError).toBeNull();
+
+        const secondInfinityRetry = new RetryCronJob({
+          maxAttempts: Infinity,
+        });
+
+        const [secondInfinityError] = await mightThrow(
+          secondInfinityRetry.update(cron, new Error("A generic error")),
+        );
+
+        expect(secondInfinityError).toBeNull();
       });
     });
   });
