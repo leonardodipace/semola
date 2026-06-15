@@ -699,7 +699,7 @@ describe("Cron", () => {
         expect(decimalNumberError).toBeInstanceOf(TypeError);
       });
 
-      test("should not raise an error when passing a floating point numbers that can be represented as integer", async () => {
+      test("should not raise an error when passing a floating point number that can be represented as integer", async () => {
         const handler = () => Promise.resolve();
         const decimalNumberRetry = new RetryCronJob({
           maxAttempts: 5.0,
