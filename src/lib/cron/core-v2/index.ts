@@ -63,9 +63,9 @@ export class RetryCronJob implements RetryObserver {
         };
 
         await this.options.onFailedAttempt(context);
-        this.currentAttempt += 1;
       }
 
+      this.currentAttempt += 1;
       await this.runDelay(delay);
 
       return;
