@@ -721,7 +721,7 @@ describe("Cron", () => {
         expect(decimalNumberError).toBeNull();
       });
 
-      test("should not raise an error when passing 'Infinity'", async () => {
+      test("should raise an error when passing 'Infinity'", async () => {
         const handler = () => Promise.resolve();
         const infinityRetry = new RetryCronJob({
           maxAttempts: Number.POSITIVE_INFINITY,
@@ -740,7 +740,8 @@ describe("Cron", () => {
           infinityRetry.update(cron, new Error("A generic error")),
         );
 
-        expect(infinityError).toBeNull();
+        expect(infinityError).toBeDefined();
+        expect(infinityError).toBeInstanceOf(TypeError);
 
         const secondInfinityRetry = new RetryCronJob({
           maxAttempts: Infinity,
@@ -750,7 +751,8 @@ describe("Cron", () => {
           secondInfinityRetry.update(cron, new Error("A generic error")),
         );
 
-        expect(secondInfinityError).toBeNull();
+        expect(secondInfinityError).toBeDefined();
+        expect(secondInfinityError).toBeInstanceOf(TypeError);
       });
     });
   });
