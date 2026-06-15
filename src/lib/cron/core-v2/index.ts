@@ -86,11 +86,17 @@ export class RetryCronJob implements RetryObserver {
   private checkAttempts() {
     const { maxAttempts } = this.options;
 
+    const isInfinity = maxAttempts === Number.POSITIVE_INFINITY;
+    const isInteger = Number.isSafeInteger(maxAttempts);
+    const isValidPositiveInteger = isInfinity || isInteger;
+
     const isNegativeZero = Object.is(maxAttempts, -0);
     const isNaturalNumber = maxAttempts >= 0;
     const isNan = Number.isNaN(maxAttempts);
 
-    return isNaturalNumber && !isNan && !isNegativeZero;
+    return (
+      isNaturalNumber && isValidPositiveInteger && !isNan && !isNegativeZero
+    );
   }
 
   private runOnRetryError(error: Error) {
