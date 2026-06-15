@@ -42,7 +42,7 @@ export class RetryCronJob implements RetryObserver {
     if (!this.checkAttempts()) {
       job.stop();
       throw new InvalidRetryError(
-        "Exppected 'maxRetries' to be greater or equal than zero or not NaN",
+        "Expected 'maxRetries' to be greater or equal than zero or not NaN",
       );
     }
 
