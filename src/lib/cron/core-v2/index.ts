@@ -31,7 +31,7 @@ const ALIASES: Record<ScheduleType, string> = {
 
 class InvalidRetryError extends TypeError {}
 
-class CommonCronUtilies {
+class CommonCronUtilities {
   public getExpression(options: CronBaseOptions) {
     return ALIASES[options.schedule] || options.schedule;
   }
@@ -166,13 +166,13 @@ export class Cron extends JobWithRetry {
   private status: CronStatus;
   private cron: Bun.CronJob | null = null;
   private manager?: RetryManager;
-  private common: CommonCronUtilies;
+  private common: CommonCronUtilities;
 
   public constructor(options: CronOptions) {
     super();
     this.options = options;
     this.status = "idle";
-    this.common = new CommonCronUtilies();
+    this.common = new CommonCronUtilities();
 
     if (this.options.retry) {
       this.manager = new RetryManager();
@@ -258,11 +258,11 @@ export class Cron extends JobWithRetry {
 
 export class CronOS {
   private options: CronOSOptions;
-  private common: CommonCronUtilies;
+  private common: CommonCronUtilities;
 
   public constructor(options: CronOSOptions) {
     this.options = options;
-    this.common = new CommonCronUtilies();
+    this.common = new CommonCronUtilities();
   }
 
   public async run() {
