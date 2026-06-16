@@ -71,7 +71,7 @@ export class RetryCronJob implements RetryObserver {
     if (!this.checkAttempts()) {
       job.stop();
       throw new InvalidRetryError(
-        "Expected 'maxRetries' to be a non-negative integer or Infinity",
+        "Expected 'maxAttempts' to be a non-negative integer or Infinity",
       );
     }
 
