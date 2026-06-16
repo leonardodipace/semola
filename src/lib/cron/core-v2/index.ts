@@ -1,6 +1,8 @@
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
 import {
+  type CronBaseOptions,
   type CronOptions,
+  type CronOSOptions,
   type CronStatus,
   type ErrorMetadataType,
   type JobPublisher,
@@ -28,6 +30,33 @@ const ALIASES: Record<ScheduleType, string> = {
 } as const;
 
 class InvalidRetryError extends TypeError {}
+
+class CommonCronUtilies {
+  public getExpression(options: CronBaseOptions) {
+    return ALIASES[options.schedule] || options.schedule;
+  }
+
+  public getJobName(options: CronBaseOptions) {
+    return options.name;
+  }
+
+  public next(options: CronBaseOptions, from?: Date | number) {
+    const { schedule } = options;
+    const exprToParse = this.resolveSchedule(schedule);
+
+    const [parseError, nextMatch] = mightThrowSync(() =>
+      Bun.cron.parse(exprToParse, from),
+    );
+
+    if (parseError) throw parseError;
+
+    return nextMatch;
+  }
+
+  public resolveSchedule(schedule: ScheduleType) {
+    return schedule === "@minutely" ? MINUTELY_EXPR : schedule;
+  }
+}
 
 export class RetryCronJob implements RetryObserver {
   private options: RetryOptions;
@@ -137,11 +166,13 @@ export class Cron extends JobWithRetry {
   private status: CronStatus;
   private cron: Bun.CronJob | null = null;
   private manager?: RetryManager;
+  private common: CommonCronUtilies;
 
   public constructor(options: CronOptions) {
     super();
     this.options = options;
     this.status = "idle";
+    this.common = new CommonCronUtilies();
 
     if (this.options.retry) {
       this.manager = new RetryManager();
@@ -162,7 +193,7 @@ export class Cron extends JobWithRetry {
 
     const { schedule, handler } = this.options;
     const [scheduleFormatErr, cron] = mightThrowSync(() => {
-      const expr = schedule === "@minutely" ? MINUTELY_EXPR : schedule;
+      const expr = this.common.resolveSchedule(schedule);
 
       return Bun.cron(expr, async () => {
         const [handlerError] = await mightThrow(
@@ -198,14 +229,6 @@ export class Cron extends JobWithRetry {
     this.status = "idle";
   }
 
-  public getExpression() {
-    return ALIASES[this.options.schedule] || this.options.schedule;
-  }
-
-  public getJobName() {
-    return this.options.name;
-  }
-
   public ref() {
     if (this.status !== "running") return;
     if (!this.cron) return;
@@ -220,16 +243,48 @@ export class Cron extends JobWithRetry {
     this.cron.unref();
   }
 
+  public getExpression() {
+    return this.common.getExpression(this.options);
+  }
+
+  public getJobName() {
+    return this.common.getJobName(this.options);
+  }
+
   public next(from?: Date | number) {
-    const { schedule } = this.options;
-    const exprToParse = schedule === "@minutely" ? MINUTELY_EXPR : schedule;
+    return this.common.next(this.options, from);
+  }
+}
 
-    const [parseError, nextMatch] = mightThrowSync(() =>
-      Bun.cron.parse(exprToParse, from),
-    );
+export class CronOS {
+  private options: CronOSOptions;
+  private common: CommonCronUtilies;
 
-    if (parseError) throw parseError;
+  public constructor(options: CronOSOptions) {
+    this.options = options;
+    this.common = new CommonCronUtilies();
+  }
 
-    return nextMatch;
+  public async run() {
+    const { path, schedule, name } = this.options;
+    const expr = this.common.resolveSchedule(schedule);
+
+    await Bun.cron(path, expr, name);
+  }
+
+  public async stop() {
+    await Bun.cron.remove(this.options.name);
+  }
+
+  public getExpression() {
+    return this.common.getExpression(this.options);
+  }
+
+  public getJobName() {
+    return this.common.getJobName(this.options);
+  }
+
+  public next(from?: Date | number) {
+    return this.common.next(this.options, from);
   }
 }
