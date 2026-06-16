@@ -25,11 +25,18 @@ export type RetryOptions = {
   retryOnError?: (error: Error) => boolean;
 };
 
-export type CronOptions = {
+export type CronBaseOptions = {
   name: string;
   schedule: ScheduleType;
+};
+
+export type CronOptions = CronBaseOptions & {
   handler: () => unknown;
   retry?: RetryObserver;
+};
+
+export type CronOSOptions = CronBaseOptions & {
+  path: string;
 };
 
 export type CronStatus = "idle" | "running";
