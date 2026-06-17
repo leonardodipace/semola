@@ -146,6 +146,7 @@ type NumberWhereOperators<T extends Column> = InWhereOperators<T> & {
   gte?: NonNullableColumnValue<T>;
   lt?: NonNullableColumnValue<T>;
   lte?: NonNullableColumnValue<T>;
+  between?: [NonNullableColumnValue<T>, NonNullableColumnValue<T>];
 };
 
 type BooleanWhereOperators<T extends Column> = InWhereOperators<T> & {
@@ -158,6 +159,7 @@ type DateWhereOperators<T extends Column> = InWhereOperators<T> & {
   gte?: NonNullableColumnValue<T>;
   lt?: NonNullableColumnValue<T>;
   lte?: NonNullableColumnValue<T>;
+  between?: [NonNullableColumnValue<T>, NonNullableColumnValue<T>];
 };
 
 type EnumWhereOperators<T extends Column> = InWhereOperators<T> & {

@@ -150,7 +150,9 @@ Pass a direct value for equality or an operator object for other comparisons.
 
 String operators: `equals`, `startsWith`, `endsWith`, `contains`, `in`, `notIn`
 
-Number and date operators: `equals`, `gt`, `gte`, `lt`, `lte`, `in`, `notIn`
+Number and date operators: `equals`, `gt`, `gte`, `lt`, `lte`, `between`, `in`, `notIn`
+
+`between` accepts a 2-element tuple `[min, max]` for an inclusive range on number and date columns.
 
 Boolean operators: `equals`, `in`, `notIn`
 
@@ -175,7 +177,8 @@ Edge cases:
 ```typescript
 const users = await db.users.findMany({
   where: {
-    age: { gte: 18 },
+    age: { between: [18, 65] },
+    createdAt: { between: [startDate, endDate] },
     name: { startsWith: "A" },
   },
   orderBy: { name: "desc" },

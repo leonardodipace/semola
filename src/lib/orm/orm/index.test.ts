@@ -308,6 +308,17 @@ describe("relation helpers", () => {
 
     expect(invalidWhereOperator).toBeDefined();
 
+    const invalidBetweenOnEnum: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        status: {
+          // @ts-expect-error enumType does not support between
+          between: ["active", "inactive"],
+        },
+      },
+    };
+
+    expect(invalidBetweenOnEnum).toBeDefined();
+
     acceptCreateOptions<Parameters<typeof orm.users.findMany>[0]>({
       where: {
         status: { in: ["active", "inactive"] },
@@ -789,6 +800,12 @@ describe("relation where filters", () => {
       },
     };
 
+    const validBetween: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        posts: { some: { views: { between: [100, 500] } } },
+      },
+    };
+
     const invalidRelation: Parameters<typeof orm.users.findMany>[0] = {
       where: {
         // @ts-expect-error tasks is not a relation on users
@@ -805,9 +822,27 @@ describe("relation where filters", () => {
       },
     };
 
+    const invalidBetweenValue: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        posts: {
+          some: {
+            views: {
+              between: [
+                // @ts-expect-error views is a number column
+                "100",
+                500,
+              ],
+            },
+          },
+        },
+      },
+    };
+
     expect(valid).toBeDefined();
+    expect(validBetween).toBeDefined();
     expect(invalidRelation).toBeDefined();
     expect(invalidFilter).toBeDefined();
+    expect(invalidBetweenValue).toBeDefined();
 
     await orm.$raw.close();
   });
