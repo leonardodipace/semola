@@ -1,3 +1,4 @@
+import assert from "node:assert";
 import { mightThrow, mightThrowSync } from "../errors/index.js";
 import {
   CancelledError,
@@ -19,18 +20,54 @@ import type {
   WorkflowStartOptions,
   WorkflowStartResult,
   WorkflowStatus,
+  WorkflowStepErrorRecord,
 } from "./types.js";
 
 const DEFAULT_LOCK_TTL = 5 * 60 * 1000;
+const DEFAULT_RETRIES = 3;
+const DEFAULT_RETRY_BASE_DELAY = 1000;
+const DEFAULT_RETRY_MULTIPLIER = 2;
+const DEFAULT_RETRY_MAX_DELAY = 30000;
 
 const now = () => Date.now();
 
-const toErrorMessage = (error: unknown) => {
-  if (error instanceof Error) {
-    return error.message;
+const delay = async (
+  ms: number,
+  signal: AbortSignal,
+  isCancelled?: () => Promise<boolean>,
+) => {
+  if (signal.aborted) {
+    throw new CancelledError(
+      "Workflow execution was aborted during retry backoff",
+    );
   }
 
-  return String(error);
+  const deadline = now() + ms;
+  const pollInterval = 50;
+
+  while (now() < deadline) {
+    if (signal.aborted) {
+      throw new CancelledError(
+        "Workflow execution was aborted during retry backoff",
+      );
+    }
+
+    if (isCancelled) {
+      const cancelled = await isCancelled();
+
+      if (cancelled) {
+        throw new CancelledError(
+          "Workflow execution was cancelled during retry backoff",
+        );
+      }
+    }
+
+    const remaining = deadline - now();
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, Math.min(pollInterval, remaining));
+    });
+  }
 };
 
 const envelopeSerialize = (value: unknown) => {
@@ -70,10 +107,49 @@ const knownStatuses: WorkflowStatus[] = [
 class WorkflowDefinition<TInput, TResult> {
   private options: WorkflowOptions<TInput, TResult>;
   private lockTTL: number;
+  private retries: number;
+  private retryBaseDelay: number;
+  private retryMultiplier: number;
+  private retryMaxDelay: number;
 
   public constructor(options: WorkflowOptions<TInput, TResult>) {
     this.options = options;
     this.lockTTL = options.lockTTL ?? DEFAULT_LOCK_TTL;
+    this.retries = options.retries ?? DEFAULT_RETRIES;
+    this.retryBaseDelay =
+      options.retryBackoff?.baseDelay ?? DEFAULT_RETRY_BASE_DELAY;
+    this.retryMultiplier =
+      options.retryBackoff?.multiplier ?? DEFAULT_RETRY_MULTIPLIER;
+    this.retryMaxDelay =
+      options.retryBackoff?.maxDelay ?? DEFAULT_RETRY_MAX_DELAY;
+
+    assert.ok(
+      Number.isFinite(this.retries) && this.retries >= 0,
+      "Invalid retries: must be a non-negative finite number",
+    );
+    assert.ok(
+      Number.isFinite(this.retryBaseDelay) && this.retryBaseDelay > 0,
+      "Invalid retryBackoff.baseDelay: must be a positive finite number",
+    );
+    assert.ok(
+      Number.isFinite(this.retryMultiplier) && this.retryMultiplier > 0,
+      "Invalid retryBackoff.multiplier: must be a positive finite number",
+    );
+    assert.ok(
+      Number.isFinite(this.retryMaxDelay) && this.retryMaxDelay > 0,
+      "Invalid retryBackoff.maxDelay: must be a positive finite number",
+    );
+  }
+
+  private runHook<T>(hook: () => T | Promise<T>) {
+    return mightThrow(Promise.resolve().then(() => hook()));
+  }
+
+  private computeBackoffDelay(attempt: number) {
+    return Math.min(
+      this.retryBaseDelay * this.retryMultiplier ** (attempt - 1),
+      this.retryMaxDelay,
+    );
   }
 
   public async start(input: TInput, options?: WorkflowStartOptions) {
@@ -287,6 +363,15 @@ class WorkflowDefinition<TInput, TResult> {
       }
     }, renewInterval);
 
+    if (this.options.hooks?.onStart) {
+      await this.runHook(() =>
+        this.options.hooks?.onStart?.({
+          executionId,
+          input,
+        }),
+      );
+    }
+
     const step = async <TStep>(
       name: string,
       handler: (
@@ -294,14 +379,9 @@ class WorkflowDefinition<TInput, TResult> {
         signal: AbortSignal,
       ) => TStep | Promise<TStep>,
     ) => {
-      const cancelled = await this.isCancelled(executionId);
-
-      if (cancelled) {
+      await this.throwIfCancelled(executionId, () => {
         controller.abort();
-        throw new CancelledError(
-          `Workflow execution ${executionId} was cancelled`,
-        );
-      }
+      });
 
       const cachedStep = await this.readStepOutput<TStep>(executionId, name);
 
@@ -309,20 +389,19 @@ class WorkflowDefinition<TInput, TResult> {
         return cachedStep.value as TStep;
       }
 
-      const [stepError, output] = await mightThrow(
-        Promise.resolve(handler(input, controller.signal)),
+      return this.runStepWithRetries(
+        executionId,
+        input,
+        name,
+        handler,
+        controller.signal,
+        () => {
+          controller.abort();
+        },
       );
-
-      if (stepError) {
-        throw stepError;
-      }
-
-      await this.writeStepOutput(executionId, name, output);
-
-      return output as TStep;
     };
 
-    const [handlerError, result] = await mightThrow(
+    const handlerOutcome = await mightThrow(
       Promise.resolve(
         this.options.handler({
           input,
@@ -349,23 +428,34 @@ class WorkflowDefinition<TInput, TResult> {
       await this.setMeta(executionId, "updatedAt", String(cancelledAt));
       await this.setMeta(executionId, "cancelledAt", String(cancelledAt));
 
+      if (this.options.hooks?.onCancel) {
+        await this.runHook(() =>
+          this.options.hooks?.onCancel?.({
+            executionId,
+            input,
+          }),
+        );
+      }
+
       await this.releaseLock(executionId, token);
 
       return { executionId, status: "cancelled" } satisfies WorkflowStartResult;
     }
 
+    const [handlerError, result] = handlerOutcome;
+
     if (handlerError) {
       const failedAt = now();
 
       await this.setMeta(executionId, "status", "failed");
-      await this.setMeta(executionId, "error", toErrorMessage(handlerError));
+      await this.setMeta(executionId, "error", handlerError.message);
       await this.setMeta(executionId, "updatedAt", String(failedAt));
       await this.setMeta(executionId, "failedAt", String(failedAt));
 
       await this.releaseLock(executionId, token);
 
       throw new ExecutionError(
-        `Workflow execution ${executionId} failed: ${toErrorMessage(handlerError)}`,
+        `Workflow execution ${executionId} failed: ${handlerError.message}`,
       );
     }
 
@@ -377,11 +467,7 @@ class WorkflowDefinition<TInput, TResult> {
       const failedAt = now();
 
       await this.setMeta(executionId, "status", "failed");
-      await this.setMeta(
-        executionId,
-        "error",
-        toErrorMessage(serializeResultError),
-      );
+      await this.setMeta(executionId, "error", serializeResultError.message);
       await this.setMeta(executionId, "updatedAt", String(failedAt));
       await this.setMeta(executionId, "failedAt", String(failedAt));
 
@@ -401,9 +487,115 @@ class WorkflowDefinition<TInput, TResult> {
     await this.setMeta(executionId, "updatedAt", String(completedAt));
     await this.setMeta(executionId, "completedAt", String(completedAt));
 
+    if (this.options.hooks?.onComplete) {
+      await this.runHook(() =>
+        this.options.hooks?.onComplete?.({
+          executionId,
+          input,
+          result,
+        }),
+      );
+    }
+
     await this.releaseLock(executionId, token);
 
     return { executionId, status: "completed" } satisfies WorkflowStartResult;
+  }
+
+  private async throwIfCancelled(executionId: string, abort: () => void) {
+    const cancelled = await this.isCancelled(executionId);
+
+    if (cancelled) {
+      abort();
+      throw new CancelledError(
+        `Workflow execution ${executionId} was cancelled`,
+      );
+    }
+  }
+
+  private async runStepWithRetries<TStep>(
+    executionId: string,
+    input: TInput,
+    stepName: string,
+    handler: (
+      inputValue: TInput,
+      signal: AbortSignal,
+    ) => TStep | Promise<TStep>,
+    signal: AbortSignal,
+    abort: () => void,
+  ) {
+    let attempt = 1;
+
+    const errorHistory: WorkflowStepErrorRecord[] = [];
+
+    while (true) {
+      await this.throwIfCancelled(executionId, abort);
+
+      const stepOutcome = await mightThrow(
+        Promise.resolve(handler(input, signal)),
+      );
+
+      const [stepError, output] = stepOutcome;
+
+      if (!stepError) {
+        await this.writeStepOutput(executionId, stepName, output);
+
+        return output;
+      }
+
+      const errorMsg = stepError.message;
+
+      errorHistory.push({
+        attempt,
+        error: errorMsg,
+        timestamp: now(),
+      });
+
+      if (attempt <= this.retries) {
+        const nextRetryDelayMs = this.computeBackoffDelay(attempt);
+
+        if (this.options.hooks?.onRetry) {
+          await this.runHook(() =>
+            this.options.hooks?.onRetry?.({
+              executionId,
+              input,
+              stepName,
+              error: errorMsg,
+              attempt,
+              nextRetryDelayMs,
+              retriesRemaining: this.retries - attempt,
+            }),
+          );
+        }
+
+        const [delayError] = await mightThrow(
+          delay(nextRetryDelayMs, signal, () => this.isCancelled(executionId)),
+        );
+
+        if (delayError) {
+          throw delayError;
+        }
+
+        attempt++;
+
+        continue;
+      }
+
+      if (this.options.hooks?.onError) {
+        await this.runHook(() =>
+          this.options.hooks?.onError?.({
+            executionId,
+            input,
+            stepName,
+            error: errorMsg,
+            totalAttempts: attempt,
+            errorHistory,
+          }),
+        );
+      }
+
+      throw stepError;
+    }
   }
 
   private async acquireLock(executionId: string, token: string) {
@@ -546,7 +738,7 @@ class WorkflowDefinition<TInput, TResult> {
 
     if (serializeError) {
       throw new SerializationError(
-        `Unable to serialize ${label}: ${toErrorMessage(serializeError)}`,
+        `Unable to serialize ${label}: ${serializeError.message}`,
       );
     }
 
@@ -566,7 +758,7 @@ class WorkflowDefinition<TInput, TResult> {
 
     if (result[0]) {
       throw new SerializationError(
-        `Unable to deserialize ${label}: ${toErrorMessage(result[0])}`,
+        `Unable to deserialize ${label}: ${result[0].message}`,
       );
     }
 
@@ -850,10 +1042,15 @@ export type {
   Workflow,
   WorkflowExecution,
   WorkflowHandlerContext,
+  WorkflowHooks,
   WorkflowMeta,
   WorkflowMetaField,
   WorkflowOptions,
+  WorkflowRetryBackoff,
   WorkflowStartOptions,
   WorkflowStartResult,
   WorkflowStatus,
+  WorkflowStepErrorContext,
+  WorkflowStepErrorRecord,
+  WorkflowStepRetryContext,
 } from "./types.js";

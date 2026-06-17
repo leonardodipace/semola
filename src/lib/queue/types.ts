@@ -41,6 +41,12 @@ export type ParseErrorContext = {
   timestamp: number;
 };
 
+export type QueueRetryBackoff = {
+  baseDelay?: number;
+  multiplier?: number;
+  maxDelay?: number;
+};
+
 export type QueueOptions<T> = {
   name: string;
   redis: Bun.RedisClient;
@@ -50,6 +56,7 @@ export type QueueOptions<T> = {
   onError?: (context: ErrorContext<T>) => void | Promise<void>;
   onParseError?: (context: ParseErrorContext) => void | Promise<void>;
   retries?: number;
+  retryBackoff?: QueueRetryBackoff;
   timeout?: number;
   concurrency?: number;
   pollInterval?: number;

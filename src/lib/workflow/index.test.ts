@@ -262,6 +262,12 @@ const createRedis = () => {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const fastRetryBackoff = {
+  baseDelay: 1,
+  multiplier: 2,
+  maxDelay: 10,
+};
+
 const createWorkflowWithEchoResult = (
   name: string,
   redis: Bun.RedisClient,
@@ -280,6 +286,39 @@ const createWorkflowWithEchoResult = (
       });
 
       return value;
+    },
+  });
+};
+
+const createTwoStepFailResumeWorkflow = (
+  name: string,
+  redis: Bun.RedisClient,
+  executedSteps: string[],
+) => {
+  let shouldFail = true;
+
+  return defineWorkflow<{ id: number }, string>({
+    name,
+    redis,
+    retries: 0,
+    handler: async ({ input, step }) => {
+      await step("step-1", async () => {
+        executedSteps.push(`step-1:${input.id}`);
+        return "ok";
+      });
+
+      await step("step-2", async () => {
+        executedSteps.push(`step-2:${input.id}`);
+
+        if (shouldFail) {
+          shouldFail = false;
+          throw new Error("crash");
+        }
+
+        return "ok";
+      });
+
+      return "done";
     },
   });
 };
@@ -352,31 +391,11 @@ describe("workflow", () => {
     const redis = createRedis();
     const executedSteps: string[] = [];
 
-    let shouldFail = true;
-
-    const workflow = defineWorkflow<{ id: number }, string>({
-      name: "resume",
+    const workflow = createTwoStepFailResumeWorkflow(
+      "resume",
       redis,
-      handler: async ({ input, step }) => {
-        await step("step-1", async () => {
-          executedSteps.push(`step-1:${input.id}`);
-          return "ok";
-        });
-
-        await step("step-2", async () => {
-          executedSteps.push(`step-2:${input.id}`);
-
-          if (shouldFail) {
-            shouldFail = false;
-            throw new Error("crash");
-          }
-
-          return "ok";
-        });
-
-        return "done";
-      },
-    });
+      executedSteps,
+    );
 
     await expect(
       workflow.start({ id: 10 }, { executionId: "exec-1" }),
@@ -416,6 +435,7 @@ describe("workflow", () => {
     const workflow = defineWorkflow<{ id: number }, string>({
       name: "cancel",
       redis,
+      retries: 0,
       handler: async ({ step }) => {
         await step("first", async () => "ok");
 
@@ -858,6 +878,7 @@ describe("workflow", () => {
       const workflow = defineWorkflow<{ id: number }, string>({
         name: "cancel-twice",
         redis,
+        retries: 0,
         handler: async ({ step }) => {
           await step("one", async () => {
             if (shouldFail) {
@@ -975,6 +996,7 @@ describe("workflow", () => {
       const workflow = defineWorkflow<{ id: number }, string>({
         name: "get-cancelled",
         redis,
+        retries: 0,
         handler: async ({ step }) => {
           await step("one", async () => {
             if (shouldFail) {
@@ -1148,6 +1170,366 @@ describe("workflow", () => {
       });
 
       expect(signalAborted).toBe(true);
+    });
+  });
+
+  describe("hooks and retries", () => {
+    test("retries step after transient failure", async () => {
+      const redis = createRedis();
+      let stepAttempts = 0;
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "retry-success",
+        redis,
+        retries: 2,
+        retryBackoff: fastRetryBackoff,
+        handler: async ({ step }) => {
+          await step("flaky", async () => {
+            stepAttempts++;
+
+            if (stepAttempts < 3) {
+              throw new Error("transient");
+            }
+
+            return "ok";
+          });
+
+          return "done";
+        },
+      });
+
+      const result = await workflow.run({ id: 1 });
+
+      expect(result).toBe("done");
+      expect(stepAttempts).toBe(3);
+    });
+
+    test("calls onRetry with correct context", async () => {
+      const redis = createRedis();
+      const retryContexts: Array<{
+        stepName: string;
+        attempt: number;
+        nextRetryDelayMs: number;
+        retriesRemaining: number;
+      }> = [];
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "on-retry",
+        redis,
+        retries: 2,
+        retryBackoff: fastRetryBackoff,
+        hooks: {
+          onRetry: (context) => {
+            retryContexts.push({
+              stepName: context.stepName,
+              attempt: context.attempt,
+              nextRetryDelayMs: context.nextRetryDelayMs,
+              retriesRemaining: context.retriesRemaining,
+            });
+          },
+        },
+        handler: async ({ step }) => {
+          await step("flaky", async () => {
+            throw new Error("always fail");
+          });
+
+          return "done";
+        },
+      });
+
+      await expect(workflow.start({ id: 1 })).rejects.toMatchObject({
+        name: "ExecutionError",
+      });
+
+      expect(retryContexts.length).toBe(2);
+      expect(retryContexts[0]?.stepName).toBe("flaky");
+      expect(retryContexts[0]?.attempt).toBe(1);
+      expect(retryContexts[0]?.nextRetryDelayMs).toBe(1);
+      expect(retryContexts[0]?.retriesRemaining).toBe(1);
+      expect(retryContexts[1]?.attempt).toBe(2);
+      expect(retryContexts[1]?.nextRetryDelayMs).toBe(2);
+      expect(retryContexts[1]?.retriesRemaining).toBe(0);
+    });
+
+    test("calls onError when retries are exhausted", async () => {
+      const redis = createRedis();
+      const errorContexts: Array<{
+        stepName: string;
+        totalAttempts: number;
+        errorHistoryLength: number;
+      }> = [];
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "on-error",
+        redis,
+        retries: 1,
+        retryBackoff: fastRetryBackoff,
+        hooks: {
+          onError: (context) => {
+            errorContexts.push({
+              stepName: context.stepName,
+              totalAttempts: context.totalAttempts,
+              errorHistoryLength: context.errorHistory.length,
+            });
+          },
+        },
+        handler: async ({ step }) => {
+          await step("flaky", async () => {
+            throw new Error("permanent fail");
+          });
+
+          return "done";
+        },
+      });
+
+      await expect(
+        workflow.start({ id: 1 }, { executionId: "on-error-1" }),
+      ).rejects.toMatchObject({ name: "ExecutionError" });
+
+      const execution = await workflow.get("on-error-1");
+
+      expect(execution.status).toBe("failed");
+      expect(errorContexts.length).toBe(1);
+      expect(errorContexts[0]?.stepName).toBe("flaky");
+      expect(errorContexts[0]?.totalAttempts).toBe(2);
+      expect(errorContexts[0]?.errorHistoryLength).toBe(2);
+    });
+
+    test("does not call onRetry when step succeeds on first try", async () => {
+      const redis = createRedis();
+      let onRetryCalls = 0;
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "no-retry",
+        redis,
+        hooks: {
+          onRetry: () => {
+            onRetryCalls++;
+          },
+        },
+        handler: async ({ step }) => {
+          await step("stable", async () => "ok");
+
+          return "done";
+        },
+      });
+
+      await workflow.run({ id: 1 });
+
+      expect(onRetryCalls).toBe(0);
+    });
+
+    test("calls lifecycle hooks on start, complete, and cancel", async () => {
+      const redis = createRedis();
+      const events: string[] = [];
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "lifecycle-hooks",
+        redis,
+        retries: 0,
+        hooks: {
+          onStart: () => {
+            events.push("start");
+          },
+          onComplete: () => {
+            events.push("complete");
+          },
+          onCancel: () => {
+            events.push("cancel");
+          },
+        },
+        handler: async ({ executionId, step }) => {
+          await step("work", async () => "ok");
+
+          if (events.length === 1) {
+            await workflow.cancel(executionId);
+          }
+
+          return "done";
+        },
+      });
+
+      const startResult = await workflow.start(
+        { id: 1 },
+        { executionId: "lifecycle-1" },
+      );
+
+      expect(startResult.status).toBe("cancelled");
+      expect(events).toEqual(["start", "cancel"]);
+
+      events.length = 0;
+
+      const workflowComplete = defineWorkflow<{ id: number }, string>({
+        name: "lifecycle-complete",
+        redis,
+        hooks: {
+          onStart: () => {
+            events.push("start");
+          },
+          onComplete: () => {
+            events.push("complete");
+          },
+        },
+        handler: async () => "done",
+      });
+
+      await workflowComplete.run({ id: 2 });
+
+      expect(events).toEqual(["start", "complete"]);
+    });
+
+    test("cancels during retry backoff", async () => {
+      const redis = createRedis();
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "cancel-backoff",
+        redis,
+        retries: 3,
+        retryBackoff: fastRetryBackoff,
+        handler: async ({ step }) => {
+          await step("flaky", async () => {
+            throw new Error("always fail");
+          });
+
+          return "done";
+        },
+      });
+
+      const startPromise = workflow.start(
+        { id: 1 },
+        { executionId: "cancel-backoff-1" },
+      );
+
+      await sleep(5);
+      await workflow.cancel("cancel-backoff-1");
+
+      const startResult = await startPromise;
+
+      expect(startResult.status).toBe("cancelled");
+    });
+
+    test("skips handler for cached step output without retries", async () => {
+      const redis = createRedis();
+      let stepRuns = 0;
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "cached-no-retry",
+        redis,
+        retries: 3,
+        handler: async ({ step }) => {
+          await step("once", async () => {
+            stepRuns++;
+            return "cached";
+          });
+
+          return "done";
+        },
+      });
+
+      await workflow.start({ id: 1 }, { executionId: "cached-1" });
+      await workflow.resume("cached-1");
+
+      expect(stepRuns).toBe(1);
+    });
+
+    test("resume after exhausted retries re-runs failed step", async () => {
+      const redis = createRedis();
+      const executedSteps: string[] = [];
+
+      const workflow = createTwoStepFailResumeWorkflow(
+        "resume-after-retries",
+        redis,
+        executedSteps,
+      );
+
+      await expect(
+        workflow.start({ id: 10 }, { executionId: "resume-retries-1" }),
+      ).rejects.toMatchObject({ name: "ExecutionError" });
+
+      const resumeData = await workflow.resume("resume-retries-1");
+
+      expect(resumeData.status).toBe("completed");
+      expect(executedSteps).toEqual(["step-1:10", "step-2:10", "step-2:10"]);
+    });
+
+    test("uses exponential backoff between retries", async () => {
+      const redis = createRedis();
+      const attemptTimestamps: number[] = [];
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "backoff-timing",
+        redis,
+        retries: 2,
+        retryBackoff: fastRetryBackoff,
+        handler: async ({ step }) => {
+          await step("flaky", async () => {
+            attemptTimestamps.push(Date.now());
+            throw new Error("fail");
+          });
+
+          return "done";
+        },
+      });
+
+      await expect(workflow.start({ id: 1 })).rejects.toMatchObject({
+        name: "ExecutionError",
+      });
+
+      expect(attemptTimestamps.length).toBe(3);
+
+      const firstAttempt = attemptTimestamps[0];
+      const secondAttempt = attemptTimestamps[1];
+      const thirdAttempt = attemptTimestamps[2];
+
+      if (
+        firstAttempt === undefined ||
+        secondAttempt === undefined ||
+        thirdAttempt === undefined
+      ) {
+        throw new Error("expected three step attempts");
+      }
+
+      const firstGap = secondAttempt - firstAttempt;
+      const secondGap = thirdAttempt - secondAttempt;
+
+      expect(firstGap).toBeGreaterThanOrEqual(1);
+      expect(secondGap).toBeGreaterThanOrEqual(2);
+    });
+
+    test("reports default backoff delay in onRetry context", async () => {
+      const redis = createRedis();
+      const retryDelays: number[] = [];
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "default-backoff-delay",
+        redis,
+        retries: 3,
+        hooks: {
+          onRetry: (context) => {
+            retryDelays.push(context.nextRetryDelayMs);
+          },
+        },
+        handler: async ({ step }) => {
+          await step("flaky", async () => {
+            throw new Error("fail");
+          });
+
+          return "done";
+        },
+      });
+
+      const startPromise = workflow.start(
+        { id: 1 },
+        { executionId: "default-backoff-1" },
+      );
+
+      await sleep(20);
+      await workflow.cancel("default-backoff-1");
+
+      const startResult = await startPromise;
+
+      expect(startResult.status).toBe("cancelled");
+      expect(retryDelays[0]).toBe(1000);
     });
   });
 });

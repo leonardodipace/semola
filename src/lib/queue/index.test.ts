@@ -53,6 +53,19 @@ const createMockRedis = () => {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const fastRetryBackoff = {
+  baseDelay: 1,
+  multiplier: 2,
+  maxDelay: 10,
+};
+
+const fastRetryQueueOptions = {
+  retryBackoff: fastRetryBackoff,
+  pollInterval: 1,
+};
+
+const waitForRetryProcessing = () => sleep(50);
+
 describe("Queue", () => {
   describe("enqueue", () => {
     test.concurrent("should enqueue a job successfully", async () => {
@@ -120,11 +133,17 @@ describe("Queue", () => {
         }
       };
 
-      const queue = new Queue({ name: "test", redis, retries: 3, handler });
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 3,
+        ...fastRetryQueueOptions,
+        handler,
+      });
 
       await queue.enqueue({ message: "test" });
 
-      await sleep(2500);
+      await waitForRetryProcessing();
 
       expect(callCount).toBeGreaterThan(1);
 
@@ -213,19 +232,20 @@ describe("Queue", () => {
         name: "test",
         redis,
         retries: 2,
+        ...fastRetryQueueOptions,
         handler,
         onRetry,
       });
 
       const jobId = await queue.enqueue({ message: "hello" });
 
-      await sleep(2500);
+      await waitForRetryProcessing();
 
       expect(retryContexts.length).toBe(1);
       expect(retryContexts[0]?.id).toBe(jobId);
       expect(retryContexts[0]?.error).toBe("First attempt fails");
       expect(retryContexts[0]?.attempts).toBe(1);
-      expect(retryContexts[0]?.nextRetryDelayMs).toBe(1000);
+      expect(retryContexts[0]?.nextRetryDelayMs).toBe(1);
       expect(retryContexts[0]?.retriesRemaining).toBe(1);
 
       await queue.stop();
@@ -258,20 +278,21 @@ describe("Queue", () => {
         name: "test",
         redis,
         retries: 2,
+        ...fastRetryQueueOptions,
         handler,
         onRetry,
       });
 
       await queue.enqueue({ message: "hello" });
 
-      await sleep(4000);
+      await waitForRetryProcessing();
 
       // Should have called onRetry 2 times (attempts 1, 2)
       expect(retryContexts.length).toBe(2);
       expect(retryContexts[0]?.attempts).toBe(1);
-      expect(retryContexts[0]?.nextRetryDelayMs).toBe(1000);
+      expect(retryContexts[0]?.nextRetryDelayMs).toBe(1);
       expect(retryContexts[1]?.attempts).toBe(2);
-      expect(retryContexts[1]?.nextRetryDelayMs).toBe(2000);
+      expect(retryContexts[1]?.nextRetryDelayMs).toBe(2);
 
       await queue.stop();
     });
@@ -334,6 +355,7 @@ describe("Queue", () => {
         name: "test",
         redis,
         retries: 2,
+        ...fastRetryQueueOptions,
         handler,
         onRetry,
         onError,
@@ -341,7 +363,7 @@ describe("Queue", () => {
 
       const jobId = await queue.enqueue({ message: "hello" });
 
-      await sleep(4000);
+      await waitForRetryProcessing();
 
       expect(retryJobs.length).toBe(2);
       expect(errorJobs.length).toBe(1);
@@ -364,11 +386,17 @@ describe("Queue", () => {
         }
       };
 
-      const queue = new Queue({ name: "test", redis, retries: 2, handler });
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 2,
+        ...fastRetryQueueOptions,
+        handler,
+      });
 
       await queue.enqueue({ message: "hello" });
 
-      await sleep(3000);
+      await waitForRetryProcessing();
 
       expect(attempts).toBe(2);
 
@@ -396,13 +424,14 @@ describe("Queue", () => {
         name: "test",
         redis,
         retries: 2,
+        ...fastRetryQueueOptions,
         handler,
         onError,
       });
 
       const jobId = await queue.enqueue({ message: "hello" });
 
-      await sleep(4000);
+      await waitForRetryProcessing();
 
       expect(attempts).toBe(3);
       expect(errorJobs).toContain(jobId);
@@ -439,13 +468,14 @@ describe("Queue", () => {
         name: "test",
         redis,
         retries: 1,
+        ...fastRetryQueueOptions,
         handler,
         onError,
       });
 
       const jobId = await queue.enqueue({ message: "hello" });
 
-      await sleep(3000);
+      await waitForRetryProcessing();
 
       expect(errorContexts.length).toBe(1);
       expect(errorContexts[0]?.id).toBe(jobId);
@@ -475,17 +505,92 @@ describe("Queue", () => {
         name: "test",
         redis,
         retries: 1,
+        ...fastRetryQueueOptions,
         handler,
         onError,
       });
 
       const jobId = await queue.enqueue({ message: "hello" });
 
-      await sleep(3000);
+      await waitForRetryProcessing();
 
       expect(errorJobs).toContain(jobId);
 
       await queue.stop();
+    });
+
+    test.concurrent("reports default backoff delay in onRetry context", async () => {
+      const redis = createMockRedis();
+      const retryDelays: number[] = [];
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 3,
+        pollInterval: 1,
+        handler: () => {
+          throw new Error("fail");
+        },
+        onRetry: (context) => {
+          retryDelays.push(context.nextRetryDelayMs);
+        },
+      });
+
+      await queue.enqueue({ message: "hello" });
+
+      await sleep(20);
+      await queue.stop();
+
+      expect(retryDelays[0]).toBe(1000);
+    });
+
+    test.concurrent("uses exponential backoff between retries", async () => {
+      const redis = createMockRedis();
+      const attemptTimestamps: number[] = [];
+      let attempts = 0;
+
+      const handler = () => {
+        attempts++;
+        attemptTimestamps.push(Date.now());
+        throw new Error(`Attempt ${attempts} failed`);
+      };
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 2,
+        ...fastRetryQueueOptions,
+        handler,
+      });
+
+      await queue.enqueue({ message: "hello" });
+
+      await waitForRetryProcessing();
+      await queue.stop();
+
+      expect(attemptTimestamps.length).toBe(3);
+
+      const firstAttempt = attemptTimestamps[0];
+      const secondAttempt = attemptTimestamps[1];
+      const thirdAttempt = attemptTimestamps[2];
+
+      if (firstAttempt === undefined) {
+        throw new Error("expected first job attempt timestamp");
+      }
+
+      if (secondAttempt === undefined) {
+        throw new Error("expected second job attempt timestamp");
+      }
+
+      if (thirdAttempt === undefined) {
+        throw new Error("expected third job attempt timestamp");
+      }
+
+      const firstGap = secondAttempt - firstAttempt;
+      const secondGap = thirdAttempt - secondAttempt;
+
+      expect(firstGap).toBeGreaterThanOrEqual(1);
+      expect(secondGap).toBeGreaterThanOrEqual(2);
     });
   });
 
@@ -893,6 +998,7 @@ describe("Queue", () => {
         name: "test",
         redis,
         retries: 1,
+        ...fastRetryQueueOptions,
         handler,
         timeout: 100,
         onError,
@@ -900,7 +1006,7 @@ describe("Queue", () => {
 
       const jobId = await queue.enqueue({ message: "hello" });
 
-      await sleep(3000);
+      await sleep(700);
 
       // Should have retried once due to timeout
       expect(attempts).toBeGreaterThanOrEqual(2);
