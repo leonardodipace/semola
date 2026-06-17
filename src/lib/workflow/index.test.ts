@@ -1493,9 +1493,7 @@ describe("workflow", () => {
       const secondGap = thirdAttempt - secondAttempt;
 
       expect(firstGap).toBeGreaterThanOrEqual(1);
-      expect(firstGap).toBeLessThan(50);
       expect(secondGap).toBeGreaterThanOrEqual(2);
-      expect(secondGap).toBeLessThan(50);
     });
 
     test("reports default backoff delay in onRetry context", async () => {

@@ -1,3 +1,4 @@
+import assert from "node:assert";
 import { mightThrow, mightThrowSync } from "../errors/index.js";
 import { EnqueueError, SerializationError } from "./errors.js";
 import type { Job, JobState, QueueOptions } from "./types.js";
@@ -43,6 +44,20 @@ export class Queue<T> {
       options.retryBackoff?.multiplier ?? DEFAULT_RETRY_MULTIPLIER;
     this.retryMaxDelay =
       options.retryBackoff?.maxDelay ?? DEFAULT_RETRY_MAX_DELAY;
+
+    assert.ok(
+      Number.isFinite(this.retryBaseDelay) && this.retryBaseDelay > 0,
+      "Invalid retryBackoff.baseDelay: must be a positive finite number",
+    );
+    assert.ok(
+      Number.isFinite(this.retryMultiplier) && this.retryMultiplier > 0,
+      "Invalid retryBackoff.multiplier: must be a positive finite number",
+    );
+    assert.ok(
+      Number.isFinite(this.retryMaxDelay) && this.retryMaxDelay > 0,
+      "Invalid retryBackoff.maxDelay: must be a positive finite number",
+    );
+
     this.startWorkers();
   }
 

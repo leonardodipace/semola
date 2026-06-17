@@ -1,3 +1,4 @@
+import assert from "node:assert";
 import { mightThrow, mightThrowSync } from "../errors/index.js";
 import {
   CancelledError,
@@ -121,6 +122,27 @@ class WorkflowDefinition<TInput, TResult> {
       options.retryBackoff?.multiplier ?? DEFAULT_RETRY_MULTIPLIER;
     this.retryMaxDelay =
       options.retryBackoff?.maxDelay ?? DEFAULT_RETRY_MAX_DELAY;
+
+    assert.ok(
+      Number.isFinite(this.retries) && this.retries >= 0,
+      "Invalid retries: must be a non-negative finite number",
+    );
+    assert.ok(
+      Number.isFinite(this.retryBaseDelay) && this.retryBaseDelay > 0,
+      "Invalid retryBackoff.baseDelay: must be a positive finite number",
+    );
+    assert.ok(
+      Number.isFinite(this.retryMultiplier) && this.retryMultiplier > 0,
+      "Invalid retryBackoff.multiplier: must be a positive finite number",
+    );
+    assert.ok(
+      Number.isFinite(this.retryMaxDelay) && this.retryMaxDelay > 0,
+      "Invalid retryBackoff.maxDelay: must be a positive finite number",
+    );
+  }
+
+  private runHook<T>(hook: () => T | Promise<T>) {
+    return mightThrow(Promise.resolve().then(() => hook()));
   }
 
   private computeBackoffDelay(attempt: number) {
@@ -323,17 +345,6 @@ class WorkflowDefinition<TInput, TResult> {
     await this.setMeta(executionId, "status", "running");
     await this.setMeta(executionId, "updatedAt", String(timestamp));
 
-    if (this.options.hooks?.onStart) {
-      await mightThrow(
-        Promise.resolve(
-          this.options.hooks.onStart({
-            executionId,
-            input,
-          }),
-        ),
-      );
-    }
-
     const controller = new AbortController();
 
     const renewInterval = Math.floor(this.lockTTL / 3);
@@ -351,6 +362,15 @@ class WorkflowDefinition<TInput, TResult> {
         clearInterval(renewTimer);
       }
     }, renewInterval);
+
+    if (this.options.hooks?.onStart) {
+      await this.runHook(() =>
+        this.options.hooks?.onStart?.({
+          executionId,
+          input,
+        }),
+      );
+    }
 
     const step = async <TStep>(
       name: string,
@@ -381,7 +401,7 @@ class WorkflowDefinition<TInput, TResult> {
       );
     };
 
-    const [handlerError, result] = await mightThrow(
+    const handlerOutcome = await mightThrow(
       Promise.resolve(
         this.options.handler({
           input,
@@ -409,13 +429,11 @@ class WorkflowDefinition<TInput, TResult> {
       await this.setMeta(executionId, "cancelledAt", String(cancelledAt));
 
       if (this.options.hooks?.onCancel) {
-        await mightThrow(
-          Promise.resolve(
-            this.options.hooks.onCancel({
-              executionId,
-              input,
-            }),
-          ),
+        await this.runHook(() =>
+          this.options.hooks?.onCancel?.({
+            executionId,
+            input,
+          }),
         );
       }
 
@@ -423,6 +441,8 @@ class WorkflowDefinition<TInput, TResult> {
 
       return { executionId, status: "cancelled" } satisfies WorkflowStartResult;
     }
+
+    const [handlerError, result] = handlerOutcome;
 
     if (handlerError) {
       const failedAt = now();
@@ -468,14 +488,12 @@ class WorkflowDefinition<TInput, TResult> {
     await this.setMeta(executionId, "completedAt", String(completedAt));
 
     if (this.options.hooks?.onComplete) {
-      await mightThrow(
-        Promise.resolve(
-          this.options.hooks.onComplete({
-            executionId,
-            input,
-            result: result as TResult,
-          }),
-        ),
+      await this.runHook(() =>
+        this.options.hooks?.onComplete?.({
+          executionId,
+          input,
+          result,
+        }),
       );
     }
 
@@ -513,14 +531,16 @@ class WorkflowDefinition<TInput, TResult> {
     while (true) {
       await this.throwIfCancelled(executionId, abort);
 
-      const [stepError, output] = await mightThrow(
+      const stepOutcome = await mightThrow(
         Promise.resolve(handler(input, signal)),
       );
+
+      const [stepError, output] = stepOutcome;
 
       if (!stepError) {
         await this.writeStepOutput(executionId, stepName, output);
 
-        return output as TStep;
+        return output;
       }
 
       const errorMsg = stepError.message;
@@ -535,18 +555,16 @@ class WorkflowDefinition<TInput, TResult> {
         const nextRetryDelayMs = this.computeBackoffDelay(attempt);
 
         if (this.options.hooks?.onRetry) {
-          await mightThrow(
-            Promise.resolve(
-              this.options.hooks.onRetry({
-                executionId,
-                input,
-                stepName,
-                error: errorMsg,
-                attempt,
-                nextRetryDelayMs,
-                retriesRemaining: this.retries - attempt,
-              }),
-            ),
+          await this.runHook(() =>
+            this.options.hooks?.onRetry?.({
+              executionId,
+              input,
+              stepName,
+              error: errorMsg,
+              attempt,
+              nextRetryDelayMs,
+              retriesRemaining: this.retries - attempt,
+            }),
           );
         }
 
@@ -564,17 +582,15 @@ class WorkflowDefinition<TInput, TResult> {
       }
 
       if (this.options.hooks?.onError) {
-        await mightThrow(
-          Promise.resolve(
-            this.options.hooks.onError({
-              executionId,
-              input,
-              stepName,
-              error: errorMsg,
-              totalAttempts: attempt,
-              errorHistory,
-            }),
-          ),
+        await this.runHook(() =>
+          this.options.hooks?.onError?.({
+            executionId,
+            input,
+            stepName,
+            error: errorMsg,
+            totalAttempts: attempt,
+            errorHistory,
+          }),
         );
       }
 
