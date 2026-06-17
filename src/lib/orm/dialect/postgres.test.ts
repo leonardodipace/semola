@@ -44,6 +44,26 @@ describe("postgres dialect", () => {
     expect(query.params).toEqual(["Jo%", createdAfter.toISOString(), 5]);
   });
 
+  test("uses between for date range filters", () => {
+    const builder = new DialectQueryBuilder({
+      spec: POSTGRES_SPEC,
+      table: usersTable,
+      relations: {},
+    });
+    const start = new Date("2025-01-01T00:00:00.000Z");
+    const end = new Date("2025-12-31T23:59:59.999Z");
+    const query = builder.buildFindMany({
+      where: {
+        createdAt: { between: [start, end] },
+      },
+    });
+
+    expect(query.statement).toBe(
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" WHERE "created_at" BETWEEN $1 AND $2',
+    );
+    expect(query.params).toEqual([start.toISOString(), end.toISOString()]);
+  });
+
   test("uses unsatisfiable sql for empty $or", () => {
     const builder = new DialectQueryBuilder({
       spec: POSTGRES_SPEC,

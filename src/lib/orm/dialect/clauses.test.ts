@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { enumType, json, jsonb, string, uuid } from "../column/index.js";
+import {
+  enumType,
+  json,
+  jsonb,
+  number,
+  string,
+  uuid,
+} from "../column/index.js";
 import { many } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
 import {
@@ -337,6 +344,86 @@ describe("clauses", () => {
         },
       }),
     ).toThrow("Expected array for where operator: notIn for field id");
+  });
+
+  test("builds between operator with serialization", () => {
+    const start = new Date("2025-01-01T00:00:00.000Z");
+    const end = new Date("2025-12-31T23:59:59.999Z");
+    const scoresTable = defineTable("scores", {
+      id: uuid("id").primaryKey().notNull(),
+      score: number("score").notNull(),
+    });
+    const where = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      table: usersTable,
+      where: {
+        createdAt: { between: [start, end] },
+      },
+    });
+
+    expect(where.sql).toBe('"created_at" BETWEEN ? AND ?');
+    expect(where.params).toEqual([start.toISOString(), end.toISOString()]);
+
+    const numberWhere = buildWhereClause({
+      nextPlaceholder: createNextPlaceholder(POSTGRES_SPEC),
+      table: scoresTable,
+      where: {
+        score: { between: [10, 20] },
+      },
+    });
+
+    expect(numberWhere.sql).toBe('"score" BETWEEN $1 AND $2');
+    expect(numberWhere.params).toEqual([10, 20]);
+  });
+
+  test("rejects invalid operands for between", () => {
+    expect(() =>
+      buildWhereClause({
+        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        table: usersTable,
+        where: {
+          createdAt: {
+            // @ts-expect-error runtime guard
+            between: "2025-01-01",
+          },
+        },
+      }),
+    ).toThrow(
+      "Expected array for where operator: between for field createdAt",
+    );
+
+    const start = new Date("2025-01-01T00:00:00.000Z");
+    const end = new Date("2025-12-31T23:59:59.999Z");
+
+    expect(() =>
+      buildWhereClause({
+        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        table: usersTable,
+        where: {
+          createdAt: {
+            // @ts-expect-error runtime guard
+            between: [start],
+          },
+        },
+      }),
+    ).toThrow(
+      "Expected 2-element array for where operator: between for field createdAt",
+    );
+
+    expect(() =>
+      buildWhereClause({
+        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        table: usersTable,
+        where: {
+          createdAt: {
+            // @ts-expect-error runtime guard
+            between: [start, end, start],
+          },
+        },
+      }),
+    ).toThrow(
+      "Expected 2-element array for where operator: between for field createdAt",
+    );
   });
 
   test("rejects unknown where keys and operators", () => {
