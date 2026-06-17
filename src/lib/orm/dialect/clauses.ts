@@ -202,12 +202,12 @@ const appendOperatorWhereClauses = (input: AppendOperatorWhereClausesInput) => {
       }
 
       const [min, max] = operand;
-      
+
       const ph1 = nextPlaceholder();
       const ph2 = nextPlaceholder();
 
       clauses.push(`${sqlName} BETWEEN ${ph1} AND ${ph2}`);
-      
+
       params.push(
         serializeColumnValue(column, min),
         serializeColumnValue(column, max),
