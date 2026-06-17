@@ -32,6 +32,7 @@ await queue.stop();
 - **`redis`** (required) - Bun Redis client instance
 - **`handler`** (required) - Function to process each job
 - **`retries`** - Number of retry attempts (default: 3)
+- **`retryBackoff`** - Optional `{ baseDelay, multiplier, maxDelay }` for retry delays (defaults: 1000ms, 2x, 60000ms cap)
 - **`timeout`** - Job timeout in milliseconds (default: 30000)
 - **`concurrency`** - Number of parallel workers (default: 1)
 - **`onSuccess`** - Called when a job succeeds
