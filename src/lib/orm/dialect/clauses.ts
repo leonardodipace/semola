@@ -188,6 +188,34 @@ const appendOperatorWhereClauses = (input: AppendOperatorWhereClausesInput) => {
       continue;
     }
 
+    if (op === "between") {
+      if (!Array.isArray(operand)) {
+        throw new Error(
+          `Expected array for where operator: ${op} for field ${jsKey}`,
+        );
+      }
+
+      if (operand.length !== 2) {
+        throw new Error(
+          `Expected 2-element array for where operator: ${op} for field ${jsKey}`,
+        );
+      }
+
+      const [min, max] = operand;
+      
+      const ph1 = nextPlaceholder();
+      const ph2 = nextPlaceholder();
+
+      clauses.push(`${sqlName} BETWEEN ${ph1} AND ${ph2}`);
+      
+      params.push(
+        serializeColumnValue(column, min),
+        serializeColumnValue(column, max),
+      );
+
+      continue;
+    }
+
     const operator = OPERATORS[op as keyof typeof OPERATORS];
 
     if (!operator) {
