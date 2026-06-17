@@ -54,15 +54,34 @@ If a workflow crashes after one or more completed steps:
 - `get(executionId)` returns execution status, timestamps, and completed steps.
 - `cancel(executionId)` marks execution as cancelled.
 
+## Options
+
+- **`name`** (required) - Workflow name for Redis keys
+- **`redis`** (required) - Bun Redis client instance
+- **`handler`** (required) - Workflow function with `step` helper
+- **`retries`** - Step retry attempts before marking the workflow `failed` (default: 3). Set to `0` to fail on the first error with no retries.
+- **`retryBackoff`** - Optional `{ baseDelay, multiplier, maxDelay }` for retry delays (defaults: 1000ms, 2x, 30000ms cap)
+- **`hooks`** - Optional lifecycle callbacks (see [Hooks](#hooks))
+- **`lockTTL`** - Execution lock TTL in milliseconds (default: 300000)
+- **`serializeInput`**, **`deserializeInput`**, **`serializeResult`**, **`deserializeResult`**, **`serializeStepOutput`**, **`deserializeStepOutput`** - Custom serializers for Redis persistence
+
 ## Retries
 
-Failed steps retry automatically with exponential backoff before the workflow is marked `failed`. The default is 3 retries (4 total attempts per step).
+Failed steps retry automatically with exponential backoff before the workflow is marked `failed`. By default, each step gets 3 retries (4 total attempts). This applies to every workflow unless you override `retries`.
+
+Only successful step runs are persisted to Redis. Side effects inside a step may run more than once during retries, so keep step handlers idempotent.
+
+`cancel(executionId)` works during retry backoff as well as between steps.
+
+After retries are exhausted, call `resume(executionId)` to re-run the handler from the first unfinished step.
+
+### Disable retries
 
 ```typescript
-const onboardUser = defineWorkflow<User>({
-  name: "onboard-user",
+const strictWorkflow = defineWorkflow<User>({
+  name: "strict",
   redis: redisClient,
-  retries: 3,
+  retries: 0,
   handler: async ({ step }) => {
     await step("send-email", async () => {
       await emailClient.send(...);
@@ -71,13 +90,29 @@ const onboardUser = defineWorkflow<User>({
 });
 ```
 
-Backoff delays start at 1000ms and double each retry, capped at 30000ms. Override with `retryBackoff` when needed. Only successful step runs are persisted to Redis. Side effects inside a step may run more than once during retries, so keep step handlers idempotent.
+### Custom backoff
 
-After retries are exhausted, call `resume(executionId)` to re-run the handler from the first unfinished step.
+```typescript
+const onboardUser = defineWorkflow<User>({
+  name: "onboard-user",
+  redis: redisClient,
+  retries: 3,
+  retryBackoff: {
+    baseDelay: 500,
+    multiplier: 2,
+    maxDelay: 10000,
+  },
+  handler: async ({ step }) => {
+    await step("send-email", async () => {
+      await emailClient.send(...);
+    });
+  },
+});
+```
 
 ## Hooks
 
-Lifecycle hooks are optional callbacks on the workflow definition:
+Lifecycle hooks are optional callbacks on the workflow definition. Use them for logging, metrics, or alerting. Errors thrown inside a hook do not fail the workflow.
 
 ```typescript
 const onboardUser = defineWorkflow<User, void>({
@@ -94,11 +129,11 @@ const onboardUser = defineWorkflow<User, void>({
 });
 ```
 
-- `onStart` runs when execution status becomes `running`.
+- `onStart` runs each time the handler executes, including on `resume()`.
 - `onRetry` runs before each step retry backoff delay.
 - `onError` runs when a step fails after all retries are exhausted.
 - `onComplete` runs after a successful execution.
-- `onCancel` runs when execution is cancelled.
+- `onCancel` runs when execution ends as cancelled.
 
 ## Notes
 

@@ -39,6 +39,26 @@ await queue.stop();
 - **`onRetry`** - Called when a job is retried
 - **`onError`** - Called when a job fails permanently
 
+Callback errors do not fail the job or stop processing. Use callbacks for observability only.
+
+### Custom retry backoff
+
+```typescript
+const queue = new Queue({
+  name: "my-queue",
+  redis: redisClient,
+  retries: 3,
+  retryBackoff: {
+    baseDelay: 500,
+    multiplier: 2,
+    maxDelay: 30000,
+  },
+  handler: async (data) => {
+    await process(data);
+  },
+});
+```
+
 ## Examples
 
 ### With Error Handling
