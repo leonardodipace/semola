@@ -732,6 +732,42 @@ export type OrmHooks = {
   ) => void | Promise<void>;
 };
 
+export type CreateTableClientInput<
+  T extends Table = Table,
+  TRelations extends TableRelations = TableRelations,
+> = {
+  sql: Bun.SQL;
+  tableName: string;
+  table: T;
+  adapter: Adapter;
+  relations: TRelations;
+  tableRelationsMap: Map<Table, TableRelations>;
+  hooks?: OrmHooks;
+};
+
+export type BuildTableClientsInput<
+  T extends Record<string, Table> = Record<string, Table>,
+  R extends RelationsFor<T> = RelationsFor<T>,
+> = {
+  tables: T;
+  relations?: R;
+  sql: Bun.SQL;
+  adapter: Adapter;
+  tableRelationsMap: Map<Table, TableRelations>;
+  hooks?: OrmHooks;
+};
+
+export type BuildOrmClientInput<
+  T extends Record<string, Table> = Record<string, Table>,
+  R extends RelationsFor<T> = RelationsFor<T>,
+> = {
+  tableClients: OrmTableClients<T, R>;
+  sql: Bun.SQL;
+  transaction: <TResult>(
+    callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
+  ) => Promise<TResult>;
+};
+
 export type TableClient<
   T extends Table,
   TRelations extends TableRelations = TableRelations,

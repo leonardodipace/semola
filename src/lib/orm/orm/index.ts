@@ -1,11 +1,13 @@
-import type { Adapter } from "../dialect/index.js";
 import { getDialect } from "../dialect/index.js";
 import type { Table } from "../table/types.js";
 import type {
+  BuildOrmClientInput,
+  BuildTableClientsInput,
   CreateManyOptions,
   CreateOptions,
   CreateOrmOptions,
   CreateResult,
+  CreateTableClientInput,
   DeleteManyOptions,
   DeleteOptions,
   DeleteResult,
@@ -16,7 +18,6 @@ import type {
   HasOne,
   ObjectEntries,
   OrmClient,
-  OrmHooks,
   OrmTableClients,
   RelationsFor,
   StringKeyOf,
@@ -47,14 +48,18 @@ export const one = <T extends Table, const TKey extends string>(
 };
 
 const createTableClient = <T extends Table, TRelations extends TableRelations>(
-  sql: Bun.SQL,
-  tableName: string,
-  table: T,
-  adapter: Adapter,
-  relations: TRelations,
-  tableRelationsMap: Map<Table, TableRelations>,
-  hooks: OrmHooks | undefined,
+  input: CreateTableClientInput<T, TRelations>,
 ): TableClient<T, TRelations> => {
+  const {
+    sql,
+    tableName,
+    table,
+    adapter,
+    relations,
+    tableRelationsMap,
+    hooks,
+  } = input;
+
   const dialect = getDialect({ adapter, table, relations, tableRelationsMap });
 
   return {
@@ -271,13 +276,10 @@ const buildTableClients = <
   T extends Record<string, Table>,
   R extends RelationsFor<T>,
 >(
-  tables: T,
-  relations: R | undefined,
-  sql: Bun.SQL,
-  adapter: Adapter,
-  tableRelationsMap: Map<Table, TableRelations>,
-  hooks: OrmHooks | undefined,
+  input: BuildTableClientsInput<T, R>,
 ): OrmTableClients<T, R> => {
+  const { tables, relations, sql, adapter, tableRelationsMap, hooks } = input;
+
   const clients = Object.create(null);
 
   for (const entry of toObjectEntries(tables)) {
@@ -288,15 +290,15 @@ const buildTableClients = <
       const tableRelations = getTableRelations(relations, tableName);
 
       tableRelationsMap.set(table, tableRelations);
-      clients[tableName] = createTableClient(
+      clients[tableName] = createTableClient({
         sql,
         tableName,
         table,
         adapter,
-        tableRelations,
+        relations: tableRelations,
         tableRelationsMap,
         hooks,
-      );
+      });
     };
 
     setTableClient(entry[0], entry[1]);
@@ -309,16 +311,16 @@ const buildOrmClient = <
   T extends Record<string, Table>,
   R extends RelationsFor<T>,
 >(
-  tableClients: OrmTableClients<T, R>,
-  sql: Bun.SQL,
-  transaction: <TResult>(
-    callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
-  ) => Promise<TResult>,
-): OrmClient<T, R> => ({
-  ...tableClients,
-  $raw: sql,
-  $transaction: transaction,
-});
+  input: BuildOrmClientInput<T, R>,
+): OrmClient<T, R> => {
+  const { tableClients, sql, transaction } = input;
+
+  return {
+    ...tableClients,
+    $raw: sql,
+    $transaction: transaction,
+  };
+};
 
 const buildTransactionClient = <
   T extends Record<string, Table>,
@@ -342,37 +344,37 @@ export const createOrm = <
   });
 
   const tableRelationsMap = new Map<Table, TableRelations>();
-  const tableClients = buildTableClients(
-    options.tables,
-    options.relations,
+  const tableClients = buildTableClients({
+    tables: options.tables,
+    relations: options.relations,
     sql,
-    options.adapter,
+    adapter: options.adapter,
     tableRelationsMap,
-    options.hooks,
-  );
+    hooks: options.hooks,
+  });
 
-  const orm = buildOrmClient<T, R>(
+  const orm = buildOrmClient<T, R>({
     tableClients,
     sql,
-    async <TResult>(
+    transaction: async <TResult>(
       callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
     ): Promise<TResult> => {
       return await sql.begin(async (txSql) => {
-        const txTableClients = buildTableClients(
-          options.tables,
-          options.relations,
-          txSql,
-          options.adapter,
+        const txTableClients = buildTableClients({
+          tables: options.tables,
+          relations: options.relations,
+          sql: txSql,
+          adapter: options.adapter,
           tableRelationsMap,
-          options.hooks,
-        );
+          hooks: options.hooks,
+        });
 
         const txClient = buildTransactionClient<T, R>(txTableClients, txSql);
 
         return await callback(txClient);
       });
     },
-  );
+  });
 
   return orm;
 };
