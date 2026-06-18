@@ -630,6 +630,13 @@ export type OrmHookContext<TOptions, TResult = undefined> = {
   result?: TResult;
 };
 
+export type OrmReadHookContext<TOptions, TResult = undefined> = {
+  tableName: string;
+  table: Table;
+  readonly options: Readonly<TOptions>;
+  result?: TResult;
+};
+
 type BeforeHookReturn<TResult> =
   | TResult
   | undefined
@@ -698,28 +705,31 @@ export type OrmHookName =
 
 export type GlobalOrmHooks = {
   beforeFindMany?: <T extends Table>(
-    ctx: OrmHookContext<FindManyOptions<T> | undefined>,
+    ctx: OrmReadHookContext<FindManyOptions<T> | undefined>,
   ) => void | Promise<void>;
   afterFindMany?: <T extends Table>(
-    ctx: OrmHookContext<FindManyOptions<T> | undefined, unknown[]>,
+    ctx: OrmReadHookContext<FindManyOptions<T> | undefined, unknown[]>,
   ) => void | Promise<void>;
   beforeFindFirst?: <T extends Table>(
-    ctx: OrmHookContext<FindFirstOptions<T> | undefined>,
+    ctx: OrmReadHookContext<FindFirstOptions<T> | undefined>,
   ) => void | Promise<void>;
   afterFindFirst?: <T extends Table>(
-    ctx: OrmHookContext<FindFirstOptions<T> | undefined, unknown | null>,
+    ctx: OrmReadHookContext<FindFirstOptions<T> | undefined, unknown | null>,
   ) => void | Promise<void>;
   beforeFindUnique?: <
     TTable extends Table,
     TRelations extends TableRelations = TableRelations,
   >(
-    ctx: OrmHookContext<FindUniqueOptions<TTable, TRelations>>,
+    ctx: OrmReadHookContext<FindUniqueOptions<TTable, TRelations>>,
   ) => void | Promise<void>;
   afterFindUnique?: <
     TTable extends Table,
     TRelations extends TableRelations = TableRelations,
   >(
-    ctx: OrmHookContext<FindUniqueOptions<TTable, TRelations>, unknown | null>,
+    ctx: OrmReadHookContext<
+      FindUniqueOptions<TTable, TRelations>,
+      unknown | null
+    >,
   ) => void | Promise<void>;
   beforeCreate?: <
     TTable extends Table,
@@ -794,28 +804,28 @@ export type TableHooks<
   TRelations extends TableRelations = TableRelations,
 > = {
   beforeFindMany?: (
-    ctx: OrmHookContext<FindManyOptions<TTable, TRelations> | undefined>,
+    ctx: OrmReadHookContext<FindManyOptions<TTable, TRelations> | undefined>,
   ) => void | Promise<void>;
   afterFindMany?: (
-    ctx: OrmHookContext<
+    ctx: OrmReadHookContext<
       FindManyOptions<TTable, TRelations> | undefined,
       Array<TableHookResult<TTable>>
     >,
   ) => void | Promise<void>;
   beforeFindFirst?: (
-    ctx: OrmHookContext<FindFirstOptions<TTable, TRelations> | undefined>,
+    ctx: OrmReadHookContext<FindFirstOptions<TTable, TRelations> | undefined>,
   ) => void | Promise<void>;
   afterFindFirst?: (
-    ctx: OrmHookContext<
+    ctx: OrmReadHookContext<
       FindFirstOptions<TTable, TRelations> | undefined,
       TableHookResult<TTable> | null
     >,
   ) => void | Promise<void>;
   beforeFindUnique?: (
-    ctx: OrmHookContext<FindUniqueOptions<TTable, TRelations>>,
+    ctx: OrmReadHookContext<FindUniqueOptions<TTable, TRelations>>,
   ) => void | Promise<void>;
   afterFindUnique?: (
-    ctx: OrmHookContext<
+    ctx: OrmReadHookContext<
       FindUniqueOptions<TTable, TRelations>,
       TableHookResult<TTable> | null
     >,

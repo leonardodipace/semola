@@ -23,6 +23,7 @@ export type {
   GlobalOrmHooks,
   OrmHookContext,
   OrmHooksConfig,
+  OrmReadHookContext,
   TableHooks,
   TableRow,
   TransactionClient,

@@ -19,9 +19,9 @@ import type {
   HasOne,
   ObjectEntries,
   OrmClient,
-  OrmHookContext,
   OrmHooksConfig,
   OrmQueryOptions,
+  OrmReadHookContext,
   OrmTableClients,
   RelationsFor,
   StringKeyOf,
@@ -102,15 +102,17 @@ const withReadHooks = async <TResult, TOptions>(input: {
   tableName: string;
   table: Table;
   hookOptions: TOptions;
-  beforeGlobal?: (ctx: OrmHookContext<TOptions>) => void | Promise<void>;
-  beforeTable?: (ctx: OrmHookContext<TOptions>) => void | Promise<void>;
+  beforeGlobal?: (ctx: OrmReadHookContext<TOptions>) => void | Promise<void>;
+  beforeTable?: (ctx: OrmReadHookContext<TOptions>) => void | Promise<void>;
   afterGlobal?: (
-    ctx: OrmHookContext<TOptions, TResult>,
+    ctx: OrmReadHookContext<TOptions, TResult>,
   ) => void | Promise<void>;
-  afterTable?: (ctx: OrmHookContext<TOptions, TResult>) => void | Promise<void>;
+  afterTable?: (
+    ctx: OrmReadHookContext<TOptions, TResult>,
+  ) => void | Promise<void>;
   query: () => Promise<TResult>;
 }) => {
-  const beforeCtx = {
+  const beforeCtx: OrmReadHookContext<TOptions> = {
     tableName: input.tableName,
     table: input.table,
     options: input.hookOptions,

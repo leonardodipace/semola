@@ -15,12 +15,16 @@ const examsTable = defineTable("exams", {
 });
 
 const studentsToExamsTable = defineTable("students_to_exams", {
-  studentId: uuid("student_id").notNull(),
-  examId: uuid("exam_id").notNull(),
+  studentId: uuid("student_id")
+    .notNull()
+    .references(() => studentsTable.columns.id),
+  examId: uuid("exam_id")
+    .notNull()
+    .references(() => examsTable.columns.id),
 });
 
 describe("hooks types", () => {
-  test("partial relations keep hooks usable for tables without relations", () => {
+  test("partial relations keep hooks usable for tables without relations", async () => {
     const orm = createOrm({
       adapter: "sqlite",
       url: ":memory:",
@@ -66,7 +70,29 @@ describe("hooks types", () => {
       },
     });
 
+    await orm.$raw`
+      CREATE TABLE students (id TEXT PRIMARY KEY NOT NULL, first_name TEXT NOT NULL);
+      CREATE TABLE exams (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL);
+      CREATE TABLE students_to_exams (
+        student_id TEXT NOT NULL REFERENCES students(id),
+        exam_id TEXT NOT NULL REFERENCES exams(id),
+        PRIMARY KEY (student_id, exam_id)
+      );
+    `;
+
+    await orm.students.createMany({ data: [{ id: "S1", firstName: "John" }] });
+    await orm.exams.createMany({ data: [{ id: "E1", name: "Math" }] });
+    await orm.studentsToExams.createMany({
+      data: [{ studentId: "S1", examId: "E1" }],
+    });
+
+    await orm.exams.findMany({ where: { name: "Math" } });
+    await orm.exams.create({ data: { id: "E2", name: "Physics" } });
+    await orm.studentsToExams.findMany({ include: { exams: true } });
+
     expect(orm.exams).toBeDefined();
+
+    await orm.$raw.close();
   });
 
   test("TableRelationsFor falls back for omitted relation keys", () => {
