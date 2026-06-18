@@ -16,6 +16,7 @@ import type {
   HasOne,
   ObjectEntries,
   OrmClient,
+  OrmHooks,
   OrmTableClients,
   RelationsFor,
   StringKeyOf,
@@ -47,10 +48,12 @@ export const one = <T extends Table, const TKey extends string>(
 
 const createTableClient = <T extends Table, TRelations extends TableRelations>(
   sql: Bun.SQL,
+  tableName: string,
   table: T,
   adapter: Adapter,
   relations: TRelations,
   tableRelationsMap: Map<Table, TableRelations>,
+  hooks: OrmHooks | undefined,
 ): TableClient<T, TRelations> => {
   const dialect = getDialect({ adapter, table, relations, tableRelationsMap });
 
@@ -58,49 +61,169 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
     findMany: async <const TOptions extends FindManyOptions<T, TRelations>>(
       options?: TOptions,
     ) => {
-      return await dialect.findMany<TOptions>(sql, options);
+      await hooks?.beforeFindMany?.({ tableName, table, options });
+
+      const result = await dialect.findMany<TOptions>(sql, options);
+
+      await hooks?.afterFindMany?.({ tableName, table, options, result });
+
+      return result;
     },
 
     findFirst: async <const TOptions extends FindFirstOptions<T, TRelations>>(
       options?: TOptions,
     ) => {
-      return await dialect.findFirst<TOptions>(sql, options);
+      await hooks?.beforeFindFirst?.({ tableName, table, options });
+
+      const result = await dialect.findFirst<TOptions>(sql, options);
+
+      await hooks?.afterFindFirst?.({ tableName, table, options, result });
+
+      return result;
     },
 
     findUnique: async <const TOptions extends FindUniqueOptions<T, TRelations>>(
       options: TOptions,
     ) => {
-      return await dialect.findUnique<TOptions>(sql, options);
+      await hooks?.beforeFindUnique?.({ tableName, table, options });
+
+      const result = await dialect.findUnique<TOptions>(sql, options);
+
+      await hooks?.afterFindUnique?.({ tableName, table, options, result });
+
+      return result;
     },
 
     create: async <const TOptions extends CreateOptions<T, TRelations>>(
       options: TOptions,
     ): Promise<CreateResult<T, TRelations, TOptions>> => {
-      return await dialect.create<TOptions>(sql, options);
+      const createHookResult = await hooks?.beforeCreate?.({
+        tableName,
+        table,
+        options,
+      });
+
+      Object.assign(options, createHookResult);
+
+      const result = await dialect.create<TOptions>(sql, options);
+
+      await hooks?.afterCreate?.({
+        tableName,
+        table,
+        options,
+        result,
+      });
+
+      return result;
     },
 
     createMany: async (options: CreateManyOptions<T>) => {
-      return await dialect.createMany(sql, options);
+      const createManyHookResult = await hooks?.beforeCreateMany?.({
+        tableName,
+        table,
+        options,
+      });
+
+      Object.assign(options, createManyHookResult);
+
+      const result = await dialect.createMany(sql, options);
+
+      await hooks?.afterCreateMany?.({
+        tableName,
+        table,
+        options,
+        result,
+      });
+
+      return result;
     },
 
     update: async <const TOptions extends UpdateOptions<T, TRelations>>(
       options: TOptions,
     ): Promise<UpdateResult<T, TRelations, TOptions>> => {
-      return await dialect.update<TOptions>(sql, options);
+      const updateHookResult = await hooks?.beforeUpdate?.({
+        tableName,
+        table,
+        options,
+      });
+
+      Object.assign(options, updateHookResult);
+
+      const result = await dialect.update<TOptions>(sql, options);
+
+      await hooks?.afterUpdate?.({
+        tableName,
+        table,
+        options,
+        result,
+      });
+
+      return result;
     },
 
     updateMany: async (options: UpdateManyOptions<T, TRelations>) => {
-      return await dialect.updateMany(sql, options);
+      const updateManyHookResult = await hooks?.beforeUpdateMany?.({
+        tableName,
+        table,
+        options,
+      });
+
+      Object.assign(options, updateManyHookResult);
+
+      const result = await dialect.updateMany(sql, options);
+
+      await hooks?.afterUpdateMany?.({
+        tableName,
+        table,
+        options,
+        result,
+      });
+
+      return result;
     },
 
     delete: async <const TOptions extends DeleteOptions<T, TRelations>>(
       options: TOptions,
     ): Promise<DeleteResult<T, TRelations, TOptions>> => {
-      return await dialect.delete<TOptions>(sql, options);
+      const deleteHookResult = await hooks?.beforeDelete?.({
+        tableName,
+        table,
+        options,
+      });
+
+      Object.assign(options, deleteHookResult);
+
+      const result = await dialect.delete<TOptions>(sql, options);
+
+      await hooks?.afterDelete?.({
+        tableName,
+        table,
+        options,
+        result,
+      });
+
+      return result;
     },
 
     deleteMany: async (options: DeleteManyOptions<T, TRelations>) => {
-      return await dialect.deleteMany(sql, options);
+      const deleteManyHookResult = await hooks?.beforeDeleteMany?.({
+        tableName,
+        table,
+        options,
+      });
+
+      Object.assign(options, deleteManyHookResult);
+
+      const result = await dialect.deleteMany(sql, options);
+
+      await hooks?.afterDeleteMany?.({
+        tableName,
+        table,
+        options,
+        result,
+      });
+
+      return result;
     },
   };
 };
@@ -153,6 +276,7 @@ const buildTableClients = <
   sql: Bun.SQL,
   adapter: Adapter,
   tableRelationsMap: Map<Table, TableRelations>,
+  hooks: OrmHooks | undefined,
 ): OrmTableClients<T, R> => {
   const clients = Object.create(null);
 
@@ -166,10 +290,12 @@ const buildTableClients = <
       tableRelationsMap.set(table, tableRelations);
       clients[tableName] = createTableClient(
         sql,
+        tableName,
         table,
         adapter,
         tableRelations,
         tableRelationsMap,
+        hooks,
       );
     };
 
@@ -222,6 +348,7 @@ export const createOrm = <
     sql,
     options.adapter,
     tableRelationsMap,
+    options.hooks,
   );
 
   const orm = buildOrmClient<T, R>(
@@ -237,6 +364,7 @@ export const createOrm = <
           txSql,
           options.adapter,
           tableRelationsMap,
+          options.hooks,
         );
 
         const txClient = buildTransactionClient<T, R>(txTableClients, txSql);
