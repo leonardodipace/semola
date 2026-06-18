@@ -35,6 +35,10 @@ type ExactlyOne<T extends Record<PropertyKey, unknown>> = {
   };
 }[keyof T];
 
+export type OrmQueryOptions = {
+  $skipHooks?: boolean;
+};
+
 export type CreateOrmOptions<
   T extends Record<string, Table> = Record<string, Table>,
   R extends RelationsFor<T> = RelationsFor<T>,
@@ -43,6 +47,7 @@ export type CreateOrmOptions<
   url: string;
   tables: T;
   relations?: R;
+  hooks?: OrmHooksConfig<T, R>;
 };
 
 // Look up the raw relations for a table by matching its structural type against all tables.
@@ -286,7 +291,7 @@ export type FindManyOptions<
   TRelations extends TableRelations = TableRelations,
   TAllTables extends Record<string, Table> = Record<string, Table>,
   TAllRelations = Record<string, unknown>,
-> = {
+> = OrmQueryOptions & {
   where?: TableWhere<T, TRelations>;
   select?: TableSelect<T>;
   orderBy?: TableOrderBy<T>;
@@ -350,7 +355,7 @@ export type FindUniqueOptions<
   TRelations extends TableRelations = TableRelations,
   TAllTables extends Record<string, Table> = Record<string, Table>,
   TAllRelations = Record<string, unknown>,
-> = {
+> = OrmQueryOptions & {
   where: FindUniqueWhere<T>;
   select?: TableSelect<T>;
   include?: TableInclude<TRelations, TAllTables, TAllRelations>;
@@ -359,6 +364,11 @@ export type FindUniqueOptions<
 export type TableRow<T extends Table> = Prettify<{
   [TColumnName in keyof T["columns"]]: ColumnValue<T["columns"][TColumnName]>;
 }>;
+
+// After-hook results use a row superset so hooks stay assignable when queries select or include.
+export type TableHookResult<T extends Table> = Prettify<
+  Partial<TableRow<T>> & Record<string, unknown>
+>;
 
 type IsRequiredCreateColumn<TColumn extends Column> =
   TColumn["_meta"]["isNullable"] extends false
@@ -393,7 +403,7 @@ export type CreateOptions<
   TRelations extends TableRelations = TableRelations,
   TAllTables extends Record<string, Table> = Record<string, Table>,
   TAllRelations = Record<string, unknown>,
-> = {
+> = OrmQueryOptions & {
   data: CreateData<T>;
   select?: TableSelect<T>;
   include?: TableInclude<TRelations, TAllTables, TAllRelations>;
@@ -424,7 +434,7 @@ export type UpdateOptions<
   TRelations extends TableRelations = TableRelations,
   TAllTables extends Record<string, Table> = Record<string, Table>,
   TAllRelations = Record<string, unknown>,
-> = {
+> = OrmQueryOptions & {
   where: FindUniqueWhere<T>;
   data: UpdateData<T>;
   select?: TableSelect<T>;
@@ -466,14 +476,14 @@ export type DeleteResult<
   FindUniqueResult<T, TRelations, TOptions, TAllTables, TAllRelations>
 >;
 
-export type CreateManyOptions<T extends Table> = {
+export type CreateManyOptions<T extends Table> = OrmQueryOptions & {
   data: CreateData<T>[];
 };
 
 export type UpdateManyOptions<
   T extends Table,
   TRelations extends TableRelations = TableRelations,
-> = {
+> = OrmQueryOptions & {
   where?: TableWhere<T, TRelations>;
   data: UpdateData<T>;
 };
@@ -481,7 +491,7 @@ export type UpdateManyOptions<
 export type DeleteManyOptions<
   T extends Table,
   TRelations extends TableRelations = TableRelations,
-> = {
+> = OrmQueryOptions & {
   where?: TableWhere<T, TRelations>;
 };
 
@@ -612,6 +622,312 @@ export type FindUniqueResult<
   SelectResult<T, TOptions> &
     IncludeResult<TRelations, TOptions, TAllTables, TAllRelations>
 > | null;
+
+export type OrmHookContext<TOptions, TResult = undefined> = {
+  tableName: string;
+  table: Table;
+  options: TOptions;
+  result?: TResult;
+};
+
+export type OrmReadHookContext<TOptions, TResult = undefined> = {
+  tableName: string;
+  table: Table;
+  readonly options: Readonly<TOptions>;
+  result?: TResult;
+};
+
+type BeforeHookReturn<TResult> =
+  | TResult
+  | undefined
+  | Promise<TResult | undefined>;
+
+type BeforeCreateHookResult<
+  TTable extends Table,
+  TRelations extends TableRelations,
+> = {
+  data?: CreateOptions<TTable, TRelations>["data"];
+};
+
+type BeforeCreateManyHookResult<TTable extends Table> = {
+  data?: CreateManyOptions<TTable>["data"];
+};
+
+type BeforeUpdateHookResult<
+  TTable extends Table,
+  TRelations extends TableRelations,
+> = {
+  where?: UpdateOptions<TTable, TRelations>["where"];
+  data?: UpdateOptions<TTable, TRelations>["data"];
+};
+
+type BeforeUpdateManyHookResult<
+  TTable extends Table,
+  TRelations extends TableRelations,
+> = {
+  where?: UpdateManyOptions<TTable, TRelations>["where"];
+  data?: UpdateManyOptions<TTable, TRelations>["data"];
+};
+
+type BeforeDeleteHookResult<
+  TTable extends Table,
+  TRelations extends TableRelations,
+> = {
+  where?: DeleteOptions<TTable, TRelations>["where"];
+};
+
+type BeforeDeleteManyHookResult<
+  TTable extends Table,
+  TRelations extends TableRelations,
+> = {
+  where?: DeleteManyOptions<TTable, TRelations>["where"];
+};
+
+export type OrmHookName =
+  | "beforeFindMany"
+  | "afterFindMany"
+  | "beforeFindFirst"
+  | "afterFindFirst"
+  | "beforeFindUnique"
+  | "afterFindUnique"
+  | "beforeCreate"
+  | "afterCreate"
+  | "beforeCreateMany"
+  | "afterCreateMany"
+  | "beforeUpdate"
+  | "afterUpdate"
+  | "beforeUpdateMany"
+  | "afterUpdateMany"
+  | "beforeDelete"
+  | "afterDelete"
+  | "beforeDeleteMany"
+  | "afterDeleteMany";
+
+export type GlobalOrmHooks = {
+  beforeFindMany?: <T extends Table>(
+    ctx: OrmReadHookContext<FindManyOptions<T> | undefined>,
+  ) => void | Promise<void>;
+  afterFindMany?: <T extends Table>(
+    ctx: OrmReadHookContext<FindManyOptions<T> | undefined, unknown[]>,
+  ) => void | Promise<void>;
+  beforeFindFirst?: <T extends Table>(
+    ctx: OrmReadHookContext<FindFirstOptions<T> | undefined>,
+  ) => void | Promise<void>;
+  afterFindFirst?: <T extends Table>(
+    ctx: OrmReadHookContext<FindFirstOptions<T> | undefined, unknown | null>,
+  ) => void | Promise<void>;
+  beforeFindUnique?: <
+    TTable extends Table,
+    TRelations extends TableRelations = TableRelations,
+  >(
+    ctx: OrmReadHookContext<FindUniqueOptions<TTable, TRelations>>,
+  ) => void | Promise<void>;
+  afterFindUnique?: <
+    TTable extends Table,
+    TRelations extends TableRelations = TableRelations,
+  >(
+    ctx: OrmReadHookContext<
+      FindUniqueOptions<TTable, TRelations>,
+      unknown | null
+    >,
+  ) => void | Promise<void>;
+  beforeCreate?: <
+    TTable extends Table,
+    TRelations extends TableRelations = TableRelations,
+  >(
+    ctx: OrmHookContext<CreateOptions<TTable, TRelations>>,
+  ) => BeforeHookReturn<BeforeCreateHookResult<TTable, TRelations>>;
+  afterCreate?: <
+    TTable extends Table,
+    TRelations extends TableRelations = TableRelations,
+  >(
+    ctx: OrmHookContext<CreateOptions<TTable, TRelations>, unknown>,
+  ) => void | Promise<void>;
+  beforeCreateMany?: <TTable extends Table>(
+    ctx: OrmHookContext<CreateManyOptions<TTable>>,
+  ) => BeforeHookReturn<BeforeCreateManyHookResult<TTable>>;
+  afterCreateMany?: <TTable extends Table>(
+    ctx: OrmHookContext<CreateManyOptions<TTable>, unknown[]>,
+  ) => void | Promise<void>;
+  beforeUpdate?: <
+    TTable extends Table,
+    TRelations extends TableRelations = TableRelations,
+  >(
+    ctx: OrmHookContext<UpdateOptions<TTable, TRelations>>,
+  ) => BeforeHookReturn<BeforeUpdateHookResult<TTable, TRelations>>;
+  afterUpdate?: <
+    TTable extends Table,
+    TRelations extends TableRelations = TableRelations,
+  >(
+    ctx: OrmHookContext<UpdateOptions<TTable, TRelations>, unknown>,
+  ) => void | Promise<void>;
+  beforeUpdateMany?: <
+    TTable extends Table,
+    TRelations extends TableRelations = TableRelations,
+  >(
+    ctx: OrmHookContext<UpdateManyOptions<TTable, TRelations>>,
+  ) => BeforeHookReturn<BeforeUpdateManyHookResult<TTable, TRelations>>;
+  afterUpdateMany?: <
+    TTable extends Table,
+    TRelations extends TableRelations = TableRelations,
+  >(
+    ctx: OrmHookContext<UpdateManyOptions<TTable, TRelations>, unknown[]>,
+  ) => void | Promise<void>;
+  beforeDelete?: <
+    TTable extends Table,
+    TRelations extends TableRelations = TableRelations,
+  >(
+    ctx: OrmHookContext<DeleteOptions<TTable, TRelations>>,
+  ) => BeforeHookReturn<BeforeDeleteHookResult<TTable, TRelations>>;
+  afterDelete?: <
+    TTable extends Table,
+    TRelations extends TableRelations = TableRelations,
+  >(
+    ctx: OrmHookContext<DeleteOptions<TTable, TRelations>, unknown>,
+  ) => void | Promise<void>;
+  beforeDeleteMany?: <
+    TTable extends Table,
+    TRelations extends TableRelations = TableRelations,
+  >(
+    ctx: OrmHookContext<DeleteManyOptions<TTable, TRelations>>,
+  ) => BeforeHookReturn<BeforeDeleteManyHookResult<TTable, TRelations>>;
+  afterDeleteMany?: <
+    TTable extends Table,
+    TRelations extends TableRelations = TableRelations,
+  >(
+    ctx: OrmHookContext<DeleteManyOptions<TTable, TRelations>, unknown[]>,
+  ) => void | Promise<void>;
+};
+
+export type TableHooks<
+  TTable extends Table,
+  TRelations extends TableRelations = TableRelations,
+> = {
+  beforeFindMany?: (
+    ctx: OrmReadHookContext<FindManyOptions<TTable, TRelations> | undefined>,
+  ) => void | Promise<void>;
+  afterFindMany?: (
+    ctx: OrmReadHookContext<
+      FindManyOptions<TTable, TRelations> | undefined,
+      Array<TableHookResult<TTable>>
+    >,
+  ) => void | Promise<void>;
+  beforeFindFirst?: (
+    ctx: OrmReadHookContext<FindFirstOptions<TTable, TRelations> | undefined>,
+  ) => void | Promise<void>;
+  afterFindFirst?: (
+    ctx: OrmReadHookContext<
+      FindFirstOptions<TTable, TRelations> | undefined,
+      TableHookResult<TTable> | null
+    >,
+  ) => void | Promise<void>;
+  beforeFindUnique?: (
+    ctx: OrmReadHookContext<FindUniqueOptions<TTable, TRelations>>,
+  ) => void | Promise<void>;
+  afterFindUnique?: (
+    ctx: OrmReadHookContext<
+      FindUniqueOptions<TTable, TRelations>,
+      TableHookResult<TTable> | null
+    >,
+  ) => void | Promise<void>;
+  beforeCreate?: (
+    ctx: OrmHookContext<CreateOptions<TTable, TRelations>>,
+  ) => BeforeHookReturn<BeforeCreateHookResult<TTable, TRelations>>;
+  afterCreate?: (
+    ctx: OrmHookContext<
+      CreateOptions<TTable, TRelations>,
+      TableHookResult<TTable>
+    >,
+  ) => void | Promise<void>;
+  beforeCreateMany?: (
+    ctx: OrmHookContext<CreateManyOptions<TTable>>,
+  ) => BeforeHookReturn<BeforeCreateManyHookResult<TTable>>;
+  afterCreateMany?: (
+    ctx: OrmHookContext<CreateManyOptions<TTable>, Array<TableRow<TTable>>>,
+  ) => void | Promise<void>;
+  beforeUpdate?: (
+    ctx: OrmHookContext<UpdateOptions<TTable, TRelations>>,
+  ) => BeforeHookReturn<BeforeUpdateHookResult<TTable, TRelations>>;
+  afterUpdate?: (
+    ctx: OrmHookContext<
+      UpdateOptions<TTable, TRelations>,
+      TableHookResult<TTable>
+    >,
+  ) => void | Promise<void>;
+  beforeUpdateMany?: (
+    ctx: OrmHookContext<UpdateManyOptions<TTable, TRelations>>,
+  ) => BeforeHookReturn<BeforeUpdateManyHookResult<TTable, TRelations>>;
+  afterUpdateMany?: (
+    ctx: OrmHookContext<
+      UpdateManyOptions<TTable, TRelations>,
+      Array<TableRow<TTable>>
+    >,
+  ) => void | Promise<void>;
+  beforeDelete?: (
+    ctx: OrmHookContext<DeleteOptions<TTable, TRelations>>,
+  ) => BeforeHookReturn<BeforeDeleteHookResult<TTable, TRelations>>;
+  afterDelete?: (
+    ctx: OrmHookContext<
+      DeleteOptions<TTable, TRelations>,
+      TableHookResult<TTable>
+    >,
+  ) => void | Promise<void>;
+  beforeDeleteMany?: (
+    ctx: OrmHookContext<DeleteManyOptions<TTable, TRelations>>,
+  ) => BeforeHookReturn<BeforeDeleteManyHookResult<TTable, TRelations>>;
+  afterDeleteMany?: (
+    ctx: OrmHookContext<
+      DeleteManyOptions<TTable, TRelations>,
+      Array<TableRow<TTable>>
+    >,
+  ) => void | Promise<void>;
+};
+
+export type OrmHooksConfig<
+  T extends Record<string, Table>,
+  R extends RelationsFor<T> = RelationsFor<T>,
+> = GlobalOrmHooks & {
+  tables?: {
+    [K in keyof T]?: TableHooks<T[K], TableRelationsFor<R, K>>;
+  };
+};
+
+export type CreateTableClientInput<
+  T extends Table = Table,
+  TRelations extends TableRelations = TableRelations,
+> = {
+  sql: Bun.SQL;
+  tableName: string;
+  table: T;
+  adapter: Adapter;
+  relations: TRelations;
+  tableRelationsMap: Map<Table, TableRelations>;
+  globalHooks?: GlobalOrmHooks;
+  tableHooks?: TableHooks<T, TRelations>;
+};
+
+export type BuildTableClientsInput<
+  T extends Record<string, Table> = Record<string, Table>,
+  R extends RelationsFor<T> = RelationsFor<T>,
+> = {
+  tables: T;
+  relations?: R;
+  sql: Bun.SQL;
+  adapter: Adapter;
+  tableRelationsMap: Map<Table, TableRelations>;
+  hooks?: OrmHooksConfig<T, R>;
+};
+
+export type BuildOrmClientInput<
+  T extends Record<string, Table> = Record<string, Table>,
+  R extends RelationsFor<T> = RelationsFor<T>,
+> = {
+  tableClients: OrmTableClients<T, R>;
+  sql: Bun.SQL;
+  transaction: <TResult>(
+    callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
+  ) => Promise<TResult>;
+};
 
 export type TableClient<
   T extends Table,

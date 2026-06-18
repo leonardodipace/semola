@@ -30,6 +30,23 @@ const createUsersOrm = () =>
     tables: { users: usersTable },
   });
 
+const createUsersOrmWithModifyingBeforeCreate = () =>
+  createOrm({
+    adapter: "sqlite",
+    url: ":memory:",
+    tables: { users: usersTable },
+    hooks: {
+      beforeCreate(ctx) {
+        return {
+          data: {
+            ...ctx.options.data,
+            name: "Modified",
+          },
+        };
+      },
+    },
+  });
+
 const createUsersSchema = async (sql: Bun.SQL) => {
   await sql.unsafe(
     "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
@@ -1496,6 +1513,310 @@ describe("many to many relation", () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0]?.exams).toMatchObject({ id: "E1", name: "Math" });
+
+    await orm.$raw.close();
+  });
+});
+
+describe("hooks", () => {
+  test("beforeCreate can return modified options", async () => {
+    const orm = createUsersOrmWithModifyingBeforeCreate();
+
+    await createUsersSchema(orm.$raw);
+
+    const created = await orm.users.create({
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+    });
+
+    expect(created.name).toBe("Modified");
+
+    await orm.$raw.close();
+  });
+
+  test("afterCreate receives result", async () => {
+    let afterResult: unknown;
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        afterCreate(ctx) {
+          afterResult = ctx.result;
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    const created = await orm.users.create({
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+    });
+
+    expect(afterResult).toEqual(created);
+
+    await orm.$raw.close();
+  });
+
+  test("beforeFindMany and afterFindMany receive table context", async () => {
+    let beforeTableName: string | undefined;
+    let afterTableName: string | undefined;
+    let afterRowCount: number | undefined;
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        beforeFindMany(ctx) {
+          beforeTableName = ctx.tableName;
+        },
+        afterFindMany(ctx) {
+          afterTableName = ctx.tableName;
+          afterRowCount = ctx.result?.length;
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+    await seedTwoUsers(orm.$raw);
+
+    await orm.users.findMany();
+
+    expect(beforeTableName).toBe("users");
+    expect(afterTableName).toBe("users");
+    expect(afterRowCount).toBe(2);
+
+    await orm.$raw.close();
+  });
+
+  test("throwing from a hook aborts the operation", async () => {
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        beforeCreate() {
+          throw new Error("blocked");
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    await expect(
+      orm.users.create({
+        data: { id: "u1", name: "Alice", email: "alice@example.com" },
+      }),
+    ).rejects.toThrow("blocked");
+
+    const rows = await orm.users.findMany();
+    expect(rows).toHaveLength(0);
+
+    await orm.$raw.close();
+  });
+
+  test("hooks run inside $transaction", async () => {
+    let hookCalls = 0;
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        beforeCreate() {
+          hookCalls += 1;
+
+          return undefined;
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    await orm.$transaction(async (tx) => {
+      await tx.users.create({
+        data: { id: "u1", name: "Alice", email: "alice@example.com" },
+      });
+    });
+
+    expect(hookCalls).toBe(1);
+
+    await orm.$raw.close();
+  });
+
+  test("throwing from a hook inside $transaction rolls back", async () => {
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        afterCreate() {
+          throw new Error("rollback");
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    await expect(
+      orm.$transaction(async (tx) => {
+        await tx.users.create({
+          data: { id: "u1", name: "Alice", email: "alice@example.com" },
+        });
+      }),
+    ).rejects.toThrow("rollback");
+
+    const rows = await orm.users.findMany();
+    expect(rows).toHaveLength(0);
+
+    await orm.$raw.close();
+  });
+
+  test("works without configured hooks", async () => {
+    const orm = createUsersOrm();
+
+    await createUsersSchema(orm.$raw);
+
+    const created = await orm.users.create({
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+    });
+
+    expect(created.name).toBe("Alice");
+
+    await orm.$raw.close();
+  });
+
+  test("beforeCreate does not mutate caller options", async () => {
+    const orm = createUsersOrmWithModifyingBeforeCreate();
+
+    await createUsersSchema(orm.$raw);
+
+    const options = {
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+    };
+
+    await orm.users.create(options);
+
+    expect(options.data.name).toBe("Alice");
+
+    await orm.$raw.close();
+  });
+
+  test("per-table hooks run only for matching table", async () => {
+    let usersHookCalls = 0;
+    let postsHookCalls = 0;
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable, posts: postsTable },
+      hooks: {
+        tables: {
+          users: {
+            beforeCreate() {
+              usersHookCalls += 1;
+
+              return undefined;
+            },
+          },
+          posts: {
+            beforeCreate() {
+              postsHookCalls += 1;
+
+              return undefined;
+            },
+          },
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+    await orm.$raw.unsafe(
+      "CREATE TABLE posts (id TEXT PRIMARY KEY, title TEXT NOT NULL)",
+    );
+
+    await orm.users.create({
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+    });
+
+    await orm.posts.create({
+      data: { id: "p1", title: "Hello" },
+    });
+
+    expect(usersHookCalls).toBe(1);
+    expect(postsHookCalls).toBe(1);
+
+    await orm.$raw.close();
+  });
+
+  test("global and per-table beforeCreate hooks run in order", async () => {
+    const callOrder: string[] = [];
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        beforeCreate(ctx) {
+          callOrder.push("global");
+
+          return {
+            data: {
+              ...ctx.options.data,
+              name: "AfterGlobal",
+            },
+          };
+        },
+        tables: {
+          users: {
+            beforeCreate(ctx) {
+              callOrder.push(`users:${ctx.options.data.name}`);
+
+              return undefined;
+            },
+          },
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    const created = await orm.users.create({
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+    });
+
+    expect(callOrder).toEqual(["global", "users:AfterGlobal"]);
+    expect(created.name).toBe("AfterGlobal");
+
+    await orm.$raw.close();
+  });
+
+  test("$skipHooks bypasses hooks for a single call", async () => {
+    let hookCalls = 0;
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        beforeCreate() {
+          hookCalls += 1;
+
+          throw new Error("should not run");
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    const created = await orm.users.create({
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+      $skipHooks: true,
+    });
+
+    expect(hookCalls).toBe(0);
+    expect(created.name).toBe("Alice");
 
     await orm.$raw.close();
   });

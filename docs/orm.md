@@ -19,6 +19,7 @@ import {
   boolean,
   date,
   uuid,
+  enumType,
   json,
   jsonb,
   one,
@@ -39,7 +40,7 @@ const users = defineTable("users", {
 });
 ```
 
-Column builders support: `.primaryKey()`, `.notNull()`, `.nullable()`, `.unique()`, `.default(fn)`, `.references(fn)`.
+Column builders support: `.primaryKey()`, `.notNull()`, `.nullable()`, `.unique()`, `.default(fn)`, `.references(fn)`. Enum columns use `enumType(name, values)`.
 
 ### JSON columns
 
@@ -72,6 +73,108 @@ const db = createOrm({
 `adapter` must be set explicitly. Supported values are `"sqlite"` and `"postgres"`.
 
 `$raw` on the returned client is the underlying `Bun.SQL` instance.
+
+## Hooks
+
+Pass an optional `hooks` object to `createOrm` to run lifecycle callbacks around database operations. Register global hooks at the top level of `hooks`. Register per-table hooks under `hooks.tables`, keyed by the table name from the `tables` config. Every hook receives context identifying the table on each call.
+
+```typescript
+const db = createOrm({
+  adapter: "sqlite",
+  url: ":memory:",
+  tables: { users },
+  hooks: {
+    beforeCreate(ctx) {
+      return {
+        data: { ...ctx.options.data, name: ctx.options.data.name.trim() },
+      };
+    },
+    afterCreate(ctx) {
+      console.log(ctx.tableName, ctx.result);
+    },
+    beforeFindMany(ctx) {
+      console.log(ctx.tableName, ctx.options);
+    },
+  },
+});
+```
+
+### Hook names
+
+Each table operation has `before*` and `after*` hooks:
+
+- `beforeFindMany` / `afterFindMany`
+- `beforeFindFirst` / `afterFindFirst`
+- `beforeFindUnique` / `afterFindUnique`
+- `beforeCreate` / `afterCreate`
+- `beforeCreateMany` / `afterCreateMany`
+- `beforeUpdate` / `afterUpdate`
+- `beforeUpdateMany` / `afterUpdateMany`
+- `beforeDelete` / `afterDelete`
+- `beforeDeleteMany` / `afterDeleteMany`
+
+### Context
+
+Every hook receives:
+
+- `tableName` - the key from the `tables` config (e.g. `"users"`)
+- `table` - the table definition object
+- `options` - the operation options passed to the method (`$skipHooks` is stripped before hooks see it)
+- `result` - on `after*` hooks only, the value returned by the operation
+
+### Before-read hooks
+
+`beforeFindMany`, `beforeFindFirst`, and `beforeFindUnique` are observe-only. They cannot return modified options.
+
+### Before-write hooks
+
+`beforeCreate` and `beforeCreateMany` may return `{ data }`. `beforeUpdate` and `beforeUpdateMany` may return `{ where, data }`. `beforeDelete` and `beforeDeleteMany` may return `{ where }`. Returned fields are merged into a copy of the operation options before the query runs. The caller's options object is not mutated.
+
+### Per-table hooks
+
+In addition to global hooks, register per-table hooks under `hooks.tables` (not the top-level `tables` config):
+
+```typescript
+const db = createOrm({
+  adapter: "sqlite",
+  url: ":memory:",
+  tables: { users, posts },
+  hooks: {
+    beforeCreate(ctx) {
+      // runs for every table
+    },
+    tables: {
+      users: {
+        beforeCreate(ctx) {
+          // runs only for users, after the global beforeCreate
+          // ctx.options is typed to the users table
+        },
+      },
+    },
+  },
+});
+```
+
+Global hooks run first. Table-specific hooks receive options already merged from global before-write hooks.
+
+### Skipping hooks
+
+Pass `$skipHooks: true` on any operation to bypass hooks for that call:
+
+```typescript
+await db.users.create({
+  data: { id: "u1", name: "Alice", email: "alice@example.com" },
+  $skipHooks: true,
+});
+```
+
+### Aborting operations
+
+Throwing from any hook aborts the operation. If the throw happens in an `after*` hook after a write, the write is not rolled back unless the call is inside `$transaction`.
+
+### Transactions
+
+Hooks also run for table clients inside `$transaction`. If a hook throws inside a transaction, the transaction is rolled back.
 
 ---
 
@@ -361,6 +464,8 @@ const rows = await db.$raw`SELECT COUNT(*) as count FROM users`;
 
 ## Type exports
 
+Import types with `import type { ... } from "semola/orm"`.
+
 Useful exported types include:
 
 - `TableRow<T>`
@@ -370,9 +475,13 @@ Useful exported types include:
 - `CreateOptions<T, TRelations>`
 - `CreateManyOptions<T>`
 - `UpdateOptions<T, TRelations>`
-- `UpdateManyOptions<T>`
+- `UpdateManyOptions<T, TRelations>`
 - `DeleteOptions<T, TRelations>`
-- `DeleteManyOptions<T>`
+- `DeleteManyOptions<T, TRelations>`
 - `CreateData<T>`
 - `UpdateData<T>`
 - `TransactionClient<T, R>`
+- `OrmHooksConfig<T, R>`
+- `GlobalOrmHooks`
+- `TableHooks<TTable, TRelations>`
+- `OrmHookContext<TOptions, TResult>`
