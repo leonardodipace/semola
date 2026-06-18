@@ -1500,3 +1500,187 @@ describe("many to many relation", () => {
     await orm.$raw.close();
   });
 });
+
+describe("hooks", () => {
+  test("beforeCreate can return modified options", async () => {
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        beforeCreate(ctx) {
+          return {
+            data: {
+              ...ctx.options.data,
+              name: "Modified",
+            },
+          };
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    const created = await orm.users.create({
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+    });
+
+    expect(created.name).toBe("Modified");
+
+    await orm.$raw.close();
+  });
+
+  test("afterCreate receives result", async () => {
+    let afterResult: unknown;
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        afterCreate(ctx) {
+          afterResult = ctx.result;
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    const created = await orm.users.create({
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+    });
+
+    expect(afterResult).toEqual(created);
+
+    await orm.$raw.close();
+  });
+
+  test("beforeFindMany and afterFindMany receive table context", async () => {
+    let beforeTableName: string | undefined;
+    let afterTableName: string | undefined;
+    let afterRowCount: number | undefined;
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        beforeFindMany(ctx) {
+          beforeTableName = ctx.tableName;
+        },
+        afterFindMany(ctx) {
+          afterTableName = ctx.tableName;
+          afterRowCount = ctx.result?.length;
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+    await seedTwoUsers(orm.$raw);
+
+    await orm.users.findMany();
+
+    expect(beforeTableName).toBe("users");
+    expect(afterTableName).toBe("users");
+    expect(afterRowCount).toBe(2);
+
+    await orm.$raw.close();
+  });
+
+  test("throwing from a hook aborts the operation", async () => {
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        beforeCreate() {
+          throw new Error("blocked");
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    await expect(
+      orm.users.create({
+        data: { id: "u1", name: "Alice", email: "alice@example.com" },
+      }),
+    ).rejects.toThrow("blocked");
+
+    const rows = await orm.users.findMany();
+    expect(rows).toHaveLength(0);
+
+    await orm.$raw.close();
+  });
+
+  test("hooks run inside $transaction", async () => {
+    let hookCalls = 0;
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        beforeCreate() {
+          hookCalls += 1;
+
+          return undefined;
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    await orm.$transaction(async (tx) => {
+      await tx.users.create({
+        data: { id: "u1", name: "Alice", email: "alice@example.com" },
+      });
+    });
+
+    expect(hookCalls).toBe(1);
+
+    await orm.$raw.close();
+  });
+
+  test("throwing from a hook inside $transaction rolls back", async () => {
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        afterCreate() {
+          throw new Error("rollback");
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    await expect(
+      orm.$transaction(async (tx) => {
+        await tx.users.create({
+          data: { id: "u1", name: "Alice", email: "alice@example.com" },
+        });
+      }),
+    ).rejects.toThrow("rollback");
+
+    const rows = await orm.users.findMany();
+    expect(rows).toHaveLength(0);
+
+    await orm.$raw.close();
+  });
+
+  test("works without configured hooks", async () => {
+    const orm = createUsersOrm();
+
+    await createUsersSchema(orm.$raw);
+
+    const created = await orm.users.create({
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+    });
+
+    expect(created.name).toBe("Alice");
+
+    await orm.$raw.close();
+  });
+});
