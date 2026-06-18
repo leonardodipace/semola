@@ -27,6 +27,7 @@ import type {
   StringKeyOf,
   TableClient,
   TableRelations,
+  TableRelationsFor,
   TransactionClient,
   UpdateManyOptions,
   UpdateOptions,
@@ -80,13 +81,20 @@ const pickGlobalHooks = <
   return globalHooks;
 };
 
+const runHook = async <THookContext>(
+  hook: ((ctx: THookContext) => void | Promise<void>) | undefined,
+  ctx: THookContext,
+) => {
+  await hook?.(ctx);
+};
+
 const runReadHooks = async <THookContext>(
   globalHook: ((ctx: THookContext) => void | Promise<void>) | undefined,
   tableHook: ((ctx: THookContext) => void | Promise<void>) | undefined,
   ctx: THookContext,
 ) => {
-  await globalHook?.(ctx);
-  await tableHook?.(ctx);
+  await runHook(globalHook, ctx);
+  await runHook(tableHook, ctx);
 };
 
 const withReadHooks = async <TResult, TOptions>(input: {
@@ -263,16 +271,15 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
       const result = await dialect.createMany(sql, queryOptions);
 
       if (!skipHooks) {
-        await runReadHooks(
-          globalHooks?.afterCreateMany,
-          tableHooks?.afterCreateMany,
-          {
-            tableName,
-            table,
-            options: queryOptions,
-            result,
-          },
-        );
+        const hookCtx = {
+          tableName,
+          table,
+          options: queryOptions,
+          result,
+        };
+
+        await runHook(globalHooks?.afterCreateMany, hookCtx);
+        await runHook(tableHooks?.afterCreateMany, hookCtx);
       }
 
       return result;
@@ -343,16 +350,15 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
       const result = await dialect.updateMany(sql, queryOptions);
 
       if (!skipHooks) {
-        await runReadHooks(
-          globalHooks?.afterUpdateMany,
-          tableHooks?.afterUpdateMany,
-          {
-            tableName,
-            table,
-            options: queryOptions,
-            result,
-          },
-        );
+        const hookCtx = {
+          tableName,
+          table,
+          options: queryOptions,
+          result,
+        };
+
+        await runHook(globalHooks?.afterUpdateMany, hookCtx);
+        await runHook(tableHooks?.afterUpdateMany, hookCtx);
       }
 
       return result;
@@ -423,16 +429,15 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
       const result = await dialect.deleteMany(sql, queryOptions);
 
       if (!skipHooks) {
-        await runReadHooks(
-          globalHooks?.afterDeleteMany,
-          tableHooks?.afterDeleteMany,
-          {
-            tableName,
-            table,
-            options: queryOptions,
-            result,
-          },
-        );
+        const hookCtx = {
+          tableName,
+          table,
+          options: queryOptions,
+          result,
+        };
+
+        await runHook(globalHooks?.afterDeleteMany, hookCtx);
+        await runHook(tableHooks?.afterDeleteMany, hookCtx);
       }
 
       return result;
@@ -497,11 +502,12 @@ const buildTableClients = <
       const tableRelations = getTableRelations(relations, tableName);
 
       tableRelationsMap.set(table, tableRelations);
-      clients[tableName] = createTableClient<T[K], NonNullable<R[K]>>({
+      clients[tableName] = createTableClient<T[K], TableRelationsFor<R, K>>({
         sql,
         tableName,
         table,
         adapter,
+        // @ts-expect-error TableRelationsFor and NonNullable<R[K]> are equivalent here
         relations: tableRelations,
         tableRelationsMap,
         globalHooks: hooks ? pickGlobalHooks(hooks) : undefined,

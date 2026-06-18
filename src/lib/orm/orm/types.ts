@@ -365,6 +365,11 @@ export type TableRow<T extends Table> = Prettify<{
   [TColumnName in keyof T["columns"]]: ColumnValue<T["columns"][TColumnName]>;
 }>;
 
+// After-hook results use a row superset so hooks stay assignable when queries select or include.
+export type TableHookResult<T extends Table> = Prettify<
+  Partial<TableRow<T>> & Record<string, unknown>
+>;
+
 type IsRequiredCreateColumn<TColumn extends Column> =
   TColumn["_meta"]["isNullable"] extends false
     ? TColumn["_meta"]["hasDefault"] extends true
@@ -794,7 +799,7 @@ export type TableHooks<
   afterFindMany?: (
     ctx: OrmHookContext<
       FindManyOptions<TTable, TRelations> | undefined,
-      unknown[]
+      Array<TableHookResult<TTable>>
     >,
   ) => void | Promise<void>;
   beforeFindFirst?: (
@@ -803,50 +808,68 @@ export type TableHooks<
   afterFindFirst?: (
     ctx: OrmHookContext<
       FindFirstOptions<TTable, TRelations> | undefined,
-      unknown | null
+      TableHookResult<TTable> | null
     >,
   ) => void | Promise<void>;
   beforeFindUnique?: (
     ctx: OrmHookContext<FindUniqueOptions<TTable, TRelations>>,
   ) => void | Promise<void>;
   afterFindUnique?: (
-    ctx: OrmHookContext<FindUniqueOptions<TTable, TRelations>, unknown | null>,
+    ctx: OrmHookContext<
+      FindUniqueOptions<TTable, TRelations>,
+      TableHookResult<TTable> | null
+    >,
   ) => void | Promise<void>;
   beforeCreate?: (
     ctx: OrmHookContext<CreateOptions<TTable, TRelations>>,
   ) => BeforeHookReturn<BeforeCreateHookResult<TTable, TRelations>>;
   afterCreate?: (
-    ctx: OrmHookContext<CreateOptions<TTable, TRelations>, unknown>,
+    ctx: OrmHookContext<
+      CreateOptions<TTable, TRelations>,
+      TableHookResult<TTable>
+    >,
   ) => void | Promise<void>;
   beforeCreateMany?: (
     ctx: OrmHookContext<CreateManyOptions<TTable>>,
   ) => BeforeHookReturn<BeforeCreateManyHookResult<TTable>>;
   afterCreateMany?: (
-    ctx: OrmHookContext<CreateManyOptions<TTable>, unknown[]>,
+    ctx: OrmHookContext<CreateManyOptions<TTable>, Array<TableRow<TTable>>>,
   ) => void | Promise<void>;
   beforeUpdate?: (
     ctx: OrmHookContext<UpdateOptions<TTable, TRelations>>,
   ) => BeforeHookReturn<BeforeUpdateHookResult<TTable, TRelations>>;
   afterUpdate?: (
-    ctx: OrmHookContext<UpdateOptions<TTable, TRelations>, unknown>,
+    ctx: OrmHookContext<
+      UpdateOptions<TTable, TRelations>,
+      TableHookResult<TTable>
+    >,
   ) => void | Promise<void>;
   beforeUpdateMany?: (
     ctx: OrmHookContext<UpdateManyOptions<TTable, TRelations>>,
   ) => BeforeHookReturn<BeforeUpdateManyHookResult<TTable, TRelations>>;
   afterUpdateMany?: (
-    ctx: OrmHookContext<UpdateManyOptions<TTable, TRelations>, unknown[]>,
+    ctx: OrmHookContext<
+      UpdateManyOptions<TTable, TRelations>,
+      Array<TableRow<TTable>>
+    >,
   ) => void | Promise<void>;
   beforeDelete?: (
     ctx: OrmHookContext<DeleteOptions<TTable, TRelations>>,
   ) => BeforeHookReturn<BeforeDeleteHookResult<TTable, TRelations>>;
   afterDelete?: (
-    ctx: OrmHookContext<DeleteOptions<TTable, TRelations>, unknown>,
+    ctx: OrmHookContext<
+      DeleteOptions<TTable, TRelations>,
+      TableHookResult<TTable>
+    >,
   ) => void | Promise<void>;
   beforeDeleteMany?: (
     ctx: OrmHookContext<DeleteManyOptions<TTable, TRelations>>,
   ) => BeforeHookReturn<BeforeDeleteManyHookResult<TTable, TRelations>>;
   afterDeleteMany?: (
-    ctx: OrmHookContext<DeleteManyOptions<TTable, TRelations>, unknown[]>,
+    ctx: OrmHookContext<
+      DeleteManyOptions<TTable, TRelations>,
+      Array<TableRow<TTable>>
+    >,
   ) => void | Promise<void>;
 };
 
@@ -855,7 +878,7 @@ export type OrmHooksConfig<
   R extends RelationsFor<T> = RelationsFor<T>,
 > = GlobalOrmHooks & {
   tables?: {
-    [K in keyof T]?: TableHooks<T[K], NonNullable<R[K]>>;
+    [K in keyof T]?: TableHooks<T[K], TableRelationsFor<R, K>>;
   };
 };
 
