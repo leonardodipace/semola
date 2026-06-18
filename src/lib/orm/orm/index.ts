@@ -19,6 +19,7 @@ import type {
   HasOne,
   ObjectEntries,
   OrmClient,
+  OrmHookContext,
   OrmHooksConfig,
   OrmQueryOptions,
   OrmTableClients,
@@ -73,26 +74,49 @@ const pickGlobalHooks = <
   R extends RelationsFor<T>,
 >(
   hooksConfig: OrmHooksConfig<T, R>,
-): GlobalOrmHooks => ({
-  beforeFindMany: hooksConfig.beforeFindMany,
-  afterFindMany: hooksConfig.afterFindMany,
-  beforeFindFirst: hooksConfig.beforeFindFirst,
-  afterFindFirst: hooksConfig.afterFindFirst,
-  beforeFindUnique: hooksConfig.beforeFindUnique,
-  afterFindUnique: hooksConfig.afterFindUnique,
-  beforeCreate: hooksConfig.beforeCreate,
-  afterCreate: hooksConfig.afterCreate,
-  beforeCreateMany: hooksConfig.beforeCreateMany,
-  afterCreateMany: hooksConfig.afterCreateMany,
-  beforeUpdate: hooksConfig.beforeUpdate,
-  afterUpdate: hooksConfig.afterUpdate,
-  beforeUpdateMany: hooksConfig.beforeUpdateMany,
-  afterUpdateMany: hooksConfig.afterUpdateMany,
-  beforeDelete: hooksConfig.beforeDelete,
-  afterDelete: hooksConfig.afterDelete,
-  beforeDeleteMany: hooksConfig.beforeDeleteMany,
-  afterDeleteMany: hooksConfig.afterDeleteMany,
-});
+): GlobalOrmHooks => {
+  const {
+    beforeFindMany,
+    afterFindMany,
+    beforeFindFirst,
+    afterFindFirst,
+    beforeFindUnique,
+    afterFindUnique,
+    beforeCreate,
+    afterCreate,
+    beforeCreateMany,
+    afterCreateMany,
+    beforeUpdate,
+    afterUpdate,
+    beforeUpdateMany,
+    afterUpdateMany,
+    beforeDelete,
+    afterDelete,
+    beforeDeleteMany,
+    afterDeleteMany,
+  } = hooksConfig;
+
+  return {
+    beforeFindMany,
+    afterFindMany,
+    beforeFindFirst,
+    afterFindFirst,
+    beforeFindUnique,
+    afterFindUnique,
+    beforeCreate,
+    afterCreate,
+    beforeCreateMany,
+    afterCreateMany,
+    beforeUpdate,
+    afterUpdate,
+    beforeUpdateMany,
+    afterUpdateMany,
+    beforeDelete,
+    afterDelete,
+    beforeDeleteMany,
+    afterDeleteMany,
+  };
+};
 
 const runReadHooks = async <THookContext>(
   globalHook: ((ctx: THookContext) => void | Promise<void>) | undefined,
@@ -101,6 +125,41 @@ const runReadHooks = async <THookContext>(
 ) => {
   await globalHook?.(ctx);
   await tableHook?.(ctx);
+};
+
+const withReadHooks = async <TResult, TOptions>(input: {
+  skipHooks: boolean;
+  tableName: string;
+  table: Table;
+  hookOptions: TOptions;
+  beforeGlobal?: (ctx: OrmHookContext<TOptions>) => void | Promise<void>;
+  beforeTable?: (ctx: OrmHookContext<TOptions>) => void | Promise<void>;
+  afterGlobal?: (
+    ctx: OrmHookContext<TOptions, TResult>,
+  ) => void | Promise<void>;
+  afterTable?: (ctx: OrmHookContext<TOptions, TResult>) => void | Promise<void>;
+  query: () => Promise<TResult>;
+}) => {
+  const beforeCtx = {
+    tableName: input.tableName,
+    table: input.table,
+    options: input.hookOptions,
+  };
+
+  if (!input.skipHooks) {
+    await runReadHooks(input.beforeGlobal, input.beforeTable, beforeCtx);
+  }
+
+  const result = await input.query();
+
+  if (!input.skipHooks) {
+    await runReadHooks(input.afterGlobal, input.afterTable, {
+      ...beforeCtx,
+      result,
+    });
+  }
+
+  return result;
 };
 
 const createTableClient = <T extends Table, TRelations extends TableRelations>(
@@ -126,34 +185,17 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
       const skipHooks = shouldSkipHooks(options);
       const hookOptions = toHookOptions(options);
 
-      if (!skipHooks) {
-        await runReadHooks(
-          globalHooks?.beforeFindMany,
-          tableHooks?.beforeFindMany,
-          {
-            tableName,
-            table,
-            options: hookOptions,
-          },
-        );
-      }
-
-      const result = await dialect.findMany(sql, hookOptions);
-
-      if (!skipHooks) {
-        await runReadHooks(
-          globalHooks?.afterFindMany,
-          tableHooks?.afterFindMany,
-          {
-            tableName,
-            table,
-            options: hookOptions,
-            result,
-          },
-        );
-      }
-
-      return result;
+      return withReadHooks({
+        skipHooks,
+        tableName,
+        table,
+        hookOptions,
+        beforeGlobal: globalHooks?.beforeFindMany,
+        beforeTable: tableHooks?.beforeFindMany,
+        afterGlobal: globalHooks?.afterFindMany,
+        afterTable: tableHooks?.afterFindMany,
+        query: () => dialect.findMany(sql, hookOptions),
+      });
     },
 
     findFirst: async <const TOptions extends FindFirstOptions<T, TRelations>>(
@@ -162,34 +204,17 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
       const skipHooks = shouldSkipHooks(options);
       const hookOptions = toHookOptions(options);
 
-      if (!skipHooks) {
-        await runReadHooks(
-          globalHooks?.beforeFindFirst,
-          tableHooks?.beforeFindFirst,
-          {
-            tableName,
-            table,
-            options: hookOptions,
-          },
-        );
-      }
-
-      const result = await dialect.findFirst(sql, hookOptions);
-
-      if (!skipHooks) {
-        await runReadHooks(
-          globalHooks?.afterFindFirst,
-          tableHooks?.afterFindFirst,
-          {
-            tableName,
-            table,
-            options: hookOptions,
-            result,
-          },
-        );
-      }
-
-      return result;
+      return withReadHooks({
+        skipHooks,
+        tableName,
+        table,
+        hookOptions,
+        beforeGlobal: globalHooks?.beforeFindFirst,
+        beforeTable: tableHooks?.beforeFindFirst,
+        afterGlobal: globalHooks?.afterFindFirst,
+        afterTable: tableHooks?.afterFindFirst,
+        query: () => dialect.findFirst(sql, hookOptions),
+      });
     },
 
     findUnique: async <const TOptions extends FindUniqueOptions<T, TRelations>>(
@@ -198,34 +223,17 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
       const skipHooks = shouldSkipHooks(options);
       const hookOptions = withoutSkipHooks(options);
 
-      if (!skipHooks) {
-        await runReadHooks(
-          globalHooks?.beforeFindUnique,
-          tableHooks?.beforeFindUnique,
-          {
-            tableName,
-            table,
-            options: hookOptions,
-          },
-        );
-      }
-
-      const result = await dialect.findUnique(sql, hookOptions);
-
-      if (!skipHooks) {
-        await runReadHooks(
-          globalHooks?.afterFindUnique,
-          tableHooks?.afterFindUnique,
-          {
-            tableName,
-            table,
-            options: hookOptions,
-            result,
-          },
-        );
-      }
-
-      return result;
+      return withReadHooks({
+        skipHooks,
+        tableName,
+        table,
+        hookOptions,
+        beforeGlobal: globalHooks?.beforeFindUnique,
+        beforeTable: tableHooks?.beforeFindUnique,
+        afterGlobal: globalHooks?.afterFindUnique,
+        afterTable: tableHooks?.afterFindUnique,
+        query: () => dialect.findUnique(sql, hookOptions),
+      });
     },
 
     create: async <const TOptions extends CreateOptions<T, TRelations>>(
