@@ -19,6 +19,7 @@ import {
   boolean,
   date,
   uuid,
+  enumType,
   json,
   jsonb,
   one,
@@ -39,7 +40,7 @@ const users = defineTable("users", {
 });
 ```
 
-Column builders support: `.primaryKey()`, `.notNull()`, `.nullable()`, `.unique()`, `.default(fn)`, `.references(fn)`.
+Column builders support: `.primaryKey()`, `.notNull()`, `.nullable()`, `.unique()`, `.default(fn)`, `.references(fn)`. Enum columns use `enumType(name, values)`.
 
 ### JSON columns
 
@@ -75,7 +76,7 @@ const db = createOrm({
 
 ## Hooks
 
-Pass an optional `hooks` object to `createOrm` to run lifecycle callbacks around database operations. Hooks are global (one set per ORM client) and receive context identifying the table on each call.
+Pass an optional `hooks` object to `createOrm` to run lifecycle callbacks around database operations. Register global hooks at the top level of `hooks`. Register per-table hooks under `hooks.tables`, keyed by the table name from the `tables` config. Every hook receives context identifying the table on each call.
 
 ```typescript
 const db = createOrm({
@@ -118,8 +119,12 @@ Every hook receives:
 
 - `tableName` - the key from the `tables` config (e.g. `"users"`)
 - `table` - the table definition object
-- `options` - the operation options passed to the method
-- `result` - on `after*` hooks, the value returned by the operation
+- `options` - the operation options passed to the method (`$skipHooks` is stripped before hooks see it)
+- `result` - on `after*` hooks only, the value returned by the operation
+
+### Before-read hooks
+
+`beforeFindMany`, `beforeFindFirst`, and `beforeFindUnique` are observe-only. They cannot return modified options.
 
 ### Before-write hooks
 
@@ -127,7 +132,7 @@ Every hook receives:
 
 ### Per-table hooks
 
-In addition to global hooks, you can register hooks for a specific table under `tables`:
+In addition to global hooks, register per-table hooks under `hooks.tables` (not the top-level `tables` config):
 
 ```typescript
 const db = createOrm({
@@ -459,6 +464,8 @@ const rows = await db.$raw`SELECT COUNT(*) as count FROM users`;
 
 ## Type exports
 
+Import types with `import type { ... } from "semola/orm"`.
+
 Useful exported types include:
 
 - `TableRow<T>`
@@ -468,9 +475,13 @@ Useful exported types include:
 - `CreateOptions<T, TRelations>`
 - `CreateManyOptions<T>`
 - `UpdateOptions<T, TRelations>`
-- `UpdateManyOptions<T>`
+- `UpdateManyOptions<T, TRelations>`
 - `DeleteOptions<T, TRelations>`
-- `DeleteManyOptions<T>`
+- `DeleteManyOptions<T, TRelations>`
 - `CreateData<T>`
 - `UpdateData<T>`
 - `TransactionClient<T, R>`
+- `OrmHooksConfig<T, R>`
+- `GlobalOrmHooks`
+- `TableHooks<TTable, TRelations>`
+- `OrmHookContext<TOptions, TResult>`

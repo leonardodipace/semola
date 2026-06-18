@@ -2,9 +2,33 @@ export {
   boolean,
   date,
   enumType,
+  json,
+  jsonb,
   number,
   string,
   uuid,
 } from "./column/index.js";
 export { createOrm, many, one } from "./orm/index.js";
+export type {
+  CreateData,
+  CreateManyOptions,
+  CreateOptions,
+  CreateResult,
+  DeleteManyOptions,
+  DeleteOptions,
+  DeleteResult,
+  FindFirstOptions,
+  FindManyOptions,
+  FindUniqueOptions,
+  GlobalOrmHooks,
+  OrmHookContext,
+  OrmHooksConfig,
+  TableHooks,
+  TableRow,
+  TransactionClient,
+  UpdateData,
+  UpdateManyOptions,
+  UpdateOptions,
+  UpdateResult,
+} from "./orm/types.js";
 export { defineTable } from "./table/index.js";
