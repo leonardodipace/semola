@@ -73,6 +73,66 @@ const db = createOrm({
 
 `$raw` on the returned client is the underlying `Bun.SQL` instance.
 
+## Hooks
+
+Pass an optional `hooks` object to `createOrm` to run lifecycle callbacks around database operations. Hooks are global (one set per ORM client) and receive context identifying the table on each call.
+
+```typescript
+const db = createOrm({
+  adapter: "sqlite",
+  url: ":memory:",
+  tables: { users },
+  hooks: {
+    beforeCreate(ctx) {
+      return {
+        data: { ...ctx.options.data, name: ctx.options.data.name.trim() },
+      };
+    },
+    afterCreate(ctx) {
+      console.log(ctx.tableName, ctx.result);
+    },
+    beforeFindMany(ctx) {
+      console.log(ctx.tableName, ctx.options);
+    },
+  },
+});
+```
+
+### Hook names
+
+Each table operation has `before*` and `after*` hooks:
+
+- `beforeFindMany` / `afterFindMany`
+- `beforeFindFirst` / `afterFindFirst`
+- `beforeFindUnique` / `afterFindUnique`
+- `beforeCreate` / `afterCreate`
+- `beforeCreateMany` / `afterCreateMany`
+- `beforeUpdate` / `afterUpdate`
+- `beforeUpdateMany` / `afterUpdateMany`
+- `beforeDelete` / `afterDelete`
+- `beforeDeleteMany` / `afterDeleteMany`
+
+### Context
+
+Every hook receives:
+
+- `tableName` - the key from the `tables` config (e.g. `"users"`)
+- `table` - the table definition object
+- `options` - the operation options passed to the method
+- `result` - on `after*` hooks, the value returned by the operation
+
+### Before-write hooks
+
+`beforeCreate`, `beforeCreateMany`, `beforeUpdate`, `beforeUpdateMany`, `beforeDelete`, and `beforeDeleteMany` may return modified options. Returned fields are merged into the operation options before the query runs.
+
+### Aborting operations
+
+Throwing from any hook aborts the operation. If the throw happens in an `after*` hook after a write, the write is not rolled back unless the call is inside `$transaction`.
+
+### Transactions
+
+Hooks also run for table clients inside `$transaction`. If a hook throws inside a transaction, the transaction is rolled back.
+
 ---
 
 ## Query API
