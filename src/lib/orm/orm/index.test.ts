@@ -1712,18 +1712,20 @@ describe("hooks", () => {
       url: ":memory:",
       tables: { users: usersTable, posts: postsTable },
       hooks: {
-        users: {
-          beforeCreate() {
-            usersHookCalls += 1;
+        tables: {
+          users: {
+            beforeCreate() {
+              usersHookCalls += 1;
 
-            return undefined;
+              return undefined;
+            },
           },
-        },
-        posts: {
-          beforeCreate() {
-            postsHookCalls += 1;
+          posts: {
+            beforeCreate() {
+              postsHookCalls += 1;
 
-            return undefined;
+              return undefined;
+            },
           },
         },
       },
@@ -1766,11 +1768,13 @@ describe("hooks", () => {
             },
           };
         },
-        users: {
-          beforeCreate(ctx) {
-            callOrder.push(`users:${ctx.options.data.name}`);
+        tables: {
+          users: {
+            beforeCreate(ctx) {
+              callOrder.push(`users:${ctx.options.data.name}`);
 
-            return undefined;
+              return undefined;
+            },
           },
         },
       },

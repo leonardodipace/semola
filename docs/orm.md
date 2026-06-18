@@ -123,11 +123,11 @@ Every hook receives:
 
 ### Before-write hooks
 
-`beforeCreate`, `beforeCreateMany`, `beforeUpdate`, `beforeUpdateMany`, `beforeDelete`, and `beforeDeleteMany` may return partial options (for example `{ data: { ... } }`). Returned fields are merged into a copy of the operation options before the query runs. The caller's options object is not mutated.
+`beforeCreate` and `beforeCreateMany` may return `{ data }`. `beforeUpdate` and `beforeUpdateMany` may return `{ where, data }`. `beforeDelete` and `beforeDeleteMany` may return `{ where }`. Returned fields are merged into a copy of the operation options before the query runs. The caller's options object is not mutated.
 
 ### Per-table hooks
 
-In addition to global hooks, you can register hooks for a specific table using its config key:
+In addition to global hooks, you can register hooks for a specific table under `tables`:
 
 ```typescript
 const db = createOrm({
@@ -138,10 +138,12 @@ const db = createOrm({
     beforeCreate(ctx) {
       // runs for every table
     },
-    users: {
-      beforeCreate(ctx) {
-        // runs only for users, after the global beforeCreate
-        // ctx.options is typed to the users table
+    tables: {
+      users: {
+        beforeCreate(ctx) {
+          // runs only for users, after the global beforeCreate
+          // ctx.options is typed to the users table
+        },
       },
     },
   },

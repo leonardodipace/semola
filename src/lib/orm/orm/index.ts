@@ -75,47 +75,9 @@ const pickGlobalHooks = <
 >(
   hooksConfig: OrmHooksConfig<T, R>,
 ): GlobalOrmHooks => {
-  const {
-    beforeFindMany,
-    afterFindMany,
-    beforeFindFirst,
-    afterFindFirst,
-    beforeFindUnique,
-    afterFindUnique,
-    beforeCreate,
-    afterCreate,
-    beforeCreateMany,
-    afterCreateMany,
-    beforeUpdate,
-    afterUpdate,
-    beforeUpdateMany,
-    afterUpdateMany,
-    beforeDelete,
-    afterDelete,
-    beforeDeleteMany,
-    afterDeleteMany,
-  } = hooksConfig;
+  const { tables, ...globalHooks } = hooksConfig;
 
-  return {
-    beforeFindMany,
-    afterFindMany,
-    beforeFindFirst,
-    afterFindFirst,
-    beforeFindUnique,
-    afterFindUnique,
-    beforeCreate,
-    afterCreate,
-    beforeCreateMany,
-    afterCreateMany,
-    beforeUpdate,
-    afterUpdate,
-    beforeUpdateMany,
-    afterUpdateMany,
-    beforeDelete,
-    afterDelete,
-    beforeDeleteMany,
-    afterDeleteMany,
-  };
+  return globalHooks;
 };
 
 const runReadHooks = async <THookContext>(
@@ -543,8 +505,7 @@ const buildTableClients = <
         relations: tableRelations,
         tableRelationsMap,
         globalHooks: hooks ? pickGlobalHooks(hooks) : undefined,
-        // @ts-expect-error table hooks are keyed by table name
-        tableHooks: hooks?.[tableName],
+        tableHooks: hooks?.tables?.[tableName],
       });
     };
 
