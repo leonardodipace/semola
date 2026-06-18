@@ -14,10 +14,13 @@ import type {
   FindFirstOptions,
   FindManyOptions,
   FindUniqueOptions,
+  GlobalOrmHooks,
   HasMany,
   HasOne,
   ObjectEntries,
   OrmClient,
+  OrmHooksConfig,
+  OrmQueryOptions,
   OrmTableClients,
   RelationsFor,
   StringKeyOf,
@@ -47,6 +50,59 @@ export const one = <T extends Table, const TKey extends string>(
   };
 };
 
+const shouldSkipHooks = (options: OrmQueryOptions | undefined) => {
+  return options?.$skipHooks === true;
+};
+
+const withoutSkipHooks = <T extends OrmQueryOptions>(options: T) => {
+  const { $skipHooks, ...queryOptions } = options;
+
+  return queryOptions;
+};
+
+const toHookOptions = <T extends OrmQueryOptions>(options: T | undefined) => {
+  if (!options) {
+    return undefined;
+  }
+
+  return withoutSkipHooks(options);
+};
+
+const pickGlobalHooks = <
+  T extends Record<string, Table>,
+  R extends RelationsFor<T>,
+>(
+  hooksConfig: OrmHooksConfig<T, R>,
+): GlobalOrmHooks => ({
+  beforeFindMany: hooksConfig.beforeFindMany,
+  afterFindMany: hooksConfig.afterFindMany,
+  beforeFindFirst: hooksConfig.beforeFindFirst,
+  afterFindFirst: hooksConfig.afterFindFirst,
+  beforeFindUnique: hooksConfig.beforeFindUnique,
+  afterFindUnique: hooksConfig.afterFindUnique,
+  beforeCreate: hooksConfig.beforeCreate,
+  afterCreate: hooksConfig.afterCreate,
+  beforeCreateMany: hooksConfig.beforeCreateMany,
+  afterCreateMany: hooksConfig.afterCreateMany,
+  beforeUpdate: hooksConfig.beforeUpdate,
+  afterUpdate: hooksConfig.afterUpdate,
+  beforeUpdateMany: hooksConfig.beforeUpdateMany,
+  afterUpdateMany: hooksConfig.afterUpdateMany,
+  beforeDelete: hooksConfig.beforeDelete,
+  afterDelete: hooksConfig.afterDelete,
+  beforeDeleteMany: hooksConfig.beforeDeleteMany,
+  afterDeleteMany: hooksConfig.afterDeleteMany,
+});
+
+const runReadHooks = async <THookContext>(
+  globalHook: ((ctx: THookContext) => void | Promise<void>) | undefined,
+  tableHook: ((ctx: THookContext) => void | Promise<void>) | undefined,
+  ctx: THookContext,
+) => {
+  await globalHook?.(ctx);
+  await tableHook?.(ctx);
+};
+
 const createTableClient = <T extends Table, TRelations extends TableRelations>(
   input: CreateTableClientInput<T, TRelations>,
 ): TableClient<T, TRelations> => {
@@ -57,7 +113,8 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
     adapter,
     relations,
     tableRelationsMap,
-    hooks,
+    globalHooks,
+    tableHooks,
   } = input;
 
   const dialect = getDialect({ adapter, table, relations, tableRelationsMap });
@@ -66,11 +123,35 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
     findMany: async <const TOptions extends FindManyOptions<T, TRelations>>(
       options?: TOptions,
     ) => {
-      await hooks?.beforeFindMany?.({ tableName, table, options });
+      const skipHooks = shouldSkipHooks(options);
+      const hookOptions = toHookOptions(options);
 
-      const result = await dialect.findMany<TOptions>(sql, options);
+      if (!skipHooks) {
+        await runReadHooks(
+          globalHooks?.beforeFindMany,
+          tableHooks?.beforeFindMany,
+          {
+            tableName,
+            table,
+            options: hookOptions,
+          },
+        );
+      }
 
-      await hooks?.afterFindMany?.({ tableName, table, options, result });
+      const result = await dialect.findMany(sql, hookOptions);
+
+      if (!skipHooks) {
+        await runReadHooks(
+          globalHooks?.afterFindMany,
+          tableHooks?.afterFindMany,
+          {
+            tableName,
+            table,
+            options: hookOptions,
+            result,
+          },
+        );
+      }
 
       return result;
     },
@@ -78,11 +159,35 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
     findFirst: async <const TOptions extends FindFirstOptions<T, TRelations>>(
       options?: TOptions,
     ) => {
-      await hooks?.beforeFindFirst?.({ tableName, table, options });
+      const skipHooks = shouldSkipHooks(options);
+      const hookOptions = toHookOptions(options);
 
-      const result = await dialect.findFirst<TOptions>(sql, options);
+      if (!skipHooks) {
+        await runReadHooks(
+          globalHooks?.beforeFindFirst,
+          tableHooks?.beforeFindFirst,
+          {
+            tableName,
+            table,
+            options: hookOptions,
+          },
+        );
+      }
 
-      await hooks?.afterFindFirst?.({ tableName, table, options, result });
+      const result = await dialect.findFirst(sql, hookOptions);
+
+      if (!skipHooks) {
+        await runReadHooks(
+          globalHooks?.afterFindFirst,
+          tableHooks?.afterFindFirst,
+          {
+            tableName,
+            table,
+            options: hookOptions,
+            result,
+          },
+        );
+      }
 
       return result;
     },
@@ -90,11 +195,35 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
     findUnique: async <const TOptions extends FindUniqueOptions<T, TRelations>>(
       options: TOptions,
     ) => {
-      await hooks?.beforeFindUnique?.({ tableName, table, options });
+      const skipHooks = shouldSkipHooks(options);
+      const hookOptions = withoutSkipHooks(options);
 
-      const result = await dialect.findUnique<TOptions>(sql, options);
+      if (!skipHooks) {
+        await runReadHooks(
+          globalHooks?.beforeFindUnique,
+          tableHooks?.beforeFindUnique,
+          {
+            tableName,
+            table,
+            options: hookOptions,
+          },
+        );
+      }
 
-      await hooks?.afterFindUnique?.({ tableName, table, options, result });
+      const result = await dialect.findUnique(sql, hookOptions);
+
+      if (!skipHooks) {
+        await runReadHooks(
+          globalHooks?.afterFindUnique,
+          tableHooks?.afterFindUnique,
+          {
+            tableName,
+            table,
+            options: hookOptions,
+            result,
+          },
+        );
+      }
 
       return result;
     },
@@ -102,43 +231,79 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
     create: async <const TOptions extends CreateOptions<T, TRelations>>(
       options: TOptions,
     ): Promise<CreateResult<T, TRelations, TOptions>> => {
-      const createHookResult = await hooks?.beforeCreate?.({
-        tableName,
-        table,
-        options,
-      });
+      const skipHooks = shouldSkipHooks(options);
+      const hookOptions = withoutSkipHooks(options);
+      let queryOptions = hookOptions;
 
-      Object.assign(options, createHookResult);
+      if (!skipHooks) {
+        const createHookResult = await globalHooks?.beforeCreate?.({
+          tableName,
+          table,
+          options: hookOptions,
+        });
 
-      const result = await dialect.create<TOptions>(sql, options);
+        queryOptions = { ...hookOptions, ...createHookResult };
 
-      await hooks?.afterCreate?.({
-        tableName,
-        table,
-        options,
-        result,
-      });
+        const tableCreateHookResult = await tableHooks?.beforeCreate?.({
+          tableName,
+          table,
+          options: queryOptions,
+        });
+
+        queryOptions = { ...queryOptions, ...tableCreateHookResult };
+      }
+
+      const result = await dialect.create(sql, queryOptions);
+
+      if (!skipHooks) {
+        await runReadHooks(globalHooks?.afterCreate, tableHooks?.afterCreate, {
+          tableName,
+          table,
+          options: queryOptions,
+          result,
+        });
+      }
 
       return result;
     },
 
     createMany: async (options: CreateManyOptions<T>) => {
-      const createManyHookResult = await hooks?.beforeCreateMany?.({
-        tableName,
-        table,
-        options,
-      });
+      const skipHooks = shouldSkipHooks(options);
+      const hookOptions = withoutSkipHooks(options);
+      let queryOptions = hookOptions;
 
-      Object.assign(options, createManyHookResult);
+      if (!skipHooks) {
+        const createManyHookResult = await globalHooks?.beforeCreateMany?.({
+          tableName,
+          table,
+          options: hookOptions,
+        });
 
-      const result = await dialect.createMany(sql, options);
+        queryOptions = { ...hookOptions, ...createManyHookResult };
 
-      await hooks?.afterCreateMany?.({
-        tableName,
-        table,
-        options,
-        result,
-      });
+        const tableCreateManyHookResult = await tableHooks?.beforeCreateMany?.({
+          tableName,
+          table,
+          options: queryOptions,
+        });
+
+        queryOptions = { ...queryOptions, ...tableCreateManyHookResult };
+      }
+
+      const result = await dialect.createMany(sql, queryOptions);
+
+      if (!skipHooks) {
+        await runReadHooks(
+          globalHooks?.afterCreateMany,
+          tableHooks?.afterCreateMany,
+          {
+            tableName,
+            table,
+            options: queryOptions,
+            result,
+          },
+        );
+      }
 
       return result;
     },
@@ -146,43 +311,79 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
     update: async <const TOptions extends UpdateOptions<T, TRelations>>(
       options: TOptions,
     ): Promise<UpdateResult<T, TRelations, TOptions>> => {
-      const updateHookResult = await hooks?.beforeUpdate?.({
-        tableName,
-        table,
-        options,
-      });
+      const skipHooks = shouldSkipHooks(options);
+      const hookOptions = withoutSkipHooks(options);
+      let queryOptions = hookOptions;
 
-      Object.assign(options, updateHookResult);
+      if (!skipHooks) {
+        const updateHookResult = await globalHooks?.beforeUpdate?.({
+          tableName,
+          table,
+          options: hookOptions,
+        });
 
-      const result = await dialect.update<TOptions>(sql, options);
+        queryOptions = { ...hookOptions, ...updateHookResult };
 
-      await hooks?.afterUpdate?.({
-        tableName,
-        table,
-        options,
-        result,
-      });
+        const tableUpdateHookResult = await tableHooks?.beforeUpdate?.({
+          tableName,
+          table,
+          options: queryOptions,
+        });
+
+        queryOptions = { ...queryOptions, ...tableUpdateHookResult };
+      }
+
+      const result = await dialect.update(sql, queryOptions);
+
+      if (!skipHooks) {
+        await runReadHooks(globalHooks?.afterUpdate, tableHooks?.afterUpdate, {
+          tableName,
+          table,
+          options: queryOptions,
+          result,
+        });
+      }
 
       return result;
     },
 
     updateMany: async (options: UpdateManyOptions<T, TRelations>) => {
-      const updateManyHookResult = await hooks?.beforeUpdateMany?.({
-        tableName,
-        table,
-        options,
-      });
+      const skipHooks = shouldSkipHooks(options);
+      const hookOptions = withoutSkipHooks(options);
+      let queryOptions = hookOptions;
 
-      Object.assign(options, updateManyHookResult);
+      if (!skipHooks) {
+        const updateManyHookResult = await globalHooks?.beforeUpdateMany?.({
+          tableName,
+          table,
+          options: hookOptions,
+        });
 
-      const result = await dialect.updateMany(sql, options);
+        queryOptions = { ...hookOptions, ...updateManyHookResult };
 
-      await hooks?.afterUpdateMany?.({
-        tableName,
-        table,
-        options,
-        result,
-      });
+        const tableUpdateManyHookResult = await tableHooks?.beforeUpdateMany?.({
+          tableName,
+          table,
+          options: queryOptions,
+        });
+
+        queryOptions = { ...queryOptions, ...tableUpdateManyHookResult };
+      }
+
+      const result = await dialect.updateMany(sql, queryOptions);
+
+      if (!skipHooks) {
+        await runReadHooks(
+          globalHooks?.afterUpdateMany,
+          tableHooks?.afterUpdateMany,
+          {
+            tableName,
+            table,
+            options: queryOptions,
+            result,
+          },
+        );
+      }
 
       return result;
     },
@@ -190,43 +391,79 @@ const createTableClient = <T extends Table, TRelations extends TableRelations>(
     delete: async <const TOptions extends DeleteOptions<T, TRelations>>(
       options: TOptions,
     ): Promise<DeleteResult<T, TRelations, TOptions>> => {
-      const deleteHookResult = await hooks?.beforeDelete?.({
-        tableName,
-        table,
-        options,
-      });
+      const skipHooks = shouldSkipHooks(options);
+      const hookOptions = withoutSkipHooks(options);
+      let queryOptions = hookOptions;
 
-      Object.assign(options, deleteHookResult);
+      if (!skipHooks) {
+        const deleteHookResult = await globalHooks?.beforeDelete?.({
+          tableName,
+          table,
+          options: hookOptions,
+        });
 
-      const result = await dialect.delete<TOptions>(sql, options);
+        queryOptions = { ...hookOptions, ...deleteHookResult };
 
-      await hooks?.afterDelete?.({
-        tableName,
-        table,
-        options,
-        result,
-      });
+        const tableDeleteHookResult = await tableHooks?.beforeDelete?.({
+          tableName,
+          table,
+          options: queryOptions,
+        });
+
+        queryOptions = { ...queryOptions, ...tableDeleteHookResult };
+      }
+
+      const result = await dialect.delete(sql, queryOptions);
+
+      if (!skipHooks) {
+        await runReadHooks(globalHooks?.afterDelete, tableHooks?.afterDelete, {
+          tableName,
+          table,
+          options: queryOptions,
+          result,
+        });
+      }
 
       return result;
     },
 
     deleteMany: async (options: DeleteManyOptions<T, TRelations>) => {
-      const deleteManyHookResult = await hooks?.beforeDeleteMany?.({
-        tableName,
-        table,
-        options,
-      });
+      const skipHooks = shouldSkipHooks(options);
+      const hookOptions = withoutSkipHooks(options);
+      let queryOptions = hookOptions;
 
-      Object.assign(options, deleteManyHookResult);
+      if (!skipHooks) {
+        const deleteManyHookResult = await globalHooks?.beforeDeleteMany?.({
+          tableName,
+          table,
+          options: hookOptions,
+        });
 
-      const result = await dialect.deleteMany(sql, options);
+        queryOptions = { ...hookOptions, ...deleteManyHookResult };
 
-      await hooks?.afterDeleteMany?.({
-        tableName,
-        table,
-        options,
-        result,
-      });
+        const tableDeleteManyHookResult = await tableHooks?.beforeDeleteMany?.({
+          tableName,
+          table,
+          options: queryOptions,
+        });
+
+        queryOptions = { ...queryOptions, ...tableDeleteManyHookResult };
+      }
+
+      const result = await dialect.deleteMany(sql, queryOptions);
+
+      if (!skipHooks) {
+        await runReadHooks(
+          globalHooks?.afterDeleteMany,
+          tableHooks?.afterDeleteMany,
+          {
+            tableName,
+            table,
+            options: queryOptions,
+            result,
+          },
+        );
+      }
 
       return result;
     },
@@ -254,19 +491,19 @@ const getTableRelations = <
 >(
   relations: R | undefined,
   tableName: K,
-): TableRelations => {
+): NonNullable<R[K]> => {
   if (!relations) {
-    return {};
+    return Object.create(null);
   }
 
   if (!Object.hasOwn(relations, tableName)) {
-    return {};
+    return Object.create(null);
   }
 
   const tableRelations = relations[tableName];
 
   if (!tableRelations) {
-    return {};
+    return Object.create(null);
   }
 
   return tableRelations;
@@ -290,14 +527,16 @@ const buildTableClients = <
       const tableRelations = getTableRelations(relations, tableName);
 
       tableRelationsMap.set(table, tableRelations);
-      clients[tableName] = createTableClient({
+      clients[tableName] = createTableClient<T[K], NonNullable<R[K]>>({
         sql,
         tableName,
         table,
         adapter,
         relations: tableRelations,
         tableRelationsMap,
-        hooks,
+        globalHooks: hooks ? pickGlobalHooks(hooks) : undefined,
+        // @ts-expect-error table hooks are keyed by table name
+        tableHooks: hooks?.[tableName],
       });
     };
 

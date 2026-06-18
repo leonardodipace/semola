@@ -30,6 +30,23 @@ const createUsersOrm = () =>
     tables: { users: usersTable },
   });
 
+const createUsersOrmWithModifyingBeforeCreate = () =>
+  createOrm({
+    adapter: "sqlite",
+    url: ":memory:",
+    tables: { users: usersTable },
+    hooks: {
+      beforeCreate(ctx) {
+        return {
+          data: {
+            ...ctx.options.data,
+            name: "Modified",
+          },
+        };
+      },
+    },
+  });
+
 const createUsersSchema = async (sql: Bun.SQL) => {
   await sql.unsafe(
     "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
@@ -1503,21 +1520,7 @@ describe("many to many relation", () => {
 
 describe("hooks", () => {
   test("beforeCreate can return modified options", async () => {
-    const orm = createOrm({
-      adapter: "sqlite",
-      url: ":memory:",
-      tables: { users: usersTable },
-      hooks: {
-        beforeCreate(ctx) {
-          return {
-            data: {
-              ...ctx.options.data,
-              name: "Modified",
-            },
-          };
-        },
-      },
-    });
+    const orm = createUsersOrmWithModifyingBeforeCreate();
 
     await createUsersSchema(orm.$raw);
 
@@ -1679,6 +1682,136 @@ describe("hooks", () => {
       data: { id: "u1", name: "Alice", email: "alice@example.com" },
     });
 
+    expect(created.name).toBe("Alice");
+
+    await orm.$raw.close();
+  });
+
+  test("beforeCreate does not mutate caller options", async () => {
+    const orm = createUsersOrmWithModifyingBeforeCreate();
+
+    await createUsersSchema(orm.$raw);
+
+    const options = {
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+    };
+
+    await orm.users.create(options);
+
+    expect(options.data.name).toBe("Alice");
+
+    await orm.$raw.close();
+  });
+
+  test("per-table hooks run only for matching table", async () => {
+    let usersHookCalls = 0;
+    let postsHookCalls = 0;
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable, posts: postsTable },
+      hooks: {
+        users: {
+          beforeCreate() {
+            usersHookCalls += 1;
+
+            return undefined;
+          },
+        },
+        posts: {
+          beforeCreate() {
+            postsHookCalls += 1;
+
+            return undefined;
+          },
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+    await orm.$raw.unsafe(
+      "CREATE TABLE posts (id TEXT PRIMARY KEY, title TEXT NOT NULL)",
+    );
+
+    await orm.users.create({
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+    });
+
+    await orm.posts.create({
+      data: { id: "p1", title: "Hello" },
+    });
+
+    expect(usersHookCalls).toBe(1);
+    expect(postsHookCalls).toBe(1);
+
+    await orm.$raw.close();
+  });
+
+  test("global and per-table beforeCreate hooks run in order", async () => {
+    const callOrder: string[] = [];
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        beforeCreate(ctx) {
+          callOrder.push("global");
+
+          return {
+            data: {
+              ...ctx.options.data,
+              name: "AfterGlobal",
+            },
+          };
+        },
+        users: {
+          beforeCreate(ctx) {
+            callOrder.push(`users:${ctx.options.data.name}`);
+
+            return undefined;
+          },
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    const created = await orm.users.create({
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+    });
+
+    expect(callOrder).toEqual(["global", "users:AfterGlobal"]);
+    expect(created.name).toBe("AfterGlobal");
+
+    await orm.$raw.close();
+  });
+
+  test("$skipHooks bypasses hooks for a single call", async () => {
+    let hookCalls = 0;
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        beforeCreate() {
+          hookCalls += 1;
+
+          throw new Error("should not run");
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    const created = await orm.users.create({
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+      $skipHooks: true,
+    });
+
+    expect(hookCalls).toBe(0);
     expect(created.name).toBe("Alice");
 
     await orm.$raw.close();

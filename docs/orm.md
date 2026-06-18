@@ -123,7 +123,43 @@ Every hook receives:
 
 ### Before-write hooks
 
-`beforeCreate`, `beforeCreateMany`, `beforeUpdate`, `beforeUpdateMany`, `beforeDelete`, and `beforeDeleteMany` may return modified options. Returned fields are merged into the operation options before the query runs.
+`beforeCreate`, `beforeCreateMany`, `beforeUpdate`, `beforeUpdateMany`, `beforeDelete`, and `beforeDeleteMany` may return partial options (for example `{ data: { ... } }`). Returned fields are merged into a copy of the operation options before the query runs. The caller's options object is not mutated.
+
+### Per-table hooks
+
+In addition to global hooks, you can register hooks for a specific table using its config key:
+
+```typescript
+const db = createOrm({
+  adapter: "sqlite",
+  url: ":memory:",
+  tables: { users, posts },
+  hooks: {
+    beforeCreate(ctx) {
+      // runs for every table
+    },
+    users: {
+      beforeCreate(ctx) {
+        // runs only for users, after the global beforeCreate
+        // ctx.options is typed to the users table
+      },
+    },
+  },
+});
+```
+
+Global hooks run first. Table-specific hooks receive options already merged from global before-write hooks.
+
+### Skipping hooks
+
+Pass `$skipHooks: true` on any operation to bypass hooks for that call:
+
+```typescript
+await db.users.create({
+  data: { id: "u1", name: "Alice", email: "alice@example.com" },
+  $skipHooks: true,
+});
+```
 
 ### Aborting operations
 
