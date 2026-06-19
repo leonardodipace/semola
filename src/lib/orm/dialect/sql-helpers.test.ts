@@ -37,6 +37,21 @@ describe("sql-helpers", () => {
     expect(() =>
       validateFindUniqueWhere(usersTable, { id: "u-1", firstName: "Ada" }),
     ).not.toThrow();
+    expect(() => validateFindUniqueWhere(usersTable, { id: null })).toThrow(
+      'findUnique where key "id" must be non-null on table users',
+    );
+  });
+
+  test("rejects unknown update keys", () => {
+    expect(() =>
+      buildSetClauses({
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
+        table: usersTable,
+        data: {
+          nickname: "Ada",
+        },
+      }),
+    ).toThrow('Unknown data key "nickname" on table users');
   });
 
   test("resolves create defaults and serializes column values", () => {

@@ -469,6 +469,17 @@ export class WhereBuilder<
       filters.push({ key: filterKey, where: nestedWhere as TableWhere<Table> });
     }
 
+    const allowedKeys = new Set<string>(RELATION_FILTER_KEYS);
+    const unknownKeys = Object.keys(filter).filter(
+      (key) => !allowedKeys.has(key),
+    );
+
+    if (unknownKeys.length) {
+      throw new Error(
+        `Relation where filter for ${relationName} has unknown operators: ${unknownKeys.join(", ")}`,
+      );
+    }
+
     if (filters.length === 0) {
       throw new Error(
         `Relation where filter for ${relationName} must include at least one of every, some, or none`,

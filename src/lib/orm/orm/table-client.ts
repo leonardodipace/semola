@@ -5,11 +5,9 @@ import { HookRunner } from "./hook-runner.js";
 import type {
   CreateManyOptions,
   CreateOptions,
-  CreateResult,
   CreateTableClientInput,
   DeleteManyOptions,
   DeleteOptions,
-  DeleteResult,
   FindFirstOptions,
   FindManyOptions,
   FindUniqueOptions,
@@ -19,7 +17,6 @@ import type {
   TableRelations,
   UpdateManyOptions,
   UpdateOptions,
-  UpdateResult,
 } from "./types.js";
 
 export class TableClientImpl<
@@ -97,7 +94,7 @@ export class TableClientImpl<
 
   public create<const TOptions extends CreateOptions<T, TRelations>>(
     options: TOptions,
-  ): Promise<CreateResult<T, TRelations, TOptions>> {
+  ) {
     const skipHooks = this.hooks.shouldSkip(options);
     const hookOptions = this.hooks.stripSkipHooks(options);
 
@@ -129,7 +126,7 @@ export class TableClientImpl<
 
   public update<const TOptions extends UpdateOptions<T, TRelations>>(
     options: TOptions,
-  ): Promise<UpdateResult<T, TRelations, TOptions>> {
+  ) {
     const skipHooks = this.hooks.shouldSkip(options);
     const hookOptions = this.hooks.stripSkipHooks(options);
 
@@ -161,7 +158,7 @@ export class TableClientImpl<
 
   public delete<const TOptions extends DeleteOptions<T, TRelations>>(
     options: TOptions,
-  ): Promise<DeleteResult<T, TRelations, TOptions>> {
+  ) {
     const skipHooks = this.hooks.shouldSkip(options);
     const hookOptions = this.hooks.stripSkipHooks(options);
 

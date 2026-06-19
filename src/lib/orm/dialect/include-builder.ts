@@ -81,6 +81,15 @@ export class IncludeBuilder {
     includeValue: unknown;
     tableRelationsMap: Map<Table, TableRelations>;
   }): RelationSubqueryResult {
+    if (
+      input.includeValue !== true &&
+      !this.isRelationIncludeOptions(input.includeValue)
+    ) {
+      throw new Error(
+        `Invalid include options for relation ${input.relationName} on table ${input.parentTable.sqlName}`,
+      );
+    }
+
     const options = this.getRelationOptions(input.includeValue);
     const relationTable = input.relation._table;
     const relationAlias = `${input.relationName}__${relationTable.sqlName}`;
@@ -341,6 +350,14 @@ export class IncludeBuilder {
     if (whereSql) return `${fkCondition} AND ${whereSql}`;
 
     return fkCondition;
+  }
+
+  private isRelationIncludeOptions(value: unknown) {
+    if (typeof value !== "object") return false;
+    if (value === null) return false;
+    if (Array.isArray(value)) return false;
+
+    return true;
   }
 
   private getRelationOptions(includeValue: unknown) {

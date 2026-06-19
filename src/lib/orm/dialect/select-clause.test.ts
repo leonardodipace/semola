@@ -22,6 +22,21 @@ describe("select-clause", () => {
         nickname: true,
       }),
     ).toThrow('Unknown select key "nickname" on table users');
+    expect(
+      selectClauseBuilder.buildColumns(usersTable, {
+        id: true,
+        // @ts-expect-error runtime guard for deselected column
+        firstName: false,
+      }),
+    ).toBe('"id" AS "id"');
+    expect(() =>
+      selectClauseBuilder.buildColumns(usersTable, {
+        // @ts-expect-error runtime guard for all-deselected select
+        firstName: false,
+      }),
+    ).toThrow(
+      "select must include at least one selected column on table users",
+    );
   });
   test("builds order and pagination fragments", () => {
     expect(

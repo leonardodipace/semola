@@ -41,7 +41,7 @@ export const validateFindUniqueWhere = (
 
   let hasUniqueKey = false;
 
-  for (const [key] of entries) {
+  for (const [key, value] of entries) {
     const column = table.columns[key];
 
     if (!column) {
@@ -49,6 +49,12 @@ export const validateFindUniqueWhere = (
     }
 
     if (column._meta.isPrimaryKey || column._meta.isUnique) {
+      if (value === null) {
+        throw new Error(
+          `findUnique where key "${key}" must be non-null on table ${table.sqlName}`,
+        );
+      }
+
       hasUniqueKey = true;
     }
   }
@@ -72,7 +78,9 @@ export const buildSetClauses = <T extends Table>(
 
     const column = table.columns[jsKey];
 
-    if (!column) continue;
+    if (!column) {
+      throw new Error(`Unknown data key "${jsKey}" on table ${table.sqlName}`);
+    }
 
     setClauses.push(
       `${quoteIdentifier(column.sqlName)} = ${nextPlaceholder()}`,

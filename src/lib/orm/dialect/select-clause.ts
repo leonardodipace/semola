@@ -29,7 +29,15 @@ export class SelectClauseBuilder {
     }
 
     const selectedColumns: string[] = [];
-    const keys = Object.keys(select);
+    const keys = Object.entries(select)
+      .filter(([, selected]) => selected === true)
+      .map(([key]) => key);
+
+    if (!keys.length) {
+      throw new Error(
+        `select must include at least one selected column on table ${table.sqlName}`,
+      );
+    }
 
     for (const key of keys) {
       const column = table.columns[key];

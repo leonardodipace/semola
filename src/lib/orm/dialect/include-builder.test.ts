@@ -225,4 +225,21 @@ describe("include-builder", () => {
       }),
     ).toThrow("Column firstName on users is not a foreign key");
   });
+
+  test("throws for invalid include option shapes", () => {
+    expect(() =>
+      includeBuilder.build({
+        spec: SQLITE_SPEC,
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
+        table: usersTable,
+        parentAlias: '"users"',
+        relations: { posts: many(() => postsTable) },
+        tableRelationsMap: new Map(),
+        include: {
+          // @ts-expect-error invalid include shape
+          posts: [],
+        },
+      }),
+    ).toThrow("Invalid include options for relation posts on table users");
+  });
 });

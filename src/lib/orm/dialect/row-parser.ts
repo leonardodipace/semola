@@ -7,12 +7,20 @@ import type {
   ReturningQuery,
 } from "./types.js";
 
+type ColumnKeysByType = {
+  boolKeys: Set<string>;
+  jsonKeys: Set<string>;
+};
+
+type ColumnKeyCache = Map<Table, ColumnKeysByType>;
+
 export class RowParser {
   public parseRows(input: ParseIncludeRowsInput) {
     const { table, rows, descriptors } = input;
+    const columnKeyCache: ColumnKeyCache = new Map();
 
     for (const row of rows) {
-      this.coerceRow({ row, table, descriptors });
+      this.coerceRow({ row, table, descriptors, columnKeyCache });
     }
   }
 
@@ -24,15 +32,26 @@ export class RowParser {
     return rows;
   }
 
-  private coerceRow(input: CoerceRowInput) {
-    const { row, table, descriptors } = input;
+  private coerceRow(
+    input: CoerceRowInput & {
+      columnKeyCache: ColumnKeyCache;
+    },
+  ) {
+    const { row, table, descriptors, columnKeyCache } = input;
 
-    this.coerceColumnValues(row, table);
-    this.coerceRelationValues(row, descriptors);
+    this.coerceColumnValues(row, table, columnKeyCache);
+    this.coerceRelationValues(row, descriptors, columnKeyCache);
   }
 
-  private coerceColumnValues(row: Record<string, unknown>, table: Table) {
-    const { boolKeys, jsonKeys } = this.getColumnKeysByType(table);
+  private coerceColumnValues(
+    row: Record<string, unknown>,
+    table: Table,
+    columnKeyCache: ColumnKeyCache,
+  ) {
+    const { boolKeys, jsonKeys } = this.getCachedColumnKeysByType(
+      table,
+      columnKeyCache,
+    );
 
     for (const key of boolKeys) {
       if (key in row) row[key] = this.coerceBooleanValue(row[key]);
@@ -52,15 +71,17 @@ export class RowParser {
   private coerceRelationValues(
     row: Record<string, unknown>,
     descriptors: IncludeDescriptor[],
+    columnKeyCache: ColumnKeyCache,
   ) {
     for (const descriptor of descriptors) {
-      this.coerceRelationValue({ row, descriptor });
+      this.coerceRelationValue({ row, descriptor, columnKeyCache });
     }
   }
 
   private coerceRelationValue(input: {
     row: Record<string, unknown>;
     descriptor: IncludeDescriptor;
+    columnKeyCache: ColumnKeyCache;
   }) {
     const { row, descriptor } = input;
     const value = row[descriptor.name];
@@ -78,16 +99,26 @@ export class RowParser {
         value: parsed,
         table: descriptor.table,
         nested,
+        columnKeyCache: input.columnKeyCache,
       });
       row[descriptor.name] = parsed;
       return;
     }
 
-    this.coerceRelationItems({ value, table: descriptor.table, nested });
+    this.coerceRelationItems({
+      value,
+      table: descriptor.table,
+      nested,
+      columnKeyCache: input.columnKeyCache,
+    });
   }
 
-  private coerceRelationItems(input: CoerceRelationItemsInput) {
-    const { value, table, nested } = input;
+  private coerceRelationItems(
+    input: CoerceRelationItemsInput & {
+      columnKeyCache: ColumnKeyCache;
+    },
+  ) {
+    const { value, table, nested, columnKeyCache } = input;
 
     if (Array.isArray(value)) {
       for (const item of value) {
@@ -98,6 +129,7 @@ export class RowParser {
           row: item as Record<string, unknown>,
           table,
           descriptors: nested,
+          columnKeyCache,
         });
       }
 
@@ -111,7 +143,22 @@ export class RowParser {
       row: value as Record<string, unknown>,
       table,
       descriptors: nested,
+      columnKeyCache,
     });
+  }
+
+  private getCachedColumnKeysByType(
+    table: Table,
+    columnKeyCache: ColumnKeyCache,
+  ) {
+    const cached = columnKeyCache.get(table);
+
+    if (cached) return cached;
+
+    const columnKeys = this.getColumnKeysByType(table);
+    columnKeyCache.set(table, columnKeys);
+
+    return columnKeys;
   }
 
   private coerceBooleanValue(val: unknown) {
@@ -121,7 +168,7 @@ export class RowParser {
     return Boolean(val);
   }
 
-  private getColumnKeysByType(table: Table) {
+  private getColumnKeysByType(table: Table): ColumnKeysByType {
     const boolKeys = new Set<string>();
     const jsonKeys = new Set<string>();
 

@@ -565,6 +565,22 @@ describe("where-builder", () => {
     ).toThrow(
       "Relation where filter for posts must include at least one of every, some, or none",
     );
+
+    expect(() =>
+      WhereBuilder.from({
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
+        table: usersTable,
+        relations: postsRelations,
+        parentAlias: '"users"',
+        where: {
+          posts: {
+            some: { title: "Hello" },
+            // @ts-expect-error unknown relation filter operator
+            typo: { title: "Oops" },
+          },
+        },
+      }),
+    ).toThrow("Relation where filter for posts has unknown operators: typo");
   });
 
   test("rejects invalid logical where values", () => {
