@@ -15,7 +15,10 @@ export default defineConfig({
     "lib/workflow/index": "src/lib/workflow/index.ts",
     "lib/orm/index": "src/lib/orm/index.ts",
   },
+  dts: {
+    cjsReexport: true,
+  },
   format: ["esm", "cjs"],
-  dts: true,
   clean: true,
+  minify: true,
 });
