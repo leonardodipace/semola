@@ -89,17 +89,7 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
   private getTableRelations<K extends StringKeyOf<T>>(
     tableName: K,
   ): NonNullable<R[K]> {
-    const relations = this.options.relations;
-
-    if (!relations) {
-      return Object.create(null);
-    }
-
-    if (!Object.hasOwn(relations, tableName)) {
-      return Object.create(null);
-    }
-
-    const tableRelations = relations[tableName];
+    const tableRelations = this.options.relations?.[tableName];
 
     if (!tableRelations) {
       return Object.create(null);

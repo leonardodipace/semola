@@ -211,8 +211,8 @@ export class IncludeBuilder {
 
     let visibleEntries = allEntries;
 
-    if (hasSelect && input.select) {
-      const select = input.select;
+    if (hasSelect) {
+      const select = input.select ?? {};
 
       for (const key of Object.keys(select)) {
         if (!(key in input.table.columns)) {
@@ -344,11 +344,12 @@ export class IncludeBuilder {
   }
 
   private getRelationOptions(includeValue: unknown) {
-    let options: RelationQueryOptions = {};
+    const options: RelationQueryOptions = {};
 
-    if (typeof includeValue === "object" && includeValue !== null) {
-      options = includeValue as RelationQueryOptions;
-    }
+    if (typeof includeValue !== "object") return options;
+    if (includeValue === null) return options;
+
+    Object.assign(options, includeValue);
 
     return options;
   }

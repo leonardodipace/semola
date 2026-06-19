@@ -14,6 +14,7 @@ import type {
   FindManyOptions,
   FindUniqueOptions,
   GlobalOrmHooks,
+  OrmHookContext,
   TableHooks,
   TableRelations,
   UpdateManyOptions,
@@ -94,255 +95,160 @@ export class TableClientImpl<
     });
   }
 
-  public async create<const TOptions extends CreateOptions<T, TRelations>>(
+  public create<const TOptions extends CreateOptions<T, TRelations>>(
     options: TOptions,
   ): Promise<CreateResult<T, TRelations, TOptions>> {
     const skipHooks = this.hooks.shouldSkip(options);
     const hookOptions = this.hooks.stripSkipHooks(options);
-    let queryOptions = hookOptions;
 
-    if (!skipHooks) {
-      const createHookResult = await this.globalHooks?.beforeCreate?.({
-        tableName: this.tableName,
-        table: this.table,
-        options: hookOptions,
-      });
-
-      queryOptions = { ...hookOptions, ...createHookResult };
-
-      const tableCreateHookResult = await this.tableHooks?.beforeCreate?.({
-        tableName: this.tableName,
-        table: this.table,
-        options: queryOptions,
-      });
-
-      queryOptions = { ...queryOptions, ...tableCreateHookResult };
-    }
-
-    const result = await this.dialect.create(this.sql, queryOptions);
-
-    if (!skipHooks) {
-      await this.hooks.runReadHooks(
-        this.globalHooks?.afterCreate,
-        this.tableHooks?.afterCreate,
-        {
-          tableName: this.tableName,
-          table: this.table,
-          options: queryOptions,
-          result,
-        },
-      );
-    }
-
-    return result;
+    return this.withMutationHooks({
+      skipHooks,
+      hookOptions,
+      beforeGlobal: this.globalHooks?.beforeCreate,
+      beforeTable: this.tableHooks?.beforeCreate,
+      afterGlobal: this.globalHooks?.afterCreate,
+      afterTable: this.tableHooks?.afterCreate,
+      query: (queryOptions) => this.dialect.create(this.sql, queryOptions),
+    });
   }
 
-  public async createMany(options: CreateManyOptions<T>) {
+  public createMany(options: CreateManyOptions<T>) {
     const skipHooks = this.hooks.shouldSkip(options);
     const hookOptions = this.hooks.stripSkipHooks(options);
-    let queryOptions = hookOptions;
 
-    if (!skipHooks) {
-      const createManyHookResult = await this.globalHooks?.beforeCreateMany?.({
-        tableName: this.tableName,
-        table: this.table,
-        options: hookOptions,
-      });
-
-      queryOptions = { ...hookOptions, ...createManyHookResult };
-
-      const tableCreateManyHookResult =
-        await this.tableHooks?.beforeCreateMany?.({
-          tableName: this.tableName,
-          table: this.table,
-          options: queryOptions,
-        });
-
-      queryOptions = { ...queryOptions, ...tableCreateManyHookResult };
-    }
-
-    const result = await this.dialect.createMany(this.sql, queryOptions);
-
-    if (!skipHooks) {
-      const hookCtx = {
-        tableName: this.tableName,
-        table: this.table,
-        options: queryOptions,
-        result,
-      };
-
-      await this.hooks.runHook(this.globalHooks?.afterCreateMany, hookCtx);
-      await this.hooks.runHook(this.tableHooks?.afterCreateMany, hookCtx);
-    }
-
-    return result;
+    return this.withMutationHooks({
+      skipHooks,
+      hookOptions,
+      beforeGlobal: this.globalHooks?.beforeCreateMany,
+      beforeTable: this.tableHooks?.beforeCreateMany,
+      afterGlobal: this.globalHooks?.afterCreateMany,
+      afterTable: this.tableHooks?.afterCreateMany,
+      query: (queryOptions) => this.dialect.createMany(this.sql, queryOptions),
+    });
   }
 
-  public async update<const TOptions extends UpdateOptions<T, TRelations>>(
+  public update<const TOptions extends UpdateOptions<T, TRelations>>(
     options: TOptions,
   ): Promise<UpdateResult<T, TRelations, TOptions>> {
     const skipHooks = this.hooks.shouldSkip(options);
     const hookOptions = this.hooks.stripSkipHooks(options);
-    let queryOptions = hookOptions;
 
-    if (!skipHooks) {
-      const updateHookResult = await this.globalHooks?.beforeUpdate?.({
-        tableName: this.tableName,
-        table: this.table,
-        options: hookOptions,
-      });
-
-      queryOptions = { ...hookOptions, ...updateHookResult };
-
-      const tableUpdateHookResult = await this.tableHooks?.beforeUpdate?.({
-        tableName: this.tableName,
-        table: this.table,
-        options: queryOptions,
-      });
-
-      queryOptions = { ...queryOptions, ...tableUpdateHookResult };
-    }
-
-    const result = await this.dialect.update(this.sql, queryOptions);
-
-    if (!skipHooks) {
-      await this.hooks.runReadHooks(
-        this.globalHooks?.afterUpdate,
-        this.tableHooks?.afterUpdate,
-        {
-          tableName: this.tableName,
-          table: this.table,
-          options: queryOptions,
-          result,
-        },
-      );
-    }
-
-    return result;
+    return this.withMutationHooks({
+      skipHooks,
+      hookOptions,
+      beforeGlobal: this.globalHooks?.beforeUpdate,
+      beforeTable: this.tableHooks?.beforeUpdate,
+      afterGlobal: this.globalHooks?.afterUpdate,
+      afterTable: this.tableHooks?.afterUpdate,
+      query: (queryOptions) => this.dialect.update(this.sql, queryOptions),
+    });
   }
 
-  public async updateMany(options: UpdateManyOptions<T, TRelations>) {
+  public updateMany(options: UpdateManyOptions<T, TRelations>) {
     const skipHooks = this.hooks.shouldSkip(options);
     const hookOptions = this.hooks.stripSkipHooks(options);
-    let queryOptions = hookOptions;
 
-    if (!skipHooks) {
-      const updateManyHookResult = await this.globalHooks?.beforeUpdateMany?.({
-        tableName: this.tableName,
-        table: this.table,
-        options: hookOptions,
-      });
-
-      queryOptions = { ...hookOptions, ...updateManyHookResult };
-
-      const tableUpdateManyHookResult =
-        await this.tableHooks?.beforeUpdateMany?.({
-          tableName: this.tableName,
-          table: this.table,
-          options: queryOptions,
-        });
-
-      queryOptions = { ...queryOptions, ...tableUpdateManyHookResult };
-    }
-
-    const result = await this.dialect.updateMany(this.sql, queryOptions);
-
-    if (!skipHooks) {
-      const hookCtx = {
-        tableName: this.tableName,
-        table: this.table,
-        options: queryOptions,
-        result,
-      };
-
-      await this.hooks.runHook(this.globalHooks?.afterUpdateMany, hookCtx);
-      await this.hooks.runHook(this.tableHooks?.afterUpdateMany, hookCtx);
-    }
-
-    return result;
+    return this.withMutationHooks({
+      skipHooks,
+      hookOptions,
+      beforeGlobal: this.globalHooks?.beforeUpdateMany,
+      beforeTable: this.tableHooks?.beforeUpdateMany,
+      afterGlobal: this.globalHooks?.afterUpdateMany,
+      afterTable: this.tableHooks?.afterUpdateMany,
+      query: (queryOptions) => this.dialect.updateMany(this.sql, queryOptions),
+    });
   }
 
-  public async delete<const TOptions extends DeleteOptions<T, TRelations>>(
+  public delete<const TOptions extends DeleteOptions<T, TRelations>>(
     options: TOptions,
   ): Promise<DeleteResult<T, TRelations, TOptions>> {
     const skipHooks = this.hooks.shouldSkip(options);
     const hookOptions = this.hooks.stripSkipHooks(options);
-    let queryOptions = hookOptions;
 
-    if (!skipHooks) {
-      const deleteHookResult = await this.globalHooks?.beforeDelete?.({
+    return this.withMutationHooks({
+      skipHooks,
+      hookOptions,
+      beforeGlobal: this.globalHooks?.beforeDelete,
+      beforeTable: this.tableHooks?.beforeDelete,
+      afterGlobal: this.globalHooks?.afterDelete,
+      afterTable: this.tableHooks?.afterDelete,
+      query: (queryOptions) => this.dialect.delete(this.sql, queryOptions),
+    });
+  }
+
+  public deleteMany(options: DeleteManyOptions<T, TRelations>) {
+    const skipHooks = this.hooks.shouldSkip(options);
+    const hookOptions = this.hooks.stripSkipHooks(options);
+
+    return this.withMutationHooks({
+      skipHooks,
+      hookOptions,
+      beforeGlobal: this.globalHooks?.beforeDeleteMany,
+      beforeTable: this.tableHooks?.beforeDeleteMany,
+      afterGlobal: this.globalHooks?.afterDeleteMany,
+      afterTable: this.tableHooks?.afterDeleteMany,
+      query: (queryOptions) => this.dialect.deleteMany(this.sql, queryOptions),
+    });
+  }
+
+  private async withMutationHooks<TOptions, TResult>(input: {
+    skipHooks: boolean;
+    hookOptions: TOptions;
+    beforeGlobal?: (
+      ctx: OrmHookContext<TOptions>,
+    ) => unknown | Promise<unknown>;
+    beforeTable?: (ctx: OrmHookContext<TOptions>) => unknown | Promise<unknown>;
+    afterGlobal?: (
+      ctx: OrmHookContext<TOptions, TResult>,
+    ) => void | Promise<void>;
+    afterTable?: (
+      ctx: OrmHookContext<TOptions, TResult>,
+    ) => void | Promise<void>;
+    query: (queryOptions: TOptions) => Promise<TResult>;
+  }) {
+    let queryOptions = input.hookOptions;
+
+    if (!input.skipHooks) {
+      const baseCtx: OrmHookContext<TOptions> = {
         tableName: this.tableName,
         table: this.table,
-        options: hookOptions,
-      });
+        options: input.hookOptions,
+      };
 
-      queryOptions = { ...hookOptions, ...deleteHookResult };
+      const globalResult = await input.beforeGlobal?.(baseCtx);
+      queryOptions = mergeHookResult(input.hookOptions, globalResult);
 
-      const tableDeleteHookResult = await this.tableHooks?.beforeDelete?.({
-        tableName: this.tableName,
-        table: this.table,
+      const tableResult = await input.beforeTable?.({
+        ...baseCtx,
         options: queryOptions,
       });
 
-      queryOptions = { ...queryOptions, ...tableDeleteHookResult };
+      queryOptions = mergeHookResult(queryOptions, tableResult);
     }
 
-    const result = await this.dialect.delete(this.sql, queryOptions);
+    const result = await input.query(queryOptions);
 
-    if (!skipHooks) {
-      await this.hooks.runReadHooks(
-        this.globalHooks?.afterDelete,
-        this.tableHooks?.afterDelete,
-        {
-          tableName: this.tableName,
-          table: this.table,
-          options: queryOptions,
-          result,
-        },
-      );
-    }
-
-    return result;
-  }
-
-  public async deleteMany(options: DeleteManyOptions<T, TRelations>) {
-    const skipHooks = this.hooks.shouldSkip(options);
-    const hookOptions = this.hooks.stripSkipHooks(options);
-    let queryOptions = hookOptions;
-
-    if (!skipHooks) {
-      const deleteManyHookResult = await this.globalHooks?.beforeDeleteMany?.({
-        tableName: this.tableName,
-        table: this.table,
-        options: hookOptions,
-      });
-
-      queryOptions = { ...hookOptions, ...deleteManyHookResult };
-
-      const tableDeleteManyHookResult =
-        await this.tableHooks?.beforeDeleteMany?.({
-          tableName: this.tableName,
-          table: this.table,
-          options: queryOptions,
-        });
-
-      queryOptions = { ...queryOptions, ...tableDeleteManyHookResult };
-    }
-
-    const result = await this.dialect.deleteMany(this.sql, queryOptions);
-
-    if (!skipHooks) {
-      const hookCtx = {
+    if (!input.skipHooks) {
+      await this.hooks.runReadHooks(input.afterGlobal, input.afterTable, {
         tableName: this.tableName,
         table: this.table,
         options: queryOptions,
         result,
-      };
-
-      await this.hooks.runHook(this.globalHooks?.afterDeleteMany, hookCtx);
-      await this.hooks.runHook(this.tableHooks?.afterDeleteMany, hookCtx);
+      });
     }
 
     return result;
   }
 }
+
+const mergeHookResult = <TOptions>(options: TOptions, result: unknown) => {
+  if (typeof result !== "object") {
+    return options;
+  }
+
+  if (result === null) {
+    return options;
+  }
+
+  return { ...options, ...result };
+};

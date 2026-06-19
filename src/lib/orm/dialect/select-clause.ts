@@ -10,7 +10,16 @@ import type {
 
 export class SelectClauseBuilder {
   public buildColumns<T extends Table>(table: T, select?: TableSelect<T>) {
-    if (!select || Object.keys(select).length === 0) {
+    if (!select) {
+      const columnEntries = Object.entries(table.columns);
+      const columnAliases = columnEntries.map(([key, column]) =>
+        this.getColumnAlias(column.sqlName, key),
+      );
+
+      return columnAliases.join(", ");
+    }
+
+    if (Object.keys(select).length === 0) {
       const columnEntries = Object.entries(table.columns);
       const columnAliases = columnEntries.map(([key, column]) =>
         this.getColumnAlias(column.sqlName, key),

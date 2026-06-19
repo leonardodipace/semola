@@ -91,25 +91,27 @@ export class RowParser {
 
     if (Array.isArray(value)) {
       for (const item of value) {
-        if (typeof item === "object" && item !== null) {
-          this.coerceRow({
-            row: item as Record<string, unknown>,
-            table,
-            descriptors: nested,
-          });
-        }
+        if (typeof item !== "object") continue;
+        if (item === null) continue;
+
+        this.coerceRow({
+          row: item as Record<string, unknown>,
+          table,
+          descriptors: nested,
+        });
       }
 
       return;
     }
 
-    if (typeof value === "object" && value !== null) {
-      this.coerceRow({
-        row: value as Record<string, unknown>,
-        table,
-        descriptors: nested,
-      });
-    }
+    if (typeof value !== "object") return;
+    if (value === null) return;
+
+    this.coerceRow({
+      row: value as Record<string, unknown>,
+      table,
+      descriptors: nested,
+    });
   }
 
   private coerceBooleanValue(val: unknown) {
