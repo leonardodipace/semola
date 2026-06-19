@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { json, jsonb, uuid } from "../column/index.js";
 import { many, one } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
-import { createSqliteDialect } from "./sqlite.js";
+import { getDialect } from "./index.js";
 import { postsTable, usersTable } from "./test-fixtures.js";
 
 const metaTable = defineTable("meta", {
@@ -63,7 +63,11 @@ const insertPost = async (
 
 describe("sqlite dialect", () => {
   test("reports sqlite as its name", () => {
-    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
+    const dialect = getDialect({
+      adapter: "sqlite",
+      table: usersTable,
+      relations: {},
+    });
 
     expect(dialect.name).toBe("sqlite");
   });
@@ -78,7 +82,8 @@ describe("sqlite dialect", () => {
     await insertPost(sql, "post-2", "Alpha", "user-1");
     await insertPost(sql, "post-3", "Beta", "user-1");
 
-    const dialect = createSqliteDialect({
+    const dialect = getDialect({
+      adapter: "sqlite",
       table: usersTable,
       relations: { posts: many(() => postsTable) },
     });
@@ -107,7 +112,11 @@ describe("sqlite dialect", () => {
     await insertUser(sql, "user-1", "John", "2025-01-01T00:00:00.000Z");
     await insertUser(sql, "user-2", "Alice", "2025-01-02T00:00:00.000Z");
 
-    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
+    const dialect = getDialect({
+      adapter: "sqlite",
+      table: usersTable,
+      relations: {},
+    });
 
     const unique = await dialect.findUnique(sql, {
       where: { id: "user-1" },
@@ -140,7 +149,11 @@ describe("sqlite dialect", () => {
 
     await createUsersTable(sql);
 
-    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
+    const dialect = getDialect({
+      adapter: "sqlite",
+      table: usersTable,
+      relations: {},
+    });
     const created = await dialect.create(sql, {
       data: {
         id: "user-1",
@@ -188,7 +201,11 @@ describe("sqlite dialect", () => {
 
     await createMetaTable(sql);
 
-    const dialect = createSqliteDialect({ table: metaTable, relations: {} });
+    const dialect = getDialect({
+      adapter: "sqlite",
+      table: metaTable,
+      relations: {},
+    });
     const created = await dialect.create(sql, {
       data: {
         id: "meta-1",
@@ -218,7 +235,11 @@ describe("sqlite dialect", () => {
     await insertUser(sql, "user-2", "Jane", "2025-01-02T00:00:00.000Z", false);
     await insertUser(sql, "user-3", "Joao", "2025-01-03T00:00:00.000Z", true);
 
-    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
+    const dialect = getDialect({
+      adapter: "sqlite",
+      table: usersTable,
+      relations: {},
+    });
     const rows = await dialect.findMany(sql, {
       where: {
         $or: [{ firstName: { startsWith: "Jo" } }, { isActive: false }],
@@ -239,7 +260,11 @@ describe("sqlite dialect", () => {
     await insertUser(sql, "user-1", "Ada", "2025-01-01T00:00:00.000Z");
     await insertUser(sql, "user-2", "Grace", "2025-01-02T00:00:00.000Z");
 
-    const dialect = createSqliteDialect({ table: usersTable, relations: {} });
+    const dialect = getDialect({
+      adapter: "sqlite",
+      table: usersTable,
+      relations: {},
+    });
     const updatedMany = await dialect.updateMany(sql, {
       where: { $or: [] },
       data: { firstName: "Changed" },
@@ -270,7 +295,8 @@ describe("sqlite dialect", () => {
     await insertPost(sql, "post-2", "World", "user-1");
     await insertPost(sql, "post-3", "release notes", "user-1");
 
-    const dialect = createSqliteDialect({
+    const dialect = getDialect({
+      adapter: "sqlite",
       table: usersTable,
       relations: { posts: many(() => postsTable) },
     });
@@ -307,7 +333,8 @@ describe("sqlite dialect", () => {
     await insertPost(sql, "post-1", "Hello", "user-1");
     await insertPost(sql, "post-2", "Missing", "missing-user");
 
-    const dialect = createSqliteDialect({
+    const dialect = getDialect({
+      adapter: "sqlite",
       table: postsTable,
       relations: { author: one("authorId", () => usersTable) },
     });

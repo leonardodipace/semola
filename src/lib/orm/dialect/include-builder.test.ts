@@ -2,16 +2,16 @@ import { describe, expect, test } from "bun:test";
 import { string, uuid } from "../column/index.js";
 import { many, one } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
-import { createNextPlaceholder } from "./clauses.js";
-import { buildIncludeClause } from "./relations.js";
+import { includeBuilder } from "./include-builder.js";
+import { PlaceholderGenerator } from "./placeholder.js";
 import { SQLITE_SPEC } from "./sqlite.js";
 import { postsTable, usersTable } from "./test-fixtures.js";
 
-describe("relations", () => {
+describe("include-builder", () => {
   test("builds hasMany include SQL and descriptors", () => {
-    const include = buildIncludeClause({
+    const include = includeBuilder.build({
       spec: SQLITE_SPEC,
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       parentAlias: '"users"',
       relations: { posts: many(() => postsTable) },
@@ -29,9 +29,9 @@ describe("relations", () => {
   });
 
   test("builds hasOne include SQL", () => {
-    const include = buildIncludeClause({
+    const include = includeBuilder.build({
       spec: SQLITE_SPEC,
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: postsTable,
       parentAlias: '"posts"',
       relations: { author: one("authorId", () => usersTable) },
@@ -47,9 +47,9 @@ describe("relations", () => {
 
   test("builds nested include params before relation where params", () => {
     const postsRelations = { author: one("authorId", () => usersTable) };
-    const include = buildIncludeClause({
+    const include = includeBuilder.build({
       spec: SQLITE_SPEC,
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       parentAlias: '"users"',
       relations: { posts: many(() => postsTable) },
@@ -72,9 +72,9 @@ describe("relations", () => {
   });
 
   test("builds include SQL with logical where clauses", () => {
-    const include = buildIncludeClause({
+    const include = includeBuilder.build({
       spec: SQLITE_SPEC,
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       parentAlias: '"users"',
       relations: { posts: many(() => postsTable) },
@@ -97,9 +97,9 @@ describe("relations", () => {
   });
 
   test("ignores disabled include flags", () => {
-    const include = buildIncludeClause({
+    const include = includeBuilder.build({
       spec: SQLITE_SPEC,
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       parentAlias: '"users"',
       relations: { posts: many(() => postsTable) },
@@ -112,9 +112,9 @@ describe("relations", () => {
 
   test("throws for unknown relation names", () => {
     expect(() =>
-      buildIncludeClause({
+      includeBuilder.build({
         spec: SQLITE_SPEC,
-        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
         table: usersTable,
         parentAlias: '"users"',
         relations: {},
@@ -126,9 +126,9 @@ describe("relations", () => {
 
   test("throws for unknown nested relation names", () => {
     expect(() =>
-      buildIncludeClause({
+      includeBuilder.build({
         spec: SQLITE_SPEC,
-        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
         table: usersTable,
         parentAlias: '"users"',
         relations: { posts: many(() => postsTable) },
@@ -140,9 +140,9 @@ describe("relations", () => {
 
   test("throws for unknown nested select keys", () => {
     expect(() =>
-      buildIncludeClause({
+      includeBuilder.build({
         spec: SQLITE_SPEC,
-        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
         table: usersTable,
         parentAlias: '"users"',
         relations: { posts: many(() => postsTable) },
@@ -171,9 +171,9 @@ describe("relations", () => {
     });
 
     expect(() =>
-      buildIncludeClause({
+      includeBuilder.build({
         spec: SQLITE_SPEC,
-        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
         table: usersTable,
         parentAlias: '"users"',
         relations: { comments: many(() => commentsTable) },
@@ -183,9 +183,9 @@ describe("relations", () => {
     ).toThrow("Missing hasMany foreign key from comments to users");
 
     expect(() =>
-      buildIncludeClause({
+      includeBuilder.build({
         spec: SQLITE_SPEC,
-        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
         table: usersTable,
         parentAlias: '"users"',
         relations: { memberships: many(() => membershipsTable) },
@@ -202,9 +202,9 @@ describe("relations", () => {
     });
 
     expect(() =>
-      buildIncludeClause({
+      includeBuilder.build({
         spec: SQLITE_SPEC,
-        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
         table: usersTable,
         parentAlias: '"users"',
         relations: { profile: one("profileId", () => profilesTable) },
@@ -214,9 +214,9 @@ describe("relations", () => {
     ).toThrow("Missing hasOne foreign key column profileId on users");
 
     expect(() =>
-      buildIncludeClause({
+      includeBuilder.build({
         spec: SQLITE_SPEC,
-        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
         table: usersTable,
         parentAlias: '"users"',
         relations: { profile: one("firstName", () => profilesTable) },
@@ -224,5 +224,22 @@ describe("relations", () => {
         include: { profile: true },
       }),
     ).toThrow("Column firstName on users is not a foreign key");
+  });
+
+  test("throws for invalid include option shapes", () => {
+    expect(() =>
+      includeBuilder.build({
+        spec: SQLITE_SPEC,
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
+        table: usersTable,
+        parentAlias: '"users"',
+        relations: { posts: many(() => postsTable) },
+        tableRelationsMap: new Map(),
+        include: {
+          // @ts-expect-error invalid include shape
+          posts: [],
+        },
+      }),
+    ).toThrow("Invalid include options for relation posts on table users");
   });
 });

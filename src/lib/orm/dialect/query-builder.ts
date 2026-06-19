@@ -13,20 +13,15 @@ import type {
 } from "../orm/types.js";
 import type { Table } from "../table/types.js";
 import { quoteIdentifier } from "../utils.js";
+import { includeBuilder } from "./include-builder.js";
+import { PlaceholderGenerator } from "./placeholder.js";
+import { selectClauseBuilder } from "./select-clause.js";
 import {
-  buildOrderByClause,
-  buildPaginationClause,
-  buildSelectColumns,
-  buildSelectList,
-  buildSelectStatement,
   buildSetClauses,
-  buildWhereClause,
-  createNextPlaceholder,
   resolveCreateValue,
   serializeColumnValue,
   validateFindUniqueWhere,
-} from "./clauses.js";
-import { buildIncludeClause } from "./relations.js";
+} from "./sql-helpers.js";
 import type {
   DialectSpec,
   QueryBuilderInput,
@@ -34,6 +29,7 @@ import type {
   QueryBuilderSelectInput,
   ReturningQuery,
 } from "./types.js";
+import { WhereBuilder } from "./where-builder.js";
 
 export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
   public readonly spec: DialectSpec;
@@ -49,27 +45,32 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
   }
 
   public buildFindMany(options?: FindManyOptions<T, R>): ReturningQuery {
-    const nextPlaceholder = createNextPlaceholder(this.spec);
-    const { include, where, selectColumns } = this.buildSelectIncludeWhere(
-      nextPlaceholder,
-      {
-        where: options?.where,
-        select: options?.select,
-        include: options?.include,
-      },
-    );
-    const orderBy = buildOrderByClause(this.table, options?.orderBy);
-    const pagination = buildPaginationClause({
-      spec: this.spec,
-      nextPlaceholder,
-      take: options?.take,
-      skip: options?.skip,
+    const placeholders = new PlaceholderGenerator(this.spec);
+    const nextPlaceholder = placeholders.asFn();
+    const parts = this.buildSelectIncludeWhere(nextPlaceholder, {
+      where: options?.where,
+      select: options?.select,
+      include: options?.include,
     });
-    const params = [...include.params, ...where.params, ...pagination.params];
-    const statement = buildSelectStatement({
+    const orderBy = selectClauseBuilder.buildOrderBy(
+      this.table,
+      options?.orderBy,
+    );
+    const pagination = selectClauseBuilder.buildPagination(
+      this.spec,
+      nextPlaceholder,
+      options?.take,
+      options?.skip,
+    );
+    const params = [
+      ...parts.include.params,
+      ...parts.where.params,
+      ...pagination.params,
+    ];
+    const statement = selectClauseBuilder.buildStatement({
       tableName: quoteIdentifier(this.table.sqlName),
-      columns: selectColumns,
-      where: where.sql,
+      columns: parts.selectColumns,
+      where: parts.where.sql,
       orderBy,
       pagination: pagination.sql,
     });
@@ -77,7 +78,7 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
     return {
       statement,
       params,
-      includeDescriptors: include.descriptors,
+      includeDescriptors: parts.include.descriptors,
     };
   }
 
@@ -91,49 +92,51 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
   public buildFindUnique(options: FindUniqueOptions<T, R>): ReturningQuery {
     validateFindUniqueWhere(this.table, options.where);
 
-    const nextPlaceholder = createNextPlaceholder(this.spec);
-    const { include, where, selectColumns } = this.buildSelectIncludeWhere(
-      nextPlaceholder,
-      {
-        where: options.where,
-        select: options.select,
-        include: options.include,
-      },
-    );
-    const statement = buildSelectStatement({
+    const placeholders = new PlaceholderGenerator(this.spec);
+    const nextPlaceholder = placeholders.asFn();
+    const parts = this.buildSelectIncludeWhere(nextPlaceholder, {
+      where: options.where,
+      select: options.select,
+      include: options.include,
+    });
+    const statement = selectClauseBuilder.buildStatement({
       tableName: quoteIdentifier(this.table.sqlName),
-      columns: selectColumns,
-      where: where.sql,
+      columns: parts.selectColumns,
+      where: parts.where.sql,
       orderBy: "",
       pagination: "LIMIT 1",
     });
 
     return {
       statement,
-      params: [...include.params, ...where.params],
-      includeDescriptors: include.descriptors,
+      params: [...parts.include.params, ...parts.where.params],
+      includeDescriptors: parts.include.descriptors,
     };
   }
 
   public buildCreate(options: CreateOptions<T, R>): ReturningQuery {
-    const nextPlaceholder = createNextPlaceholder(this.spec);
+    const placeholders = new PlaceholderGenerator(this.spec);
+    const nextPlaceholder = placeholders.asFn();
     const provided = new Map<string, unknown>(Object.entries(options.data));
     const sqlNames: string[] = [];
-    const placeholders: string[] = [];
+    const valuePlaceholders: string[] = [];
     const params: unknown[] = [];
 
     for (const [jsKey, column] of Object.entries(this.table.columns)) {
       const value = resolveCreateValue(column, provided.get(jsKey));
 
       sqlNames.push(quoteIdentifier(column.sqlName));
-      placeholders.push(nextPlaceholder());
+      valuePlaceholders.push(nextPlaceholder());
       params.push(serializeColumnValue(column, value));
     }
 
-    const columns = buildSelectColumns(this.table, options.select);
+    const columns = selectClauseBuilder.buildColumns(
+      this.table,
+      options.select,
+    );
     const include = this.buildInclude(nextPlaceholder, options.include);
-    const returning = buildSelectList(columns, include);
-    const statement = `INSERT INTO ${quoteIdentifier(this.table.sqlName)} (${sqlNames.join(", ")}) VALUES (${placeholders.join(", ")}) RETURNING ${returning}`;
+    const returning = selectClauseBuilder.buildList(columns, include);
+    const statement = `INSERT INTO ${quoteIdentifier(this.table.sqlName)} (${sqlNames.join(", ")}) VALUES (${valuePlaceholders.join(", ")}) RETURNING ${returning}`;
 
     return {
       statement,
@@ -145,77 +148,69 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
   public buildUpdate(options: UpdateOptions<T, R>): ReturningQuery {
     validateFindUniqueWhere(this.table, options.where);
 
-    const nextPlaceholder = createNextPlaceholder(this.spec);
-    const { setClauses, params } = buildSetClauses({
+    const placeholders = new PlaceholderGenerator(this.spec);
+    const nextPlaceholder = placeholders.asFn();
+    const set = buildSetClauses({
       nextPlaceholder,
       table: this.table,
       data: options.data,
     });
 
-    if (!setClauses.length) {
+    if (!set.setClauses.length) {
       throw new Error("update requires at least one field in data");
     }
 
-    const { where, include, returning } = this.buildWhereIncludeReturning(
-      nextPlaceholder,
-      {
-        where: options.where,
-        select: options.select,
-        include: options.include,
-      },
-    );
+    const parts = this.buildWhereIncludeReturning(nextPlaceholder, {
+      where: options.where,
+      select: options.select,
+      include: options.include,
+    });
 
-    let statement = `UPDATE ${quoteIdentifier(this.table.sqlName)} SET ${setClauses.join(", ")}`;
+    let statement = `UPDATE ${quoteIdentifier(this.table.sqlName)} SET ${set.setClauses.join(", ")}`;
 
-    if (where.sql) {
-      statement = `${statement} WHERE ${where.sql}`;
+    if (parts.where.sql) {
+      statement = `${statement} WHERE ${parts.where.sql}`;
     }
 
-    statement = `${statement} RETURNING ${returning}`;
-
-    params.push(...where.params, ...include.params);
+    statement = `${statement} RETURNING ${parts.returning}`;
+    set.params.push(...parts.where.params, ...parts.include.params);
 
     return {
       statement,
-      params,
-      includeDescriptors: include.descriptors,
+      params: set.params,
+      includeDescriptors: parts.include.descriptors,
     };
   }
 
   public buildDelete(options: DeleteOptions<T, R>): ReturningQuery {
     validateFindUniqueWhere(this.table, options.where);
 
-    const nextPlaceholder = createNextPlaceholder(this.spec);
-    const { where, include, returning } = this.buildWhereIncludeReturning(
-      nextPlaceholder,
-      {
-        where: options.where,
-        select: options.select,
-        include: options.include,
-      },
-    );
+    const placeholders = new PlaceholderGenerator(this.spec);
+    const nextPlaceholder = placeholders.asFn();
+    const parts = this.buildWhereIncludeReturning(nextPlaceholder, {
+      where: options.where,
+      select: options.select,
+      include: options.include,
+    });
 
     let statement = `DELETE FROM ${quoteIdentifier(this.table.sqlName)}`;
 
-    if (where.sql) {
-      statement = `${statement} WHERE ${where.sql}`;
+    if (parts.where.sql) {
+      statement = `${statement} WHERE ${parts.where.sql}`;
     }
 
-    statement = `${statement} RETURNING ${returning}`;
+    statement = `${statement} RETURNING ${parts.returning}`;
 
     return {
       statement,
-      params: [...where.params, ...include.params],
-      includeDescriptors: include.descriptors,
+      params: [...parts.where.params, ...parts.include.params],
+      includeDescriptors: parts.include.descriptors,
     };
   }
 
   public buildCreateMany(options: CreateManyOptions<T>): ReturningQuery {
-    if (!options.data.length) {
-      return { statement: "", params: [], includeDescriptors: [] };
-    }
-
-    const nextPlaceholder = createNextPlaceholder(this.spec);
+    const placeholders = new PlaceholderGenerator(this.spec);
+    const nextPlaceholder = placeholders.asFn();
     const columnEntries = Object.entries(this.table.columns);
     const sqlNames = columnEntries.map(([, col]) => {
       return quoteIdentifier(col.sqlName);
@@ -225,36 +220,37 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
 
     for (const row of options.data) {
       const rowRecord = row as Record<string, unknown>;
-      const placeholders: string[] = [];
+      const placeholdersForRow: string[] = [];
 
       for (const [jsKey, column] of columnEntries) {
         const value = resolveCreateValue(column, rowRecord[jsKey]);
-        placeholders.push(nextPlaceholder());
+        placeholdersForRow.push(nextPlaceholder());
         params.push(serializeColumnValue(column, value));
       }
 
-      rowPlaceholders.push(`(${placeholders.join(", ")})`);
+      rowPlaceholders.push(`(${placeholdersForRow.join(", ")})`);
     }
 
-    const returning = buildSelectColumns(this.table, undefined);
+    const returning = selectClauseBuilder.buildColumns(this.table, undefined);
     const statement = `INSERT INTO ${quoteIdentifier(this.table.sqlName)} (${sqlNames.join(", ")}) VALUES ${rowPlaceholders.join(", ")} RETURNING ${returning}`;
 
     return { statement, params, includeDescriptors: [] };
   }
 
   public buildUpdateMany(options: UpdateManyOptions<T, R>): ReturningQuery {
-    const nextPlaceholder = createNextPlaceholder(this.spec);
-    const { setClauses, params } = buildSetClauses({
+    const placeholders = new PlaceholderGenerator(this.spec);
+    const nextPlaceholder = placeholders.asFn();
+    const set = buildSetClauses({
       nextPlaceholder,
       table: this.table,
       data: options.data,
     });
 
-    if (!setClauses.length) {
+    if (!set.setClauses.length) {
       throw new Error("updateMany requires at least one field in data");
     }
 
-    const where = buildWhereClause({
+    const where = WhereBuilder.from({
       nextPlaceholder,
       table: this.table,
       where: options.where,
@@ -262,23 +258,24 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
       parentAlias: quoteIdentifier(this.table.sqlName),
     });
 
-    let statement = `UPDATE ${quoteIdentifier(this.table.sqlName)} SET ${setClauses.join(", ")}`;
+    let statement = `UPDATE ${quoteIdentifier(this.table.sqlName)} SET ${set.setClauses.join(", ")}`;
 
     if (where.sql) {
       statement = `${statement} WHERE ${where.sql}`;
     }
 
-    params.push(...where.params);
+    set.params.push(...where.params);
 
-    const returning = buildSelectColumns(this.table, undefined);
+    const returning = selectClauseBuilder.buildColumns(this.table, undefined);
     statement = `${statement} RETURNING ${returning}`;
 
-    return { statement, params, includeDescriptors: [] };
+    return { statement, params: set.params, includeDescriptors: [] };
   }
 
   public buildDeleteMany(options: DeleteManyOptions<T, R>): ReturningQuery {
-    const nextPlaceholder = createNextPlaceholder(this.spec);
-    const where = buildWhereClause({
+    const placeholders = new PlaceholderGenerator(this.spec);
+    const nextPlaceholder = placeholders.asFn();
+    const where = WhereBuilder.from({
       nextPlaceholder,
       table: this.table,
       where: options.where,
@@ -292,7 +289,7 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
       statement = `${statement} WHERE ${where.sql}`;
     }
 
-    const returning = buildSelectColumns(this.table, undefined);
+    const returning = selectClauseBuilder.buildColumns(this.table, undefined);
     statement = `${statement} RETURNING ${returning}`;
 
     return {
@@ -306,7 +303,7 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
     nextPlaceholder: () => string,
     include?: TableInclude<R>,
   ) {
-    return buildIncludeClause({
+    return includeBuilder.build({
       spec: this.spec,
       nextPlaceholder,
       table: this.table,
@@ -322,15 +319,15 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
     input: QueryBuilderSelectInput<T, R>,
   ) {
     const include = this.buildInclude(nextPlaceholder, input.include);
-    const where = buildWhereClause({
+    const where = WhereBuilder.from({
       nextPlaceholder,
       table: this.table,
       where: input.where,
       relations: this.relations,
       parentAlias: quoteIdentifier(this.table.sqlName),
     });
-    const columns = buildSelectColumns(this.table, input.select);
-    const selectColumns = buildSelectList(columns, include);
+    const columns = selectClauseBuilder.buildColumns(this.table, input.select);
+    const selectColumns = selectClauseBuilder.buildList(columns, include);
 
     return { include, where, selectColumns };
   }
@@ -339,16 +336,16 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
     nextPlaceholder: () => string,
     input: QueryBuilderReturningInput<T, R>,
   ) {
-    const where = buildWhereClause({
+    const where = WhereBuilder.from({
       nextPlaceholder,
       table: this.table,
       where: input.where,
       relations: this.relations,
       parentAlias: quoteIdentifier(this.table.sqlName),
     });
-    const columns = buildSelectColumns(this.table, input.select);
+    const columns = selectClauseBuilder.buildColumns(this.table, input.select);
     const include = this.buildInclude(nextPlaceholder, input.include);
-    const returning = buildSelectList(columns, include);
+    const returning = selectClauseBuilder.buildList(columns, include);
 
     return { where, include, returning };
   }

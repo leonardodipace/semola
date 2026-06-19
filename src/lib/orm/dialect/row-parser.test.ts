@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { boolean, json, jsonb, uuid } from "../column/index.js";
 import { defineTable } from "../table/index.js";
-import { parseIncludeRows } from "./rows.js";
+import { RowParser } from "./row-parser.js";
 import { postsTable, usersTable } from "./test-fixtures.js";
 import type { IncludeDescriptor } from "./types.js";
 
@@ -12,7 +12,9 @@ const eventsTable = defineTable("events", {
   published: boolean("published").notNull(),
 });
 
-describe("rows", () => {
+const rowParser = new RowParser();
+
+describe("row-parser", () => {
   test("coerces root boolean and JSON column values", () => {
     const rows: Array<Record<string, unknown>> = [
       {
@@ -23,7 +25,7 @@ describe("rows", () => {
       },
     ];
 
-    parseIncludeRows({ table: eventsTable, rows, descriptors: [] });
+    rowParser.parseRows({ table: eventsTable, rows, descriptors: [] });
 
     expect(rows).toEqual([
       {
@@ -49,7 +51,7 @@ describe("rows", () => {
       },
     ];
 
-    parseIncludeRows({ table: usersTable, rows, descriptors });
+    rowParser.parseRows({ table: usersTable, rows, descriptors });
 
     expect(rows).toEqual([
       { id: "u-1", posts: [], author: null },
@@ -80,7 +82,7 @@ describe("rows", () => {
       },
     ];
 
-    parseIncludeRows({ table: usersTable, rows, descriptors });
+    rowParser.parseRows({ table: usersTable, rows, descriptors });
 
     const posts = rows[0]?.posts as Array<Record<string, unknown>>;
     const author = posts[0]?.author as Record<string, unknown>;
