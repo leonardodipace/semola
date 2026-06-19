@@ -9,50 +9,17 @@ import {
 } from "../column/index.js";
 import { many } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
-import {
-  buildOrderByClause,
-  buildPaginationClause,
-  buildSelectColumns,
-  buildSelectStatement,
-  buildSetClauses,
-  buildWhereClause,
-  createNextPlaceholder,
-  resolveCreateValue,
-  serializeColumnValue,
-  validateFindUniqueWhere,
-} from "./clauses.js";
+import { PlaceholderGenerator } from "./placeholder.js";
 import { POSTGRES_SPEC } from "./postgres.js";
 import { SQLITE_SPEC } from "./sqlite.js";
 import { postsTable, usersTable } from "./test-fixtures.js";
+import { WhereBuilder } from "./where-builder.js";
 
-describe("clauses", () => {
-  test("creates dialect placeholders", () => {
-    const sqlite = createNextPlaceholder(SQLITE_SPEC);
-    const postgres = createNextPlaceholder(POSTGRES_SPEC);
-
-    expect([sqlite(), sqlite()]).toEqual(["?", "?"]);
-    expect([postgres(), postgres()]).toEqual(["$1", "$2"]);
-  });
-
-  test("builds select columns and rejects unknown select keys", () => {
-    expect(buildSelectColumns(usersTable, { id: true, firstName: true })).toBe(
-      '"id" AS "id", "first_name" AS "firstName"',
-    );
-    expect(buildSelectColumns(usersTable, {})).toBe(
-      '"id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive"',
-    );
-    expect(() =>
-      buildSelectColumns(usersTable, {
-        // @ts-expect-error invalid runtime key
-        nickname: true,
-      }),
-    ).toThrow('Unknown select key "nickname" on table users');
-  });
-
+describe("where-builder", () => {
   test("builds where operators with serialization and LIKE escaping", () => {
     const createdAfter = new Date("2025-01-01T00:00:00.000Z");
-    const nextPlaceholder = createNextPlaceholder(SQLITE_SPEC);
-    const where = buildWhereClause({
+    const nextPlaceholder = new PlaceholderGenerator(SQLITE_SPEC).asFn();
+    const where = WhereBuilder.from({
       nextPlaceholder,
       table: usersTable,
       where: {
@@ -77,8 +44,8 @@ describe("clauses", () => {
   });
 
   test("treats empty $or as unsatisfiable", () => {
-    const where = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const where = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       where: {
         $or: [],
@@ -90,8 +57,8 @@ describe("clauses", () => {
   });
 
   test("treats empty $and as a no-op", () => {
-    const where = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const where = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       where: {
         $and: [],
@@ -103,8 +70,8 @@ describe("clauses", () => {
   });
 
   test("ignores empty $and when combined with column filters", () => {
-    const where = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const where = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       where: {
         id: "u-1",
@@ -117,8 +84,8 @@ describe("clauses", () => {
   });
 
   test("treats tautological $or branches as always true", () => {
-    const where = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const where = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       where: {
         $or: [{}, { id: "u-1" }],
@@ -130,8 +97,8 @@ describe("clauses", () => {
   });
 
   test("accepts $and and $not as single objects", () => {
-    const where = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const where = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       where: {
         $and: { id: "u-1", isActive: true },
@@ -146,8 +113,8 @@ describe("clauses", () => {
   });
 
   test("negates each $not array entry separately", () => {
-    const where = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const where = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       where: {
         $not: [{ id: "u-1" }, { isActive: false }],
@@ -161,8 +128,8 @@ describe("clauses", () => {
   test("builds logical where clauses with nested params in order", () => {
     const createdBefore = new Date("2025-02-01T00:00:00.000Z");
     const createdAfter = new Date("2025-01-01T00:00:00.000Z");
-    const where = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const where = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       where: {
         firstName: { startsWith: "A" },
@@ -194,8 +161,8 @@ describe("clauses", () => {
     });
     const payload = [1, 2, 3];
     const meta = { type: "click" };
-    const where = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const where = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: eventsTable,
       where: {
         status: "active",
@@ -211,8 +178,8 @@ describe("clauses", () => {
       JSON.stringify(meta),
     ]);
 
-    const nullWhere = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const nullWhere = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       where: {
         // @ts-expect-error runtime null guard
@@ -226,8 +193,8 @@ describe("clauses", () => {
 
   test("builds in and notIn operators with serialization", () => {
     const createdAt = new Date("2025-01-01T00:00:00.000Z");
-    const where = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const where = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       where: {
         id: { in: ["u-1", "u-2", "u-3"] },
@@ -260,8 +227,8 @@ describe("clauses", () => {
     });
     const payload = { type: "click" };
     const meta = { source: "web" };
-    const where = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(POSTGRES_SPEC),
+    const where = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(POSTGRES_SPEC).asFn(),
       table: eventsTable,
       where: {
         status: { in: ["active", "inactive"], notIn: ["inactive"] },
@@ -283,8 +250,8 @@ describe("clauses", () => {
   });
 
   test("treats empty in as unsatisfiable and empty notIn as a no-op", () => {
-    const emptyIn = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const emptyIn = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       where: {
         id: { in: [] },
@@ -294,8 +261,8 @@ describe("clauses", () => {
     expect(emptyIn.sql).toBe("(1 = 0)");
     expect(emptyIn.params).toEqual([]);
 
-    const emptyNotIn = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const emptyNotIn = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       where: {
         id: { notIn: [] },
@@ -305,8 +272,8 @@ describe("clauses", () => {
     expect(emptyNotIn.sql).toBe("");
     expect(emptyNotIn.params).toEqual([]);
 
-    const combined = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const combined = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       where: {
         id: "u-1",
@@ -320,8 +287,8 @@ describe("clauses", () => {
 
   test("rejects non-array operands for in and notIn", () => {
     expect(() =>
-      buildWhereClause({
-        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      WhereBuilder.from({
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
         table: usersTable,
         where: {
           id: {
@@ -333,8 +300,8 @@ describe("clauses", () => {
     ).toThrow("Expected array for where operator: in for field id");
 
     expect(() =>
-      buildWhereClause({
-        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      WhereBuilder.from({
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
         table: usersTable,
         where: {
           id: {
@@ -353,8 +320,8 @@ describe("clauses", () => {
       id: uuid("id").primaryKey().notNull(),
       score: number("score").notNull(),
     });
-    const where = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const where = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       where: {
         createdAt: { between: [start, end] },
@@ -364,8 +331,8 @@ describe("clauses", () => {
     expect(where.sql).toBe('"created_at" BETWEEN ? AND ?');
     expect(where.params).toEqual([start.toISOString(), end.toISOString()]);
 
-    const numberWhere = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(POSTGRES_SPEC),
+    const numberWhere = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(POSTGRES_SPEC).asFn(),
       table: scoresTable,
       where: {
         score: { between: [10, 20] },
@@ -378,8 +345,8 @@ describe("clauses", () => {
 
   test("rejects invalid operands for between", () => {
     expect(() =>
-      buildWhereClause({
-        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      WhereBuilder.from({
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
         table: usersTable,
         where: {
           createdAt: {
@@ -394,8 +361,8 @@ describe("clauses", () => {
     const end = new Date("2025-12-31T23:59:59.999Z");
 
     expect(() =>
-      buildWhereClause({
-        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      WhereBuilder.from({
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
         table: usersTable,
         where: {
           createdAt: {
@@ -409,8 +376,8 @@ describe("clauses", () => {
     );
 
     expect(() =>
-      buildWhereClause({
-        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      WhereBuilder.from({
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
         table: usersTable,
         where: {
           createdAt: {
@@ -426,8 +393,8 @@ describe("clauses", () => {
 
   test("rejects unknown where keys and operators", () => {
     expect(() =>
-      buildWhereClause({
-        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      WhereBuilder.from({
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
         table: usersTable,
         // @ts-expect-error invalid runtime key
         where: { nickname: "Ada" },
@@ -435,8 +402,8 @@ describe("clauses", () => {
     ).toThrow('Unknown where key "nickname" on table users');
 
     expect(() =>
-      buildWhereClause({
-        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      WhereBuilder.from({
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
         table: usersTable,
         where: {
           firstName: {
@@ -450,9 +417,9 @@ describe("clauses", () => {
 
   test("builds relation where filters with every, some, and none", () => {
     const postsRelations = { posts: many(() => postsTable) };
-    const nextPlaceholder = createNextPlaceholder(SQLITE_SPEC);
+    const nextPlaceholder = new PlaceholderGenerator(SQLITE_SPEC).asFn();
 
-    const everyWhere = buildWhereClause({
+    const everyWhere = WhereBuilder.from({
       nextPlaceholder,
       table: usersTable,
       relations: postsRelations,
@@ -467,8 +434,8 @@ describe("clauses", () => {
     );
     expect(everyWhere.params).toEqual(["Published"]);
 
-    const someWhere = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const someWhere = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       relations: postsRelations,
       parentAlias: '"users"',
@@ -482,8 +449,8 @@ describe("clauses", () => {
     );
     expect(someWhere.params).toEqual(["Hello"]);
 
-    const noneWhere = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const noneWhere = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       relations: postsRelations,
       parentAlias: '"users"',
@@ -500,8 +467,8 @@ describe("clauses", () => {
 
   test("composes relation where filters with column filters", () => {
     const postsRelations = { posts: many(() => postsTable) };
-    const where = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const where = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       relations: postsRelations,
       parentAlias: '"users"',
@@ -531,8 +498,8 @@ describe("clauses", () => {
     });
     const itemRelations = { tags: many(() => tagsTable) };
 
-    const columnWhere = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const columnWhere = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: itemsTable,
       relations: itemRelations,
       parentAlias: '"items"',
@@ -544,8 +511,8 @@ describe("clauses", () => {
     expect(columnWhere.sql).toBe('"tags" = ?');
     expect(columnWhere.params).toEqual(['["alpha","beta"]']);
 
-    const relationWhere = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const relationWhere = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: itemsTable,
       relations: itemRelations,
       parentAlias: '"items"',
@@ -562,8 +529,8 @@ describe("clauses", () => {
 
   test("combines multiple relation where filters on the same relation", () => {
     const postsRelations = { posts: many(() => postsTable) };
-    const where = buildWhereClause({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+    const where = WhereBuilder.from({
+      nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
       table: usersTable,
       relations: postsRelations,
       parentAlias: '"users"',
@@ -585,8 +552,8 @@ describe("clauses", () => {
     const postsRelations = { posts: many(() => postsTable) };
 
     expect(() =>
-      buildWhereClause({
-        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      WhereBuilder.from({
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
         table: usersTable,
         relations: postsRelations,
         parentAlias: '"users"',
@@ -602,8 +569,8 @@ describe("clauses", () => {
 
   test("rejects invalid logical where values", () => {
     expect(() =>
-      buildWhereClause({
-        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      WhereBuilder.from({
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
         table: usersTable,
         where: {
           // @ts-expect-error runtime guard
@@ -613,98 +580,13 @@ describe("clauses", () => {
     ).toThrow("$or where value must be an array");
 
     expect(() =>
-      buildWhereClause({
-        nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
+      WhereBuilder.from({
+        nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
         table: usersTable,
         where: {
           $or: ["bad"],
         },
       }),
     ).toThrow("$or where value must contain object filters");
-  });
-
-  test("builds order and pagination fragments", () => {
-    expect(
-      buildOrderByClause(usersTable, { createdAt: "desc", firstName: "asc" }),
-    ).toBe('"created_at" DESC, "first_name" ASC');
-
-    const sqlitePagination = buildPaginationClause({
-      spec: SQLITE_SPEC,
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
-      skip: 3,
-    });
-    const postgresPagination = buildPaginationClause({
-      spec: POSTGRES_SPEC,
-      nextPlaceholder: createNextPlaceholder(POSTGRES_SPEC),
-      skip: 3,
-    });
-
-    expect(sqlitePagination).toEqual({
-      sql: "LIMIT -1 OFFSET ?",
-      params: [3],
-    });
-    expect(postgresPagination).toEqual({
-      sql: "LIMIT ALL OFFSET $1",
-      params: [3],
-    });
-  });
-
-  test("builds select statements and mutation set clauses", () => {
-    expect(
-      buildSelectStatement({
-        tableName: '"users"',
-        columns: '"id" AS "id"',
-        where: '"id" = ?',
-        orderBy: '"id" ASC',
-        pagination: "LIMIT ?",
-      }),
-    ).toBe(
-      'SELECT "id" AS "id" FROM "users" WHERE "id" = ? ORDER BY "id" ASC LIMIT ?',
-    );
-
-    const set = buildSetClauses({
-      nextPlaceholder: createNextPlaceholder(SQLITE_SPEC),
-      table: usersTable,
-      data: {
-        firstName: "Grace",
-        createdAt: new Date("2025-01-01T00:00:00.000Z"),
-      },
-    });
-
-    expect(set.setClauses).toEqual(['"first_name" = ?', '"created_at" = ?']);
-    expect(set.params).toEqual(["Grace", "2025-01-01T00:00:00.000Z"]);
-  });
-
-  test("validates findUnique where payloads", () => {
-    expect(() => validateFindUniqueWhere(usersTable, {})).toThrow(
-      "findUnique requires at least one where key",
-    );
-    expect(() =>
-      validateFindUniqueWhere(usersTable, { firstName: "Ada" }),
-    ).toThrow(
-      "findUnique where must include at least one unique or primary key column",
-    );
-    expect(() =>
-      validateFindUniqueWhere(usersTable, { id: "u-1", firstName: "Ada" }),
-    ).not.toThrow();
-  });
-
-  test("resolves create defaults and serializes column values", () => {
-    const isActiveColumn = usersTable.columns.isActive;
-
-    if (!isActiveColumn) throw new Error("Missing isActive column");
-
-    expect(resolveCreateValue(usersTable.columns.firstName, undefined)).toBe(
-      null,
-    );
-    expect(resolveCreateValue(usersTable.columns.firstName, "Ada")).toBe("Ada");
-    expect(resolveCreateValue(isActiveColumn, undefined)).toBe(true);
-    expect(
-      serializeColumnValue(
-        defineTable("events", { payload: json("payload").notNull() }).columns
-          .payload,
-        { ok: true },
-      ),
-    ).toBe('{"ok":true}');
   });
 });

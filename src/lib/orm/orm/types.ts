@@ -906,29 +906,6 @@ export type CreateTableClientInput<
   tableHooks?: TableHooks<T, TRelations>;
 };
 
-export type BuildTableClientsInput<
-  T extends Record<string, Table> = Record<string, Table>,
-  R extends RelationsFor<T> = RelationsFor<T>,
-> = {
-  tables: T;
-  relations?: R;
-  sql: Bun.SQL;
-  adapter: Adapter;
-  tableRelationsMap: Map<Table, TableRelations>;
-  hooks?: OrmHooksConfig<T, R>;
-};
-
-export type BuildOrmClientInput<
-  T extends Record<string, Table> = Record<string, Table>,
-  R extends RelationsFor<T> = RelationsFor<T>,
-> = {
-  tableClients: OrmTableClients<T, R>;
-  sql: Bun.SQL;
-  transaction: <TResult>(
-    callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
-  ) => Promise<TResult>;
-};
-
 export type TableClient<
   T extends Table,
   TRelations extends TableRelations = TableRelations,

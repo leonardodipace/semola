@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { many, one } from "../orm/index.js";
-import { createPostgresDialect, POSTGRES_SPEC } from "./postgres.js";
+import { getDialect } from "./index.js";
+import { POSTGRES_SPEC } from "./postgres.js";
 import { DialectQueryBuilder } from "./query-builder.js";
-import { createDialect } from "./shared.js";
 import {
   buildUserPostMutationQueries,
   postsTable,
@@ -11,15 +11,13 @@ import {
 
 describe("postgres dialect", () => {
   test("reports postgres as its name", () => {
-    const dialect = createPostgresDialect({ table: usersTable, relations: {} });
-    const sharedDialect = createDialect({
-      spec: POSTGRES_SPEC,
+    const dialect = getDialect({
+      adapter: "postgres",
       table: usersTable,
       relations: {},
     });
 
     expect(dialect.name).toBe("postgres");
-    expect(sharedDialect.name).toBe("postgres");
   });
 
   test("uses numbered placeholders and postgres offset syntax", () => {

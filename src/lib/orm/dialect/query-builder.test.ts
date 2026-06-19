@@ -170,10 +170,5 @@ describe("DialectQueryBuilder", () => {
     expect(() => builder.buildUpdateMany({ data: {} })).toThrow(
       "updateMany requires at least one field in data",
     );
-    expect(builder.buildCreateMany({ data: [] })).toEqual({
-      statement: "",
-      params: [],
-      includeDescriptors: [],
-    });
   });
 });

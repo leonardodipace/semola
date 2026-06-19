@@ -12,8 +12,6 @@ import type {
   FindManyResult,
   FindUniqueOptions,
   FindUniqueResult,
-  HasMany,
-  HasOne,
   TableInclude,
   TableRelations,
   TableRow,
@@ -63,53 +61,6 @@ export type LogicalNotOperator = Extract<LogicalSqlOperator, "NOT">;
 export type CollectedLogicalWhere =
   | { nestedClauses: string[]; nestedParams: unknown[] }
   | string;
-
-export type AppendDirectWhereClauseInput = {
-  clauses: string[];
-  params: unknown[];
-  nextPlaceholder: () => string;
-  column: Column;
-  sqlName: string;
-  value: unknown;
-};
-
-export type AppendOperatorWhereClausesInput = {
-  clauses: string[];
-  params: unknown[];
-  nextPlaceholder: () => string;
-  column: Column;
-  sqlName: string;
-  jsKey: string;
-  value: Record<string, unknown>;
-};
-
-export type AppendWhereClauseInput<
-  T extends Table,
-  R extends TableRelations = Record<never, never>,
-> = BuildWhereClauseInput<T, R> & {
-  clauses: string[];
-  params: unknown[];
-  jsKey: string;
-  value: unknown;
-};
-
-export type AppendLogicalWhereClauseInput<
-  T extends Table,
-  R extends TableRelations = Record<never, never>,
-> = BuildWhereClauseInput<T, R> & {
-  clauses: string[];
-  params: unknown[];
-  jsKey: LogicalWhereKey;
-  value: unknown;
-};
-
-export type CollectLogicalWhereClausesInput<
-  T extends Table,
-  R extends TableRelations = Record<never, never>,
-> = BuildWhereClauseInput<T, R> & {
-  jsKey: LogicalWhereKey;
-  value: unknown;
-};
 
 export type IncludeDescriptor = {
   name: string;
@@ -168,15 +119,6 @@ export type CreateDialectInput<T extends Table, R extends TableRelations> = {
   tableRelationsMap?: Map<Table, TableRelations>;
 };
 
-export type CreateNamedDialectInput<
-  T extends Table,
-  R extends TableRelations,
-> = {
-  table: T;
-  relations: R;
-  tableRelationsMap?: Map<Table, TableRelations>;
-};
-
 export type GetDialectInput<T extends Table, R extends TableRelations> = {
   adapter: Adapter;
   table: T;
@@ -208,45 +150,10 @@ export type ParsedRelationFilter = {
   where: TableWhere<Table>;
 };
 
-export type BuildRelationForeignKeyConditionInput = {
-  parentTable: Table;
-  parentAlias: string;
-  relation: HasMany<Table> | HasOne<Table>;
-  relationTable: Table;
-  relationAlias: string;
-};
-
-export type AppendRelationWhereClauseInput<
-  T extends Table,
-  R extends TableRelations = Record<never, never>,
-> = AppendWhereClauseInput<T, R> & {
-  relation: HasMany<Table> | HasOne<Table>;
-  relationName: string;
-};
-
 export type ResolveHasOneForeignKeyColumnInput = {
   sourceTable: Table;
   relationTable: Table;
   relationForeignKey: string;
-};
-
-export type BuildJsonObjectExpressionInput = {
-  spec: DialectSpec;
-  alias: string;
-  table: Table;
-  extraPairs?: string[];
-  select?: Record<string, boolean>;
-};
-
-export type BuildRelationSubqueryInput = {
-  spec: DialectSpec;
-  nextPlaceholder: () => string;
-  parentTable: Table;
-  parentAlias: string;
-  relation: HasMany<Table> | HasOne<Table>;
-  relationName: string;
-  includeValue: unknown;
-  tableRelationsMap: Map<Table, TableRelations>;
 };
 
 export type BuildIncludeClauseInput<
