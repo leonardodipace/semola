@@ -1,7 +1,7 @@
 import { describe, expect, setSystemTime, spyOn, test } from "bun:test";
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
-import { Cron, RetryCronJob } from "./index.js";
 import { InvalidRetryError } from "../errors.js";
+import { Cron, RetryCronJob } from "./index.js";
 
 class UserDefinedError extends Error {}
 
