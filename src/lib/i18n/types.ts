@@ -29,15 +29,16 @@ type ArrayKeys<T extends readonly unknown[]> = {
 }[keyof T & `${number}`];
 
 // Generate translation keys for a single object property
-type ObjectPropertyKeys<K extends string, V> = IsString<V> extends true
-  ? K
-  : IsArray<V> extends true
-    ? V extends readonly unknown[]
-      ? `${K}.${NestedKeyOf<V>}`
-      : never
-    : IsObject<V> extends true
-      ? `${K}.${NestedKeyOf<V>}`
-      : never;
+type ObjectPropertyKeys<K extends string, V> =
+  IsString<V> extends true
+    ? K
+    : IsArray<V> extends true
+      ? V extends readonly unknown[]
+        ? `${K}.${NestedKeyOf<V>}`
+        : never
+      : IsObject<V> extends true
+        ? `${K}.${NestedKeyOf<V>}`
+        : never;
 
 // Recursively generate all valid translation keys
 export type NestedKeyOf<T> =

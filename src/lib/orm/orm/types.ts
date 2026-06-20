@@ -556,11 +556,12 @@ type RelationResultType<
   TIncludeValue,
   TAllTables extends Record<string, Table>,
   TAllRelations,
-> = R extends HasMany<infer TTable>
-  ? Array<RelationRow<TTable, TIncludeValue, TAllTables, TAllRelations>>
-  : R extends HasOne<infer TTable>
-    ? RelationRow<TTable, TIncludeValue, TAllTables, TAllRelations> | null
-    : never;
+> =
+  R extends HasMany<infer TTable>
+    ? Array<RelationRow<TTable, TIncludeValue, TAllTables, TAllRelations>>
+    : R extends HasOne<infer TTable>
+      ? RelationRow<TTable, TIncludeValue, TAllTables, TAllRelations> | null
+      : never;
 
 type IncludeResult<
   TRelations extends TableRelations,
