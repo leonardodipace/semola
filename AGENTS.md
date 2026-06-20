@@ -27,6 +27,8 @@ Read each skill file and follow its instructions.
 
 Ponytail and caveman are always on. Fallow is task-triggered. Caveman affects prose only - never reduce code quality, test coverage, or correctness.
 
+Run fallow with `bunx fallow` (no install or dev dependency needed). Example: `bunx fallow audit --base main --format json --quiet 2>/dev/null || true`. See the fallow skill for commands and flags.
+
 ## Repo Constraints
 
 - **Zero runtime dependencies** - do not add packages without strong reason.
@@ -113,6 +115,7 @@ bun test src/lib/api             # run tests for a specific module
 bun test --watch                 # watch mode
 bun run build                    # build package
 bun pm version <major|minor|patch>   # bump version for publishing
+bunx fallow audit --base main --format json --quiet 2>/dev/null || true   # changed-code audit
 ```
 
 ## Documentation
