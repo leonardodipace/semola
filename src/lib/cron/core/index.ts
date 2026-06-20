@@ -1,4 +1,5 @@
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
+import { InvalidRetryError } from "../errors.js";
 import {
   type CronBaseOptions,
   type CronOptions,
@@ -28,8 +29,6 @@ const ALIASES: Record<ScheduleType, string> = {
   "@hourly": "0 * * * *",
   "@minutely": "* * * * *",
 } as const;
-
-class InvalidRetryError extends TypeError {}
 
 class CommonCronUtilities {
   public getExpression(options: CronBaseOptions) {

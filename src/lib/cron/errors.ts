@@ -1,10 +1,3 @@
-export class InvalidValueError extends Error {
-  public constructor(message: string) {
-    super(message);
-    this.name = "InvalidValueError";
-  }
-}
-
 export class OutOfBoundError extends Error {
   public constructor(message: string) {
     super(message);
@@ -12,23 +5,9 @@ export class OutOfBoundError extends Error {
   }
 }
 
-export class CronExpressionError extends Error {
+export class InvalidRetryError extends TypeError {
   public constructor(message: string) {
     super(message);
-    this.name = "CronExpressionError";
-  }
-}
-
-export class EmptyCronExpressionError extends Error {
-  public constructor(message: string) {
-    super(message);
-    this.name = "EmptyCronExpressionError";
-  }
-}
-
-export class CronLengthError extends Error {
-  public constructor(message: string) {
-    super(message);
-    this.name = "CronLengthError";
+    this.name = "InvalidRetryError";
   }
 }
