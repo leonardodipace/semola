@@ -10,6 +10,7 @@ import type {
   OpenApiParameter,
   OpenApiResponse,
   OpenApiSpec,
+  SchemaMeta,
 } from "./types.js";
 
 type RouteConfigInternal = {
@@ -45,18 +46,15 @@ const toOpenAPISchema = (
   ]({ target: "draft-2020-12" }),
 });
 
-const getSchemaDescription = (schema: StandardSchemaV1) => {
-  const metadata = schema["~standard"];
+const getSchemaMeta = (schema: StandardSchemaV1): SchemaMeta => {
+  if (!("meta" in schema)) return {}
+  if (typeof schema.meta !== "function") return {};
 
-  if (!metadata) {
-    return "";
-  }
+  const meta: SchemaMeta = schema.meta()
 
-  if ("description" in metadata && typeof metadata.description === "string") {
-    return metadata.description;
-  }
+  if (!meta) return {};
 
-  return "";
+  return meta;
 };
 
 const requestFields = [
@@ -124,7 +122,7 @@ const convertSchemaToOpenApi = async (
   };
 
   // Check if schema has an id (from .meta({ id: "..." }))
-  const schemaId = jsonSchema.id;
+  const schemaId = getSchemaMeta(schema).id ?? jsonSchema.id;
 
   if (schemaId && typeof schemaId === "string") {
     // Extract to components and return a reference
@@ -310,7 +308,7 @@ const createResponses = async (response?: ResponseSchema) => {
       continue;
     }
 
-    const description = getSchemaDescription(schema);
+    const description = getSchemaMeta(schema).description ?? "";
     const { schema: jsonSchema, components } = await convertSchemaToOpenApi(
       schema,
       "output",

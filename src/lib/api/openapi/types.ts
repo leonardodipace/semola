@@ -60,3 +60,8 @@ export type OpenApiResponse = {
     };
   };
 };
+
+export type SchemaMeta = {
+  id?: string;
+  description?: string;
+};
