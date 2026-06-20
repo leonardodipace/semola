@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "caveman": {
+      "source": "juliusbrussee/caveman",
+      "sourceType": "github",
+      "skillPath": "skills/caveman/SKILL.md",
+      "computedHash": "1902fa0b569912d0c05736d8d98a72097d9b82719aac88c0c1d03bb546f9176d"
+    },
+    "fallow": {
+      "source": "fallow-rs/fallow-skills",
+      "sourceType": "github",
+      "skillPath": "fallow/skills/fallow/SKILL.md",
+      "computedHash": "53187fb28352440857278e84d2592302aec2157d8b5caaa301d6848303019285"
+    },
+    "ponytail": {
+      "source": "DietrichGebert/ponytail",
+      "sourceType": "github",
+      "skillPath": "skills/ponytail/SKILL.md",
+      "computedHash": "55e888f9d81f873068de13d44f4f963595aa2c2c6bb0f9024160bea79f756618"
+    }
+  }
+}
