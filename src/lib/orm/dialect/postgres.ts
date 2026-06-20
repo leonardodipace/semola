@@ -1,6 +1,4 @@
-import type { TableRelations } from "../orm/types.js";
-import type { Table } from "../table/types.js";
-import { createDialect, type DialectSpec } from "./shared.js";
+import type { DialectSpec } from "./types.js";
 
 export const POSTGRES_SPEC: DialectSpec = {
   name: "postgres",
@@ -10,11 +8,3 @@ export const POSTGRES_SPEC: DialectSpec = {
   jsonArrayAggregateFunctionName: "jsonb_agg",
   emptyJsonArrayLiteral: "'[]'::jsonb",
 };
-
-export const createPostgresDialect = <
-  T extends Table,
-  R extends TableRelations,
->(
-  table: T,
-  relations: R,
-) => createDialect(POSTGRES_SPEC, table, relations);

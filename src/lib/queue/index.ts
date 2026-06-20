@@ -1,3 +1,4 @@
+import assert from "node:assert";
 import { mightThrow, mightThrowSync } from "../errors/index.js";
 import { EnqueueError, SerializationError } from "./errors.js";
 import type { Job, JobState, QueueOptions } from "./types.js";
@@ -14,9 +15,9 @@ const DEFAULT_RETRIES = 3;
 const DEFAULT_TIMEOUT = 30000;
 const DEFAULT_CONCURRENCY = 1;
 const DEFAULT_POLL_INTERVAL = 100;
-const MAX_BACKOFF_DELAY = 60000;
-const BASE_BACKOFF_DELAY = 1000;
-const BACKOFF_MULTIPLIER = 2;
+const DEFAULT_RETRY_MAX_DELAY = 60000;
+const DEFAULT_RETRY_BASE_DELAY = 1000;
+const DEFAULT_RETRY_MULTIPLIER = 2;
 const SHUTDOWN_POLL_INTERVAL = 10;
 
 export class Queue<T> {
@@ -27,6 +28,9 @@ export class Queue<T> {
   private timeout: number;
   private concurrency: number;
   private pollInterval: number;
+  private retryBaseDelay: number;
+  private retryMultiplier: number;
+  private retryMaxDelay: number;
 
   public constructor(options: QueueOptions<T>) {
     this.options = options;
@@ -34,7 +38,34 @@ export class Queue<T> {
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT;
     this.concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
     this.pollInterval = options.pollInterval ?? DEFAULT_POLL_INTERVAL;
+    this.retryBaseDelay =
+      options.retryBackoff?.baseDelay ?? DEFAULT_RETRY_BASE_DELAY;
+    this.retryMultiplier =
+      options.retryBackoff?.multiplier ?? DEFAULT_RETRY_MULTIPLIER;
+    this.retryMaxDelay =
+      options.retryBackoff?.maxDelay ?? DEFAULT_RETRY_MAX_DELAY;
+
+    assert.ok(
+      Number.isFinite(this.retryBaseDelay) && this.retryBaseDelay > 0,
+      "Invalid retryBackoff.baseDelay: must be a positive finite number",
+    );
+    assert.ok(
+      Number.isFinite(this.retryMultiplier) && this.retryMultiplier > 0,
+      "Invalid retryBackoff.multiplier: must be a positive finite number",
+    );
+    assert.ok(
+      Number.isFinite(this.retryMaxDelay) && this.retryMaxDelay > 0,
+      "Invalid retryBackoff.maxDelay: must be a positive finite number",
+    );
+
     this.startWorkers();
+  }
+
+  private computeBackoffDelay(attempt: number) {
+    return Math.min(
+      this.retryBaseDelay * this.retryMultiplier ** (attempt - 1),
+      this.retryMaxDelay,
+    );
   }
 
   public async enqueue(data: T) {
@@ -212,10 +243,8 @@ export class Queue<T> {
     // Check if we should retry. Attempt starts at 1, so we retry while attempts <= maxRetries
     if (job.attempts <= job.maxRetries) {
       if (this.options.onRetry) {
-        const delay = Math.min(
-          BASE_BACKOFF_DELAY * BACKOFF_MULTIPLIER ** (job.attempts - 1),
-          MAX_BACKOFF_DELAY,
-        );
+        const delay = this.computeBackoffDelay(job.attempts);
+
         await mightThrow(
           Promise.resolve(
             this.options.onRetry({
@@ -223,7 +252,7 @@ export class Queue<T> {
               error: errorMsg,
               nextRetryDelayMs: delay,
               retriesRemaining: job.maxRetries - job.attempts,
-              backoffMultiplier: BACKOFF_MULTIPLIER,
+              backoffMultiplier: this.retryMultiplier,
             }),
           ),
         );
@@ -269,11 +298,7 @@ export class Queue<T> {
   }
 
   private async retryJob(job: JobState<T>) {
-    // Exponential backoff: 1st retry (attempts=1) -> 1000ms, 2nd (attempts=2) -> 2000ms, etc.
-    const delay = Math.min(
-      BASE_BACKOFF_DELAY * BACKOFF_MULTIPLIER ** (job.attempts - 1),
-      MAX_BACKOFF_DELAY,
-    );
+    const delay = this.computeBackoffDelay(job.attempts);
 
     await new Promise((resolve) => setTimeout(resolve, delay));
 

@@ -43,12 +43,64 @@ export type WorkflowHandlerContext<TInput> = {
 export type SerializeValue<T> = (value: T) => string;
 export type DeserializeValue<T> = (raw: string) => T;
 
+export type WorkflowStepErrorRecord = {
+  attempt: number;
+  error: string;
+  timestamp: number;
+};
+
+export type WorkflowStepRetryContext<TInput> = {
+  executionId: string;
+  input: TInput;
+  stepName: string;
+  error: string;
+  attempt: number;
+  nextRetryDelayMs: number;
+  retriesRemaining: number;
+};
+
+export type WorkflowStepErrorContext<TInput> = {
+  executionId: string;
+  input: TInput;
+  stepName: string;
+  error: string;
+  totalAttempts: number;
+  errorHistory: WorkflowStepErrorRecord[];
+};
+
+export type WorkflowHooks<TInput, TResult> = {
+  onStart?: (context: {
+    executionId: string;
+    input: TInput;
+  }) => void | Promise<void>;
+  onRetry?: (context: WorkflowStepRetryContext<TInput>) => void | Promise<void>;
+  onError?: (context: WorkflowStepErrorContext<TInput>) => void | Promise<void>;
+  onComplete?: (context: {
+    executionId: string;
+    input: TInput;
+    result: TResult;
+  }) => void | Promise<void>;
+  onCancel?: (context: {
+    executionId: string;
+    input: TInput;
+  }) => void | Promise<void>;
+};
+
+export type WorkflowRetryBackoff = {
+  baseDelay?: number;
+  multiplier?: number;
+  maxDelay?: number;
+};
+
 export type WorkflowOptions<TInput, TResult> = {
   name: string;
   redis: Bun.RedisClient;
   handler: (
     context: WorkflowHandlerContext<TInput>,
   ) => TResult | Promise<TResult>;
+  retries?: number;
+  retryBackoff?: WorkflowRetryBackoff;
+  hooks?: WorkflowHooks<TInput, TResult>;
   lockTTL?: number;
   serializeInput?: SerializeValue<TInput>;
   deserializeInput?: DeserializeValue<TInput>;

@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { date, enumType, string, uuid } from "../column/index.js";
+import {
+  boolean,
+  date,
+  enumType,
+  number,
+  string,
+  uuid,
+} from "../column/index.js";
+import type { Column } from "../column/types.js";
 import { defineTable } from "../table/index.js";
+import type { Table } from "../table/types.js";
 import { createOrm, many, one } from "./index.js";
 
 const usersTable = defineTable("users", {
@@ -13,6 +22,72 @@ const postsTable = defineTable("posts", {
   id: uuid("id").primaryKey().notNull(),
   title: string("title").notNull(),
 });
+
+const createUsersOrm = () =>
+  createOrm({
+    adapter: "sqlite",
+    url: ":memory:",
+    tables: { users: usersTable },
+  });
+
+const createUsersOrmWithModifyingBeforeCreate = () =>
+  createOrm({
+    adapter: "sqlite",
+    url: ":memory:",
+    tables: { users: usersTable },
+    hooks: {
+      beforeCreate(ctx) {
+        return {
+          data: {
+            ...ctx.options.data,
+            name: "Modified",
+          },
+        };
+      },
+    },
+  });
+
+const createUsersSchema = async (sql: Bun.SQL) => {
+  await sql.unsafe(
+    "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
+  );
+};
+
+const seedSingleUser = async (sql: Bun.SQL) => {
+  await sql.unsafe("INSERT INTO users VALUES (?, ?, ?)", [
+    "u1",
+    "Alice",
+    "alice@example.com",
+  ]);
+};
+
+const seedTwoUsers = async (sql: Bun.SQL) => {
+  await sql.unsafe("INSERT INTO users VALUES (?, ?, ?), (?, ?, ?)", [
+    "u1",
+    "Alice",
+    "alice@example.com",
+    "u2",
+    "Bob",
+    "bob@example.com",
+  ]);
+};
+
+type TableWithId = Table<{ id: Column }>;
+
+const defineStudentsToExamsTable = (
+  studentTable: TableWithId,
+  examsTable: TableWithId,
+) =>
+  defineTable("students_to_exams", {
+    studentId: uuid("student_id")
+      .primaryKey()
+      .notNull()
+      .references(() => studentTable.columns.id),
+    examId: uuid("exam_id")
+      .primaryKey()
+      .notNull()
+      .references(() => examsTable.columns.id),
+  });
 
 describe("relation helpers", () => {
   test("many() returns a hasMany descriptor", () => {
@@ -176,6 +251,8 @@ describe("relation helpers", () => {
         name: {
           startsWith: "J",
         },
+        $or: [{ email: { endsWith: "@example.com" } }, { name: "Jane" }],
+        $not: { name: "Blocked" },
       },
       orderBy: {
         name: "asc",
@@ -240,13 +317,49 @@ describe("relation helpers", () => {
     const invalidWhereOperator: Parameters<typeof orm.users.findMany>[0] = {
       where: {
         status: {
-          // @ts-expect-error enumType supports equals only
+          // @ts-expect-error enumType supports equals, in, and notIn only
           startsWith: "a",
         },
       },
     };
 
     expect(invalidWhereOperator).toBeDefined();
+
+    const invalidBetweenOnEnum: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        status: {
+          // @ts-expect-error enumType does not support between
+          between: ["active", "inactive"],
+        },
+      },
+    };
+
+    expect(invalidBetweenOnEnum).toBeDefined();
+
+    acceptCreateOptions<Parameters<typeof orm.users.findMany>[0]>({
+      where: {
+        status: { in: ["active", "inactive"] },
+      },
+    });
+
+    acceptCreateOptions<Parameters<typeof orm.users.findMany>[0]>({
+      where: {
+        status: { notIn: ["inactive"] },
+      },
+    });
+
+    const invalidInValue: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        status: {
+          in: [
+            // @ts-expect-error status only accepts active or inactive
+            "pending",
+          ],
+        },
+      },
+    };
+
+    expect(invalidInValue).toBeDefined();
 
     await orm.$raw.close();
   });
@@ -460,15 +573,9 @@ describe("relation helpers", () => {
   });
 
   test("createMany inserts multiple rows and returns the inserted records", async () => {
-    const orm = createOrm({
-      adapter: "sqlite",
-      url: ":memory:",
-      tables: { users: usersTable },
-    });
+    const orm = createUsersOrm();
 
-    await orm.$raw.unsafe(
-      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
-    );
+    await createUsersSchema(orm.$raw);
 
     const result = await orm.users.createMany({
       data: [
@@ -487,21 +594,10 @@ describe("relation helpers", () => {
   });
 
   test("update modifies a row and returns it", async () => {
-    const orm = createOrm({
-      adapter: "sqlite",
-      url: ":memory:",
-      tables: { users: usersTable },
-    });
+    const orm = createUsersOrm();
 
-    await orm.$raw.unsafe(
-      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
-    );
-
-    await orm.$raw.unsafe("INSERT INTO users VALUES (?, ?, ?)", [
-      "u1",
-      "Alice",
-      "alice@example.com",
-    ]);
+    await createUsersSchema(orm.$raw);
+    await seedSingleUser(orm.$raw);
 
     const updated = await orm.users.update({
       where: { id: "u1" },
@@ -515,24 +611,10 @@ describe("relation helpers", () => {
   });
 
   test("updateMany updates matching rows and returns the updated records", async () => {
-    const orm = createOrm({
-      adapter: "sqlite",
-      url: ":memory:",
-      tables: { users: usersTable },
-    });
+    const orm = createUsersOrm();
 
-    await orm.$raw.unsafe(
-      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
-    );
-
-    await orm.$raw.unsafe("INSERT INTO users VALUES (?, ?, ?), (?, ?, ?)", [
-      "u1",
-      "Alice",
-      "alice@example.com",
-      "u2",
-      "Bob",
-      "bob@example.com",
-    ]);
+    await createUsersSchema(orm.$raw);
+    await seedTwoUsers(orm.$raw);
 
     const result = await orm.users.updateMany({
       data: { name: "Updated" },
@@ -545,21 +627,10 @@ describe("relation helpers", () => {
   });
 
   test("delete removes a row and returns it", async () => {
-    const orm = createOrm({
-      adapter: "sqlite",
-      url: ":memory:",
-      tables: { users: usersTable },
-    });
+    const orm = createUsersOrm();
 
-    await orm.$raw.unsafe(
-      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
-    );
-
-    await orm.$raw.unsafe("INSERT INTO users VALUES (?, ?, ?)", [
-      "u1",
-      "Alice",
-      "alice@example.com",
-    ]);
+    await createUsersSchema(orm.$raw);
+    await seedSingleUser(orm.$raw);
 
     const deleted = await orm.users.delete({
       where: { id: "u1" },
@@ -575,24 +646,10 @@ describe("relation helpers", () => {
   });
 
   test("deleteMany removes matching rows and returns the deleted records", async () => {
-    const orm = createOrm({
-      adapter: "sqlite",
-      url: ":memory:",
-      tables: { users: usersTable },
-    });
+    const orm = createUsersOrm();
 
-    await orm.$raw.unsafe(
-      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
-    );
-
-    await orm.$raw.unsafe("INSERT INTO users VALUES (?, ?, ?), (?, ?, ?)", [
-      "u1",
-      "Alice",
-      "alice@example.com",
-      "u2",
-      "Bob",
-      "bob@example.com",
-    ]);
+    await createUsersSchema(orm.$raw);
+    await seedTwoUsers(orm.$raw);
 
     const result = await orm.users.deleteMany({
       where: { name: "Alice" },
@@ -604,6 +661,649 @@ describe("relation helpers", () => {
     const rows = await orm.users.findMany();
 
     expect(rows).toHaveLength(1);
+
+    await orm.$raw.close();
+  });
+});
+
+describe("relation where filters", () => {
+  const postsTable = defineTable("posts", {
+    id: uuid("id").primaryKey().notNull(),
+    title: string("title").notNull(),
+    published: boolean("published")
+      .notNull()
+      .default(() => false),
+    views: number("views")
+      .notNull()
+      .default(() => 0),
+    authorId: uuid("author_id")
+      .notNull()
+      .references(() => usersTable.columns.id),
+  });
+
+  const createOrmWithPosts = () =>
+    createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable, posts: postsTable },
+      relations: {
+        users: { posts: many(() => postsTable) },
+      },
+    });
+
+  const seedRelationFilterData = async (sql: Bun.SQL) => {
+    await sql.unsafe(
+      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE)",
+    );
+    await sql.unsafe(
+      "CREATE TABLE posts (id TEXT PRIMARY KEY, title TEXT NOT NULL, published INTEGER NOT NULL, views INTEGER NOT NULL, author_id TEXT NOT NULL)",
+    );
+    await sql.unsafe(
+      "INSERT INTO users VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?)",
+      [
+        "u1",
+        "Alice",
+        "alice@example.com",
+        "u2",
+        "Bob",
+        "bob@example.com",
+        "u3",
+        "Carol",
+        "carol@example.com",
+      ],
+    );
+    await sql.unsafe(
+      "INSERT INTO posts (id, title, published, views, author_id) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
+      [
+        "p1",
+        "Draft",
+        0,
+        10,
+        "u1",
+        "p2",
+        "Published",
+        1,
+        150,
+        "u1",
+        "p3",
+        "Popular",
+        1,
+        200,
+        "u2",
+        "p4",
+        "Quiet",
+        1,
+        5,
+        "u2",
+      ],
+    );
+  };
+
+  test("filters users where every post is published", async () => {
+    const orm = createOrmWithPosts();
+
+    await seedRelationFilterData(orm.$raw);
+
+    const users = await orm.users.findMany({
+      where: {
+        posts: { every: { published: true } },
+      },
+      select: { id: true },
+    });
+
+    expect(users.map((user) => user.id).sort()).toEqual(["u2", "u3"]);
+
+    await orm.$raw.close();
+  });
+
+  test("filters users where some post has more than 100 views", async () => {
+    const orm = createOrmWithPosts();
+
+    await seedRelationFilterData(orm.$raw);
+
+    const users = await orm.users.findMany({
+      where: {
+        posts: { some: { views: { gt: 100 } } },
+      },
+      select: { id: true },
+    });
+
+    expect(users.map((user) => user.id).sort()).toEqual(["u1", "u2"]);
+
+    await orm.$raw.close();
+  });
+
+  test("filters users with no posts", async () => {
+    const orm = createOrmWithPosts();
+
+    await seedRelationFilterData(orm.$raw);
+
+    const users = await orm.users.findMany({
+      where: {
+        posts: { none: {} },
+      },
+      select: { id: true },
+    });
+
+    expect(users).toEqual([{ id: "u3" }]);
+
+    await orm.$raw.close();
+  });
+
+  test("composes relation filters with column filters", async () => {
+    const orm = createOrmWithPosts();
+
+    await seedRelationFilterData(orm.$raw);
+
+    const users = await orm.users.findMany({
+      where: {
+        name: { startsWith: "A" },
+        posts: { some: { published: true } },
+      },
+      select: { id: true },
+    });
+
+    expect(users).toEqual([{ id: "u1" }]);
+
+    await orm.$raw.close();
+  });
+
+  test("relation where filters are typed on findMany", async () => {
+    const orm = createOrmWithPosts();
+
+    const valid: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        posts: { none: { published: false } },
+      },
+    };
+
+    const validBetween: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        posts: { some: { views: { between: [100, 500] } } },
+      },
+    };
+
+    const invalidRelation: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        // @ts-expect-error tasks is not a relation on users
+        tasks: { some: {} },
+      },
+    };
+
+    const invalidFilter: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        posts: {
+          // @ts-expect-error views is not a column on users
+          views: { gt: 1 },
+        },
+      },
+    };
+
+    const invalidBetweenValue: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        posts: {
+          some: {
+            views: {
+              between: [
+                // @ts-expect-error views is a number column
+                "100",
+                500,
+              ],
+            },
+          },
+        },
+      },
+    };
+
+    expect(valid).toBeDefined();
+    expect(validBetween).toBeDefined();
+    expect(invalidRelation).toBeDefined();
+    expect(invalidFilter).toBeDefined();
+    expect(invalidBetweenValue).toBeDefined();
+
+    await orm.$raw.close();
+  });
+});
+
+describe("nested include options", () => {
+  const authoredPostsTable = defineTable("posts", {
+    id: uuid("id").primaryKey().notNull(),
+    title: string("title").notNull(),
+    content: string("content").notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => usersTable.columns.id),
+  });
+
+  const createOrmWithPosts = () =>
+    createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable, posts: authoredPostsTable },
+      relations: {
+        users: { posts: many(() => authoredPostsTable) },
+      },
+    });
+
+  const definePostWithAuthorTable = (sqlName: string) =>
+    defineTable(sqlName, {
+      id: uuid("id").primaryKey().notNull(),
+      title: string("title").notNull(),
+      userId: uuid("user_id")
+        .notNull()
+        .references(() => usersTable.columns.id),
+    });
+
+  const definePostWithAuthorAndContentTable = (sqlName: string) =>
+    defineTable(sqlName, {
+      id: uuid("id").primaryKey().notNull(),
+      title: string("title").notNull(),
+      content: string("content").notNull(),
+      userId: uuid("user_id")
+        .notNull()
+        .references(() => usersTable.columns.id),
+    });
+
+  const createOrmWithAuthorRelation = <
+    TPostsTable extends ReturnType<typeof definePostWithAuthorTable>,
+  >(
+    postsTable: TPostsTable,
+  ) =>
+    createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable, posts: postsTable },
+      relations: {
+        users: { posts: many(() => postsTable) },
+        posts: { author: one("userId", () => usersTable) },
+      },
+    });
+
+  const createNestedIncludeSchemaAndRows = async (
+    sql: Bun.SQL,
+    postsSqlName: string,
+  ) => {
+    await sql.unsafe(
+      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE)",
+    );
+    await sql.unsafe(
+      `CREATE TABLE ${postsSqlName} (id TEXT PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL, user_id TEXT NOT NULL)`,
+    );
+    await sql.unsafe("INSERT INTO users VALUES (?, ?, ?)", [
+      "u1",
+      "John",
+      "john@example.com",
+    ]);
+    await sql.unsafe(
+      `INSERT INTO ${postsSqlName} (id, title, content, user_id) VALUES (?, ?, ?, ?)`,
+      ["p1", "Hello", "World", "u1"],
+    );
+  };
+
+  test("select in nested include returns only requested columns at runtime", async () => {
+    const orm = createOrmWithPosts();
+
+    await createNestedIncludeSchemaAndRows(orm.$raw, "posts");
+
+    const rows = await orm.users.findMany({
+      include: { posts: { select: { title: true } } },
+    });
+
+    const post = rows[0]?.posts[0];
+
+    expect(post?.title).toBe("Hello");
+    expect(Object.keys(post ?? {})).toEqual(["title"]);
+
+    await orm.$raw.close();
+  });
+
+  test("nested include select rejects invalid column names", async () => {
+    const orm = createOrmWithPosts();
+
+    const _invalid: Parameters<typeof orm.users.findMany>[0] = {
+      include: {
+        posts: {
+          select: {
+            // @ts-expect-error "nonExistent" is not a column on posts
+            nonExistent: true,
+          },
+        },
+      },
+    };
+
+    expect(_invalid).toBeDefined();
+    await orm.$raw.close();
+  });
+
+  test("nested include options accept valid types and reject invalid ones", async () => {
+    const orm = createOrmWithPosts();
+
+    const _valid: Parameters<typeof orm.users.findMany>[0] = {
+      where: {
+        $and: [{ name: { contains: "Jo" } }],
+      },
+      include: {
+        posts: {
+          where: {
+            $or: [{ title: "Hello" }, { content: { contains: "World" } }],
+          },
+          orderBy: { title: "asc" },
+          take: 5,
+          skip: 0,
+          select: { id: true, title: true },
+        },
+      },
+    };
+
+    const _invalidWhere: Parameters<typeof orm.users.findMany>[0] = {
+      include: {
+        posts: {
+          where: {
+            $or: [
+              {
+                // @ts-expect-error "badCol" is not a column on posts
+                badCol: "x",
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const _invalidOrderDir: Parameters<typeof orm.users.findMany>[0] = {
+      include: {
+        posts: {
+          orderBy: {
+            // @ts-expect-error invalid direction
+            title: "badDir",
+          },
+        },
+      },
+    };
+
+    expect(_valid).toBeDefined();
+    expect(_invalidWhere).toBeDefined();
+    expect(_invalidOrderDir).toBeDefined();
+    await orm.$raw.close();
+  });
+
+  test("nested include propagates relation types (posts include author)", async () => {
+    const postsWithAuthorTable = definePostWithAuthorTable("posts_with_author");
+    const orm = createOrmWithAuthorRelation(postsWithAuthorTable);
+
+    await orm.$raw.unsafe(
+      "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE)",
+    );
+    await orm.$raw.unsafe(
+      "CREATE TABLE posts_with_author (id TEXT PRIMARY KEY, title TEXT NOT NULL, user_id TEXT NOT NULL)",
+    );
+
+    await orm.users.create({
+      data: { id: "u1", name: "John", email: "john@example.com" },
+    });
+    await orm.posts.create({
+      data: { id: "p1", title: "Hello", userId: "u1" },
+    });
+
+    const rows = await orm.users.findMany({
+      include: { posts: { include: { author: true } } },
+    });
+
+    const post = rows[0]?.posts[0];
+    const author = post?.author;
+
+    // runtime: nested include data is present
+    expect(author?.name).toBe("John");
+
+    // type: author column is accessible (TypeScript would flag unknown columns)
+    const _nameCheck: string | null | undefined = author?.name;
+    expect(_nameCheck).toBeDefined();
+
+    await orm.$raw.close();
+  });
+
+  test("depth-3 nested include with select shows correct type (not never or missing)", async () => {
+    const postsWithAuthorTable =
+      definePostWithAuthorAndContentTable("posts_depth3");
+    const orm = createOrmWithAuthorRelation(postsWithAuthorTable);
+
+    await createNestedIncludeSchemaAndRows(orm.$raw, "posts_depth3");
+
+    const rows = await orm.users.findMany({
+      include: {
+        posts: {
+          include: {
+            author: {
+              include: {
+                posts: { select: { title: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const firstUser = rows[0];
+    const firstPost = firstUser?.posts[0];
+    const author = firstPost?.author;
+    const authorPosts = author?.posts;
+
+    expect(authorPosts).toBeDefined();
+    expect(authorPosts?.[0]?.title).toBe("Hello");
+    expect(Object.keys(authorPosts?.[0] ?? {})).toEqual(["title"]);
+
+    await orm.$raw.close();
+  });
+
+  test("select on depth-3 nested include narrows type correctly", async () => {
+    const postsWithAuthorTable = definePostWithAuthorAndContentTable(
+      "posts_select_depth3",
+    );
+    const orm = createOrmWithAuthorRelation(postsWithAuthorTable);
+
+    // "author.posts" with select — type must only contain selected columns.
+    // Before the fix, the intersection `TIncludeValue & { select?: TableSelect<T> }`
+    // added all optional columns, so keyof picked up id, title, content, userId.
+    const _typed: Parameters<typeof orm.users.findMany>[0] = {
+      include: {
+        posts: {
+          include: {
+            author: {
+              include: {
+                posts: { select: { title: true, content: true } },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    type AuthorPosts = NonNullable<
+      ReturnType<typeof orm.users.findMany> extends Promise<infer U>
+        ? U extends Array<infer Row>
+          ? Row extends { posts: Array<infer Post> }
+            ? Post extends { author: infer Author | null }
+              ? Author extends { posts: Array<infer AuthorPost> }
+                ? AuthorPost
+                : never
+              : never
+            : never
+          : never
+        : never
+    >;
+
+    // AuthorPosts should only have title and content, not id or userId.
+    // @ts-expect-error id should not exist when select: { title, content }
+    const _badId: AuthorPosts = { id: "", title: "", content: "" };
+
+    expect(_typed).toBeDefined();
+    expect(_badId).toBeDefined();
+    await orm.$raw.close();
+  });
+
+  test("nested include with select does not produce never in sibling relation type", async () => {
+    const postsWithAuthorTable = definePostWithAuthorTable("posts_never_check");
+    const orm = createOrmWithAuthorRelation(postsWithAuthorTable);
+
+    // "author" appears in type (depth 2) — must be a proper type, not never
+    const _check: Parameters<typeof orm.users.findMany>[0] = {
+      include: {
+        posts: {
+          include: {
+            author: {
+              // author.posts is depth 3 — no type info but MUST NOT produce `posts: never`
+              include: { posts: { select: { title: true } } },
+            },
+          },
+        },
+      },
+    };
+
+    expect(_check).toBeDefined();
+    await orm.$raw.close();
+  });
+
+  test("nested include type rejects invalid columns at each level", async () => {
+    const postsWithAuthorTable = definePostWithAuthorTable(
+      "posts_nested_type_check",
+    );
+    const orm = createOrmWithAuthorRelation(postsWithAuthorTable);
+
+    // valid: include author (a known relation on posts)
+    const _valid: Parameters<typeof orm.users.findMany>[0] = {
+      include: { posts: { include: { author: true } } },
+    };
+
+    // invalid: "badCol" in nested where is not a column on posts
+    const _invalidNestedWhere: Parameters<typeof orm.users.findMany>[0] = {
+      include: {
+        posts: {
+          where: {
+            // @ts-expect-error "badCol" is not a column on posts
+            badCol: "x",
+          },
+        },
+      },
+    };
+
+    expect(_valid).toBeDefined();
+    expect(_invalidNestedWhere).toBeDefined();
+    await orm.$raw.close();
+  });
+
+  test("deep bidirectional include matches runtime and inferred type", async () => {
+    const exampleUsersTable = defineTable("users", {
+      id: uuid("id").primaryKey().notNull().default(Bun.randomUUIDv7),
+      firstName: string("first_name").notNull(),
+      lastName: string("last_name").notNull(),
+    });
+
+    const examplePostsTable = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull().default(Bun.randomUUIDv7),
+      title: string("title").notNull(),
+      content: string("content").notNull(),
+      authorId: uuid("author_id")
+        .notNull()
+        .references(() => exampleUsersTable.columns.id),
+    });
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: {
+        users: exampleUsersTable,
+        posts: examplePostsTable,
+      },
+      relations: {
+        users: {
+          posts: many(() => examplePostsTable),
+        },
+        posts: {
+          author: one("authorId", () => exampleUsersTable),
+        },
+      },
+    });
+
+    await orm.$raw`
+      CREATE TABLE users (
+        id TEXT PRIMARY KEY NOT NULL,
+        first_name TEXT NOT NULL,
+        last_name TEXT NOT NULL
+      );
+
+      CREATE TABLE posts (
+        id TEXT PRIMARY KEY NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        author_id TEXT NOT NULL REFERENCES users(id)
+      );
+    `;
+
+    const leo = await orm.users.create({
+      data: {
+        firstName: "Leonardo",
+        lastName: "Dipace",
+      },
+    });
+
+    await orm.posts.create({
+      data: {
+        title: "Hello World",
+        content: "Hello World",
+        authorId: leo.id,
+      },
+    });
+
+    const result = await orm.users.findMany({
+      include: {
+        posts: {
+          include: {
+            author: {
+              include: {
+                posts: {
+                  include: {
+                    author: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const firstUser = result[0];
+    const firstPost = firstUser?.posts[0];
+    const author = firstPost?.author;
+    const nestedPost = author?.posts[0];
+    const nestedAuthor = nestedPost?.author;
+    const nestedName: string | undefined = nestedAuthor?.firstName;
+
+    expect(nestedName).toBe("Leonardo");
+    expect(author?.posts).toHaveLength(1);
+    expect(author?.lastName).toBe("Dipace");
+
+    const selected = await orm.users.findMany({
+      include: {
+        posts: {
+          select: {
+            title: true,
+          },
+          include: {
+            author: true,
+          },
+        },
+      },
+    });
+
+    const selectedUser = selected[0];
+    const selectedPost = selectedUser?.posts[0];
+    const selectedTitle: string | undefined = selectedPost?.title;
+    // @ts-expect-error content is not selected on posts
+    const selectedContent = selectedPost?.content;
+
+    expect(selectedTitle).toBe("Hello World");
+    expect(selectedContent).toBeUndefined();
 
     await orm.$raw.close();
   });
@@ -634,16 +1334,10 @@ describe("many to many relation", () => {
       name: string("name").notNull(),
     });
 
-    const studentsToExamsTable = defineTable("students_to_exams", {
-      studentId: uuid("student_id")
-        .primaryKey()
-        .notNull()
-        .references(() => studentTable.columns.id),
-      examId: uuid("exam_id")
-        .primaryKey()
-        .notNull()
-        .references(() => examsTable.columns.id),
-    });
+    const studentsToExamsTable = defineStudentsToExamsTable(
+      studentTable,
+      examsTable,
+    );
 
     const orm = createOrm({
       adapter: "sqlite",
@@ -777,16 +1471,10 @@ describe("many to many relation", () => {
       name: string("name").notNull(),
     });
 
-    const studentsToExamsTable = defineTable("students_to_exams", {
-      studentId: uuid("student_id")
-        .primaryKey()
-        .notNull()
-        .references(() => studentTable.columns.id),
-      examId: uuid("exam_id")
-        .primaryKey()
-        .notNull()
-        .references(() => examsTable.columns.id),
-    });
+    const studentsToExamsTable = defineStudentsToExamsTable(
+      studentTable,
+      examsTable,
+    );
 
     const orm = createOrm({
       adapter: "sqlite",
@@ -825,6 +1513,310 @@ describe("many to many relation", () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0]?.exams).toMatchObject({ id: "E1", name: "Math" });
+
+    await orm.$raw.close();
+  });
+});
+
+describe("hooks", () => {
+  test("beforeCreate can return modified options", async () => {
+    const orm = createUsersOrmWithModifyingBeforeCreate();
+
+    await createUsersSchema(orm.$raw);
+
+    const created = await orm.users.create({
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+    });
+
+    expect(created.name).toBe("Modified");
+
+    await orm.$raw.close();
+  });
+
+  test("afterCreate receives result", async () => {
+    let afterResult: unknown;
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        afterCreate(ctx) {
+          afterResult = ctx.result;
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    const created = await orm.users.create({
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+    });
+
+    expect(afterResult).toEqual(created);
+
+    await orm.$raw.close();
+  });
+
+  test("beforeFindMany and afterFindMany receive table context", async () => {
+    let beforeTableName: string | undefined;
+    let afterTableName: string | undefined;
+    let afterRowCount: number | undefined;
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        beforeFindMany(ctx) {
+          beforeTableName = ctx.tableName;
+        },
+        afterFindMany(ctx) {
+          afterTableName = ctx.tableName;
+          afterRowCount = ctx.result?.length;
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+    await seedTwoUsers(orm.$raw);
+
+    await orm.users.findMany();
+
+    expect(beforeTableName).toBe("users");
+    expect(afterTableName).toBe("users");
+    expect(afterRowCount).toBe(2);
+
+    await orm.$raw.close();
+  });
+
+  test("throwing from a hook aborts the operation", async () => {
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        beforeCreate() {
+          throw new Error("blocked");
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    await expect(
+      orm.users.create({
+        data: { id: "u1", name: "Alice", email: "alice@example.com" },
+      }),
+    ).rejects.toThrow("blocked");
+
+    const rows = await orm.users.findMany();
+    expect(rows).toHaveLength(0);
+
+    await orm.$raw.close();
+  });
+
+  test("hooks run inside $transaction", async () => {
+    let hookCalls = 0;
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        beforeCreate() {
+          hookCalls += 1;
+
+          return undefined;
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    await orm.$transaction(async (tx) => {
+      await tx.users.create({
+        data: { id: "u1", name: "Alice", email: "alice@example.com" },
+      });
+    });
+
+    expect(hookCalls).toBe(1);
+
+    await orm.$raw.close();
+  });
+
+  test("throwing from a hook inside $transaction rolls back", async () => {
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        afterCreate() {
+          throw new Error("rollback");
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    await expect(
+      orm.$transaction(async (tx) => {
+        await tx.users.create({
+          data: { id: "u1", name: "Alice", email: "alice@example.com" },
+        });
+      }),
+    ).rejects.toThrow("rollback");
+
+    const rows = await orm.users.findMany();
+    expect(rows).toHaveLength(0);
+
+    await orm.$raw.close();
+  });
+
+  test("works without configured hooks", async () => {
+    const orm = createUsersOrm();
+
+    await createUsersSchema(orm.$raw);
+
+    const created = await orm.users.create({
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+    });
+
+    expect(created.name).toBe("Alice");
+
+    await orm.$raw.close();
+  });
+
+  test("beforeCreate does not mutate caller options", async () => {
+    const orm = createUsersOrmWithModifyingBeforeCreate();
+
+    await createUsersSchema(orm.$raw);
+
+    const options = {
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+    };
+
+    await orm.users.create(options);
+
+    expect(options.data.name).toBe("Alice");
+
+    await orm.$raw.close();
+  });
+
+  test("per-table hooks run only for matching table", async () => {
+    let usersHookCalls = 0;
+    let postsHookCalls = 0;
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable, posts: postsTable },
+      hooks: {
+        tables: {
+          users: {
+            beforeCreate() {
+              usersHookCalls += 1;
+
+              return undefined;
+            },
+          },
+          posts: {
+            beforeCreate() {
+              postsHookCalls += 1;
+
+              return undefined;
+            },
+          },
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+    await orm.$raw.unsafe(
+      "CREATE TABLE posts (id TEXT PRIMARY KEY, title TEXT NOT NULL)",
+    );
+
+    await orm.users.create({
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+    });
+
+    await orm.posts.create({
+      data: { id: "p1", title: "Hello" },
+    });
+
+    expect(usersHookCalls).toBe(1);
+    expect(postsHookCalls).toBe(1);
+
+    await orm.$raw.close();
+  });
+
+  test("global and per-table beforeCreate hooks run in order", async () => {
+    const callOrder: string[] = [];
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        beforeCreate(ctx) {
+          callOrder.push("global");
+
+          return {
+            data: {
+              ...ctx.options.data,
+              name: "AfterGlobal",
+            },
+          };
+        },
+        tables: {
+          users: {
+            beforeCreate(ctx) {
+              callOrder.push(`users:${ctx.options.data.name}`);
+
+              return undefined;
+            },
+          },
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    const created = await orm.users.create({
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+    });
+
+    expect(callOrder).toEqual(["global", "users:AfterGlobal"]);
+    expect(created.name).toBe("AfterGlobal");
+
+    await orm.$raw.close();
+  });
+
+  test("$skipHooks bypasses hooks for a single call", async () => {
+    let hookCalls = 0;
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { users: usersTable },
+      hooks: {
+        beforeCreate() {
+          hookCalls += 1;
+
+          throw new Error("should not run");
+        },
+      },
+    });
+
+    await createUsersSchema(orm.$raw);
+
+    const created = await orm.users.create({
+      data: { id: "u1", name: "Alice", email: "alice@example.com" },
+      $skipHooks: true,
+    });
+
+    expect(hookCalls).toBe(0);
+    expect(created.name).toBe("Alice");
 
     await orm.$raw.close();
   });
