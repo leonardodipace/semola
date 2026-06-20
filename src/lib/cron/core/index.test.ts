@@ -1,6 +1,7 @@
 import { describe, expect, setSystemTime, spyOn, test } from "bun:test";
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
 import { Cron, RetryCronJob } from "./index.js";
+import { InvalidRetryError } from "../errors.js";
 
 class UserDefinedError extends Error {}
 
@@ -628,7 +629,7 @@ describe("Cron", () => {
         );
 
         expect(negativeNumberError).toBeDefined();
-        expect(negativeNumberError).toBeInstanceOf(TypeError);
+        expect(negativeNumberError).toBeInstanceOf(InvalidRetryError);
 
         const retryNegativeZero = new RetryCronJob({
           maxAttempts: -0,
@@ -639,7 +640,7 @@ describe("Cron", () => {
         );
 
         expect(negativeZeroError).toBeDefined();
-        expect(negativeZeroError).toBeInstanceOf(TypeError);
+        expect(negativeZeroError).toBeInstanceOf(InvalidRetryError);
 
         const retryNegativeInfinity = new RetryCronJob({
           maxAttempts: Number.NEGATIVE_INFINITY,
@@ -650,7 +651,7 @@ describe("Cron", () => {
         );
 
         expect(negativeInfinityError).toBeDefined();
-        expect(negativeInfinityError).toBeInstanceOf(TypeError);
+        expect(negativeInfinityError).toBeInstanceOf(InvalidRetryError);
       });
 
       test("should raise an error when passing NaN", async () => {
@@ -673,7 +674,7 @@ describe("Cron", () => {
         );
 
         expect(nanError).toBeDefined();
-        expect(nanError).toBeInstanceOf(TypeError);
+        expect(nanError).toBeInstanceOf(InvalidRetryError);
       });
 
       test("should raise an error when passing a non-integer number", async () => {
@@ -696,7 +697,7 @@ describe("Cron", () => {
         );
 
         expect(decimalNumberError).toBeDefined();
-        expect(decimalNumberError).toBeInstanceOf(TypeError);
+        expect(decimalNumberError).toBeInstanceOf(InvalidRetryError);
       });
 
       test("should not raise an error when passing a floating point number that can be represented as integer", async () => {
@@ -741,7 +742,7 @@ describe("Cron", () => {
         );
 
         expect(infinityError).toBeDefined();
-        expect(infinityError).toBeInstanceOf(TypeError);
+        expect(infinityError).toBeInstanceOf(InvalidRetryError);
 
         const secondInfinityRetry = new RetryCronJob({
           maxAttempts: Infinity,
@@ -752,7 +753,7 @@ describe("Cron", () => {
         );
 
         expect(secondInfinityError).toBeDefined();
-        expect(secondInfinityError).toBeInstanceOf(TypeError);
+        expect(secondInfinityError).toBeInstanceOf(InvalidRetryError);
       });
     });
   });
