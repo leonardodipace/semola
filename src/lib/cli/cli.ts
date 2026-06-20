@@ -62,6 +62,11 @@ export class Cli {
       this.handleCliError(new UnknownCommandError(`Unknown command: ${first}`));
     }
 
+    if (rest[0] === "--help" || rest[0] === "-h") {
+      this.printCommandHelp(command);
+      return;
+    }
+
     const handler = command.handler;
 
     if (!handler) {
@@ -101,12 +106,7 @@ export class Cli {
       const argNames = command.arguments
         .map((argument) => `<${argument.name}>`)
         .join(" ");
-      const optionNames = command.options
-        .map((option) => `--${option.name}`)
-        .join(" ");
-      const parts = [name, argNames, optionNames].filter(
-        (part) => part.length > 0,
-      );
+      const parts = [name, argNames].filter((part) => part.length > 0);
 
       console.log(`  ${parts.join(" ")}`);
     }
@@ -114,6 +114,45 @@ export class Cli {
     console.log("\nOptions:");
     console.log("  -h, --help       Show help");
     console.log("  -v, --version    Show version");
+  }
+
+  private printCommandHelp(
+    command: Command<Record<string, unknown>, Record<string, unknown>>,
+  ) {
+    const argNames = command.arguments
+      .map((argument) => `<${argument.name}>`)
+      .join(" ");
+    const usageParts = [this.config.name, command.name, argNames, "[options]"];
+    const usage = usageParts.filter((part) => part.length > 0).join(" ");
+
+    console.log(`Usage: ${usage}\n`);
+
+    if (command.arguments.length > 0) {
+      console.log("Arguments:");
+
+      for (const argument of command.arguments) {
+        console.log(`  ${argument.name}`);
+      }
+
+      console.log("");
+    }
+
+    if (command.options.length > 0) {
+      console.log("Options:");
+
+      for (const option of command.options) {
+        const flags = [
+          ...(option.aliases ?? []).map((alias) => `-${alias}`),
+          `--${option.name}`,
+        ];
+
+        console.log(`  ${flags.join(", ")}`);
+      }
+
+      console.log("");
+    }
+
+    console.log("  -h, --help       Show help");
   }
 
   private handleCliError(error: unknown): never {

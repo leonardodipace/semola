@@ -124,6 +124,48 @@ describe("CLI", () => {
     expect(stdout.join("\n")).toContain("--help");
   });
 
+  test("prints command help for split --help", async () => {
+    const program = new CLI({
+      name: "string-util",
+      description: "String utilities",
+    });
+
+    program
+      .command("split")
+      .argument("str", { schema: z.string() })
+      .option("separator", { schema: z.string().default(",") })
+      .option("first", { schema: z.boolean().default(false) })
+      .action(() => {});
+
+    const { stdout, exitCode } = await withExitStub(async () => {
+      await program.parse(["split", "--help"]);
+    });
+
+    expect(exitCode).toBe(-1);
+    expect(stdout.join("\n")).toContain("Usage: string-util split <str>");
+    expect(stdout.join("\n")).toContain("Arguments:");
+    expect(stdout.join("\n")).toContain("str");
+    expect(stdout.join("\n")).toContain("--separator");
+    expect(stdout.join("\n")).toContain("--first");
+  });
+
+  test("prints command help for -h", async () => {
+    const program = new CLI({ name: "string-util" });
+
+    program
+      .command("publish")
+      .argument("pkg", { schema: z.string() })
+      .option("tag", { schema: z.string(), aliases: ["t"] })
+      .action(() => {});
+
+    const { stdout } = await withExitStub(async () => {
+      await program.parse(["publish", "-h"]);
+    });
+
+    expect(stdout.join("\n")).toContain("Usage: string-util publish <pkg>");
+    expect(stdout.join("\n")).toContain("-t, --tag");
+  });
+
   test("prints version for --version", async () => {
     const program = new CLI({ name: "string-util", version: "0.6.7" });
 
