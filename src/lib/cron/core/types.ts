@@ -6,10 +6,7 @@ export type ErrorMetadataType = {
   error: Error;
 };
 
-export type ScheduleType =
-  | Bun.CronWithAutocomplete
-  | MinutelyAlias
-  | (string & {});
+export type ScheduleType = Bun.CronWithAutocomplete | MinutelyAlias;
 
 export type OnFailedAttemptContextType = {
   error: Error;
