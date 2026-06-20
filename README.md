@@ -26,7 +26,7 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 | **🔐 Policy**        | Policy-based authorization with type-safe guards       | `semola/policy`   |
 | **🌍 i18n**          | Compile-time validated internationalization            | `semola/i18n`     |
 | **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`    |
-| **⏰ Cron**          | In-memory cron scheduler for periodic task execution   | `semola/cron`     |
+| **⏰ Cron**          | In-memory and OS cron scheduler for periodic task execution   | `semola/cron`     |
 | **🔁 Workflow**      | Durable resumable workflows with retries and hooks   | `semola/workflow` |
 | **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors`   |
 | **📃 Logging**       | A simple logging utility                               | `semola/logging`  |
@@ -153,18 +153,30 @@ console.log(user);
 ### Schedule Recurring Tasks
 
 ```typescript
-import { Cron } from "semola/cron";
+import { Cron, RetryCronJob } from "semola/cron";
 
 const cleanup = new Cron({
   name: "daily-cleanup",
-  schedule: "0 0 * * *", // Daily at midnight
+  schedule: "@daily",
   handler: async () => {
     await deleteOldLogs();
     await archiveInactiveUsers();
   },
+  retry: new RetryCronJob({
+    maxAttempts: 2,
+    onError: (err) => console.log(`An error: ${err.error.message}`),
+    onFailedAttempt: async ({ attemptNumber, delay, error, retriesLeft }) => {
+      console.log(
+        `Attempt ${attemptNumber} failed. Retrying in ${delay}ms. ${retriesLeft} retries left.`,
+      );
+
+      await recover();
+    },
+  }),
 });
 
-cleanup.start();
+cleanup.run();
+
 ```
 
 ### Query a Database
@@ -317,7 +329,7 @@ _Higher is better for req/sec, lower is better for latency._
 - [API Framework](./docs/api.md) - Type-safe REST API framework with OpenAPI
 - [Queue](./docs/queue.md) - Redis-backed job queue with timeouts & concurrency
 - [PubSub](./docs/pubsub.md) - Type-safe Redis pub/sub
-- [Cron](./docs/cron.md) - In-memory cron scheduler for periodic task execution
+- [Cron](./docs/cron.md) - In-memory and OS cron scheduler for periodic task execution
 - [Workflow](./docs/workflow.md) - Durable and resumable workflows with retries and hooks
 - [Policy](./docs/policy.md) - Policy-based authorization
 - [i18n](./docs/i18n.md) - Type-safe internationalization
