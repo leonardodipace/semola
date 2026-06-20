@@ -55,6 +55,8 @@ await program.parse();
 
 ### Publish package
 
+Continues from the split example above (`program` is already defined).
+
 ```typescript
 program
   .command("publish")

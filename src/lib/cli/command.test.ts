@@ -50,4 +50,26 @@ describe("Command", () => {
       program.command("run");
     }).toThrow('Command "run" already exists');
   });
+
+  test("rejects duplicate option aliases", () => {
+    const program = new CLI({ name: "app" });
+
+    expect(() => {
+      program
+        .command("run")
+        .option("tag", { schema: z.string(), aliases: ["t"] })
+        .option("type", { schema: z.string(), aliases: ["t"] });
+    }).toThrow('Option alias "t" already exists');
+  });
+
+  test("rejects option alias conflicting with option name", () => {
+    const program = new CLI({ name: "app" });
+
+    expect(() => {
+      program
+        .command("run")
+        .option("verbose", { schema: z.boolean().default(false) })
+        .option("other", { schema: z.string(), aliases: ["verbose"] });
+    }).toThrow('Option alias "verbose" conflicts with option "verbose"');
+  });
 });

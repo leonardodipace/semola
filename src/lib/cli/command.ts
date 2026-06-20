@@ -43,6 +43,30 @@ export class Command<
       }
     }
 
+    const aliases = config.aliases ?? [];
+
+    for (const alias of aliases) {
+      for (const existing of this.options) {
+        if (existing.name === alias) {
+          throw new Error(
+            `Option alias "${alias}" conflicts with option "${existing.name}"`,
+          );
+        }
+
+        if (existing.aliases?.includes(alias)) {
+          throw new Error(`Option alias "${alias}" already exists`);
+        }
+      }
+    }
+
+    for (const existing of this.options) {
+      if (existing.aliases?.includes(name)) {
+        throw new Error(
+          `Option "${name}" conflicts with alias of option "${existing.name}"`,
+        );
+      }
+    }
+
     this.options.push({
       name,
       schema: config.schema,
