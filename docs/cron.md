@@ -150,6 +150,14 @@ console.log(job.next(new Date(1990, 1)));
 
 **Note**: the `next()` method will raise an error if the used expression is invalid or if it is `NaN` or `Infinity`. 
 
+## Disposable Job
+
+```typescript
+using job = new Cron({...})
+```
+
+When using the `using` keyword, the job will auto-stop when out of scope. This works only for in-process jobs.
+
 ## Expression Builder
 
 Build cron expressions programmatically with full type-safety supported by a fluent and an intuitive API.
