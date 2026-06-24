@@ -40,14 +40,27 @@ export type CronStatus = "idle" | "running";
 
 export abstract class JobWithRetry {
   protected constructor() {}
+  public abstract run(): void;
+  public abstract stop(): void;
 }
 
+type NotifyErrorContext = {
+  type: "error";
+  job: JobWithRetry;
+  error: Error;
+  name: string;
+};
+
+type NotifySuccessContext = { type: "success" };
+
+export type NotifyContext = NotifySuccessContext | NotifyErrorContext;
+
 export interface RetryObserver {
-  update(job: JobWithRetry, error: Error): Promise<void>;
+  update(ctx: NotifyContext): Promise<void>;
 }
 
 export interface JobPublisher {
   subscribe(retry: RetryObserver): void;
   unsubscribe(): void;
-  notify(job: JobWithRetry, error: Error): Promise<void>;
+  notify(ctx: NotifyContext): Promise<void>;
 }

@@ -8,6 +8,7 @@ import {
   type ErrorMetadataType,
   type JobPublisher,
   JobWithRetry,
+  type NotifyContext,
   type OnFailedAttemptContextType,
   type RetryObserver,
   type RetryOptions,
@@ -61,7 +62,14 @@ export class RetryCronJob implements RetryObserver {
     this.currentAttempt = 0;
   }
 
-  public async update(job: Cron, error: Error): Promise<void> {
+  public async update(ctx: NotifyContext): Promise<void> {
+    if (ctx.type === "success") {
+      this.currentAttempt = 0;
+      return;
+    }
+
+    const { job, error, name } = ctx;
+
     if (!this.checkAttempts()) {
       job.stop();
       throw new InvalidRetryError(
@@ -98,8 +106,8 @@ export class RetryCronJob implements RetryObserver {
     if (!this.options.onError) throw error;
 
     const data: ErrorMetadataType = {
-      name: job.getJobName(),
-      error: error,
+      name,
+      error,
       failedAt: Date.now(),
     };
 
@@ -148,10 +156,10 @@ class RetryManager implements JobPublisher {
     this.listener = null;
   }
 
-  public async notify(job: JobWithRetry, error: Error): Promise<void> {
+  public async notify(ctx: NotifyContext): Promise<void> {
     if (!this.listener) return;
 
-    await this.listener.update(job, error);
+    await this.listener.update(ctx);
   }
 }
 
@@ -194,10 +202,23 @@ export class Cron extends JobWithRetry {
           Promise.resolve().then(() => handler()),
         );
 
-        if (!handlerError) return Promise.resolve();
+        if (!handlerError) {
+          if (this.manager) {
+            await this.manager.notify({ type: "success" });
+          }
+
+          return Promise.resolve();
+        }
 
         if (this.manager) {
-          await this.manager.notify(this, handlerError);
+          const errorContext: NotifyContext = {
+            type: "error",
+            error: handlerError,
+            job: this,
+            name: this.getJobName(),
+          };
+
+          await this.manager.notify(errorContext);
           return;
         }
 
