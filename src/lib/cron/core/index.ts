@@ -30,8 +30,8 @@ const ALIASES: Record<ScheduleType, string> = {
 } as const;
 
 class CommonCronUtilities {
-  public getExpression(options: CronBaseOptions) {
-    return ALIASES[options.schedule] || options.schedule;
+  public getExpression(schedule: ScheduleType) {
+    return ALIASES[schedule] || schedule;
   }
 
   public getJobName(options: CronBaseOptions) {
@@ -40,7 +40,7 @@ class CommonCronUtilities {
 
   public next(options: CronBaseOptions, from?: Date | number) {
     const { schedule } = options;
-    const exprToParse = this.resolveSchedule(schedule);
+    const exprToParse = this.getExpression(schedule);
 
     const [parseError, nextMatch] = mightThrowSync(() =>
       Bun.cron.parse(exprToParse, from),
@@ -49,10 +49,6 @@ class CommonCronUtilities {
     if (parseError) throw parseError;
 
     return nextMatch;
-  }
-
-  public resolveSchedule(schedule: ScheduleType) {
-    return schedule === "@minutely" ? ALIASES["@minutely"] : schedule;
   }
 }
 
@@ -191,7 +187,7 @@ export class Cron extends JobWithRetry {
 
     const { schedule, handler } = this.options;
     const [scheduleFormatErr, cron] = mightThrowSync(() => {
-      const expr = this.common.resolveSchedule(schedule);
+      const expr = this.common.getExpression(schedule);
 
       return Bun.cron(expr, async () => {
         const [handlerError] = await mightThrow(
@@ -242,7 +238,7 @@ export class Cron extends JobWithRetry {
   }
 
   public getExpression() {
-    return this.common.getExpression(this.options);
+    return this.common.getExpression(this.options.schedule);
   }
 
   public getJobName() {
@@ -265,7 +261,7 @@ export class CronOS {
 
   public async run() {
     const { path, schedule, name } = this.options;
-    const expr = this.common.resolveSchedule(schedule);
+    const expr = this.common.getExpression(schedule);
 
     await Bun.cron(path, expr, name);
   }
@@ -275,7 +271,7 @@ export class CronOS {
   }
 
   public getExpression() {
-    return this.common.getExpression(this.options);
+    return this.common.getExpression(this.options.schedule);
   }
 
   public getJobName() {
