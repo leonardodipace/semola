@@ -2,6 +2,7 @@ import { describe, expect, setSystemTime, spyOn, test } from "bun:test";
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
 import { InvalidRetryError } from "../errors.js";
 import { Cron, RetryCronJob } from "./index.js";
+import type { NotifyContext } from "./types.js";
 
 class UserDefinedError extends Error {}
 
@@ -457,7 +458,13 @@ describe("Cron", () => {
       cron.run();
       expect(cron.getStatus()).toBe("running");
 
-      await retry.update(cron, new Error("A generic error"));
+      const ctx: NotifyContext = {
+        type: "error",
+        job: cron,
+        error: new Error("A generic error"),
+        name: cron.getJobName(),
+      };
+      await retry.update(ctx);
       expect(cron.getStatus()).toBe("idle");
 
       setSystemTime();
@@ -482,9 +489,13 @@ describe("Cron", () => {
       cron.run();
       expect(cron.getStatus()).toBe("running");
 
-      const [theError] = await mightThrow(
-        retry.update(cron, new Error("A generic error")),
-      );
+      const ctx: NotifyContext = {
+        type: "error",
+        job: cron,
+        error: new Error("A generic error"),
+        name: cron.getJobName(),
+      };
+      const [theError] = await mightThrow(retry.update(ctx));
 
       expect(cron.getStatus()).toBe("idle");
       expect(theError).toBeDefined();
@@ -528,10 +539,17 @@ describe("Cron", () => {
       cron.run();
       expect(cron.getStatus()).toBe("running");
 
-      await retry.update(cron, new Error("A generic error"));
+      const ctx: NotifyContext = {
+        type: "error",
+        job: cron,
+        error: new Error("A generic error"),
+        name: cron.getJobName(),
+      };
+
+      await retry.update(ctx);
       expect(cron.getStatus()).toBe("running");
 
-      await retry.update(cron, new Error("A generic error"));
+      await retry.update(ctx);
       expect(cron.getStatus()).toBe("running");
 
       cron.stop();
@@ -559,11 +577,25 @@ describe("Cron", () => {
       cron.run();
       expect(cron.getStatus()).toBe("running");
 
-      await retry.update(cron, new Error("Generic error"));
+      const ctx: NotifyContext = {
+        type: "error",
+        job: cron,
+        error: new Error("A generic error"),
+        name: cron.getJobName(),
+      };
+
+      await retry.update(ctx);
       expect(cron.getStatus()).toBe("running");
 
+      const ctxWithCustomError: NotifyContext = {
+        type: "error",
+        job: cron,
+        error: new UserDefinedError("User defined error"),
+        name: cron.getJobName(),
+      };
+
       const [userDefinedError] = await mightThrow(
-        retry.update(cron, new UserDefinedError("User defined error")),
+        retry.update(ctxWithCustomError),
       );
 
       expect(cron.getStatus()).toBe("idle");
@@ -599,10 +631,24 @@ describe("Cron", () => {
       cron.run();
       expect(cron.getStatus()).toBe("running");
 
-      await retry.update(cron, new Error("Generic error"));
+      const ctx: NotifyContext = {
+        type: "error",
+        job: cron,
+        error: new Error("A generic error"),
+        name: cron.getJobName(),
+      };
+
+      await retry.update(ctx);
       expect(cron.getStatus()).toBe("running");
 
-      await retry.update(cron, new UserDefinedError("User defined error"));
+      const ctxWithCustomError: NotifyContext = {
+        type: "error",
+        job: cron,
+        error: new UserDefinedError("User defined error"),
+        name: cron.getJobName(),
+      };
+
+      await retry.update(ctxWithCustomError);
       expect(cron.getStatus()).toBe("idle");
 
       setSystemTime();
@@ -624,8 +670,15 @@ describe("Cron", () => {
         expect(cron).toBeDefined();
         expect(cron.getStatus()).toBe("idle");
 
+        const ctx: NotifyContext = {
+          type: "error",
+          job: cron,
+          error: new Error("A generic error"),
+          name: cron.getJobName(),
+        };
+
         const [negativeNumberError] = await mightThrow(
-          retryNegativeNumber.update(cron, new Error("A generic error")),
+          retryNegativeNumber.update(ctx),
         );
 
         expect(negativeNumberError).toBeDefined();
@@ -636,7 +689,7 @@ describe("Cron", () => {
         });
 
         const [negativeZeroError] = await mightThrow(
-          retryNegativeZero.update(cron, new Error("A generic error")),
+          retryNegativeZero.update(ctx),
         );
 
         expect(negativeZeroError).toBeDefined();
@@ -647,7 +700,7 @@ describe("Cron", () => {
         });
 
         const [negativeInfinityError] = await mightThrow(
-          retryNegativeInfinity.update(cron, new Error("A generic error")),
+          retryNegativeInfinity.update(ctx),
         );
 
         expect(negativeInfinityError).toBeDefined();
@@ -669,9 +722,14 @@ describe("Cron", () => {
         expect(cron).toBeDefined();
         expect(cron.getStatus()).toBe("idle");
 
-        const [nanError] = await mightThrow(
-          retryNan.update(cron, new Error("A generic error")),
-        );
+        const ctx: NotifyContext = {
+          type: "error",
+          job: cron,
+          error: new Error("A generic error"),
+          name: cron.getJobName(),
+        };
+
+        const [nanError] = await mightThrow(retryNan.update(ctx));
 
         expect(nanError).toBeDefined();
         expect(nanError).toBeInstanceOf(InvalidRetryError);
@@ -692,8 +750,15 @@ describe("Cron", () => {
         expect(cron).toBeDefined();
         expect(cron.getStatus()).toBe("idle");
 
+        const ctx: NotifyContext = {
+          type: "error",
+          job: cron,
+          error: new Error("A generic error"),
+          name: cron.getJobName(),
+        };
+
         const [decimalNumberError] = await mightThrow(
-          decimalNumberRetry.update(cron, new Error("A generic error")),
+          decimalNumberRetry.update(ctx),
         );
 
         expect(decimalNumberError).toBeDefined();
@@ -715,8 +780,15 @@ describe("Cron", () => {
         expect(cron).toBeDefined();
         expect(cron.getStatus()).toBe("idle");
 
+        const ctx: NotifyContext = {
+          type: "error",
+          job: cron,
+          error: new Error("A generic error"),
+          name: cron.getJobName(),
+        };
+
         const [decimalNumberError] = await mightThrow(
-          decimalNumberRetry.update(cron, new Error("A generic error")),
+          decimalNumberRetry.update(ctx),
         );
 
         expect(decimalNumberError).toBeNull();
@@ -737,9 +809,14 @@ describe("Cron", () => {
         expect(cron).toBeDefined();
         expect(cron.getStatus()).toBe("idle");
 
-        const [infinityError] = await mightThrow(
-          infinityRetry.update(cron, new Error("A generic error")),
-        );
+        const ctx: NotifyContext = {
+          type: "error",
+          job: cron,
+          error: new Error("A generic error"),
+          name: cron.getJobName(),
+        };
+
+        const [infinityError] = await mightThrow(infinityRetry.update(ctx));
 
         expect(infinityError).toBeDefined();
         expect(infinityError).toBeInstanceOf(InvalidRetryError);
@@ -749,7 +826,7 @@ describe("Cron", () => {
         });
 
         const [secondInfinityError] = await mightThrow(
-          secondInfinityRetry.update(cron, new Error("A generic error")),
+          secondInfinityRetry.update(ctx),
         );
 
         expect(secondInfinityError).toBeDefined();
