@@ -215,7 +215,7 @@ const cleanup = new Cron({
 });
 ```
 
-- **`maxAttempts`** (required) - The maximum number of attempts
+- **`maxAttempts`** (required) - The number of retries to attempt after the first failure; a successful execution of the `handler` function will reset the count
 - **`onError(ctx: ErrorMetadataType): void | Promise<void>`** (optional) - Function called when an error is raised inside the `handler` function, after all retries have been exhausted, with the final error passed in as the argument. If not provided, the instance re-raises that error. The `ErrorMetadataType` type contains the following properties:
   - `name: string` - The job's name
   - `failedAt: number` - When the job failed, expressed in milliseconds
