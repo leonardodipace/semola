@@ -54,7 +54,7 @@ await osJob.stop();
   - **`name: string`** (required) - Unique job name
   - **`schedule: string`** (required) - Cron expression or alias
   - **`handler: () => unknown`** (required) - Function to execute on schedule. Support both sync and async functions
-  - **`retry: RetryCronJob`** (optinal) - Instace of `RetryCronJob` class containing retries' handling logic
+  - **`retry: RetryCronJob`** (optional) - Instance of `RetryCronJob` class containing retries' handling logic. Use one instance per `Cron` job (see Error Handling and Retries).
 - `CronOS` class:
   - **`name`** (required) - Unique job name
   - **`schedule`** (required) - Cron expression or alias
@@ -121,15 +121,24 @@ job.ref()
 job.unref();
 ```
 
-**Note:** `ref()`, `unref()` and `getStatus()` methods are avaiable only for in-process job.
+**Note:** `ref()`, `unref()` and `getStatus()` methods are available only for in-process job.
+
+### Handler errors without retry
+
+When no `retry` option is passed, an error in `handler` causes the cron callback to reject. Bun treats this like an unhandled promise rejection:
+
+- **Without a `process.on("unhandledRejection")` listener:** the process exits with code `1`.
+- **With a listener:** the process keeps running and Bun reschedules the job for the next tick. `Cron` does not call `stop()`, so `getStatus()` stays `"running"`.
+
+Use `retry` or handle errors inside `handler` if you want failures contained without taking down the process.
 
 ## Common Utilities
 
-This is a list of methods avaiable for both `Cron` and `CronOS` classes:
+This is a list of methods available for both `Cron` and `CronOS` classes:
 - `getExpression(): string` - returns the job's expression 
 - `getJobName(): string` - returns the job's name 
 - `next(from?: Date | number): Date | null` - returns the next matching Date in UTC format or `null` if no match exists within 8 years. 
-  - `from` - Starting point for the search. This paramenter can be a `Date` object or a date expressed in milliseconds
+  - `from` - Starting point for the search. This parameter can be a `Date` object or a date expressed in milliseconds
 
 ```typescript
 const job = new Cron({
@@ -191,7 +200,18 @@ console.log(expr);
 
 ## Error Handling and Retries
 
-Pass an optional `RetryCronJob` instance to automatically retry your in-process job for a fixed amount of time.
+Pass an optional `RetryCronJob` instance to retry failed in-process runs up to a fixed number of times.
+
+Bun invokes the cron callback on each schedule tick. Inside that callback, `Cron` runs your `handler`. On failure:
+
+- **With `retry`:** the error is caught, `RetryCronJob` updates the attempt count, applies a backoff delay, and returns without rejecting. The job stays scheduled; Bun invokes the callback again on the next tick. A successful `handler` run resets the attempt count.
+- **Without `retry`:** the error propagates as a rejected cron callback. By default Bun exits the process with code `1` (same as an unhandled rejection). If you attach a `process.on("unhandledRejection")` [listener](https://bun.com/docs/runtime/cron#error-handling), the process survives and Bun reschedules the job; `Cron` still does not call `stop()`.
+
+`RetryCronJob.update()` only tracks attempts and backoff. It does not call `handler` itself; Bun re-invokes the callback on the next scheduled run.
+
+Create one `RetryCronJob` per `Cron` job. Sharing a single instance across multiple jobs shares attempt state between them.
+
+`maxAttempts` is validated when the first failure is processed (inside `update()`), not in the constructor.
 
 ```typescript
 const cleanup = new Cron({
@@ -215,7 +235,7 @@ const cleanup = new Cron({
 });
 ```
 
-- **`maxAttempts`** (required) - The number of retries to attempt after the first failure; a successful execution of the `handler` function will reset the count
+- **`maxAttempts`** (required) - Number of retries after the first failure on a given schedule tick sequence; a successful `handler` run resets the count. Must be a finite non-negative integer; invalid values raise `InvalidRetryError` on the first failure.
 - **`onError(ctx: ErrorMetadataType): void | Promise<void>`** (optional) - Function called when an error is raised inside the `handler` function, after all retries have been exhausted, with the final error passed in as the argument. If not provided, the instance re-raises that error. The `ErrorMetadataType` type contains the following properties:
   - `name: string` - The job's name
   - `failedAt: number` - When the job failed, expressed in milliseconds
@@ -225,7 +245,7 @@ const cleanup = new Cron({
   - `error: Error` - Which error was fired in the `handler` function
   - `attemptNumber: number` - The attempt number. Note that they start at 1
   - `retriesLeft: number` - How many retries remains before stopping the job
-  - `delay: number` - How much time the job will be paused before running again. The delay is calculated based on the exponential backoff algorithm with [Full Jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/) strategy.
+  - `delay: number` - Backoff delay in milliseconds before the next scheduled run. Calculated with exponential backoff and [Full Jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/). The callback returns after this delay; Bun invokes `handler` again on the next schedule tick.
 
 
 ## Examples
