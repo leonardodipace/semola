@@ -4,6 +4,11 @@ import {
   MissingArgumentError,
   UnknownCommandError,
 } from "./errors.js";
+import {
+  formatArgumentPlaceholders,
+  formatOptionFlags,
+  globalOptionLines,
+} from "./help.js";
 import { parseArgv } from "./parser.js";
 import type { CLIConfig } from "./types.js";
 import { validateArguments, validateOptions } from "./validate.js";
@@ -96,40 +101,31 @@ export class Cli {
   private printHelp() {
     console.log(`Usage: ${this.config.name} <command> [options]\n`);
 
-    if (this.config.description) {
-      console.log(`${this.config.description}\n`);
-    }
+    this.printDescription();
 
     console.log("Commands:");
 
     for (const [name, command] of this.commands) {
-      const argNames = command.arguments
-        .map((argument) => `<${argument.name}>`)
-        .join(" ");
+      const argNames = formatArgumentPlaceholders(command.arguments);
       const parts = [name, argNames].filter((part) => part.length > 0);
 
       console.log(`  ${parts.join(" ")}`);
     }
 
-    console.log("\nOptions:");
-    console.log("  -h, --help       Show help");
-    console.log("  -v, --version    Show version");
+    console.log("");
+    this.printGlobalOptions();
   }
 
   private printCommandHelp(
     command: Command<Record<string, unknown>, Record<string, unknown>>,
   ) {
-    const argNames = command.arguments
-      .map((argument) => `<${argument.name}>`)
-      .join(" ");
+    const argNames = formatArgumentPlaceholders(command.arguments);
     const usageParts = [this.config.name, command.name, argNames, "[options]"];
     const usage = usageParts.filter((part) => part.length > 0).join(" ");
 
     console.log(`Usage: ${usage}\n`);
 
-    if (this.config.description) {
-      console.log(`${this.config.description}\n`);
-    }
+    this.printDescription();
 
     if (command.arguments.length > 0) {
       console.log("Arguments:");
@@ -144,16 +140,28 @@ export class Cli {
     console.log("Options:");
 
     for (const option of command.options) {
-      const flags = [
-        ...(option.aliases ?? []).map((alias) => `-${alias}`),
-        `--${option.name}`,
-      ];
-
-      console.log(`  ${flags.join(", ")}`);
+      console.log(`  ${formatOptionFlags(option)}`);
     }
 
-    console.log("  -h, --help       Show help");
-    console.log("  -v, --version    Show version");
+    for (const line of globalOptionLines) {
+      console.log(line);
+    }
+  }
+
+  private printDescription() {
+    if (!this.config.description) {
+      return;
+    }
+
+    console.log(`${this.config.description}\n`);
+  }
+
+  private printGlobalOptions() {
+    console.log("Options:");
+
+    for (const line of globalOptionLines) {
+      console.log(line);
+    }
   }
 
   private handleCliError(error: unknown): never {
