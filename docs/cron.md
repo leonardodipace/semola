@@ -203,7 +203,7 @@ const cleanup = new Cron({
   retry: new RetryCronJob({
     maxAttempts: 2,
     onError: (ctx) => console.log(`An error: ${ctx.error.message}`),
-    retryOnError: (err) => !(error instanceof MyCustomError),
+    retryOnError: (err) => !(err instanceof MyCustomError),
     onFailedAttempt: async ({ attemptNumber, delay, error, retriesLeft }) => {
       console.log(
         `Attempt ${attemptNumber} failed. Retrying in ${delay}ms. ${retriesLeft} retries left.`,
