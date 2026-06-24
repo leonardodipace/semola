@@ -14,7 +14,6 @@ import {
   type ScheduleType,
 } from "./types.js";
 
-const MINUTELY_EXPR = "* * * * *";
 const BASE_BACKOFF_DELAY = 1000;
 const MAX_BACKOFF_DELAY = 1000 * 60; // 1 minute
 const BACKOFF_MULTIPLIER = 2;
@@ -53,7 +52,7 @@ class CommonCronUtilities {
   }
 
   public resolveSchedule(schedule: ScheduleType) {
-    return schedule === "@minutely" ? MINUTELY_EXPR : schedule;
+    return schedule === "@minutely" ? ALIASES["@minutely"] : schedule;
   }
 }
 
