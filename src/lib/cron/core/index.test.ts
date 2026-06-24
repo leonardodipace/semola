@@ -695,6 +695,119 @@ describe("Cron", () => {
       expect(thirdErr).toBeNull();
     });
 
+    test("re-invokes the handler after a retry delay within the same scheduled tick", async () => {
+      let handlerCalls = 0;
+
+      const handler = () => {
+        handlerCalls += 1;
+        throw new Error(`fail ${handlerCalls}`);
+      };
+
+      const retry = new RetryCronJob({ maxAttempts: 3 });
+      const job = new Cron({
+        name: "retry-within-tick",
+        schedule: "@minutely",
+        handler,
+        retry,
+      });
+
+      const [handlerError] = await mightThrow(
+        Promise.resolve().then(() => handler()),
+      );
+
+      expect(handlerError).toBeDefined();
+      expect(handlerError?.message).toBe("fail 1");
+
+      const errorContext: NotifyContext = {
+        type: "error",
+        error: handlerError as Error,
+        job,
+        name: job.getJobName(),
+      };
+
+      await retry.update(errorContext);
+
+      expect(handlerCalls).toBeGreaterThan(1);
+    });
+
+    test("stops the job when the handler fails without retry configuration", async () => {
+      const handler = () => {
+        throw new Error("handler failed");
+      };
+
+      const job = new Cron({
+        name: "no-retry-failure",
+        schedule: "@minutely",
+        handler,
+      });
+
+      job.run();
+
+      const [handlerError] = await mightThrow(
+        Promise.resolve().then(() => handler()),
+      );
+
+      expect(handlerError).toBeDefined();
+      expect(handlerError?.message).toBe("handler failed");
+
+      const [error] = await mightThrow(Promise.reject(handlerError));
+
+      expect(error).toBeDefined();
+      expect(job.getStatus()).toBe("idle");
+
+      job.stop();
+    });
+
+    test("rejects invalid maxAttempts when RetryCronJob is constructed", () => {
+      expect(() => new RetryCronJob({ maxAttempts: -1 })).toThrow(
+        InvalidRetryError,
+      );
+    });
+
+    test("keeps per-job retry state when a RetryCronJob instance is shared", async () => {
+      const firstFailureRetriesLeft: number[] = [];
+      const retry = new RetryCronJob({
+        maxAttempts: 2,
+        onFailedAttempt: ({ retriesLeft }) => {
+          firstFailureRetriesLeft.push(retriesLeft);
+        },
+      });
+
+      const cronA = new Cron({
+        name: "job-a",
+        schedule: "0 0 * * *",
+        handler: () => Promise.resolve(),
+        retry,
+      });
+
+      const cronB = new Cron({
+        name: "job-b",
+        schedule: "0 0 * * *",
+        handler: () => Promise.resolve(),
+        retry,
+      });
+
+      const ctxA: NotifyContext = {
+        type: "error",
+        job: cronA,
+        error: new Error("a"),
+        name: cronA.getJobName(),
+      };
+
+      const ctxB: NotifyContext = {
+        type: "error",
+        job: cronB,
+        error: new Error("b"),
+        name: cronB.getJobName(),
+      };
+
+      await retry.update(ctxA);
+      await retry.update(ctxB);
+
+      expect(firstFailureRetriesLeft[0]).toBe(2);
+      expect(firstFailureRetriesLeft[1]).toBe(2);
+    });
+
     describe("Validate attempts", () => {
       test("should raise an error when passing a negative number", async () => {
         const handler = () => Promise.resolve();
