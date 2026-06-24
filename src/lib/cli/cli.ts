@@ -127,6 +127,10 @@ export class Cli {
 
     console.log(`Usage: ${usage}\n`);
 
+    if (this.config.description) {
+      console.log(`${this.config.description}\n`);
+    }
+
     if (command.arguments.length > 0) {
       console.log("Arguments:");
 
@@ -137,22 +141,19 @@ export class Cli {
       console.log("");
     }
 
-    if (command.options.length > 0) {
-      console.log("Options:");
+    console.log("Options:");
 
-      for (const option of command.options) {
-        const flags = [
-          ...(option.aliases ?? []).map((alias) => `-${alias}`),
-          `--${option.name}`,
-        ];
+    for (const option of command.options) {
+      const flags = [
+        ...(option.aliases ?? []).map((alias) => `-${alias}`),
+        `--${option.name}`,
+      ];
 
-        console.log(`  ${flags.join(", ")}`);
-      }
-
-      console.log("");
+      console.log(`  ${flags.join(", ")}`);
     }
 
     console.log("  -h, --help       Show help");
+    console.log("  -v, --version    Show version");
   }
 
   private handleCliError(error: unknown): never {

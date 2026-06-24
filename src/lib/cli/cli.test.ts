@@ -141,16 +141,24 @@ describe("CLI", () => {
       await program.parse(["split", "--help"]);
     });
 
+    const help = stdout.join("\n");
+
     expect(exitCode).toBe(-1);
-    expect(stdout.join("\n")).toContain("Usage: string-util split <str>");
-    expect(stdout.join("\n")).toContain("Arguments:");
-    expect(stdout.join("\n")).toContain("str");
-    expect(stdout.join("\n")).toContain("--separator");
-    expect(stdout.join("\n")).toContain("--first");
+    expect(help).toContain("Usage: string-util split <str>");
+    expect(help).toContain("String utilities");
+    expect(help).toContain("Arguments:");
+    expect(help).toContain("str");
+    expect(help).toContain("--separator");
+    expect(help).toContain("--first");
+    expect(help).toContain("-v, --version");
+    expect(help).not.toContain("--first\n\n  -h");
   });
 
   test("prints command help for -h", async () => {
-    const program = new CLI({ name: "string-util" });
+    const program = new CLI({
+      name: "string-util",
+      description: "String utilities",
+    });
 
     program
       .command("publish")
@@ -162,8 +170,13 @@ describe("CLI", () => {
       await program.parse(["publish", "-h"]);
     });
 
-    expect(stdout.join("\n")).toContain("Usage: string-util publish <pkg>");
-    expect(stdout.join("\n")).toContain("-t, --tag");
+    const help = stdout.join("\n");
+
+    expect(help).toContain("Usage: string-util publish <pkg>");
+    expect(help).toContain("String utilities");
+    expect(help).toContain("-t, --tag");
+    expect(help).toContain("-v, --version");
+    expect(help).not.toContain("--tag\n\n  -h");
   });
 
   test("prints version for --version", async () => {
