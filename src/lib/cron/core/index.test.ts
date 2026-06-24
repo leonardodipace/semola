@@ -654,6 +654,47 @@ describe("Cron", () => {
       setSystemTime();
     });
 
+    test("should reset attempts after a success", async () => {
+      const handler = () => Promise.resolve();
+      const maxAttempts = 10;
+      let shouldFail = true;
+      const retry = new RetryCronJob({
+        maxAttempts,
+        onFailedAttempt: ({ retriesLeft }) => {
+          if (shouldFail) {
+            expect(retriesLeft).toBe(maxAttempts);
+          }
+        },
+      });
+
+      const cron = new Cron({
+        name: "retry-job",
+        schedule: "0 0 * * *",
+        handler,
+        retry,
+      });
+
+      expect(cron).toBeDefined();
+      expect(cron.getStatus()).toBe("idle");
+
+      const ctx: NotifyContext = {
+        type: "error",
+        job: cron,
+        error: new Error("A generic error"),
+        name: cron.getJobName(),
+      };
+
+      const [firstErr] = await mightThrow(retry.update(ctx));
+      expect(firstErr).toBeDefined();
+
+      const [secondErr] = await mightThrow(retry.update(ctx));
+      expect(secondErr).toBeDefined();
+
+      shouldFail = true;
+      const [thirdErr] = await mightThrow(retry.update({ type: "success" }));
+      expect(thirdErr).toBeNull();
+    });
+
     describe("Validate attempts", () => {
       test("should raise an error when passing a negative number", async () => {
         const handler = () => Promise.resolve();
