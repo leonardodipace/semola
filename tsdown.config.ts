@@ -18,6 +18,7 @@ export default defineConfig({
   },
   dts: {
     cjsReexport: true,
+    tsgo: true,
   },
   format: ["esm", "cjs"],
   clean: true,
