@@ -18,8 +18,59 @@ export const globalOptions: UsageEntry[] = [helpOption, versionOption];
 
 export const commandHelpOptions: UsageEntry[] = [helpOption];
 
+export const isHelpToken = (token: string | undefined) => {
+  if (!token) {
+    return false;
+  }
+
+  if (token === "--help") {
+    return true;
+  }
+
+  if (token === "-h") {
+    return true;
+  }
+
+  return false;
+};
+
+export const isVersionToken = (token: string | undefined) => {
+  if (!token) {
+    return false;
+  }
+
+  if (token === "--version") {
+    return true;
+  }
+
+  if (token === "-v") {
+    return true;
+  }
+
+  return false;
+};
+
 export const formatArgumentPlaceholders = (arguments_: ArgumentConfig[]) => {
   return arguments_.map((argument) => `<${argument.name}>`).join(" ");
+};
+
+type CommandListEntry = {
+  arguments: ArgumentConfig[];
+};
+
+export const formatCommandListLines = (
+  commands: Map<string, CommandListEntry>,
+) => {
+  const lines: string[] = [];
+
+  for (const [name, command] of commands) {
+    const argNames = formatArgumentPlaceholders(command.arguments);
+    const parts = [name, argNames].filter((part) => part.length > 0);
+
+    lines.push(`  ${parts.join(" ")}`);
+  }
+
+  return lines;
 };
 
 const formatOptionFlags = (option: OptionConfig) => {
@@ -71,4 +122,12 @@ export const getSchemaDescription = (schema: StandardSchemaV1) => {
   }
 
   return description;
+};
+
+export const printDescription = (description: string | undefined) => {
+  if (!description) {
+    return;
+  }
+
+  console.log(`${description}\n`);
 };

@@ -1,6 +1,25 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type { Cli } from "./cli.js";
-import type { ArgumentConfig, InferOutput, OptionConfig } from "./types.js";
+import {
+  commandHelpOptions,
+  formatArgumentPlaceholders,
+  formatCommandListLines,
+  formatOptionUsageEntry,
+  formatUsageEntries,
+  getSchemaDescription,
+  printDescription,
+} from "./help.js";
+import type {
+  ArgumentConfig,
+  CLIConfig,
+  InferOutput,
+  OptionConfig,
+} from "./types.js";
+
+export type AnyCommand = Command<
+  Record<string, unknown>,
+  Record<string, unknown>
+>;
 
 export class Command<
   TArgs extends Record<string, unknown> = Record<string, never>,
@@ -8,10 +27,7 @@ export class Command<
 > {
   public readonly arguments: ArgumentConfig[] = [];
   public readonly options: OptionConfig[] = [];
-  public readonly commands = new Map<
-    string,
-    Command<Record<string, unknown>, Record<string, unknown>>
-  >();
+  public readonly commands = new Map<string, AnyCommand>();
   public handler?: (
     args: Record<string, unknown>,
     options: Record<string, unknown>,
@@ -20,18 +36,110 @@ export class Command<
   public constructor(
     private readonly cli: Cli,
     public readonly name: string,
+    public readonly parent?: AnyCommand,
   ) {}
+
+  public get path() {
+    const names: string[] = [];
+    let node: AnyCommand | undefined = this as AnyCommand;
+
+    while (node?.parent) {
+      names.unshift(node.name);
+      node = node.parent;
+    }
+
+    return names;
+  }
 
   public command(name: string) {
     if (this.commands.has(name)) {
       throw new Error(`Command "${name}" already exists`);
     }
 
-    const command = new Command(this.cli, name);
+    const command = new Command(this.cli, name, this as AnyCommand);
 
     this.commands.set(name, command);
 
     return command;
+  }
+
+  public resolve(tokens: string[]) {
+    let current: AnyCommand = this as AnyCommand;
+    let index = 0;
+    let matched = false;
+
+    while (index < tokens.length) {
+      const token = tokens[index];
+
+      if (!token) {
+        break;
+      }
+
+      if (token.startsWith("-")) {
+        break;
+      }
+
+      const next = current.commands.get(token);
+
+      if (!next) {
+        break;
+      }
+
+      current = next;
+      matched = true;
+      index++;
+    }
+
+    if (!matched) {
+      return { command: undefined, rest: tokens.slice(index) };
+    }
+
+    return { command: current, rest: tokens.slice(index) };
+  }
+
+  public printHelp(config: CLIConfig) {
+    const argNames = formatArgumentPlaceholders(this.arguments);
+    const commandPath = this.path.join(" ");
+    const usageParts = [config.name, commandPath, argNames, "[options]"];
+    const usage = usageParts.filter((part) => part.length > 0).join(" ");
+
+    console.log(`Usage: ${usage}\n`);
+
+    printDescription(config.description);
+
+    if (this.arguments.length > 0) {
+      console.log("Arguments:");
+
+      const argumentEntries = this.arguments.map((argument) => ({
+        label: argument.name,
+        description: getSchemaDescription(argument.schema),
+      }));
+
+      for (const line of formatUsageEntries(argumentEntries)) {
+        console.log(line);
+      }
+
+      console.log("");
+    }
+
+    if (this.commands.size > 0) {
+      console.log("Commands:");
+
+      for (const line of formatCommandListLines(this.commands)) {
+        console.log(line);
+      }
+
+      console.log("");
+    }
+
+    console.log("Options:");
+
+    const commandOptionEntries = this.options.map(formatOptionUsageEntry);
+    const optionEntries = [...commandOptionEntries, ...commandHelpOptions];
+
+    for (const line of formatUsageEntries(optionEntries)) {
+      console.log(line);
+    }
   }
 
   public argument<K extends string, S extends StandardSchemaV1>(

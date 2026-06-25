@@ -1,16 +1,12 @@
 import { Command } from "./command.js";
+import { CliError, UnknownCommandError } from "./errors.js";
 import {
-  CliValidationError,
-  MissingArgumentError,
-  UnknownCommandError,
-} from "./errors.js";
-import {
-  commandHelpOptions,
-  formatArgumentPlaceholders,
-  formatOptionUsageEntry,
+  formatCommandListLines,
   formatUsageEntries,
-  getSchemaDescription,
   globalOptions,
+  isHelpToken,
+  isVersionToken,
+  printDescription,
 } from "./help.js";
 import { parseArgv } from "./parser.js";
 import type { CLIConfig } from "./types.js";
@@ -18,25 +14,14 @@ import { validateArguments, validateOptions } from "./validate.js";
 
 export class Cli {
   private readonly config: CLIConfig;
-  private readonly commands = new Map<
-    string,
-    Command<Record<string, unknown>, Record<string, unknown>>
-  >();
+  private readonly root = new Command(this, "");
 
   public constructor(config: CLIConfig) {
     this.config = config;
   }
 
   public command(name: string) {
-    if (this.commands.has(name)) {
-      throw new Error(`Command "${name}" already exists`);
-    }
-
-    const command = new Command(this, name);
-
-    this.commands.set(name, command);
-
-    return command;
+    return this.root.command(name);
   }
 
   public async parse(argv?: string[]) {
@@ -54,29 +39,28 @@ export class Cli {
       process.exit(1);
     }
 
-    if (first === "--help" || first === "-h") {
+    if (isHelpToken(first)) {
       this.printHelp();
       return;
     }
 
-    if (first === "--version" || first === "-v") {
+    if (isVersionToken(first)) {
       this.printVersion();
       return;
     }
 
-    const { command, path, rest } = this.resolveCommand(tokens);
-    const [firstPath] = path;
+    const { command, rest } = this.root.resolve(tokens);
     const [firstRest] = rest;
 
     if (!command) {
-      const attempted = firstPath ?? first;
+      const attempted = firstRest ?? first;
       this.handleCliError(
         new UnknownCommandError(`Unknown command: ${attempted}`),
       );
     }
 
-    if (firstRest === "--help" || firstRest === "-h") {
-      this.printCommandHelp(command, path);
+    if (isHelpToken(firstRest)) {
+      command.printHelp(this.config);
       return;
     }
 
@@ -84,11 +68,19 @@ export class Cli {
 
     if (!handler) {
       if (command.commands.size > 0) {
-        this.printCommandHelp(command, path);
+        if (firstRest !== undefined) {
+          this.handleCliError(
+            new UnknownCommandError(`Unknown command: ${firstRest}`),
+          );
+        }
+
+        command.printHelp(this.config);
         return;
       }
 
-      throw new Error(`Command "${path.join(" ")}" has no action handler`);
+      throw new Error(
+        `Command "${command.path.join(" ")}" has no action handler`,
+      );
     }
 
     try {
@@ -114,78 +106,16 @@ export class Cli {
   private printHelp() {
     console.log(`Usage: ${this.config.name} <command> [options]\n`);
 
-    this.printDescription();
+    printDescription(this.config.description);
 
     console.log("Commands:");
 
-    for (const [name, command] of this.commands) {
-      const argNames = formatArgumentPlaceholders(command.arguments);
-      const parts = [name, argNames].filter((part) => part.length > 0);
-
-      console.log(`  ${parts.join(" ")}`);
+    for (const line of formatCommandListLines(this.root.commands)) {
+      console.log(line);
     }
 
     console.log("");
     this.printGlobalOptions();
-  }
-
-  private printCommandHelp(
-    command: Command<Record<string, unknown>, Record<string, unknown>>,
-    path: string[],
-  ) {
-    const argNames = formatArgumentPlaceholders(command.arguments);
-    const commandPath = path.join(" ");
-    const usageParts = [this.config.name, commandPath, argNames, "[options]"];
-    const usage = usageParts.filter((part) => part.length > 0).join(" ");
-
-    console.log(`Usage: ${usage}\n`);
-
-    this.printDescription();
-
-    if (command.arguments.length > 0) {
-      console.log("Arguments:");
-
-      const argumentEntries = command.arguments.map((argument) => ({
-        label: argument.name,
-        description: getSchemaDescription(argument.schema),
-      }));
-
-      for (const line of formatUsageEntries(argumentEntries)) {
-        console.log(line);
-      }
-
-      console.log("");
-    }
-
-    if (command.commands.size > 0) {
-      console.log("Commands:");
-
-      for (const [name, child] of command.commands) {
-        const childArgNames = formatArgumentPlaceholders(child.arguments);
-        const parts = [name, childArgNames].filter((part) => part.length > 0);
-
-        console.log(`  ${parts.join(" ")}`);
-      }
-
-      console.log("");
-    }
-
-    console.log("Options:");
-
-    const commandOptionEntries = command.options.map(formatOptionUsageEntry);
-    const optionEntries = [...commandOptionEntries, ...commandHelpOptions];
-
-    for (const line of formatUsageEntries(optionEntries)) {
-      console.log(line);
-    }
-  }
-
-  private printDescription() {
-    if (!this.config.description) {
-      return;
-    }
-
-    console.log(`${this.config.description}\n`);
   }
 
   private printGlobalOptions() {
@@ -197,59 +127,11 @@ export class Cli {
   }
 
   private handleCliError(error: unknown): never {
-    if (error instanceof CliValidationError) {
-      console.error(error.message);
-      process.exit(1);
-    }
-
-    if (error instanceof UnknownCommandError) {
-      console.error(error.message);
-      process.exit(1);
-    }
-
-    if (error instanceof MissingArgumentError) {
+    if (error instanceof CliError) {
       console.error(error.message);
       process.exit(1);
     }
 
     throw error;
-  }
-
-  private resolveCommand(tokens: string[]) {
-    let current:
-      | Command<Record<string, unknown>, Record<string, unknown>>
-      | undefined;
-    let commands = this.commands;
-    const path: string[] = [];
-    let index = 0;
-
-    while (index < tokens.length) {
-      const token = tokens[index];
-
-      if (!token) {
-        break;
-      }
-
-      if (token.startsWith("-")) {
-        break;
-      }
-
-      const next = commands.get(token);
-
-      if (!next) {
-        if (current) {
-          break;
-        }
-
-        return { command: undefined, path: [token], rest: tokens.slice(index) };
-      }
-
-      current = next;
-      path.push(token);
-      commands = next.commands;
-      index++;
-    }
-
-    return { command: current, path, rest: tokens.slice(index) };
   }
 }

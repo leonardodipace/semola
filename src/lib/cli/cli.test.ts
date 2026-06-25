@@ -197,6 +197,25 @@ describe("CLI", () => {
     expect(help).toContain("create");
   });
 
+  test("exits with error on unknown nested command", async () => {
+    const program = new CLI({ name: "semola-cli" });
+
+    program
+      .command("orm")
+      .command("migrations")
+      .command("create")
+      .action(() => {
+        //
+      });
+
+    const { exitCode, stderr } = await withExitStub(async () => {
+      await program.parse(["orm", "migrations", "missing"]);
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stderr.join("\n")).toContain("Unknown command: missing");
+  });
+
   test("prints help when parent command has subcommands and no action", async () => {
     const program = new CLI({ name: "semola-cli" });
 
