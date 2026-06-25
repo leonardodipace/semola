@@ -47,7 +47,7 @@ export class Cli {
       process.exit(1);
     }
 
-    const [first, ...rest] = tokens;
+    const [first] = tokens;
 
     if (!first) {
       this.printHelp();
@@ -64,21 +64,31 @@ export class Cli {
       return;
     }
 
-    const command = this.commands.get(first);
+    const { command, path, rest } = this.resolveCommand(tokens);
+    const [firstPath] = path;
+    const [firstRest] = rest;
 
     if (!command) {
-      this.handleCliError(new UnknownCommandError(`Unknown command: ${first}`));
+      const attempted = firstPath ?? first;
+      this.handleCliError(
+        new UnknownCommandError(`Unknown command: ${attempted}`),
+      );
     }
 
-    if (rest[0] === "--help" || rest[0] === "-h") {
-      this.printCommandHelp(command);
+    if (firstRest === "--help" || firstRest === "-h") {
+      this.printCommandHelp(command, path);
       return;
     }
 
     const handler = command.handler;
 
     if (!handler) {
-      throw new Error(`Command "${first}" has no action handler`);
+      if (command.commands.size > 0) {
+        this.printCommandHelp(command, path);
+        return;
+      }
+
+      throw new Error(`Command "${path.join(" ")}" has no action handler`);
     }
 
     try {
@@ -121,9 +131,11 @@ export class Cli {
 
   private printCommandHelp(
     command: Command<Record<string, unknown>, Record<string, unknown>>,
+    path: string[],
   ) {
     const argNames = formatArgumentPlaceholders(command.arguments);
-    const usageParts = [this.config.name, command.name, argNames, "[options]"];
+    const commandPath = path.join(" ");
+    const usageParts = [this.config.name, commandPath, argNames, "[options]"];
     const usage = usageParts.filter((part) => part.length > 0).join(" ");
 
     console.log(`Usage: ${usage}\n`);
@@ -140,6 +152,19 @@ export class Cli {
 
       for (const line of formatUsageEntries(argumentEntries)) {
         console.log(line);
+      }
+
+      console.log("");
+    }
+
+    if (command.commands.size > 0) {
+      console.log("Commands:");
+
+      for (const [name, child] of command.commands) {
+        const childArgNames = formatArgumentPlaceholders(child.arguments);
+        const parts = [name, childArgNames].filter((part) => part.length > 0);
+
+        console.log(`  ${parts.join(" ")}`);
       }
 
       console.log("");
@@ -188,5 +213,43 @@ export class Cli {
     }
 
     throw error;
+  }
+
+  private resolveCommand(tokens: string[]) {
+    let current:
+      | Command<Record<string, unknown>, Record<string, unknown>>
+      | undefined;
+    let commands = this.commands;
+    const path: string[] = [];
+    let index = 0;
+
+    while (index < tokens.length) {
+      const token = tokens[index];
+
+      if (!token) {
+        break;
+      }
+
+      if (token.startsWith("-")) {
+        break;
+      }
+
+      const next = commands.get(token);
+
+      if (!next) {
+        if (current) {
+          break;
+        }
+
+        return { command: undefined, path: [token], rest: tokens.slice(index) };
+      }
+
+      current = next;
+      path.push(token);
+      commands = next.commands;
+      index++;
+    }
+
+    return { command: current, path, rest: tokens.slice(index) };
   }
 }

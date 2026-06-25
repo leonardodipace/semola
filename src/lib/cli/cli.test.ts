@@ -109,6 +109,23 @@ describe("CLI", () => {
     expect(receivedOptions).toEqual({ tag: "v1.0.0" });
   });
 
+  test("dispatches nested command", async () => {
+    const program = new CLI({ name: "semola-cli" });
+    let called = false;
+
+    program
+      .command("orm")
+      .command("migrations")
+      .command("create")
+      .action(() => {
+        called = true;
+      });
+
+    await program.parse(["orm", "migrations", "create"]);
+
+    expect(called).toBe(true);
+  });
+
   test("prints help for --help", async () => {
     const program = new CLI({
       name: "string-util",
@@ -155,6 +172,48 @@ describe("CLI", () => {
     expect(help).toContain("-h, --help");
     expect(help).not.toContain("-v, --version");
     expect(help).not.toContain("--first\n\n  -h");
+  });
+
+  test("prints nested command help", async () => {
+    const program = new CLI({ name: "semola-cli", description: "Semola CLI" });
+
+    program
+      .command("orm")
+      .command("migrations")
+      .command("create")
+      .action(() => {
+        //
+      });
+
+    const { help, exitCode } = await runHelp(program, [
+      "orm",
+      "migrations",
+      "--help",
+    ]);
+
+    expect(exitCode).toBe(-1);
+    expect(help).toContain("Usage: semola-cli orm migrations [options]");
+    expect(help).toContain("Commands:");
+    expect(help).toContain("create");
+  });
+
+  test("prints help when parent command has subcommands and no action", async () => {
+    const program = new CLI({ name: "semola-cli" });
+
+    program
+      .command("orm")
+      .command("migrations")
+      .command("create")
+      .action(() => {
+        //
+      });
+
+    const { help, exitCode } = await runHelp(program, ["orm"]);
+
+    expect(exitCode).toBe(-1);
+    expect(help).toContain("Usage: semola-cli orm [options]");
+    expect(help).toContain("Commands:");
+    expect(help).toContain("migrations");
   });
 
   test("prints schema descriptions in command help", async () => {

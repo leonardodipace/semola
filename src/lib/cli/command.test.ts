@@ -49,6 +49,17 @@ describe("Command", () => {
     }).toThrow('Command "run" already exists');
   });
 
+  test("rejects duplicate nested command names", () => {
+    const program = app();
+    const orm = program.command("orm");
+
+    orm.command("migrations");
+
+    expect(() => {
+      orm.command("migrations");
+    }).toThrow('Command "migrations" already exists');
+  });
+
   test("rejects duplicate option aliases", () => {
     expect(() => {
       runCommand()

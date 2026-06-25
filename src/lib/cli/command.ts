@@ -8,6 +8,10 @@ export class Command<
 > {
   public readonly arguments: ArgumentConfig[] = [];
   public readonly options: OptionConfig[] = [];
+  public readonly commands = new Map<
+    string,
+    Command<Record<string, unknown>, Record<string, unknown>>
+  >();
   public handler?: (
     args: Record<string, unknown>,
     options: Record<string, unknown>,
@@ -17,6 +21,18 @@ export class Command<
     private readonly cli: Cli,
     public readonly name: string,
   ) {}
+
+  public command(name: string) {
+    if (this.commands.has(name)) {
+      throw new Error(`Command "${name}" already exists`);
+    }
+
+    const command = new Command(this.cli, name);
+
+    this.commands.set(name, command);
+
+    return command;
+  }
 
   public argument<K extends string, S extends StandardSchemaV1>(
     name: K,
