@@ -740,182 +740,88 @@ describe("Cron", () => {
     });
 
     describe("Validate attempts", () => {
-      test("should raise an error when passing a negative number", async () => {
-        const handler = () => Promise.resolve();
-        const retryNegativeNumber = new RetryCronJob({
-          maxAttempts: -10,
-        });
-
-        const cron = new Cron({
-          name: "retry-job",
-          schedule: "0 0 * * *",
-          handler,
-        });
-
-        expect(cron).toBeDefined();
-        expect(cron.getStatus()).toBe("idle");
-
-        const ctx: NotifyContext = {
-          type: "error",
-          job: cron,
-          error: new Error("A generic error"),
-          name: cron.getJobName(),
-        };
-
-        const [negativeNumberError] = await mightThrow(
-          retryNegativeNumber.update(ctx),
+      test("should raise an error when passing a negative number", () => {
+        const [retryNegativeNumber] = mightThrowSync(
+          () =>
+            new RetryCronJob({
+              maxAttempts: -10,
+            }),
         );
+        expect(retryNegativeNumber).toBeDefined();
+        expect(retryNegativeNumber).toBeInstanceOf(InvalidRetryError);
 
-        expect(negativeNumberError).toBeDefined();
-        expect(negativeNumberError).toBeInstanceOf(InvalidRetryError);
-
-        const retryNegativeZero = new RetryCronJob({
-          maxAttempts: -0,
-        });
-
-        const [negativeZeroError] = await mightThrow(
-          retryNegativeZero.update(ctx),
+        const [retryNegativeZero] = mightThrowSync(
+          () =>
+            new RetryCronJob({
+              maxAttempts: -0,
+            }),
         );
+        expect(retryNegativeZero).toBeDefined();
+        expect(retryNegativeZero).toBeInstanceOf(InvalidRetryError);
 
-        expect(negativeZeroError).toBeDefined();
-        expect(negativeZeroError).toBeInstanceOf(InvalidRetryError);
-
-        const retryNegativeInfinity = new RetryCronJob({
-          maxAttempts: Number.NEGATIVE_INFINITY,
-        });
-
-        const [negativeInfinityError] = await mightThrow(
-          retryNegativeInfinity.update(ctx),
+        const [retryNegativeInfinity] = mightThrowSync(
+          () =>
+            new RetryCronJob({
+              maxAttempts: Number.NEGATIVE_INFINITY,
+            }),
         );
-
-        expect(negativeInfinityError).toBeDefined();
-        expect(negativeInfinityError).toBeInstanceOf(InvalidRetryError);
+        expect(retryNegativeInfinity).toBeDefined();
+        expect(retryNegativeInfinity).toBeInstanceOf(InvalidRetryError);
       });
 
-      test("should raise an error when passing NaN", async () => {
-        const handler = () => Promise.resolve();
-        const retryNan = new RetryCronJob({
-          maxAttempts: NaN,
-        });
-
-        const cron = new Cron({
-          name: "retry-job",
-          schedule: "0 0 * * *",
-          handler,
-        });
-
-        expect(cron).toBeDefined();
-        expect(cron.getStatus()).toBe("idle");
-
-        const ctx: NotifyContext = {
-          type: "error",
-          job: cron,
-          error: new Error("A generic error"),
-          name: cron.getJobName(),
-        };
-
-        const [nanError] = await mightThrow(retryNan.update(ctx));
-
-        expect(nanError).toBeDefined();
-        expect(nanError).toBeInstanceOf(InvalidRetryError);
-      });
-
-      test("should raise an error when passing a non-integer number", async () => {
-        const handler = () => Promise.resolve();
-        const decimalNumberRetry = new RetryCronJob({
-          maxAttempts: 1.5,
-        });
-
-        const cron = new Cron({
-          name: "retry-job",
-          schedule: "0 0 * * *",
-          handler,
-        });
-
-        expect(cron).toBeDefined();
-        expect(cron.getStatus()).toBe("idle");
-
-        const ctx: NotifyContext = {
-          type: "error",
-          job: cron,
-          error: new Error("A generic error"),
-          name: cron.getJobName(),
-        };
-
-        const [decimalNumberError] = await mightThrow(
-          decimalNumberRetry.update(ctx),
+      test("should raise an error when passing NaN", () => {
+        const [retryNan] = mightThrowSync(
+          () =>
+            new RetryCronJob({
+              maxAttempts: NaN,
+            }),
         );
 
-        expect(decimalNumberError).toBeDefined();
-        expect(decimalNumberError).toBeInstanceOf(InvalidRetryError);
+        expect(retryNan).toBeDefined();
+        expect(retryNan).toBeInstanceOf(InvalidRetryError);
       });
 
-      test("should not raise an error when passing a floating point number that can be represented as integer", async () => {
-        const handler = () => Promise.resolve();
-        const decimalNumberRetry = new RetryCronJob({
-          maxAttempts: 5.0,
-        });
-
-        const cron = new Cron({
-          name: "retry-job",
-          schedule: "0 0 * * *",
-          handler,
-        });
-
-        expect(cron).toBeDefined();
-        expect(cron.getStatus()).toBe("idle");
-
-        const ctx: NotifyContext = {
-          type: "error",
-          job: cron,
-          error: new Error("A generic error"),
-          name: cron.getJobName(),
-        };
-
-        const [decimalNumberError] = await mightThrow(
-          decimalNumberRetry.update(ctx),
+      test("should raise an error when passing a non-integer number", () => {
+        const [decimalNumberRetry] = mightThrowSync(
+          () =>
+            new RetryCronJob({
+              maxAttempts: 1.5,
+            }),
         );
 
-        expect(decimalNumberError).toBeNull();
+        expect(decimalNumberRetry).toBeDefined();
+        expect(decimalNumberRetry).toBeInstanceOf(InvalidRetryError);
       });
 
-      test("should raise an error when passing 'Infinity'", async () => {
-        const handler = () => Promise.resolve();
-        const infinityRetry = new RetryCronJob({
-          maxAttempts: Number.POSITIVE_INFINITY,
-        });
-
-        const cron = new Cron({
-          name: "retry-job",
-          schedule: "0 0 * * *",
-          handler,
-        });
-
-        expect(cron).toBeDefined();
-        expect(cron.getStatus()).toBe("idle");
-
-        const ctx: NotifyContext = {
-          type: "error",
-          job: cron,
-          error: new Error("A generic error"),
-          name: cron.getJobName(),
-        };
-
-        const [infinityError] = await mightThrow(infinityRetry.update(ctx));
-
-        expect(infinityError).toBeDefined();
-        expect(infinityError).toBeInstanceOf(InvalidRetryError);
-
-        const secondInfinityRetry = new RetryCronJob({
-          maxAttempts: Infinity,
-        });
-
-        const [secondInfinityError] = await mightThrow(
-          secondInfinityRetry.update(ctx),
+      test("should not raise an error when passing a floating point number that can be represented as integer", () => {
+        const [decimalNumberRetry] = mightThrowSync(
+          () =>
+            new RetryCronJob({
+              maxAttempts: 5.0,
+            }),
         );
 
-        expect(secondInfinityError).toBeDefined();
-        expect(secondInfinityError).toBeInstanceOf(InvalidRetryError);
+        expect(decimalNumberRetry).toBeNull();
+      });
+
+      test("should raise an error when passing 'Infinity'", () => {
+        const [infinityRetry] = mightThrowSync(
+          () =>
+            new RetryCronJob({
+              maxAttempts: Number.POSITIVE_INFINITY,
+            }),
+        );
+        expect(infinityRetry).toBeDefined();
+        expect(infinityRetry).toBeInstanceOf(InvalidRetryError);
+
+        const [secondInfinityRetry] = mightThrowSync(
+          () =>
+            new RetryCronJob({
+              maxAttempts: Infinity,
+            }),
+        );
+        expect(secondInfinityRetry).toBeDefined();
+        expect(secondInfinityRetry).toBeInstanceOf(InvalidRetryError);
       });
     });
   });

@@ -60,6 +60,12 @@ export class RetryCronJob implements RetryObserver {
   public constructor(options: RetryOptions) {
     this.options = options;
     this.currentAttempt = 0;
+
+    if (!this.checkAttempts()) {
+      throw new InvalidRetryError(
+        "Expected 'maxAttempts' to be a finite non-negative integer",
+      );
+    }
   }
 
   public async update(ctx: NotifyContext): Promise<void> {
@@ -69,14 +75,6 @@ export class RetryCronJob implements RetryObserver {
     }
 
     const { job, error, name } = ctx;
-
-    if (!this.checkAttempts()) {
-      job.stop();
-      throw new InvalidRetryError(
-        "Expected 'maxAttempts' to be a finite non-negative integer",
-      );
-    }
-
     const { maxAttempts } = this.options;
     const onRetryErrorResult = this.runOnRetryError(error);
     const hasMoreAttempts = this.currentAttempt < maxAttempts;
