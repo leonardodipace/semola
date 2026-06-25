@@ -4,12 +4,12 @@ import type {
 } from "@standard-schema/spec";
 import type { ArgumentConfig, OptionConfig, UsageEntry } from "./types.js";
 
-export const helpOption: UsageEntry = {
+const helpOption: UsageEntry = {
   label: "-h, --help",
   description: "Show help",
 };
 
-export const versionOption: UsageEntry = {
+const versionOption: UsageEntry = {
   label: "-v, --version",
   description: "Show version",
 };
@@ -22,7 +22,7 @@ export const formatArgumentPlaceholders = (arguments_: ArgumentConfig[]) => {
   return arguments_.map((argument) => `<${argument.name}>`).join(" ");
 };
 
-export const formatOptionFlags = (option: OptionConfig) => {
+const formatOptionFlags = (option: OptionConfig) => {
   const aliases = option.aliases ?? [];
   const formattedAliases = aliases.map((alias) => `-${alias}`);
   const formattedName = `--${option.name}`;

@@ -1,6 +1,25 @@
 import { CliValidationError } from "./errors.js";
 import type { OptionDef, ParsedArgv } from "./types.js";
 
+const readFlagValue = (
+  options: Record<string, string | true>,
+  name: string,
+  tokens: string[],
+  index: number,
+) => {
+  const next = tokens[index + 1];
+
+  if (next !== undefined) {
+    if (!next.startsWith("-")) {
+      options[name] = next;
+      return index + 2;
+    }
+  }
+
+  options[name] = true;
+  return index + 1;
+};
+
 const resolveOption = (lookup: Map<string, string>, key: string) => {
   const canonical = lookup.get(key);
 
@@ -59,18 +78,8 @@ export const parseArgv = (tokens: string[], optionDefs: OptionDef[]) => {
 
       const key = token.slice(2);
       const name = resolveOption(lookup, key);
-      const next = tokens[index + 1];
 
-      if (next !== undefined) {
-        if (!next.startsWith("-")) {
-          options[name] = next;
-          index += 2;
-          continue;
-        }
-      }
-
-      options[name] = true;
-      index++;
+      index = readFlagValue(options, name, tokens, index);
       continue;
     }
 
@@ -88,18 +97,7 @@ export const parseArgv = (tokens: string[], optionDefs: OptionDef[]) => {
       continue;
     }
 
-    const next = tokens[index + 1];
-
-    if (next !== undefined) {
-      if (!next.startsWith("-")) {
-        options[name] = next;
-        index += 2;
-        continue;
-      }
-    }
-
-    options[name] = true;
-    index++;
+    index = readFlagValue(options, name, tokens, index);
   }
 
   return { positional, options } satisfies ParsedArgv;

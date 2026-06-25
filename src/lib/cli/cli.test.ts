@@ -47,6 +47,14 @@ const withExitStub = async (run: () => Promise<void>) => {
   return { exitCode, stderr, stdout };
 };
 
+const runHelp = async (program: CLI, argv: string[]) => {
+  const { stdout, exitCode } = await withExitStub(async () => {
+    await program.parse(argv);
+  });
+
+  return { help: stdout.join("\n"), exitCode };
+};
+
 describe("CLI", () => {
   test("dispatches split command with args and options", async () => {
     const program = new CLI({
@@ -114,14 +122,12 @@ describe("CLI", () => {
       .option("first", { schema: z.boolean().default(false) })
       .action(() => {});
 
-    const { stdout, exitCode } = await withExitStub(async () => {
-      await program.parse(["--help"]);
-    });
+    const { help, exitCode } = await runHelp(program, ["--help"]);
 
     expect(exitCode).toBe(-1);
-    expect(stdout.join("\n")).toContain("Usage: string-util");
-    expect(stdout.join("\n")).toContain("split");
-    expect(stdout.join("\n")).toContain("--help");
+    expect(help).toContain("Usage: string-util");
+    expect(help).toContain("split");
+    expect(help).toContain("--help");
   });
 
   test("prints command help for split --help", async () => {
@@ -137,11 +143,7 @@ describe("CLI", () => {
       .option("first", { schema: z.boolean().default(false) })
       .action(() => {});
 
-    const { stdout, exitCode } = await withExitStub(async () => {
-      await program.parse(["split", "--help"]);
-    });
-
-    const help = stdout.join("\n");
+    const { help, exitCode } = await runHelp(program, ["split", "--help"]);
 
     expect(exitCode).toBe(-1);
     expect(help).toContain("Usage: string-util split <str>");
@@ -172,11 +174,7 @@ describe("CLI", () => {
       })
       .action(() => {});
 
-    const { stdout } = await withExitStub(async () => {
-      await program.parse(["publish", "--help"]);
-    });
-
-    const help = stdout.join("\n");
+    const { help } = await runHelp(program, ["publish", "--help"]);
 
     expect(help).toContain("The package to publish");
     expect(help).toContain("The tag to publish the package with");
@@ -194,11 +192,7 @@ describe("CLI", () => {
       .option("tag", { schema: z.string(), aliases: ["t"] })
       .action(() => {});
 
-    const { stdout } = await withExitStub(async () => {
-      await program.parse(["publish", "-h"]);
-    });
-
-    const help = stdout.join("\n");
+    const { help } = await runHelp(program, ["publish", "-h"]);
 
     expect(help).toContain("Usage: string-util publish <pkg>");
     expect(help).toContain("String utilities");
