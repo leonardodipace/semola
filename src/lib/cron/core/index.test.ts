@@ -691,7 +691,9 @@ describe("Cron", () => {
       expect(secondErr).toBeDefined();
 
       shouldFail = true;
-      const [thirdErr] = await mightThrow(retry.update({ type: "success" }));
+      const [thirdErr] = await mightThrow(
+        retry.update({ type: "success", name: cron.getJobName() }),
+      );
       expect(thirdErr).toBeNull();
     });
 

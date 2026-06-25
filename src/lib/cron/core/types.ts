@@ -51,7 +51,7 @@ type NotifyErrorContext = {
   name: string;
 };
 
-type NotifySuccessContext = { type: "success" };
+type NotifySuccessContext = { type: "success"; name: string };
 
 export type NotifyContext = NotifySuccessContext | NotifyErrorContext;
 
