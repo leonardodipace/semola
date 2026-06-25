@@ -22,6 +22,11 @@ export type OptionDef = {
   aliases?: string[];
 };
 
+export type UsageEntry = {
+  label: string;
+  description?: string;
+};
+
 type SafeTypeAccess<
   T,
   K extends "input" | "output",

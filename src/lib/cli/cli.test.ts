@@ -150,8 +150,36 @@ describe("CLI", () => {
     expect(help).toContain("str");
     expect(help).toContain("--separator");
     expect(help).toContain("--first");
-    expect(help).toContain("-v, --version");
+    expect(help).toContain("-h, --help");
+    expect(help).not.toContain("-v, --version");
     expect(help).not.toContain("--first\n\n  -h");
+  });
+
+  test("prints schema descriptions in command help", async () => {
+    const program = new CLI({ name: "pkg-cli" });
+
+    program
+      .command("publish")
+      .argument("pkg", {
+        schema: z.string().min(1).describe("The package to publish"),
+      })
+      .option("tag", {
+        schema: z
+          .string()
+          .min(1)
+          .describe("The tag to publish the package with"),
+        aliases: ["t"],
+      })
+      .action(() => {});
+
+    const { stdout } = await withExitStub(async () => {
+      await program.parse(["publish", "--help"]);
+    });
+
+    const help = stdout.join("\n");
+
+    expect(help).toContain("The package to publish");
+    expect(help).toContain("The tag to publish the package with");
   });
 
   test("prints command help for -h", async () => {
@@ -175,7 +203,8 @@ describe("CLI", () => {
     expect(help).toContain("Usage: string-util publish <pkg>");
     expect(help).toContain("String utilities");
     expect(help).toContain("-t, --tag");
-    expect(help).toContain("-v, --version");
+    expect(help).toContain("-h, --help");
+    expect(help).not.toContain("-v, --version");
     expect(help).not.toContain("--tag\n\n  -h");
   });
 

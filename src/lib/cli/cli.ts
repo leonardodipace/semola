@@ -5,9 +5,12 @@ import {
   UnknownCommandError,
 } from "./errors.js";
 import {
+  commandHelpOptions,
   formatArgumentPlaceholders,
-  formatOptionFlags,
-  globalOptionLines,
+  formatOptionUsageEntry,
+  formatUsageEntries,
+  getSchemaDescription,
+  globalOptions,
 } from "./help.js";
 import { parseArgv } from "./parser.js";
 import type { CLIConfig } from "./types.js";
@@ -130,8 +133,13 @@ export class Cli {
     if (command.arguments.length > 0) {
       console.log("Arguments:");
 
-      for (const argument of command.arguments) {
-        console.log(`  ${argument.name}`);
+      const argumentEntries = command.arguments.map((argument) => ({
+        label: argument.name,
+        description: getSchemaDescription(argument.schema),
+      }));
+
+      for (const line of formatUsageEntries(argumentEntries)) {
+        console.log(line);
       }
 
       console.log("");
@@ -139,11 +147,10 @@ export class Cli {
 
     console.log("Options:");
 
-    for (const option of command.options) {
-      console.log(`  ${formatOptionFlags(option)}`);
-    }
+    const commandOptionEntries = command.options.map(formatOptionUsageEntry);
+    const optionEntries = [...commandOptionEntries, ...commandHelpOptions];
 
-    for (const line of globalOptionLines) {
+    for (const line of formatUsageEntries(optionEntries)) {
       console.log(line);
     }
   }
@@ -159,7 +166,7 @@ export class Cli {
   private printGlobalOptions() {
     console.log("Options:");
 
-    for (const line of globalOptionLines) {
+    for (const line of formatUsageEntries(globalOptions)) {
       console.log(line);
     }
   }

@@ -80,12 +80,16 @@ await program.parse(["publish", "my-package", "-t", "v1.0.0"]);
 
 Each argument and option is validated individually with its schema, so per-field `.default()` works when a value is missing.
 
+Schema `.describe()` text is shown in command help (`<command> --help`) when the schema library implements Standard JSON Schema.
+
 ## Global flags
 
 Before the subcommand name:
 
 - `-h`, `--help` - print usage and command list
 - `-v`, `--version` - print program version
+
+Command help (`<command> --help`) lists `-h`/`--help` only. Version is a CLI-level flag, not per-command.
 
 On validation failure or unknown command, the program writes to stderr and exits with code `1`.
 
