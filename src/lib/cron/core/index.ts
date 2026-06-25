@@ -55,11 +55,10 @@ class CommonCronUtilities {
 
 export class RetryCronJob implements RetryObserver {
   private options: RetryOptions;
-  private currentAttempt: number;
+  private jobs = new Map<string, number>();
 
   public constructor(options: RetryOptions) {
     this.options = options;
-    this.currentAttempt = 0;
 
     if (!this.checkAttempts()) {
       throw new InvalidRetryError(
@@ -69,32 +68,40 @@ export class RetryCronJob implements RetryObserver {
   }
 
   public async update(ctx: NotifyContext): Promise<void> {
+    if (ctx.type === "add") {
+      this.jobs.set(ctx.name, 0);
+      return;
+    }
+
+    const jobAttempts = this.jobs.get(ctx.name);
+    if (jobAttempts === undefined) return;
+
     if (ctx.type === "success") {
-      this.currentAttempt = 0;
+      this.jobs.set(ctx.name, 0);
       return;
     }
 
     const { job, error, name } = ctx;
     const { maxAttempts } = this.options;
     const onRetryErrorResult = this.runOnRetryError(error);
-    const hasMoreAttempts = this.currentAttempt < maxAttempts;
+    const hasMoreAttempts = jobAttempts < maxAttempts;
     const canRetry = hasMoreAttempts && onRetryErrorResult;
 
     if (canRetry) {
-      const delay = this.calculateDelay();
+      const delay = this.calculateDelay(jobAttempts);
 
       if (this.options.onFailedAttempt) {
         const context: OnFailedAttemptContextType = {
-          attemptNumber: this.currentAttempt + 1,
+          attemptNumber: jobAttempts + 1,
           delay,
           error,
-          retriesLeft: maxAttempts - this.currentAttempt,
+          retriesLeft: maxAttempts - jobAttempts,
         };
 
         await this.options.onFailedAttempt(context);
       }
 
-      this.currentAttempt += 1;
+      this.jobs.set(ctx.name, jobAttempts + 1);
       await this.runDelay(delay);
 
       return;
@@ -132,11 +139,11 @@ export class RetryCronJob implements RetryObserver {
     await new Promise((resolve) => setTimeout(resolve, delay));
   }
 
-  private calculateDelay() {
+  private calculateDelay(jobAttempt: number) {
     // exponential backoff with "Full Jitter" algorithm
 
     const deltaTime =
-      BASE_BACKOFF_DELAY * BACKOFF_MULTIPLIER ** (this.currentAttempt - 1);
+      BASE_BACKOFF_DELAY * BACKOFF_MULTIPLIER ** (jobAttempt - 1);
 
     const minDeltaTime = Math.min(deltaTime, MAX_BACKOFF_DELAY);
     return Math.round(Math.random() * (minDeltaTime + 1));
@@ -177,6 +184,7 @@ export class Cron extends JobWithRetry {
     if (this.options.retry) {
       this.manager = new RetryManager();
       this.manager.subscribe(this.options.retry);
+      this.manager.notify({ type: "add", name: this.getJobName() });
     }
   }
 

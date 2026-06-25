@@ -51,9 +51,13 @@ type NotifyErrorContext = {
   name: string;
 };
 
+type NotifyAddRetryContext = { type: "add"; name: string };
 type NotifySuccessContext = { type: "success"; name: string };
 
-export type NotifyContext = NotifySuccessContext | NotifyErrorContext;
+export type NotifyContext =
+  | NotifySuccessContext
+  | NotifyErrorContext
+  | NotifyAddRetryContext;
 
 export interface RetryObserver {
   update(ctx: NotifyContext): Promise<void>;
