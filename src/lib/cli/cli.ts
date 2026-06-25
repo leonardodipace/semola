@@ -20,8 +20,8 @@ export class Cli {
     this.config = config;
   }
 
-  public command(name: string) {
-    return this.root.command(name);
+  public command(name: string, config?: { description?: string }) {
+    return this.root.command(name, config);
   }
 
   public async parse(argv?: string[]) {

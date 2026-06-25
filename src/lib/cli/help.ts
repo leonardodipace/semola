@@ -39,6 +39,7 @@ export const formatArgumentPlaceholders = (arguments_: ArgumentConfig[]) => {
 
 type CommandListEntry = {
   arguments: ArgumentConfig[];
+  description?: string;
 };
 
 export const formatCommandListLines = (
@@ -47,8 +48,9 @@ export const formatCommandListLines = (
   return Array.from(commands, ([name, command]) => {
     const argNames = formatArgumentPlaceholders(command.arguments);
     const parts = [name, argNames].filter((part) => part.length > 0);
+    if (!command.description) return `  ${parts.join(" ")}`;
 
-    return `  ${parts.join(" ")}`;
+    return `  ${parts.join(" ")}  ${command.description}`;
   });
 };
 

@@ -37,6 +37,7 @@ export class Command<
     private readonly cli: Cli,
     public readonly name: string,
     public readonly parent?: AnyCommand,
+    public readonly description?: string,
   ) {}
 
   public get path() {
@@ -51,12 +52,12 @@ export class Command<
     return names;
   }
 
-  public command(name: string) {
+  public command(name: string, config?: { description?: string }) {
     if (this.commands.has(name)) {
       throw new Error(`Command "${name}" already exists`);
     }
 
-    const command = new Command(this.cli, name, this as AnyCommand);
+    const command = new Command(this.cli, name, this, config?.description);
 
     this.commands.set(name, command);
 

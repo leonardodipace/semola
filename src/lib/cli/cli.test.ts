@@ -134,7 +134,7 @@ describe("CLI", () => {
     });
 
     program
-      .command("split")
+      .command("split", { description: "Split input string" })
       .argument("str", { schema: z.string() })
       .option("first", { schema: z.boolean().default(false) })
       .action(() => {});
@@ -144,6 +144,7 @@ describe("CLI", () => {
     expect(exitCode).toBe(-1);
     expect(help).toContain("Usage: string-util");
     expect(help).toContain("split");
+    expect(help).toContain("Split input string");
     expect(help).toContain("--help");
   });
 
