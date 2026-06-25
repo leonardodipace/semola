@@ -217,6 +217,21 @@ describe("CLI", () => {
     expect(stderr.join("\n")).toContain("Unknown command: missing");
   });
 
+  test("exits with error when leaf command has no action handler", async () => {
+    const program = new CLI({ name: "semola-cli" });
+
+    program.command("broken");
+
+    const { exitCode, stderr } = await withExitStub(async () => {
+      await program.parse(["broken"]);
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stderr.join("\n")).toContain(
+      'Command "broken" has no action handler',
+    );
+  });
+
   test("prints help when parent command has subcommands and no action", async () => {
     const program = new CLI({ name: "semola-cli" });
 

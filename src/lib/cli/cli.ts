@@ -1,5 +1,9 @@
 import { Command } from "./command.js";
-import { CliError, UnknownCommandError } from "./errors.js";
+import {
+  CliConfigurationError,
+  CliError,
+  UnknownCommandError,
+} from "./errors.js";
 import {
   formatCommandListLines,
   formatUsageEntries,
@@ -69,8 +73,10 @@ export class Cli {
         return;
       }
 
-      throw new Error(
-        `Command "${command.path.join(" ")}" has no action handler`,
+      this.handleCliError(
+        new CliConfigurationError(
+          `Command "${command.path.join(" ")}" has no action handler`,
+        ),
       );
     }
 

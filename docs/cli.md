@@ -14,8 +14,9 @@ import { CLI } from "semola/cli";
 | ---------------------- | ------------------------------------------------ |
 | `CLI`                  | Program builder with `.command()`, `.parse()`    |
 | `CliValidationError`   | Schema validation failed for an argument/option  |
-| `UnknownCommandError`  | Subcommand name not registered                   |
-| `MissingArgumentError` | Required positional argument not provided        |
+| `UnknownCommandError`     | Subcommand name not registered                   |
+| `CliConfigurationError`   | Command registered without an action handler     |
+| `MissingArgumentError`    | Required positional argument not provided        |
 
 Use any Standard Schema library (Zod, Valibot, ArkType, etc.) for argument and option schemas.
 
@@ -98,5 +99,6 @@ On validation failure or unknown command, the program writes to stderr and exits
 | Error                  | When                                        |
 | ---------------------- | ------------------------------------------- |
 | `CliValidationError`   | Schema validation failed                    |
-| `UnknownCommandError`  | Subcommand not found                        |
-| `MissingArgumentError` | Too few positional arguments for a command  |
+| `UnknownCommandError`     | Subcommand not found                        |
+| `CliConfigurationError`   | Leaf command has no `.action()` handler     |
+| `MissingArgumentError`    | Too few positional arguments for a command  |
