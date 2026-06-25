@@ -66,31 +66,22 @@ export class Command<
   public resolve(tokens: string[]) {
     let current: AnyCommand = this as AnyCommand;
     let index = 0;
-    let matched = false;
 
     while (index < tokens.length) {
       const token = tokens[index];
 
-      if (!token) {
-        break;
-      }
-
-      if (token.startsWith("-")) {
-        break;
-      }
+      if (!token) break;
+      if (token.startsWith("-")) break;
 
       const next = current.commands.get(token);
 
-      if (!next) {
-        break;
-      }
+      if (!next) break;
 
       current = next;
-      matched = true;
       index++;
     }
 
-    if (!matched) {
+    if (index === 0) {
       return { command: undefined, rest: tokens.slice(index) };
     }
 
@@ -161,16 +152,20 @@ export class Command<
     name: K,
     config: { schema: S; aliases?: string[] },
   ) {
+    const aliases = config.aliases ?? [];
+
     for (const existing of this.options) {
       if (existing.name === name) {
         throw new Error(`Option "${name}" already exists`);
       }
-    }
 
-    const aliases = config.aliases ?? [];
+      if (existing.aliases?.includes(name)) {
+        throw new Error(
+          `Option "${name}" conflicts with alias of option "${existing.name}"`,
+        );
+      }
 
-    for (const alias of aliases) {
-      for (const existing of this.options) {
+      for (const alias of aliases) {
         if (existing.name === alias) {
           throw new Error(
             `Option alias "${alias}" conflicts with option "${existing.name}"`,
@@ -180,14 +175,6 @@ export class Command<
         if (existing.aliases?.includes(alias)) {
           throw new Error(`Option alias "${alias}" already exists`);
         }
-      }
-    }
-
-    for (const existing of this.options) {
-      if (existing.aliases?.includes(name)) {
-        throw new Error(
-          `Option "${name}" conflicts with alias of option "${existing.name}"`,
-        );
       }
     }
 

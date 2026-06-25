@@ -18,36 +18,19 @@ export const globalOptions: UsageEntry[] = [helpOption, versionOption];
 
 export const commandHelpOptions: UsageEntry[] = [helpOption];
 
+const hasToken = (token: string | undefined, values: readonly string[]) => {
+  if (!token) return false;
+  if (!values.includes(token)) return false;
+
+  return true;
+};
+
 export const isHelpToken = (token: string | undefined) => {
-  if (!token) {
-    return false;
-  }
-
-  if (token === "--help") {
-    return true;
-  }
-
-  if (token === "-h") {
-    return true;
-  }
-
-  return false;
+  return hasToken(token, ["--help", "-h"]);
 };
 
 export const isVersionToken = (token: string | undefined) => {
-  if (!token) {
-    return false;
-  }
-
-  if (token === "--version") {
-    return true;
-  }
-
-  if (token === "-v") {
-    return true;
-  }
-
-  return false;
+  return hasToken(token, ["--version", "-v"]);
 };
 
 export const formatArgumentPlaceholders = (arguments_: ArgumentConfig[]) => {
@@ -61,16 +44,12 @@ type CommandListEntry = {
 export const formatCommandListLines = (
   commands: Map<string, CommandListEntry>,
 ) => {
-  const lines: string[] = [];
-
-  for (const [name, command] of commands) {
+  return Array.from(commands, ([name, command]) => {
     const argNames = formatArgumentPlaceholders(command.arguments);
     const parts = [name, argNames].filter((part) => part.length > 0);
 
-    lines.push(`  ${parts.join(" ")}`);
-  }
-
-  return lines;
+    return `  ${parts.join(" ")}`;
+  });
 };
 
 const formatOptionFlags = (option: OptionConfig) => {

@@ -26,12 +26,6 @@ export class Cli {
 
   public async parse(argv?: string[]) {
     const tokens = argv ?? process.argv.slice(2);
-
-    if (tokens.length === 0) {
-      this.printHelp();
-      process.exit(1);
-    }
-
     const [first] = tokens;
 
     if (!first) {
@@ -53,10 +47,7 @@ export class Cli {
     const [firstRest] = rest;
 
     if (!command) {
-      const attempted = firstRest ?? first;
-      this.handleCliError(
-        new UnknownCommandError(`Unknown command: ${attempted}`),
-      );
+      this.handleCliError(new UnknownCommandError(`Unknown command: ${first}`));
     }
 
     if (isHelpToken(firstRest)) {
@@ -115,10 +106,6 @@ export class Cli {
     }
 
     console.log("");
-    this.printGlobalOptions();
-  }
-
-  private printGlobalOptions() {
     console.log("Options:");
 
     for (const line of formatUsageEntries(globalOptions)) {

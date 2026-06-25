@@ -1,27 +1,15 @@
 export class CliError extends Error {
-  public constructor(message: string) {
-    super(message);
-    this.name = "CliError";
-  }
+  public override name = "CliError";
 }
 
 export class CliValidationError extends CliError {
-  public constructor(message: string) {
-    super(message);
-    this.name = "CliValidationError";
-  }
+  public override name = "CliValidationError";
 }
 
 export class UnknownCommandError extends CliError {
-  public constructor(message: string) {
-    super(message);
-    this.name = "UnknownCommandError";
-  }
+  public override name = "UnknownCommandError";
 }
 
 export class MissingArgumentError extends CliError {
-  public constructor(message: string) {
-    super(message);
-    this.name = "MissingArgumentError";
-  }
+  public override name = "MissingArgumentError";
 }

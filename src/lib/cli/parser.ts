@@ -48,10 +48,7 @@ export const parseArgv = (tokens: string[], optionDefs: OptionDef[]) => {
   while (index < tokens.length) {
     const token = tokens[index];
 
-    if (token === undefined) {
-      break;
-    }
-
+    if (!token) break;
     if (token === "--") {
       positional.push(...tokens.slice(index + 1));
       break;
@@ -65,19 +62,14 @@ export const parseArgv = (tokens: string[], optionDefs: OptionDef[]) => {
 
     if (token.startsWith("--")) {
       const equalsIndex = token.indexOf("=");
+      const key = token.slice(2, equalsIndex === -1 ? undefined : equalsIndex);
+      const name = resolveOption(lookup, key);
 
       if (equalsIndex !== -1) {
-        const key = token.slice(2, equalsIndex);
-        const value = token.slice(equalsIndex + 1);
-        const name = resolveOption(lookup, key);
-
-        options[name] = value;
+        options[name] = token.slice(equalsIndex + 1);
         index++;
         continue;
       }
-
-      const key = token.slice(2);
-      const name = resolveOption(lookup, key);
 
       index = readFlagValue(options, name, tokens, index);
       continue;
