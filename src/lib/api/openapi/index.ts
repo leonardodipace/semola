@@ -113,17 +113,17 @@ type JsonSchema = {
   [key: string]: unknown;
 };
 
-// Zod stores .meta({ id }) on the schema object and strips it from JSON Schema output.
-const getZodMetaId = (schema: StandardSchemaV1 & { meta?: unknown }) => {
-  const readMeta = schema.meta
+// Libraries may attach a declared id in schema metadata but omit it from JSON Schema output.
+const getDeclaredSchemaId = (schema: StandardSchemaV1 & { meta?: unknown }) => {
+  const readMeta = schema.meta;
 
-  if (typeof readMeta !== "function") return
+  if (typeof readMeta !== "function") return;
 
   const meta = readMeta();
 
-  if (typeof meta !== "object") return
-  if (meta === null) return
-  if (typeof meta.id !== "string") return
+  if (typeof meta !== "object") return;
+  if (meta === null) return;
+  if (typeof meta.id !== "string") return;
 
   return meta.id;
 };
@@ -133,7 +133,7 @@ const getSchemaId = (schema: StandardSchemaV1, jsonSchema: JsonSchema) => {
     return jsonSchema.id;
   }
 
-  return getZodMetaId(schema);
+  return getDeclaredSchemaId(schema);
 };
 
 const convertSchemaToOpenApi = async (
