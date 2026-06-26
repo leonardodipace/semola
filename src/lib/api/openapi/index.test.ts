@@ -576,4 +576,54 @@ describe("OpenAPI Generation", () => {
       ]?.schema,
     ).toEqual({ $ref: "#/components/schemas/User" });
   });
+
+  test("should merge nested reusable schemas when extracting schema with id", async () => {
+    const AddressSchema = z
+      .object({
+        city: z.string(),
+      })
+      .meta({ id: "Address" });
+
+    const UserSchema = z
+      .object({
+        id: z.string(),
+        address: AddressSchema,
+      })
+      .meta({ id: "User" });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/users",
+          method: "POST",
+          request: { body: UserSchema },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas?.Address).toMatchObject({
+      type: "object",
+      properties: {
+        city: { type: "string" },
+      },
+      required: ["city"],
+    });
+
+    expect(spec.components?.schemas?.User).toMatchObject({
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        address: { $ref: "#/components/schemas/Address" },
+      },
+      required: ["id", "address"],
+    });
+
+    expect(
+      spec.paths["/users"]?.post?.requestBody?.content["application/json"]
+        ?.schema,
+    ).toEqual({ $ref: "#/components/schemas/User" });
+  });
 });
