@@ -100,6 +100,37 @@ This framework generates OpenAPI 3.1.0 specifications, which provide several adv
 
 The generated spec is compatible with modern OpenAPI tooling including Swagger UI, Redoc, and OpenAPI Generator.
 
+#### Valibot and JSON Schema
+
+Valibot supports [Standard Schema v1](https://standardschema.dev/) for request validation, but it does not ship a JSON Schema converter. OpenAPI generation calls `schema["~standard"].jsonSchema`, so plain Valibot schemas will not work with `api.getOpenApiSpec()`.
+
+Wrap Valibot schemas with [`toStandardJsonSchema`](https://www.npmjs.com/package/@valibot/to-json-schema) from `@valibot/to-json-schema` first:
+
+```typescript
+import * as v from "valibot";
+import { toStandardJsonSchema } from "@valibot/to-json-schema";
+import { Api } from "semola/api";
+
+const UserBody = toStandardJsonSchema(
+  v.object({
+    name: v.string(),
+    email: v.pipe(v.string(), v.email()),
+  }),
+);
+
+const api = new Api();
+
+api.defineRoute({
+  path: "/users",
+  method: "POST",
+  request: { body: UserBody },
+  response: { 201: UserBody },
+  handler: async (c) => c.json(201, c.req.body),
+});
+```
+
+Zod and ArkType include Standard JSON Schema support natively and do not need this wrapper.
+
 #### Schema Reuse in OpenAPI
 
 To optimize your OpenAPI specification and reduce redundancy, you can define reusable schemas using the `.meta({ id: "SchemaName" })` method. Schemas with an ID are extracted to `components.schemas` and referenced using `$ref` instead of being inlined everywhere they're used.
@@ -153,15 +184,18 @@ api.defineRoute({
 
 ```typescript
 import * as v from "valibot";
+import { toStandardJsonSchema } from "@valibot/to-json-schema";
 
-// Valibot uses metadata in the schema pipeline
-const UserSchema = v.pipe(
-  v.object({
-    id: v.pipe(v.string(), v.uuid()),
-    name: v.string(),
-    email: v.pipe(v.string(), v.email()),
-  }),
-  v.metadata({ id: "User" }),
+// Valibot uses metadata in the schema pipeline; wrap with toStandardJsonSchema for OpenAPI
+const UserSchema = toStandardJsonSchema(
+  v.pipe(
+    v.object({
+      id: v.pipe(v.string(), v.uuid()),
+      name: v.string(),
+      email: v.pipe(v.string(), v.email()),
+    }),
+    v.metadata({ id: "User" }),
+  ),
 );
 ```
 
