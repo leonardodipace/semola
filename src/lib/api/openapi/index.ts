@@ -150,10 +150,17 @@ const hoistDefsToComponents = (jsonSchema: JsonSchema) => {
   const schema = rewriteDefsRefs({ ...jsonSchema }) as JsonSchema;
   delete schema.$defs;
 
+  const defsRecord = defs as Record<string, JsonSchema>;
+  const schemas: Record<string, JsonSchema> = {};
+
+  for (const name in defsRecord) {
+    schemas[name] = rewriteDefsRefs(defsRecord[name]) as JsonSchema;
+  }
+
   return {
     schema,
     components: {
-      schemas: { ...(defs as Record<string, JsonSchema>) },
+      schemas,
     } as OpenAPIV3_1.ComponentsObject,
   };
 };
