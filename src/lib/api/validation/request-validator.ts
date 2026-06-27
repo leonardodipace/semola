@@ -1,5 +1,5 @@
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
-import type { RequestSchema } from "../core/types.js";
+import type { RequestSchema, ValidatedRequest } from "../core/types.js";
 import {
   validateBody,
   validateCookies,
@@ -63,7 +63,7 @@ export class RequestValidator {
       return { success: true, data: {} };
     }
 
-    const data: Record<string, unknown> = {};
+    const data: ValidatedRequest = {};
 
     for (const field of schemaFields) {
       if (!input.schema[field]) {

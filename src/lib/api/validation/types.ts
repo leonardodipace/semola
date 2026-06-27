@@ -1,4 +1,4 @@
-import type { RequestSchema } from "../core/types.js";
+import type { RequestSchema, ValidatedRequest } from "../core/types.js";
 
 export type BodyCache = { parsed: boolean; value: unknown };
 
@@ -10,7 +10,7 @@ export type ValidateRequestInput = {
 
 export type ValidateRequestSuccess = {
   success: true;
-  data: Record<string, unknown>;
+  data: ValidatedRequest;
 };
 
 export type ValidateRequestFailure = {

@@ -1,20 +1,16 @@
 import type { Middleware } from "../middleware/index.js";
 import { RequestValidator } from "../validation/request-validator.js";
 import type { BodyCache } from "../validation/types.js";
-import { sharedContextFactory } from "./context-factory.js";
+import { createContext, getEmptyValidated } from "./context-factory.js";
 import { badRequest } from "./response-helpers.js";
-import type { RequestPipelineConfig, ValidatedRequest } from "./types.js";
-import { bodyHasMultipleReaders, hasRequestSchemas } from "./utils.js";
+import type { RequestPipelineConfig } from "./types.js";
+import { bodyHasMultipleReaders } from "./utils.js";
 
 export class RequestPipeline {
-  private config: RequestPipelineConfig;
   private validator = new RequestValidator();
-  private contextFactory = sharedContextFactory;
   private bodyCache?: BodyCache;
 
-  public constructor(config: RequestPipelineConfig) {
-    this.config = config;
-
+  public constructor(private config: RequestPipelineConfig) {
     if (
       config.validateInput &&
       bodyHasMultipleReaders({
@@ -47,7 +43,7 @@ export class RequestPipeline {
       return badRequest(validated.error.message);
     }
 
-    const context = this.contextFactory.create({
+    const context = createContext({
       req,
       validated: validated.data,
       extensions,
@@ -66,9 +62,9 @@ export class RequestPipeline {
     const { request: requestSchema, handler: middlewareHandler } =
       input.middleware.options;
 
-    let validated = this.contextFactory.getEmptyValidated();
+    let validated = getEmptyValidated();
 
-    if (this.config.validateInput && hasRequestSchemas(requestSchema)) {
+    if (this.config.validateInput) {
       const result = await this.validator.validate({
         req: input.req,
         schema: requestSchema,
@@ -79,10 +75,10 @@ export class RequestPipeline {
         return badRequest(result.error.message);
       }
 
-      validated = result.data as ValidatedRequest;
+      validated = result.data;
     }
 
-    const context = this.contextFactory.create({
+    const context = createContext({
       req: input.req,
       validated,
       extensions: input.extensions,
@@ -105,14 +101,7 @@ export class RequestPipeline {
     if (!this.config.validateInput) {
       return {
         success: true as const,
-        data: this.contextFactory.getEmptyValidated(),
-      };
-    }
-
-    if (!hasRequestSchemas(this.config.routeRequest)) {
-      return {
-        success: true as const,
-        data: this.contextFactory.getEmptyValidated(),
+        data: getEmptyValidated(),
       };
     }
 
@@ -128,7 +117,7 @@ export class RequestPipeline {
 
     return {
       success: true as const,
-      data: result.data as ValidatedRequest,
+      data: result.data,
     };
   }
 }

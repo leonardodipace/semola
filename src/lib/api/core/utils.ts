@@ -26,17 +26,6 @@ export const getFullPath = (input: { prefix?: string; path: string }) => {
   return normalizedPrefix + normalizedPath;
 };
 
-export const hasRequestSchemas = (schema?: RequestSchema) => {
-  if (!schema) return false;
-  if (schema.body) return true;
-  if (schema.query) return true;
-  if (schema.headers) return true;
-  if (schema.cookies) return true;
-  if (schema.params) return true;
-
-  return false;
-};
-
 const validatesBody = (schema?: RequestSchema) => {
   if (schema?.body === undefined) {
     return false;

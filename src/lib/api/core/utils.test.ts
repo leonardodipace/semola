@@ -4,7 +4,6 @@ import { Middleware } from "../middleware/index.js";
 import {
   bodyHasMultipleReaders,
   getFullPath,
-  hasRequestSchemas,
   resolveValidation,
 } from "./utils.js";
 
@@ -48,18 +47,6 @@ describe("utils", () => {
         input: true,
         output: false,
       });
-    });
-  });
-
-  describe("hasRequestSchemas", () => {
-    test("returns false for empty schema", () => {
-      expect(hasRequestSchemas({})).toBe(false);
-      expect(hasRequestSchemas(undefined)).toBe(false);
-    });
-
-    test("returns true when any field is set", () => {
-      expect(hasRequestSchemas({ body: z.object({}) })).toBeTruthy();
-      expect(hasRequestSchemas({ params: z.object({}) })).toBeTruthy();
     });
   });
 

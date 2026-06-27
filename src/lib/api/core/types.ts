@@ -158,11 +158,11 @@ export type RouteHandler<
 export type BareRouteHandler = () => RouteReturn | Promise<RouteReturn>;
 
 export type ValidatedRequest = {
-  body: unknown;
-  query: unknown;
-  headers: unknown;
-  cookies: unknown;
-  params: unknown;
+  body?: unknown;
+  query?: unknown;
+  headers?: unknown;
+  cookies?: unknown;
+  params?: unknown;
 };
 
 export type MethodRoutes = Record<
@@ -224,11 +224,6 @@ export type CreateContextInput = {
   extensions?: Record<string, unknown>;
   response?: ResponseSchema;
   validateOutput?: boolean;
-};
-
-export type CreateContextWithBodyInput = {
-  req: Bun.BunRequest;
-  body: unknown;
 };
 
 export type BuildRouteHandlerInput = {
