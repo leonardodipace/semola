@@ -54,7 +54,8 @@ await osJob.stop();
   - **`name: string`** (required) - Unique job name
   - **`schedule: string`** (required) - Cron expression or alias
   - **`handler: () => unknown`** (required) - Function to execute on schedule. Support both sync and async functions
-  - **`retry: RetryCronJob`** (optional) - Instance of `RetryCronJob` class containing retries' handling logic. Use one instance per `Cron` job (see Error Handling and Retries).
+  - **`retry: RetryCronJob`** (optional) - Instance of `RetryCronJob` class containing retries' handling logic. You can 
+  use the same instance for multiple `Cron` instances. For more information about errors, check the [Error Handling and Retries](#error-handling-and-retries) section 
 - `CronOS` class:
   - **`name`** (required) - Unique job name
   - **`schedule`** (required) - Cron expression or alias
@@ -121,7 +122,7 @@ job.ref()
 job.unref();
 ```
 
-**Note:** `ref()`, `unref()` and `getStatus()` methods are available only for in-process job.
+**Note:** `ref()`, `unref()` and `getStatus()` methods are available only for in-process jobs.
 
 ### Handler errors without retry
 
@@ -205,11 +206,11 @@ Pass an optional `RetryCronJob` instance to retry failed in-process runs up to a
 Bun invokes the cron callback on each schedule tick. Inside that callback, `Cron` runs your `handler`. On failure:
 
 - **With `retry`:** the error is caught, `RetryCronJob` updates the attempt count, applies a backoff delay, and returns without rejecting. The job stays scheduled; Bun invokes the callback again on the next tick. A successful `handler` run resets the attempt count.
-- **Without `retry`:** the error propagates as a rejected cron callback. By default Bun exits the process with code `1` (same as an unhandled rejection). If you attach a `process.on("unhandledRejection")` [listener](https://bun.com/docs/runtime/cron#error-handling), the process survives and Bun reschedules the job; `Cron` still does not call `stop()`.
+- **Without `retry`:** the error propagates as a rejected cron callback. By default Bun exits the process with code `1` (same as an unhandled rejection). From [Bun's documentation](https://bun.com/docs/runtime/cron#error-handling), if you attach a `process.on("unhandledRejection")` listener, the process survives and Bun reschedules the job; `Cron` still does not call `stop()`.
 
 `RetryCronJob.update()` only tracks attempts and backoff. It does not call `handler` itself; Bun re-invokes the callback on the next scheduled run.
 
-Create one `RetryCronJob` per `Cron` job. Sharing a single instance across multiple jobs shares attempt state between them.
+Create one `RetryCronJob` per `Cron` job or share the same instance with multiple `Cron` jobs. When sharing one `RetryCronJob` instance, it internally use the cron job's name to ensure state isolation and, in case it's used for two jobs with the same name, the old job is replaced.
 
 `maxAttempts` is validated when the first failure is processed (inside `update()`), not in the constructor.
 
