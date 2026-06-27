@@ -13,13 +13,19 @@ export type OnFailedAttemptContextType = {
   attemptNumber: number;
   retriesLeft: number;
   delay: number;
+  jobName: string;
+};
+
+export type RetryOnErrorContextType = {
+  error: Error;
+  jobName: string;
 };
 
 export type RetryOptions = {
   maxAttempts: number;
   onError?: (error: ErrorMetadataType) => void | Promise<void>;
   onFailedAttempt?: (ctx: OnFailedAttemptContextType) => void | Promise<void>;
-  retryOnError?: (error: Error) => boolean;
+  retryOnError?: (ctx: RetryOnErrorContextType) => boolean;
 };
 
 export type CronBaseOptions = {

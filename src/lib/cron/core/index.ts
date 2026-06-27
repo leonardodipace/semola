@@ -11,6 +11,7 @@ import {
   type NotifyContext,
   type OnFailedAttemptContextType,
   type RetryObserver,
+  RetryOnErrorContextType,
   type RetryOptions,
   type ScheduleType,
 } from "./types.js";
@@ -83,7 +84,7 @@ export class RetryCronJob implements RetryObserver {
 
     const { job, error, name } = ctx;
     const { maxAttempts } = this.options;
-    const onRetryErrorResult = this.runOnRetryError(error);
+    const onRetryErrorResult = this.runOnRetryError(error, name);
     const hasMoreAttempts = jobAttempts < maxAttempts;
     const canRetry = hasMoreAttempts && onRetryErrorResult;
 
@@ -96,6 +97,7 @@ export class RetryCronJob implements RetryObserver {
           delay,
           error,
           retriesLeft: maxAttempts - jobAttempts,
+          jobName: name,
         };
 
         await this.options.onFailedAttempt(context);
@@ -129,10 +131,9 @@ export class RetryCronJob implements RetryObserver {
     return isNaturalNumber && isValidInteger && !isNegativeZero;
   }
 
-  private runOnRetryError(error: Error) {
+  private runOnRetryError(error: Error, jobName: string) {
     if (!this.options.retryOnError) return true;
-
-    return this.options.retryOnError(error);
+    return this.options.retryOnError({ error, jobName });
   }
 
   private async runDelay(delay: number) {
