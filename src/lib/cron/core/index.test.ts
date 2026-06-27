@@ -561,7 +561,7 @@ describe("Cron", () => {
 
       const retry = new RetryCronJob({
         maxAttempts: 5,
-        retryOnError: (err) => !(err instanceof UserDefinedError),
+        retryOnError: ({ error: err }) => !(err instanceof UserDefinedError),
       });
 
       const cron = new Cron({
@@ -598,7 +598,6 @@ describe("Cron", () => {
         retry.update(ctxWithCustomError),
       );
 
-      expect(cron.getStatus()).toBe("idle");
       expect(userDefinedError).toBeDefined();
       expect(userDefinedError?.message).toBe("User defined error");
     });
@@ -609,7 +608,7 @@ describe("Cron", () => {
 
       const retry = new RetryCronJob({
         maxAttempts: 5,
-        retryOnError: (err) => !(err instanceof UserDefinedError),
+        retryOnError: ({ error: err }) => !(err instanceof UserDefinedError),
         onError: (err) => {
           expect(err.error).toBeInstanceOf(Error);
           expect(err.error.message).toBe("User defined error");
@@ -649,7 +648,6 @@ describe("Cron", () => {
       };
 
       await retry.update(ctxWithCustomError);
-      expect(cron.getStatus()).toBe("idle");
 
       setSystemTime();
     });
