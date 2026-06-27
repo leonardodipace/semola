@@ -128,8 +128,8 @@ job.unref();
 
 When no `retry` option is passed, an error in `handler` causes the cron callback to reject. Bun treats this like an unhandled promise rejection:
 
-- **Without a `process.on("unhandledRejection")` listener:** the process exits with code `1`.
-- **With a listener:** the process keeps running and Bun reschedules the job for the next tick. `Cron` does not call `stop()`, so `getStatus()` stays `"running"`.
+- **Without a `process.on("unhandledRejection")` listener** the process exits with code `1`.
+- **With a listener** the process keeps running and Bun reschedules the job for the next tick. `Cron` does not call `stop()`, so `getStatus()` stays `"running"`.
 
 Use `retry` or handle errors inside `handler` if you want failures contained without taking down the process.
 
@@ -224,7 +224,7 @@ const cleanup = new Cron({
   retry: new RetryCronJob({
     maxAttempts: 2,
     onError: (ctx) => console.log(`An error: ${ctx.error.message}`),
-    retryOnError: (err) => !(err instanceof MyCustomError),
+    retryOnError: ({ error: err }) => !(err instanceof MyCustomError),
     onFailedAttempt: async ({ attemptNumber, delay, error, retriesLeft }) => {
       console.log(
         `Attempt ${attemptNumber} failed. Retrying in ${delay}ms. ${retriesLeft} retries left.`,
@@ -241,9 +241,12 @@ const cleanup = new Cron({
   - `name: string` - The job's name
   - `failedAt: number` - When the job failed, expressed in milliseconds
   - `error: Error` - Which error was fired
-- **`retryOnError(error: Error): boolean`** (optional) - Function called before each attempt. This function return `true` if a job should consume the current retry, otherwise it must return `false`. By default, if not provided, a job will retry on every error raised by the `handler` function
+- **`retryOnError(ctx: RetryOnErrorContextType): boolean`** (optional) - Function called before each attempt. This function return `true` if a job should consume the current retry, otherwise it must return `false`. By default, if not provided, a job will retry on every error raised by the `handler` function. The `RetryOnErrorContextType` type contains the following properties:
+    - `error: Error` - Which error was fired in the `handler` function 
+    - `jobName: string` - Job's name
 - **`onFailedAttempt(ctx: OnFailedAttemptContextType): void | Promise<void>`** (optional) - Function called on every attempt. The `OnFailedAttemptContextType` type contains the following properties:
   - `error: Error` - Which error was fired in the `handler` function
+  - `jobName: string` - Job's name
   - `attemptNumber: number` - The attempt number. Note that they start at 1
   - `retriesLeft: number` - How many retries remains before stopping the job
   - `delay: number` - Backoff delay in milliseconds before the next scheduled run. Calculated with exponential backoff and [Full Jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/). The callback returns after this delay; Bun invokes `handler` again on the next schedule tick.
@@ -295,9 +298,9 @@ const reports = new Cron({
   },
   retry: new RetryCronJob({
     maxAttempts: 10,
-    onFailedAttempt: async ({ error, attemptNumber }) => {
+    onFailedAttempt: async ({ jobName, error, attemptNumber }) => {
       console.log(
-        `Attempt number ${attemptNumber} for error: ${error.name} => ${error.message}`,
+        `${jobName} => Attempt number ${attemptNumber} for error: ${error.name} => ${error.message}`,
       );
 
       await retryEmail();
