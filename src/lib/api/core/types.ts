@@ -180,3 +180,61 @@ export type RouteConfig<
   operationId?: string;
   tags?: string[];
 };
+
+export type ResolvedValidation = {
+  input: boolean;
+  output: boolean;
+};
+
+export type RouteKind = "simple" | "outputOnly" | "bodyOnly" | "full";
+
+export type InternalContext = {
+  raw: Bun.BunRequest;
+  req: ValidatedRequest;
+  get: (key: string) => unknown;
+  json: (status: number, data: unknown) => Response;
+  text: (status: number, text: string) => Response;
+  html: (status: number, html: string) => Response;
+  redirect: (status: number, url: string) => Response;
+};
+
+export type AnyRouteHandler = (
+  context: InternalContext,
+) => Response | Promise<Response>;
+
+export type BunRouteHandler = (
+  req: Bun.BunRequest,
+) => Response | Promise<Response>;
+
+export type CreateContextInput = {
+  req: Bun.BunRequest;
+  validated?: ValidatedRequest;
+  extensions?: Record<string, unknown>;
+  response?: ResponseSchema;
+  validateOutput?: boolean;
+};
+
+export type CreateContextWithBodyInput = {
+  req: Bun.BunRequest;
+  body: unknown;
+};
+
+export type BuildRouteHandlerInput = {
+  route: RouteConfig<
+    RequestSchema,
+    ResponseSchema,
+    readonly Middleware[],
+    readonly Middleware[]
+  >;
+  globalMiddlewares: readonly Middleware[];
+  validation: ResolvedValidation;
+};
+
+export type RequestPipelineConfig = {
+  middlewares: Middleware[];
+  routeRequest?: RequestSchema;
+  routeResponse?: ResponseSchema;
+  validateInput: boolean;
+  validateOutput: boolean;
+  handler: AnyRouteHandler;
+};

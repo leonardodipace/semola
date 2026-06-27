@@ -401,4 +401,22 @@ describe("Api Core", () => {
     const res = await fetch(`http://localhost:${server?.port}/user`);
     expect(res.status).toBe(200);
   });
+
+  test("should expose OpenAPI spec from the api instance", async () => {
+    const api = new Api({
+      openapi: { title: "Test API", version: "2.0.0" },
+    });
+
+    api.defineRoute({
+      path: "/hello",
+      method: "GET",
+      handler: (c) => c.json(200, { ok: true }),
+    });
+
+    const spec = await api.getOpenApiSpec();
+
+    expect(spec.openapi).toBe("3.1.0");
+    expect(spec.info.title).toBe("Test API");
+    expect(spec.info.version).toBe("2.0.0");
+  });
 });

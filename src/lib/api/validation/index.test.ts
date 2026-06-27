@@ -20,16 +20,20 @@ describe("Validation Module", () => {
 
       const invalid = { user: { email: "invalid" } };
 
-      const runValidation = async () => {
-        await validateSchema(schema, invalid);
+      const runValidation = () => {
+        validateSchema(schema, invalid);
       };
 
-      await expect(runValidation()).rejects.toMatchObject({
-        message: expect.stringContaining("user.email:"),
-      });
-      await expect(runValidation()).rejects.toMatchObject({
-        message: expect.stringContaining("age:"),
-      });
+      expect(runValidation).toThrow(
+        expect.objectContaining({
+          message: expect.stringContaining("user.email:"),
+        }),
+      );
+      expect(runValidation).toThrow(
+        expect.objectContaining({
+          message: expect.stringContaining("age:"),
+        }),
+      );
     });
   });
 
@@ -158,14 +162,15 @@ describe("Validation Module", () => {
       expect(data).toEqual({ theme: "dark", session: "abc" });
     });
 
-    test("should throw when required cookie is missing", async () => {
+    test("should throw when required cookie is missing", () => {
       const schema = z.object({ requiredCookie: z.string() });
       const req = new Request("http://localhost");
 
-      const promise = validateCookies(req, schema);
-      await expect(promise).rejects.toMatchObject({
-        message: expect.stringContaining("requiredCookie:"),
-      });
+      expect(() => validateCookies(req, schema)).toThrow(
+        expect.objectContaining({
+          message: expect.stringContaining("requiredCookie:"),
+        }),
+      );
     });
   });
 });

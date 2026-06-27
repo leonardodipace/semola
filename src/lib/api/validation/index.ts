@@ -1,5 +1,6 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { ParseError, ValidationError } from "../errors.js";
+import type { BodyCache } from "./types.js";
 
 const formatIssues = (
   issues: NonNullable<
@@ -32,17 +33,15 @@ const readValidationResult = <T>(
 export const validateSchema = <T>(
   schema: StandardSchemaV1,
   data: unknown,
-): T | Promise<T> => {
+): T => {
   const result = schema["~standard"].validate(data);
 
   if (result instanceof Promise) {
-    return result.then((output) => readValidationResult<T>(output));
+    throw new ValidationError("Async schema validation is not supported");
   }
 
   return readValidationResult<T>(result);
 };
-
-export type BodyCache = { parsed: boolean; value: unknown };
 
 export const validateBody = async (
   req: Request,
@@ -79,10 +78,7 @@ export const validateBody = async (
   return validateSchema(bodySchema, parsedBody);
 };
 
-export const validateQuery = async (
-  req: Request,
-  querySchema?: StandardSchemaV1,
-) => {
+export const validateQuery = (req: Request, querySchema?: StandardSchemaV1) => {
   if (!querySchema) {
     return true;
   }
@@ -117,7 +113,7 @@ export const validateQuery = async (
   return validateSchema(querySchema, queryParams);
 };
 
-export const validateHeaders = async (
+export const validateHeaders = (
   req: Request,
   headersSchema?: StandardSchemaV1,
 ) => {
@@ -134,7 +130,7 @@ export const validateHeaders = async (
   return validateSchema(headersSchema, headers);
 };
 
-export const validateCookies = async (
+export const validateCookies = (
   req: Request,
   cookiesSchema?: StandardSchemaV1,
 ) => {
@@ -149,7 +145,7 @@ export const validateCookies = async (
   return validateSchema(cookiesSchema, cookies);
 };
 
-export const validateParams = async (
+export const validateParams = (
   req: Bun.BunRequest,
   paramsSchema?: StandardSchemaV1,
 ) => {

@@ -1,0 +1,164 @@
+import { describe, expect, test } from "bun:test";
+import { z } from "zod";
+import { Middleware } from "../middleware/index.js";
+import {
+  bodyHasMultipleReaders,
+  classifyRoute,
+  getFullPath,
+  hasRequestSchemas,
+  onlyValidatesBody,
+  resolveValidation,
+} from "./utils.js";
+
+describe("utils", () => {
+  describe("getFullPath", () => {
+    test("returns path when no prefix", () => {
+      expect(getFullPath({ path: "/hello" })).toBe("/hello");
+    });
+
+    test("normalizes trailing slashes on prefix and path", () => {
+      expect(getFullPath({ prefix: "/api/", path: "/hello/" })).toBe(
+        "/api/hello",
+      );
+    });
+
+    test("returns prefix when path is root", () => {
+      expect(getFullPath({ prefix: "/api/v1", path: "/" })).toBe("/api/v1");
+    });
+
+    test("returns path when prefix is root", () => {
+      expect(getFullPath({ prefix: "/", path: "/hello" })).toBe("/hello");
+    });
+  });
+
+  describe("resolveValidation", () => {
+    test("defaults to both enabled", () => {
+      expect(resolveValidation()).toEqual({ input: true, output: true });
+      expect(resolveValidation(true)).toEqual({ input: true, output: true });
+    });
+
+    test("disables both when false", () => {
+      expect(resolveValidation(false)).toEqual({ input: false, output: false });
+    });
+
+    test("respects partial options", () => {
+      expect(resolveValidation({ input: false })).toEqual({
+        input: false,
+        output: true,
+      });
+      expect(resolveValidation({ output: false })).toEqual({
+        input: true,
+        output: false,
+      });
+    });
+  });
+
+  describe("hasRequestSchemas", () => {
+    test("returns false for empty schema", () => {
+      expect(hasRequestSchemas({})).toBe(false);
+      expect(hasRequestSchemas(undefined)).toBe(false);
+    });
+
+    test("returns true when any field is set", () => {
+      expect(hasRequestSchemas({ body: z.object({}) })).toBeTruthy();
+      expect(hasRequestSchemas({ params: z.object({}) })).toBeTruthy();
+    });
+  });
+
+  describe("onlyValidatesBody", () => {
+    test("returns true for body-only schema", () => {
+      expect(onlyValidatesBody({ body: z.object({ name: z.string() }) })).toBe(
+        true,
+      );
+    });
+
+    test("returns false when other fields are present", () => {
+      expect(
+        onlyValidatesBody({
+          body: z.object({ name: z.string() }),
+          query: z.object({ q: z.string() }),
+        }),
+      ).toBe(false);
+    });
+  });
+
+  describe("classifyRoute", () => {
+    test("returns simple for bare routes", () => {
+      expect(
+        classifyRoute({
+          middlewares: [],
+          validation: resolveValidation(),
+        }),
+      ).toBe("simple");
+    });
+
+    test("returns outputOnly when only response schema is validated", () => {
+      expect(
+        classifyRoute({
+          middlewares: [],
+          response: { 200: z.object({ ok: z.boolean() }) },
+          validation: resolveValidation(),
+        }),
+      ).toBe("outputOnly");
+    });
+
+    test("returns bodyOnly for body-only input validation", () => {
+      expect(
+        classifyRoute({
+          middlewares: [],
+          request: { body: z.object({ name: z.string() }) },
+          validation: resolveValidation(),
+        }),
+      ).toBe("bodyOnly");
+    });
+
+    test("returns full for middleware or multi-field validation", () => {
+      const mw = new Middleware({
+        handler: () => ({}),
+      });
+
+      expect(
+        classifyRoute({
+          middlewares: [mw],
+          validation: resolveValidation(),
+        }),
+      ).toBe("full");
+
+      expect(
+        classifyRoute({
+          middlewares: [],
+          request: {
+            body: z.object({ name: z.string() }),
+            query: z.object({ q: z.string() }),
+          },
+          validation: resolveValidation(),
+        }),
+      ).toBe("full");
+    });
+  });
+
+  describe("bodyHasMultipleReaders", () => {
+    test("returns false for single body reader", () => {
+      expect(
+        bodyHasMultipleReaders({
+          middlewares: [],
+          request: { body: z.object({ name: z.string() }) },
+        }),
+      ).toBe(false);
+    });
+
+    test("returns true when middleware and route both read body", () => {
+      const mw = new Middleware({
+        request: { body: z.object({ name: z.string() }) },
+        handler: () => ({}),
+      });
+
+      expect(
+        bodyHasMultipleReaders({
+          middlewares: [mw],
+          request: { body: z.object({ name: z.string(), age: z.number() }) },
+        }),
+      ).toBe(true);
+    });
+  });
+});
