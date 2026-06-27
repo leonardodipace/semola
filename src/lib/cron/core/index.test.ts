@@ -746,6 +746,18 @@ describe("Cron", () => {
         retriesLeft: 2,
         jobName: "job-b",
       });
+
+      await retry.update(ctxB);
+
+      expect(perJobFailes[0]).toMatchObject({
+        retriesLeft: 2,
+        jobName: "job-a",
+      });
+
+      expect(perJobFailes[2]).toMatchObject({
+        retriesLeft: 1,
+        jobName: "job-b",
+      });
     });
 
     describe("Validate attempts", () => {
