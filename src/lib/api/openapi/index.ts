@@ -2,7 +2,6 @@ import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,
 } from "@standard-schema/spec";
-import type { OpenAPIV3_1 } from "openapi-types";
 import type { RequestSchema, ResponseSchema } from "../core/types.js";
 import type { Middleware } from "../middleware/index.js";
 import type {
@@ -11,6 +10,8 @@ import type {
   OpenApiResponse,
   OpenApiSpec,
 } from "./types.js";
+
+type OpenApiComponents = NonNullable<OpenApiSpec["components"]>;
 
 type RouteConfigInternal = {
   path: string;
@@ -113,14 +114,14 @@ type JsonSchema = {
   [key: string]: unknown;
 };
 
-const convertSchemaToOpenApi = async (
+const convertSchemaToOpenApi = (
   schema: StandardSchemaV1,
   io: "input" | "output" = "input",
 ) => {
   const result = toOpenAPISchema(schema, io);
   const { schema: jsonSchema } = result as {
     schema: JsonSchema;
-    components?: OpenAPIV3_1.ComponentsObject;
+    components?: OpenApiComponents;
   };
 
   // Check if schema has an id (from .meta({ id: "..." }))
@@ -138,7 +139,7 @@ const convertSchemaToOpenApi = async (
         schemas: {
           [schemaId]: schemaWithoutId,
         },
-      } as OpenAPIV3_1.ComponentsObject,
+      } as OpenApiComponents,
     };
   }
 
@@ -154,19 +155,19 @@ const convertSchemaToOpenApi = async (
 
   return result as {
     schema: JsonSchema;
-    components?: OpenAPIV3_1.ComponentsObject;
+    components?: OpenApiComponents;
   };
 };
 
 // Convert schema to inline JSON schema (for parameters that don't support $ref)
-const convertSchemaToInlineOpenApi = async (
+const convertSchemaToInlineOpenApi = (
   schema: StandardSchemaV1,
   io: "input" | "output" = "input",
 ) => {
   const result = toOpenAPISchema(schema, io);
   const { schema: jsonSchema } = result as {
     schema: JsonSchema;
-    components?: OpenAPIV3_1.ComponentsObject;
+    components?: OpenApiComponents;
   };
 
   // Remove $schema and id from inline schemas
@@ -180,19 +181,18 @@ const convertSchemaToInlineOpenApi = async (
   };
 };
 
-const extractParametersFromSchema = async (
+const extractParametersFromSchema = (
   schema: StandardSchemaV1,
   location: "query" | "header" | "cookie",
 ) => {
-  const { schema: jsonSchema, components } =
-    await convertSchemaToInlineOpenApi(schema);
+  const { schema: jsonSchema } = convertSchemaToInlineOpenApi(schema);
 
   if (jsonSchema.type !== "object") {
-    return { parameters: [], components };
+    return [];
   }
 
   if (!jsonSchema.properties) {
-    return { parameters: [], components };
+    return [];
   }
 
   const parameters: OpenApiParameter[] = [];
@@ -210,7 +210,7 @@ const extractParametersFromSchema = async (
     });
   }
 
-  return { parameters, components };
+  return parameters;
 };
 
 const normalizePathForOpenAPI = (path: string) => {
@@ -234,30 +234,19 @@ const paramSources = [
   ["cookies", "cookie"],
 ] as const;
 
-const createParameters = async (request: RequestSchema, path: string) => {
+const createParameters = (request: RequestSchema, path: string) => {
   const parameters: OpenApiParameter[] = [];
-  const allComponents: Array<OpenAPIV3_1.ComponentsObject | undefined> = [];
 
   for (const [field, location] of paramSources) {
     if (request[field]) {
-      const { parameters: params, components } =
-        await extractParametersFromSchema(request[field], location);
-      parameters.push(...params);
-      if (components) {
-        allComponents.push(components);
-      }
+      parameters.push(...extractParametersFromSchema(request[field], location));
     }
   }
 
   const pathParamNames = extractPathParameters(path);
 
   if (pathParamNames.length > 0 && request.params) {
-    const { schema: jsonSchema, components } =
-      await convertSchemaToInlineOpenApi(request.params);
-
-    if (components) {
-      allComponents.push(components);
-    }
+    const { schema: jsonSchema } = convertSchemaToInlineOpenApi(request.params);
 
     if (jsonSchema.type === "object" && jsonSchema.properties) {
       for (const name of pathParamNames) {
@@ -275,11 +264,11 @@ const createParameters = async (request: RequestSchema, path: string) => {
     }
   }
 
-  return { parameters, components: allComponents };
+  return parameters;
 };
 
-const createRequestBody = async (bodySchema: StandardSchemaV1) => {
-  const { schema, components } = await convertSchemaToOpenApi(bodySchema);
+const createRequestBody = (bodySchema: StandardSchemaV1) => {
+  const { schema, components } = convertSchemaToOpenApi(bodySchema);
 
   return {
     components,
@@ -294,12 +283,12 @@ const createRequestBody = async (bodySchema: StandardSchemaV1) => {
   };
 };
 
-const createResponses = async (response?: ResponseSchema) => {
+const createResponses = (response?: ResponseSchema) => {
   const responses: Record<string, OpenApiResponse> = {};
-  const allComponents: Array<OpenAPIV3_1.ComponentsObject | undefined> = [];
+  const components: OpenApiComponents[] = [];
 
   if (!response) {
-    return { responses, components: allComponents };
+    return { responses, components };
   }
 
   for (const status in response) {
@@ -311,13 +300,11 @@ const createResponses = async (response?: ResponseSchema) => {
     }
 
     const description = getSchemaDescription(schema);
-    const { schema: jsonSchema, components } = await convertSchemaToOpenApi(
-      schema,
-      "output",
-    );
+    const { schema: jsonSchema, components: responseComponents } =
+      convertSchemaToOpenApi(schema, "output");
 
-    if (components) {
-      allComponents.push(components);
+    if (responseComponents) {
+      components.push(responseComponents);
     }
 
     responses[statusCode] = {
@@ -330,10 +317,10 @@ const createResponses = async (response?: ResponseSchema) => {
     };
   }
 
-  return { responses, components: allComponents };
+  return { responses, components };
 };
 
-const createOperation = async (
+const createOperation = (
   route: RouteConfigInternal,
   globalMiddlewares: readonly Middleware[],
   prefix?: string,
@@ -358,18 +345,16 @@ const createOperation = async (
   const mergedResponse = mergeResponseSchemas(responseSchemas);
 
   const fullPath = prefix ? prefix + route.path : route.path;
-  const { parameters, components: parameterComponents } =
-    await createParameters(mergedRequest, fullPath);
+  const parameters = createParameters(mergedRequest, fullPath);
   const { responses, components: responseComponents } =
-    await createResponses(mergedResponse);
+    createResponses(mergedResponse);
 
   const operation: OpenApiOperation = {
     responses,
   };
 
-  const allComponents: Array<OpenAPIV3_1.ComponentsObject | undefined> = [];
+  const allComponents: OpenApiComponents[] = [];
   allComponents.push(...responseComponents);
-  allComponents.push(...parameterComponents);
 
   for (const field of ["summary", "description", "operationId"] as const) {
     if (route[field]) {
@@ -389,7 +374,7 @@ const createOperation = async (
 
   if (bodySchema) {
     const { requestBody, components: bodyComponents } =
-      await createRequestBody(bodySchema);
+      createRequestBody(bodySchema);
     operation.requestBody = requestBody;
     if (bodyComponents) {
       allComponents.push(bodyComponents);
@@ -409,15 +394,11 @@ const componentKeys = [
 // Merges multiple ComponentsObject into a single object
 // Handles deduplication by merging schemas with the same name
 const mergeComponents = (
-  componentsArray: Array<OpenAPIV3_1.ComponentsObject | undefined>,
-): OpenAPIV3_1.ComponentsObject => {
+  componentsArray: OpenApiComponents[],
+): OpenApiComponents => {
   const merged: Record<string, Record<string, unknown>> = {};
 
   for (const components of componentsArray) {
-    if (!components) {
-      continue;
-    }
-
     for (const key of componentKeys) {
       if (components[key]) {
         merged[key] = { ...merged[key], ...components[key] };
@@ -428,7 +409,7 @@ const mergeComponents = (
   return merged;
 };
 
-export const generateOpenApiSpec = async (options: OpenApiGeneratorOptions) => {
+export const generateOpenApiSpec = (options: OpenApiGeneratorOptions) => {
   const spec: OpenApiSpec = {
     openapi: "3.1.0",
     info: {
@@ -449,8 +430,7 @@ export const generateOpenApiSpec = async (options: OpenApiGeneratorOptions) => {
     };
   }
 
-  const allRouteComponents: Array<OpenAPIV3_1.ComponentsObject | undefined> =
-    [];
+  const allRouteComponents: OpenApiComponents[] = [];
 
   for (const route of options.routes) {
     const fullPath = options.prefix ? options.prefix + route.path : route.path;
@@ -461,7 +441,7 @@ export const generateOpenApiSpec = async (options: OpenApiGeneratorOptions) => {
       spec.paths[openApiPath] = {};
     }
 
-    const { operation, components } = await createOperation(
+    const { operation, components } = createOperation(
       route,
       options.globalMiddlewares ?? [],
       options.prefix,
