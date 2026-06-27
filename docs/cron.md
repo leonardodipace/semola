@@ -250,7 +250,7 @@ const cleanup = new Cron({
   - `jobName: string` - Job's name
   - `attemptNumber: number` - The attempt number. Note that they start at 1
   - `retriesLeft: number` - How many retries remains before stopping the job
-  - `delay: number` - Backoff delay in milliseconds before the next scheduled run. Calculated with exponential backoff and [Full Jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/). The callback returns after this delay; Bun invokes `handler` again on the next schedule tick.
+  - `delay: number` - Backoff delay in milliseconds before the next scheduled run. Calculated with exponential backoff and [Full Jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/). The callback returns after this delay; Bun invokes `handler` again on the next schedule tick. Note that the `delay` is capped to 1 minute.
 
 
 ## Examples
