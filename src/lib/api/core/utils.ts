@@ -5,7 +5,7 @@ import type {
   ValidationOptions,
 } from "./types.js";
 
-export const stripTrailingSlash = (path: string) => {
+const stripTrailingSlash = (path: string) => {
   if (path !== "/" && path.endsWith("/")) {
     return path.slice(0, -1);
   }
@@ -26,31 +26,25 @@ export const getFullPath = (input: { prefix?: string; path: string }) => {
   return normalizedPrefix + normalizedPath;
 };
 
-const validatesBody = (schema?: RequestSchema) => {
-  if (schema?.body === undefined) {
-    return false;
-  }
-
-  return true;
-};
-
 export const bodyHasMultipleReaders = (input: {
-  middlewares: Middleware[];
+  middlewares: readonly Middleware[];
   request?: RequestSchema;
 }) => {
   let readers = 0;
 
-  if (validatesBody(input.request)) {
+  if (input.request?.body !== undefined) {
     readers++;
   }
 
   for (const middleware of input.middlewares) {
-    if (validatesBody(middleware.options.request)) {
-      readers++;
-    }
+    if (middleware.options.request?.body === undefined) continue;
+
+    readers++;
+
+    if (readers > 1) return true;
   }
 
-  return readers > 1;
+  return false;
 };
 
 export const resolveValidation = (

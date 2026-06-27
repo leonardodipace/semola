@@ -1,3 +1,4 @@
+import { mightThrowSync } from "../../errors/index.js";
 import type { Middleware } from "../middleware/index.js";
 import { validateSchema } from "../validation/index.js";
 import { validateRequest } from "../validation/request-validator.js";
@@ -53,21 +54,15 @@ const toValidatedResponse = (
     return toResponse(value);
   }
 
-  try {
+  const [error] = mightThrowSync(() => {
     validateSchema(schema, value);
+  });
 
-    return toResponse(value);
-  } catch (error) {
-    return badRequest((error as Error).message);
+  if (error) {
+    return badRequest(error.message);
   }
-};
 
-const hasRequestSchema = (route: BuildRouteHandlerInput["route"]) => {
-  return !!route.request;
-};
-
-const hasResponseSchema = (route: BuildRouteHandlerInput["route"]) => {
-  return !!route.response;
+  return toResponse(value);
 };
 
 const hasMiddlewareRequestSchema = (middlewares: readonly Middleware[]) => {
@@ -78,6 +73,24 @@ const hasMiddlewareRequestSchema = (middlewares: readonly Middleware[]) => {
   }
 
   return false;
+};
+
+const getRouteMiddlewares = (input: BuildRouteHandlerInput) => {
+  if (!input.route.middlewares?.length) {
+    return input.globalMiddlewares;
+  }
+
+  return [...input.globalMiddlewares, ...input.route.middlewares];
+};
+
+const shouldValidateInput = (
+  input: BuildRouteHandlerInput,
+  middlewares: readonly Middleware[],
+) => {
+  if (!input.validation.input) return false;
+  if (input.route.request) return true;
+
+  return hasMiddlewareRequestSchema(middlewares);
 };
 
 const buildValidatedBareRouteHandler = (
@@ -130,18 +143,10 @@ const buildValidatedBareRouteHandler = (
 };
 
 const buildRouteHandler = (input: BuildRouteHandlerInput): BunRouteHandler => {
-  const allMiddlewares = [
-    ...input.globalMiddlewares,
-    ...(input.route.middlewares ?? []),
-  ];
-
+  const allMiddlewares = getRouteMiddlewares(input);
   const handler = input.route.handler;
-  const validateInput =
-    input.validation.input &&
-    (hasRequestSchema(input.route) ||
-      hasMiddlewareRequestSchema(allMiddlewares));
-  const validateOutput =
-    input.validation.output && hasResponseSchema(input.route);
+  const validateInput = shouldValidateInput(input, allMiddlewares);
+  const validateOutput = input.validation.output && !!input.route.response;
 
   if (allMiddlewares.length === 0 && isBareHandler(handler)) {
     if (!validateInput && !validateOutput) {

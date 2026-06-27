@@ -92,4 +92,37 @@ describe("validateRequest", () => {
       expect(result.data.params).toEqual({ id: "abc" });
     }
   });
+
+  test("validates multiple request zones together", async () => {
+    const req = new Request("http://localhost?active=true", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-role": "admin",
+      },
+      body: JSON.stringify({ name: "Alice" }),
+    }) as Bun.BunRequest & { params: Record<string, string> };
+
+    Object.defineProperty(req, "params", {
+      value: { id: "abc" },
+    });
+
+    const result = await validateRequest({
+      req,
+      schema: {
+        body: z.object({ name: z.string() }),
+        query: z.object({ active: z.string() }),
+        headers: z.object({ "x-role": z.string() }),
+        params: z.object({ id: z.string() }),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.body).toEqual({ name: "Alice" });
+      expect(result.data.query).toEqual({ active: "true" });
+      expect(result.data.headers).toEqual({ "x-role": "admin" });
+      expect(result.data.params).toEqual({ id: "abc" });
+    }
+  });
 });

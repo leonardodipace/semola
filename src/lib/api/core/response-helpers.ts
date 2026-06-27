@@ -1,3 +1,4 @@
+import { mightThrowSync } from "../../errors/index.js";
 import { validateSchema } from "../validation/index.js";
 import type { ResponseSchema } from "./types.js";
 
@@ -42,12 +43,14 @@ export const validatingJson = (responseSchema: ResponseSchema) => {
       return json(status, data);
     }
 
-    try {
+    const [error] = mightThrowSync(() => {
       validateSchema(schema, data);
+    });
 
-      return json(status, data);
-    } catch (error) {
-      return badRequest((error as Error).message);
+    if (error) {
+      return badRequest(error.message);
     }
+
+    return json(status, data);
   };
 };

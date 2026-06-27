@@ -7,7 +7,24 @@ import {
   validateParams,
   validateQuery,
 } from "./index.js";
-import type { ValidateRequestInput, ValidateRequestResult } from "./types.js";
+import type { ValidateRequestInput } from "./types.js";
+
+type SyncRequestField = "query" | "headers" | "cookies" | "params";
+
+type SyncValidator = {
+  field: SyncRequestField;
+  validate: (
+    req: Bun.BunRequest,
+    schema: NonNullable<RequestSchema[SyncRequestField]>,
+  ) => unknown;
+};
+
+const syncValidators = [
+  { field: "query", validate: validateQuery },
+  { field: "headers", validate: validateHeaders },
+  { field: "cookies", validate: validateCookies },
+  { field: "params", validate: validateParams },
+] as const satisfies readonly SyncValidator[];
 
 const hasOnlyBodySchema = (schema: RequestSchema) => {
   if (!schema.body) {
@@ -33,13 +50,11 @@ const hasOnlyBodySchema = (schema: RequestSchema) => {
   return true;
 };
 
-export const validateRequest = async (
-  input: ValidateRequestInput,
-): Promise<ValidateRequestResult> => {
+export const validateRequest = async (input: ValidateRequestInput) => {
   const schema = input.schema;
 
   if (!schema) {
-    return { success: true, data: {} };
+    return { success: true as const, data: {} };
   }
 
   if (hasOnlyBodySchema(schema)) {
@@ -48,10 +63,10 @@ export const validateRequest = async (
     );
 
     if (error) {
-      return { success: false, error };
+      return { success: false as const, error };
     }
 
-    return { success: true, data: { body } };
+    return { success: true as const, data: { body } };
   }
 
   const data: ValidatedRequest = {};
@@ -62,59 +77,29 @@ export const validateRequest = async (
     );
 
     if (error) {
-      return { success: false, error };
+      return { success: false as const, error };
     }
 
     data.body = body;
   }
 
-  if (schema.query) {
-    const [error, query] = mightThrowSync(() => {
-      return validateQuery(input.req, schema.query);
+  for (const { field, validate } of syncValidators) {
+    const fieldSchema = schema[field];
+
+    if (!fieldSchema) {
+      continue;
+    }
+
+    const [error, value] = mightThrowSync(() => {
+      return validate(input.req, fieldSchema);
     });
 
     if (error) {
-      return { success: false, error };
+      return { success: false as const, error };
     }
 
-    data.query = query;
+    data[field] = value;
   }
 
-  if (schema.headers) {
-    const [error, headers] = mightThrowSync(() => {
-      return validateHeaders(input.req, schema.headers);
-    });
-
-    if (error) {
-      return { success: false, error };
-    }
-
-    data.headers = headers;
-  }
-
-  if (schema.cookies) {
-    const [error, cookies] = mightThrowSync(() => {
-      return validateCookies(input.req, schema.cookies);
-    });
-
-    if (error) {
-      return { success: false, error };
-    }
-
-    data.cookies = cookies;
-  }
-
-  if (schema.params) {
-    const [error, params] = mightThrowSync(() => {
-      return validateParams(input.req, schema.params);
-    });
-
-    if (error) {
-      return { success: false, error };
-    }
-
-    data.params = params;
-  }
-
-  return { success: true, data };
+  return { success: true as const, data };
 };

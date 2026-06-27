@@ -68,45 +68,6 @@ const requestFields = [
   "params",
 ] as const;
 
-const mergeRequestSchemas = (schemas: Array<RequestSchema | undefined>) => {
-  const merged: RequestSchema = {};
-
-  for (const schema of schemas) {
-    if (!schema) {
-      continue;
-    }
-
-    for (const field of requestFields) {
-      if (schema[field]) {
-        merged[field] = schema[field];
-      }
-    }
-  }
-
-  return merged;
-};
-
-const mergeResponseSchemas = (schemas: Array<ResponseSchema | undefined>) => {
-  const merged: ResponseSchema = {};
-
-  for (const schema of schemas) {
-    if (!schema) {
-      continue;
-    }
-
-    for (const status in schema) {
-      const statusCode = Number(status);
-      const responseSchema = schema[statusCode];
-
-      if (responseSchema) {
-        merged[statusCode] = responseSchema;
-      }
-    }
-  }
-
-  return Object.keys(merged).length > 0 ? merged : undefined;
-};
-
 type JsonSchema = {
   type?: string;
   properties?: Record<string, unknown>;
@@ -321,29 +282,12 @@ const createOperation = (
   globalMiddlewares: readonly Middleware[],
   prefix?: string,
 ) => {
-  const allMiddlewares = [
-    ...(globalMiddlewares ?? []),
-    ...(route.middlewares ?? []),
-  ];
-
-  const requestSchemas: Array<RequestSchema | undefined> = [];
-  const responseSchemas: Array<ResponseSchema | undefined> = [];
-
-  for (const middleware of allMiddlewares) {
-    requestSchemas.push(middleware.options.request);
-    responseSchemas.push(middleware.options.response);
-  }
-
-  requestSchemas.push(route.request);
-  responseSchemas.push(route.response);
-
-  const mergedRequest = mergeRequestSchemas(requestSchemas);
-  const mergedResponse = mergeResponseSchemas(responseSchemas);
+  const { request, response } = createRouteSchemas(route, globalMiddlewares);
 
   const fullPath = prefix ? prefix + route.path : route.path;
-  const parameters = createParameters(mergedRequest, fullPath);
+  const parameters = createParameters(request, fullPath);
   const { responses, components: responseComponents } =
-    createResponses(mergedResponse);
+    createResponses(response);
 
   const operation: OpenApiOperation = {
     responses,
@@ -366,7 +310,7 @@ const createOperation = (
     operation.parameters = parameters;
   }
 
-  const bodySchema = mergedRequest.body;
+  const bodySchema = request.body;
 
   if (bodySchema) {
     const { requestBody, components: bodyComponents } =
@@ -380,24 +324,58 @@ const createOperation = (
   return { operation, components: allComponents };
 };
 
-const componentKeys = ["schemas"] as const;
+const createRouteSchemas = (
+  route: RouteConfigInternal,
+  globalMiddlewares: readonly Middleware[],
+) => {
+  const request: RequestSchema = {};
+  const response: ResponseSchema = {};
 
-// Merges multiple ComponentsObject into a single object
-// Handles deduplication by merging schemas with the same name
-const mergeComponents = (
-  componentsArray: OpenApiComponents[],
-): OpenApiComponents => {
-  const merged: Record<string, Record<string, unknown>> = {};
-
-  for (const components of componentsArray) {
-    for (const key of componentKeys) {
-      if (components[key]) {
-        merged[key] = { ...merged[key], ...components[key] };
-      }
-    }
+  for (const middleware of [
+    ...globalMiddlewares,
+    ...(route.middlewares ?? []),
+  ]) {
+    mergeIntoRequest(request, middleware.options.request);
+    mergeIntoResponse(response, middleware.options.response);
   }
 
-  return merged;
+  mergeIntoRequest(request, route.request);
+  mergeIntoResponse(response, route.response);
+
+  return {
+    request,
+    response: Object.keys(response).length > 0 ? response : undefined,
+  };
+};
+
+const mergeIntoRequest = (
+  target: RequestSchema,
+  schema: RequestSchema | undefined,
+) => {
+  if (!schema) {
+    return;
+  }
+
+  for (const field of requestFields) {
+    if (schema[field]) {
+      target[field] = schema[field];
+    }
+  }
+};
+
+const mergeIntoResponse = (target: ResponseSchema, schema?: ResponseSchema) => {
+  if (!schema) {
+    return;
+  }
+
+  for (const status in schema) {
+    const statusCode = Number(status);
+    const responseSchema = schema[statusCode];
+
+    if (responseSchema) {
+      target[statusCode] = responseSchema;
+    }
+  }
 };
 
 export const generateOpenApiSpec = (options: OpenApiGeneratorOptions) => {
@@ -415,22 +393,14 @@ export const generateOpenApiSpec = (options: OpenApiGeneratorOptions) => {
     spec.servers = options.servers;
   }
 
-  if (options.securitySchemes) {
-    spec.components = {
-      securitySchemes: options.securitySchemes,
-    };
-  }
-
-  const allRouteComponents: OpenApiComponents[] = [];
+  const schemas: Record<string, unknown> = {};
 
   for (const route of options.routes) {
     const fullPath = options.prefix ? options.prefix + route.path : route.path;
     const openApiPath = normalizePathForOpenAPI(fullPath);
     const method = route.method.toLowerCase();
 
-    if (!spec.paths[openApiPath]) {
-      spec.paths[openApiPath] = {};
-    }
+    spec.paths[openApiPath] ??= {};
 
     const { operation, components } = createOperation(
       route,
@@ -439,27 +409,23 @@ export const generateOpenApiSpec = (options: OpenApiGeneratorOptions) => {
     );
 
     spec.paths[openApiPath][method] = operation;
-    allRouteComponents.push(...components);
+
+    components.forEach((component) => {
+      Object.assign(schemas, component.schemas ?? {});
+    });
   }
 
-  // Merge all components into spec
-  const mergedComponents = mergeComponents(allRouteComponents);
+  const hasSchemas = Object.keys(schemas).length > 0;
 
-  if (!spec.components) {
+  if (options.securitySchemes || hasSchemas) {
     spec.components = {};
-  }
 
-  // Merge with existing security schemes
-  if (options.securitySchemes) {
-    spec.components.securitySchemes = options.securitySchemes;
-  }
+    if (options.securitySchemes) {
+      spec.components.securitySchemes = options.securitySchemes;
+    }
 
-  // Add collected component types if present
-  for (const key of componentKeys) {
-    const value = mergedComponents[key];
-
-    if (value && Object.keys(value).length > 0) {
-      spec.components[key] = value;
+    if (hasSchemas) {
+      spec.components.schemas = schemas;
     }
   }
 

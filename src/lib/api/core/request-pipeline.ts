@@ -6,6 +6,8 @@ import { badRequest } from "./response-helpers.js";
 import type { RequestPipelineConfig } from "./types.js";
 import { bodyHasMultipleReaders } from "./utils.js";
 
+const emptySuccess = { success: true as const, data: getEmptyValidated() };
+
 export class RequestPipeline {
   private bodyCache?: BodyCache;
 
@@ -63,7 +65,7 @@ export class RequestPipeline {
 
     let validated = getEmptyValidated();
 
-    if (this.config.validateInput) {
+    if (this.config.validateInput && requestSchema) {
       const result = await validateRequest({
         req: input.req,
         schema: requestSchema,
@@ -98,25 +100,17 @@ export class RequestPipeline {
 
   private async validateRouteRequest(req: Bun.BunRequest) {
     if (!this.config.validateInput) {
-      return {
-        success: true as const,
-        data: getEmptyValidated(),
-      };
+      return emptySuccess;
     }
 
-    const result = await validateRequest({
+    if (!this.config.routeRequest) {
+      return emptySuccess;
+    }
+
+    return validateRequest({
       req,
       schema: this.config.routeRequest,
       bodyCache: this.bodyCache,
     });
-
-    if (!result.success) {
-      return result;
-    }
-
-    return {
-      success: true as const,
-      data: result.data,
-    };
   }
 }

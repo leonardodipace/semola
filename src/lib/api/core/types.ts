@@ -238,7 +238,7 @@ export type BuildRouteHandlerInput = {
 };
 
 export type RequestPipelineConfig = {
-  middlewares: Middleware[];
+  middlewares: readonly Middleware[];
   routeRequest?: RequestSchema;
   routeResponse?: ResponseSchema;
   validateInput: boolean;
