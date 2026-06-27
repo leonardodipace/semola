@@ -1,13 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { RequestValidator } from "./request-validator.js";
+import { validateRequest } from "./request-validator.js";
 
-describe("RequestValidator", () => {
-  const validator = new RequestValidator();
-
+describe("validateRequest", () => {
   test("returns empty data when schema is omitted", async () => {
     const req = new Request("http://localhost") as Bun.BunRequest;
-    const result = await validator.validate({ req });
+    const result = await validateRequest({ req });
 
     expect(result.success).toBe(true);
     if (result.success) {
@@ -22,7 +20,7 @@ describe("RequestValidator", () => {
       body: JSON.stringify({ name: "Alice" }),
     }) as Bun.BunRequest;
 
-    const result = await validator.validate({
+    const result = await validateRequest({
       req,
       schema: { body: z.object({ name: z.string() }) },
     });
@@ -40,7 +38,7 @@ describe("RequestValidator", () => {
       body: JSON.stringify({ name: 123 }),
     }) as Bun.BunRequest;
 
-    const result = await validator.validate({
+    const result = await validateRequest({
       req,
       schema: { body: z.object({ name: z.string() }) },
     });
@@ -60,13 +58,13 @@ describe("RequestValidator", () => {
 
     const bodyCache = { parsed: false, value: undefined as unknown };
 
-    const first = await validator.validate({
+    const first = await validateRequest({
       req,
       schema: { body: z.object({ name: z.string() }) },
       bodyCache,
     });
 
-    const second = await validator.validate({
+    const second = await validateRequest({
       req,
       schema: { body: z.object({ name: z.string(), age: z.number() }) },
       bodyCache,
@@ -84,7 +82,7 @@ describe("RequestValidator", () => {
       params: { id: "abc" },
     } as unknown as Bun.BunRequest;
 
-    const result = await validator.validate({
+    const result = await validateRequest({
       req,
       schema: { params: z.object({ id: z.string() }) },
     });

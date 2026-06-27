@@ -1,5 +1,5 @@
 import type { Middleware } from "../middleware/index.js";
-import { RequestValidator } from "../validation/request-validator.js";
+import { validateRequest } from "../validation/request-validator.js";
 import type { BodyCache } from "../validation/types.js";
 import { createContext, getEmptyValidated } from "./context-factory.js";
 import { badRequest } from "./response-helpers.js";
@@ -7,7 +7,6 @@ import type { RequestPipelineConfig } from "./types.js";
 import { bodyHasMultipleReaders } from "./utils.js";
 
 export class RequestPipeline {
-  private validator = new RequestValidator();
   private bodyCache?: BodyCache;
 
   public constructor(private config: RequestPipelineConfig) {
@@ -65,7 +64,7 @@ export class RequestPipeline {
     let validated = getEmptyValidated();
 
     if (this.config.validateInput) {
-      const result = await this.validator.validate({
+      const result = await validateRequest({
         req: input.req,
         schema: requestSchema,
         bodyCache: this.bodyCache,
@@ -105,7 +104,7 @@ export class RequestPipeline {
       };
     }
 
-    const result = await this.validator.validate({
+    const result = await validateRequest({
       req,
       schema: this.config.routeRequest,
       bodyCache: this.bodyCache,

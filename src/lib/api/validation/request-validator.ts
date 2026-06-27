@@ -35,65 +35,63 @@ const syncFieldValidators = {
   (input: ValidateRequestInput) => unknown
 >;
 
-export class RequestValidator {
-  private validateField<T>(validate: () => T) {
-    const [error, value] = mightThrowSync(validate);
+const validateField = <T>(validate: () => T) => {
+  const [error, value] = mightThrowSync(validate);
 
-    if (error) {
-      return { success: false as const, error };
-    }
-
-    return { success: true as const, value };
+  if (error) {
+    return { success: false as const, error };
   }
 
-  private async validateFieldAsync<T>(validate: () => Promise<T>) {
-    const [error, value] = await mightThrow(validate());
+  return { success: true as const, value };
+};
 
-    if (error) {
-      return { success: false as const, error };
-    }
+const validateFieldAsync = async <T>(validate: () => Promise<T>) => {
+  const [error, value] = await mightThrow(validate());
 
-    return { success: true as const, value };
+  if (error) {
+    return { success: false as const, error };
   }
 
-  public async validate(
-    input: ValidateRequestInput,
-  ): Promise<ValidateRequestResult> {
-    if (!input.schema) {
-      return { success: true, data: {} };
+  return { success: true as const, value };
+};
+
+export const validateRequest = async (
+  input: ValidateRequestInput,
+): Promise<ValidateRequestResult> => {
+  if (!input.schema) {
+    return { success: true, data: {} };
+  }
+
+  const data: ValidatedRequest = {};
+
+  for (const field of schemaFields) {
+    if (!input.schema[field]) {
+      continue;
     }
 
-    const data: ValidatedRequest = {};
-
-    for (const field of schemaFields) {
-      if (!input.schema[field]) {
-        continue;
-      }
-
-      if (field === "body") {
-        const result = await this.validateFieldAsync(() => {
-          return validateBody(input.req, input.schema?.body, input.bodyCache);
-        });
-
-        if (!result.success) {
-          return { success: false, error: result.error };
-        }
-
-        data.body = result.value;
-        continue;
-      }
-
-      const result = this.validateField(() => {
-        return syncFieldValidators[field](input);
+    if (field === "body") {
+      const result = await validateFieldAsync(() => {
+        return validateBody(input.req, input.schema?.body, input.bodyCache);
       });
 
       if (!result.success) {
         return { success: false, error: result.error };
       }
 
-      data[field] = result.value;
+      data.body = result.value;
+      continue;
     }
 
-    return { success: true, data };
+    const result = validateField(() => {
+      return syncFieldValidators[field](input);
+    });
+
+    if (!result.success) {
+      return { success: false, error: result.error };
+    }
+
+    data[field] = result.value;
   }
-}
+
+  return { success: true, data };
+};
