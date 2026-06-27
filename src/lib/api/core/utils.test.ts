@@ -3,10 +3,8 @@ import { z } from "zod";
 import { Middleware } from "../middleware/index.js";
 import {
   bodyHasMultipleReaders,
-  classifyRoute,
   getFullPath,
   hasRequestSchemas,
-  onlyValidatesBody,
   resolveValidation,
 } from "./utils.js";
 
@@ -62,78 +60,6 @@ describe("utils", () => {
     test("returns true when any field is set", () => {
       expect(hasRequestSchemas({ body: z.object({}) })).toBeTruthy();
       expect(hasRequestSchemas({ params: z.object({}) })).toBeTruthy();
-    });
-  });
-
-  describe("onlyValidatesBody", () => {
-    test("returns true for body-only schema", () => {
-      expect(onlyValidatesBody({ body: z.object({ name: z.string() }) })).toBe(
-        true,
-      );
-    });
-
-    test("returns false when other fields are present", () => {
-      expect(
-        onlyValidatesBody({
-          body: z.object({ name: z.string() }),
-          query: z.object({ q: z.string() }),
-        }),
-      ).toBe(false);
-    });
-  });
-
-  describe("classifyRoute", () => {
-    test("returns simple for bare routes", () => {
-      expect(
-        classifyRoute({
-          middlewares: [],
-          validation: resolveValidation(),
-        }),
-      ).toBe("simple");
-    });
-
-    test("returns outputOnly when only response schema is validated", () => {
-      expect(
-        classifyRoute({
-          middlewares: [],
-          response: { 200: z.object({ ok: z.boolean() }) },
-          validation: resolveValidation(),
-        }),
-      ).toBe("outputOnly");
-    });
-
-    test("returns bodyOnly for body-only input validation", () => {
-      expect(
-        classifyRoute({
-          middlewares: [],
-          request: { body: z.object({ name: z.string() }) },
-          validation: resolveValidation(),
-        }),
-      ).toBe("bodyOnly");
-    });
-
-    test("returns full for middleware or multi-field validation", () => {
-      const mw = new Middleware({
-        handler: () => ({}),
-      });
-
-      expect(
-        classifyRoute({
-          middlewares: [mw],
-          validation: resolveValidation(),
-        }),
-      ).toBe("full");
-
-      expect(
-        classifyRoute({
-          middlewares: [],
-          request: {
-            body: z.object({ name: z.string() }),
-            query: z.object({ q: z.string() }),
-          },
-          validation: resolveValidation(),
-        }),
-      ).toBe("full");
     });
   });
 

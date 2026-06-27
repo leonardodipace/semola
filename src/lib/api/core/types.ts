@@ -200,8 +200,6 @@ export type ResolvedValidation = {
   output: boolean;
 };
 
-export type RouteKind = "simple" | "outputOnly" | "bodyOnly" | "full";
-
 export type InternalContext = {
   raw: Bun.BunRequest;
   req: ValidatedRequest;

@@ -2,8 +2,6 @@ import type { Middleware } from "../middleware/index.js";
 import type {
   RequestSchema,
   ResolvedValidation,
-  ResponseSchema,
-  RouteKind,
   ValidationOptions,
 } from "./types.js";
 
@@ -37,16 +35,6 @@ export const hasRequestSchemas = (schema?: RequestSchema) => {
   if (schema.params) return true;
 
   return false;
-};
-
-export const onlyValidatesBody = (schema?: RequestSchema) => {
-  if (!schema?.body) return false;
-  if (schema.query) return false;
-  if (schema.headers) return false;
-  if (schema.cookies) return false;
-  if (schema.params) return false;
-
-  return true;
 };
 
 const validatesBody = (schema?: RequestSchema) => {
@@ -91,33 +79,4 @@ export const resolveValidation = (
     input: options.input !== false,
     output: options.output !== false,
   };
-};
-
-export const classifyRoute = (input: {
-  middlewares: Middleware[];
-  request?: RequestSchema;
-  response?: ResponseSchema;
-  validation: ResolvedValidation;
-}): RouteKind => {
-  if (input.middlewares.length > 0) {
-    return "full";
-  }
-
-  const validateInput =
-    input.validation.input && hasRequestSchemas(input.request);
-  const validateOutput = input.validation.output && !!input.response;
-
-  if (!validateInput && !validateOutput) {
-    return "simple";
-  }
-
-  if (!validateInput && validateOutput) {
-    return "outputOnly";
-  }
-
-  if (validateInput && onlyValidatesBody(input.request) && !validateOutput) {
-    return "bodyOnly";
-  }
-
-  return "full";
 };
