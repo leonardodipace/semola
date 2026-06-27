@@ -49,6 +49,50 @@ describe("Api Core", () => {
     expect(body).toEqual({ message: "world" });
   });
 
+  test("should reuse compiled routes across fetch calls", async () => {
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/hello",
+      method: "GET",
+      handler: () => "ok",
+    });
+
+    const first = api.getRouteHandlers();
+    const second = api.getRouteHandlers();
+
+    expect(first).toBe(second);
+    expect(first["/hello"]?.GET).toBe(second["/hello"]?.GET);
+
+    await api.fetch(new Request("http://localhost/hello"));
+
+    const third = api.getRouteHandlers();
+
+    expect(third).toBe(first);
+  });
+
+  test("should map bare return handlers to responses", async () => {
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/text",
+      method: "GET",
+      handler: () => "Hello World",
+    });
+
+    api.defineRoute({
+      path: "/json",
+      method: "GET",
+      handler: () => ({ message: "Hello World" }),
+    });
+
+    const textRes = await api.fetch(new Request("http://localhost/text"));
+    const jsonRes = await api.fetch(new Request("http://localhost/json"));
+
+    expect(await textRes.text()).toBe("Hello World");
+    expect(await jsonRes.json()).toEqual({ message: "Hello World" });
+  });
+
   test("should normalize prefix", async () => {
     const api = new Api({
       prefix: "/api/",

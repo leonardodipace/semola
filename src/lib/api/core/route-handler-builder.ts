@@ -5,11 +5,41 @@ import { RequestPipeline } from "./request-pipeline.js";
 import { badRequest, validatingJson } from "./response-helpers.js";
 import type {
   AnyRouteHandler,
+  BareRouteHandler,
   BuildRouteHandlerInput,
   BunRouteHandler,
   ResponseSchema,
+  RouteReturn,
 } from "./types.js";
 import { classifyRoute } from "./utils.js";
+
+const isBareHandler = (handler: unknown) => {
+  return typeof handler === "function" && handler.length === 0;
+};
+
+const toResponse = (value: RouteReturn): Response => {
+  if (value instanceof Response) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return new Response(value);
+  }
+
+  return Response.json(value);
+};
+
+const buildBareHandler = (handler: BareRouteHandler): BunRouteHandler => {
+  const probe = handler();
+
+  if (probe instanceof Promise) {
+    return async () => toResponse(await handler());
+  }
+
+  const response = toResponse(probe);
+
+  return () => response;
+};
 
 const buildSimpleHandler = (handler: AnyRouteHandler): BunRouteHandler => {
   return (req) => {
@@ -60,22 +90,26 @@ export class RouteHandlerBuilder {
       validation: input.validation,
     });
 
-    const handler = input.route.handler as AnyRouteHandler;
+    const handler = input.route.handler;
 
     if (kind === "simple") {
-      return buildSimpleHandler(handler);
+      if (isBareHandler(handler)) {
+        return buildBareHandler(handler as BareRouteHandler);
+      }
+
+      return buildSimpleHandler(handler as AnyRouteHandler);
     }
 
     if (kind === "outputOnly") {
       return buildOutputValidatedHandler({
-        handler,
+        handler: handler as AnyRouteHandler,
         responseSchema: input.route.response as ResponseSchema,
       });
     }
 
     if (kind === "bodyOnly") {
       return buildBodyOnlyHandler({
-        handler,
+        handler: handler as AnyRouteHandler,
         bodySchema: input.route.request?.body as StandardSchemaV1,
       });
     }
@@ -86,7 +120,7 @@ export class RouteHandlerBuilder {
       routeResponse: input.route.response,
       validateInput: input.validation.input,
       validateOutput: input.validation.output && !!input.route.response,
-      handler,
+      handler: handler as AnyRouteHandler,
     });
 
     return (req) => {

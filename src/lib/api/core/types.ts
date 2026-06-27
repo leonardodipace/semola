@@ -143,11 +143,19 @@ export type Context<
   get: <K extends keyof TExt>(key: K) => TExt[K];
 };
 
+export type RouteReturn =
+  | Response
+  | string
+  | Record<string, unknown>
+  | unknown[];
+
 export type RouteHandler<
   TReq extends RequestSchema = RequestSchema,
   TRes extends ResponseSchema | undefined = undefined,
   TExt extends Record<string, unknown> = Record<string, unknown>,
 > = (c: Context<TReq, TRes, TExt>) => Response | Promise<Response>;
+
+export type BareRouteHandler = () => RouteReturn | Promise<RouteReturn>;
 
 export type ValidatedRequest = {
   body: unknown;
@@ -173,12 +181,14 @@ export type RouteConfig<
   request?: TReq;
   response?: TRes;
   middlewares?: TRouteMiddlewares;
-  handler: RouteHandler<
-    TReq,
-    TRes,
-    MergeMiddlewareExtensions<TGlobalMiddlewares> &
-      MergeMiddlewareExtensions<TRouteMiddlewares>
-  >;
+  handler:
+    | RouteHandler<
+        TReq,
+        TRes,
+        MergeMiddlewareExtensions<TGlobalMiddlewares> &
+          MergeMiddlewareExtensions<TRouteMiddlewares>
+      >
+    | BareRouteHandler;
   summary?: string;
   description?: string;
   operationId?: string;

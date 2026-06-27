@@ -7,6 +7,24 @@ describe("RouteHandlerBuilder", () => {
   const builder = new RouteHandlerBuilder();
   const user = { name: "Alice" };
 
+  test("builds bare return route handler", async () => {
+    const handler = builder.build({
+      route: {
+        path: "/hello",
+        method: "GET",
+        handler: () => "Hello World",
+      },
+      globalMiddlewares: [],
+      validation: { input: true, output: true },
+    });
+
+    const req = new Request("http://localhost/hello") as Bun.BunRequest;
+    const res = await handler(req);
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("Hello World");
+  });
+
   test("builds simple route handler", async () => {
     const handler = builder.build({
       route: {

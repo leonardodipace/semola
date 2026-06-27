@@ -1,17 +1,24 @@
 import type { Middleware } from "../middleware/index.js";
 import { generateOpenApiSpec } from "../openapi/index.js";
+import { buildFetchDispatcher } from "./fetch-dispatcher.js";
 import { RouteRegistry } from "./route-registry.js";
 import type {
   ApiOptions,
+  MethodRoutes,
   RequestSchema,
   ResponseSchema,
   RouteConfig,
 } from "./types.js";
-import { resolveValidation, stripTrailingSlash } from "./utils.js";
+import { resolveValidation } from "./utils.js";
 
 export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
   private options: ApiOptions<TMiddlewares>;
   private registry: RouteRegistry;
+  private routesDirty = true;
+  private compiled?: {
+    routes: MethodRoutes;
+    fetch: (req: Request) => Response | Promise<Response>;
+  };
 
   public constructor(options: ApiOptions<TMiddlewares> = {}) {
     this.options = options;
@@ -24,39 +31,15 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     TRouteMiddlewares extends readonly Middleware[] = readonly [],
   >(config: RouteConfig<TReq, TRes, TMiddlewares, TRouteMiddlewares>) {
     this.registry.addRoute(config);
+    this.routesDirty = true;
   }
 
   public fetch(req: Request) {
-    const url = new URL(req.url);
-    const pathname = stripTrailingSlash(url.pathname) || "/";
-    const method = req.method as Bun.Serve.HTTPMethod;
-    const bunRoutes = this.getRouteHandlers();
-    const server = undefined as unknown as Bun.Server<unknown>;
-
-    for (const [pattern, methods] of Object.entries(bunRoutes)) {
-      const match = new URLPattern({ pathname: pattern }).exec({ pathname });
-
-      if (!match) continue;
-
-      const handler = methods[method];
-
-      if (!handler) continue;
-
-      const apiReq = Object.assign(req, {
-        params: match.pathname.groups,
-      });
-
-      return Promise.resolve(handler(apiReq as Bun.BunRequest, server));
-    }
-
-    return Promise.resolve(new Response("Not found", { status: 404 }));
+    return this.ensureCompiled().fetch(req);
   }
 
   public getRouteHandlers() {
-    return this.registry.buildRoutes({
-      globalMiddlewares: this.options.middlewares,
-      validation: resolveValidation(this.options.validation),
-    });
+    return this.ensureCompiled().routes;
   }
 
   public getOpenApiSpec() {
@@ -82,5 +65,25 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     if (callback) {
       callback(server);
     }
+  }
+
+  private ensureCompiled() {
+    if (!this.routesDirty && this.compiled) {
+      return this.compiled;
+    }
+
+    const routes = this.registry.buildRoutes({
+      globalMiddlewares: this.options.middlewares,
+      validation: resolveValidation(this.options.validation),
+    });
+
+    this.compiled = {
+      routes,
+      fetch: buildFetchDispatcher(routes),
+    };
+
+    this.routesDirty = false;
+
+    return this.compiled;
   }
 }
