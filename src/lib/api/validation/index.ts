@@ -1,18 +1,12 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { mightThrow } from "../../errors/index.js";
 import { ParseError, ValidationError } from "../errors.js";
 
-export const validateSchema = async <T>(
-  schema: StandardSchemaV1,
-  data: unknown,
+const formatIssues = (
+  issues: NonNullable<
+    Awaited<ReturnType<StandardSchemaV1["~standard"]["validate"]>>["issues"]
+  >,
 ) => {
-  const result = await schema["~standard"].validate(data);
-
-  if (!result.issues) {
-    return result.value as T;
-  }
-
-  const issues = result.issues.map((issue) => {
+  const messages = issues.map((issue) => {
     let path = "unknown";
 
     if (Array.isArray(issue.path)) {
@@ -22,9 +16,30 @@ export const validateSchema = async <T>(
     return `${path}: ${issue.message ?? "validation failed"}`;
   });
 
-  const message = issues.join(", ");
+  return messages.join(", ");
+};
 
-  throw new ValidationError(message);
+const processResult = <T>(
+  result: Awaited<ReturnType<StandardSchemaV1["~standard"]["validate"]>>,
+) => {
+  if (!result.issues) {
+    return result.value as T;
+  }
+
+  throw new ValidationError(formatIssues(result.issues));
+};
+
+export const validateSchema = <T>(
+  schema: StandardSchemaV1,
+  data: unknown,
+): T | Promise<T> => {
+  const output = schema["~standard"].validate(data);
+
+  if (output instanceof Promise) {
+    return output.then((result) => processResult<T>(result));
+  }
+
+  return processResult<T>(output);
 };
 
 export type BodyCache = { parsed: boolean; value: unknown };
@@ -49,9 +64,11 @@ export const validateBody = async (
     return validateSchema(bodySchema, bodyCache.value);
   }
 
-  const [parseError, parsedBody] = await mightThrow(req.json());
+  let parsedBody: unknown;
 
-  if (parseError) {
+  try {
+    parsedBody = await req.json();
+  } catch {
     throw new ParseError("Invalid JSON body");
   }
 

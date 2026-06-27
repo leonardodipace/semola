@@ -20,12 +20,14 @@ describe("Validation Module", () => {
 
       const invalid = { user: { email: "invalid" } };
 
-      const promise1 = validateSchema(schema, invalid);
-      await expect(promise1).rejects.toMatchObject({
+      const runValidation = async () => {
+        await validateSchema(schema, invalid);
+      };
+
+      await expect(runValidation()).rejects.toMatchObject({
         message: expect.stringContaining("user.email:"),
       });
-      const promise2 = validateSchema(schema, invalid);
-      await expect(promise2).rejects.toMatchObject({
+      await expect(runValidation()).rejects.toMatchObject({
         message: expect.stringContaining("age:"),
       });
     });
