@@ -1,5 +1,4 @@
 import type { ApiRequest, BunRouteHandler, MethodRoutes } from "./types.js";
-import { stripTrailingSlash } from "./utils.js";
 
 type HTTPMethod = Bun.Serve.HTTPMethod;
 type RouteMethods = Partial<Record<HTTPMethod, BunRouteHandler>>;
@@ -24,15 +23,15 @@ const pathnameFromRequestUrl = (url: string) => {
     pathname = url.slice(pathStart, query);
   }
 
-  const normalized = stripTrailingSlash(pathname);
+  if (pathname.length > 1 && pathname.endsWith("/")) {
+    return pathname.slice(0, -1);
+  }
 
-  if (!normalized) return "/";
-
-  return normalized;
+  return pathname;
 };
 
 export const buildFetchDispatcher = (bunRoutes: MethodRoutes) => {
-  const staticRoutes = new Map<string, RouteMethods>();
+  const staticRoutes: Record<string, RouteMethods> = Object.create(null);
   const dynamicRoutes: Array<{
     pattern: URLPattern;
     methods: RouteMethods;
@@ -50,13 +49,13 @@ export const buildFetchDispatcher = (bunRoutes: MethodRoutes) => {
       continue;
     }
 
-    staticRoutes.set(path, handlers);
+    staticRoutes[path] = handlers;
   }
 
   return (req: Request): Response | Promise<Response> => {
     const pathname = pathnameFromRequestUrl(req.url);
     const method = req.method as HTTPMethod;
-    const staticHandler = staticRoutes.get(pathname)?.[method];
+    const staticHandler = staticRoutes[pathname]?.[method];
 
     if (staticHandler) {
       return staticHandler(req as Bun.BunRequest);

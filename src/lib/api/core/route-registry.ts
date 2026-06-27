@@ -1,5 +1,8 @@
 import type { Middleware } from "../middleware/index.js";
+import { validateSchema } from "../validation/index.js";
+import { validateRequest } from "../validation/request-validator.js";
 import { RequestPipeline } from "./request-pipeline.js";
+import { badRequest } from "./response-helpers.js";
 import type {
   AnyRouteHandler,
   BareRouteHandler,
@@ -42,6 +45,90 @@ const buildBareHandler = (handler: BareRouteHandler): BunRouteHandler => {
   return () => response;
 };
 
+const toValidatedResponse = (
+  value: RouteReturn,
+  schema: ResponseSchema[number] | undefined,
+) => {
+  if (!schema) {
+    return toResponse(value);
+  }
+
+  try {
+    validateSchema(schema, value);
+
+    return toResponse(value);
+  } catch (error) {
+    return badRequest((error as Error).message);
+  }
+};
+
+const hasRequestSchema = (route: BuildRouteHandlerInput["route"]) => {
+  return !!route.request;
+};
+
+const hasResponseSchema = (route: BuildRouteHandlerInput["route"]) => {
+  return !!route.response;
+};
+
+const hasMiddlewareRequestSchema = (middlewares: readonly Middleware[]) => {
+  for (const middleware of middlewares) {
+    if (middleware.options.request) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+const buildValidatedBareRouteHandler = (
+  handler: BareRouteHandler,
+  request: RequestSchema | undefined,
+  response: ResponseSchema | undefined,
+  validateInput: boolean,
+  validateOutput: boolean,
+) => {
+  const responseSchema = validateOutput ? response?.[200] : undefined;
+  const probe = handler();
+
+  if (probe instanceof Promise) {
+    if (!validateInput) {
+      return async () => {
+        const value = await handler();
+
+        return toValidatedResponse(value, responseSchema);
+      };
+    }
+
+    return async (req: Bun.BunRequest) => {
+      const validated = await validateRequest({ req, schema: request });
+
+      if (!validated.success) {
+        return badRequest(validated.error.message);
+      }
+
+      const value = await handler();
+
+      return toValidatedResponse(value, responseSchema);
+    };
+  }
+
+  const result = toValidatedResponse(probe, responseSchema);
+
+  if (!validateInput) {
+    return () => result;
+  }
+
+  return async (req: Bun.BunRequest) => {
+    const validated = await validateRequest({ req, schema: request });
+
+    if (!validated.success) {
+      return badRequest(validated.error.message);
+    }
+
+    return result;
+  };
+};
+
 const buildRouteHandler = (input: BuildRouteHandlerInput): BunRouteHandler => {
   const allMiddlewares = [
     ...input.globalMiddlewares,
@@ -49,17 +136,33 @@ const buildRouteHandler = (input: BuildRouteHandlerInput): BunRouteHandler => {
   ];
 
   const handler = input.route.handler;
+  const validateInput =
+    input.validation.input &&
+    (hasRequestSchema(input.route) ||
+      hasMiddlewareRequestSchema(allMiddlewares));
+  const validateOutput =
+    input.validation.output && hasResponseSchema(input.route);
 
   if (allMiddlewares.length === 0 && isBareHandler(handler)) {
-    return buildBareHandler(handler as BareRouteHandler);
+    if (!validateInput && !validateOutput) {
+      return buildBareHandler(handler as BareRouteHandler);
+    }
+
+    return buildValidatedBareRouteHandler(
+      handler as BareRouteHandler,
+      input.route.request,
+      input.route.response,
+      validateInput,
+      validateOutput,
+    );
   }
 
   const pipeline = new RequestPipeline({
     middlewares: allMiddlewares,
     routeRequest: input.route.request,
     routeResponse: input.route.response,
-    validateInput: input.validation.input,
-    validateOutput: input.validation.output && !!input.route.response,
+    validateInput,
+    validateOutput,
     handler: handler as AnyRouteHandler,
   });
 

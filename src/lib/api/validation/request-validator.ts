@@ -9,88 +9,111 @@ import {
 } from "./index.js";
 import type { ValidateRequestInput, ValidateRequestResult } from "./types.js";
 
-const schemaFields = [
-  "body",
-  "query",
-  "headers",
-  "cookies",
-  "params",
-] as const satisfies readonly (keyof RequestSchema)[];
-
-const syncFieldValidators = {
-  query: (input: ValidateRequestInput) => {
-    return validateQuery(input.req, input.schema?.query);
-  },
-  headers: (input: ValidateRequestInput) => {
-    return validateHeaders(input.req, input.schema?.headers);
-  },
-  cookies: (input: ValidateRequestInput) => {
-    return validateCookies(input.req, input.schema?.cookies);
-  },
-  params: (input: ValidateRequestInput) => {
-    return validateParams(input.req, input.schema?.params);
-  },
-} as const satisfies Record<
-  Exclude<keyof RequestSchema, "body">,
-  (input: ValidateRequestInput) => unknown
->;
-
-const validateField = <T>(validate: () => T) => {
-  const [error, value] = mightThrowSync(validate);
-
-  if (error) {
-    return { success: false as const, error };
+const hasOnlyBodySchema = (schema: RequestSchema) => {
+  if (!schema.body) {
+    return false;
   }
 
-  return { success: true as const, value };
-};
-
-const validateFieldAsync = async <T>(validate: () => Promise<T>) => {
-  const [error, value] = await mightThrow(validate());
-
-  if (error) {
-    return { success: false as const, error };
+  if (schema.query) {
+    return false;
   }
 
-  return { success: true as const, value };
+  if (schema.headers) {
+    return false;
+  }
+
+  if (schema.cookies) {
+    return false;
+  }
+
+  if (schema.params) {
+    return false;
+  }
+
+  return true;
 };
 
 export const validateRequest = async (
   input: ValidateRequestInput,
 ): Promise<ValidateRequestResult> => {
-  if (!input.schema) {
+  const schema = input.schema;
+
+  if (!schema) {
     return { success: true, data: {} };
+  }
+
+  if (hasOnlyBodySchema(schema)) {
+    const [error, body] = await mightThrow(
+      validateBody(input.req, schema.body, input.bodyCache),
+    );
+
+    if (error) {
+      return { success: false, error };
+    }
+
+    return { success: true, data: { body } };
   }
 
   const data: ValidatedRequest = {};
 
-  for (const field of schemaFields) {
-    if (!input.schema[field]) {
-      continue;
+  if (schema.body) {
+    const [error, body] = await mightThrow(
+      validateBody(input.req, schema.body, input.bodyCache),
+    );
+
+    if (error) {
+      return { success: false, error };
     }
 
-    if (field === "body") {
-      const result = await validateFieldAsync(() => {
-        return validateBody(input.req, input.schema?.body, input.bodyCache);
-      });
+    data.body = body;
+  }
 
-      if (!result.success) {
-        return { success: false, error: result.error };
-      }
-
-      data.body = result.value;
-      continue;
-    }
-
-    const result = validateField(() => {
-      return syncFieldValidators[field](input);
+  if (schema.query) {
+    const [error, query] = mightThrowSync(() => {
+      return validateQuery(input.req, schema.query);
     });
 
-    if (!result.success) {
-      return { success: false, error: result.error };
+    if (error) {
+      return { success: false, error };
     }
 
-    data[field] = result.value;
+    data.query = query;
+  }
+
+  if (schema.headers) {
+    const [error, headers] = mightThrowSync(() => {
+      return validateHeaders(input.req, schema.headers);
+    });
+
+    if (error) {
+      return { success: false, error };
+    }
+
+    data.headers = headers;
+  }
+
+  if (schema.cookies) {
+    const [error, cookies] = mightThrowSync(() => {
+      return validateCookies(input.req, schema.cookies);
+    });
+
+    if (error) {
+      return { success: false, error };
+    }
+
+    data.cookies = cookies;
+  }
+
+  if (schema.params) {
+    const [error, params] = mightThrowSync(() => {
+      return validateParams(input.req, schema.params);
+    });
+
+    if (error) {
+      return { success: false, error };
+    }
+
+    data.params = params;
   }
 
   return { success: true, data };

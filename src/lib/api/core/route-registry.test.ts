@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { z } from "zod";
 import { RouteRegistry } from "./route-registry.js";
 
 describe("RouteRegistry", () => {
@@ -60,5 +61,52 @@ describe("RouteRegistry", () => {
 
     expect(routes["/resource"]?.GET).toBeDefined();
     expect(routes["/resource"]?.POST).toBeDefined();
+  });
+
+  test("validates bare handler request schemas", async () => {
+    const registry = new RouteRegistry({});
+
+    registry.addRoute({
+      path: "/user",
+      method: "POST",
+      request: { body: z.object({ name: z.string() }) },
+      handler: () => "ok",
+    });
+
+    const routes = registry.buildRoutes({
+      validation: { input: true, output: true },
+    });
+
+    const handler = routes["/user"]?.POST;
+    const req = new Request("http://localhost/user", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: 123 }),
+    }) as Bun.BunRequest;
+
+    const res = await handler?.(req, {} as Bun.Server<unknown>);
+
+    expect(res?.status).toBe(400);
+  });
+
+  test("validates bare handler response schemas", async () => {
+    const registry = new RouteRegistry({});
+
+    registry.addRoute({
+      path: "/user",
+      method: "GET",
+      response: { 200: z.object({ name: z.string() }) },
+      handler: () => ({ name: 123 }),
+    });
+
+    const routes = registry.buildRoutes({
+      validation: { input: true, output: true },
+    });
+
+    const handler = routes["/user"]?.GET;
+    const req = new Request("http://localhost/user") as Bun.BunRequest;
+    const res = await handler?.(req, {} as Bun.Server<unknown>);
+
+    expect(res?.status).toBe(400);
   });
 });
