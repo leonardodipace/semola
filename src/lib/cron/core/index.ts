@@ -142,9 +142,7 @@ export class RetryCronJob implements RetryObserver {
   private calculateDelay(jobAttempt: number) {
     // exponential backoff with "Full Jitter" algorithm
 
-    const deltaTime =
-      BASE_BACKOFF_DELAY * BACKOFF_MULTIPLIER ** (jobAttempt - 1);
-
+    const deltaTime = BASE_BACKOFF_DELAY * BACKOFF_MULTIPLIER ** jobAttempt;
     const minDeltaTime = Math.min(deltaTime, MAX_BACKOFF_DELAY);
     return Math.round(Math.random() * (minDeltaTime + 1));
   }
