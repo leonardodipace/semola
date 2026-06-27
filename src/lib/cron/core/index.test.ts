@@ -698,11 +698,11 @@ describe("Cron", () => {
     });
 
     test("keeps per-job retry state when a RetryCronJob instance is shared", async () => {
-      const firstFailureRetriesLeft: number[] = [];
+      const perJobFailes: { retriesLeft: number; jobName: string }[] = [];
       const retry = new RetryCronJob({
         maxAttempts: 2,
-        onFailedAttempt: ({ retriesLeft }) => {
-          firstFailureRetriesLeft.push(retriesLeft);
+        onFailedAttempt: ({ retriesLeft, jobName }) => {
+          perJobFailes.push({ retriesLeft, jobName });
         },
       });
 
@@ -737,8 +737,15 @@ describe("Cron", () => {
       await retry.update(ctxA);
       await retry.update(ctxB);
 
-      expect(firstFailureRetriesLeft[0]).toBe(2);
-      expect(firstFailureRetriesLeft[1]).toBe(2);
+      expect(perJobFailes[0]).toMatchObject({
+        retriesLeft: 2,
+        jobName: "job-a",
+      });
+
+      expect(perJobFailes[1]).toMatchObject({
+        retriesLeft: 2,
+        jobName: "job-b",
+      });
     });
 
     describe("Validate attempts", () => {
