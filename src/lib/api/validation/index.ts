@@ -19,7 +19,7 @@ const formatIssues = (
   return messages.join(", ");
 };
 
-const processResult = <T>(
+const readValidationResult = <T>(
   result: Awaited<ReturnType<StandardSchemaV1["~standard"]["validate"]>>,
 ) => {
   if (!result.issues) {
@@ -33,18 +33,17 @@ export const validateSchema = <T>(
   schema: StandardSchemaV1,
   data: unknown,
 ): T | Promise<T> => {
-  const output = schema["~standard"].validate(data);
+  const result = schema["~standard"].validate(data);
 
-  if (output instanceof Promise) {
-    return output.then((result) => processResult<T>(result));
+  if (result instanceof Promise) {
+    return result.then((output) => readValidationResult<T>(output));
   }
 
-  return processResult<T>(output);
+  return readValidationResult<T>(result);
 };
 
 export type BodyCache = { parsed: boolean; value: unknown };
 
-// Body cache prevents re-parsing JSON when multiple middlewares validate the same body
 export const validateBody = async (
   req: Request,
   bodySchema?: StandardSchemaV1,
@@ -88,18 +87,18 @@ export const validateQuery = async (
     return true;
   }
 
-  const qIndex = req.url.indexOf("?");
+  const queryStart = req.url.indexOf("?");
 
-  if (qIndex === -1) {
+  if (queryStart === -1) {
     return validateSchema(querySchema, {});
   }
 
-  // Handle both query strings and URL fragments
-  const hashIndex = req.url.indexOf("#", qIndex + 1);
-  const queryString =
-    hashIndex === -1
-      ? req.url.slice(qIndex + 1)
-      : req.url.slice(qIndex + 1, hashIndex);
+  const hashStart = req.url.indexOf("#", queryStart + 1);
+  let queryString = req.url.slice(queryStart + 1);
+
+  if (hashStart !== -1) {
+    queryString = req.url.slice(queryStart + 1, hashStart);
+  }
 
   const searchParams = new URLSearchParams(queryString);
   const queryParams: Record<string, string | string[]> = {};
@@ -143,7 +142,6 @@ export const validateCookies = async (
     return true;
   }
 
-  // Use Bun's native CookieMap for efficient cookie parsing
   const cookieHeader = req.headers.get("cookie") ?? "";
   const cookieMap = new Bun.CookieMap(cookieHeader);
   const cookies = Object.fromEntries(cookieMap);

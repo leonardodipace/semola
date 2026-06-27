@@ -21,7 +21,7 @@ import type {
   ValidationOptions,
 } from "./types.js";
 
-const defaultValidated: ValidatedRequest = Object.freeze({
+const emptyValidated: ValidatedRequest = Object.freeze({
   body: undefined,
   query: undefined,
   headers: undefined,
@@ -29,19 +29,32 @@ const defaultValidated: ValidatedRequest = Object.freeze({
   params: undefined,
 });
 
-const noopGet = () => undefined;
+const getNothing = () => undefined;
 
-const jsonResponse = (status: number, data: unknown) =>
-  status === 200 ? Response.json(data) : Response.json(data, { status });
+const json = (status: number, data: unknown) => {
+  if (status === 200) {
+    return Response.json(data);
+  }
 
-const textResponse = (status: number, text: string) =>
-  status === 200 ? new Response(text) : new Response(text, { status });
+  return Response.json(data, { status });
+};
+
+const text = (status: number, body: string) => {
+  if (status === 200) {
+    return new Response(body);
+  }
+
+  return new Response(body, { status });
+};
+
+const html = (status: number, body: string) =>
+  new Response(body, { status, headers: { "Content-Type": "text/html" } });
+
+const redirect = (status: number, url: string) =>
+  Response.redirect(url, status);
 
 const badRequest = (message?: string) =>
   Response.json({ message }, { status: 400 });
-
-const htmlResponse = (status: number, html: string) =>
-  new Response(html, { status, headers: { "Content-Type": "text/html" } });
 
 type ApiContext = {
   raw: Bun.BunRequest;
@@ -53,26 +66,31 @@ type ApiContext = {
   redirect: (status: number, url: string) => Response;
 };
 
-const contextProto: Omit<ApiContext, "raw"> = {
-  req: defaultValidated,
-  get: noopGet,
-  json: jsonResponse,
-  text: textResponse,
-  html: htmlResponse,
-  redirect: (status: number, url: string) => Response.redirect(url, status),
+// Shared helpers and defaults live on the prototype so each request only sets raw.
+const sharedContext = {
+  req: emptyValidated,
+  get: getNothing,
+  json,
+  text,
+  html,
+  redirect,
 };
 
 const createContext = (req: Bun.BunRequest): ApiContext => {
-  const context = Object.create(contextProto) as ApiContext;
+  const context = Object.create(sharedContext) as ApiContext;
   context.raw = req;
 
   return context;
 };
 
-const createBodyContext = (req: Bun.BunRequest, body: unknown): ApiContext => {
-  const context = Object.create(contextProto) as ApiContext & ValidatedRequest;
+const createContextWithBody = (
+  req: Bun.BunRequest,
+  body: unknown,
+): ApiContext => {
+  const context = Object.create(sharedContext) as ApiContext & ValidatedRequest;
   context.raw = req;
   context.body = body;
+  // One allocation: context.req.body reads from the same object as context.body.
   context.req = context;
 
   return context;
@@ -86,7 +104,7 @@ const stripTrailingSlash = (path: string) => {
   return path;
 };
 
-const hasSchemas = (schema?: RequestSchema) =>
+const hasRequestSchemas = (schema?: RequestSchema) =>
   schema &&
   (schema.body ||
     schema.query ||
@@ -94,74 +112,111 @@ const hasSchemas = (schema?: RequestSchema) =>
     schema.cookies ||
     schema.params);
 
-const isBodyOnlySchema = (schema?: RequestSchema) =>
+const onlyValidatesBody = (schema?: RequestSchema) =>
   !!schema?.body &&
   !schema.query &&
   !schema.headers &&
   !schema.cookies &&
   !schema.params;
 
-const needsBodyCache = (schema?: RequestSchema) => schema?.body !== undefined;
+const validatesBody = (schema?: RequestSchema) => schema?.body !== undefined;
 
-const countBodyConsumers = (
-  hasMiddlewares: boolean,
-  allMiddlewares: Middleware[],
+const bodyHasMultipleReaders = (
+  middlewares: Middleware[],
   request?: RequestSchema,
 ) => {
-  let consumers = 0;
+  let readers = 0;
 
-  if (needsBodyCache(request)) {
-    consumers += 1;
+  if (validatesBody(request)) {
+    readers += 1;
   }
 
-  if (!hasMiddlewares) {
-    return consumers;
-  }
-
-  for (const mw of allMiddlewares) {
-    if (needsBodyCache(mw.options.request)) {
-      consumers += 1;
+  for (const middleware of middlewares) {
+    if (validatesBody(middleware.options.request)) {
+      readers += 1;
     }
   }
 
-  return consumers;
+  return readers > 1;
 };
 
-const shouldCreateBodyCache = (
-  hasMiddlewares: boolean,
-  allMiddlewares: Middleware[],
-  request?: RequestSchema,
-) => countBodyConsumers(hasMiddlewares, allMiddlewares, request) > 1;
+const resolveValidation = (options?: ValidationOptions) => {
+  if (options === undefined || options === true) {
+    return { input: true, output: true };
+  }
 
-const resolveValidation = (v?: ValidationOptions) => {
-  if (v === undefined || v === true) return { input: true, output: true };
-  if (v === false) return { input: false, output: false };
-  return { input: v.input !== false, output: v.output !== false };
+  if (options === false) {
+    return { input: false, output: false };
+  }
+
+  return {
+    input: options.input !== false,
+    output: options.output !== false,
+  };
 };
 
-const createJsonWithOutputValidation = (responseSchema: ResponseSchema) => {
+const badRequestFromError = (error: Error) => badRequest(error.message);
+
+const validatingJson = (responseSchema: ResponseSchema) => {
   return (status: number, data: unknown): Response | Promise<Response> => {
-    const statusSchema = responseSchema[status];
+    const schema = responseSchema[status];
 
-    if (!statusSchema) {
-      return jsonResponse(status, data);
+    if (!schema) {
+      return json(status, data);
     }
 
     try {
-      const validated = validateSchema(statusSchema, data);
+      const result = validateSchema(schema, data);
 
-      if (validated instanceof Promise) {
-        return validated.then(
-          () => jsonResponse(status, data),
-          (error) =>
-            badRequest(error instanceof Error ? error.message : undefined),
+      if (result instanceof Promise) {
+        return result.then(
+          () => json(status, data),
+          (error) => badRequestFromError(error as Error),
         );
       }
 
-      return jsonResponse(status, data);
+      return json(status, data);
     } catch (error) {
-      return badRequest(error instanceof Error ? error.message : undefined);
+      return badRequestFromError(error as Error);
     }
+  };
+};
+
+type AnyRouteHandler = (context: ApiContext) => Response | Promise<Response>;
+
+const runHandler = (handler: AnyRouteHandler, context: ApiContext) =>
+  handler(context);
+
+const wrapSimpleRoute = (handler: AnyRouteHandler) => {
+  return (req: Bun.BunRequest) => runHandler(handler, createContext(req));
+};
+
+const wrapOutputValidatedRoute = (
+  handler: AnyRouteHandler,
+  responseSchema: ResponseSchema,
+) => {
+  return (req: Bun.BunRequest) => {
+    const context = createContext(req);
+    context.json = validatingJson(responseSchema);
+
+    return runHandler(handler, context);
+  };
+};
+
+const wrapBodyOnlyRoute = (
+  handler: AnyRouteHandler,
+  bodySchema: StandardSchemaV1,
+) => {
+  return async (req: Bun.BunRequest) => {
+    let body: unknown;
+
+    try {
+      body = await validateBody(req, bodySchema);
+    } catch (error) {
+      return badRequestFromError(error as Error);
+    }
+
+    return runHandler(handler, createContextWithBody(req, body));
   };
 };
 
@@ -191,229 +246,231 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     return normalizedPrefix + normalizedPath;
   }
 
+  private async validateField<T>(validate: () => Promise<T> | T) {
+    let output = validate();
+
+    if (!(output instanceof Promise)) {
+      output = Promise.resolve(output);
+    }
+
+    const [error, value] = await mightThrow(output);
+
+    if (error) {
+      return { success: false as const, error };
+    }
+
+    return { success: true as const, value };
+  }
+
   private async validateRequestSchema(
     req: Bun.BunRequest,
     schema: RequestSchema | undefined,
     bodyCache?: BodyCache,
   ) {
     if (!schema) {
-      return { success: true, data: {} };
+      return { success: true as const, data: {} };
     }
 
-    const v: Record<string, unknown> = {};
+    const data: Record<string, unknown> = {};
 
     if (schema.body) {
-      const [err, val] = await mightThrow(
+      const result = await this.validateField(() =>
         validateBody(req, schema.body, bodyCache),
       );
 
-      if (err) {
-        return {
-          success: false,
-          error: err,
-        };
+      if (!result.success) {
+        return { success: false as const, error: result.error };
       }
 
-      v.body = val;
+      data.body = result.value;
     }
 
     if (schema.query) {
-      const [err, val] = await mightThrow(validateQuery(req, schema.query));
+      const result = await this.validateField(() =>
+        validateQuery(req, schema.query),
+      );
 
-      if (err) {
-        return {
-          success: false,
-          error: err,
-        };
+      if (!result.success) {
+        return { success: false as const, error: result.error };
       }
 
-      v.query = val;
+      data.query = result.value;
     }
 
     if (schema.headers) {
-      const [err, val] = await mightThrow(validateHeaders(req, schema.headers));
+      const result = await this.validateField(() =>
+        validateHeaders(req, schema.headers),
+      );
 
-      if (err) {
-        return {
-          success: false,
-          error: err,
-        };
+      if (!result.success) {
+        return { success: false as const, error: result.error };
       }
 
-      v.headers = val;
+      data.headers = result.value;
     }
 
     if (schema.cookies) {
-      const [err, val] = await mightThrow(validateCookies(req, schema.cookies));
+      const result = await this.validateField(() =>
+        validateCookies(req, schema.cookies),
+      );
 
-      if (err) {
-        return {
-          success: false,
-          error: err,
-        };
+      if (!result.success) {
+        return { success: false as const, error: result.error };
       }
 
-      v.cookies = val;
+      data.cookies = result.value;
     }
 
     if (schema.params) {
-      const [err, val] = await mightThrow(validateParams(req, schema.params));
+      const result = await this.validateField(() =>
+        validateParams(req, schema.params),
+      );
 
-      if (err) {
-        return {
-          success: false,
-          error: err,
-        };
+      if (!result.success) {
+        return { success: false as const, error: result.error };
       }
 
-      v.params = val;
+      data.params = result.value;
     }
 
-    return { success: true, data: v };
+    return { success: true as const, data };
+  }
+
+  private createRouteHandler(
+    route: RouteConfig<
+      RequestSchema,
+      ResponseSchema,
+      TMiddlewares,
+      readonly Middleware[]
+    >,
+    validation: ReturnType<typeof resolveValidation>,
+  ) {
+    const { handler, request, response, middlewares } = route;
+
+    const allMiddlewares = [
+      ...(this.options.middlewares ?? []),
+      ...(middlewares ?? []),
+    ];
+
+    const hasMiddlewares = allMiddlewares.length > 0;
+    const validateInput = validation.input && hasRequestSchemas(request);
+    const validateOutput = validation.output && !!response;
+    const isSimpleRoute = !hasMiddlewares && !validateInput && !validateOutput;
+    const isOutputOnlyRoute =
+      !hasMiddlewares && !validateInput && validateOutput;
+    const isBodyOnlyRoute =
+      !hasMiddlewares &&
+      validateInput &&
+      onlyValidatesBody(request) &&
+      !validateOutput;
+
+    if (isSimpleRoute) {
+      return wrapSimpleRoute(handler as AnyRouteHandler);
+    }
+
+    if (isOutputOnlyRoute) {
+      return wrapOutputValidatedRoute(
+        handler as AnyRouteHandler,
+        response as ResponseSchema,
+      );
+    }
+
+    if (isBodyOnlyRoute) {
+      return wrapBodyOnlyRoute(
+        handler as AnyRouteHandler,
+        request?.body as StandardSchemaV1,
+      );
+    }
+
+    return async (req: Bun.BunRequest) => {
+      const extensions: Record<string, unknown> = {};
+
+      let bodyCache: BodyCache | undefined;
+
+      if (validation.input && bodyHasMultipleReaders(allMiddlewares, request)) {
+        bodyCache = { parsed: false, value: undefined };
+      }
+
+      for (const middleware of allMiddlewares) {
+        const { request: requestSchema, handler: middlewareHandler } =
+          middleware.options;
+
+        let validated = emptyValidated;
+
+        if (validation.input && hasRequestSchemas(requestSchema)) {
+          const result = await this.validateRequestSchema(
+            req,
+            requestSchema,
+            bodyCache,
+          );
+
+          if (!result.success) {
+            return badRequest(result.error?.message);
+          }
+
+          validated = result.data as ValidatedRequest;
+        }
+
+        const context = createContext(req);
+        context.req = validated;
+        context.get = (key: string) => extensions[key];
+
+        const middlewareResult = await middlewareHandler(
+          context as Parameters<typeof middlewareHandler>[0],
+        );
+
+        if (middlewareResult instanceof Response) {
+          return middlewareResult;
+        }
+
+        if (middlewareResult) {
+          Object.assign(extensions, middlewareResult);
+        }
+      }
+
+      let validated = emptyValidated;
+
+      if (validation.input && hasRequestSchemas(request)) {
+        const result = await this.validateRequestSchema(
+          req,
+          request,
+          bodyCache,
+        );
+
+        if (!result.success) {
+          return badRequest(result.error?.message);
+        }
+
+        validated = result.data as ValidatedRequest;
+      }
+
+      const context = createContext(req);
+      context.req = validated;
+      context.get = (key: string) => extensions[key];
+
+      if (validateOutput) {
+        context.json = validatingJson(response as ResponseSchema);
+      }
+
+      return runHandler(handler as AnyRouteHandler, context);
+    };
   }
 
   private buildBunRoutes() {
     const bunRoutes: MethodRoutes = {};
-    const validationConfig = resolveValidation(this.options.validation);
+    const validation = resolveValidation(this.options.validation);
 
     for (const route of this.routes) {
-      const { path, method, handler, request, response, middlewares } = route;
-
-      const fullPath = this.getFullPath(path);
+      const fullPath = this.getFullPath(route.path);
 
       if (!bunRoutes[fullPath]) {
         bunRoutes[fullPath] = {};
       }
 
-      const allMiddlewares = [
-        ...(this.options.middlewares ?? []),
-        ...(middlewares ?? []),
-      ];
-
-      const hasMiddlewares = allMiddlewares.length > 0;
-      const hasRouteSchemas = hasSchemas(request);
-      const effectiveOutputValidation = validationConfig.output && !!response;
-      const inputEnabled = validationConfig.input && hasRouteSchemas;
-
-      if (!hasMiddlewares && !inputEnabled && !effectiveOutputValidation) {
-        bunRoutes[fullPath][method] = (req: Bun.BunRequest) => {
-          const context = createContext(req);
-
-          return handler(context as Parameters<typeof handler>[0]);
-        };
-      } else if (
-        !hasMiddlewares &&
-        !inputEnabled &&
-        effectiveOutputValidation
-      ) {
-        const responseSchema = response as ResponseSchema;
-
-        bunRoutes[fullPath][method] = (req: Bun.BunRequest) => {
-          const context = createContext(req);
-          context.json = createJsonWithOutputValidation(responseSchema);
-
-          return handler(context as Parameters<typeof handler>[0]);
-        };
-      } else if (
-        !hasMiddlewares &&
-        inputEnabled &&
-        isBodyOnlySchema(request) &&
-        !effectiveOutputValidation
-      ) {
-        const bodySchema = request?.body as StandardSchemaV1;
-
-        bunRoutes[fullPath][method] = async (req: Bun.BunRequest) => {
-          let body: unknown;
-
-          try {
-            body = await validateBody(req, bodySchema);
-          } catch (error) {
-            if (!(error instanceof Error)) {
-              throw error;
-            }
-
-            return badRequest(error.message);
-          }
-
-          const context = createBodyContext(req, body);
-
-          return handler(context as Parameters<typeof handler>[0]);
-        };
-      } else {
-        bunRoutes[fullPath][method] = async (req: Bun.BunRequest) => {
-          const extensions: Record<string, unknown> = {};
-
-          const bodyCache: BodyCache | undefined =
-            validationConfig.input &&
-            shouldCreateBodyCache(hasMiddlewares, allMiddlewares, request)
-              ? { parsed: false, value: undefined }
-              : undefined;
-
-          for (const mw of allMiddlewares) {
-            const { request: reqSchema, handler: mwHandler } = mw.options;
-
-            let validated = defaultValidated;
-
-            if (validationConfig.input && hasSchemas(reqSchema)) {
-              const result = await this.validateRequestSchema(
-                req,
-                reqSchema,
-                bodyCache,
-              );
-
-              if (!result.success) {
-                return badRequest(result.error?.message);
-              }
-
-              validated = result.data as ValidatedRequest;
-            }
-
-            const context = createContext(req);
-            context.req = validated;
-            context.get = (key: string) => extensions[key];
-
-            const mwResult = await mwHandler(
-              context as Parameters<typeof mwHandler>[0],
-            );
-
-            if (mwResult instanceof Response) {
-              return mwResult;
-            }
-
-            if (mwResult) {
-              Object.assign(extensions, mwResult);
-            }
-          }
-
-          let routeValidated = defaultValidated;
-
-          if (validationConfig.input && hasRouteSchemas) {
-            const result = await this.validateRequestSchema(
-              req,
-              request,
-              bodyCache,
-            );
-
-            if (!result.success) {
-              return badRequest(result.error?.message);
-            }
-
-            routeValidated = result.data as ValidatedRequest;
-          }
-
-          const context = createContext(req);
-          context.req = routeValidated;
-          context.get = (key: string) => extensions[key];
-
-          if (effectiveOutputValidation) {
-            context.json = createJsonWithOutputValidation(
-              response as ResponseSchema,
-            );
-          }
-
-          return handler(context as Parameters<typeof handler>[0]);
-        };
-      }
+      bunRoutes[fullPath][route.method] = this.createRouteHandler(
+        route,
+        validation,
+      );
     }
 
     return bunRoutes;
