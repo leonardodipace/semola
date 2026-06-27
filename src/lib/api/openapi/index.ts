@@ -165,10 +165,7 @@ const convertSchemaToInlineOpenApi = (
   io: "input" | "output" = "input",
 ) => {
   const result = toOpenAPISchema(schema, io);
-  const { schema: jsonSchema } = result as {
-    schema: JsonSchema;
-    components?: OpenApiComponents;
-  };
+  const { schema: jsonSchema } = result as { schema: JsonSchema };
 
   // Remove $schema and id from inline schemas
   const cleanSchema = { ...jsonSchema };
@@ -177,7 +174,6 @@ const convertSchemaToInlineOpenApi = (
 
   return {
     schema: cleanSchema,
-    components: undefined,
   };
 };
 
@@ -384,12 +380,7 @@ const createOperation = (
   return { operation, components: allComponents };
 };
 
-const componentKeys = [
-  "schemas",
-  "responses",
-  "parameters",
-  "requestBodies",
-] as const;
+const componentKeys = ["schemas"] as const;
 
 // Merges multiple ComponentsObject into a single object
 // Handles deduplication by merging schemas with the same name

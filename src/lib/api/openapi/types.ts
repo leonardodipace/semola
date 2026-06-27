@@ -13,9 +13,6 @@ export type OpenApiSpec = {
   paths: Record<string, OpenApiPath>;
   components?: {
     schemas?: Record<string, unknown>;
-    responses?: Record<string, unknown>;
-    parameters?: Record<string, unknown>;
-    requestBodies?: Record<string, unknown>;
     securitySchemes?: Record<string, unknown>;
   };
 };
@@ -32,7 +29,6 @@ export type OpenApiOperation = {
   parameters?: OpenApiParameter[];
   requestBody?: OpenApiRequestBody;
   responses: Record<string, OpenApiResponse>;
-  security?: Array<Record<string, string[]>>;
 };
 
 export type OpenApiParameter = {
@@ -40,7 +36,6 @@ export type OpenApiParameter = {
   in: "path" | "query" | "header" | "cookie";
   required?: boolean;
   schema: unknown; // Flexible to accept any schema from converters
-  description?: string;
 };
 
 export type OpenApiRequestBody = {
