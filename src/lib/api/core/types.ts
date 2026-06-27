@@ -116,6 +116,10 @@ export type OpenApiOptions = {
   securitySchemes?: Record<string, SecurityScheme>;
 };
 
+export type ApiRequest = Request & {
+  params?: Record<string, string>;
+};
+
 export type Context<
   TReq extends RequestSchema = RequestSchema,
   TRes extends ResponseSchema | undefined = undefined,

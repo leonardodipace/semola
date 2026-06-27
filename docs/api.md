@@ -187,6 +187,14 @@ const UserSchema = type({
 
 **Note:** Query parameters, headers, cookies, and path parameters are always inlined (OpenAPI requirement), regardless of whether they have an ID.
 
+### `api.fetch`
+
+Fetch handler for use with `Bun.serve({ fetch: api.fetch })` or other runtimes that accept a `Request` handler.
+
+```typescript
+Bun.serve({ port: 3000, fetch: api.fetch });
+```
+
 ### `api.serve(port, callback?)`
 
 Starts the server on the specified port.

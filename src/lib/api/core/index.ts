@@ -7,7 +7,7 @@ import type {
   ResponseSchema,
   RouteConfig,
 } from "./types.js";
-import { resolveValidation } from "./utils.js";
+import { resolveValidation, stripTrailingSlash } from "./utils.js";
 
 export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
   private options: ApiOptions<TMiddlewares>;
@@ -24,6 +24,32 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     TRouteMiddlewares extends readonly Middleware[] = readonly [],
   >(config: RouteConfig<TReq, TRes, TMiddlewares, TRouteMiddlewares>) {
     this.registry.addRoute(config);
+  }
+
+  public fetch(req: Request) {
+    const url = new URL(req.url);
+    const pathname = stripTrailingSlash(url.pathname) || "/";
+    const method = req.method as Bun.Serve.HTTPMethod;
+    const bunRoutes = this.getRouteHandlers();
+    const server = undefined as unknown as Bun.Server<unknown>;
+
+    for (const [pattern, methods] of Object.entries(bunRoutes)) {
+      const match = new URLPattern({ pathname: pattern }).exec({ pathname });
+
+      if (!match) continue;
+
+      const handler = methods[method];
+
+      if (!handler) continue;
+
+      const apiReq = Object.assign(req, {
+        params: match.pathname.groups,
+      });
+
+      return Promise.resolve(handler(apiReq as Bun.BunRequest, server));
+    }
+
+    return Promise.resolve(new Response("Not found", { status: 404 }));
   }
 
   public getRouteHandlers() {
@@ -47,14 +73,10 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
   }
 
   public serve(port: number, callback?: (server: Bun.Server<unknown>) => void) {
-    const bunRoutes = this.getRouteHandlers();
-
     const server = Bun.serve({
       port,
-      routes: bunRoutes,
-      fetch: () => {
-        return new Response("Not found", { status: 404 });
-      },
+      routes: this.getRouteHandlers(),
+      fetch: () => new Response("Not found", { status: 404 }),
     });
 
     if (callback) {

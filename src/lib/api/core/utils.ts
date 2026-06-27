@@ -7,7 +7,7 @@ import type {
   ValidationOptions,
 } from "./types.js";
 
-const stripTrailingSlash = (path: string) => {
+export const stripTrailingSlash = (path: string) => {
   if (path !== "/" && path.endsWith("/")) {
     return path.slice(0, -1);
   }

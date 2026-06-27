@@ -1,4 +1,5 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import type { ApiRequest } from "../core/types.js";
 import { ParseError, ValidationError } from "../errors.js";
 import type { BodyCache } from "./types.js";
 
@@ -146,12 +147,12 @@ export const validateCookies = (
 };
 
 export const validateParams = (
-  req: Bun.BunRequest,
+  req: ApiRequest,
   paramsSchema?: StandardSchemaV1,
 ) => {
   if (!paramsSchema) {
     return true;
   }
 
-  return validateSchema(paramsSchema, req.params);
+  return validateSchema(paramsSchema, req.params ?? {});
 };

@@ -12,6 +12,23 @@ afterEach(() => {
 });
 
 describe("Api Core", () => {
+  test("should dispatch via api.fetch without server", async () => {
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/users/:id",
+      method: "GET",
+      request: { params: z.object({ id: z.string() }) },
+      handler: (c) => c.json(200, { userId: c.req.params.id }),
+    });
+
+    const res = await api.fetch(new Request("http://localhost/users/abc"));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ userId: "abc" });
+  });
+
   test("should handle a basic GET request", async () => {
     const api = new Api();
 
