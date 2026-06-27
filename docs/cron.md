@@ -55,7 +55,8 @@ await osJob.stop();
   - **`schedule: string`** (required) - Cron expression or alias
   - **`handler: () => unknown`** (required) - Function to execute on schedule. Support both sync and async functions
   - **`retry: RetryCronJob`** (optional) - Instance of `RetryCronJob` class containing retries' handling logic. You can 
-  use the same instance for multiple `Cron` instances. For more information about errors, check the [Error Handling and Retries](#error-handling-and-retries) section 
+  use the same instance for multiple `Cron` instances. For more information about errors and retries, check 
+  the [Error Handling and Retries](#error-handling-and-retries) section 
 - `CronOS` class:
   - **`name`** (required) - Unique job name
   - **`schedule`** (required) - Cron expression or alias
