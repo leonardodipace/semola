@@ -11,7 +11,6 @@ import {
   type NotifyContext,
   type OnFailedAttemptContextType,
   type RetryObserver,
-  RetryOnErrorContextType,
   type RetryOptions,
   type ScheduleType,
 } from "./types.js";
