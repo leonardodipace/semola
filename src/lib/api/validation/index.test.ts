@@ -64,7 +64,7 @@ describe("Validation Module", () => {
       });
     });
 
-    test("should skip validation if Content-Type is not JSON", async () => {
+    test("should validate text body and return parsed data", async () => {
       const req = new Request("http://localhost", {
         method: "POST",
         headers: { "Content-Type": "text/plain" },
@@ -72,7 +72,7 @@ describe("Validation Module", () => {
       });
 
       const data = await validateBody(req, z.string());
-      expect(data).toBeUndefined();
+      expect(data).toBe("hello");
     });
 
     test("should cache parsed body and reuse on subsequent calls", async () => {

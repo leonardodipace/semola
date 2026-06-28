@@ -149,6 +149,30 @@ describe("Api Core", () => {
     expect(body).toEqual({ name: "Alice" });
   });
 
+  test("should validate text request body", async () => {
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/message",
+      method: "POST",
+      request: { body: z.string() },
+      handler: (c) => c.text(200, c.req.body),
+    });
+
+    api.serve(0, (s) => {
+      server = s;
+    });
+
+    const res = await fetch(`http://localhost:${server?.port}/message`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: "hello",
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("hello");
+  });
+
   test("should extract and validate path parameters", async () => {
     const api = new Api();
 

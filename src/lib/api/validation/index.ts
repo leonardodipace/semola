@@ -53,22 +53,21 @@ export const validateBody = async (
     return true;
   }
 
-  const contentType = req.headers.get("content-type") ?? "";
-
-  if (!contentType.includes("application/json")) {
-    return undefined;
-  }
-
   if (bodyCache?.parsed) {
     return validateSchema(bodySchema, bodyCache.value);
   }
 
+  const contentType = req.headers.get("content-type") ?? "";
   let parsedBody: unknown;
 
-  try {
-    parsedBody = await req.json();
-  } catch {
-    throw new ParseError("Invalid JSON body");
+  if (contentType.includes("application/json")) {
+    try {
+      parsedBody = await req.json();
+    } catch {
+      throw new ParseError("Invalid JSON body");
+    }
+  } else {
+    parsedBody = await req.text();
   }
 
   if (bodyCache) {
