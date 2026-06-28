@@ -146,6 +146,9 @@ export type Context<
 export type RouteReturn =
   | Response
   | string
+  | number
+  | boolean
+  | null
   | Record<string, unknown>
   | unknown[];
 

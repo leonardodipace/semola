@@ -89,6 +89,53 @@ describe("RouteRegistry", () => {
     expect(res?.status).toBe(400);
   });
 
+  test("maps bare handler JSON primitives to responses", async () => {
+    const registry = new RouteRegistry({});
+
+    registry.addRoute({
+      path: "/flag",
+      method: "GET",
+      handler: () => false,
+    });
+
+    registry.addRoute({
+      path: "/count",
+      method: "GET",
+      handler: () => 42,
+    });
+
+    registry.addRoute({
+      path: "/empty",
+      method: "GET",
+      handler: () => null,
+    });
+
+    const routes = registry.buildRoutes({
+      validation: { input: false, output: false },
+    });
+
+    const flagReq = new Request("http://localhost/flag") as Bun.BunRequest;
+    const countReq = new Request("http://localhost/count") as Bun.BunRequest;
+    const emptyReq = new Request("http://localhost/empty") as Bun.BunRequest;
+
+    const flagRes = await routes["/flag"]?.GET?.(
+      flagReq,
+      {} as Bun.Server<unknown>,
+    );
+    const countRes = await routes["/count"]?.GET?.(
+      countReq,
+      {} as Bun.Server<unknown>,
+    );
+    const emptyRes = await routes["/empty"]?.GET?.(
+      emptyReq,
+      {} as Bun.Server<unknown>,
+    );
+
+    expect(await flagRes?.json()).toBe(false);
+    expect(await countRes?.json()).toBe(42);
+    expect(await emptyRes?.json()).toBe(null);
+  });
+
   test("bare handler runs per request not at build time", async () => {
     let calls = 0;
     const registry = new RouteRegistry({});
