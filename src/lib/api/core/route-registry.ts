@@ -39,19 +39,27 @@ const buildBareHandler = (handler: BareRouteHandler): BunRouteHandler => {
   };
 };
 
-const toValidatedResponse = (
+const toValidatedResponse = async (
   value: RouteReturn,
-  schema: ResponseSchema[number] | undefined,
+  responseSchema: ResponseSchema | undefined,
 ) => {
-  if (!schema) return toResponse(value);
+  const res = toResponse(value);
+  const schema = responseSchema?.[res.status];
+  if (!schema) return res;
+
+  let data: unknown = value;
+
+  if (value instanceof Response) {
+    data = await res.clone().json();
+  }
 
   try {
-    validateSchema(schema, value);
+    validateSchema(schema, data);
   } catch (error) {
     return badRequest((error as Error).message);
   }
 
-  return toResponse(value);
+  return res;
 };
 
 const hasMiddlewareRequestSchema = (middlewares: readonly Middleware[]) => {
@@ -87,7 +95,7 @@ const buildValidatedBareRouteHandler = (
   validateInput: boolean,
   validateOutput: boolean,
 ) => {
-  let responseSchema = response?.[200];
+  let responseSchema = response;
 
   if (!validateOutput) {
     responseSchema = undefined;
@@ -103,7 +111,7 @@ const buildValidatedBareRouteHandler = (
     return async () => {
       const value = await handler();
 
-      return toValidatedResponse(value, responseSchema);
+      return await toValidatedResponse(value, responseSchema);
     };
   }
 
@@ -114,7 +122,7 @@ const buildValidatedBareRouteHandler = (
 
     const value = await handler();
 
-    return toValidatedResponse(value, responseSchema);
+    return await toValidatedResponse(value, responseSchema);
   };
 };
 

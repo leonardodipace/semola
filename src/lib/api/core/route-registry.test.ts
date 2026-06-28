@@ -135,4 +135,27 @@ describe("RouteRegistry", () => {
 
     expect(res?.status).toBe(400);
   });
+
+  test("validates bare handler response by status code", async () => {
+    const registry = new RouteRegistry({});
+
+    registry.addRoute({
+      path: "/item",
+      method: "POST",
+      response: { 201: z.object({ id: z.number() }) },
+      handler: () => Response.json({ id: "bad" }, { status: 201 }),
+    });
+
+    const routes = registry.buildRoutes({
+      validation: { input: true, output: true },
+    });
+
+    const handler = routes["/item"]?.POST;
+    const req = new Request("http://localhost/item", {
+      method: "POST",
+    }) as Bun.BunRequest;
+    const res = await handler?.(req, {} as Bun.Server<unknown>);
+
+    expect(res?.status).toBe(400);
+  });
 });
