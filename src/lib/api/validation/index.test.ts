@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { z } from "zod";
+import { SchemaConfigError } from "../errors.js";
 import {
   validateBody,
   validateCookies,
@@ -34,6 +36,18 @@ describe("Validation Module", () => {
           message: expect.stringContaining("age:"),
         }),
       );
+    });
+
+    test("should throw SchemaConfigError for async schemas", () => {
+      const schema = {
+        "~standard": {
+          version: 1,
+          vendor: "test",
+          validate: () => Promise.resolve({ value: {} }),
+        },
+      } as StandardSchemaV1;
+
+      expect(() => validateSchema(schema, {})).toThrow(SchemaConfigError);
     });
   });
 

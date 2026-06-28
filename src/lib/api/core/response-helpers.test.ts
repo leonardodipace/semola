@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { z } from "zod";
+import { SchemaConfigError } from "../errors.js";
 import {
   badRequest,
   html,
   json,
+  mapValidationError,
   redirect,
   text,
   validatingJson,
@@ -66,5 +69,26 @@ describe("response-helpers", () => {
     const validate = validatingJson({ 200: z.object({ name: z.string() }) });
     const res = await validate(404, { name: 123 });
     expect(res.status).toBe(404);
+  });
+
+  test("mapValidationError rethrows schema config errors", () => {
+    const error = new SchemaConfigError(
+      "Async schema validation is not supported",
+    );
+
+    expect(() => mapValidationError(error)).toThrow(SchemaConfigError);
+  });
+
+  test("validatingJson rethrows schema config errors", () => {
+    const schema = {
+      "~standard": {
+        version: 1,
+        vendor: "test",
+        validate: () => Promise.resolve({ value: {} }),
+      },
+    } as StandardSchemaV1;
+    const validate = validatingJson({ 200: schema });
+
+    expect(() => validate(200, {})).toThrow(SchemaConfigError);
   });
 });

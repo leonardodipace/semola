@@ -2,7 +2,7 @@ import type { Middleware } from "../middleware/index.js";
 import { validateSchema } from "../validation/index.js";
 import { buildRequestValidator } from "../validation/request-validator.js";
 import { RequestPipeline } from "./request-pipeline.js";
-import { badRequest } from "./response-helpers.js";
+import { mapValidationError } from "./response-helpers.js";
 import type {
   AnyRouteHandler,
   BareRouteHandler,
@@ -56,7 +56,7 @@ const toValidatedResponse = async (
   try {
     validateSchema(schema, data);
   } catch (error) {
-    return badRequest((error as Error).message);
+    return mapValidationError(error as Error);
   }
 
   return res;
@@ -118,7 +118,7 @@ const buildValidatedBareRouteHandler = (
   return async (req: Bun.BunRequest) => {
     const error = await requestValidator(req);
 
-    if (error) return badRequest(error.message);
+    if (error) return mapValidationError(error);
 
     const value = await handler();
 

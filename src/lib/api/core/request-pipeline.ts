@@ -1,7 +1,7 @@
 import { validateRequestInto } from "../validation/request-validator.js";
 import type { BodyCache } from "../validation/types.js";
 import { createContext, getEmptyValidated } from "./context-factory.js";
-import { badRequest, validatingJson } from "./response-helpers.js";
+import { mapValidationError, validatingJson } from "./response-helpers.js";
 import type { RequestPipelineConfig } from "./types.js";
 import { bodyHasMultipleReaders } from "./utils.js";
 
@@ -53,7 +53,7 @@ export class RequestPipeline {
           data,
         );
 
-        if (error) return badRequest(error.message);
+        if (error) return mapValidationError(error);
 
         validated = data;
       }
@@ -83,7 +83,7 @@ export class RequestPipeline {
         data,
       );
 
-      if (error) return badRequest(error.message);
+      if (error) return mapValidationError(error);
 
       validated = data;
     }

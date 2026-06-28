@@ -1,3 +1,4 @@
+import { ParseError, ValidationError } from "../errors.js";
 import { validateSchema } from "../validation/index.js";
 import type { ResponseSchema } from "./types.js";
 
@@ -33,6 +34,13 @@ export const badRequest = (message?: string) => {
   return Response.json({ message }, badRequestInit);
 };
 
+export const mapValidationError = (error: Error) => {
+  if (error instanceof ValidationError) return badRequest(error.message);
+  if (error instanceof ParseError) return badRequest(error.message);
+
+  throw error;
+};
+
 export const validatingJson = (responseSchema: ResponseSchema) => {
   return (status: number, data: unknown) => {
     const schema = responseSchema[status];
@@ -42,7 +50,7 @@ export const validatingJson = (responseSchema: ResponseSchema) => {
     try {
       validateSchema(schema, data);
     } catch (error) {
-      return badRequest((error as Error).message);
+      return mapValidationError(error as Error);
     }
 
     return json(status, data);

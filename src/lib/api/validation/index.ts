@@ -1,6 +1,6 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type { ApiRequest } from "../core/types.js";
-import { ParseError, ValidationError } from "../errors.js";
+import { ParseError, SchemaConfigError, ValidationError } from "../errors.js";
 import type { BodyCache } from "./types.js";
 
 const formatIssues = (
@@ -70,7 +70,7 @@ export const validateSchema = <T>(
   const result = schema["~standard"].validate(data);
 
   if (result instanceof Promise) {
-    throw new ValidationError("Async schema validation is not supported");
+    throw new SchemaConfigError("Async schema validation is not supported");
   }
 
   return readValidationResult<T>(result);
