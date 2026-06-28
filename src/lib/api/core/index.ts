@@ -34,9 +34,9 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
     this.routesDirty = true;
   }
 
-  public fetch(req: Request) {
+  public fetch = (req: Request) => {
     return this.ensureCompiled().fetch(req);
-  }
+  };
 
   public getRouteHandlers() {
     return this.ensureCompiled().routes;
