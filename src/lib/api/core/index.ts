@@ -68,9 +68,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
   }
 
   private ensureCompiled() {
-    if (!this.routesDirty && this.compiled) {
-      return this.compiled;
-    }
+    if (!this.routesDirty && this.compiled) return this.compiled;
 
     const routes = this.registry.buildRoutes({
       globalMiddlewares: this.options.middlewares,

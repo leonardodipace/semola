@@ -1,15 +1,5 @@
-import {
-  html,
-  json,
-  redirect,
-  text,
-  validatingJson,
-} from "./response-helpers.js";
-import type {
-  CreateContextInput,
-  InternalContext,
-  ValidatedRequest,
-} from "./types.js";
+import { html, json, redirect, text } from "./response-helpers.js";
+import type { InternalContext, ValidatedRequest } from "./types.js";
 
 const emptyValidated: ValidatedRequest = Object.freeze({
   body: undefined,
@@ -30,22 +20,25 @@ const sharedContext = {
   redirect,
 };
 
-export const createContext = (input: CreateContextInput): InternalContext => {
+export const createContext = (
+  req: Bun.BunRequest,
+  validated?: ValidatedRequest,
+  get?: (key: string) => unknown,
+  jsonHandler?: (status: number, data: unknown) => Response,
+): InternalContext => {
   const context = Object.create(sharedContext) as InternalContext;
-  context.raw = input.req;
+  context.raw = req;
 
-  if (input.validated) {
-    context.req = input.validated;
+  if (validated) {
+    context.req = validated;
   }
 
-  if (input.extensions) {
-    context.get = (key: string) => {
-      return input.extensions?.[key];
-    };
+  if (get) {
+    context.get = get;
   }
 
-  if (input.validateOutput && input.response) {
-    context.json = validatingJson(input.response);
+  if (jsonHandler) {
+    context.json = jsonHandler;
   }
 
   return context;

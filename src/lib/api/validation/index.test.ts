@@ -130,6 +130,29 @@ describe("Validation Module", () => {
 
       expect(data).toEqual({ filter: "active", tags: ["a", "b"] });
     });
+
+    test("should decode query values and preserve empty flags", async () => {
+      const schema = z.object({
+        q: z.string(),
+        encoded: z.string(),
+        empty: z.string(),
+        flag: z.string(),
+        tags: z.array(z.string()),
+      });
+      const req = new Request(
+        "http://localhost?q=two+words&encoded=a%20b&empty=&flag&tags=a&tags=b",
+      );
+
+      const data = await validateQuery(req, schema);
+
+      expect(data).toEqual({
+        q: "two words",
+        encoded: "a b",
+        empty: "",
+        flag: "",
+        tags: ["a", "b"],
+      });
+    });
   });
 
   describe("validateHeaders", () => {
@@ -160,6 +183,21 @@ describe("Validation Module", () => {
       const data = await validateCookies(req, schema);
 
       expect(data).toEqual({ theme: "dark", session: "abc" });
+    });
+
+    test("should decode cookies and ignore flag-only cookies", async () => {
+      const schema = z.object({
+        session: z.string(),
+        empty: z.string(),
+        plus: z.string(),
+      });
+      const req = new Request("http://localhost", {
+        headers: { cookie: " session=s%201; flag; empty= ; plus=a+b" },
+      });
+
+      const data = await validateCookies(req, schema);
+
+      expect(data).toEqual({ session: "s 1", empty: "", plus: "a+b" });
     });
 
     test("should throw when required cookie is missing", () => {

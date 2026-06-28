@@ -6,9 +6,7 @@ import type {
 } from "./types.js";
 
 const stripTrailingSlash = (path: string) => {
-  if (path !== "/" && path.endsWith("/")) {
-    return path.slice(0, -1);
-  }
+  if (path !== "/" && path.endsWith("/")) return path.slice(0, -1);
 
   return path;
 };
@@ -50,13 +48,10 @@ export const bodyHasMultipleReaders = (input: {
 export const resolveValidation = (
   options?: ValidationOptions,
 ): ResolvedValidation => {
-  if (options === undefined || options === true) {
+  if (options === undefined || options === true)
     return { input: true, output: true };
-  }
 
-  if (options === false) {
-    return { input: false, output: false };
-  }
+  if (options === false) return { input: false, output: false };
 
   return {
     input: options.input !== false,

@@ -1,15 +1,13 @@
-import type { Middleware } from "../middleware/index.js";
-import { validateRequest } from "../validation/request-validator.js";
+import { validateRequestInto } from "../validation/request-validator.js";
 import type { BodyCache } from "../validation/types.js";
 import { createContext, getEmptyValidated } from "./context-factory.js";
-import { badRequest } from "./response-helpers.js";
+import { badRequest, validatingJson } from "./response-helpers.js";
 import type { RequestPipelineConfig } from "./types.js";
 import { bodyHasMultipleReaders } from "./utils.js";
 
-const emptySuccess = { success: true as const, data: getEmptyValidated() };
-
 export class RequestPipeline {
-  private bodyCache?: BodyCache;
+  private needsBodyCache = false;
+  private jsonHandler?: (status: number, data: unknown) => Response;
 
   public constructor(private config: RequestPipelineConfig) {
     if (
@@ -19,98 +17,79 @@ export class RequestPipeline {
         request: config.routeRequest,
       })
     ) {
-      this.bodyCache = { parsed: false, value: undefined };
+      this.needsBodyCache = true;
+    }
+
+    if (config.validateOutput && config.routeResponse) {
+      this.jsonHandler = validatingJson(config.routeResponse);
     }
   }
 
   public async handle(req: Bun.BunRequest) {
-    const extensions: Record<string, unknown> = {};
+    let extensions: Record<string, unknown> | undefined;
+    let get: ((key: string) => unknown) | undefined;
+    let bodyCache: BodyCache | undefined;
+
+    if (this.needsBodyCache) {
+      bodyCache = { parsed: false, value: undefined };
+    }
+
+    if (this.config.middlewares.length > 0) {
+      get = (key: string) => {
+        return extensions?.[key];
+      };
+    }
 
     for (const middleware of this.config.middlewares) {
-      const shortCircuit = await this.runMiddleware({
-        middleware,
-        req,
-        extensions,
-      });
+      const { request: requestSchema, handler: middlewareHandler } =
+        middleware.options;
 
-      if (shortCircuit) {
-        return shortCircuit;
+      let validated = getEmptyValidated();
+
+      if (this.config.validateInput && requestSchema) {
+        const data = {};
+        const error = await validateRequestInto(
+          { req, schema: requestSchema, bodyCache },
+          data,
+        );
+
+        if (error) return badRequest(error.message);
+
+        validated = data;
+      }
+
+      const context = createContext(req, validated, get);
+      const middlewareResult = await middlewareHandler(
+        context as Parameters<typeof middlewareHandler>[0],
+      );
+
+      if (middlewareResult instanceof Response) return middlewareResult;
+
+      if (middlewareResult) {
+        if (!extensions) {
+          extensions = {};
+        }
+
+        Object.assign(extensions, middlewareResult);
       }
     }
-
-    const validated = await this.validateRouteRequest(req);
-
-    if (!validated.success) {
-      return badRequest(validated.error.message);
-    }
-
-    const context = createContext({
-      req,
-      validated: validated.data,
-      extensions,
-      response: this.config.routeResponse,
-      validateOutput: this.config.validateOutput,
-    });
-
-    return this.config.handler(context);
-  }
-
-  private async runMiddleware(input: {
-    middleware: Middleware;
-    req: Bun.BunRequest;
-    extensions: Record<string, unknown>;
-  }) {
-    const { request: requestSchema, handler: middlewareHandler } =
-      input.middleware.options;
 
     let validated = getEmptyValidated();
 
-    if (this.config.validateInput && requestSchema) {
-      const result = await validateRequest({
-        req: input.req,
-        schema: requestSchema,
-        bodyCache: this.bodyCache,
-      });
+    if (this.config.validateInput && this.config.routeRequest) {
+      const data = {};
+      const error = await validateRequestInto(
+        { req, schema: this.config.routeRequest, bodyCache },
+        data,
+      );
 
-      if (!result.success) {
-        return badRequest(result.error.message);
-      }
+      if (error) return badRequest(error.message);
 
-      validated = result.data;
+      validated = data;
     }
 
-    const context = createContext({
-      req: input.req,
-      validated,
-      extensions: input.extensions,
-    });
+    const context = createContext(req, validated, get, this.jsonHandler);
 
-    const middlewareResult = await middlewareHandler(
-      context as Parameters<typeof middlewareHandler>[0],
-    );
-
-    if (middlewareResult instanceof Response) {
-      return middlewareResult;
-    }
-
-    if (middlewareResult) {
-      Object.assign(input.extensions, middlewareResult);
-    }
-  }
-
-  private async validateRouteRequest(req: Bun.BunRequest) {
-    if (!this.config.validateInput) {
-      return emptySuccess;
-    }
-
-    if (!this.config.routeRequest) {
-      return emptySuccess;
-    }
-
-    return validateRequest({
-      req,
-      schema: this.config.routeRequest,
-      bodyCache: this.bodyCache,
-    });
+    return this.config.handler(context);
   }
 }

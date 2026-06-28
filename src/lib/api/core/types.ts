@@ -218,14 +218,6 @@ export type BunRouteHandler = (
   req: Bun.BunRequest,
 ) => Response | Promise<Response>;
 
-export type CreateContextInput = {
-  req: Bun.BunRequest;
-  validated?: ValidatedRequest;
-  extensions?: Record<string, unknown>;
-  response?: ResponseSchema;
-  validateOutput?: boolean;
-};
-
 export type BuildRouteHandlerInput = {
   route: RouteConfig<
     RequestSchema,

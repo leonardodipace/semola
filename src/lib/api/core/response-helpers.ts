@@ -1,21 +1,19 @@
-import { mightThrowSync } from "../../errors/index.js";
 import { validateSchema } from "../validation/index.js";
 import type { ResponseSchema } from "./types.js";
+
+const htmlHeaders = { "Content-Type": "text/html" };
+const badRequestInit = { status: 400 };
 
 // Status 200 uses default Response constructors to avoid init object allocation
 // and the general constructor path on every request.
 export const json = (status: number, data: unknown) => {
-  if (status === 200) {
-    return Response.json(data);
-  }
+  if (status === 200) return Response.json(data);
 
   return Response.json(data, { status });
 };
 
 export const text = (status: number, body: string) => {
-  if (status === 200) {
-    return new Response(body);
-  }
+  if (status === 200) return new Response(body);
 
   return new Response(body, { status });
 };
@@ -23,7 +21,7 @@ export const text = (status: number, body: string) => {
 export const html = (status: number, body: string) => {
   return new Response(body, {
     status,
-    headers: { "Content-Type": "text/html" },
+    headers: htmlHeaders,
   });
 };
 
@@ -32,23 +30,19 @@ export const redirect = (status: number, url: string) => {
 };
 
 export const badRequest = (message?: string) => {
-  return Response.json({ message }, { status: 400 });
+  return Response.json({ message }, badRequestInit);
 };
 
 export const validatingJson = (responseSchema: ResponseSchema) => {
   return (status: number, data: unknown) => {
     const schema = responseSchema[status];
 
-    if (!schema) {
-      return json(status, data);
-    }
+    if (!schema) return json(status, data);
 
-    const [error] = mightThrowSync(() => {
+    try {
       validateSchema(schema, data);
-    });
-
-    if (error) {
-      return badRequest(error.message);
+    } catch (error) {
+      return badRequest((error as Error).message);
     }
 
     return json(status, data);

@@ -1,7 +1,6 @@
-import { mightThrowSync } from "../../errors/index.js";
 import type { Middleware } from "../middleware/index.js";
 import { validateSchema } from "../validation/index.js";
-import { validateRequest } from "../validation/request-validator.js";
+import { validateRequestInto } from "../validation/request-validator.js";
 import { RequestPipeline } from "./request-pipeline.js";
 import { badRequest } from "./response-helpers.js";
 import type {
@@ -18,18 +17,16 @@ import type {
 } from "./types.js";
 import { getFullPath } from "./utils.js";
 
+const emptyMiddlewares: readonly Middleware[] = [];
+
 const isBareHandler = (handler: unknown) => {
   return typeof handler === "function" && handler.length === 0;
 };
 
 const toResponse = (value: RouteReturn): Response => {
-  if (value instanceof Response) {
-    return value;
-  }
+  if (value instanceof Response) return value;
 
-  if (typeof value === "string") {
-    return new Response(value);
-  }
+  if (typeof value === "string") return new Response(value);
 
   return Response.json(value);
 };
@@ -37,9 +34,7 @@ const toResponse = (value: RouteReturn): Response => {
 const buildBareHandler = (handler: BareRouteHandler): BunRouteHandler => {
   const probe = handler();
 
-  if (probe instanceof Promise) {
-    return async () => toResponse(await handler());
-  }
+  if (probe instanceof Promise) return async () => toResponse(await handler());
 
   const response = toResponse(probe);
 
@@ -50,16 +45,12 @@ const toValidatedResponse = (
   value: RouteReturn,
   schema: ResponseSchema[number] | undefined,
 ) => {
-  if (!schema) {
-    return toResponse(value);
-  }
+  if (!schema) return toResponse(value);
 
-  const [error] = mightThrowSync(() => {
+  try {
     validateSchema(schema, value);
-  });
-
-  if (error) {
-    return badRequest(error.message);
+  } catch (error) {
+    return badRequest((error as Error).message);
   }
 
   return toResponse(value);
@@ -67,18 +58,16 @@ const toValidatedResponse = (
 
 const hasMiddlewareRequestSchema = (middlewares: readonly Middleware[]) => {
   for (const middleware of middlewares) {
-    if (middleware.options.request) {
-      return true;
-    }
+    if (middleware.options.request) return true;
   }
 
   return false;
 };
 
 const getRouteMiddlewares = (input: BuildRouteHandlerInput) => {
-  if (!input.route.middlewares?.length) {
-    return input.globalMiddlewares;
-  }
+  if (!input.route.middlewares?.length) return input.globalMiddlewares;
+
+  if (input.globalMiddlewares.length === 0) return input.route.middlewares;
 
   return [...input.globalMiddlewares, ...input.route.middlewares];
 };
@@ -113,11 +102,10 @@ const buildValidatedBareRouteHandler = (
     }
 
     return async (req: Bun.BunRequest) => {
-      const validated = await validateRequest({ req, schema: request });
+      const data = {};
+      const error = await validateRequestInto({ req, schema: request }, data);
 
-      if (!validated.success) {
-        return badRequest(validated.error.message);
-      }
+      if (error) return badRequest(error.message);
 
       const value = await handler();
 
@@ -127,16 +115,13 @@ const buildValidatedBareRouteHandler = (
 
   const result = toValidatedResponse(probe, responseSchema);
 
-  if (!validateInput) {
-    return () => result;
-  }
+  if (!validateInput) return () => result;
 
   return async (req: Bun.BunRequest) => {
-    const validated = await validateRequest({ req, schema: request });
+    const data = {};
+    const error = await validateRequestInto({ req, schema: request }, data);
 
-    if (!validated.success) {
-      return badRequest(validated.error.message);
-    }
+    if (error) return badRequest(error.message);
 
     return result;
   };
@@ -149,9 +134,8 @@ const buildRouteHandler = (input: BuildRouteHandlerInput): BunRouteHandler => {
   const validateOutput = input.validation.output && !!input.route.response;
 
   if (allMiddlewares.length === 0 && isBareHandler(handler)) {
-    if (!validateInput && !validateOutput) {
+    if (!validateInput && !validateOutput)
       return buildBareHandler(handler as BareRouteHandler);
-    }
 
     return buildValidatedBareRouteHandler(
       handler as BareRouteHandler,
@@ -214,6 +198,7 @@ export class RouteRegistry {
     validation: ResolvedValidation;
   }): MethodRoutes {
     const bunRoutes: MethodRoutes = {};
+    const globalMiddlewares = input.globalMiddlewares ?? emptyMiddlewares;
 
     for (const route of this.routes) {
       const fullPath = getFullPath({ prefix: this.prefix, path: route.path });
@@ -224,7 +209,7 @@ export class RouteRegistry {
 
       bunRoutes[fullPath][route.method] = buildRouteHandler({
         route,
-        globalMiddlewares: input.globalMiddlewares ?? [],
+        globalMiddlewares,
         validation: input.validation,
       });
     }

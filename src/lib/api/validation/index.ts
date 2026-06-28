@@ -24,11 +24,43 @@ const formatIssues = (
 const readValidationResult = <T>(
   result: Awaited<ReturnType<StandardSchemaV1["~standard"]["validate"]>>,
 ) => {
-  if (!result.issues) {
-    return result.value as T;
-  }
+  if (!result.issues) return result.value as T;
 
   throw new ValidationError(formatIssues(result.issues));
+};
+
+const decodePart = (value: string, plusAsSpace = false) => {
+  let normalized = value;
+
+  if (plusAsSpace && value.includes("+")) {
+    normalized = value.replaceAll("+", " ");
+  }
+
+  try {
+    return decodeURIComponent(normalized);
+  } catch {
+    return normalized;
+  }
+};
+
+const assignQueryValue = (
+  queryParams: Record<string, string | string[]>,
+  key: string,
+  value: string,
+) => {
+  const current = queryParams[key];
+
+  if (current === undefined) {
+    queryParams[key] = value;
+    return;
+  }
+
+  if (Array.isArray(current)) {
+    current.push(value);
+    return;
+  }
+
+  queryParams[key] = [current, value];
 };
 
 export const validateSchema = <T>(
@@ -49,13 +81,9 @@ export const validateBody = async (
   bodySchema?: StandardSchemaV1,
   bodyCache?: BodyCache,
 ) => {
-  if (!bodySchema) {
-    return true;
-  }
+  if (!bodySchema) return true;
 
-  if (bodyCache?.parsed) {
-    return validateSchema(bodySchema, bodyCache.value);
-  }
+  if (bodyCache?.parsed) return validateSchema(bodySchema, bodyCache.value);
 
   const contentType = req.headers.get("content-type") ?? "";
   let parsedBody: unknown;
@@ -79,35 +107,53 @@ export const validateBody = async (
 };
 
 export const validateQuery = (req: Request, querySchema?: StandardSchemaV1) => {
-  if (!querySchema) {
-    return true;
-  }
+  if (!querySchema) return true;
 
   const queryStart = req.url.indexOf("?");
 
-  if (queryStart === -1) {
-    return validateSchema(querySchema, {});
-  }
+  if (queryStart === -1) return validateSchema(querySchema, {});
 
   const hashStart = req.url.indexOf("#", queryStart + 1);
-  let queryString = req.url.slice(queryStart + 1);
+  let queryEnd = req.url.length;
 
   if (hashStart !== -1) {
-    queryString = req.url.slice(queryStart + 1, hashStart);
+    queryEnd = hashStart;
   }
 
-  const searchParams = new URLSearchParams(queryString);
   const queryParams: Record<string, string | string[]> = {};
+  let partStart = queryStart + 1;
 
-  for (const key of searchParams.keys()) {
-    const values = searchParams.getAll(key);
-    const [firstValue] = values;
+  while (partStart <= queryEnd) {
+    const ampersand = req.url.indexOf("&", partStart);
+    let partEnd = queryEnd;
 
-    if (values.length === 1) {
-      queryParams[key] = firstValue as string;
-    } else {
-      queryParams[key] = values;
+    if (ampersand !== -1 && ampersand < queryEnd) {
+      partEnd = ampersand;
     }
+
+    if (partEnd > partStart) {
+      const equals = req.url.indexOf("=", partStart);
+      const hasEquals = equals !== -1 && equals < partEnd;
+      let rawKey = req.url.slice(partStart, partEnd);
+      let rawValue = "";
+
+      if (hasEquals) {
+        rawKey = req.url.slice(partStart, equals);
+        rawValue = req.url.slice(equals + 1, partEnd);
+      }
+
+      assignQueryValue(
+        queryParams,
+        decodePart(rawKey, true),
+        decodePart(rawValue, true),
+      );
+    }
+
+    if (ampersand === -1 || ampersand >= queryEnd) {
+      break;
+    }
+
+    partStart = ampersand + 1;
   }
 
   return validateSchema(querySchema, queryParams);
@@ -117,15 +163,13 @@ export const validateHeaders = (
   req: Request,
   headersSchema?: StandardSchemaV1,
 ) => {
-  if (!headersSchema) {
-    return true;
-  }
+  if (!headersSchema) return true;
 
   const headers: Record<string, string> = {};
 
-  req.headers.forEach((value, key) => {
+  for (const [key, value] of req.headers) {
     headers[key] = value;
-  });
+  }
 
   return validateSchema(headersSchema, headers);
 };
@@ -134,13 +178,38 @@ export const validateCookies = (
   req: Request,
   cookiesSchema?: StandardSchemaV1,
 ) => {
-  if (!cookiesSchema) {
-    return true;
-  }
+  if (!cookiesSchema) return true;
 
   const cookieHeader = req.headers.get("cookie") ?? "";
-  const cookieMap = new Bun.CookieMap(cookieHeader);
-  const cookies = Object.fromEntries(cookieMap);
+  const cookies: Record<string, string> = {};
+  let partStart = 0;
+
+  while (partStart < cookieHeader.length) {
+    const semicolon = cookieHeader.indexOf(";", partStart);
+    let partEnd = cookieHeader.length;
+
+    if (semicolon !== -1) {
+      partEnd = semicolon;
+    }
+
+    const equals = cookieHeader.indexOf("=", partStart);
+    const hasEquals = equals !== -1 && equals < partEnd;
+
+    if (hasEquals) {
+      const key = cookieHeader.slice(partStart, equals).trim();
+
+      if (key) {
+        const value = cookieHeader.slice(equals + 1, partEnd).trim();
+        cookies[key] = decodePart(value);
+      }
+    }
+
+    if (semicolon === -1) {
+      break;
+    }
+
+    partStart = semicolon + 1;
+  }
 
   return validateSchema(cookiesSchema, cookies);
 };
@@ -149,9 +218,7 @@ export const validateParams = (
   req: ApiRequest,
   paramsSchema?: StandardSchemaV1,
 ) => {
-  if (!paramsSchema) {
-    return true;
-  }
+  if (!paramsSchema) return true;
 
   return validateSchema(paramsSchema, req.params ?? {});
 };
