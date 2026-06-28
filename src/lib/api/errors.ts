@@ -11,3 +11,10 @@ export class ValidationError extends Error {
     this.name = "ValidationError";
   }
 }
+
+export class SchemaConfigError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = "SchemaConfigError";
+  }
+}

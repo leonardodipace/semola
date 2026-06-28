@@ -20,6 +20,7 @@ export type MiddlewareOptions<
   TExt extends Record<string, unknown> = Record<string, unknown>,
 > = {
   request?: TReq;
+  // OpenAPI documentation only; response schemas are not validated at runtime.
   response?: TRes;
   handler: MiddlewareHandler<TReq, TRes, TExt>;
 };

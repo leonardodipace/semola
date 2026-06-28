@@ -12,6 +12,23 @@ afterEach(() => {
 });
 
 describe("Api Core", () => {
+  test("should dispatch via api.fetch without server", async () => {
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/users/:id",
+      method: "GET",
+      request: { params: z.object({ id: z.string() }) },
+      handler: (c) => c.json(200, { userId: c.req.params.id }),
+    });
+
+    const res = await api.fetch(new Request("http://localhost/users/abc"));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ userId: "abc" });
+  });
+
   test("should handle a basic GET request", async () => {
     const api = new Api();
 
@@ -30,6 +47,50 @@ describe("Api Core", () => {
 
     expect(res.status).toBe(200);
     expect(body).toEqual({ message: "world" });
+  });
+
+  test("should reuse compiled routes across fetch calls", async () => {
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/hello",
+      method: "GET",
+      handler: () => "ok",
+    });
+
+    const first = api.getRouteHandlers();
+    const second = api.getRouteHandlers();
+
+    expect(first).toBe(second);
+    expect(first["/hello"]?.GET).toBe(second["/hello"]?.GET);
+
+    await api.fetch(new Request("http://localhost/hello"));
+
+    const third = api.getRouteHandlers();
+
+    expect(third).toBe(first);
+  });
+
+  test("should map bare return handlers to responses", async () => {
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/text",
+      method: "GET",
+      handler: () => "Hello World",
+    });
+
+    api.defineRoute({
+      path: "/json",
+      method: "GET",
+      handler: () => ({ message: "Hello World" }),
+    });
+
+    const textRes = await api.fetch(new Request("http://localhost/text"));
+    const jsonRes = await api.fetch(new Request("http://localhost/json"));
+
+    expect(await textRes.text()).toBe("Hello World");
+    expect(await jsonRes.json()).toEqual({ message: "Hello World" });
   });
 
   test("should normalize prefix", async () => {
@@ -86,6 +147,30 @@ describe("Api Core", () => {
     expect(goodRes.status).toBe(200);
     const body = await goodRes.json();
     expect(body).toEqual({ name: "Alice" });
+  });
+
+  test("should validate text request body", async () => {
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/message",
+      method: "POST",
+      request: { body: z.string() },
+      handler: (c) => c.text(200, c.req.body),
+    });
+
+    api.serve(0, (s) => {
+      server = s;
+    });
+
+    const res = await fetch(`http://localhost:${server?.port}/message`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: "hello",
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("hello");
   });
 
   test("should extract and validate path parameters", async () => {
@@ -400,5 +485,23 @@ describe("Api Core", () => {
 
     const res = await fetch(`http://localhost:${server?.port}/user`);
     expect(res.status).toBe(200);
+  });
+
+  test("should expose OpenAPI spec from the api instance", async () => {
+    const api = new Api({
+      openapi: { title: "Test API", version: "2.0.0" },
+    });
+
+    api.defineRoute({
+      path: "/hello",
+      method: "GET",
+      handler: (c) => c.json(200, { ok: true }),
+    });
+
+    const spec = await api.getOpenApiSpec();
+
+    expect(spec.openapi).toBe("3.1.0");
+    expect(spec.info.title).toBe("Test API");
+    expect(spec.info.version).toBe("2.0.0");
   });
 });

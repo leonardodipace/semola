@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { z } from "zod";
+import { SchemaConfigError } from "../errors.js";
 import {
   validateBody,
   validateCookies,
@@ -20,14 +22,32 @@ describe("Validation Module", () => {
 
       const invalid = { user: { email: "invalid" } };
 
-      const promise1 = validateSchema(schema, invalid);
-      await expect(promise1).rejects.toMatchObject({
-        message: expect.stringContaining("user.email:"),
-      });
-      const promise2 = validateSchema(schema, invalid);
-      await expect(promise2).rejects.toMatchObject({
-        message: expect.stringContaining("age:"),
-      });
+      const runValidation = () => {
+        validateSchema(schema, invalid);
+      };
+
+      expect(runValidation).toThrow(
+        expect.objectContaining({
+          message: expect.stringContaining("user.email:"),
+        }),
+      );
+      expect(runValidation).toThrow(
+        expect.objectContaining({
+          message: expect.stringContaining("age:"),
+        }),
+      );
+    });
+
+    test("should throw SchemaConfigError for async schemas", () => {
+      const schema = {
+        "~standard": {
+          version: 1,
+          vendor: "test",
+          validate: () => Promise.resolve({ value: {} }),
+        },
+      } as StandardSchemaV1;
+
+      expect(() => validateSchema(schema, {})).toThrow(SchemaConfigError);
     });
   });
 
@@ -58,7 +78,7 @@ describe("Validation Module", () => {
       });
     });
 
-    test("should skip validation if Content-Type is not JSON", async () => {
+    test("should validate text body and return parsed data", async () => {
       const req = new Request("http://localhost", {
         method: "POST",
         headers: { "Content-Type": "text/plain" },
@@ -66,7 +86,7 @@ describe("Validation Module", () => {
       });
 
       const data = await validateBody(req, z.string());
-      expect(data).toBeUndefined();
+      expect(data).toBe("hello");
     });
 
     test("should cache parsed body and reuse on subsequent calls", async () => {
@@ -124,6 +144,29 @@ describe("Validation Module", () => {
 
       expect(data).toEqual({ filter: "active", tags: ["a", "b"] });
     });
+
+    test("should decode query values and preserve empty flags", async () => {
+      const schema = z.object({
+        q: z.string(),
+        encoded: z.string(),
+        empty: z.string(),
+        flag: z.string(),
+        tags: z.array(z.string()),
+      });
+      const req = new Request(
+        "http://localhost?q=two+words&encoded=a%20b&empty=&flag&tags=a&tags=b",
+      );
+
+      const data = await validateQuery(req, schema);
+
+      expect(data).toEqual({
+        q: "two words",
+        encoded: "a b",
+        empty: "",
+        flag: "",
+        tags: ["a", "b"],
+      });
+    });
   });
 
   describe("validateHeaders", () => {
@@ -156,14 +199,30 @@ describe("Validation Module", () => {
       expect(data).toEqual({ theme: "dark", session: "abc" });
     });
 
-    test("should throw when required cookie is missing", async () => {
+    test("should decode cookies and ignore flag-only cookies", async () => {
+      const schema = z.object({
+        session: z.string(),
+        empty: z.string(),
+        plus: z.string(),
+      });
+      const req = new Request("http://localhost", {
+        headers: { cookie: " session=s%201; flag; empty= ; plus=a+b" },
+      });
+
+      const data = await validateCookies(req, schema);
+
+      expect(data).toEqual({ session: "s 1", empty: "", plus: "a+b" });
+    });
+
+    test("should throw when required cookie is missing", () => {
       const schema = z.object({ requiredCookie: z.string() });
       const req = new Request("http://localhost");
 
-      const promise = validateCookies(req, schema);
-      await expect(promise).rejects.toMatchObject({
-        message: expect.stringContaining("requiredCookie:"),
-      });
+      expect(() => validateCookies(req, schema)).toThrow(
+        expect.objectContaining({
+          message: expect.stringContaining("requiredCookie:"),
+        }),
+      );
     });
   });
 });

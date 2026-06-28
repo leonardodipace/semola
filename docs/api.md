@@ -187,6 +187,34 @@ const UserSchema = type({
 
 **Note:** Query parameters, headers, cookies, and path parameters are always inlined (OpenAPI requirement), regardless of whether they have an ID.
 
+### `api.fetch`
+
+Fetch handler for use with `Bun.serve({ fetch: api.fetch })` or other runtimes that accept a `Request` handler. Routes compile once on the first request (or when `getRouteHandlers()` is called) and recompile when `defineRoute()` adds a route.
+
+```typescript
+Bun.serve({ port: 3000, fetch: api.fetch });
+```
+
+### Bare return handlers
+
+Simple routes without validation or middleware can return a value directly. The framework maps it to a `Response` at the boundary:
+
+```typescript
+api.defineRoute({
+  path: "/hello",
+  method: "GET",
+  handler: () => "Hello World",
+});
+
+api.defineRoute({
+  path: "/user",
+  method: "GET",
+  handler: () => ({ id: "1", name: "Alice" }),
+});
+```
+
+Supported return types: `string`, plain objects/arrays (JSON), or `Response`. Zero-argument handlers skip context allocation for maximum throughput. Context handlers `(c) => c.json(...)` remain fully supported.
+
 ### `api.serve(port, callback?)`
 
 Starts the server on the specified port.

@@ -1,18 +1,14 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { mightThrow } from "../../errors/index.js";
-import { ParseError, ValidationError } from "../errors.js";
+import type { ApiRequest } from "../core/types.js";
+import { ParseError, SchemaConfigError, ValidationError } from "../errors.js";
+import type { BodyCache } from "./types.js";
 
-export const validateSchema = async <T>(
-  schema: StandardSchemaV1,
-  data: unknown,
+const formatIssues = (
+  issues: NonNullable<
+    Awaited<ReturnType<StandardSchemaV1["~standard"]["validate"]>>["issues"]
+  >,
 ) => {
-  const result = await schema["~standard"].validate(data);
-
-  if (!result.issues) {
-    return result.value as T;
-  }
-
-  const issues = result.issues.map((issue) => {
+  const messages = issues.map((issue) => {
     let path = "unknown";
 
     if (Array.isArray(issue.path)) {
@@ -22,37 +18,84 @@ export const validateSchema = async <T>(
     return `${path}: ${issue.message ?? "validation failed"}`;
   });
 
-  const message = issues.join(", ");
-
-  throw new ValidationError(message);
+  return messages.join(", ");
 };
 
-export type BodyCache = { parsed: boolean; value: unknown };
+const readValidationResult = <T>(
+  result: Awaited<ReturnType<StandardSchemaV1["~standard"]["validate"]>>,
+) => {
+  if (!result.issues) return result.value as T;
 
-// Body cache prevents re-parsing JSON when multiple middlewares validate the same body
+  throw new ValidationError(formatIssues(result.issues));
+};
+
+const decodePart = (value: string, plusAsSpace = false) => {
+  let normalized = value;
+
+  if (plusAsSpace && value.includes("+")) {
+    normalized = value.replaceAll("+", " ");
+  }
+
+  try {
+    return decodeURIComponent(normalized);
+  } catch {
+    return normalized;
+  }
+};
+
+const assignQueryValue = (
+  queryParams: Record<string, string | string[]>,
+  key: string,
+  value: string,
+) => {
+  const current = queryParams[key];
+
+  if (current === undefined) {
+    queryParams[key] = value;
+    return;
+  }
+
+  if (Array.isArray(current)) {
+    current.push(value);
+    return;
+  }
+
+  queryParams[key] = [current, value];
+};
+
+export const validateSchema = <T>(
+  schema: StandardSchemaV1,
+  data: unknown,
+): T => {
+  const result = schema["~standard"].validate(data);
+
+  if (result instanceof Promise) {
+    throw new SchemaConfigError("Async schema validation is not supported");
+  }
+
+  return readValidationResult<T>(result);
+};
+
 export const validateBody = async (
   req: Request,
   bodySchema?: StandardSchemaV1,
   bodyCache?: BodyCache,
 ) => {
-  if (!bodySchema) {
-    return true;
-  }
+  if (!bodySchema) return true;
+
+  if (bodyCache?.parsed) return validateSchema(bodySchema, bodyCache.value);
 
   const contentType = req.headers.get("content-type") ?? "";
+  let parsedBody: unknown;
 
-  if (!contentType.includes("application/json")) {
-    return undefined;
-  }
-
-  if (bodyCache?.parsed) {
-    return validateSchema(bodySchema, bodyCache.value);
-  }
-
-  const [parseError, parsedBody] = await mightThrow(req.json());
-
-  if (parseError) {
-    throw new ParseError("Invalid JSON body");
+  if (contentType.includes("application/json")) {
+    try {
+      parsedBody = await req.json();
+    } catch {
+      throw new ParseError("Invalid JSON body");
+    }
+  } else {
+    parsedBody = await req.text();
   }
 
   if (bodyCache) {
@@ -63,84 +106,119 @@ export const validateBody = async (
   return validateSchema(bodySchema, parsedBody);
 };
 
-export const validateQuery = async (
-  req: Request,
-  querySchema?: StandardSchemaV1,
-) => {
-  if (!querySchema) {
-    return true;
+export const validateQuery = (req: Request, querySchema?: StandardSchemaV1) => {
+  if (!querySchema) return true;
+
+  const queryStart = req.url.indexOf("?");
+
+  if (queryStart === -1) return validateSchema(querySchema, {});
+
+  const hashStart = req.url.indexOf("#", queryStart + 1);
+  let queryEnd = req.url.length;
+
+  if (hashStart !== -1) {
+    queryEnd = hashStart;
   }
 
-  const qIndex = req.url.indexOf("?");
-
-  if (qIndex === -1) {
-    return validateSchema(querySchema, {});
-  }
-
-  // Handle both query strings and URL fragments
-  const hashIndex = req.url.indexOf("#", qIndex + 1);
-  const queryString =
-    hashIndex === -1
-      ? req.url.slice(qIndex + 1)
-      : req.url.slice(qIndex + 1, hashIndex);
-
-  const searchParams = new URLSearchParams(queryString);
   const queryParams: Record<string, string | string[]> = {};
+  let partStart = queryStart + 1;
 
-  for (const key of searchParams.keys()) {
-    const values = searchParams.getAll(key);
-    const [firstValue] = values;
+  while (partStart <= queryEnd) {
+    const ampersand = req.url.indexOf("&", partStart);
+    let partEnd = queryEnd;
 
-    if (values.length === 1) {
-      queryParams[key] = firstValue as string;
-    } else {
-      queryParams[key] = values;
+    if (ampersand !== -1 && ampersand < queryEnd) {
+      partEnd = ampersand;
     }
+
+    if (partEnd > partStart) {
+      const equals = req.url.indexOf("=", partStart);
+      const hasEquals = equals !== -1 && equals < partEnd;
+      let rawKey = req.url.slice(partStart, partEnd);
+      let rawValue = "";
+
+      if (hasEquals) {
+        rawKey = req.url.slice(partStart, equals);
+        rawValue = req.url.slice(equals + 1, partEnd);
+      }
+
+      assignQueryValue(
+        queryParams,
+        decodePart(rawKey, true),
+        decodePart(rawValue, true),
+      );
+    }
+
+    if (ampersand === -1 || ampersand >= queryEnd) {
+      break;
+    }
+
+    partStart = ampersand + 1;
   }
 
   return validateSchema(querySchema, queryParams);
 };
 
-export const validateHeaders = async (
+export const validateHeaders = (
   req: Request,
   headersSchema?: StandardSchemaV1,
 ) => {
-  if (!headersSchema) {
-    return true;
-  }
+  if (!headersSchema) return true;
 
   const headers: Record<string, string> = {};
 
-  req.headers.forEach((value, key) => {
+  for (const [key, value] of req.headers) {
     headers[key] = value;
-  });
+  }
 
   return validateSchema(headersSchema, headers);
 };
 
-export const validateCookies = async (
+export const validateCookies = (
   req: Request,
   cookiesSchema?: StandardSchemaV1,
 ) => {
-  if (!cookiesSchema) {
-    return true;
-  }
+  if (!cookiesSchema) return true;
 
-  // Use Bun's native CookieMap for efficient cookie parsing
   const cookieHeader = req.headers.get("cookie") ?? "";
-  const cookieMap = new Bun.CookieMap(cookieHeader);
-  const cookies = Object.fromEntries(cookieMap);
+  const cookies: Record<string, string> = {};
+  let partStart = 0;
+
+  while (partStart < cookieHeader.length) {
+    const semicolon = cookieHeader.indexOf(";", partStart);
+    let partEnd = cookieHeader.length;
+
+    if (semicolon !== -1) {
+      partEnd = semicolon;
+    }
+
+    const equals = cookieHeader.indexOf("=", partStart);
+    const hasEquals = equals !== -1 && equals < partEnd;
+
+    if (hasEquals) {
+      const key = cookieHeader.slice(partStart, equals).trim();
+
+      if (key) {
+        const value = cookieHeader.slice(equals + 1, partEnd).trim();
+        cookies[key] = decodePart(value);
+      }
+    }
+
+    if (semicolon === -1) {
+      break;
+    }
+
+    partStart = semicolon + 1;
+  }
 
   return validateSchema(cookiesSchema, cookies);
 };
 
-export const validateParams = async (
-  req: Bun.BunRequest,
+export const validateParams = (
+  req: ApiRequest,
   paramsSchema?: StandardSchemaV1,
 ) => {
-  if (!paramsSchema) {
-    return true;
-  }
+  if (!paramsSchema) return true;
 
-  return validateSchema(paramsSchema, req.params);
+  return validateSchema(paramsSchema, req.params ?? {});
 };

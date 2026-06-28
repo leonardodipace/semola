@@ -116,6 +116,10 @@ export type OpenApiOptions = {
   securitySchemes?: Record<string, SecurityScheme>;
 };
 
+export type ApiRequest = Request & {
+  params?: Record<string, string>;
+};
+
 export type Context<
   TReq extends RequestSchema = RequestSchema,
   TRes extends ResponseSchema | undefined = undefined,
@@ -139,18 +143,29 @@ export type Context<
   get: <K extends keyof TExt>(key: K) => TExt[K];
 };
 
+export type RouteReturn =
+  | Response
+  | string
+  | number
+  | boolean
+  | null
+  | Record<string, unknown>
+  | unknown[];
+
 export type RouteHandler<
   TReq extends RequestSchema = RequestSchema,
   TRes extends ResponseSchema | undefined = undefined,
   TExt extends Record<string, unknown> = Record<string, unknown>,
 > = (c: Context<TReq, TRes, TExt>) => Response | Promise<Response>;
 
+export type BareRouteHandler = () => RouteReturn | Promise<RouteReturn>;
+
 export type ValidatedRequest = {
-  body: unknown;
-  query: unknown;
-  headers: unknown;
-  cookies: unknown;
-  params: unknown;
+  body?: unknown;
+  query?: unknown;
+  headers?: unknown;
+  cookies?: unknown;
+  params?: unknown;
 };
 
 export type MethodRoutes = Record<
@@ -169,14 +184,59 @@ export type RouteConfig<
   request?: TReq;
   response?: TRes;
   middlewares?: TRouteMiddlewares;
-  handler: RouteHandler<
-    TReq,
-    TRes,
-    MergeMiddlewareExtensions<TGlobalMiddlewares> &
-      MergeMiddlewareExtensions<TRouteMiddlewares>
-  >;
+  handler:
+    | RouteHandler<
+        TReq,
+        TRes,
+        MergeMiddlewareExtensions<TGlobalMiddlewares> &
+          MergeMiddlewareExtensions<TRouteMiddlewares>
+      >
+    | BareRouteHandler;
   summary?: string;
   description?: string;
   operationId?: string;
   tags?: string[];
+};
+
+export type ResolvedValidation = {
+  input: boolean;
+  output: boolean;
+};
+
+export type InternalContext = {
+  raw: Bun.BunRequest;
+  req: ValidatedRequest;
+  get: (key: string) => unknown;
+  json: (status: number, data: unknown) => Response;
+  text: (status: number, text: string) => Response;
+  html: (status: number, html: string) => Response;
+  redirect: (status: number, url: string) => Response;
+};
+
+export type AnyRouteHandler = (
+  context: InternalContext,
+) => Response | Promise<Response>;
+
+export type BunRouteHandler = (
+  req: Bun.BunRequest,
+) => Response | Promise<Response>;
+
+export type BuildRouteHandlerInput = {
+  route: RouteConfig<
+    RequestSchema,
+    ResponseSchema,
+    readonly Middleware[],
+    readonly Middleware[]
+  >;
+  globalMiddlewares: readonly Middleware[];
+  validation: ResolvedValidation;
+};
+
+export type RequestPipelineConfig = {
+  middlewares: readonly Middleware[];
+  routeRequest?: RequestSchema;
+  routeResponse?: ResponseSchema;
+  validateInput: boolean;
+  validateOutput: boolean;
+  handler: AnyRouteHandler;
 };
