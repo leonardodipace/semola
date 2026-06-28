@@ -284,7 +284,12 @@ const createOperation = (
 ) => {
   const { request, response } = createRouteSchemas(route, globalMiddlewares);
 
-  const fullPath = prefix ? prefix + route.path : route.path;
+  let fullPath = route.path;
+
+  if (prefix) {
+    fullPath = prefix + route.path;
+  }
+
   const parameters = createParameters(request, fullPath);
   const { responses, components: responseComponents } =
     createResponses(response);
@@ -342,9 +347,15 @@ const createRouteSchemas = (
   mergeIntoRequest(request, route.request);
   mergeIntoResponse(response, route.response);
 
+  let routeResponse: ResponseSchema | undefined;
+
+  if (Object.keys(response).length > 0) {
+    routeResponse = response;
+  }
+
   return {
     request,
-    response: Object.keys(response).length > 0 ? response : undefined,
+    response: routeResponse,
   };
 };
 
@@ -396,7 +407,12 @@ export const generateOpenApiSpec = (options: OpenApiGeneratorOptions) => {
   const schemas: Record<string, unknown> = {};
 
   for (const route of options.routes) {
-    const fullPath = options.prefix ? options.prefix + route.path : route.path;
+    let fullPath = route.path;
+
+    if (options.prefix) {
+      fullPath = options.prefix + route.path;
+    }
+
     const openApiPath = normalizePathForOpenAPI(fullPath);
     const method = route.method.toLowerCase();
 

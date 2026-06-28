@@ -1,6 +1,6 @@
 import type { Middleware } from "../middleware/index.js";
 import { validateSchema } from "../validation/index.js";
-import { validateRequestInto } from "../validation/request-validator.js";
+import { buildRequestValidator } from "../validation/request-validator.js";
 import { RequestPipeline } from "./request-pipeline.js";
 import { badRequest } from "./response-helpers.js";
 import type {
@@ -89,11 +89,22 @@ const buildValidatedBareRouteHandler = (
   validateInput: boolean,
   validateOutput: boolean,
 ) => {
-  const responseSchema = validateOutput ? response?.[200] : undefined;
+  let responseSchema = response?.[200];
+
+  if (!validateOutput) {
+    responseSchema = undefined;
+  }
+
+  let requestValidator = buildRequestValidator(request);
+
+  if (!validateInput) {
+    requestValidator = undefined;
+  }
+
   const probe = handler();
 
   if (probe instanceof Promise) {
-    if (!validateInput) {
+    if (!requestValidator) {
       return async () => {
         const value = await handler();
 
@@ -102,8 +113,7 @@ const buildValidatedBareRouteHandler = (
     }
 
     return async (req: Bun.BunRequest) => {
-      const data = {};
-      const error = await validateRequestInto({ req, schema: request }, data);
+      const error = await requestValidator(req);
 
       if (error) return badRequest(error.message);
 
@@ -115,11 +125,10 @@ const buildValidatedBareRouteHandler = (
 
   const result = toValidatedResponse(probe, responseSchema);
 
-  if (!validateInput) return () => result;
+  if (!requestValidator) return () => result;
 
   return async (req: Bun.BunRequest) => {
-    const data = {};
-    const error = await validateRequestInto({ req, schema: request }, data);
+    const error = await requestValidator(req);
 
     if (error) return badRequest(error.message);
 
