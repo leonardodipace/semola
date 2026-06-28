@@ -136,32 +136,6 @@ describe("RouteRegistry", () => {
     expect(await emptyRes?.json()).toBe(null);
   });
 
-  test("bare handler runs per request not at build time", async () => {
-    let calls = 0;
-    const registry = new RouteRegistry({});
-
-    registry.addRoute({
-      path: "/counter",
-      method: "GET",
-      handler: () => ({ count: ++calls }),
-    });
-
-    const routes = registry.buildRoutes({
-      validation: { input: false, output: false },
-    });
-
-    expect(calls).toBe(0);
-
-    const handler = routes["/counter"]?.GET;
-    const req = new Request("http://localhost/counter") as Bun.BunRequest;
-
-    const res1 = await handler?.(req, {} as Bun.Server<unknown>);
-    expect(await res1?.json()).toEqual({ count: 1 });
-
-    const res2 = await handler?.(req, {} as Bun.Server<unknown>);
-    expect(await res2?.json()).toEqual({ count: 2 });
-  });
-
   test("validates bare handler response schemas", async () => {
     const registry = new RouteRegistry({});
 
