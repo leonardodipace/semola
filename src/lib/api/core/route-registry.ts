@@ -32,13 +32,11 @@ const toResponse = (value: RouteReturn): Response => {
 };
 
 const buildBareHandler = (handler: BareRouteHandler): BunRouteHandler => {
-  const probe = handler();
+  return async () => {
+    const value = await handler();
 
-  if (probe instanceof Promise) return async () => toResponse(await handler());
-
-  const response = toResponse(probe);
-
-  return () => response;
+    return toResponse(value);
+  };
 };
 
 const toValidatedResponse = (
@@ -101,38 +99,22 @@ const buildValidatedBareRouteHandler = (
     requestValidator = undefined;
   }
 
-  const probe = handler();
-
-  if (probe instanceof Promise) {
-    if (!requestValidator) {
-      return async () => {
-        const value = await handler();
-
-        return toValidatedResponse(value, responseSchema);
-      };
-    }
-
-    return async (req: Bun.BunRequest) => {
-      const error = await requestValidator(req);
-
-      if (error) return badRequest(error.message);
-
+  if (!requestValidator) {
+    return async () => {
       const value = await handler();
 
       return toValidatedResponse(value, responseSchema);
     };
   }
 
-  const result = toValidatedResponse(probe, responseSchema);
-
-  if (!requestValidator) return () => result;
-
   return async (req: Bun.BunRequest) => {
     const error = await requestValidator(req);
 
     if (error) return badRequest(error.message);
 
-    return result;
+    const value = await handler();
+
+    return toValidatedResponse(value, responseSchema);
   };
 };
 
