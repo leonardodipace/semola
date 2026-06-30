@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { Middleware } from "./index.js";
+import { Middleware } from "./middleware.js";
 
 describe("Middleware", () => {
   test("should initialize with a basic handler", () => {

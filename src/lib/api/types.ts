@@ -1,8 +1,7 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import type { Middleware } from "../middleware/index.js";
-import type { MergeMiddlewareExtensions } from "../middleware/types.js";
+import type { Middleware } from "./middleware.js";
 
-type HTTPMethod = Bun.Serve.HTTPMethod;
+export type HTTPMethod = Bun.Serve.HTTPMethod;
 
 type BunHandler = Bun.Serve.Handler<
   Bun.BunRequest,
@@ -22,8 +21,14 @@ export type RequestSchema = {
   cookies?: StandardSchemaV1;
 };
 
-// Helper to safely extract type information from Standard Schema
-// Uses [K] access to defer evaluation and avoid deep instantiation
+export type StandardSchemaValidationResult = Awaited<
+  ReturnType<StandardSchemaV1["~standard"]["validate"]>
+>;
+
+export type StandardSchemaIssues = NonNullable<
+  StandardSchemaValidationResult["issues"]
+>;
+
 type SafeTypeAccess<
   T,
   K extends "input" | "output",
@@ -203,6 +208,57 @@ export type ResolvedValidation = {
   output: boolean;
 };
 
+export type MiddlewareHandler<
+  TReq extends RequestSchema = RequestSchema,
+  TRes extends ResponseSchema | undefined = undefined,
+  TExt extends Record<string, unknown> = Record<never, never>,
+> = (
+  c: Context<TReq, TRes>,
+) =>
+  | Response
+  | TExt
+  | undefined
+  | Promise<Response | TExt | undefined>
+  | Promise<void>
+  | void;
+
+export type MiddlewareOptions<
+  TReq extends RequestSchema = RequestSchema,
+  TRes extends ResponseSchema | undefined = undefined,
+  TExt extends Record<string, unknown> = Record<string, unknown>,
+> = {
+  request?: TReq;
+  response?: TRes;
+  handler: MiddlewareHandler<TReq, TRes, TExt>;
+};
+
+export type InferMiddlewareExtension<T> = T extends {
+  options: MiddlewareOptions<infer _TReq, infer _TRes, infer E>;
+}
+  ? E
+  : never;
+
+export type MergeMiddlewareExtensions<T extends readonly unknown[]> =
+  T extends readonly [infer First, ...infer Rest]
+    ? InferMiddlewareExtension<First> & MergeMiddlewareExtensions<Rest>
+    : {};
+
+export type BodyCache = {
+  parsed: boolean;
+  value: unknown;
+};
+
+export type RequestValidator = (
+  req: Bun.BunRequest,
+  bodyCache?: BodyCache,
+) => Promise<Error | undefined>;
+
+export type ValidateRequestInput = {
+  req: Bun.BunRequest;
+  schema?: RequestSchema;
+  bodyCache?: BodyCache;
+};
+
 export type InternalContext = {
   raw: Bun.BunRequest;
   req: ValidatedRequest;
@@ -213,30 +269,125 @@ export type InternalContext = {
   redirect: (status: number, url: string) => Response;
 };
 
-export type AnyRouteHandler = (
-  context: InternalContext,
-) => Response | Promise<Response>;
-
 export type BunRouteHandler = (
   req: Bun.BunRequest,
 ) => Response | Promise<Response>;
 
-export type BuildRouteHandlerInput = {
-  route: RouteConfig<
-    RequestSchema,
-    ResponseSchema,
-    readonly Middleware[],
-    readonly Middleware[]
-  >;
-  globalMiddlewares: readonly Middleware[];
-  validation: ResolvedValidation;
-};
+export type AnyRouteHandler = (
+  context: InternalContext,
+) => Response | Promise<Response>;
 
-export type RequestPipelineConfig = {
+export type HandleRequestConfig = {
   middlewares: readonly Middleware[];
   routeRequest?: RequestSchema;
   routeResponse?: ResponseSchema;
   validateInput: boolean;
   validateOutput: boolean;
   handler: AnyRouteHandler;
+};
+
+export type RouteMethods = Partial<Record<HTTPMethod, BunRouteHandler>>;
+
+export type CompiledSegment = {
+  value: string;
+  paramName?: string;
+};
+
+export type DynamicRoute = {
+  segments: CompiledSegment[];
+  methods: RouteMethods;
+  paramStarts: number[];
+  paramEnds: number[];
+};
+
+export type PatternRoute = {
+  pattern: URLPattern;
+  methods: RouteMethods;
+};
+
+export type OpenApiSpec = {
+  openapi: string;
+  info: {
+    title: string;
+    description?: string;
+    version: string;
+  };
+  servers?: Array<{ url: string; description?: string }>;
+  paths: Record<string, OpenApiPath>;
+  components?: {
+    schemas?: Record<string, unknown>;
+    securitySchemes?: Record<string, unknown>;
+  };
+};
+
+export type OpenApiPath = {
+  [method: string]: OpenApiOperation;
+};
+
+export type OpenApiOperation = {
+  summary?: string;
+  description?: string;
+  operationId?: string;
+  tags?: string[];
+  parameters?: OpenApiParameter[];
+  requestBody?: OpenApiRequestBody;
+  responses: Record<string, OpenApiResponse>;
+};
+
+export type OpenApiParameter = {
+  name: string;
+  in: "path" | "query" | "header" | "cookie";
+  required?: boolean;
+  schema: unknown;
+};
+
+export type OpenApiRequestBody = {
+  required?: boolean;
+  content: {
+    [mediaType: string]: {
+      schema: unknown;
+    };
+  };
+};
+
+export type OpenApiResponse = {
+  description: string;
+  content?: {
+    [mediaType: string]: {
+      schema: unknown;
+    };
+  };
+};
+
+export type OpenApiComponents = NonNullable<OpenApiSpec["components"]>;
+
+export type RouteConfigInternal = {
+  path: string;
+  method: string;
+  request?: RequestSchema;
+  response?: ResponseSchema;
+  middlewares?: readonly Middleware[];
+  handler: unknown;
+  summary?: string;
+  description?: string;
+  operationId?: string;
+  tags?: string[];
+};
+
+export type OpenApiGeneratorOptions = {
+  title: string;
+  description?: string;
+  version: string;
+  prefix?: string;
+  servers?: Array<{ url: string; description?: string }>;
+  securitySchemes?: Record<string, unknown>;
+  routes: RouteConfigInternal[];
+  globalMiddlewares?: readonly Middleware[];
+};
+
+export type JsonSchema = {
+  type?: string;
+  properties?: Record<string, unknown>;
+  required?: string[];
+  [key: string]: unknown;
 };

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { Middleware } from "../middleware/index.js";
+import { Middleware } from "../middleware.js";
 import { generateOpenApiSpec } from "./index.js";
 
 describe("OpenAPI Generation", () => {

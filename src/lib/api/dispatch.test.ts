@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { buildFetchDispatcher } from "./fetch-dispatcher.js";
+import { buildFetchDispatcher } from "./dispatch.js";
 import type { MethodRoutes } from "./types.js";
 
 const GET = "GET" as const satisfies Bun.Serve.HTTPMethod;
 const POST = "POST" as const satisfies Bun.Serve.HTTPMethod;
 
-describe("fetch-dispatcher", () => {
+describe("dispatch", () => {
   test("dispatches static routes", async () => {
     const routes: MethodRoutes = {
       "/hello": {

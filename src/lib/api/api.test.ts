@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { Middleware } from "../middleware/index.js";
-import { Api } from "./index.js";
+import { Api } from "./api.js";
+import { Middleware } from "./middleware.js";
 
 // Global server reference for cleanup
 let server: ReturnType<typeof Bun.serve> | undefined;
@@ -503,5 +503,202 @@ describe("Api Core", () => {
     expect(spec.openapi).toBe("3.1.0");
     expect(spec.info.title).toBe("Test API");
     expect(spec.info.version).toBe("2.0.0");
+  });
+
+  test("registers multiple methods on the same path", () => {
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/resource",
+      method: "GET",
+      handler: (c) => c.json(200, { method: "GET" }),
+    });
+
+    api.defineRoute({
+      path: "/resource",
+      method: "POST",
+      handler: (c) => c.json(200, { method: "POST" }),
+    });
+
+    const routes = api.getRouteHandlers();
+
+    expect(routes["/resource"]?.GET).toBeDefined();
+    expect(routes["/resource"]?.POST).toBeDefined();
+  });
+
+  test("validates bare handler request schemas via getRouteHandlers", async () => {
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/user",
+      method: "POST",
+      request: { body: z.object({ name: z.string() }) },
+      handler: () => "ok",
+    });
+
+    const handler = api.getRouteHandlers()["/user"]?.POST;
+    const req = new Request("http://localhost/user", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: 123 }),
+    }) as Bun.BunRequest;
+
+    const res = await handler?.(req, {} as Bun.Server<unknown>);
+
+    expect(res?.status).toBe(400);
+  });
+
+  test("maps bare handler JSON primitives to responses", async () => {
+    const api = new Api({ validation: false });
+
+    api.defineRoute({ path: "/flag", method: "GET", handler: () => false });
+    api.defineRoute({ path: "/count", method: "GET", handler: () => 42 });
+    api.defineRoute({ path: "/empty", method: "GET", handler: () => null });
+
+    const routes = api.getRouteHandlers();
+    const server = {} as Bun.Server<unknown>;
+
+    const flagRes = await routes["/flag"]?.GET?.(
+      new Request("http://localhost/flag") as Bun.BunRequest,
+      server,
+    );
+    const countRes = await routes["/count"]?.GET?.(
+      new Request("http://localhost/count") as Bun.BunRequest,
+      server,
+    );
+    const emptyRes = await routes["/empty"]?.GET?.(
+      new Request("http://localhost/empty") as Bun.BunRequest,
+      server,
+    );
+
+    expect(await flagRes?.json()).toBe(false);
+    expect(await countRes?.json()).toBe(42);
+    expect(await emptyRes?.json()).toBe(null);
+  });
+
+  test("validates bare handler response schemas", async () => {
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/user",
+      method: "GET",
+      response: { 200: z.object({ name: z.string() }) },
+      handler: () => ({ name: 123 }),
+    });
+
+    const handler = api.getRouteHandlers()["/user"]?.GET;
+    const req = new Request("http://localhost/user") as Bun.BunRequest;
+    const res = await handler?.(req, {} as Bun.Server<unknown>);
+
+    expect(res?.status).toBe(400);
+  });
+
+  test("validates bare handler response by status code", async () => {
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/item",
+      method: "POST",
+      response: { 201: z.object({ id: z.number() }) },
+      handler: () => Response.json({ id: "bad" }, { status: 201 }),
+    });
+
+    const handler = api.getRouteHandlers()["/item"]?.POST;
+    const req = new Request("http://localhost/item", {
+      method: "POST",
+    }) as Bun.BunRequest;
+    const res = await handler?.(req, {} as Bun.Server<unknown>);
+
+    expect(res?.status).toBe(400);
+  });
+
+  test("returns cached Response for sync validated bare POST handler", async () => {
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/echo",
+      method: "POST",
+      request: { body: z.string() },
+      response: { 200: z.string() },
+      handler: () => "Hello World",
+    });
+
+    const handler = api.getRouteHandlers()["/echo"]?.POST;
+    const req = new Request("http://localhost/echo", {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: "Hello World",
+    }) as Bun.BunRequest;
+
+    const res = await handler?.(req, {} as Bun.Server<unknown>);
+
+    expect(res).toBeInstanceOf(Response);
+    expect(res?.status).toBe(200);
+    expect(await res?.text()).toBe("Hello World");
+  });
+
+  test("keeps middleware extension return objects unchanged", async () => {
+    const authData = { user: { role: "admin" } };
+    const auth = new Middleware({ handler: () => authData });
+    const label = new Middleware({
+      handler: (c) => ({ label: (c.get("user") as { role: string }).role }),
+    });
+
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/me",
+      method: "GET",
+      middlewares: [auth, label] as const,
+      handler: (c) =>
+        c.json(200, {
+          role: (c.get("user") as { role: string }).role,
+          label: c.get("label"),
+        }),
+    });
+
+    const res = await api.fetch(new Request("http://localhost/me"));
+
+    expect(await res.json()).toEqual({ role: "admin", label: "admin" });
+    expect(authData).toEqual({ user: { role: "admin" } });
+  });
+
+  test("keeps body cache scoped to one request", async () => {
+    const bodyMiddleware = new Middleware({
+      request: { body: z.object({ name: z.string() }) },
+      handler: (c) => ({ name: c.req.body.name }),
+    });
+
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/user",
+      method: "POST",
+      middlewares: [bodyMiddleware] as const,
+      request: { body: z.object({ age: z.number() }) },
+      handler: (c) =>
+        c.json(200, {
+          name: c.get("name"),
+          age: (c.req.body as { age: number }).age,
+        }),
+    });
+
+    const first = await api.fetch(
+      new Request("http://localhost/user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Alice", age: 30 }),
+      }),
+    );
+    const second = await api.fetch(
+      new Request("http://localhost/user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Bob", age: 40 }),
+      }),
+    );
+
+    expect(await first.json()).toEqual({ name: "Alice", age: 30 });
+    expect(await second.json()).toEqual({ name: "Bob", age: 40 });
   });
 });

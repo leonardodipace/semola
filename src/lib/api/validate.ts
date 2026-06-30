@@ -1,13 +1,17 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import type { ApiRequest } from "../core/types.js";
-import { ParseError, SchemaConfigError, ValidationError } from "../errors.js";
-import type { BodyCache } from "./types.js";
+import { ParseError, SchemaConfigError, ValidationError } from "./errors.js";
+import type {
+  ApiRequest,
+  BodyCache,
+  RequestSchema,
+  RequestValidator,
+  StandardSchemaIssues,
+  StandardSchemaValidationResult,
+  ValidatedRequest,
+  ValidateRequestInput,
+} from "./types.js";
 
-const formatIssues = (
-  issues: NonNullable<
-    Awaited<ReturnType<StandardSchemaV1["~standard"]["validate"]>>["issues"]
-  >,
-) => {
+const formatIssues = (issues: StandardSchemaIssues) => {
   const messages = issues.map((issue) => {
     let path = "unknown";
 
@@ -21,9 +25,7 @@ const formatIssues = (
   return messages.join(", ");
 };
 
-const readValidationResult = <T>(
-  result: Awaited<ReturnType<StandardSchemaV1["~standard"]["validate"]>>,
-) => {
+const readValidationResult = <T>(result: StandardSchemaValidationResult) => {
   if (!result.issues) return result.value as T;
 
   throw new ValidationError(formatIssues(result.issues));
@@ -221,4 +223,88 @@ export const validateParams = (
   if (!paramsSchema) return true;
 
   return validateSchema(paramsSchema, req.params ?? {});
+};
+
+export const validateParts = async (
+  input: ValidateRequestInput,
+  data?: ValidatedRequest,
+) => {
+  const schema = input.schema;
+
+  if (!schema) return;
+
+  try {
+    if (schema.body) {
+      const body = await validateBody(input.req, schema.body, input.bodyCache);
+
+      if (data) data.body = body;
+    }
+
+    if (schema.query) {
+      const query = validateQuery(input.req, schema.query);
+
+      if (data) data.query = query;
+    }
+
+    if (schema.headers) {
+      const headers = validateHeaders(input.req, schema.headers);
+
+      if (data) data.headers = headers;
+    }
+
+    if (schema.cookies) {
+      const cookies = validateCookies(input.req, schema.cookies);
+
+      if (data) data.cookies = cookies;
+    }
+
+    if (schema.params) {
+      const params = validateParams(input.req, schema.params);
+
+      if (data) data.params = params;
+    }
+  } catch (error) {
+    return error as Error;
+  }
+};
+
+export const buildRequestValidator = (
+  schema?: RequestSchema,
+): RequestValidator | undefined => {
+  if (!schema) return;
+
+  if (
+    schema.body &&
+    !schema.query &&
+    !schema.headers &&
+    !schema.cookies &&
+    !schema.params
+  ) {
+    const bodySchema = schema.body;
+
+    return async (req, bodyCache) => {
+      try {
+        await validateBody(req, bodySchema, bodyCache);
+      } catch (error) {
+        return error as Error;
+      }
+    };
+  }
+
+  return (req, bodyCache) => {
+    return validateParts({ req, schema, bodyCache });
+  };
+};
+
+export const validateRequest = async (input: ValidateRequestInput) => {
+  const schema = input.schema;
+
+  if (!schema) return { success: true as const, data: {} };
+
+  const data: ValidatedRequest = {};
+  const error = await validateParts(input, data);
+
+  if (error) return { success: false as const, error };
+
+  return { success: true as const, data };
 };

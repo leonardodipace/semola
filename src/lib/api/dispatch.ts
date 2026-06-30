@@ -1,21 +1,12 @@
-import type { ApiRequest, BunRouteHandler, MethodRoutes } from "./types.js";
-
-type HTTPMethod = Bun.Serve.HTTPMethod;
-type RouteMethods = Partial<Record<HTTPMethod, BunRouteHandler>>;
-type CompiledSegment = {
-  value: string;
-  paramName?: string;
-};
-type DynamicRoute = {
-  segments: CompiledSegment[];
-  methods: RouteMethods;
-  paramStarts: number[];
-  paramEnds: number[];
-};
-type PatternRoute = {
-  pattern: URLPattern;
-  methods: RouteMethods;
-};
+import type {
+  ApiRequest,
+  CompiledSegment,
+  DynamicRoute,
+  HTTPMethod,
+  MethodRoutes,
+  PatternRoute,
+  RouteMethods,
+} from "./types.js";
 
 const notFoundInit = { status: 404 };
 
@@ -99,8 +90,6 @@ const assignParams = (route: DynamicRoute, pathname: string) => {
   return params;
 };
 
-// node:url only exposes `new URL()` or deprecated `url.parse()` - both allocate.
-// Slice the path section directly on the hot path.
 const pathnameFromRequestUrl = (url: string) => {
   const schemeEnd = url.indexOf("://");
   const pathStart = url.indexOf("/", schemeEnd + 3);

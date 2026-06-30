@@ -2,40 +2,19 @@ import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,
 } from "@standard-schema/spec";
-import type { RequestSchema, ResponseSchema } from "../core/types.js";
-import type { Middleware } from "../middleware/index.js";
+import type { Middleware } from "../middleware.js";
 import type {
+  JsonSchema,
+  OpenApiComponents,
+  OpenApiGeneratorOptions,
   OpenApiOperation,
   OpenApiParameter,
   OpenApiResponse,
   OpenApiSpec,
-} from "./types.js";
-
-type OpenApiComponents = NonNullable<OpenApiSpec["components"]>;
-
-type RouteConfigInternal = {
-  path: string;
-  method: string;
-  request?: RequestSchema;
-  response?: ResponseSchema;
-  middlewares?: readonly Middleware[];
-  handler: unknown;
-  summary?: string;
-  description?: string;
-  operationId?: string;
-  tags?: string[];
-};
-
-type OpenApiGeneratorOptions = {
-  title: string;
-  description?: string;
-  version: string;
-  prefix?: string;
-  servers?: Array<{ url: string; description?: string }>;
-  securitySchemes?: Record<string, unknown>;
-  routes: RouteConfigInternal[];
-  globalMiddlewares?: readonly Middleware[];
-};
+  RequestSchema,
+  ResponseSchema,
+  RouteConfigInternal,
+} from "../types.js";
 
 const toOpenAPISchema = (
   schema: StandardSchemaV1,
@@ -67,13 +46,6 @@ const requestFields = [
   "cookies",
   "params",
 ] as const;
-
-type JsonSchema = {
-  type?: string;
-  properties?: Record<string, unknown>;
-  required?: string[];
-  [key: string]: unknown;
-};
 
 const convertSchemaToOpenApi = (
   schema: StandardSchemaV1,
