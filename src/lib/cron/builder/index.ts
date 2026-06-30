@@ -161,9 +161,7 @@ function handleSimpleExpression<T>(expr: CronExpr<T>) {
       const { step, range } = expr;
 
       if (step === 0) {
-        throw new Error(
-          `OutOfBoundError: Expected step value greater than zero`,
-        );
+        throw new OutOfBoundError("Expected step value greater than zero");
       }
 
       if (!range) {
@@ -174,9 +172,7 @@ function handleSimpleExpression<T>(expr: CronExpr<T>) {
 
       if (max === 0) {
         if (min > max) {
-          throw new Error(
-            `OutOfBoundError: Expected max value greater than zero`,
-          );
+          throw new OutOfBoundError("Expected max value greater than zero");
         }
 
         return `${min}-${max}/${step}`;
