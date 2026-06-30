@@ -1,10 +1,24 @@
-import { describe, expect, setSystemTime, spyOn, test } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  setSystemTime,
+  spyOn,
+  test,
+} from "bun:test";
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
 import { InvalidRetryError } from "../errors.js";
 import { Cron, CronOS, RetryCronJob } from "./index.js";
 import type { NotifyContext } from "./types.js";
 
 class UserDefinedError extends Error {}
+
+const instantTimeout = ((fn: () => void) => {
+  fn();
+
+  return 0;
+}) as unknown as typeof setTimeout;
 
 describe("Cron", () => {
   describe("constructor", () => {
@@ -431,6 +445,18 @@ describe("Cron", () => {
   });
 
   describe("Retry", () => {
+    let timeoutSpy: ReturnType<typeof spyOn<typeof globalThis, "setTimeout">>;
+
+    beforeEach(() => {
+      timeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(
+        instantTimeout,
+      );
+    });
+
+    afterEach(() => {
+      timeoutSpy.mockRestore();
+    });
+
     test("should successfully call onError() callback", async () => {
       setSystemTime(new Date("2020-01-10T00:00:00.000Z"));
       const handler = () => Promise.resolve();
