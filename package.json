@@ -111,6 +111,16 @@
         "default": "./dist/lib/prompts/index.cjs"
       }
     },
+    "./cli": {
+      "import": {
+        "types": "./dist/lib/cli/index.d.mts",
+        "default": "./dist/lib/cli/index.mjs"
+      },
+      "require": {
+        "types": "./dist/lib/cli/index.d.cts",
+        "default": "./dist/lib/cli/index.cjs"
+      }
+    },
     "./workflow": {
       "import": {
         "types": "./dist/lib/workflow/index.d.mts",
