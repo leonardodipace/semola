@@ -39,11 +39,13 @@ type OpenApiGeneratorOptions = {
 const toOpenAPISchema = (
   schema: StandardSchemaV1,
   io: "input" | "output" = "input",
-) => ({
-  schema: (schema as unknown as StandardJSONSchemaV1)["~standard"].jsonSchema[
-    io
-  ]({ target: "draft-2020-12" }),
-});
+) => {
+  const jsonSchema = (schema as unknown as StandardJSONSchemaV1)[
+    "~standard"
+  ].jsonSchema[io]({ target: "draft-2020-12" }) as JsonSchema;
+
+  return hoistDefsToComponents(jsonSchema);
+};
 
 const getSchemaDescription = (schema: StandardSchemaV1) => {
   const metadata = schema["~standard"];
@@ -113,20 +115,92 @@ type JsonSchema = {
   [key: string]: unknown;
 };
 
+const rewriteDefsRefs = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map(rewriteDefsRefs);
+  }
+
+  if (typeof value !== "object") return value;
+  if (value === null) return value;
+
+  const record = value as Record<string, unknown>;
+
+  if (typeof record.$ref === "string" && record.$ref.startsWith("#/$defs/")) {
+    const name = record.$ref.slice("#/$defs/".length);
+
+    return { $ref: `#/components/schemas/${name}` };
+  }
+
+  const rewritten: Record<string, unknown> = {};
+
+  for (const key in record) {
+    rewritten[key] = rewriteDefsRefs(record[key]);
+  }
+
+  return rewritten;
+};
+
+const hoistDefsToComponents = (jsonSchema: JsonSchema) => {
+  const defs = jsonSchema.$defs;
+
+  if (!defs || typeof defs !== "object") {
+    return { schema: jsonSchema, components: undefined };
+  }
+
+  const schema = rewriteDefsRefs({ ...jsonSchema }) as JsonSchema;
+  delete schema.$defs;
+
+  const defsRecord = defs as Record<string, JsonSchema>;
+  const schemas: Record<string, JsonSchema> = {};
+
+  for (const name in defsRecord) {
+    schemas[name] = rewriteDefsRefs(defsRecord[name]) as JsonSchema;
+  }
+
+  return {
+    schema,
+    components: {
+      schemas,
+    } as OpenAPIV3_1.ComponentsObject,
+  };
+};
+
+// Libraries may attach a declared id in schema metadata but omit it from JSON Schema output.
+const getDeclaredSchemaId = (schema: StandardSchemaV1 & { meta?: unknown }) => {
+  const readMeta = schema.meta;
+
+  if (typeof readMeta !== "function") return;
+
+  const meta = readMeta();
+
+  if (typeof meta !== "object") return;
+  if (meta === null) return;
+  if (typeof meta.id !== "string") return;
+
+  return meta.id;
+};
+
+const getSchemaId = (schema: StandardSchemaV1, jsonSchema: JsonSchema) => {
+  if (typeof jsonSchema.id === "string") {
+    return jsonSchema.id;
+  }
+
+  return getDeclaredSchemaId(schema);
+};
+
 const convertSchemaToOpenApi = async (
   schema: StandardSchemaV1,
   io: "input" | "output" = "input",
 ) => {
   const result = toOpenAPISchema(schema, io);
-  const { schema: jsonSchema } = result as {
+  const { schema: jsonSchema, components: existingComponents } = result as {
     schema: JsonSchema;
     components?: OpenAPIV3_1.ComponentsObject;
   };
 
-  // Check if schema has an id (from .meta({ id: "..." }))
-  const schemaId = jsonSchema.id;
+  const schemaId = getSchemaId(schema, jsonSchema);
 
-  if (schemaId && typeof schemaId === "string") {
+  if (schemaId) {
     // Extract to components and return a reference
     const schemaWithoutId = { ...jsonSchema };
     delete schemaWithoutId.id;
@@ -135,7 +209,9 @@ const convertSchemaToOpenApi = async (
     return {
       schema: { $ref: `#/components/schemas/${schemaId}` },
       components: {
+        ...existingComponents,
         schemas: {
+          ...existingComponents?.schemas,
           [schemaId]: schemaWithoutId,
         },
       } as OpenAPIV3_1.ComponentsObject,
