@@ -8,3 +8,4 @@ export {
 } from "./builder/index.js";
 export { Month, WeekDay } from "./builder/types.js";
 export { Cron, CronOS, RetryCronJob } from "./core/index.js";
+export { InvalidRetryError, OutOfBoundError } from "./errors.js";
