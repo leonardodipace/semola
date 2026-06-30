@@ -51,9 +51,10 @@ export const parseArgv = (tokens: string[], optionDefs: OptionDef[]) => {
 
   while (index < tokens.length) {
     const token = tokens[index];
+    if (!token) break;
+
     const errMessage = `Unknown option: ${token}`;
 
-    if (!token) break;
     if (token === "--") {
       positional.push(...tokens.slice(index + 1));
       break;
