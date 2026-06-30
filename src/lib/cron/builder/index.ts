@@ -1,3 +1,4 @@
+import { OutOfBoundError } from "../errors.js";
 import type {
   BuilderFn,
   CronBuilderType,
@@ -150,7 +151,7 @@ function handleSimpleExpression<T>(expr: CronExpr<T>) {
     case "range": {
       const { min, max } = expr;
       if (min > max) {
-        throw new Error(`OutOfBoundError: Expected ${min} <= ${max}`);
+        throw new OutOfBoundError(`Expected ${min} <= ${max}`);
       }
 
       return `${min}-${max}`;
@@ -186,7 +187,7 @@ function handleSimpleExpression<T>(expr: CronExpr<T>) {
       }
 
       if (min > max) {
-        throw new Error(`OutOfBoundError: Expected ${min} <= ${max}`);
+        throw new OutOfBoundError(`Expected ${min} <= ${max}`);
       }
 
       return `${min}-${max}/${step}`;
