@@ -20,11 +20,15 @@ const readFlagValue = (
   return index + 1;
 };
 
-const resolveOption = (lookup: Map<string, string>, key: string) => {
+const resolveOption = (
+  lookup: Map<string, string>,
+  key: string,
+  errorMessage: string,
+) => {
   const canonical = lookup.get(key);
 
   if (!canonical) {
-    throw new CliValidationError(`Unknown option: --${key}`);
+    throw new CliValidationError(errorMessage);
   }
 
   return canonical;
@@ -47,6 +51,7 @@ export const parseArgv = (tokens: string[], optionDefs: OptionDef[]) => {
 
   while (index < tokens.length) {
     const token = tokens[index];
+    const errMessage = `Unknown option: ${token}`;
 
     if (!token) break;
     if (token === "--") {
@@ -63,7 +68,7 @@ export const parseArgv = (tokens: string[], optionDefs: OptionDef[]) => {
     if (token.startsWith("--")) {
       const equalsIndex = token.indexOf("=");
       const key = token.slice(2, equalsIndex === -1 ? undefined : equalsIndex);
-      const name = resolveOption(lookup, key);
+      const name = resolveOption(lookup, key, errMessage);
 
       if (equalsIndex !== -1) {
         options[name] = token.slice(equalsIndex + 1);
@@ -81,7 +86,7 @@ export const parseArgv = (tokens: string[], optionDefs: OptionDef[]) => {
 
     const equalsIndex = token.indexOf("=");
     const key = token.slice(1, equalsIndex === -1 ? undefined : equalsIndex);
-    const name = resolveOption(lookup, key);
+    const name = resolveOption(lookup, key, errMessage);
 
     if (equalsIndex !== -1) {
       options[name] = token.slice(equalsIndex + 1);
