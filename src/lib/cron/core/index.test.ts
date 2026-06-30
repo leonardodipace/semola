@@ -1,7 +1,7 @@
 import { describe, expect, setSystemTime, spyOn, test } from "bun:test";
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
 import { InvalidRetryError } from "../errors.js";
-import { Cron, RetryCronJob } from "./index.js";
+import { Cron, CronOS, RetryCronJob } from "./index.js";
 import type { NotifyContext } from "./types.js";
 
 class UserDefinedError extends Error {}
@@ -843,5 +843,63 @@ describe("Cron", () => {
         expect(secondInfinityRetry).toBeInstanceOf(InvalidRetryError);
       });
     });
+  });
+});
+
+describe("CronOS", () => {
+  test("should expose job name and resolved expression", () => {
+    const job = new CronOS({
+      name: "daily-report",
+      schedule: "@daily",
+      path: "./report-worker.ts",
+    });
+
+    expect(job.getJobName()).toBe("daily-report");
+    expect(job.getExpression()).toBe("0 0 * * *");
+  });
+
+  test("should compute the next run", () => {
+    const job = new CronOS({
+      name: "monthly-job",
+      schedule: "@monthly",
+      path: "./worker.ts",
+    });
+
+    const next = job.next(new Date(2020, 0, 10));
+    if (!next) throw new Error("Expected next run to be found");
+
+    expect(next).toEqual(new Date("2020-02-01T00:00:00.000Z"));
+  });
+
+  test("run should register an OS-level cron job", async () => {
+    const cronSpy = spyOn(Bun, "cron").mockResolvedValue(undefined);
+
+    const job = new CronOS({
+      name: "os-job",
+      schedule: "@daily",
+      path: "./worker.ts",
+    });
+
+    await job.run();
+
+    expect(cronSpy).toHaveBeenCalledWith("./worker.ts", "0 0 * * *", "os-job");
+
+    cronSpy.mockRestore();
+  });
+
+  test("stop should remove the OS-level cron job", async () => {
+    const removeSpy = spyOn(Bun.cron, "remove").mockResolvedValue(undefined);
+
+    const job = new CronOS({
+      name: "os-job",
+      schedule: "@daily",
+      path: "./worker.ts",
+    });
+
+    await job.stop();
+
+    expect(removeSpy).toHaveBeenCalledWith("os-job");
+
+    removeSpy.mockRestore();
   });
 });
