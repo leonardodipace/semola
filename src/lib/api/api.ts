@@ -4,7 +4,7 @@ import { generateOpenApiSpec } from "./openapi/index.js";
 import {
   bodyHasMultipleReaders,
   createContext,
-  getEmptyValidated,
+  emptyValidated,
   getFullPath,
   mapValidationError,
   resolveValidation,
@@ -26,6 +26,8 @@ import type {
 } from "./types.js";
 import {
   buildRequestValidator,
+  compileBodyValidator,
+  isBodyOnlySchema,
   validateParts,
   validateSchema,
 } from "./validate.js";
@@ -86,25 +88,6 @@ const prepareResponse = (
   return response;
 };
 
-const wrapBareRoute = (
-  validateRequest: ReturnType<typeof buildRequestValidator>,
-  cached: Response | Promise<Response>,
-): BunRouteHandler => {
-  if (!validateRequest) {
-    if (cached instanceof Promise) return async () => cached;
-
-    return () => cached;
-  }
-
-  return async (req) => {
-    const error = await validateRequest(req);
-
-    if (error) return mapValidationError(error);
-
-    return cached;
-  };
-};
-
 const buildBareRoute = (
   handler: BareRouteHandler,
   request?: RequestSchema,
@@ -113,13 +96,32 @@ const buildBareRoute = (
   validateOutput = false,
 ): BunRouteHandler => {
   const responseSchema = validateOutput ? response : undefined;
-  const validateRequest = validateInput
-    ? buildRequestValidator(request)
-    : undefined;
+  let bodyValidator: ReturnType<typeof compileBodyValidator> | undefined;
+
+  if (validateInput && request && isBodyOnlySchema(request)) {
+    const bodySchema = request.body;
+
+    if (bodySchema) {
+      bodyValidator = compileBodyValidator(bodySchema);
+    }
+  }
+
+  const validateRequest =
+    validateInput && !bodyValidator
+      ? buildRequestValidator(request)
+      : undefined;
   const probe = handler();
 
   if (probe instanceof Promise) {
     return async (req) => {
+      if (bodyValidator) {
+        try {
+          await bodyValidator(req);
+        } catch (error) {
+          return mapValidationError(error as Error);
+        }
+      }
+
       if (validateRequest) {
         const error = await validateRequest(req);
 
@@ -134,7 +136,39 @@ const buildBareRoute = (
 
   const cached = prepareResponse(probe, responseSchema);
 
-  return wrapBareRoute(validateRequest, cached);
+  if (!bodyValidator && !validateRequest) {
+    if (cached instanceof Promise) return async () => cached;
+
+    return () => cached;
+  }
+
+  if (bodyValidator) {
+    return async (req) => {
+      try {
+        await bodyValidator(req);
+      } catch (error) {
+        return mapValidationError(error as Error);
+      }
+
+      return cached;
+    };
+  }
+
+  const validator = validateRequest;
+
+  if (!validator) {
+    if (cached instanceof Promise) return async () => cached;
+
+    return () => cached;
+  }
+
+  return async (req) => {
+    const error = await validator(req);
+
+    if (error) return mapValidationError(error);
+
+    return cached;
+  };
 };
 
 const buildContextRoute = (handler: AnyRouteHandler): BunRouteHandler => {
@@ -221,7 +255,7 @@ const handleRequest = async (
     const { request: requestSchema, handler: middlewareHandler } =
       middleware.options;
 
-    let validated = getEmptyValidated();
+    let validated = emptyValidated;
 
     if (config.validateInput && requestSchema) {
       const data = {};
@@ -251,7 +285,7 @@ const handleRequest = async (
     }
   }
 
-  let validated = getEmptyValidated();
+  let validated = emptyValidated;
 
   if (config.validateInput && config.routeRequest) {
     const data = {};

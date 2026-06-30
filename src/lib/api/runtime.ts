@@ -63,7 +63,7 @@ export const validatingJson = (responseSchema: ResponseSchema) => {
   };
 };
 
-const emptyValidated: ValidatedRequest = Object.freeze({
+export const emptyValidated: ValidatedRequest = Object.freeze({
   body: undefined,
   query: undefined,
   headers: undefined,
@@ -104,10 +104,6 @@ export const createContext = (
   }
 
   return context;
-};
-
-export const getEmptyValidated = () => {
-  return emptyValidated;
 };
 
 const stripTrailingSlash = (path: string) => {

@@ -25,6 +25,45 @@ const formatIssues = (issues: StandardSchemaIssues) => {
   return messages.join(", ");
 };
 
+export const isBodyOnlySchema = (schema: RequestSchema) => {
+  if (!schema.body) return false;
+  if (schema.query) return false;
+  if (schema.headers) return false;
+  if (schema.cookies) return false;
+  if (schema.params) return false;
+
+  return true;
+};
+
+export const compileBodyValidator = (bodySchema: StandardSchemaV1) => {
+  const validate = bodySchema["~standard"].validate;
+
+  return async (req: Request) => {
+    const contentType = req.headers.get("content-type") ?? "";
+    let parsedBody: unknown;
+
+    if (contentType.startsWith("application/json")) {
+      try {
+        parsedBody = await req.json();
+      } catch {
+        throw new ParseError("Invalid JSON body");
+      }
+    } else {
+      parsedBody = await req.text();
+    }
+
+    const result = validate(parsedBody);
+
+    if (result instanceof Promise) {
+      throw new SchemaConfigError("Async schema validation is not supported");
+    }
+
+    if (result.issues) {
+      throw new ValidationError(formatIssues(result.issues));
+    }
+  };
+};
+
 const readValidationResult = <T>(result: StandardSchemaValidationResult) => {
   if (!result.issues) return result.value as T;
 
@@ -273,27 +312,23 @@ export const buildRequestValidator = (
 ): RequestValidator | undefined => {
   if (!schema) return;
 
-  if (
-    schema.body &&
-    !schema.query &&
-    !schema.headers &&
-    !schema.cookies &&
-    !schema.params
-  ) {
+  if (isBodyOnlySchema(schema)) {
     const bodySchema = schema.body;
 
-    return async (req, bodyCache) => {
+    if (!bodySchema) return;
+
+    const validateBodyOnly = compileBodyValidator(bodySchema);
+
+    return async (req) => {
       try {
-        await validateBody(req, bodySchema, bodyCache);
+        await validateBodyOnly(req);
       } catch (error) {
         return error as Error;
       }
     };
   }
 
-  return (req, bodyCache) => {
-    return validateParts({ req, schema, bodyCache });
-  };
+  return (req, bodyCache) => validateParts({ req, schema, bodyCache });
 };
 
 export const validateRequest = async (input: ValidateRequestInput) => {

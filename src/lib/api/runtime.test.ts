@@ -7,7 +7,7 @@ import {
   badRequest,
   bodyHasMultipleReaders,
   createContext,
-  getEmptyValidated,
+  emptyValidated,
   getFullPath,
   html,
   json,
@@ -61,10 +61,9 @@ describe("runtime", () => {
       expect(await res.json()).toEqual({ ok: true });
     });
 
-    test("getEmptyValidated returns frozen defaults", () => {
-      const empty = getEmptyValidated();
-      expect(empty.body).toBeUndefined();
-      expect(Object.isFrozen(empty)).toBe(true);
+    test("emptyValidated is frozen defaults", () => {
+      expect(emptyValidated.body).toBeUndefined();
+      expect(Object.isFrozen(emptyValidated)).toBe(true);
     });
   });
 
