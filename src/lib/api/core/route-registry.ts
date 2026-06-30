@@ -1,6 +1,7 @@
 import type { Middleware } from "../middleware/index.js";
 import { validateSchema } from "../validation/index.js";
 import { buildRequestValidator } from "../validation/request-validator.js";
+import { createContext } from "./context-factory.js";
 import { RequestPipeline } from "./request-pipeline.js";
 import { mapValidationError } from "./response-helpers.js";
 import type {
@@ -19,10 +20,6 @@ import { getFullPath } from "./utils.js";
 
 const emptyMiddlewares: readonly Middleware[] = [];
 
-const isBareHandler = (handler: unknown) => {
-  return typeof handler === "function" && handler.length === 0;
-};
-
 const toResponse = (value: RouteReturn): Response => {
   if (value instanceof Response) return value;
 
@@ -31,30 +28,19 @@ const toResponse = (value: RouteReturn): Response => {
   return Response.json(value);
 };
 
-const buildBareHandler = (handler: BareRouteHandler): BunRouteHandler => {
-  const probe = handler();
-
-  if (probe instanceof Promise) {
-    return async () => toResponse(await handler());
-  }
-
-  const response = toResponse(probe);
-
-  return () => response;
-};
-
-const toValidatedResponse = async (
+const validateResponse = async (
   value: RouteReturn,
-  responseSchema: ResponseSchema | undefined,
+  responseSchema?: ResponseSchema,
 ) => {
-  const res = toResponse(value);
-  const schema = responseSchema?.[res.status];
-  if (!schema) return res;
+  const response = toResponse(value);
+  const schema = responseSchema?.[response.status];
+
+  if (!schema) return response;
 
   let data: unknown = value;
 
   if (value instanceof Response) {
-    data = await res.clone().json();
+    data = await response.clone().json();
   }
 
   try {
@@ -63,15 +49,98 @@ const toValidatedResponse = async (
     return mapValidationError(error as Error);
   }
 
-  return res;
+  return response;
 };
 
-const hasMiddlewareRequestSchema = (middlewares: readonly Middleware[]) => {
-  for (const middleware of middlewares) {
-    if (middleware.options.request) return true;
+const prepareResponse = (
+  value: RouteReturn,
+  responseSchema?: ResponseSchema,
+): Response | Promise<Response> => {
+  if (value instanceof Response) {
+    return validateResponse(value, responseSchema);
   }
 
-  return false;
+  const response = toResponse(value);
+  const schema = responseSchema?.[response.status];
+
+  if (!schema) return response;
+
+  try {
+    validateSchema(schema, value);
+  } catch (error) {
+    return mapValidationError(error as Error);
+  }
+
+  return response;
+};
+
+const wrapBareRoute = (
+  validateRequest: ReturnType<typeof buildRequestValidator>,
+  cached: Response | Promise<Response>,
+): BunRouteHandler => {
+  if (!validateRequest) {
+    if (cached instanceof Promise) return async () => cached;
+
+    return () => cached;
+  }
+
+  return async (req) => {
+    const error = await validateRequest(req);
+
+    if (error) return mapValidationError(error);
+
+    return cached;
+  };
+};
+
+const buildBareRoute = (
+  handler: BareRouteHandler,
+  request?: RequestSchema,
+  response?: ResponseSchema,
+  validateInput = false,
+  validateOutput = false,
+): BunRouteHandler => {
+  const responseSchema = validateOutput ? response : undefined;
+  const validateRequest = validateInput
+    ? buildRequestValidator(request)
+    : undefined;
+  const probe = handler();
+
+  if (probe instanceof Promise) {
+    return async (req) => {
+      if (validateRequest) {
+        const error = await validateRequest(req);
+
+        if (error) return mapValidationError(error);
+      }
+
+      const value = await handler();
+
+      return validateResponse(value, responseSchema);
+    };
+  }
+
+  const cached = prepareResponse(probe, responseSchema);
+
+  return wrapBareRoute(validateRequest, cached);
+};
+
+const buildContextRoute = (handler: AnyRouteHandler): BunRouteHandler => {
+  return (req) => {
+    const result = handler(createContext(req));
+
+    if (result instanceof Promise) {
+      return result.then((value) => {
+        if (value instanceof Response) return value;
+
+        return toResponse(value);
+      });
+    }
+
+    if (result instanceof Response) return result;
+
+    return toResponse(result);
+  };
 };
 
 const getRouteMiddlewares = (input: BuildRouteHandlerInput) => {
@@ -82,101 +151,72 @@ const getRouteMiddlewares = (input: BuildRouteHandlerInput) => {
   return [...input.globalMiddlewares, ...input.route.middlewares];
 };
 
-const shouldValidateInput = (
-  input: BuildRouteHandlerInput,
-  middlewares: readonly Middleware[],
-) => {
-  if (!input.validation.input) return false;
-  if (input.route.request) return true;
-
-  return hasMiddlewareRequestSchema(middlewares);
+const isReturnValueHandler = (handler: unknown) => {
+  return typeof handler === "function" && handler.length === 0;
 };
 
-const buildValidatedBareRouteHandler = (
-  handler: BareRouteHandler,
+const isContextHandler = (handler: unknown) => {
+  return typeof handler === "function" && handler.length === 1;
+};
+
+const routeValidatesInput = (
+  validation: ResolvedValidation,
   request: RequestSchema | undefined,
-  response: ResponseSchema | undefined,
-  validateInput: boolean,
-  validateOutput: boolean,
+  middlewares: readonly Middleware[],
 ) => {
-  let responseSchema = response;
+  if (!validation.input) return false;
 
-  if (!validateOutput) {
-    responseSchema = undefined;
+  if (request) return true;
+
+  for (const middleware of middlewares) {
+    if (middleware.options.request) return true;
   }
 
-  let requestValidator = buildRequestValidator(request);
-
-  if (!validateInput) {
-    requestValidator = undefined;
-  }
-
-  const probe = handler();
-
-  if (probe instanceof Promise) {
-    if (!requestValidator) {
-      return async () => {
-        const value = await handler();
-
-        return toValidatedResponse(value, responseSchema);
-      };
-    }
-
-    return async (req: Bun.BunRequest) => {
-      const error = await requestValidator(req);
-
-      if (error) return mapValidationError(error);
-
-      const value = await handler();
-
-      return toValidatedResponse(value, responseSchema);
-    };
-  }
-
-  const result = toValidatedResponse(probe, responseSchema);
-
-  if (!requestValidator) return () => result;
-
-  return async (req: Bun.BunRequest) => {
-    const error = await requestValidator(req);
-
-    if (error) return mapValidationError(error);
-
-    return result;
-  };
+  return false;
 };
 
 const buildRouteHandler = (input: BuildRouteHandlerInput): BunRouteHandler => {
-  const allMiddlewares = getRouteMiddlewares(input);
-  const handler = input.route.handler;
-  const validateInput = shouldValidateInput(input, allMiddlewares);
-  const validateOutput = input.validation.output && !!input.route.response;
+  const { route, validation } = input;
+  const middlewares = getRouteMiddlewares(input);
+  const handler = route.handler;
 
-  if (allMiddlewares.length === 0 && isBareHandler(handler)) {
-    if (!validateInput && !validateOutput)
-      return buildBareHandler(handler as BareRouteHandler);
+  const hasMiddleware = middlewares.length > 0;
+  const validateInput = routeValidatesInput(
+    validation,
+    route.request,
+    middlewares,
+  );
+  const validateOutput = validation.output && !!route.response;
 
-    return buildValidatedBareRouteHandler(
+  if (!hasMiddleware && isReturnValueHandler(handler)) {
+    return buildBareRoute(
       handler as BareRouteHandler,
-      input.route.request,
-      input.route.response,
+      route.request,
+      route.response,
       validateInput,
       validateOutput,
     );
   }
 
+  if (
+    !hasMiddleware &&
+    isContextHandler(handler) &&
+    !validateInput &&
+    !validateOutput
+  ) {
+    return buildContextRoute(handler as AnyRouteHandler);
+  }
+
   const pipeline = new RequestPipeline({
-    middlewares: allMiddlewares,
-    routeRequest: input.route.request,
-    routeResponse: input.route.response,
+    middlewares,
+    routeRequest: route.request,
+    routeResponse: route.response,
     validateInput,
     validateOutput,
     handler: handler as AnyRouteHandler,
   });
 
-  return (req) => {
-    return pipeline.handle(req);
-  };
+  return (req) => pipeline.handle(req);
 };
 
 export class RouteRegistry {

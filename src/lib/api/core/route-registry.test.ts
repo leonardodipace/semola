@@ -179,4 +179,74 @@ describe("RouteRegistry", () => {
 
     expect(res?.status).toBe(400);
   });
+
+  test("returns cached Response for sync validated bare POST handler", async () => {
+    const registry = new RouteRegistry({});
+
+    registry.addRoute({
+      path: "/echo",
+      method: "POST",
+      request: { body: z.string() },
+      response: { 200: z.string() },
+      handler: () => "Hello World",
+    });
+
+    const routes = registry.buildRoutes({
+      validation: { input: true, output: true },
+    });
+
+    const handler = routes["/echo"]?.POST;
+    const req = new Request("http://localhost/echo", {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: "Hello World",
+    }) as Bun.BunRequest;
+
+    const res = await handler?.(req, {} as Bun.Server<unknown>);
+
+    expect(res).toBeInstanceOf(Response);
+    expect(res?.status).toBe(200);
+    expect(await res?.text()).toBe("Hello World");
+  });
+
+  test("uses context bare handler for arity-1 routes without validation", async () => {
+    const registry = new RouteRegistry({});
+
+    registry.addRoute({
+      path: "/json-context",
+      method: "GET",
+      handler: (c) => c.json(200, { message: "Hello World" }),
+    });
+
+    registry.addRoute({
+      path: "/text-context",
+      method: "GET",
+      handler: (c) => c.text(200, "Hello World"),
+    });
+
+    const routes = registry.buildRoutes({
+      validation: { input: true, output: true },
+    });
+
+    const jsonReq = new Request(
+      "http://localhost/json-context",
+    ) as Bun.BunRequest;
+    const textReq = new Request(
+      "http://localhost/text-context",
+    ) as Bun.BunRequest;
+
+    const jsonRes = await routes["/json-context"]?.GET?.(
+      jsonReq,
+      {} as Bun.Server<unknown>,
+    );
+    const textRes = await routes["/text-context"]?.GET?.(
+      textReq,
+      {} as Bun.Server<unknown>,
+    );
+
+    expect(jsonRes?.status).toBe(200);
+    expect(await jsonRes?.json()).toEqual({ message: "Hello World" });
+    expect(textRes?.status).toBe(200);
+    expect(await textRes?.text()).toBe("Hello World");
+  });
 });

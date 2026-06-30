@@ -88,7 +88,7 @@ export const validateBody = async (
   const contentType = req.headers.get("content-type") ?? "";
   let parsedBody: unknown;
 
-  if (contentType.includes("application/json")) {
+  if (contentType.startsWith("application/json")) {
     try {
       parsedBody = await req.json();
     } catch {
