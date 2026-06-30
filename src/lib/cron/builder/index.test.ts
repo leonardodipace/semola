@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { OutOfBoundError } from "../errors.js";
 import { any, cronJobBuilder, list, number, range, step } from "./index.js";
 import { Month, WeekDay } from "./types.js";
 
@@ -98,7 +99,7 @@ describe("Cron Expression Builder", () => {
           cronJobBuilder((b) => b.hour(range({ min: 12, max: 1 })));
         }
 
-        expect(inner).toThrow("OutOfBoundError");
+        expect(inner).toThrow(OutOfBoundError);
       });
 
       test("should create a range with min and max equals to zero", () => {
@@ -143,8 +144,8 @@ describe("Cron Expression Builder", () => {
           cronJobBuilder((b) => b.minute(step({ step: 0, range: { min: 1 } })));
         }
 
-        expect(zeroStepWithoutRange).toThrow("OutOfBoundError");
-        expect(zeroStepWithRange).toThrow("OutOfBoundError");
+        expect(zeroStepWithoutRange).toThrow(OutOfBoundError);
+        expect(zeroStepWithRange).toThrow(OutOfBoundError);
       });
 
       test("should raise an error if the step's range bounds are incorrect", () => {
@@ -154,7 +155,7 @@ describe("Cron Expression Builder", () => {
           );
         }
 
-        expect(inner).toThrow("OutOfBoundError");
+        expect(inner).toThrow(OutOfBoundError);
       });
 
       test("should raise an error when step range max is zero and min is greater than max", () => {
@@ -164,7 +165,7 @@ describe("Cron Expression Builder", () => {
           );
         }
 
-        expect(inner).toThrow("OutOfBoundError");
+        expect(inner).toThrow(OutOfBoundError);
       });
 
       test("should create a step with min and max equals to zero", () => {
