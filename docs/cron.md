@@ -9,6 +9,8 @@ import {
   Cron,
   CronOS,
   RetryCronJob,
+  InvalidRetryError,
+  OutOfBoundError,
   Month,
   WeekDay, 
   cronJobBuilder,
@@ -200,6 +202,8 @@ console.log(expr);
 
 **Note:** If a field is not defined, it defaults to `'*'` (any).
 
+Invalid builder ranges and steps raise `OutOfBoundError`.
+
 ## Error Handling and Retries
 
 Pass an optional `RetryCronJob` instance to retry failed in-process runs up to a fixed number of times.
@@ -211,9 +215,9 @@ Bun invokes the cron callback on each schedule tick. Inside that callback, `Cron
 
 `RetryCronJob.update()` only tracks attempts and backoff. It does not call `handler` itself; Bun re-invokes the callback on the next scheduled run.
 
-Create one `RetryCronJob` per `Cron` job or share the same instance with multiple `Cron` jobs. When sharing one `RetryCronJob` instance, it internally use the cron job's name to ensure state isolation and, in case it's used for two jobs with the same name, the old job is replaced.
+Create one `RetryCronJob` per `Cron` job or share the same instance with multiple `Cron` jobs. When sharing one `RetryCronJob` instance, it internally uses the cron job's name to ensure state isolation and, in case it's used for two jobs with the same name, the old job is replaced.
 
-`maxAttempts` is validated when the first failure is processed (inside `update()`), not in the constructor.
+`maxAttempts` is validated in the `RetryCronJob` constructor. Invalid values raise `InvalidRetryError` at construction time.
 
 ```typescript
 const cleanup = new Cron({
@@ -237,7 +241,7 @@ const cleanup = new Cron({
 });
 ```
 
-- **`maxAttempts`** (required) - Number of retries after the first failure on a given schedule tick sequence; a successful `handler` run resets the count. Must be a finite non-negative integer; invalid values raise `InvalidRetryError` on the first failure.
+- **`maxAttempts`** (required) - Number of retries after the first failure on a given schedule tick sequence; a successful `handler` run resets the count. Must be a finite non-negative integer; invalid values raise `InvalidRetryError` in the constructor.
 - **`onError(ctx: ErrorMetadataType): void | Promise<void>`** (optional) - Function called when an error is raised inside the `handler` function, after all retries have been exhausted, with the final error passed in as the argument. If not provided, the instance re-raises that error. The `ErrorMetadataType` type contains the following properties:
   - `name: string` - The job's name
   - `failedAt: number` - When the job failed, expressed in milliseconds
@@ -362,7 +366,7 @@ await job.run();
 
 
 // worker.ts
-const logger = new Logger("job-staus", [
+const logger = new Logger("job-status", [
   new FileProvider("./job-status.json", {
     formatter: new JSONFormatter(),
     policy: { type: "time", instant: "month", duration: 12 },
