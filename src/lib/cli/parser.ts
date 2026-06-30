@@ -79,12 +79,12 @@ export const parseArgv = (tokens: string[], optionDefs: OptionDef[]) => {
       throw new CliValidationError(`Invalid option: ${token}`);
     }
 
-    const key = token.slice(1, 2);
-    const attached = token.slice(2);
+    const equalsIndex = token.indexOf("=");
+    const key = token.slice(1, equalsIndex === -1 ? undefined : equalsIndex);
     const name = resolveOption(lookup, key);
 
-    if (attached.length > 0) {
-      options[name] = attached;
+    if (equalsIndex !== -1) {
+      options[name] = token.slice(equalsIndex + 1);
       index++;
       continue;
     }

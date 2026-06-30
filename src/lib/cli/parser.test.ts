@@ -46,15 +46,34 @@ describe("parseArgv", () => {
     expect(parsed.options).toEqual({ tag: "v1.0.0" });
   });
 
-  test("parses short alias with attached value", () => {
-    const parsed = parseArgv(["-tv1.0.0"], optionDefs);
+  test("parses short alias with equals value", () => {
+    const parsed = parseArgv(["-t=v1.0.0"], optionDefs);
 
     expect(parsed.options).toEqual({ tag: "v1.0.0" });
+  });
+
+  test("parses multi-character alias with separate value", () => {
+    const defs = [{ name: "tag", aliases: ["pkg"] }];
+    const parsed = parseArgv(["-pkg", "v1.0.0"], defs);
+
+    expect(parsed.options).toEqual({ tag: "v1.0.0" });
+  });
+
+  test("rejects glued short alias values", () => {
+    expect(() => parseArgv(["-tv1.0.0"], optionDefs)).toThrow(
+      "Unknown option: --tv1.0.0",
+    );
   });
 
   test("throws on unknown options", () => {
     expect(() => parseArgv(["--unknown"], optionDefs)).toThrow(
       "Unknown option: --unknown",
+    );
+  });
+
+  test("throws on unknown multi-character short options", () => {
+    expect(() => parseArgv(["-pkg"], optionDefs)).toThrow(
+      "Unknown option: --pkg",
     );
   });
 });

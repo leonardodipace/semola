@@ -73,7 +73,7 @@ await program.parse(["publish", "my-package", "-t", "v1.0.0"]);
 ## Argv parsing
 
 - Long options: `--name`, `--name=value`, `--name value`
-- Short aliases: `-t value`, `-t=v1.0.0` (single-character aliases only)
+- Short aliases: `-alias`, `-alias value`, `-alias=value` (full alias name after `-`)
 - Boolean flags: bare `--first` or `-f` sets the option to `true`
 - Positional arguments: tokens not starting with `-`
 - `--` sentinel: everything after `--` is treated as positional
