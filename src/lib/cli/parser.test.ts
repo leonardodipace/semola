@@ -54,14 +54,28 @@ describe("parseArgv", () => {
 
   test("parses multi-character alias with separate value", () => {
     const defs = [{ name: "tag", aliases: ["pkg"] }];
-    const parsed = parseArgv(["-pkg", "v1.0.0"], defs);
+    const parsedNormal = parseArgv(["--tag", "v1.0.0"], defs);
+    const parsedAlias = parseArgv(["-pkg", "v1.0.0"], defs);
 
-    expect(parsed.options).toEqual({ tag: "v1.0.0" });
+    expect(parsedNormal.options).toEqual({ tag: "v1.0.0" });
+    expect(parsedAlias.options).toEqual({ tag: "v1.0.0" });
   });
 
   test("rejects glued short alias values", () => {
     expect(() => parseArgv(["-tv1.0.0"], optionDefs)).toThrow(
-      "Unknown option: --tv1.0.0",
+      "Unknown option: -tv1.0.0",
+    );
+  });
+
+  test("rejects glued long alias values", () => {
+    expect(() => parseArgv(["-tagv1.0.0"], optionDefs)).toThrow(
+      "Unknown option: -tagv1.0.0",
+    );
+  });
+
+  test("rejects glued option values", () => {
+    expect(() => parseArgv(["--tagv1.0.0"], optionDefs)).toThrow(
+      "Unknown option: --tagv1.0.0",
     );
   });
 
@@ -73,7 +87,19 @@ describe("parseArgv", () => {
 
   test("throws on unknown multi-character short options", () => {
     expect(() => parseArgv(["-pkg"], optionDefs)).toThrow(
-      "Unknown option: --pkg",
+      "Unknown option: -pkg",
+    );
+  });
+
+  test("throws on unknown options with separeted value", () => {
+    expect(() => parseArgv(["--unknown", "10"], optionDefs)).toThrow(
+      "Unknown option: --unknown",
+    );
+  });
+
+  test("throws on unknown options with equals", () => {
+    expect(() => parseArgv(["--unknown=10"], optionDefs)).toThrow(
+      "Unknown option: --unknown",
     );
   });
 });
