@@ -1,6 +1,7 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { mightThrow } from "../../errors/index.js";
 import { ParseError, ValidationError } from "../errors.js";
+import { formatValidationIssues } from "../standard-schema.js";
 
 export const validateSchema = async <T>(
   schema: StandardSchemaV1,
@@ -12,17 +13,7 @@ export const validateSchema = async <T>(
     return result.value as T;
   }
 
-  const issues = result.issues.map((issue) => {
-    let path = "unknown";
-
-    if (Array.isArray(issue.path)) {
-      path = issue.path.map(String).join(".");
-    }
-
-    return `${path}: ${issue.message ?? "validation failed"}`;
-  });
-
-  const message = issues.join(", ");
+  const message = formatValidationIssues(result.issues);
 
   throw new ValidationError(message);
 };
