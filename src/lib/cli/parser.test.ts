@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { mightThrowSync } from "../errors/index.js";
+import { CliValidationError } from "./errors.js";
 import { parseArgv } from "./parser.js";
 
 describe("parseArgv", () => {
@@ -19,6 +21,12 @@ describe("parseArgv", () => {
     expect(() => parseArgv(["--first", "--", "value"], optionDefs)).toThrow(
       "Unknown option: --",
     );
+  });
+
+  test("treats - token as an invalid option and raise an error", () => {
+    const [err] = mightThrowSync(() => parseArgv(["--first", "-"], optionDefs));
+
+    expect(err).toBeInstanceOf(CliValidationError);
   });
 
   test("parses --name value long options", () => {
