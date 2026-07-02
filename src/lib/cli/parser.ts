@@ -54,21 +54,20 @@ export const parseArgv = (tokens: string[], optionDefs: OptionDef[]) => {
     if (!token) break;
 
     const errMessage = `Unknown option: ${token}`;
+    const equalsIndex = token.indexOf("=");
+    const tokenKeyEnd = equalsIndex === -1 ? undefined : equalsIndex;
 
-    if (token === "--") {
-      positional.push(...tokens.slice(index + 1));
-      break;
-    }
+    if (token.charAt(0) === "-") {
+      if (token.length < 2) {
+        throw new CliValidationError(`Invalid option: ${token}`);
+      }
 
-    if (!token.startsWith("-")) {
-      positional.push(token);
-      index++;
-      continue;
-    }
+      let tokenKeyStart = 1;
+      if (token.charAt(1) === "-") {
+        tokenKeyStart = 2;
+      }
 
-    if (token.startsWith("--")) {
-      const equalsIndex = token.indexOf("=");
-      const key = token.slice(2, equalsIndex === -1 ? undefined : equalsIndex);
+      const key = token.slice(tokenKeyStart, tokenKeyEnd);
       const name = resolveOption(lookup, key, errMessage);
 
       if (equalsIndex !== -1) {
@@ -81,21 +80,8 @@ export const parseArgv = (tokens: string[], optionDefs: OptionDef[]) => {
       continue;
     }
 
-    if (token.length < 2) {
-      throw new CliValidationError(`Invalid option: ${token}`);
-    }
-
-    const equalsIndex = token.indexOf("=");
-    const key = token.slice(1, equalsIndex === -1 ? undefined : equalsIndex);
-    const name = resolveOption(lookup, key, errMessage);
-
-    if (equalsIndex !== -1) {
-      options[name] = token.slice(equalsIndex + 1);
-      index++;
-      continue;
-    }
-
-    index = readFlagValue(options, name, tokens, index);
+    positional.push(token);
+    index++;
   }
 
   return { positional, options } satisfies ParsedArgv;
