@@ -15,11 +15,10 @@ describe("parseArgv", () => {
     expect(parsed.options).toEqual({});
   });
 
-  test("treats tokens after -- as positional", () => {
-    const parsed = parseArgv(["--", "--first", "value"], optionDefs);
-
-    expect(parsed.positional).toEqual(["--first", "value"]);
-    expect(parsed.options).toEqual({});
+  test("treats -- token as an invalid option", () => {
+    expect(() => parseArgv(["--first", "--", "value"], optionDefs)).toThrow(
+      "Unknown option: --",
+    );
   });
 
   test("parses --name value long options", () => {
