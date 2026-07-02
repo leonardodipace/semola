@@ -4,7 +4,7 @@ import { parseArgv } from "./parser.js";
 describe("parseArgv", () => {
   const optionDefs = [
     { name: "separator", aliases: [] as string[] },
-    { name: "first" },
+    { name: "first", aliases: ["f"] },
     { name: "tag", aliases: ["t"] },
   ];
 
@@ -35,6 +35,12 @@ describe("parseArgv", () => {
 
   test("parses bare boolean long options", () => {
     const parsed = parseArgv(["--first"], optionDefs);
+
+    expect(parsed.options).toEqual({ first: true });
+  });
+
+  test("parses bare boolean short options", () => {
+    const parsed = parseArgv(["-f"], optionDefs);
 
     expect(parsed.options).toEqual({ first: true });
   });
