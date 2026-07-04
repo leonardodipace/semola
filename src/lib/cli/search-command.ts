@@ -69,7 +69,7 @@ export function searchPossibleCommands(
   return retrive(calculations);
 }
 
-export function retrive(calculations: Calculation[]) {
+function retrive(calculations: Calculation[]) {
   return calculations
     .sort((a, b) => b.cost - a.cost)
     .slice(0, TOP_COMMANDS_AMOUNT)
