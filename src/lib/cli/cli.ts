@@ -90,7 +90,7 @@ export class Cli {
 
       await handler(args, options);
     } catch (error) {
-      this.handleCliError(error);
+      this.handleCliError(error as Error);
     }
   }
 
@@ -119,7 +119,7 @@ export class Cli {
     }
   }
 
-  private handleCliError(error: unknown): never {
+  private handleCliError(error: Error): never {
     if (error instanceof CliError) {
       console.error(error.message);
       process.exit(1);
