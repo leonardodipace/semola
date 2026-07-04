@@ -1,5 +1,10 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 
+export type Calculation = {
+  command: string;
+  cost: number;
+};
+
 export type CLIConfig = {
   name: string;
   description?: string;
