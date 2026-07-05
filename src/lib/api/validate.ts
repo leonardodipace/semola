@@ -1,29 +1,15 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { ParseError, SchemaConfigError, ValidationError } from "./errors.js";
+import { formatValidationIssues } from "./standard-schema.js";
 import type {
   ApiRequest,
   BodyCache,
   RequestSchema,
   RequestValidator,
-  StandardSchemaIssues,
   StandardSchemaValidationResult,
   ValidatedRequest,
   ValidateRequestInput,
 } from "./types.js";
-
-const formatIssues = (issues: StandardSchemaIssues) => {
-  const messages = issues.map((issue) => {
-    let path = "unknown";
-
-    if (Array.isArray(issue.path)) {
-      path = issue.path.map(String).join(".");
-    }
-
-    return `${path}: ${issue.message ?? "validation failed"}`;
-  });
-
-  return messages.join(", ");
-};
 
 export const isBodyOnlySchema = (schema: RequestSchema) => {
   if (!schema.body) return false;
@@ -59,7 +45,7 @@ export const compileBodyValidator = (bodySchema: StandardSchemaV1) => {
     }
 
     if (result.issues) {
-      throw new ValidationError(formatIssues(result.issues));
+      throw new ValidationError(formatValidationIssues(result.issues));
     }
   };
 };
@@ -67,7 +53,7 @@ export const compileBodyValidator = (bodySchema: StandardSchemaV1) => {
 const readValidationResult = <T>(result: StandardSchemaValidationResult) => {
   if (!result.issues) return result.value as T;
 
-  throw new ValidationError(formatIssues(result.issues));
+  throw new ValidationError(formatValidationIssues(result.issues));
 };
 
 const decodePart = (value: string, plusAsSpace = false) => {

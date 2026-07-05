@@ -1,4 +1,11 @@
-import { beforeAll, describe, expect, setSystemTime, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  describe,
+  expect,
+  setSystemTime,
+  test,
+} from "bun:test";
 import { basename, dirname, join } from "node:path";
 import { mightThrowSync } from "../../errors/index.js";
 import {
@@ -16,6 +23,10 @@ import type {
 
 beforeAll(() => {
   setSystemTime(new Date("2020-01-10T00:00:00.000Z"));
+});
+
+afterAll(() => {
+  setSystemTime();
 });
 
 type MockProviderResult = {

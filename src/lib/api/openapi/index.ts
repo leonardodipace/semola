@@ -16,14 +16,66 @@ import type {
   RouteConfigInternal,
 } from "../types.js";
 
+const rewriteDefsRefs = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map(rewriteDefsRefs);
+  }
+
+  if (typeof value !== "object") return value;
+  if (value === null) return value;
+
+  const record = value as Record<string, unknown>;
+
+  if (typeof record.$ref === "string" && record.$ref.startsWith("#/$defs/")) {
+    const name = record.$ref.slice("#/$defs/".length);
+
+    return { $ref: `#/components/schemas/${name}` };
+  }
+
+  const rewritten: Record<string, unknown> = {};
+
+  for (const key in record) {
+    rewritten[key] = rewriteDefsRefs(record[key]);
+  }
+
+  return rewritten;
+};
+
+const hoistDefsToComponents = (jsonSchema: JsonSchema) => {
+  const defs = jsonSchema.$defs;
+
+  if (!defs || typeof defs !== "object") {
+    return { schema: jsonSchema, components: undefined };
+  }
+
+  const schema = rewriteDefsRefs({ ...jsonSchema }) as JsonSchema;
+  delete schema.$defs;
+
+  const defsRecord = defs as Record<string, JsonSchema>;
+  const schemas: Record<string, JsonSchema> = {};
+
+  for (const name in defsRecord) {
+    schemas[name] = rewriteDefsRefs(defsRecord[name]) as JsonSchema;
+  }
+
+  return {
+    schema,
+    components: {
+      schemas,
+    } as OpenApiComponents,
+  };
+};
+
 const toOpenAPISchema = (
   schema: StandardSchemaV1,
   io: "input" | "output" = "input",
-) => ({
-  schema: (schema as unknown as StandardJSONSchemaV1)["~standard"].jsonSchema[
-    io
-  ]({ target: "draft-2020-12" }),
-});
+) => {
+  const jsonSchema = (schema as unknown as StandardJSONSchemaV1)[
+    "~standard"
+  ].jsonSchema[io]({ target: "draft-2020-12" }) as JsonSchema;
+
+  return hoistDefsToComponents(jsonSchema);
+};
 
 const getSchemaDescription = (schema: StandardSchemaV1) => {
   const metadata = schema["~standard"];
@@ -39,6 +91,28 @@ const getSchemaDescription = (schema: StandardSchemaV1) => {
   return "";
 };
 
+const getDeclaredSchemaId = (schema: StandardSchemaV1 & { meta?: unknown }) => {
+  const readMeta = schema.meta;
+
+  if (typeof readMeta !== "function") return;
+
+  const meta = readMeta();
+
+  if (typeof meta !== "object") return;
+  if (meta === null) return;
+  if (typeof meta.id !== "string") return;
+
+  return meta.id;
+};
+
+const getSchemaId = (schema: StandardSchemaV1, jsonSchema: JsonSchema) => {
+  if (typeof jsonSchema.id === "string") {
+    return jsonSchema.id;
+  }
+
+  return getDeclaredSchemaId(schema);
+};
+
 const requestFields = [
   "body",
   "query",
@@ -52,16 +126,14 @@ const convertSchemaToOpenApi = (
   io: "input" | "output" = "input",
 ) => {
   const result = toOpenAPISchema(schema, io);
-  const { schema: jsonSchema } = result as {
+  const { schema: jsonSchema, components: existingComponents } = result as {
     schema: JsonSchema;
     components?: OpenApiComponents;
   };
 
-  // Check if schema has an id (from .meta({ id: "..." }))
-  const schemaId = jsonSchema.id;
+  const schemaId = getSchemaId(schema, jsonSchema);
 
-  if (schemaId && typeof schemaId === "string") {
-    // Extract to components and return a reference
+  if (schemaId) {
     const schemaWithoutId = { ...jsonSchema };
     delete schemaWithoutId.id;
     delete schemaWithoutId.$schema;
@@ -69,20 +141,22 @@ const convertSchemaToOpenApi = (
     return {
       schema: { $ref: `#/components/schemas/${schemaId}` },
       components: {
+        ...existingComponents,
         schemas: {
+          ...existingComponents?.schemas,
           [schemaId]: schemaWithoutId,
         },
       } as OpenApiComponents,
     };
   }
 
-  // Remove $schema from inline schemas
   if (jsonSchema.$schema) {
     const schemaWithoutMeta = { ...jsonSchema };
     delete schemaWithoutMeta.$schema;
+
     return {
       schema: schemaWithoutMeta,
-      components: undefined,
+      components: existingComponents,
     };
   }
 
@@ -92,21 +166,23 @@ const convertSchemaToOpenApi = (
   };
 };
 
-// Convert schema to inline JSON schema (for parameters that don't support $ref)
 const convertSchemaToInlineOpenApi = (
   schema: StandardSchemaV1,
   io: "input" | "output" = "input",
 ) => {
   const result = toOpenAPISchema(schema, io);
-  const { schema: jsonSchema } = result as { schema: JsonSchema };
+  const { schema: jsonSchema, components } = result as {
+    schema: JsonSchema;
+    components?: OpenApiComponents;
+  };
 
-  // Remove $schema and id from inline schemas
   const cleanSchema = { ...jsonSchema };
   delete cleanSchema.$schema;
   delete cleanSchema.id;
 
   return {
     schema: cleanSchema,
+    components,
   };
 };
 
@@ -114,14 +190,15 @@ const extractParametersFromSchema = (
   schema: StandardSchemaV1,
   location: "query" | "header" | "cookie",
 ) => {
-  const { schema: jsonSchema } = convertSchemaToInlineOpenApi(schema);
+  const { schema: jsonSchema, components } =
+    convertSchemaToInlineOpenApi(schema);
 
   if (jsonSchema.type !== "object") {
-    return [];
+    return { parameters: [], components };
   }
 
   if (!jsonSchema.properties) {
-    return [];
+    return { parameters: [], components };
   }
 
   const parameters: OpenApiParameter[] = [];
@@ -139,11 +216,10 @@ const extractParametersFromSchema = (
     });
   }
 
-  return parameters;
+  return { parameters, components };
 };
 
 const normalizePathForOpenAPI = (path: string) => {
-  // Convert Bun-style path parameters (:param) to OpenAPI syntax ({param})
   return path.replace(/:([a-zA-Z_][a-zA-Z0-9_]*)/g, "{$1}");
 };
 
@@ -165,17 +241,33 @@ const paramSources = [
 
 const createParameters = (request: RequestSchema, path: string) => {
   const parameters: OpenApiParameter[] = [];
+  const allComponents: OpenApiComponents[] = [];
 
   for (const [field, location] of paramSources) {
     if (request[field]) {
-      parameters.push(...extractParametersFromSchema(request[field], location));
+      const { parameters: params, components } = extractParametersFromSchema(
+        request[field],
+        location,
+      );
+
+      parameters.push(...params);
+
+      if (components) {
+        allComponents.push(components);
+      }
     }
   }
 
   const pathParamNames = extractPathParameters(path);
 
   if (pathParamNames.length > 0 && request.params) {
-    const { schema: jsonSchema } = convertSchemaToInlineOpenApi(request.params);
+    const { schema: jsonSchema, components } = convertSchemaToInlineOpenApi(
+      request.params,
+    );
+
+    if (components) {
+      allComponents.push(components);
+    }
 
     if (jsonSchema.type === "object" && jsonSchema.properties) {
       for (const name of pathParamNames) {
@@ -193,7 +285,7 @@ const createParameters = (request: RequestSchema, path: string) => {
     }
   }
 
-  return parameters;
+  return { parameters, components: allComponents };
 };
 
 const createRequestBody = (bodySchema: StandardSchemaV1) => {
@@ -262,7 +354,10 @@ const createOperation = (
     fullPath = prefix + route.path;
   }
 
-  const parameters = createParameters(request, fullPath);
+  const { parameters, components: parameterComponents } = createParameters(
+    request,
+    fullPath,
+  );
   const { responses, components: responseComponents } =
     createResponses(response);
 
@@ -272,6 +367,7 @@ const createOperation = (
 
   const allComponents: OpenApiComponents[] = [];
   allComponents.push(...responseComponents);
+  allComponents.push(...parameterComponents);
 
   for (const field of ["summary", "description", "operationId"] as const) {
     if (route[field]) {
@@ -293,6 +389,7 @@ const createOperation = (
     const { requestBody, components: bodyComponents } =
       createRequestBody(bodySchema);
     operation.requestBody = requestBody;
+
     if (bodyComponents) {
       allComponents.push(bodyComponents);
     }
