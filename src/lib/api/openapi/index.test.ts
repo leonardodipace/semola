@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { z } from "zod";
-import { Middleware } from "../middleware/index.js";
+import { Middleware } from "../middleware.js";
 import { generateOpenApiSpec } from "./index.js";
 
 const schemaWithNestedDefs = {
@@ -699,6 +699,42 @@ describe("OpenAPI Generation", () => {
 
     expect(
       spec.paths["/users"]?.post?.requestBody?.content["application/json"]
+        ?.schema,
+    ).toEqual({ $ref: "#/components/schemas/User" });
+  });
+
+  test("should merge response components from middlewares and routes", async () => {
+    const AuthErrorSchema = z.object({ error: z.string() }).meta({
+      id: "AuthError",
+    });
+    const UserSchema = z.object({ id: z.string() }).meta({ id: "User" });
+    const authMw = new Middleware({
+      response: { 401: AuthErrorSchema },
+      handler: () => ({}),
+    });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      globalMiddlewares: [authMw],
+      routes: [
+        {
+          path: "/me",
+          method: "GET",
+          response: { 200: UserSchema },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas?.AuthError).toBeDefined();
+    expect(spec.components?.schemas?.User).toBeDefined();
+    expect(
+      spec.paths["/me"]?.get?.responses["401"]?.content?.["application/json"]
+        ?.schema,
+    ).toEqual({ $ref: "#/components/schemas/AuthError" });
+    expect(
+      spec.paths["/me"]?.get?.responses["200"]?.content?.["application/json"]
         ?.schema,
     ).toEqual({ $ref: "#/components/schemas/User" });
   });

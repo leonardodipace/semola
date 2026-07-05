@@ -16,7 +16,7 @@ import {
   validateParams,
   validateQuery,
   validateSchema,
-} from "./validation/index.js";
+} from "./validate.js";
 
 describe("Standard Schema support", () => {
   for (const provider of providers) {
@@ -28,18 +28,18 @@ describe("Standard Schema support", () => {
         expect(data).toEqual(validUser);
       });
 
-      test("validateSchema formats nested paths on failure", async () => {
+      test("validateSchema formats nested paths on failure", () => {
         const schema = schemaFor.userWithAge(provider);
 
-        await expect(validateSchema(schema, invalidUser)).rejects.toMatchObject(
-          {
+        expect(() => validateSchema(schema, invalidUser)).toThrow(
+          expect.objectContaining({
             message: expect.stringContaining("user.email:"),
-          },
+          }),
         );
-        await expect(validateSchema(schema, invalidUser)).rejects.toMatchObject(
-          {
+        expect(() => validateSchema(schema, invalidUser)).toThrow(
+          expect.objectContaining({
             message: expect.stringContaining("age:"),
-          },
+          }),
         );
       });
 
@@ -126,22 +126,26 @@ describe("Standard Schema support", () => {
         expect(data).toEqual({ theme: "dark", session: "abc" });
       });
 
-      test("validateCookies throws when required cookie is missing", async () => {
+      test("validateCookies throws when required cookie is missing", () => {
         const schema = schemaFor.requiredCookie(provider);
         const req = new Request("http://localhost");
 
-        await expect(validateCookies(req, schema)).rejects.toMatchObject({
-          message: expect.stringContaining("requiredCookie:"),
-        });
+        expect(() => validateCookies(req, schema)).toThrow(
+          expect.objectContaining({
+            message: expect.stringContaining("requiredCookie:"),
+          }),
+        );
       });
 
-      test("validateParams validates path parameters", async () => {
+      test("validateParams validates path parameters", () => {
         const schema = schemaFor.idNumber(provider);
         const req = { params: { id: "123" } } as unknown as Bun.BunRequest;
 
-        await expect(validateParams(req, schema)).rejects.toMatchObject({
-          message: expect.stringContaining("id:"),
-        });
+        expect(() => validateParams(req, schema)).toThrow(
+          expect.objectContaining({
+            message: expect.stringContaining("id:"),
+          }),
+        );
       });
     });
   }
@@ -182,15 +186,15 @@ describe("Validation Module (schema-agnostic)", () => {
     });
   });
 
-  test("validateBody skips validation when Content-Type is not JSON", async () => {
+  test("validateBody validates text body when Content-Type is not JSON", async () => {
     const req = new Request("http://localhost", {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: "hello",
     });
 
-    const data = await validateBody(req, anySchema);
+    const data = await validateBody(req, z.string());
 
-    expect(data).toBeUndefined();
+    expect(data).toBe("hello");
   });
 });
