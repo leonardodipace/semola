@@ -13,6 +13,7 @@ import {
   printDescription,
 } from "./help.js";
 import { parseArgv } from "./parser.js";
+import { searchPossibleCommands } from "./search-command.js";
 import type { CLIConfig } from "./types.js";
 import { validateArguments, validateOptions } from "./validate.js";
 
@@ -51,7 +52,12 @@ export class Cli {
     const [firstRest] = rest;
 
     if (!command) {
-      this.handleCliError(new UnknownCommandError(`Unknown command: ${first}`));
+      const suggestionMessage = this.createSuggestion(first);
+      this.handleCliError(
+        new UnknownCommandError(
+          this.formatUnknownCommandMessage(first, suggestionMessage),
+        ),
+      );
     }
 
     if (isHelpToken(firstRest)) {
@@ -64,8 +70,11 @@ export class Cli {
     if (!handler) {
       if (command.commands.size > 0) {
         if (firstRest !== undefined) {
+          const suggestionMessage = this.createSuggestion(firstRest);
           this.handleCliError(
-            new UnknownCommandError(`Unknown command: ${firstRest}`),
+            new UnknownCommandError(
+              this.formatUnknownCommandMessage(firstRest, suggestionMessage),
+            ),
           );
         }
 
@@ -126,5 +135,37 @@ export class Cli {
     }
 
     throw error;
+  }
+
+  private createSuggestion(userCommand: string) {
+    const commands = this.root.readCommands();
+    const suggestions = searchPossibleCommands(commands, userCommand);
+
+    if (suggestions.length === 0) return "";
+    if (suggestions.length === 1) return `Did you mean ${suggestions[0]}?`;
+
+    const header = "Did you mean \n";
+    const message = suggestions.reduce((prev, curr, index) => {
+      let acc = prev.concat(`  ${curr}`);
+
+      if (index !== suggestions.length - 1) {
+        acc = acc.concat("\n");
+      }
+
+      return acc;
+    }, header);
+
+    return message;
+  }
+
+  private formatUnknownCommandMessage(
+    command: string,
+    suggestionMessage: string,
+  ) {
+    if (suggestionMessage.length === 0) {
+      return `Unknown command: ${command}`;
+    }
+
+    return `Unknown command: ${command}\n${suggestionMessage}`;
   }
 }

@@ -64,6 +64,10 @@ export class Command<
     return command;
   }
 
+  public readCommands() {
+    return this.commands.keys().toArray();
+  }
+
   public resolve(tokens: string[]) {
     let current: AnyCommand = this as AnyCommand;
     let index = 0;
