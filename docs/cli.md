@@ -70,6 +70,27 @@ program
 await program.parse(["publish", "my-package", "-t", "v1.0.0"]);
 ```
 
+### Git-like commands
+
+Continues from the split example above (`program` is already defined).
+
+```typescript
+program
+  .command("push", { description: "Push changes from local to remote" })
+  .option("verbose", { schema: z.boolean(), aliases: ["v"] })
+  .action((_, options) => {
+    console.log(`Pushing with this option: ${options.tag}`);
+  })
+  .command("pull", { description: "Pull changes from remote to local" })
+  .option("--quite", { schema: z.boolean(), aliases: ["q"] })
+  .action((_, options) => {
+    console.log(`PUlling with this option: ${options.tag}`);
+  });
+
+await program.parse(["push", "-v"]);
+```
+
+
 ## Argv parsing
 
 - Long options: `--name`, `--name=value`, `--name value`
