@@ -35,6 +35,12 @@ describe("parseArgv", () => {
     expect(parsed.options).toEqual({ separator: "," });
   });
 
+  test("parses --name value long options with spaces inside a value", () => {
+    const parsed = parseArgv(["--separator", "   ,      "], optionDefs);
+
+    expect(parsed.options).toEqual({ separator: "," });
+  });
+
   test("parses --name=value long options", () => {
     const parsed = parseArgv(["--separator=,"], optionDefs);
 
@@ -96,6 +102,10 @@ describe("parseArgv", () => {
     expect(() => parseArgv(["--unknown"], optionDefs)).toThrow(
       "Unknown option: --unknown",
     );
+  });
+
+  test("throws an invalid options when passing an alias with more than one dash", () => {
+    expect(() => parseArgv(["--f"], optionDefs)).toThrow("Invalid option: --f");
   });
 
   test("throws on unknown multi-character short options", () => {

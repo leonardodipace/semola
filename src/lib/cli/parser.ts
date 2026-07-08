@@ -1,3 +1,4 @@
+import { which } from "bun";
 import { CliValidationError } from "./errors.js";
 import type { OptionDef, ParsedArgv } from "./types.js";
 
@@ -7,9 +8,15 @@ const readFlagValue = (
   tokens: string[],
   index: number,
 ) => {
-  const next = tokens[index + 1];
+  const prev = tokens[index];
+  let next = tokens[index + 1];
 
-  if (next !== undefined) {
+  if (prev !== undefined && next !== undefined) {
+    const equalsIndex = prev.indexOf("=");
+    if (equalsIndex === -1) {
+      next = next.trim();
+    }
+
     if (!next.startsWith("-")) {
       options[name] = next;
       return index + 2;
@@ -68,6 +75,10 @@ export const parseArgv = (tokens: string[], optionDefs: OptionDef[]) => {
       }
 
       const key = token.slice(tokenKeyStart, tokenKeyEnd);
+      if (key.length === 1 && tokenKeyStart === 2) {
+        throw new CliValidationError(`Invalid option: ${token}`);
+      }
+
       const name = resolveOption(lookup, key, errMessage);
 
       if (equalsIndex !== -1) {
