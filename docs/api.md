@@ -243,7 +243,7 @@ const UserSchema = type({
 
 ### `api.fetch`
 
-Fetch handler for use with `Bun.serve({ fetch: api.fetch })` or other runtimes that accept a `Request` handler. Routes compile once on the first request (or when `getRouteHandlers()` is called) and recompile when `defineRoute()` adds a route.
+Fetch handler for use with `Bun.serve({ fetch: api.fetch })` or other runtimes that accept a `Request` handler. Routes compile once on the first request (or when `getRouteHandlers()` is called) and recompile when `defineRoute()` or `mount()` changes the route tree, including routes added on already-mounted groups. Compiling throws if the same method and path are registered more than once.
 
 ```typescript
 Bun.serve({ port: 3000, fetch: api.fetch });

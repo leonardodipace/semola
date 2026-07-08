@@ -37,6 +37,7 @@ export class Group<TMiddlewares extends readonly Middleware[] = readonly []> {
   protected options: GroupOptions<TMiddlewares>;
   protected routes: InternalRouteConfig[] = [];
   protected groups: Group<readonly Middleware[]>[] = [];
+  private parent?: Group<readonly Middleware[]>;
 
   public constructor(options: GroupOptions<TMiddlewares> = {}) {
     this.options = options;
@@ -59,11 +60,14 @@ export class Group<TMiddlewares extends readonly Middleware[] = readonly []> {
   }
 
   public mount(group: Group<readonly Middleware[]>) {
+    group.parent = this;
     this.groups.push(group);
     this.onRoutesChanged();
   }
 
-  protected onRoutesChanged() {}
+  protected onRoutesChanged() {
+    this.parent?.onRoutesChanged();
+  }
 
   protected collectRoutes(
     prefix: string | undefined = this.options.prefix,

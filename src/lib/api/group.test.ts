@@ -81,6 +81,44 @@ describe("Group", () => {
     expect(await res.json()).toEqual({ id: "9" });
   });
 
+  test("recompiles when routes are added after mount", async () => {
+    const api = new Api({ prefix: "/api" });
+    const users = new Group({ prefix: "/users" });
+
+    api.mount(users);
+
+    await api.fetch(new Request("http://localhost/api/users/1"));
+
+    users.defineRoute({
+      path: "/:id",
+      method: "GET",
+      request: { params: z.object({ id: z.string() }) },
+      handler: (c) => c.json(200, { id: c.req.params.id }),
+    });
+
+    const res = await api.fetch(new Request("http://localhost/api/users/1"));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: "1" });
+  });
+
+  test("throws on duplicate method and path", () => {
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/dup",
+      method: "GET",
+      handler: () => "a",
+    });
+    api.defineRoute({
+      path: "/dup",
+      method: "GET",
+      handler: () => "b",
+    });
+
+    expect(() => api.getRouteHandlers()).toThrow("Duplicate route: GET /dup");
+  });
+
   test("does not expose runtime methods", () => {
     const group = new Group();
     const shape = group as unknown as Record<string, unknown>;

@@ -18,3 +18,10 @@ export class SchemaConfigError extends Error {
     this.name = "SchemaConfigError";
   }
 }
+
+export class DuplicateRouteError extends Error {
+  public constructor(method: string, path: string) {
+    super(`Duplicate route: ${method} ${path}`);
+    this.name = "DuplicateRouteError";
+  }
+}

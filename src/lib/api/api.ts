@@ -1,4 +1,5 @@
 import { buildFetchDispatcher } from "./dispatch.js";
+import { DuplicateRouteError } from "./errors.js";
 import { Group } from "./group.js";
 import type { Middleware } from "./middleware.js";
 import { generateOpenApiSpec } from "./openapi/index.js";
@@ -359,6 +360,10 @@ const compileRoutes = (
       bunRoutes[route.path] = methods;
     }
 
+    if (methods[route.method]) {
+      throw new DuplicateRouteError(route.method, route.path);
+    }
+
     methods[route.method] = buildHandler(route, validation);
   }
 
@@ -382,6 +387,7 @@ export class Api<
 
   protected override onRoutesChanged() {
     this.needsRecompile = true;
+    super.onRoutesChanged();
   }
 
   public fetch = (req: Request) => {
