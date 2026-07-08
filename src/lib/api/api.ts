@@ -27,8 +27,6 @@ import type {
 } from "./types.js";
 import {
   buildRequestValidator,
-  compileBodyValidator,
-  isBodyOnlySchema,
   validateParts,
   validateSchema,
 } from "./validate.js";
@@ -97,32 +95,14 @@ const buildBareRoute = (
   validateOutput = false,
 ): BunRouteHandler => {
   const responseSchema = validateOutput ? response : undefined;
-  let bodyValidator: ReturnType<typeof compileBodyValidator> | undefined;
+  const validateRequest = validateInput
+    ? buildRequestValidator(request)
+    : undefined;
 
-  if (validateInput && request && isBodyOnlySchema(request)) {
-    const bodySchema = request.body;
-
-    if (bodySchema) {
-      bodyValidator = compileBodyValidator(bodySchema);
-    }
-  }
-
-  const validateRequest =
-    validateInput && !bodyValidator
-      ? buildRequestValidator(request)
-      : undefined;
   const probe = handler();
 
   if (probe instanceof Promise) {
     return async (req) => {
-      if (bodyValidator) {
-        try {
-          await bodyValidator(req);
-        } catch (error) {
-          return mapValidationError(error as Error);
-        }
-      }
-
       if (validateRequest) {
         const error = await validateRequest(req);
 
@@ -137,34 +117,14 @@ const buildBareRoute = (
 
   const cached = prepareResponse(probe, responseSchema);
 
-  if (!bodyValidator && !validateRequest) {
-    if (cached instanceof Promise) return async () => cached;
-
-    return () => cached;
-  }
-
-  if (bodyValidator) {
-    return async (req) => {
-      try {
-        await bodyValidator(req);
-      } catch (error) {
-        return mapValidationError(error as Error);
-      }
-
-      return cached;
-    };
-  }
-
-  const validator = validateRequest;
-
-  if (!validator) {
+  if (!validateRequest) {
     if (cached instanceof Promise) return async () => cached;
 
     return () => cached;
   }
 
   return async (req) => {
-    const error = await validator(req);
+    const error = await validateRequest(req);
 
     if (error) return mapValidationError(error);
 
