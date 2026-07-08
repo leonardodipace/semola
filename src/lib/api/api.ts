@@ -403,17 +403,7 @@ export class Api<
     this.options = options;
   }
 
-  public override defineRoute<
-    TReq extends RequestSchema = RequestSchema,
-    TRes extends ResponseSchema = ResponseSchema,
-    TRouteMiddlewares extends readonly Middleware[] = readonly [],
-  >(config: RouteConfig<TReq, TRes, TMiddlewares, TRouteMiddlewares>) {
-    super.defineRoute(config);
-    this.needsRecompile = true;
-  }
-
-  public override mount(group: Group<readonly Middleware[]>) {
-    super.mount(group);
+  protected override onRoutesChanged() {
     this.needsRecompile = true;
   }
 
@@ -426,15 +416,13 @@ export class Api<
   }
 
   public getOpenApiSpec() {
-    const routes = this.collectRoutes(undefined, emptyMiddlewares);
-
     return generateOpenApiSpec({
       title: this.options.openapi?.title ?? "API",
       description: this.options.openapi?.description,
       version: this.options.openapi?.version ?? "1.0.0",
       servers: this.options.openapi?.servers,
       securitySchemes: this.options.openapi?.securitySchemes,
-      routes,
+      routes: this.collectRoutes(),
     });
   }
 
@@ -453,9 +441,8 @@ export class Api<
   private ensureCompiled() {
     if (!this.needsRecompile && this.compiled) return this.compiled;
 
-    const routesList = this.collectRoutes(undefined, emptyMiddlewares);
     const routes = compileRoutes(
-      routesList,
+      this.collectRoutes(),
       undefined,
       emptyMiddlewares,
       resolveValidation(this.options.validation),

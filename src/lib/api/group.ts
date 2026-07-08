@@ -9,7 +9,7 @@ import type {
 
 const emptyMiddlewares: readonly Middleware[] = [];
 
-export type InternalRouteConfig = RouteConfig<
+type InternalRouteConfig = RouteConfig<
   RequestSchema,
   ResponseSchema,
   readonly Middleware[],
@@ -55,11 +55,15 @@ export class Group<TMiddlewares extends readonly Middleware[] = readonly []> {
         readonly Middleware[]
       >,
     );
+    this.onRoutesChanged();
   }
 
   public mount(group: Group<readonly Middleware[]>) {
     this.groups.push(group);
+    this.onRoutesChanged();
   }
+
+  protected onRoutesChanged() {}
 
   protected collectRoutes(
     prefix: string | undefined = this.options.prefix,
