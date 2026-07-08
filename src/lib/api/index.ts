@@ -1,9 +1,11 @@
 export { Api } from "./api.js";
+export { Group } from "./group.js";
 export { Middleware } from "./middleware.js";
 export type {
   ApiOptions,
   Context,
   ExtractStatusCodes,
+  GroupOptions,
   InferInput,
   InferMiddlewareExtension,
   InferOutput,

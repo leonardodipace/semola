@@ -69,6 +69,13 @@ export type ApiOptions<
   validation?: ValidationOptions;
 };
 
+export type GroupOptions<
+  TMiddlewares extends readonly Middleware[] = readonly [],
+> = {
+  prefix?: string;
+  middlewares?: TMiddlewares;
+};
+
 export type SecuritySchemeApiKey = {
   type: "apiKey";
   name: string;

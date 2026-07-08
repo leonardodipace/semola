@@ -1,4 +1,5 @@
 import { buildFetchDispatcher } from "./dispatch.js";
+import { Group } from "./group.js";
 import type { Middleware } from "./middleware.js";
 import { generateOpenApiSpec } from "./openapi/index.js";
 import {
@@ -387,38 +388,33 @@ const compileRoutes = (
   return bunRoutes;
 };
 
-export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
-  private options: ApiOptions<TMiddlewares>;
-  private routes: RouteConfig<
-    RequestSchema,
-    ResponseSchema,
-    readonly Middleware[],
-    readonly Middleware[]
-  >[] = [];
-  private routesDirty = true;
+export class Api<
+  TMiddlewares extends readonly Middleware[] = readonly [],
+> extends Group<TMiddlewares> {
+  protected override options: ApiOptions<TMiddlewares>;
   private compiled?: {
     routes: MethodRoutes;
     fetch: (req: Request) => Response | Promise<Response>;
   };
+  private needsRecompile = true;
 
   public constructor(options: ApiOptions<TMiddlewares> = {}) {
+    super(options);
     this.options = options;
   }
 
-  public defineRoute<
+  public override defineRoute<
     TReq extends RequestSchema = RequestSchema,
     TRes extends ResponseSchema = ResponseSchema,
     TRouteMiddlewares extends readonly Middleware[] = readonly [],
   >(config: RouteConfig<TReq, TRes, TMiddlewares, TRouteMiddlewares>) {
-    this.routes.push(
-      config as RouteConfig<
-        RequestSchema,
-        ResponseSchema,
-        readonly Middleware[],
-        readonly Middleware[]
-      >,
-    );
-    this.routesDirty = true;
+    super.defineRoute(config);
+    this.needsRecompile = true;
+  }
+
+  public override mount(group: Group<readonly Middleware[]>) {
+    super.mount(group);
+    this.needsRecompile = true;
   }
 
   public fetch = (req: Request) => {
@@ -430,15 +426,15 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
   }
 
   public getOpenApiSpec() {
+    const routes = this.collectRoutes(undefined, emptyMiddlewares);
+
     return generateOpenApiSpec({
       title: this.options.openapi?.title ?? "API",
       description: this.options.openapi?.description,
       version: this.options.openapi?.version ?? "1.0.0",
-      prefix: this.options.prefix,
       servers: this.options.openapi?.servers,
       securitySchemes: this.options.openapi?.securitySchemes,
-      routes: this.routes,
-      globalMiddlewares: this.options.middlewares,
+      routes,
     });
   }
 
@@ -455,12 +451,13 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
   }
 
   private ensureCompiled() {
-    if (!this.routesDirty && this.compiled) return this.compiled;
+    if (!this.needsRecompile && this.compiled) return this.compiled;
 
+    const routesList = this.collectRoutes(undefined, emptyMiddlewares);
     const routes = compileRoutes(
-      this.routes,
-      this.options.prefix,
-      this.options.middlewares ?? emptyMiddlewares,
+      routesList,
+      undefined,
+      emptyMiddlewares,
       resolveValidation(this.options.validation),
     );
 
@@ -469,7 +466,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
       fetch: buildFetchDispatcher(routes),
     };
 
-    this.routesDirty = false;
+    this.needsRecompile = false;
 
     return this.compiled;
   }

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { Api } from "./api.js";
+import { Group } from "./group.js";
 import { Middleware } from "./middleware.js";
 
 // Global server reference for cleanup
@@ -260,6 +261,27 @@ describe("Api Core", () => {
     const res = await fetch(`http://localhost:${server?.port}/api/v1/status`);
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("ok");
+  });
+
+  test("should mount a group into the api", async () => {
+    const api = new Api({ prefix: "/api/v1" });
+    const users = new Group({ prefix: "/users" });
+
+    users.defineRoute({
+      path: "/:id",
+      method: "GET",
+      request: { params: z.object({ id: z.string() }) },
+      handler: (c) => c.json(200, { id: c.req.params.id }),
+    });
+
+    api.mount(users);
+
+    const res = await api.fetch(
+      new Request("http://localhost/api/v1/users/123"),
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: "123" });
   });
 
   test("should return 404 for non-existent routes", async () => {
