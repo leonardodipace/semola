@@ -1,4 +1,3 @@
-import { which } from "bun";
 import { CliValidationError } from "./errors.js";
 import type { OptionDef, ParsedArgv } from "./types.js";
 
