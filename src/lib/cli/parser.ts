@@ -73,7 +73,7 @@ export const parseArgv = (tokens: string[], optionDefs: OptionDef[]) => {
         tokenKeyStart = 2;
       }
 
-      const key = token.slice(tokenKeyStart, tokenKeyEnd);
+      const key = token.slice(tokenKeyStart, tokenKeyEnd).trim();
       if (key.length === 1 && tokenKeyStart === 2) {
         throw new CliValidationError(`Invalid option: ${token}`);
       }
