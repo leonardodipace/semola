@@ -77,14 +77,14 @@ Continues from the split example above (`program` is already defined).
 ```typescript
 program
   .command("push", { description: "Push changes from local to remote" })
-  .option("verbose", { schema: z.boolean(), aliases: ["v"] })
+  .option("verbose", { schema: z.boolean().default(false), aliases: ["v"] })
   .action((_, options) => {
-    console.log(`Pushing with this option: ${options}`);
+    console.log(`Pushing with verbose=${options.verbose}`);
   })
   .command("pull", { description: "Pull changes from remote to local" })
-  .option("--quite", { schema: z.boolean(), aliases: ["q"] })
+  .option("quite", { schema: z.boolean().default(false), aliases: ["q"] })
   .action((_, options) => {
-    console.log(`PUlling with this option: ${options}`);
+    console.log(`PUlling with quite=${options}`);
   });
 
 await program.parse(["push", "-v"]);
