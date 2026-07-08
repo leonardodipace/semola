@@ -79,12 +79,12 @@ program
   .command("push", { description: "Push changes from local to remote" })
   .option("verbose", { schema: z.boolean(), aliases: ["v"] })
   .action((_, options) => {
-    console.log(`Pushing with this option: ${options.tag}`);
+    console.log(`Pushing with this option: ${options}`);
   })
   .command("pull", { description: "Pull changes from remote to local" })
   .option("--quite", { schema: z.boolean(), aliases: ["q"] })
   .action((_, options) => {
-    console.log(`PUlling with this option: ${options.tag}`);
+    console.log(`PUlling with this option: ${options}`);
   });
 
 await program.parse(["push", "-v"]);
