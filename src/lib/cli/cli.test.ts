@@ -337,4 +337,22 @@ describe("CLI", () => {
     expect(exitCode).toBe(1);
     expect(stderr.join("\n")).toContain("str:");
   });
+
+  test("should show 'Did you mean' prompt", async () => {
+    const program = new CLI({ name: "string-util" });
+
+    program
+      .command("split")
+      .argument("str", { schema: z.string().min(5) })
+      .action(() => {});
+
+    const { exitCode, stderr } = await withExitStub(async () => {
+      await program.parse(["splt", "hi"]);
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stderr.join("\n")).toContain(
+      "Unknown command: splt\nDid you mean split?",
+    );
+  });
 });
