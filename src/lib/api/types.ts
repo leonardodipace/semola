@@ -25,10 +25,6 @@ export type StandardSchemaValidationResult = Awaited<
   ReturnType<StandardSchemaV1["~standard"]["validate"]>
 >;
 
-export type StandardSchemaIssues = NonNullable<
-  StandardSchemaValidationResult["issues"]
->;
-
 type SafeTypeAccess<
   T,
   K extends "input" | "output",

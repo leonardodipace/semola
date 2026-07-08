@@ -6,7 +6,6 @@ import {
   bodyHasMultipleReaders,
   createContext,
   emptyValidated,
-  getFullPath,
   mapValidationError,
   resolveValidation,
   validatingJson,
@@ -190,22 +189,6 @@ const buildContextRoute = (handler: AnyRouteHandler): BunRouteHandler => {
   };
 };
 
-const getRouteMiddlewares = (
-  route: RouteConfig<
-    RequestSchema,
-    ResponseSchema,
-    readonly Middleware[],
-    readonly Middleware[]
-  >,
-  globalMiddlewares: readonly Middleware[],
-) => {
-  if (!route.middlewares?.length) return globalMiddlewares;
-
-  if (globalMiddlewares.length === 0) return route.middlewares;
-
-  return [...globalMiddlewares, ...route.middlewares];
-};
-
 const routeValidatesInput = (
   validation: ResolvedValidation,
   request: RequestSchema | undefined,
@@ -312,10 +295,9 @@ const buildHandler = (
     readonly Middleware[],
     readonly Middleware[]
   >,
-  globalMiddlewares: readonly Middleware[],
   validation: ResolvedValidation,
 ): BunRouteHandler => {
-  const middlewares = getRouteMiddlewares(route, globalMiddlewares);
+  const middlewares = route.middlewares ?? emptyMiddlewares;
   const handler = route.handler;
 
   const hasMiddleware = middlewares.length > 0;
@@ -365,24 +347,19 @@ const compileRoutes = (
     readonly Middleware[],
     readonly Middleware[]
   >[],
-  prefix: string | undefined,
-  globalMiddlewares: readonly Middleware[],
   validation: ResolvedValidation,
 ): MethodRoutes => {
   const bunRoutes: MethodRoutes = {};
 
   for (const route of routes) {
-    const fullPath = getFullPath({ prefix, path: route.path });
+    let methods = bunRoutes[route.path];
 
-    if (!bunRoutes[fullPath]) {
-      bunRoutes[fullPath] = {};
+    if (!methods) {
+      methods = {};
+      bunRoutes[route.path] = methods;
     }
 
-    bunRoutes[fullPath][route.method] = buildHandler(
-      route,
-      globalMiddlewares,
-      validation,
-    );
+    methods[route.method] = buildHandler(route, validation);
   }
 
   return bunRoutes;
@@ -443,8 +420,6 @@ export class Api<
 
     const routes = compileRoutes(
       this.collectRoutes(),
-      undefined,
-      emptyMiddlewares,
       resolveValidation(this.options.validation),
     );
 
