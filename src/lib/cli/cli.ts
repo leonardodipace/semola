@@ -1,3 +1,4 @@
+import { CommandHelper } from "./command.helper.js";
 import { Command } from "./command.js";
 import {
   CliConfigurationError,
@@ -20,6 +21,7 @@ import { validateArguments, validateOptions } from "./validate.js";
 export class Cli {
   private readonly config: CLIConfig;
   private readonly root = new Command(this, "");
+  private readonly commandHelper = new CommandHelper();
 
   public constructor(config: CLIConfig) {
     this.config = config;
@@ -48,7 +50,7 @@ export class Cli {
       return;
     }
 
-    const { command, rest } = this.root.resolve(tokens);
+    const { command, rest } = this.commandHelper.resolve(this.root, tokens);
     const [firstRest] = rest;
 
     if (!command) {
@@ -61,7 +63,7 @@ export class Cli {
     }
 
     if (isHelpToken(firstRest)) {
-      command.printHelp(this.config);
+      this.commandHelper.printHelp(command, this.config);
       return;
     }
 
@@ -78,13 +80,14 @@ export class Cli {
           );
         }
 
-        command.printHelp(this.config);
+        this.commandHelper.printHelp(command, this.config);
         return;
       }
 
+      const noHandlerCommand = this.commandHelper.path(command).join(" ");
       this.handleCliError(
         new CliConfigurationError(
-          `Command "${command.path().join(" ")}" has no action handler`,
+          `Command "${noHandlerCommand}" has no action handler`,
         ),
       );
     }
@@ -138,7 +141,7 @@ export class Cli {
   }
 
   private createSuggestion(userCommand: string) {
-    const commands = this.root.readCommands();
+    const commands = this.commandHelper.readCommands(this.root);
     const suggestions = searchPossibleCommands(commands, userCommand);
 
     if (suggestions.length === 0) return "";

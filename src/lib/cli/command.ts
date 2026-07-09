@@ -1,128 +1,27 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type { Cli } from "./cli.js";
-import {
-  commandHelpOptions,
-  formatArgumentPlaceholders,
-  formatCommandListLines,
-  formatOptionUsageEntry,
-  formatUsageEntries,
-  getSchemaDescription,
-  printDescription,
-} from "./help.js";
 import type {
   ArgumentConfig,
-  CLIConfig,
   HandlerFnType,
   InferOutput,
   OptionConfig,
 } from "./types.js";
 
-export type AnyCommand = Command<
-  Record<string, unknown>,
-  Record<string, unknown>
->;
-
 export class Command<
-  TArgs extends Record<string, unknown> = Record<string, never>,
-  TOptions extends Record<string, unknown> = Record<string, never>,
+  TArgs extends Record<string, unknown> = Record<string, unknown>,
+  TOptions extends Record<string, unknown> = Record<string, unknown>,
 > {
   public readonly arguments: ArgumentConfig[] = [];
   public readonly options: OptionConfig[] = [];
-  public readonly commands = new Map<string, AnyCommand>();
+  public readonly commands = new Map<string, Command>();
   public handler?: HandlerFnType;
 
   public constructor(
     private readonly cli: Cli,
     public readonly name: string,
-    public readonly parent?: AnyCommand,
+    public readonly parent?: Command,
     public readonly description?: string,
   ) {}
-
-  public path() {
-    const names: string[] = [];
-    let node: AnyCommand | undefined = this as AnyCommand;
-
-    while (node?.parent) {
-      names.unshift(node.name);
-      node = node.parent;
-    }
-
-    return names;
-  }
-
-  public readCommands() {
-    return this.commands.keys().toArray();
-  }
-
-  public resolve(tokens: string[]) {
-    let current: AnyCommand = this as AnyCommand;
-    let index = 0;
-
-    while (index < tokens.length) {
-      const token = tokens[index];
-
-      if (!token) break;
-      if (token.startsWith("-")) break;
-
-      const next = current.commands.get(token);
-
-      if (!next) break;
-
-      current = next;
-      index++;
-    }
-
-    if (index === 0) {
-      return { command: undefined, rest: tokens.slice(index) };
-    }
-
-    return { command: current, rest: tokens.slice(index) };
-  }
-
-  public printHelp(config: CLIConfig) {
-    const argNames = formatArgumentPlaceholders(this.arguments);
-    const commandPath = this.path().join(" ");
-    const usageParts = [config.name, commandPath, argNames, "[options]"];
-    const usage = usageParts.filter((part) => part.length > 0).join(" ");
-
-    console.log(`Usage: ${usage}\n`);
-
-    printDescription(config.description);
-
-    if (this.arguments.length > 0) {
-      console.log("Arguments:");
-
-      const argumentEntries = this.arguments.map((argument) => ({
-        label: argument.name,
-        description: getSchemaDescription(argument.schema),
-      }));
-
-      for (const line of formatUsageEntries(argumentEntries)) {
-        console.log(line);
-      }
-
-      console.log("");
-    }
-
-    if (this.commands.size > 0) {
-      console.log("Commands:");
-
-      for (const line of formatCommandListLines(this.commands)) {
-        console.log(line);
-      }
-
-      console.log("");
-    }
-
-    console.log("Options:");
-
-    const commandOptionEntries = this.options.map(formatOptionUsageEntry);
-    const optionEntries = [...commandOptionEntries, ...commandHelpOptions];
-
-    for (const line of formatUsageEntries(optionEntries)) {
-      console.log(line);
-    }
-  }
 
   public command(name: string, config?: { description?: string }) {
     if (this.commands.has(name)) {
