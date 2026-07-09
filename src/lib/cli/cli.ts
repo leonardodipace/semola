@@ -84,7 +84,7 @@ export class Cli {
 
       this.handleCliError(
         new CliConfigurationError(
-          `Command "${command.path.join(" ")}" has no action handler`,
+          `Command "${command.path().join(" ")}" has no action handler`,
         ),
       );
     }

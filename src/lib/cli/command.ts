@@ -12,6 +12,7 @@ import {
 import type {
   ArgumentConfig,
   CLIConfig,
+  HandlerFnType,
   InferOutput,
   OptionConfig,
 } from "./types.js";
@@ -28,10 +29,7 @@ export class Command<
   public readonly arguments: ArgumentConfig[] = [];
   public readonly options: OptionConfig[] = [];
   public readonly commands = new Map<string, AnyCommand>();
-  public handler?: (
-    args: Record<string, unknown>,
-    options: Record<string, unknown>,
-  ) => void | Promise<void>;
+  public handler?: HandlerFnType;
 
   public constructor(
     private readonly cli: Cli,
@@ -40,7 +38,7 @@ export class Command<
     public readonly description?: string,
   ) {}
 
-  public get path() {
+  public path() {
     const names: string[] = [];
     let node: AnyCommand | undefined = this as AnyCommand;
 
@@ -50,18 +48,6 @@ export class Command<
     }
 
     return names;
-  }
-
-  public command(name: string, config?: { description?: string }) {
-    if (this.commands.has(name)) {
-      throw new Error(`Command "${name}" already exists`);
-    }
-
-    const command = new Command(this.cli, name, this, config?.description);
-
-    this.commands.set(name, command);
-
-    return command;
   }
 
   public readCommands() {
@@ -95,7 +81,7 @@ export class Command<
 
   public printHelp(config: CLIConfig) {
     const argNames = formatArgumentPlaceholders(this.arguments);
-    const commandPath = this.path.join(" ");
+    const commandPath = this.path().join(" ");
     const usageParts = [config.name, commandPath, argNames, "[options]"];
     const usage = usageParts.filter((part) => part.length > 0).join(" ");
 
@@ -136,6 +122,18 @@ export class Command<
     for (const line of formatUsageEntries(optionEntries)) {
       console.log(line);
     }
+  }
+
+  public command(name: string, config?: { description?: string }) {
+    if (this.commands.has(name)) {
+      throw new Error(`Command "${name}" already exists`);
+    }
+
+    const command = new Command(this.cli, name, this, config?.description);
+
+    this.commands.set(name, command);
+
+    return command;
   }
 
   public argument<K extends string, S extends StandardSchemaV1>(
@@ -195,11 +193,7 @@ export class Command<
   public action(
     handler: (args: TArgs, options: TOptions) => void | Promise<void>,
   ) {
-    this.handler = handler as (
-      args: Record<string, unknown>,
-      options: Record<string, unknown>,
-    ) => void | Promise<void>;
-
+    this.handler = handler as HandlerFnType;
     return this.cli;
   }
 }

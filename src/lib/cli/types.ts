@@ -1,5 +1,10 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 
+export type HandlerFnType = (
+  args: Record<string, unknown>,
+  options: Record<string, unknown>,
+) => void | Promise<void>;
+
 export type Calculation = {
   command: string;
   cost: number;
