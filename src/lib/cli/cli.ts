@@ -14,7 +14,7 @@ import {
   printDescription,
 } from "./help.js";
 import { parseArgv } from "./parser.js";
-import { searchPossibleCommands } from "./search-command.js";
+import { searchPossibleCommands } from "./search.command.js";
 import type { CLIConfig } from "./types.js";
 import { validateArguments, validateOptions } from "./validate.js";
 
