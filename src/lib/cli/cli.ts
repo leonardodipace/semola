@@ -1,3 +1,4 @@
+import { CommandControl } from "./command.control.js";
 import { CommandHelper } from "./command.helper.js";
 import { Command } from "./command.js";
 import {
@@ -28,7 +29,8 @@ export class Cli {
   }
 
   public command(name: string, config?: { description?: string }) {
-    return this.root.command(name, config);
+    const command = this.root.create(name, config);
+    return new CommandControl(command);
   }
 
   public async parse(argv?: string[]) {
