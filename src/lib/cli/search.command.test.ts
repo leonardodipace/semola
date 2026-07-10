@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   levenshteinDistance,
   searchPossibleCommands,
-} from "./search-command.js";
+} from "./search.command.js";
 
 describe("Search command", () => {
   const commands = ["create", "pull", "migrate", "audit", "push"];
