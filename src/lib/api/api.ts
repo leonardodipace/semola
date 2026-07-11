@@ -1,11 +1,12 @@
 import { buildFetchDispatcher } from "./dispatch.js";
+import { DuplicateRouteError } from "./errors.js";
+import { Group } from "./group.js";
 import type { Middleware } from "./middleware.js";
 import { generateOpenApiSpec } from "./openapi/index.js";
 import {
   bodyHasMultipleReaders,
   createContext,
   emptyValidated,
-  getFullPath,
   mapValidationError,
   resolveValidation,
   validatingJson,
@@ -26,8 +27,6 @@ import type {
 } from "./types.js";
 import {
   buildRequestValidator,
-  compileBodyValidator,
-  isBodyOnlySchema,
   validateParts,
   validateSchema,
 } from "./validate.js";
@@ -96,32 +95,14 @@ const buildBareRoute = (
   validateOutput = false,
 ): BunRouteHandler => {
   const responseSchema = validateOutput ? response : undefined;
-  let bodyValidator: ReturnType<typeof compileBodyValidator> | undefined;
+  const validateRequest = validateInput
+    ? buildRequestValidator(request)
+    : undefined;
 
-  if (validateInput && request && isBodyOnlySchema(request)) {
-    const bodySchema = request.body;
-
-    if (bodySchema) {
-      bodyValidator = compileBodyValidator(bodySchema);
-    }
-  }
-
-  const validateRequest =
-    validateInput && !bodyValidator
-      ? buildRequestValidator(request)
-      : undefined;
   const probe = handler();
 
   if (probe instanceof Promise) {
     return async (req) => {
-      if (bodyValidator) {
-        try {
-          await bodyValidator(req);
-        } catch (error) {
-          return mapValidationError(error as Error);
-        }
-      }
-
       if (validateRequest) {
         const error = await validateRequest(req);
 
@@ -136,34 +117,14 @@ const buildBareRoute = (
 
   const cached = prepareResponse(probe, responseSchema);
 
-  if (!bodyValidator && !validateRequest) {
-    if (cached instanceof Promise) return async () => cached;
-
-    return () => cached;
-  }
-
-  if (bodyValidator) {
-    return async (req) => {
-      try {
-        await bodyValidator(req);
-      } catch (error) {
-        return mapValidationError(error as Error);
-      }
-
-      return cached;
-    };
-  }
-
-  const validator = validateRequest;
-
-  if (!validator) {
+  if (!validateRequest) {
     if (cached instanceof Promise) return async () => cached;
 
     return () => cached;
   }
 
   return async (req) => {
-    const error = await validator(req);
+    const error = await validateRequest(req);
 
     if (error) return mapValidationError(error);
 
@@ -187,22 +148,6 @@ const buildContextRoute = (handler: AnyRouteHandler): BunRouteHandler => {
 
     return toResponse(result);
   };
-};
-
-const getRouteMiddlewares = (
-  route: RouteConfig<
-    RequestSchema,
-    ResponseSchema,
-    readonly Middleware[],
-    readonly Middleware[]
-  >,
-  globalMiddlewares: readonly Middleware[],
-) => {
-  if (!route.middlewares?.length) return globalMiddlewares;
-
-  if (globalMiddlewares.length === 0) return route.middlewares;
-
-  return [...globalMiddlewares, ...route.middlewares];
 };
 
 const routeValidatesInput = (
@@ -311,10 +256,9 @@ const buildHandler = (
     readonly Middleware[],
     readonly Middleware[]
   >,
-  globalMiddlewares: readonly Middleware[],
   validation: ResolvedValidation,
 ): BunRouteHandler => {
-  const middlewares = getRouteMiddlewares(route, globalMiddlewares);
+  const middlewares = route.middlewares ?? emptyMiddlewares;
   const handler = route.handler;
 
   const hasMiddleware = middlewares.length > 0;
@@ -364,61 +308,46 @@ const compileRoutes = (
     readonly Middleware[],
     readonly Middleware[]
   >[],
-  prefix: string | undefined,
-  globalMiddlewares: readonly Middleware[],
   validation: ResolvedValidation,
 ): MethodRoutes => {
   const bunRoutes: MethodRoutes = {};
 
   for (const route of routes) {
-    const fullPath = getFullPath({ prefix, path: route.path });
+    let methods = bunRoutes[route.path];
 
-    if (!bunRoutes[fullPath]) {
-      bunRoutes[fullPath] = {};
+    if (!methods) {
+      methods = {};
+      bunRoutes[route.path] = methods;
     }
 
-    bunRoutes[fullPath][route.method] = buildHandler(
-      route,
-      globalMiddlewares,
-      validation,
-    );
+    if (methods[route.method]) {
+      throw new DuplicateRouteError(route.method, route.path);
+    }
+
+    methods[route.method] = buildHandler(route, validation);
   }
 
   return bunRoutes;
 };
 
-export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
-  private options: ApiOptions<TMiddlewares>;
-  private routes: RouteConfig<
-    RequestSchema,
-    ResponseSchema,
-    readonly Middleware[],
-    readonly Middleware[]
-  >[] = [];
-  private routesDirty = true;
+export class Api<
+  TMiddlewares extends readonly Middleware[] = readonly [],
+> extends Group<TMiddlewares> {
+  protected override options: ApiOptions<TMiddlewares>;
   private compiled?: {
     routes: MethodRoutes;
     fetch: (req: Request) => Response | Promise<Response>;
   };
+  private needsRecompile = true;
 
   public constructor(options: ApiOptions<TMiddlewares> = {}) {
+    super(options);
     this.options = options;
   }
 
-  public defineRoute<
-    TReq extends RequestSchema = RequestSchema,
-    TRes extends ResponseSchema = ResponseSchema,
-    TRouteMiddlewares extends readonly Middleware[] = readonly [],
-  >(config: RouteConfig<TReq, TRes, TMiddlewares, TRouteMiddlewares>) {
-    this.routes.push(
-      config as RouteConfig<
-        RequestSchema,
-        ResponseSchema,
-        readonly Middleware[],
-        readonly Middleware[]
-      >,
-    );
-    this.routesDirty = true;
+  protected override onRoutesChanged() {
+    this.needsRecompile = true;
+    super.onRoutesChanged();
   }
 
   public fetch = (req: Request) => {
@@ -434,11 +363,9 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
       title: this.options.openapi?.title ?? "API",
       description: this.options.openapi?.description,
       version: this.options.openapi?.version ?? "1.0.0",
-      prefix: this.options.prefix,
       servers: this.options.openapi?.servers,
       securitySchemes: this.options.openapi?.securitySchemes,
-      routes: this.routes,
-      globalMiddlewares: this.options.middlewares,
+      routes: this.collectRoutes(),
     });
   }
 
@@ -455,12 +382,10 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
   }
 
   private ensureCompiled() {
-    if (!this.routesDirty && this.compiled) return this.compiled;
+    if (!this.needsRecompile && this.compiled) return this.compiled;
 
     const routes = compileRoutes(
-      this.routes,
-      this.options.prefix,
-      this.options.middlewares ?? emptyMiddlewares,
+      this.collectRoutes(),
       resolveValidation(this.options.validation),
     );
 
@@ -469,7 +394,7 @@ export class Api<TMiddlewares extends readonly Middleware[] = readonly []> {
       fetch: buildFetchDispatcher(routes),
     };
 
-    this.routesDirty = false;
+    this.needsRecompile = false;
 
     return this.compiled;
   }

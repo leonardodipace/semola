@@ -25,10 +25,6 @@ export type StandardSchemaValidationResult = Awaited<
   ReturnType<StandardSchemaV1["~standard"]["validate"]>
 >;
 
-export type StandardSchemaIssues = NonNullable<
-  StandardSchemaValidationResult["issues"]
->;
-
 type SafeTypeAccess<
   T,
   K extends "input" | "output",
@@ -67,6 +63,13 @@ export type ApiOptions<
   openapi?: OpenApiOptions;
   middlewares?: TMiddlewares;
   validation?: ValidationOptions;
+};
+
+export type GroupOptions<
+  TMiddlewares extends readonly Middleware[] = readonly [],
+> = {
+  prefix?: string;
+  middlewares?: TMiddlewares;
 };
 
 export type SecuritySchemeApiKey = {

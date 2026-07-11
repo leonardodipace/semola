@@ -11,45 +11,6 @@ import type {
   ValidateRequestInput,
 } from "./types.js";
 
-export const isBodyOnlySchema = (schema: RequestSchema) => {
-  if (!schema.body) return false;
-  if (schema.query) return false;
-  if (schema.headers) return false;
-  if (schema.cookies) return false;
-  if (schema.params) return false;
-
-  return true;
-};
-
-export const compileBodyValidator = (bodySchema: StandardSchemaV1) => {
-  const validate = bodySchema["~standard"].validate;
-
-  return async (req: Request) => {
-    const contentType = req.headers.get("content-type") ?? "";
-    let parsedBody: unknown;
-
-    if (contentType.startsWith("application/json")) {
-      try {
-        parsedBody = await req.json();
-      } catch {
-        throw new ParseError("Invalid JSON body");
-      }
-    } else {
-      parsedBody = await req.text();
-    }
-
-    const result = validate(parsedBody);
-
-    if (result instanceof Promise) {
-      throw new SchemaConfigError("Async schema validation is not supported");
-    }
-
-    if (result.issues) {
-      throw new ValidationError(formatValidationIssues(result.issues));
-    }
-  };
-};
-
 const readValidationResult = <T>(result: StandardSchemaValidationResult) => {
   if (!result.issues) return result.value as T;
 
@@ -298,34 +259,5 @@ export const buildRequestValidator = (
 ): RequestValidator | undefined => {
   if (!schema) return;
 
-  if (isBodyOnlySchema(schema)) {
-    const bodySchema = schema.body;
-
-    if (!bodySchema) return;
-
-    const validateBodyOnly = compileBodyValidator(bodySchema);
-
-    return async (req) => {
-      try {
-        await validateBodyOnly(req);
-      } catch (error) {
-        return error as Error;
-      }
-    };
-  }
-
   return (req, bodyCache) => validateParts({ req, schema, bodyCache });
-};
-
-export const validateRequest = async (input: ValidateRequestInput) => {
-  const schema = input.schema;
-
-  if (!schema) return { success: true as const, data: {} };
-
-  const data: ValidatedRequest = {};
-  const error = await validateParts(input, data);
-
-  if (error) return { success: false as const, error };
-
-  return { success: true as const, data };
 };

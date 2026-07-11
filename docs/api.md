@@ -15,7 +15,7 @@ curl -fsSL https://bun.sh/install | bash
 ## Import
 
 ```typescript
-import { Api } from "semola/api";
+import { Api, Group } from "semola/api";
 ```
 
 ## API
@@ -79,6 +79,26 @@ api.defineRoute({
   },
 });
 ```
+
+### `new Group(options?)` and `api.mount(group)`
+
+Use `Group` to organize route trees and mount them into an `Api`.
+
+```typescript
+const api = new Api({ prefix: "/api/v1" });
+
+const users = new Group({ prefix: "/users" });
+
+users.defineRoute({
+  path: "/:id",
+  method: "GET",
+  handler: (c) => c.json(200, { id: c.req.params.id }),
+});
+
+api.mount(users);
+```
+
+`Group` supports `defineRoute()` and `mount()` (including nested groups). Runtime methods like `fetch()` and `serve()` are only available on `Api`.
 
 ### `api.getOpenApiSpec()`
 
@@ -223,7 +243,7 @@ const UserSchema = type({
 
 ### `api.fetch`
 
-Fetch handler for use with `Bun.serve({ fetch: api.fetch })` or other runtimes that accept a `Request` handler. Routes compile once on the first request (or when `getRouteHandlers()` is called) and recompile when `defineRoute()` adds a route.
+Fetch handler for use with `Bun.serve({ fetch: api.fetch })` or other runtimes that accept a `Request` handler. Routes compile once on the first request (or when `getRouteHandlers()` is called) and recompile when `defineRoute()` or `mount()` changes the route tree, including routes added on already-mounted groups. Compiling throws if the same method and path are registered more than once.
 
 ```typescript
 Bun.serve({ port: 3000, fetch: api.fetch });
