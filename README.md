@@ -31,6 +31,7 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 | **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors`   |
 | **📃 Logging**       | A simple logging utility                               | `semola/logging`  |
 | **⌨️ Prompts**       | Interactive zero-dependency CLI prompts                | `semola/prompts`  |
+| **🖥️ CLI**           | Non-interactive CLI builder with schema validation     | `semola/cli`      |
 | **🗄️ ORM**           | Type-safe data layer with query APIs                   | `semola/orm`      |
 
 ---
@@ -337,6 +338,7 @@ _Higher is better for req/sec, lower is better for latency._
 - [Errors](./docs/errors.md) - Result-based error handling
 - [Logging](./docs/logging.md) - Logging utility
 - [Prompts](./docs/prompts.md) - Interactive CLI prompts
+- [CLI](./docs/cli.md) - Non-interactive CLI builder
 - [ORM](./docs/orm.md) - Type-safe data layer with SQLite support
 
 ---
