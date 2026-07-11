@@ -1,5 +1,8 @@
-import type { RequestSchema, ResponseSchema } from "../core/types.js";
-import type { MiddlewareOptions } from "./types.js";
+import type {
+  MiddlewareOptions,
+  RequestSchema,
+  ResponseSchema,
+} from "./types.js";
 
 export class Middleware<
   TRequest extends RequestSchema = RequestSchema,

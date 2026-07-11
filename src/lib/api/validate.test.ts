@@ -1,0 +1,351 @@
+import { describe, expect, test } from "bun:test";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
+import { z } from "zod";
+import { SchemaConfigError } from "./errors.js";
+import {
+  validateBody,
+  validateCookies,
+  validateHeaders,
+  validateQuery,
+  validateRequest,
+  validateSchema,
+} from "./validate.js";
+
+describe("validate", () => {
+  describe("validateSchema", () => {
+    test("should format validation errors into a readable string", async () => {
+      const schema = z.object({
+        user: z.object({
+          email: z.email(),
+        }),
+        age: z.number(),
+      });
+
+      const invalid = { user: { email: "invalid" } };
+
+      const runValidation = () => {
+        validateSchema(schema, invalid);
+      };
+
+      expect(runValidation).toThrow(
+        expect.objectContaining({
+          message: expect.stringContaining("user.email:"),
+        }),
+      );
+      expect(runValidation).toThrow(
+        expect.objectContaining({
+          message: expect.stringContaining("age:"),
+        }),
+      );
+    });
+
+    test("should throw SchemaConfigError for async schemas", () => {
+      const schema = {
+        "~standard": {
+          version: 1,
+          vendor: "test",
+          validate: () => Promise.resolve({ value: {} }),
+        },
+      } as StandardSchemaV1;
+
+      expect(() => validateSchema(schema, {})).toThrow(SchemaConfigError);
+    });
+  });
+
+  describe("validateBody", () => {
+    test("should validate JSON body and return parsed data", async () => {
+      const schema = z.object({ id: z.number() });
+      const req = new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: 123 }),
+      });
+
+      const data = await validateBody(req, schema);
+
+      expect(data).toEqual({ id: 123 });
+    });
+
+    test("should throw ParseError for malformed JSON", async () => {
+      const req = new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{ invalid json }",
+      });
+
+      const promise = validateBody(req, z.any());
+      await expect(promise).rejects.toMatchObject({
+        name: "ParseError",
+      });
+    });
+
+    test("should validate text body and return parsed data", async () => {
+      const req = new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: "hello",
+      });
+
+      const data = await validateBody(req, z.string());
+      expect(data).toBe("hello");
+    });
+
+    test("should cache parsed body and reuse on subsequent calls", async () => {
+      const schema = z.object({ name: z.string() });
+      const req = new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "test" }),
+      });
+
+      const bodyCache = { parsed: false, value: undefined as unknown };
+
+      const data1 = await validateBody(req, schema, bodyCache);
+
+      expect(data1).toEqual({ name: "test" });
+      expect(bodyCache.parsed).toBe(true);
+      expect(bodyCache.value).toEqual({ name: "test" });
+
+      const data2 = await validateBody(req, schema, bodyCache);
+
+      expect(data2).toEqual({ name: "test" });
+    });
+
+    test("should validate cached body against different schemas", async () => {
+      const partialSchema = z.object({ name: z.string() });
+      const fullSchema = z.object({ name: z.string(), age: z.number() });
+      const req = new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "test", age: 25 }),
+      });
+
+      const bodyCache = { parsed: false, value: undefined as unknown };
+
+      const data1 = await validateBody(req, partialSchema, bodyCache);
+      expect(data1).toEqual({ name: "test" });
+
+      const data2 = await validateBody(req, fullSchema, bodyCache);
+      expect(data2).toEqual({ name: "test", age: 25 });
+    });
+  });
+
+  describe("validateQuery", () => {
+    test("should handle single and multiple query parameters", async () => {
+      const schema = z.object({
+        filter: z.string(),
+        tags: z.array(z.string()),
+      });
+      const req = new Request("http://localhost?filter=active&tags=a&tags=b");
+
+      const data = await validateQuery(req, schema);
+
+      expect(data).toEqual({ filter: "active", tags: ["a", "b"] });
+    });
+
+    test("should decode query values and preserve empty flags", async () => {
+      const schema = z.object({
+        q: z.string(),
+        encoded: z.string(),
+        empty: z.string(),
+        flag: z.string(),
+        tags: z.array(z.string()),
+      });
+      const req = new Request(
+        "http://localhost?q=two+words&encoded=a%20b&empty=&flag&tags=a&tags=b",
+      );
+
+      const data = await validateQuery(req, schema);
+
+      expect(data).toEqual({
+        q: "two words",
+        encoded: "a b",
+        empty: "",
+        flag: "",
+        tags: ["a", "b"],
+      });
+    });
+  });
+
+  describe("validateHeaders", () => {
+    test("should validate normalized lowercase headers", async () => {
+      const schema = z.object({
+        "x-api-key": z.string(),
+      });
+      const req = new Request("http://localhost", {
+        headers: { "X-API-KEY": "secret-123" },
+      });
+
+      const data = await validateHeaders(req, schema);
+
+      expect(data).toEqual({ "x-api-key": "secret-123" });
+    });
+  });
+
+  describe("validateCookies", () => {
+    test("should parse and validate cookies", async () => {
+      const schema = z.object({
+        theme: z.enum(["light", "dark"]),
+        session: z.string(),
+      });
+      const req = new Request("http://localhost", {
+        headers: { cookie: "theme=dark; session=abc" },
+      });
+
+      const data = await validateCookies(req, schema);
+
+      expect(data).toEqual({ theme: "dark", session: "abc" });
+    });
+
+    test("should decode cookies and ignore flag-only cookies", async () => {
+      const schema = z.object({
+        session: z.string(),
+        empty: z.string(),
+        plus: z.string(),
+      });
+      const req = new Request("http://localhost", {
+        headers: { cookie: " session=s%201; flag; empty= ; plus=a+b" },
+      });
+
+      const data = await validateCookies(req, schema);
+
+      expect(data).toEqual({ session: "s 1", empty: "", plus: "a+b" });
+    });
+
+    test("should throw when required cookie is missing", () => {
+      const schema = z.object({ requiredCookie: z.string() });
+      const req = new Request("http://localhost");
+
+      expect(() => validateCookies(req, schema)).toThrow(
+        expect.objectContaining({
+          message: expect.stringContaining("requiredCookie:"),
+        }),
+      );
+    });
+  });
+
+  describe("validateRequest", () => {
+    test("returns empty data when schema is omitted", async () => {
+      const req = new Request("http://localhost") as Bun.BunRequest;
+      const result = await validateRequest({ req });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data).toEqual({});
+      }
+    });
+
+    test("validates body", async () => {
+      const req = new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Alice" }),
+      }) as Bun.BunRequest;
+
+      const result = await validateRequest({
+        req,
+        schema: { body: z.object({ name: z.string() }) },
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.body).toEqual({ name: "Alice" });
+      }
+    });
+
+    test("returns error on validation failure", async () => {
+      const req = new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: 123 }),
+      }) as Bun.BunRequest;
+
+      const result = await validateRequest({
+        req,
+        schema: { body: z.object({ name: z.string() }) },
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.message).toContain("name:");
+      }
+    });
+
+    test("reuses body cache across validations", async () => {
+      const req = new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Alice", age: 30 }),
+      }) as Bun.BunRequest;
+
+      const bodyCache = { parsed: false, value: undefined as unknown };
+
+      const first = await validateRequest({
+        req,
+        schema: { body: z.object({ name: z.string() }) },
+        bodyCache,
+      });
+
+      const second = await validateRequest({
+        req,
+        schema: { body: z.object({ name: z.string(), age: z.number() }) },
+        bodyCache,
+      });
+
+      expect(first.success).toBe(true);
+      expect(second.success).toBe(true);
+      if (first.success && second.success) {
+        expect(second.data.body).toEqual({ name: "Alice", age: 30 });
+      }
+    });
+
+    test("validates params", async () => {
+      const req = {
+        params: { id: "abc" },
+      } as unknown as Bun.BunRequest;
+
+      const result = await validateRequest({
+        req,
+        schema: { params: z.object({ id: z.string() }) },
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.params).toEqual({ id: "abc" });
+      }
+    });
+
+    test("validates multiple request zones together", async () => {
+      const req = new Request("http://localhost?active=true", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-role": "admin",
+        },
+        body: JSON.stringify({ name: "Alice" }),
+      }) as Bun.BunRequest & { params: Record<string, string> };
+
+      Object.defineProperty(req, "params", {
+        value: { id: "abc" },
+      });
+
+      const result = await validateRequest({
+        req,
+        schema: {
+          body: z.object({ name: z.string() }),
+          query: z.object({ active: z.string() }),
+          headers: z.object({ "x-role": z.string() }),
+          params: z.object({ id: z.string() }),
+        },
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.body).toEqual({ name: "Alice" });
+        expect(result.data.query).toEqual({ active: "true" });
+        expect(result.data.headers).toEqual({ "x-role": "admin" });
+        expect(result.data.params).toEqual({ id: "abc" });
+      }
+    });
+  });
+});

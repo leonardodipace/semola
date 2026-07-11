@@ -1,11 +1,15 @@
-export { Api } from "./core/index.js";
-// Export types from core
+export { Api } from "./api.js";
+export { Middleware } from "./middleware.js";
 export type {
   ApiOptions,
   Context,
   ExtractStatusCodes,
   InferInput,
+  InferMiddlewareExtension,
   InferOutput,
+  MergeMiddlewareExtensions,
+  MiddlewareHandler,
+  MiddlewareOptions,
   OpenApiOptions,
   RequestSchema,
   ResponseSchema,
@@ -17,13 +21,4 @@ export type {
   SecuritySchemeOAuth2,
   SecuritySchemeOAuth2Flow,
   SecuritySchemeOpenIdConnect,
-} from "./core/types.js";
-export { Middleware } from "./middleware/index.js";
-
-// Export types from middleware
-export type {
-  InferMiddlewareExtension,
-  MergeMiddlewareExtensions,
-  MiddlewareHandler,
-  MiddlewareOptions,
-} from "./middleware/types.js";
+} from "./types.js";

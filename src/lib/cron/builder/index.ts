@@ -1,3 +1,4 @@
+import { OutOfBoundError } from "../errors.js";
 import type {
   BuilderFn,
   CronBuilderType,
@@ -14,7 +15,6 @@ import type {
 } from "./types.js";
 
 const CRON_FIELD_ORDER: CronField[] = [
-  "second",
   "minute",
   "hour",
   "day",
@@ -89,7 +89,6 @@ export function number<T>(value: T) {
 
 export function cronJobBuilder(buildFn: BuilderFn) {
   const fields: Partial<Record<CronField, string>> = {
-    second: undefined,
     minute: undefined,
     hour: undefined,
     day: undefined,
@@ -98,10 +97,6 @@ export function cronJobBuilder(buildFn: BuilderFn) {
   };
 
   const obj: CronBuilderType = {
-    second(expr: CronExpr<TimeType>) {
-      fields.second = checkExpr(expr);
-      return obj;
-    },
     minute(expr: CronExpr<TimeType>) {
       fields.minute = checkExpr(expr);
       return obj;
@@ -156,7 +151,7 @@ function handleSimpleExpression<T>(expr: CronExpr<T>) {
     case "range": {
       const { min, max } = expr;
       if (min > max) {
-        throw new Error(`OutOfBoundError: Expected ${min} <= ${max}`);
+        throw new OutOfBoundError(`Expected ${min} <= ${max}`);
       }
 
       return `${min}-${max}`;
@@ -166,9 +161,7 @@ function handleSimpleExpression<T>(expr: CronExpr<T>) {
       const { step, range } = expr;
 
       if (step === 0) {
-        throw new Error(
-          `OutOfBoundError: Expected step value greater than zero`,
-        );
+        throw new OutOfBoundError("Expected step value greater than zero");
       }
 
       if (!range) {
@@ -179,9 +172,7 @@ function handleSimpleExpression<T>(expr: CronExpr<T>) {
 
       if (max === 0) {
         if (min > max) {
-          throw new Error(
-            `OutOfBoundError: Expected max value greater than zero`,
-          );
+          throw new OutOfBoundError("Expected max value greater than zero");
         }
 
         return `${min}-${max}/${step}`;
@@ -192,7 +183,7 @@ function handleSimpleExpression<T>(expr: CronExpr<T>) {
       }
 
       if (min > max) {
-        throw new Error(`OutOfBoundError: Expected ${min} <= ${max}`);
+        throw new OutOfBoundError(`Expected ${min} <= ${max}`);
       }
 
       return `${min}-${max}/${step}`;
@@ -210,9 +201,6 @@ function generate(fields: Partial<Record<CronField, string>>): string {
   for (let index = 0; index < CRON_FIELD_ORDER.length; index++) {
     const key = CRON_FIELD_ORDER[index];
     if (!key) return "";
-    if (key === "second" && !fields[key]) {
-      continue;
-    }
 
     parts.push(fields[key] ?? "*");
   }
