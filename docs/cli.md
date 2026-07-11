@@ -72,9 +72,16 @@ await program.parse(["publish", "my-package", "-t", "v1.0.0"]);
 
 ### Git-like commands
 
-Continues from the split example above (`program` is already defined).
-
 ```typescript
+import { CLI } from "semola/cli";
+import { z } from "zod";
+
+const program = new CLI({
+  name: "git-essential",
+  description: "Git essential commands",
+  version: "0.1.7",
+});
+
 program
   .command("push", { description: "Push changes from local to remote" })
   .option("verbose", { schema: z.boolean().default(false), aliases: ["v"] })
@@ -84,10 +91,52 @@ program
   .command("pull", { description: "Pull changes from remote to local" })
   .option("quite", { schema: z.boolean().default(false), aliases: ["q"] })
   .action((_, options) => {
-    console.log(`PUlling with quite=${options}`);
+    console.log(`PUlling with quite=${options.quite}`);
   });
 
 await program.parse(["push", "-v"]);
+```
+
+### CLI with sub commands
+
+```typescript
+const program = new CLI({
+  name: "rainy",
+});
+
+const orm = program.command("orm");
+const db = program.command("db");
+
+orm
+  .command("push")
+  .argument("name", { schema: z.string().min(1) })
+  .option("silent", { schema: z.string().min(1) })
+  .option("force", { schema: z.string().min(1) })
+  .action((args, option) => {
+    // your implementation
+  });
+
+orm
+  .command("pull")
+  .argument("name", { schema: z.string().min(1) })
+  .action((args, option) => {
+    // your implementation
+  });
+
+db.command("create")
+  .argument("name", { schema: z.string().min(1) })
+  .argument("dialect", { schema: z.string().min(1) })
+  .action((args, option) => {
+    // your implementation
+  });
+
+db.command("remove")
+  .argument("name", { schema: z.string().min(1) })
+  .action((args, option) => {
+    // your implementation
+  });
+
+await program.parse();
 ```
 
 
@@ -96,8 +145,7 @@ await program.parse(["push", "-v"]);
 - Long options: `--name`, `--name=value`, `--name value`
 - Short aliases: `-alias`, `-alias value`, `-alias=value` (full alias name after `-`)
 - Boolean flags: bare `--first` or `-f` sets the option to `true`
-- Positional arguments: tokens not starting with `-`
-- `--` sentinel: everything after `--` is treated as positional
+- Positional arguments: tokens not starting with `-` or `--`
 - Unknown options throw `CliValidationError`
 
 Each argument and option is validated individually with its schema, so per-field `.default()` works when a value is missing.
