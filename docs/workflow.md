@@ -34,6 +34,14 @@ const started = await onboardUser.start({
   id: 1,
   email: "leo@example.com",
 });
+
+// start() schedules work in the background, so this is initially pending
+let execution = await onboardUser.get(started.executionId);
+
+while (execution.status === "pending" || execution.status === "running") {
+  await Bun.sleep(1000);
+  execution = await onboardUser.get(started.executionId);
+}
 ```
 
 ## Why It Is Durable
@@ -48,11 +56,12 @@ If a workflow crashes after one or more completed steps:
 
 ## API
 
-- `start(input, options?)` starts a new execution and runs inline.
-- `run(input, options?)` starts and returns the typed workflow result.
-- `resume(executionId)` resumes a failed or interrupted execution.
+- `start(input, options?)` persists and schedules a new execution, then returns its ID with `pending` status.
+- `resume(executionId)` schedules a failed or interrupted execution, then returns its ID with `pending` status.
 - `get(executionId)` returns execution status, timestamps, and completed steps.
 - `cancel(executionId)` marks execution as cancelled.
+
+`start()` and `resume()` run handlers in the background. Use `get(executionId)` to read the eventual result or failure.
 
 ## Options
 
