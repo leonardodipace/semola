@@ -336,7 +336,10 @@ class WorkflowDefinition<TInput, TResult> {
     );
 
     if (recordError) {
-      return;
+      console.error("Unable to record background workflow failure", {
+        executionId,
+        error: recordError,
+      });
     }
   }
 

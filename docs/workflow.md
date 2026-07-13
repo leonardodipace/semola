@@ -35,7 +35,13 @@ const started = await onboardUser.start({
   email: "leo@example.com",
 });
 
-const execution = await onboardUser.get(started.executionId);
+// start() schedules work in the background, so this is initially pending
+let execution = await onboardUser.get(started.executionId);
+
+while (execution.status === "pending" || execution.status === "running") {
+  await Bun.sleep(1000);
+  execution = await onboardUser.get(started.executionId);
+}
 ```
 
 ## Why It Is Durable

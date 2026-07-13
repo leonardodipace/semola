@@ -7,6 +7,7 @@ class MockRedisClient {
   private expirations = new Map<string, number>();
   private failCommands = new Set<string>();
   private hsetCallsBeforeFail: number | null = null;
+  public hsetFailureCount = 0;
 
   private isExpired(key: string) {
     const expiry = this.expirations.get(key);
@@ -53,11 +54,13 @@ class MockRedisClient {
     value?: string,
   ) {
     if (this.failCommands.has("hset")) {
+      this.hsetFailureCount++;
       throw new Error("hset failed");
     }
 
     if (this.hsetCallsBeforeFail !== null) {
       if (this.hsetCallsBeforeFail <= 0) {
+        this.hsetFailureCount++;
         throw new Error("hset failed");
       }
 
@@ -266,7 +269,7 @@ const waitForExecution = async <TInput, TResult>(
   workflow: ReturnType<typeof defineWorkflow<TInput, TResult>>,
   executionId: string,
 ) => {
-  for (let attempt = 0; attempt < 100; attempt++) {
+  for (let attempt = 0; attempt < 3000; attempt++) {
     const execution = await workflow.get(executionId);
 
     if (execution.status !== "pending" && execution.status !== "running") {
@@ -279,12 +282,24 @@ const waitForExecution = async <TInput, TResult>(
   throw new Error(`Workflow execution ${executionId} did not finish`);
 };
 
+const waitForHsetFailure = async (redis: MockRedisClient, failureCount = 1) => {
+  for (let attempt = 0; attempt < 3000; attempt++) {
+    if (redis.hsetFailureCount >= failureCount) {
+      return;
+    }
+
+    await sleep(1);
+  }
+
+  throw new Error("Mock Redis hset did not fail");
+};
+
 const waitForStatus = async <TInput, TResult>(
   workflow: ReturnType<typeof defineWorkflow<TInput, TResult>>,
   executionId: string,
-  status: "completed" | "failed" | "cancelled",
+  status: "running" | "completed" | "failed" | "cancelled",
 ) => {
-  for (let attempt = 0; attempt < 100; attempt++) {
+  for (let attempt = 0; attempt < 3000; attempt++) {
     const execution = await workflow.get(executionId);
 
     if (execution.status === status) {
@@ -557,7 +572,7 @@ describe("workflow", () => {
       { executionId: "lock-1" },
     );
 
-    await sleep(15);
+    await waitForStatus(workflow, "lock-1", "running");
 
     const resumeData = await workflow.resume("lock-1");
 
@@ -925,7 +940,7 @@ describe("workflow", () => {
         { id: 1 },
         { executionId: "hset-completed-fail-1" },
       );
-      await sleep(5);
+      await waitForHsetFailure(redis);
 
       const execution = await workflow.get(started.executionId);
 
@@ -995,6 +1010,46 @@ describe("workflow", () => {
   });
 
   describe("background execution errors", () => {
+    test("reports failure to record background execution errors", async () => {
+      const redis = createRedis() as MockRedisClient & Bun.RedisClient;
+      const errors: unknown[][] = [];
+      const originalError = console.error;
+
+      console.error = (...args: unknown[]) => {
+        errors.push(args);
+      };
+
+      try {
+        redis.failHsetAfterNCalls(1);
+
+        const workflow = createWorkflowWithEchoResult(
+          "background-record-failure",
+          redis,
+        );
+
+        await workflow.start(
+          { id: 1 },
+          { executionId: "background-record-failure-1" },
+        );
+        await waitForHsetFailure(redis, 2);
+
+        expect(errors).toEqual([
+          [
+            "Unable to record background workflow failure",
+            {
+              executionId: "background-record-failure-1",
+              error: expect.objectContaining({
+                message:
+                  "Unable to persist status for execution background-record-failure-1",
+              }),
+            },
+          ],
+        ]);
+      } finally {
+        console.error = originalError;
+      }
+    });
+
     test("records handler errors on the execution", async () => {
       const redis = createRedis();
 
@@ -1201,19 +1256,26 @@ describe("workflow", () => {
   describe("result deserializer", () => {
     test("returns serialization error when result deserializer throws", async () => {
       const redis = createRedis();
+      let shouldThrow = false;
 
       const workflow = defineWorkflow<{ id: number }, string>({
         name: "deser-result-error",
         redis,
         serializeResult: () => "custom-format",
         deserializeResult: () => {
-          throw new Error("cannot deserialize");
+          if (shouldThrow) {
+            throw new Error("cannot deserialize");
+          }
+
+          return "done";
         },
         handler: async () => "done",
       });
 
       await workflow.start({ id: 1 }, { executionId: "deser-1" });
-      await sleep(1);
+      await waitForStatus(workflow, "deser-1", "completed");
+
+      shouldThrow = true;
 
       await expect(workflow.get("deser-1")).rejects.toMatchObject({
         name: "SerializationError",
