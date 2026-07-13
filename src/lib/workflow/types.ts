@@ -147,10 +147,6 @@ export type Workflow<TInput, TResult> = {
     input: TInput,
     options?: WorkflowStartOptions,
   ) => Promise<WorkflowStartResult>;
-  run: (
-    input: TInput,
-    options?: WorkflowStartOptions,
-  ) => Promise<TResult | null>;
   resume: (executionId: string) => Promise<WorkflowStartResult>;
   get: (executionId: string) => Promise<WorkflowExecution<TInput, TResult>>;
   cancel: (executionId: string) => Promise<WorkflowCancelResult>;

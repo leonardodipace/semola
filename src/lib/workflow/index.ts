@@ -157,21 +157,9 @@ class WorkflowDefinition<TInput, TResult> {
 
     await this.createExecution(executionId, input);
 
-    return this.execute(executionId, input);
-  }
+    this.scheduleExecution(executionId, input);
 
-  public async run(input: TInput, options?: WorkflowStartOptions) {
-    const startData = await this.start(input, options);
-
-    if (startData.status === "cancelled") {
-      throw new CancelledError(
-        `Workflow execution ${startData.executionId} was cancelled`,
-      );
-    }
-
-    const execution = await this.get(startData.executionId);
-
-    return execution.result;
+    return { executionId, status: "pending" } satisfies WorkflowStartResult;
   }
 
   public async resume(executionId: string) {
@@ -191,7 +179,9 @@ class WorkflowDefinition<TInput, TResult> {
       } satisfies WorkflowStartResult;
     }
 
-    return this.execute(executionId, execution.input);
+    this.scheduleExecution(executionId, execution.input);
+
+    return { executionId, status: "pending" } satisfies WorkflowStartResult;
   }
 
   public async get(executionId: string) {
@@ -326,6 +316,43 @@ class WorkflowDefinition<TInput, TResult> {
         `Unable to persist metadata for execution ${executionId}`,
       );
     }
+  }
+
+  private scheduleExecution(executionId: string, input: TInput) {
+    queueMicrotask(() => {
+      void this.executeInBackground(executionId, input);
+    });
+  }
+
+  private async executeInBackground(executionId: string, input: TInput) {
+    const [executionError] = await mightThrow(this.execute(executionId, input));
+
+    if (!executionError) {
+      return;
+    }
+
+    const [recordError] = await mightThrow(
+      this.recordBackgroundFailure(executionId, executionError),
+    );
+
+    if (recordError) {
+      return;
+    }
+  }
+
+  private async recordBackgroundFailure(executionId: string, error: Error) {
+    const status = await this.getMeta(executionId, "status");
+
+    if (status !== "pending") {
+      return;
+    }
+
+    const failedAt = now();
+
+    await this.setMeta(executionId, "status", "failed");
+    await this.setMeta(executionId, "error", error.message);
+    await this.setMeta(executionId, "updatedAt", String(failedAt));
+    await this.setMeta(executionId, "failedAt", String(failedAt));
   }
 
   private async execute(executionId: string, input: TInput) {
@@ -1021,7 +1048,6 @@ export const defineWorkflow = <TInput, TResult = void>(
 
   return {
     start: (input, startOptions) => workflow.start(input, startOptions),
-    run: (input, startOptions) => workflow.run(input, startOptions),
     resume: (executionId) => workflow.resume(executionId),
     get: (executionId) => workflow.get(executionId),
     cancel: (executionId) => workflow.cancel(executionId),
