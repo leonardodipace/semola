@@ -69,15 +69,15 @@ export class RetryCronJob implements RetryObserver {
 
   public async update(ctx: NotifyContext): Promise<void> {
     if (ctx.type === "add") {
-      this.jobs.set(ctx.name, 0);
+      this.jobs.set(ctx.jobId, 0);
       return;
     }
 
-    const jobAttempts = this.jobs.get(ctx.name);
+    const jobAttempts = this.jobs.get(ctx.jobId);
     if (jobAttempts === undefined) return;
 
     if (ctx.type === "success") {
-      this.jobs.set(ctx.name, 0);
+      this.jobs.set(ctx.jobId, 0);
       return;
     }
 
@@ -172,17 +172,19 @@ export class Cron extends JobWithRetry {
   private cron: Bun.CronJob | null = null;
   private manager?: RetryManager;
   private common: CommonCronUtilities;
+  private jobId: string;
 
   public constructor(options: CronOptions) {
     super();
     this.options = options;
+    this.jobId = crypto.randomUUID();
     this.status = "idle";
     this.common = new CommonCronUtilities();
 
     if (this.options.retry) {
       this.manager = new RetryManager();
       this.manager.subscribe(this.options.retry);
-      this.manager.notify({ type: "add", name: this.getJobName() });
+      this.manager.notify({ type: "add", jobId: this.jobId });
     }
   }
 
@@ -210,7 +212,7 @@ export class Cron extends JobWithRetry {
           if (this.manager) {
             await this.manager.notify({
               type: "success",
-              name: this.getJobName(),
+              jobId: this.jobId,
             });
           }
 
@@ -223,6 +225,7 @@ export class Cron extends JobWithRetry {
             error: handlerError,
             job: this,
             name: this.getJobName(),
+            jobId: this.jobId,
           };
 
           await this.manager.notify(errorContext);

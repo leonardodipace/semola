@@ -55,10 +55,11 @@ type NotifyErrorContext = {
   job: JobWithRetry;
   error: Error;
   name: string;
+  jobId: string;
 };
 
-type NotifyAddRetryContext = { type: "add"; name: string };
-type NotifySuccessContext = { type: "success"; name: string };
+type NotifyAddRetryContext = { type: "add"; jobId: string };
+type NotifySuccessContext = { type: "success"; jobId: string };
 
 export type NotifyContext =
   | NotifySuccessContext
