@@ -4,6 +4,7 @@ export type ErrorMetadataType = {
   name: string;
   failedAt: number;
   error: Error;
+  jobId: string;
 };
 
 export type ScheduleType = Bun.CronWithAutocomplete | MinutelyAlias;
@@ -14,11 +15,13 @@ export type OnFailedAttemptContextType = {
   retriesLeft: number;
   delay: number;
   jobName: string;
+  jobId: string;
 };
 
 export type RetryOnErrorContextType = {
   error: Error;
   jobName: string;
+  jobId: string;
 };
 
 export type RetryOptions = {

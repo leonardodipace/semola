@@ -81,9 +81,9 @@ export class RetryCronJob implements RetryObserver {
       return;
     }
 
-    const { job, error, name } = ctx;
+    const { job, error, name, jobId } = ctx;
     const { maxAttempts } = this.options;
-    const onRetryErrorResult = this.runOnRetryError(error, name);
+    const onRetryErrorResult = this.runOnRetryError(error, name, jobId);
     const hasMoreAttempts = jobAttempts < maxAttempts;
     const canRetry = hasMoreAttempts && onRetryErrorResult;
 
@@ -97,6 +97,7 @@ export class RetryCronJob implements RetryObserver {
           error,
           retriesLeft: maxAttempts - jobAttempts,
           jobName: name,
+          jobId,
         };
 
         await this.options.onFailedAttempt(context);
@@ -114,6 +115,7 @@ export class RetryCronJob implements RetryObserver {
     const data: ErrorMetadataType = {
       name,
       error,
+      jobId,
       failedAt: Date.now(),
     };
 
@@ -130,9 +132,9 @@ export class RetryCronJob implements RetryObserver {
     return isNaturalNumber && isValidInteger && !isNegativeZero;
   }
 
-  private runOnRetryError(error: Error, jobName: string) {
+  private runOnRetryError(error: Error, jobName: string, jobId: string) {
     if (!this.options.retryOnError) return true;
-    return this.options.retryOnError({ error, jobName });
+    return this.options.retryOnError({ error, jobName, jobId });
   }
 
   private async runDelay(delay: number) {
