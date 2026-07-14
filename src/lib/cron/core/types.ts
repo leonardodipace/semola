@@ -31,6 +31,7 @@ export type RetryOptions = {
 export type CronBaseOptions = {
   name: string;
   schedule: ScheduleType;
+  jobId?: string;
 };
 
 export type CronOptions = CronBaseOptions & {

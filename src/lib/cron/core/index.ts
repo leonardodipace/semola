@@ -177,7 +177,7 @@ export class Cron extends JobWithRetry {
   public constructor(options: CronOptions) {
     super();
     this.options = options;
-    this.jobId = crypto.randomUUID();
+    this.jobId = options?.jobId ?? crypto.randomUUID();
     this.status = "idle";
     this.common = new CommonCronUtilities();
 
