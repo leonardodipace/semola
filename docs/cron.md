@@ -53,9 +53,10 @@ await osJob.stop();
 ## Options
 
 - `Cron` class:
-  - **`name: string`** (required) - Unique job name
+  - **`name: string`** (required) - Job's name
   - **`schedule: string`** (required) - Cron expression or alias
   - **`handler: () => unknown`** (required) - Function to execute on schedule. Support both sync and async functions
+  - **`jobId: string`** (optional) - A unique id assigned for each cron jobs. If not provided, the class will generate a random uuid
   - **`retry: RetryCronJob`** (optional) - Instance of `RetryCronJob` class containing retries' handling logic. You can 
   use the same instance for multiple `Cron` instances. For more information about errors and retries, check 
   the [Error Handling and Retries](#error-handling-and-retries) section 
@@ -215,7 +216,7 @@ Bun invokes the cron callback on each schedule tick. Inside that callback, `Cron
 
 `RetryCronJob.update()` only tracks attempts and backoff. It does not call `handler` itself; Bun re-invokes the callback on the next scheduled run.
 
-Create one `RetryCronJob` per `Cron` job or share the same instance with multiple `Cron` jobs. When sharing one `RetryCronJob` instance, it internally uses the cron job's name to ensure state isolation and, in case it's used for two jobs with the same name, the old job is replaced.
+Create one `RetryCronJob` per `Cron` job or share the same instance with multiple `Cron` jobs. When sharing one `RetryCronJob` instance, it internally uses the cron job's id to ensure state isolation.
 
 `maxAttempts` is validated in the `RetryCronJob` constructor. Invalid values raise `InvalidRetryError` at construction time.
 
@@ -246,14 +247,17 @@ const cleanup = new Cron({
   - `name: string` - The job's name
   - `failedAt: number` - When the job failed, expressed in milliseconds
   - `error: Error` - Which error was fired
+  - `jobId: string` - Job's id
 - **`retryOnError(ctx: RetryOnErrorContextType): boolean`** (optional) - Function called before each attempt. This function return `true` if a job should consume the current retry, otherwise it must return `false`. By default, if not provided, a job will retry on every error raised by the `handler` function. The `RetryOnErrorContextType` type contains the following properties:
     - `error: Error` - Which error was fired in the `handler` function 
     - `jobName: string` - Job's name
+    - `jobId: string` - Job's id
 - **`onFailedAttempt(ctx: OnFailedAttemptContextType): void | Promise<void>`** (optional) - Function called on every attempt. The `OnFailedAttemptContextType` type contains the following properties:
   - `error: Error` - Which error was fired in the `handler` function
   - `jobName: string` - Job's name
   - `attemptNumber: number` - The attempt number. Note that they start at 1
   - `retriesLeft: number` - How many retries remains before stopping the job
+  - `jobId: string` - Job's id
   - `delay: number` - Backoff delay in milliseconds before the next scheduled run. Calculated with exponential backoff and [Full Jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/). The callback returns after this delay; Bun invokes `handler` again on the next schedule tick. Note that the `delay` is capped to 1 minute.
 
 

@@ -460,7 +460,7 @@ describe("Cron", () => {
     test("should successfully call onError() callback", async () => {
       setSystemTime(new Date("2020-01-10T00:00:00.000Z"));
       const handler = () => Promise.resolve();
-
+      const jobId = "1";
       const retry = new RetryCronJob({
         maxAttempts: 0,
         onError: (err) => {
@@ -468,6 +468,7 @@ describe("Cron", () => {
           expect(err.error.message).toBe("A generic error");
           expect(err.failedAt).toBe(Date.now());
           expect(err.name).toBe("retry-job");
+          expect(err.jobId).toBe(jobId);
         },
       });
 
@@ -476,6 +477,7 @@ describe("Cron", () => {
         schedule: "0 0 * * *",
         handler,
         retry,
+        jobId,
       });
 
       expect(cron).toBeDefined();
@@ -489,6 +491,7 @@ describe("Cron", () => {
         job: cron,
         error: new Error("A generic error"),
         name: cron.getJobName(),
+        jobId,
       };
       await retry.update(ctx);
       expect(cron.getStatus()).toBe("idle");
@@ -498,6 +501,7 @@ describe("Cron", () => {
 
     test("should successfully throw an error when onError() callback is not defined", async () => {
       const handler = () => Promise.resolve();
+      const jobId = "1";
       const retry = new RetryCronJob({
         maxAttempts: 0,
       });
@@ -507,6 +511,7 @@ describe("Cron", () => {
         schedule: "0 0 * * *",
         handler,
         retry,
+        jobId,
       });
 
       expect(cron).toBeDefined();
@@ -520,6 +525,7 @@ describe("Cron", () => {
         job: cron,
         error: new Error("A generic error"),
         name: cron.getJobName(),
+        jobId,
       };
       const [theError] = await mightThrow(retry.update(ctx));
 
@@ -530,16 +536,24 @@ describe("Cron", () => {
 
     test("should successfully call onFailedAttempt() callback", async () => {
       const handler = () => Promise.resolve();
+      const jobId = "1";
 
       const retry = new RetryCronJob({
         maxAttempts: 3,
-        onFailedAttempt: ({ attemptNumber, delay, error, retriesLeft }) => {
+        onFailedAttempt: ({
+          jobId: onFailedAttemptId,
+          attemptNumber,
+          delay,
+          error,
+          retriesLeft,
+        }) => {
           if (attemptNumber === 1) {
             expect(attemptNumber).toBe(1);
             expect(delay).toBeGreaterThan(0);
             expect(error).toBeInstanceOf(Error);
             expect(error.message).toBe("A generic error");
             expect(retriesLeft).toBe(3);
+            expect(onFailedAttemptId).toBe(jobId);
 
             return;
           }
@@ -557,6 +571,7 @@ describe("Cron", () => {
         schedule: "0 0 * * *",
         handler,
         retry,
+        jobId,
       });
 
       expect(cron).toBeDefined();
@@ -570,6 +585,7 @@ describe("Cron", () => {
         job: cron,
         error: new Error("A generic error"),
         name: cron.getJobName(),
+        jobId,
       };
 
       await retry.update(ctx);
@@ -584,6 +600,7 @@ describe("Cron", () => {
 
     test("should not retry when retryOnError() callback return false", async () => {
       const handler = () => Promise.resolve();
+      const jobId = "1";
 
       const retry = new RetryCronJob({
         maxAttempts: 5,
@@ -595,6 +612,7 @@ describe("Cron", () => {
         schedule: "0 0 * * *",
         handler,
         retry,
+        jobId,
       });
 
       expect(cron).toBeDefined();
@@ -608,6 +626,7 @@ describe("Cron", () => {
         job: cron,
         error: new Error("A generic error"),
         name: cron.getJobName(),
+        jobId,
       };
 
       await retry.update(ctx);
@@ -618,6 +637,7 @@ describe("Cron", () => {
         job: cron,
         error: new UserDefinedError("User defined error"),
         name: cron.getJobName(),
+        jobId,
       };
 
       const [userDefinedError] = await mightThrow(
@@ -631,7 +651,7 @@ describe("Cron", () => {
     test("should not retry when retryOnError() callback return false and also call onError() callback", async () => {
       setSystemTime(new Date("2020-01-10T00:00:00.000Z"));
       const handler = () => Promise.resolve();
-
+      const jobId = "1";
       const retry = new RetryCronJob({
         maxAttempts: 5,
         retryOnError: ({ error: err }) => !(err instanceof UserDefinedError),
@@ -640,6 +660,7 @@ describe("Cron", () => {
           expect(err.error.message).toBe("User defined error");
           expect(err.failedAt).toBe(Date.now());
           expect(err.name).toBe("retry-job");
+          expect(err.jobId).toBe(jobId);
         },
       });
 
@@ -648,6 +669,7 @@ describe("Cron", () => {
         schedule: "0 0 * * *",
         handler,
         retry,
+        jobId,
       });
 
       expect(cron).toBeDefined();
@@ -661,6 +683,7 @@ describe("Cron", () => {
         job: cron,
         error: new Error("A generic error"),
         name: cron.getJobName(),
+        jobId,
       };
 
       await retry.update(ctx);
@@ -671,6 +694,7 @@ describe("Cron", () => {
         job: cron,
         error: new UserDefinedError("User defined error"),
         name: cron.getJobName(),
+        jobId,
       };
 
       await retry.update(ctxWithCustomError);
@@ -680,13 +704,16 @@ describe("Cron", () => {
 
     test("should reset attempts after a success", async () => {
       const handler = () => Promise.resolve();
+      const jobId = "1";
+
       const maxAttempts = 10;
       let shouldFail = true;
       const retry = new RetryCronJob({
         maxAttempts,
-        onFailedAttempt: ({ retriesLeft }) => {
+        onFailedAttempt: ({ retriesLeft, jobId: onFailedAttemptId }) => {
           if (shouldFail) {
             expect(retriesLeft).toBe(maxAttempts);
+            expect(onFailedAttemptId).toBe(jobId);
           }
         },
       });
@@ -696,6 +723,7 @@ describe("Cron", () => {
         schedule: "0 0 * * *",
         handler,
         retry,
+        jobId,
       });
 
       expect(cron).toBeDefined();
@@ -706,6 +734,7 @@ describe("Cron", () => {
         job: cron,
         error: new Error("A generic error"),
         name: cron.getJobName(),
+        jobId,
       };
 
       const [firstErr] = await mightThrow(retry.update(ctx));
@@ -716,17 +745,28 @@ describe("Cron", () => {
 
       shouldFail = true;
       const [thirdErr] = await mightThrow(
-        retry.update({ type: "success", name: cron.getJobName() }),
+        retry.update({ type: "success", jobId }),
       );
       expect(thirdErr).toBeNull();
     });
 
     test("keeps per-job retry state when a RetryCronJob instance is shared", async () => {
-      const perJobFailes: { retriesLeft: number; jobName: string }[] = [];
+      const perJobFailes: {
+        retriesLeft: number;
+        jobName: string;
+        jobId: string;
+      }[] = [];
+      const firstJobId = "1";
+      const secondJobId = "2";
+
       const retry = new RetryCronJob({
         maxAttempts: 2,
-        onFailedAttempt: ({ retriesLeft, jobName }) => {
-          perJobFailes.push({ retriesLeft, jobName });
+        onFailedAttempt: ({
+          retriesLeft,
+          jobName,
+          jobId: onFailedAttemptId,
+        }) => {
+          perJobFailes.push({ retriesLeft, jobName, jobId: onFailedAttemptId });
         },
       });
 
@@ -735,6 +775,7 @@ describe("Cron", () => {
         schedule: "0 0 * * *",
         handler: () => Promise.resolve(),
         retry,
+        jobId: firstJobId,
       });
 
       const cronB = new Cron({
@@ -742,17 +783,20 @@ describe("Cron", () => {
         schedule: "0 0 * * *",
         handler: () => Promise.resolve(),
         retry,
+        jobId: secondJobId,
       });
 
       const ctxA: NotifyContext = {
         type: "error",
         job: cronA,
+        jobId: firstJobId,
         error: new Error("a"),
         name: cronA.getJobName(),
       };
 
       const ctxB: NotifyContext = {
         type: "error",
+        jobId: secondJobId,
         job: cronB,
         error: new Error("b"),
         name: cronB.getJobName(),
@@ -764,11 +808,13 @@ describe("Cron", () => {
       expect(perJobFailes[0]).toMatchObject({
         retriesLeft: 2,
         jobName: "job-a",
+        jobId: firstJobId,
       });
 
       expect(perJobFailes[1]).toMatchObject({
         retriesLeft: 2,
         jobName: "job-b",
+        jobId: secondJobId,
       });
 
       await retry.update(ctxB);
@@ -776,11 +822,13 @@ describe("Cron", () => {
       expect(perJobFailes[0]).toMatchObject({
         retriesLeft: 2,
         jobName: "job-a",
+        jobId: firstJobId,
       });
 
       expect(perJobFailes[2]).toMatchObject({
         retriesLeft: 1,
         jobName: "job-b",
+        jobId: secondJobId,
       });
     });
 
