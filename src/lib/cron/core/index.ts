@@ -102,7 +102,7 @@ export class RetryCronJob implements RetryObserver {
         await this.options.onFailedAttempt(context);
       }
 
-      this.jobs.set(ctx.name, jobAttempts + 1);
+      this.jobs.set(ctx.jobId, jobAttempts + 1);
       await this.runDelay(delay);
 
       return;
