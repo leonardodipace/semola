@@ -468,6 +468,7 @@ describe("Cron", () => {
           expect(err.error.message).toBe("A generic error");
           expect(err.failedAt).toBe(Date.now());
           expect(err.name).toBe("retry-job");
+          expect(err.jobId).toBe(jobId);
         },
       });
 
@@ -539,13 +540,20 @@ describe("Cron", () => {
 
       const retry = new RetryCronJob({
         maxAttempts: 3,
-        onFailedAttempt: ({ attemptNumber, delay, error, retriesLeft }) => {
+        onFailedAttempt: ({
+          jobId: onFailedAttemptId,
+          attemptNumber,
+          delay,
+          error,
+          retriesLeft,
+        }) => {
           if (attemptNumber === 1) {
             expect(attemptNumber).toBe(1);
             expect(delay).toBeGreaterThan(0);
             expect(error).toBeInstanceOf(Error);
             expect(error.message).toBe("A generic error");
             expect(retriesLeft).toBe(3);
+            expect(onFailedAttemptId).toBe(jobId);
 
             return;
           }
@@ -652,6 +660,7 @@ describe("Cron", () => {
           expect(err.error.message).toBe("User defined error");
           expect(err.failedAt).toBe(Date.now());
           expect(err.name).toBe("retry-job");
+          expect(err.jobId).toBe(jobId);
         },
       });
 
@@ -701,9 +710,10 @@ describe("Cron", () => {
       let shouldFail = true;
       const retry = new RetryCronJob({
         maxAttempts,
-        onFailedAttempt: ({ retriesLeft }) => {
+        onFailedAttempt: ({ retriesLeft, jobId: onFailedAttemptId }) => {
           if (shouldFail) {
             expect(retriesLeft).toBe(maxAttempts);
+            expect(onFailedAttemptId).toBe(jobId);
           }
         },
       });
@@ -741,14 +751,22 @@ describe("Cron", () => {
     });
 
     test("keeps per-job retry state when a RetryCronJob instance is shared", async () => {
-      const perJobFailes: { retriesLeft: number; jobName: string }[] = [];
+      const perJobFailes: {
+        retriesLeft: number;
+        jobName: string;
+        jobId: string;
+      }[] = [];
       const firstJobId = "1";
       const secondJobId = "2";
 
       const retry = new RetryCronJob({
         maxAttempts: 2,
-        onFailedAttempt: ({ retriesLeft, jobName }) => {
-          perJobFailes.push({ retriesLeft, jobName });
+        onFailedAttempt: ({
+          retriesLeft,
+          jobName,
+          jobId: onFailedAttemptId,
+        }) => {
+          perJobFailes.push({ retriesLeft, jobName, jobId: onFailedAttemptId });
         },
       });
 
@@ -790,11 +808,13 @@ describe("Cron", () => {
       expect(perJobFailes[0]).toMatchObject({
         retriesLeft: 2,
         jobName: "job-a",
+        jobId: firstJobId,
       });
 
       expect(perJobFailes[1]).toMatchObject({
         retriesLeft: 2,
         jobName: "job-b",
+        jobId: secondJobId,
       });
 
       await retry.update(ctxB);
@@ -802,11 +822,13 @@ describe("Cron", () => {
       expect(perJobFailes[0]).toMatchObject({
         retriesLeft: 2,
         jobName: "job-a",
+        jobId: firstJobId,
       });
 
       expect(perJobFailes[2]).toMatchObject({
         retriesLeft: 1,
         jobName: "job-b",
+        jobId: secondJobId,
       });
     });
 
