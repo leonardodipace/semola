@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { mightThrow } from "../errors/index.js";
 import type {
   OnFailedAttemptContextType,
+  RetryContext,
   RetryFnType,
   RetryOptions,
 } from "./types.js";
@@ -29,9 +30,8 @@ class Retry {
     this.id = this.options.id ?? crypto.randomUUID();
   }
 
-  public async update(ctx: { error: Error }) {
+  public async update(ctx: RetryContext) {
     const { maxAttempts } = this.options;
-
     const onRetryErrorResult = this.runOnRetryError(ctx.error, this.id);
     const hasMoreAttempts = this.currentAttempt < maxAttempts;
     const canRetry = hasMoreAttempts && onRetryErrorResult;

@@ -35,3 +35,6 @@ export type RetryOptions = {
 };
 
 export type RetryFnType = () => void | Promise<void>;
+export type RetryContext = {
+  error: Error;
+};
