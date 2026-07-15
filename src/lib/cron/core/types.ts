@@ -1,25 +1,24 @@
+import type {
+  BaseErrorMetadata,
+  BaseOnFailedAttemptContext,
+  BaseRetryOnErrorContext,
+} from "../../retry/types.js";
+
 type MinutelyAlias = "@minutely";
 
-export type ErrorMetadataType = {
+export type ErrorMetadataType = BaseErrorMetadata & {
   name: string;
-  failedAt: number;
-  error: Error;
   jobId: string;
 };
 
 export type ScheduleType = Bun.CronWithAutocomplete | MinutelyAlias;
 
-export type OnFailedAttemptContextType = {
-  error: Error;
-  attemptNumber: number;
-  retriesLeft: number;
-  delay: number;
+export type OnFailedAttemptContextType = BaseOnFailedAttemptContext & {
   jobName: string;
   jobId: string;
 };
 
-export type RetryOnErrorContextType = {
-  error: Error;
+export type RetryOnErrorContextType = BaseRetryOnErrorContext & {
   jobName: string;
   jobId: string;
 };
