@@ -1,4 +1,3 @@
-import { EventEmitter } from "node:events";
 import { mightThrow } from "../errors/index.js";
 import type {
   ErrorMetadataType,
@@ -8,17 +7,9 @@ import type {
   RetryOptions,
 } from "./types.js";
 
-const SemolaEventName = {
-  start: "semola-retry-start",
-  continue: "semola-retry-continue",
-} as const;
-
 const BASE_BACKOFF_DELAY = 1000;
 const MAX_BACKOFF_DELAY = 1000 * 60; // 1 minute
 const BACKOFF_MULTIPLIER = 2;
-
-class SemolaStartRetryEmitter extends EventEmitter {}
-class SemolaContinueRetryEmitter extends EventEmitter {}
 
 class Retry {
   private options: RetryOptions;
@@ -98,15 +89,9 @@ class Retry {
 
 export function createRetry(fn: RetryFnType, options: RetryOptions) {
   const retry = new Retry(options);
-  const startEmitter = new SemolaStartRetryEmitter();
-  const continueEmitter = new SemolaContinueRetryEmitter();
 
-  return () => {
-    const continueCallback = async () => {
-      await retryFn();
-    };
-
-    const retryFn = async () => {
+  return async () => {
+    for (;;) {
       const [fnError] = await mightThrow(Promise.resolve().then(() => fn()));
       if (!fnError) {
         retry.reset();
@@ -114,28 +99,12 @@ export function createRetry(fn: RetryFnType, options: RetryOptions) {
       }
 
       const shouldContinue = await retry.update({ error: fnError });
-      if (shouldContinue) {
-        continueEmitter.emit(SemolaEventName.continue);
-        return;
-      }
+      if (shouldContinue) continue;
 
       const shouldThrow = await retry.fireOnError({ error: fnError });
       if (!shouldThrow) return;
 
-      continueEmitter.removeListener(
-        SemolaEventName.continue,
-        continueCallback,
-      );
-
       throw fnError;
-    };
-
-    startEmitter.once(SemolaEventName.start, async () => {
-      await retryFn();
-    });
-
-    continueEmitter.on(SemolaEventName.continue, continueCallback);
-
-    startEmitter.emit(SemolaEventName.start);
+    }
   };
 }
