@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { mightThrow } from "../errors/index.js";
 import type {
+  ErrorMetadataType,
   OnFailedAttemptContextType,
   RetryContext,
   RetryFnType,
@@ -64,6 +65,19 @@ class Retry {
     this.currentAttempt = 0;
   }
 
+  public async fireOnError(ctx: RetryContext) {
+    if (!this.options.onError) return true;
+
+    const data: ErrorMetadataType = {
+      failedAt: Date.now(),
+      error: ctx.error,
+      id: this.id,
+    };
+
+    await this.options.onError(data);
+    return false;
+  }
+
   private runOnRetryError(error: Error, id: string) {
     if (!this.options.retryOnError) return true;
     return this.options.retryOnError({ error, id });
@@ -88,26 +102,39 @@ export function createRetry(fn: RetryFnType, options: RetryOptions) {
   const continueEmitter = new SemolaContinueRetryEmitter();
 
   return () => {
+    const continueCallback = async () => {
+      await retryFn();
+    };
+
     const retryFn = async () => {
-      const [err] = await mightThrow(Promise.resolve().then(() => fn()));
-      if (!err) {
+      const [fnError] = await mightThrow(Promise.resolve().then(() => fn()));
+      if (!fnError) {
         retry.reset();
         return;
       }
 
-      const shouldContinue = await retry.update({ error: err });
-      if (!shouldContinue) throw err;
+      const shouldContinue = await retry.update({ error: fnError });
+      if (shouldContinue) {
+        continueEmitter.emit(SemolaEventName.continue);
+        return;
+      }
 
-      continueEmitter.emit(SemolaEventName.continue);
+      const shouldThrow = await retry.fireOnError({ error: fnError });
+      if (!shouldThrow) return;
+
+      continueEmitter.removeListener(
+        SemolaEventName.continue,
+        continueCallback,
+      );
+
+      throw fnError;
     };
 
     startEmitter.once(SemolaEventName.start, async () => {
       await retryFn();
     });
 
-    continueEmitter.on(SemolaEventName.continue, async () => {
-      await retryFn();
-    });
+    continueEmitter.on(SemolaEventName.continue, continueCallback);
 
     startEmitter.emit(SemolaEventName.start);
   };
