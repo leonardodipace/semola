@@ -34,7 +34,8 @@ export type RetryOptions = {
   retryOnError?: (ctx: RetryOnErrorContextType) => boolean;
 };
 
-export type RetryFnType = () => void | Promise<void>;
+export type RetryFnType<RetryValue> = () => RetryValue | Promise<RetryValue>;
+
 export type RetryContext = {
   error: Error;
 };

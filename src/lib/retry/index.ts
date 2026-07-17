@@ -52,10 +52,6 @@ class Retry {
     return false;
   }
 
-  public reset() {
-    this.currentAttempt = 0;
-  }
-
   public async fireOnError(ctx: RetryContext) {
     if (!this.options.onError) return true;
 
@@ -87,16 +83,19 @@ class Retry {
   }
 }
 
-export function createRetry(fn: RetryFnType, options: RetryOptions) {
+export function createRetry<RetryValue = void>(
+  fn: RetryFnType<RetryValue>,
+  options: RetryOptions,
+) {
   const retry = new Retry(options);
 
   return async () => {
     for (;;) {
-      const [fnError] = await mightThrow(Promise.resolve().then(() => fn()));
-      if (!fnError) {
-        retry.reset();
-        return;
-      }
+      const [fnError, result] = await mightThrow(
+        Promise.resolve().then(() => fn()),
+      );
+
+      if (!fnError) return result;
 
       const shouldContinue = await retry.update({ error: fnError });
       if (shouldContinue) continue;
