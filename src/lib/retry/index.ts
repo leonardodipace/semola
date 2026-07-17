@@ -11,6 +11,13 @@ const BASE_BACKOFF_DELAY = 1000;
 const MAX_BACKOFF_DELAY = 1000 * 60; // 1 minute
 const BACKOFF_MULTIPLIER = 2;
 
+export class InvalidRetryError extends TypeError {
+  public constructor(message: string) {
+    super(message);
+    this.name = "InvalidRetryError";
+  }
+}
+
 class Retry {
   private options: RetryOptions;
   private currentAttempt: number;
@@ -65,6 +72,16 @@ class Retry {
     return false;
   }
 
+  public checkAttempts() {
+    const { maxAttempts } = this.options;
+
+    const isValidInteger = Number.isSafeInteger(maxAttempts);
+    const isNegativeZero = Object.is(maxAttempts, -0);
+    const isNaturalNumber = maxAttempts >= 0;
+
+    return isNaturalNumber && isValidInteger && !isNegativeZero;
+  }
+
   private runOnRetryError(error: Error, id: string) {
     if (!this.options.retryOnError) return true;
     return this.options.retryOnError({ error, id });
@@ -89,6 +106,12 @@ export function createRetry<RetryValue = void>(
 ) {
   return async () => {
     const retry = new Retry(options);
+
+    if (!retry.checkAttempts()) {
+      throw new InvalidRetryError(
+        "Expected 'maxAttempts' to be a finite non-negative integer",
+      );
+    }
 
     for (;;) {
       const [fnError, result] = await mightThrow(
