@@ -35,7 +35,7 @@ describe("Create retry", () => {
   });
 
   test("should create a callable object", () => {
-    const callable = createRetry(() => {}, { maxAttempts: 1 });
+    const callable = createRetry(() => {}, { maxRetries: 1 });
     expect(callable).toBeDefined();
     expect(callable).toBeFunction();
   });
@@ -46,7 +46,7 @@ describe("Create retry", () => {
         throw new Error("A generic error");
       },
       {
-        maxAttempts: 0,
+        maxRetries: 0,
         id: "1",
         onError: ({ error, failedAt, id }) => {
           expect(error).toBeInstanceOf(Error);
@@ -66,7 +66,7 @@ describe("Create retry", () => {
         throw new Error("A generic error");
       },
       {
-        maxAttempts: 0,
+        maxRetries: 0,
       },
     );
 
@@ -83,7 +83,7 @@ describe("Create retry", () => {
         throw new Error("A generic error");
       },
       {
-        maxAttempts: 3,
+        maxRetries: 3,
         onFailedAttempt: (ctx) => {
           attempts.push(ctx);
         },
@@ -122,7 +122,7 @@ describe("Create retry", () => {
         }
       },
       {
-        maxAttempts: 3,
+        maxRetries: 3,
         retryOnError: ({ error }) => !(error instanceof UserDefinedError),
         onFailedAttempt: (ctx) => {
           attempts.push(ctx);
@@ -158,7 +158,7 @@ describe("Create retry", () => {
       },
       {
         id: "1",
-        maxAttempts: 3,
+        maxRetries: 3,
         retryOnError: ({ error }) => !(error instanceof UserDefinedError),
         onError: ({ error, failedAt, id }) => {
           expect(error).toBeInstanceOf(Error);
@@ -192,7 +192,7 @@ describe("Create retry", () => {
         return "success";
       },
       {
-        maxAttempts: 4,
+        maxRetries: 4,
         onFailedAttempt: (ctx) => {
           attempts.push(ctx);
           counter++;
@@ -227,7 +227,7 @@ describe("Create retry", () => {
         throw new Error("A repeating error");
       },
       {
-        maxAttempts: 2,
+        maxRetries: 2,
         onFailedAttempt: (ctx) => {
           if (!secondCall) {
             attemptsOnFirstCall.push(ctx);
@@ -266,25 +266,25 @@ describe("Validate attempts", () => {
   const noop = () => {};
 
   test("should raise an error when passing a negative number", async () => {
-    const negativeNumberCall = createRetry(noop, { maxAttempts: -10 });
+    const negativeNumberCall = createRetry(noop, { maxRetries: -10 });
     const [retryNegativeNumber] = await mightThrow(negativeNumberCall());
     expect(retryNegativeNumber).toBeDefined();
     expect(retryNegativeNumber).toBeInstanceOf(InvalidRetryError);
 
-    const negativeZeroCall = createRetry(noop, { maxAttempts: -0 });
+    const negativeZeroCall = createRetry(noop, { maxRetries: -0 });
     const [retryNegativeZero] = await mightThrow(negativeZeroCall());
     expect(retryNegativeZero).toBeDefined();
     expect(retryNegativeZero).toBeInstanceOf(InvalidRetryError);
 
     const negativeInfinityCall = createRetry(noop, {
-      maxAttempts: Number.NEGATIVE_INFINITY,
+      maxRetries: Number.NEGATIVE_INFINITY,
     });
     const [retryNegativeInfinity] = await mightThrow(negativeInfinityCall());
     expect(retryNegativeInfinity).toBeDefined();
     expect(retryNegativeInfinity).toBeInstanceOf(InvalidRetryError);
 
     const secondNegativeInfinityCall = createRetry(noop, {
-      maxAttempts: -Infinity,
+      maxRetries: -Infinity,
     });
     const [secondRetryNegativeInfinity] = await mightThrow(
       secondNegativeInfinityCall(),
@@ -294,7 +294,7 @@ describe("Validate attempts", () => {
   });
 
   test("should raise an error when passing NaN", async () => {
-    const nanCall = createRetry(noop, { maxAttempts: NaN });
+    const nanCall = createRetry(noop, { maxRetries: NaN });
     const [retryNan] = await mightThrow(nanCall());
 
     expect(retryNan).toBeDefined();
@@ -302,12 +302,12 @@ describe("Validate attempts", () => {
   });
 
   test("should raise an error when passing a non-integer number", async () => {
-    const decimalNumberCall = createRetry(noop, { maxAttempts: 1.5 });
+    const decimalNumberCall = createRetry(noop, { maxRetries: 1.5 });
     const [decimalNumberRetry] = await mightThrow(decimalNumberCall());
     expect(decimalNumberRetry).toBeDefined();
     expect(decimalNumberRetry).toBeInstanceOf(InvalidRetryError);
 
-    const negativeDecimalNumberCall = createRetry(noop, { maxAttempts: -1.5 });
+    const negativeDecimalNumberCall = createRetry(noop, { maxRetries: -1.5 });
     const [negativeDecimalNumberRetry] = await mightThrow(
       negativeDecimalNumberCall(),
     );
@@ -316,7 +316,7 @@ describe("Validate attempts", () => {
   });
 
   test("should not raise an error when passing a floating point number that can be represented as integer", async () => {
-    const integerDecimalNumberCall = createRetry(noop, { maxAttempts: 5.0 });
+    const integerDecimalNumberCall = createRetry(noop, { maxRetries: 5.0 });
     const [integerDecimalNumberRetry] = await mightThrow(
       integerDecimalNumberCall(),
     );
@@ -325,14 +325,14 @@ describe("Validate attempts", () => {
 
   test("should raise an error when passing 'Infinity'", async () => {
     const inifinyCall = createRetry(noop, {
-      maxAttempts: Number.POSITIVE_INFINITY,
+      maxRetries: Number.POSITIVE_INFINITY,
     });
     const [infinityRetry] = await mightThrow(inifinyCall());
     expect(infinityRetry).toBeDefined();
     expect(infinityRetry).toBeInstanceOf(InvalidRetryError);
 
     const secondInifinyCall = createRetry(noop, {
-      maxAttempts: Infinity,
+      maxRetries: Infinity,
     });
     const [secondInfinityRetry] = await mightThrow(secondInifinyCall());
     expect(secondInfinityRetry).toBeDefined();

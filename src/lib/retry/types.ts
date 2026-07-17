@@ -27,7 +27,7 @@ export type RetryOnErrorContextType = BaseRetryOnErrorContext & {
 };
 
 export type RetryOptions = {
-  maxAttempts: number;
+  maxRetries: number;
   id?: string;
   onError?: (error: ErrorMetadataType) => void | Promise<void>;
   onFailedAttempt?: (ctx: OnFailedAttemptContextType) => void | Promise<void>;

@@ -30,9 +30,9 @@ class Retry {
   }
 
   public async update(ctx: RetryContext) {
-    const { maxAttempts } = this.options;
+    const { maxRetries } = this.options;
     const onRetryErrorResult = this.runOnRetryError(ctx.error, this.id);
-    const hasMoreAttempts = this.currentAttempt < maxAttempts;
+    const hasMoreAttempts = this.currentAttempt < maxRetries;
     const canRetry = hasMoreAttempts && onRetryErrorResult;
 
     if (canRetry) {
@@ -43,7 +43,7 @@ class Retry {
           attemptNumber: this.currentAttempt + 1,
           delay,
           error: ctx.error,
-          retriesLeft: maxAttempts - this.currentAttempt,
+          retriesLeft: maxRetries - this.currentAttempt,
           id: this.id,
         };
 
@@ -73,11 +73,11 @@ class Retry {
   }
 
   public checkAttempts() {
-    const { maxAttempts } = this.options;
+    const { maxRetries } = this.options;
 
-    const isValidInteger = Number.isSafeInteger(maxAttempts);
-    const isNegativeZero = Object.is(maxAttempts, -0);
-    const isNaturalNumber = maxAttempts >= 0;
+    const isValidInteger = Number.isSafeInteger(maxRetries);
+    const isNegativeZero = Object.is(maxRetries, -0);
+    const isNaturalNumber = maxRetries >= 0;
 
     return isNaturalNumber && isValidInteger && !isNegativeZero;
   }
@@ -109,7 +109,7 @@ export function createRetry<RetryValue = void>(
 
     if (!retry.checkAttempts()) {
       throw new InvalidRetryError(
-        "Expected 'maxAttempts' to be a finite non-negative integer",
+        "Expected 'maxRetries' to be a finite non-negative integer",
       );
     }
 
