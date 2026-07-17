@@ -87,9 +87,9 @@ export function createRetry<RetryValue = void>(
   fn: RetryFnType<RetryValue>,
   options: RetryOptions,
 ) {
-  const retry = new Retry(options);
-
   return async () => {
+    const retry = new Retry(options);
+
     for (;;) {
       const [fnError, result] = await mightThrow(
         Promise.resolve().then(() => fn()),
