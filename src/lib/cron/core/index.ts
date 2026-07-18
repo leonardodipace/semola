@@ -4,6 +4,7 @@ import type {
   CronOptions,
   CronOSOptions,
   CronStatus,
+  CronUtilitiesInterface,
   ScheduleType,
 } from "./types.js";
 
@@ -41,7 +42,7 @@ class CommonCronUtilities {
   }
 }
 
-export class Cron {
+export class Cron implements CronUtilitiesInterface {
   private options: CronOptions;
   private status: CronStatus;
   private cron: Bun.CronJob | null = null;
@@ -125,7 +126,7 @@ export class Cron {
   }
 }
 
-export class CronOS {
+export class CronOS implements CronUtilitiesInterface {
   private options: CronOSOptions;
   private common: CommonCronUtilities;
 

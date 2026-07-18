@@ -17,3 +17,9 @@ export type CronOSOptions = CronBaseOptions & {
 };
 
 export type CronStatus = "idle" | "running";
+
+export interface CronUtilitiesInterface {
+  getExpression(schedule: ScheduleType): string;
+  getJobName(options: CronBaseOptions): string;
+  next(from?: Date | number): Date | null;
+}
