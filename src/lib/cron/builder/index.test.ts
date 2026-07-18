@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { OutOfBoundError } from "../errors.js";
+import { EmptyListError, OutOfBoundError } from "../errors.js";
 import { any, cronJobBuilder, list, number, range, step } from "./index.js";
 import { Month, WeekDay } from "./types.js";
 
@@ -213,7 +213,7 @@ describe("Cron Expression Builder", () => {
           cronJobBuilder((b) => b.month(list((l) => l)));
         }
 
-        expect(emptyList).toThrow("EmptyListError");
+        expect(emptyList).toThrow(EmptyListError);
       });
 
       test("should generate a list in case of using an object instead of helper functions", () => {
