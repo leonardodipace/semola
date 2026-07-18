@@ -7,5 +7,5 @@ export {
   step,
 } from "./builder/index.js";
 export { Month, WeekDay } from "./builder/types.js";
-export { Cron, CronOS, RetryCronJob } from "./core/index.js";
-export { InvalidRetryError, OutOfBoundError } from "./errors.js";
+export { Cron, CronOS } from "./core/index.js";
+export { OutOfBoundError } from "./errors.js";
