@@ -1,23 +1,11 @@
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
-import { InvalidRetryError } from "../errors.js";
-import {
-  type CronBaseOptions,
-  type CronOptions,
-  type CronOSOptions,
-  type CronStatus,
-  type ErrorMetadataType,
-  type JobPublisher,
-  JobWithRetry,
-  type NotifyContext,
-  type OnFailedAttemptContextType,
-  type RetryObserver,
-  type RetryOptions,
-  type ScheduleType,
+import type {
+  CronBaseOptions,
+  CronOptions,
+  CronOSOptions,
+  CronStatus,
+  ScheduleType,
 } from "./types.js";
-
-const BASE_BACKOFF_DELAY = 1000;
-const MAX_BACKOFF_DELAY = 1000 * 60; // 1 minute
-const BACKOFF_MULTIPLIER = 2;
 
 const ALIASES: Record<ScheduleType, string> = {
   "@yearly": "0 0 1 1 *",
@@ -53,141 +41,18 @@ class CommonCronUtilities {
   }
 }
 
-export class RetryCronJob implements RetryObserver {
-  private options: RetryOptions;
-  private jobs = new Map<string, number>();
-
-  public constructor(options: RetryOptions) {
-    this.options = options;
-
-    if (!this.checkAttempts()) {
-      throw new InvalidRetryError(
-        "Expected 'maxAttempts' to be a finite non-negative integer",
-      );
-    }
-  }
-
-  public async update(ctx: NotifyContext): Promise<void> {
-    if (ctx.type === "add") {
-      this.jobs.set(ctx.jobId, 0);
-      return;
-    }
-
-    const jobAttempts = this.jobs.get(ctx.jobId);
-    if (jobAttempts === undefined) return;
-
-    if (ctx.type === "success") {
-      this.jobs.set(ctx.jobId, 0);
-      return;
-    }
-
-    const { job, error, name, jobId } = ctx;
-    const { maxAttempts } = this.options;
-    const onRetryErrorResult = this.runOnRetryError(error, name, jobId);
-    const hasMoreAttempts = jobAttempts < maxAttempts;
-    const canRetry = hasMoreAttempts && onRetryErrorResult;
-
-    if (canRetry) {
-      const delay = this.calculateDelay(jobAttempts);
-
-      if (this.options.onFailedAttempt) {
-        const context: OnFailedAttemptContextType = {
-          attemptNumber: jobAttempts + 1,
-          delay,
-          error,
-          retriesLeft: maxAttempts - jobAttempts,
-          jobName: name,
-          jobId,
-        };
-
-        await this.options.onFailedAttempt(context);
-      }
-
-      this.jobs.set(ctx.jobId, jobAttempts + 1);
-      await this.runDelay(delay);
-
-      return;
-    }
-
-    job.stop();
-    if (!this.options.onError) throw error;
-
-    const data: ErrorMetadataType = {
-      name,
-      error,
-      jobId,
-      failedAt: Date.now(),
-    };
-
-    await this.options.onError(data);
-  }
-
-  private checkAttempts() {
-    const { maxAttempts } = this.options;
-
-    const isValidInteger = Number.isSafeInteger(maxAttempts);
-    const isNegativeZero = Object.is(maxAttempts, -0);
-    const isNaturalNumber = maxAttempts >= 0;
-
-    return isNaturalNumber && isValidInteger && !isNegativeZero;
-  }
-
-  private runOnRetryError(error: Error, jobName: string, jobId: string) {
-    if (!this.options.retryOnError) return true;
-    return this.options.retryOnError({ error, jobName, jobId });
-  }
-
-  private async runDelay(delay: number) {
-    await new Promise((resolve) => setTimeout(resolve, delay));
-  }
-
-  private calculateDelay(jobAttempt: number) {
-    // exponential backoff with "Full Jitter" algorithm
-
-    const deltaTime = BASE_BACKOFF_DELAY * BACKOFF_MULTIPLIER ** jobAttempt;
-    const minDeltaTime = Math.min(deltaTime, MAX_BACKOFF_DELAY);
-    return Math.round(Math.random() * (minDeltaTime + 1));
-  }
-}
-
-class RetryManager implements JobPublisher {
-  private listener: RetryObserver | null = null;
-
-  public subscribe(listener: RetryObserver): void {
-    this.listener = listener;
-  }
-
-  public unsubscribe(): void {
-    this.listener = null;
-  }
-
-  public async notify(ctx: NotifyContext): Promise<void> {
-    if (!this.listener) return;
-
-    await this.listener.update(ctx);
-  }
-}
-
-export class Cron extends JobWithRetry {
+export class Cron {
   private options: CronOptions;
   private status: CronStatus;
   private cron: Bun.CronJob | null = null;
-  private manager?: RetryManager;
   private common: CommonCronUtilities;
   private jobId: string;
 
   public constructor(options: CronOptions) {
-    super();
     this.options = options;
     this.jobId = options?.jobId ?? crypto.randomUUID();
     this.status = "idle";
     this.common = new CommonCronUtilities();
-
-    if (this.options.retry) {
-      this.manager = new RetryManager();
-      this.manager.subscribe(this.options.retry);
-      this.manager.notify({ type: "add", jobId: this.jobId });
-    }
   }
 
   public [Symbol.dispose](): void {
@@ -210,30 +75,7 @@ export class Cron extends JobWithRetry {
           Promise.resolve().then(() => handler()),
         );
 
-        if (!handlerError) {
-          if (this.manager) {
-            await this.manager.notify({
-              type: "success",
-              jobId: this.jobId,
-            });
-          }
-
-          return Promise.resolve();
-        }
-
-        if (this.manager) {
-          const errorContext: NotifyContext = {
-            type: "error",
-            error: handlerError,
-            job: this,
-            name: this.getJobName(),
-            jobId: this.jobId,
-          };
-
-          await this.manager.notify(errorContext);
-          return;
-        }
-
+        if (!handlerError) return Promise.resolve();
         await Promise.reject(handlerError);
       });
     });
