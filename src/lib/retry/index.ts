@@ -124,7 +124,9 @@ export function createRetry<RetryValue = void>(
       if (shouldContinue) continue;
 
       const shouldThrow = await retry.fireOnError({ error: fnError });
-      if (shouldThrow) throw fnError;
+      if (!shouldThrow) break;
+
+      throw fnError;
     }
   };
 }
