@@ -47,11 +47,9 @@ export class Cron implements CronUtilitiesInterface {
   private status: CronStatus;
   private cron: Bun.CronJob | null = null;
   private common: CommonCronUtilities;
-  private jobId: string;
 
   public constructor(options: CronOptions) {
     this.options = options;
-    this.jobId = options?.jobId ?? crypto.randomUUID();
     this.status = "idle";
     this.common = new CommonCronUtilities();
   }
