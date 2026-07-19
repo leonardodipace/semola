@@ -9,7 +9,6 @@ export type CronBaseOptions = {
 
 export type CronOptions = CronBaseOptions & {
   handler: () => unknown;
-  jobId?: string;
 };
 
 export type CronOSOptions = CronBaseOptions & {
