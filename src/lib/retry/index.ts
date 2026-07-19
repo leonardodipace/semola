@@ -124,3 +124,12 @@ export function createRetry<RetryValue = void>(
     }
   };
 }
+
+export { InvalidRetryError } from "./error.js";
+export type {
+  ErrorMetadataType,
+  OnFailedAttemptContextType,
+  RetryContext,
+  RetryFnType,
+  RetryOptions,
+} from "./types.js";
