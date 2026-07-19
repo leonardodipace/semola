@@ -1,6 +1,6 @@
 # Retry Utility
 
-A tiny, wrapper for retring any sync or async functions.
+A tiny wrapper for retrying any sync or async functions.
 
 ## Import 
 
@@ -11,7 +11,7 @@ import { createRetry, InvalidRetryError } from "semola/retry";
 ## API
 
 `
-createRetry<RetryValue = void>(fn: RetryFnType<RetryValue>, options: RetryOptions : () => Promise<RetryValue>
+createRetry<RetryValue = void>(fn: RetryFnType<RetryValue>, options: RetryOptions): () => Promise<RetryValue>
 `
 
 Creates a retriable function.

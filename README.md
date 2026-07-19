@@ -268,7 +268,7 @@ type FriendRequest = {
 };
 
 async function sendFriendRequest(req: FriendRequest) {
-  console.log(`sendin from ${req.from} to ${req.to}`);
+  console.log(`sending from ${req.from} to ${req.to}`);
   await sender(req);
 }
 

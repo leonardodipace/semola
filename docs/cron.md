@@ -276,11 +276,11 @@ async function createReport(data: ReportDataType) {
   await sendEmail("admin@company.com", "Daily Report", report);
 }
 
-const callable = createRetry(() => createReport(dataPoint), {
+const callable = createRetry(async () => await createReport(dataPoint), {
   maxRetries: 10,
-  onFailedAttempt: async ({ jobName, error, attemptNumber }) => {
+  onFailedAttempt: async ({ id, error, attemptNumber }) => {
     console.log(
-      `${jobName} => Attempt number ${attemptNumber} for error: ${error.name} => ${error.message}`,
+      `${id} => Attempt number ${attemptNumber} for error: ${error.name} => ${error.message}`,
     );
 
     await retryEmail();
