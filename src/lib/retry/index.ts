@@ -124,7 +124,7 @@ export function createRetry<RetryValue = void>(
       if (shouldContinue) continue;
 
       const shouldThrow = await retry.fireOnError({ error: fnError });
-      if (!shouldThrow) return result;
+      if (!shouldThrow) return undefined;
 
       throw fnError;
     }
