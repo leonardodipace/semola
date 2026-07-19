@@ -1,4 +1,5 @@
 import { mightThrow } from "../errors/index.js";
+import { InvalidRetryError } from "./error.js";
 import type {
   ErrorMetadataType,
   OnFailedAttemptContextType,
@@ -10,13 +11,6 @@ import type {
 const BASE_BACKOFF_DELAY = 1000;
 const MAX_BACKOFF_DELAY = 1000 * 60; // 1 minute
 const BACKOFF_MULTIPLIER = 2;
-
-export class InvalidRetryError extends TypeError {
-  public constructor(message: string) {
-    super(message);
-    this.name = "InvalidRetryError";
-  }
-}
 
 class Retry {
   private options: RetryOptions;
