@@ -57,7 +57,8 @@ describe("Create retry", () => {
       },
     );
 
-    await callable();
+    const result = await callable();
+    expect(result).toBeUndefined();
   });
 
   test("should throw an error when onError() callback is not provided", async () => {
