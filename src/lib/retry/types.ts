@@ -1,28 +1,19 @@
-export type BaseErrorMetadata = {
+export type ErrorMetadataType = {
   failedAt: number;
   error: Error;
-};
-
-export type ErrorMetadataType = BaseErrorMetadata & {
   id: string;
 };
 
-export type BaseOnFailedAttemptContext = {
+export type OnFailedAttemptContextType = {
   error: Error;
   attemptNumber: number;
   retriesLeft: number;
   delay: number;
-};
-
-export type OnFailedAttemptContextType = BaseOnFailedAttemptContext & {
   id: string;
 };
 
-export type BaseRetryOnErrorContext = {
+export type RetryOnErrorContextType = {
   error: Error;
-};
-
-export type RetryOnErrorContextType = BaseRetryOnErrorContext & {
   id: string;
 };
 
