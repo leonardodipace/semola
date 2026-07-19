@@ -55,7 +55,6 @@ await osJob.stop();
   - **`name: string`** (required) - Job's name
   - **`schedule: string`** (required) - Cron expression or alias
   - **`handler: () => unknown`** (required) - Function to execute on schedule. Support both sync and async functions
-  - **`jobId: string`** (optional) - A unique id assigned for each cron jobs. If not provided, the class will generate a random uuid
 - `CronOS` class:
   - **`name`** (required) - Unique job name
   - **`schedule`** (required) - Cron expression or alias
