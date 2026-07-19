@@ -8,7 +8,8 @@ import {
   test,
 } from "bun:test";
 import { mightThrow } from "../errors/index.js";
-import { createRetry, InvalidRetryError } from "./index.js";
+import { InvalidRetryError } from "./error.js";
+import { createRetry } from "./index.js";
 import type { OnFailedAttemptContextType } from "./types.js";
 
 class UserDefinedError extends Error {}
