@@ -155,7 +155,7 @@ console.log(user);
 ### Schedule Recurring Tasks
 
 ```typescript
-import { Cron, RetryCronJob } from "semola/cron";
+import { Cron } from "semola/cron";
 
 const cleanup = new Cron({
   name: "daily-cleanup",
