@@ -140,6 +140,16 @@
         "types": "./dist/lib/orm/index.d.cts",
         "default": "./dist/lib/orm/index.cjs"
       }
+    },
+    "./extra": {
+      "import": {
+        "types": "./dist/lib/extra/index.d.mts",
+        "default": "./dist/lib/extra/index.mjs"
+      },
+      "require": {
+        "types": "./dist/lib/extra/index.d.cts",
+        "default": "./dist/lib/extra/index.cjs"
+      }
     }
   },
   "files": [
