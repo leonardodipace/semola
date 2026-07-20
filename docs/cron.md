@@ -207,6 +207,8 @@ Note that invalid ranges and steps values will raise an `OutOfBoundError`. In ad
 For more information on how `createRetry()` works, check out [semola/retry](./retry.md) package.
 
 ```typescript
+import { createRetry } from "semola/retry";
+
 const retriable = createRetry(checkEndpoint, {
   maxRetries: 2,
   onError: (ctx) => console.log(`An error: ${ctx.error.message}`),
