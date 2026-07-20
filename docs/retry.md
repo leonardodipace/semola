@@ -41,7 +41,7 @@ console.log(await callable());
     - `failedAt: number` - When the function failed, expressed in milliseconds
     - `error: Error` - Which error was fired inside `fn`
     - `id: string` - retry's id
-  - `onFailedAttempt?: (ctx: OnFailedAttemptContextType) => void | Promise<void>` (optional) - Function called on every attempt. The `OnFailedAttemptContextType` type contains the following properties:
+  - `onFailedAttempt?: (ctx: OnFailedAttemptContextType) => void | Promise<void>` (optional) - Function called on every failed attempt. The `OnFailedAttemptContextType` type contains the following properties:
     - `error: Error` - Which error was fired inside `fn`
     - `attemptNumber: number` - The attempt number. Note that they start at 1
     - `retriesLeft: number` - How many retries remains before stopping
