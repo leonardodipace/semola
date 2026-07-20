@@ -66,16 +66,6 @@ class Retry {
     return false;
   }
 
-  public checkAttempts() {
-    const { maxRetries } = this.options;
-
-    const isValidInteger = Number.isSafeInteger(maxRetries);
-    const isNegativeZero = Object.is(maxRetries, -0);
-    const isNaturalNumber = maxRetries >= 0;
-
-    return isNaturalNumber && isValidInteger && !isNegativeZero;
-  }
-
   private runOnRetryError(error: Error, id: string) {
     if (!this.options.retryOnError) return true;
     return this.options.retryOnError({ error, id });
@@ -94,18 +84,28 @@ class Retry {
   }
 }
 
+function checkAttempts(options: RetryOptions) {
+  const { maxRetries } = options;
+
+  const isValidInteger = Number.isSafeInteger(maxRetries);
+  const isNegativeZero = Object.is(maxRetries, -0);
+  const isNaturalNumber = maxRetries >= 0;
+
+  return isNaturalNumber && isValidInteger && !isNegativeZero;
+}
+
 export function createRetry<RetryValue = void>(
   fn: RetryFnType<RetryValue>,
   options: RetryOptions,
 ) {
+  if (!checkAttempts(options)) {
+    throw new InvalidRetryError(
+      "Expected 'maxRetries' to be a finite non-negative integer",
+    );
+  }
+
   return async () => {
     const retry = new Retry(options);
-
-    if (!retry.checkAttempts()) {
-      throw new InvalidRetryError(
-        "Expected 'maxRetries' to be a finite non-negative integer",
-      );
-    }
 
     for (;;) {
       const [fnError, result] = await mightThrow(
