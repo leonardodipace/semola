@@ -33,7 +33,7 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 | **⌨️ Prompts**       | Interactive zero-dependency CLI prompts                | `semola/prompts`  |
 | **🖥️ CLI**           | Non-interactive CLI builder with schema validation     | `semola/cli`      |
 | **🗄️ ORM**           | Type-safe data layer with query APIs                   | `semola/orm`      |
-| **🔄 Retry**         | Tiny and simple retry function                      | `semola/retry`      |
+| **💡 Extra**         | A collection of tiny utilities                      | `semola/extra`      |
 
 ---
 
@@ -260,7 +260,7 @@ logger.info("Hello!");
 ### Retry a function multiple times
 
 ```typescript
-import { createRetry } from "semola/retry";
+import { createRetry } from "semola/extra";
 
 type FriendRequest = {
   from: string;
@@ -363,7 +363,7 @@ _Higher is better for req/sec, lower is better for latency._
 - [Prompts](./docs/prompts.md) - Interactive CLI prompts
 - [CLI](./docs/cli.md) - Non-interactive CLI builder
 - [ORM](./docs/orm.md) - Type-safe data layer with SQLite support
-- [Retry](./docs/retry.md) - Tiny and simple retry function
+- [Extra](./docs/extra.md) - A collection of tiny utilities
 
 ---
 
