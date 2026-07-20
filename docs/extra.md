@@ -1,14 +1,18 @@
-# Retry Utility
+# Extra
+
+A collection of small, focused utility packages that help you reduce boilerplate.
+
+## Retry
 
 A tiny wrapper for retrying any sync or async functions.
 
-## Import 
+### Import 
 
 ```typescript
 import { createRetry, InvalidRetryError } from "semola/retry";
 ```
 
-## API
+### API
 
 `
 createRetry<RetryValue = void>(fn: RetryFnType<RetryValue>, options: RetryOptions): () => Promise<RetryValue | undefined>
@@ -53,9 +57,9 @@ console.log(await callable());
 
 `createRetry()` returns a function that automatically handles all the retry logic. Note that if the `onError()` callback is defined, the function returned by `createRetry()` will return `undefined` instead of throwing when all retries are exhausted.
 
-## Usage Example
+### Usage Example
 
-### Write something inside a file
+Save something inside a file
 
 ```typescript
 const callable = createRetry(
@@ -74,7 +78,7 @@ const callable = createRetry(
 console.log(`Content: ${await callable()}`);
 ```
 
-### Stop at a specific error
+Stop at a specific error
 
 ```typescript
 type Report = { name: string; completed: boolean; author: string };
@@ -96,7 +100,7 @@ const callable = createRetry(
 console.log(`Report: ${await callable()}`);
 ```
 
-### Log attempts
+Log attempts
 
 ```typescript
 type Report = { name: string; completed: boolean; author: string };
@@ -121,7 +125,7 @@ const callable = createRetry(
 console.log(`Report: ${await callable()}`);
 ```
 
-### Call a function with arguments
+Call a function with arguments
 
 ```typescript
 async function execute(command: string) { ... }
