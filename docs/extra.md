@@ -1,6 +1,6 @@
 # Extra
 
-A collection of small, focused utility packages that help you reduce boilerplate.
+A collection of small, focused utility functionalities that help you reduce boilerplate.
 
 ## Retry
 
