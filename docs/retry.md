@@ -47,7 +47,7 @@ console.log(await callable());
     - `retriesLeft: number` - How many retries remains before stopping
     - `id: string` - retry's id
     - `delay: number` - Backoff delay, in milliseconds before the next run, calculated with exponential backoff and [Full Jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/). Note that the delay is capped at 1 minute
-  - `retryOnError?: (ctx: RetryOnErrorContextType) => boolean` (optional) - Function called before each attempt. This function return `true` if `fn` should consume the current retry, otherwise it must return `false`. By default, if not provided, `fn` will retry on every errors. The `RetryOnErrorContextType` type contains the following properties:
+  - `retryOnError?: (ctx: RetryOnErrorContextType) => boolean` (optional) - Function called when `fn` throw an error and before consuming a retry. This function return `true` if `fn` should consume the current retry, otherwise it must return `false`. By default, if not provided, `fn` will retry on every errors. The `RetryOnErrorContextType` type contains the following properties:
     - `error: Error` - Which error was fired inside `fn`
     - `id: string` - retry's id
 
