@@ -1,6 +1,6 @@
 # Cron
 
-A lightweight cron scheduler for executing periodic tasks built on top of Bun's native cron module. Supports standard cron expressions, convenient aliases, retries, an expression builder and in-process and OS level jobs.
+A lightweight cron scheduler for executing periodic tasks built on top of Bun's native cron module. Supports standard cron expressions, convenient aliases, an expression builder and in-process and OS level jobs.
 
 ## Import
 
