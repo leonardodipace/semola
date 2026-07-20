@@ -11,7 +11,7 @@ import { createRetry, InvalidRetryError } from "semola/retry";
 ## API
 
 `
-createRetry<RetryValue = void>(fn: RetryFnType<RetryValue>, options: RetryOptions): () => Promise<RetryValue>
+createRetry<RetryValue = void>(fn: RetryFnType<RetryValue>, options: RetryOptions): () => Promise<RetryValue | undefined>
 `
 
 Creates a retriable function.
@@ -51,7 +51,7 @@ console.log(await callable());
     - `error: Error` - Which error was fired inside `fn`
     - `id: string` - retry's id
 
-`createRetry()` returns a function that automatically handle all the retry's logic.
+`createRetry()` returns a function that automatically handles all the retry logic. Note that if the `onError()` callback is defined, the function returned by `createRetry()` will return `undefined` instead of throwing when all retries are exhausted.
 
 ## Usage Example
 
