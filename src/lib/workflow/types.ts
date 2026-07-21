@@ -128,6 +128,7 @@ export type WorkflowCancelResult = {
 };
 
 export type WorkflowMeta = {
+  name: string;
   status: string;
   input: string;
   result: string;
@@ -142,7 +143,25 @@ export type WorkflowMeta = {
 
 export type WorkflowMetaField = keyof WorkflowMeta;
 
+export type WorkflowListOptions = {
+  name?: string | string[];
+  status?: WorkflowStatus | WorkflowStatus[];
+  unlockedOnly?: boolean;
+};
+
+export type WorkflowListItem = {
+  id: string;
+  name: string;
+  status: WorkflowStatus;
+  createdAt: number;
+  updatedAt: number;
+  completedAt: number | null;
+  failedAt: number | null;
+  cancelledAt: number | null;
+};
+
 export type Workflow<TInput, TResult> = {
+  name: string;
   start: (
     input: TInput,
     options?: WorkflowStartOptions,

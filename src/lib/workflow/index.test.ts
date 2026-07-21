@@ -1,5 +1,10 @@
-import { describe, expect, test } from "bun:test";
-import { defineWorkflow } from "./index.js";
+import { beforeEach, describe, expect, test } from "bun:test";
+import {
+  clearWorkflowRegistry,
+  defineWorkflow,
+  listWorkflows,
+  resumeWorkflow,
+} from "./index.js";
 
 class MockRedisClient {
   private hashes = new Map<string, Map<string, string>>();
@@ -23,6 +28,13 @@ class MockRedisClient {
     }
 
     return false;
+  }
+
+  private matchesGlob(key: string, pattern: string) {
+    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(`^${escaped.replace(/\*/g, ".*")}$`);
+
+    return regex.test(key);
   }
 
   public setCommandFailure(command: "hset" | "hget" | "set" | "get" | "del") {
@@ -111,6 +123,78 @@ class MockRedisClient {
     }
 
     return hash.get(field) ?? null;
+  }
+
+  public async hgetall(key: string) {
+    const hash = this.hashes.get(key);
+
+    if (!hash) {
+      return {};
+    }
+
+    return Object.fromEntries(hash.entries());
+  }
+
+  public async exists(key: string) {
+    if (this.isExpired(key)) {
+      return false;
+    }
+
+    if (this.strings.has(key)) {
+      return true;
+    }
+
+    if (this.hashes.has(key)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  public async scan(
+    cursor: string | number,
+    ...args: (string | number)[]
+  ): Promise<[string, string[]]> {
+    let pattern: string | null = null;
+
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === "MATCH" && typeof args[i + 1] === "string") {
+        pattern = args[i + 1] as string;
+      }
+    }
+
+    const keys: string[] = [];
+
+    for (const key of this.hashes.keys()) {
+      if (pattern) {
+        if (!this.matchesGlob(key, pattern)) {
+          continue;
+        }
+      }
+
+      keys.push(key);
+    }
+
+    for (const key of this.strings.keys()) {
+      if (this.isExpired(key)) {
+        continue;
+      }
+
+      if (pattern) {
+        if (!this.matchesGlob(key, pattern)) {
+          continue;
+        }
+      }
+
+      keys.push(key);
+    }
+
+    // ponytail: mock returns all matches in one page
+    if (String(cursor) !== "0") {
+      return ["0", []];
+    }
+
+    return ["0", keys];
   }
 
   public async set(key: string, value: string, ...args: unknown[]) {
@@ -374,6 +458,10 @@ const createTwoStepFailResumeWorkflow = (
 };
 
 describe("workflow", () => {
+  beforeEach(() => {
+    clearWorkflowRegistry();
+  });
+
   test("starts workflow in the background and stores result", async () => {
     const redis = createRedis();
     let handlerStarted = false;
@@ -673,7 +761,7 @@ describe("workflow", () => {
     await workflow.start({ id: 1 }, { executionId: "bad-steps-1" });
 
     redis.seedHashField(
-      "workflow:invalid-steps:execution:bad-steps-1:meta",
+      "workflow:execution:bad-steps-1:meta",
       "steps",
       "{not-json}",
     );
@@ -791,7 +879,7 @@ describe("workflow", () => {
         );
 
         const executionId = `invalid-status-exec-${status || "empty"}`;
-        const metaKey = `workflow:invalid-status-${status || "empty"}:execution:${executionId}:meta`;
+        const metaKey = `workflow:execution:${executionId}:meta`;
 
         await workflow.start({ id: 1 }, { executionId });
         redis.seedHashField(metaKey, "status", status);
@@ -820,7 +908,7 @@ describe("workflow", () => {
         const workflow = createWorkflowWithEchoResult(`bad-${field}`, redis);
 
         const executionId = `bad-${field}-exec`;
-        const metaKey = `workflow:bad-${field}:execution:${executionId}:meta`;
+        const metaKey = `workflow:execution:${executionId}:meta`;
 
         await workflow.start({ id: 1 }, { executionId });
         redis.seedHashField(metaKey, field, "abc");
@@ -861,8 +949,8 @@ describe("workflow", () => {
         });
 
         const executionId = `bad-step-payload-exec-${i + 1}`;
-        const metaKey = `workflow:bad-step-payload-${i + 1}:execution:${executionId}:meta`;
-        const stepsKey = `workflow:bad-step-payload-${i + 1}:execution:${executionId}:steps`;
+        const metaKey = `workflow:execution:${executionId}:meta`;
+        const stepsKey = `workflow:execution:${executionId}:steps`;
 
         await workflow.start({ id: 1 }, { executionId });
 
@@ -1695,6 +1783,248 @@ describe("workflow", () => {
       expect(startResult.status).toBe("pending");
       expect(execution.status).toBe("cancelled");
       expect(retryDelays[0]).toBe(1000);
+    });
+  });
+
+  describe("listWorkflows and resumeWorkflow", () => {
+    test("returns empty list when no executions exist", async () => {
+      const redis = createRedis();
+
+      defineWorkflow<{ id: number }, string>({
+        name: "list-empty",
+        redis,
+        handler: async () => "ok",
+      });
+
+      const listed = await listWorkflows(redis);
+
+      expect(listed).toEqual([]);
+    });
+
+    test("lists executions across multiple workflow names", async () => {
+      const redis = createRedis();
+
+      const onboard = defineWorkflow<{ id: number }, string>({
+        name: "list-onboard",
+        redis,
+        handler: async () => "ok",
+      });
+
+      const provision = defineWorkflow<{ id: number }, string>({
+        name: "list-provision",
+        redis,
+        handler: async () => "ok",
+      });
+
+      await onboard.start({ id: 1 }, { executionId: "list-onboard-1" });
+      await provision.start({ id: 2 }, { executionId: "list-provision-1" });
+      await waitForExecution(onboard, "list-onboard-1");
+      await waitForExecution(provision, "list-provision-1");
+
+      const listed = await listWorkflows(redis);
+      const names = listed.map((item) => item.name).sort();
+      const ids = listed.map((item) => item.id).sort();
+
+      expect(listed.length).toBe(2);
+      expect(names).toEqual(["list-onboard", "list-provision"]);
+      expect(ids).toEqual(["list-onboard-1", "list-provision-1"]);
+    });
+
+    test("filters by name and status", async () => {
+      const redis = createRedis();
+
+      const onboard = defineWorkflow<{ id: number }, string>({
+        name: "filter-onboard",
+        redis,
+        handler: async () => "ok",
+      });
+
+      const provision = defineWorkflow<{ id: number }, string>({
+        name: "filter-provision",
+        redis,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("fail", async () => {
+            throw new Error("boom");
+          });
+
+          return "ok";
+        },
+      });
+
+      await onboard.start({ id: 1 }, { executionId: "filter-onboard-1" });
+      await provision.start({ id: 2 }, { executionId: "filter-provision-1" });
+      await waitForExecution(onboard, "filter-onboard-1");
+      await waitForStatus(provision, "filter-provision-1", "failed");
+
+      const byName = await listWorkflows(redis, { name: "filter-onboard" });
+      const byStatus = await listWorkflows(redis, { status: "failed" });
+
+      expect(byName.map((item) => item.id)).toEqual(["filter-onboard-1"]);
+      expect(byStatus.map((item) => item.id)).toEqual(["filter-provision-1"]);
+    });
+
+    test("unlockedOnly excludes locked running executions", async () => {
+      const redis = createRedis() as MockRedisClient & Bun.RedisClient;
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "list-lock",
+        redis,
+        handler: async () => "ok",
+      });
+
+      await workflow.start({ id: 1 }, { executionId: "list-lock-held" });
+      await workflow.start({ id: 2 }, { executionId: "list-lock-orphan" });
+      await waitForExecution(workflow, "list-lock-held");
+      await waitForExecution(workflow, "list-lock-orphan");
+
+      redis.seedHashField(
+        "workflow:execution:list-lock-held:meta",
+        "status",
+        "running",
+      );
+      redis.seedHashField(
+        "workflow:execution:list-lock-orphan:meta",
+        "status",
+        "running",
+      );
+      await redis.set(
+        "workflow:execution:list-lock-held:lock",
+        "token",
+        "PX",
+        "60000",
+      );
+
+      const unlocked = await listWorkflows(redis, {
+        status: "running",
+        unlockedOnly: true,
+      });
+
+      expect(unlocked.map((item) => item.id)).toEqual(["list-lock-orphan"]);
+    });
+
+    test("resumeWorkflow resumes by execution id via registry", async () => {
+      const redis = createRedis();
+      const executedSteps: string[] = [];
+
+      const workflow = createTwoStepFailResumeWorkflow(
+        "resume-workflow-api",
+        redis,
+        executedSteps,
+      );
+
+      await workflow.start({ id: 10 }, { executionId: "resume-api-1" });
+      await waitForStatus(workflow, "resume-api-1", "failed");
+
+      const pending = await listWorkflows(redis, {
+        status: ["pending", "running", "failed"],
+        unlockedOnly: true,
+      });
+
+      expect(pending.some((item) => item.id === "resume-api-1")).toBe(true);
+
+      const resumed = await resumeWorkflow(redis, "resume-api-1");
+      const execution = await waitForStatus(
+        workflow,
+        "resume-api-1",
+        "completed",
+      );
+
+      expect(resumed.status).toBe("pending");
+      expect(execution.status).toBe("completed");
+      expect(executedSteps).toEqual(["step-1:10", "step-2:10", "step-2:10"]);
+    });
+
+    test("resumeWorkflow fails when workflow is not registered", async () => {
+      const redis = createRedis();
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "resume-unregistered",
+        redis,
+        handler: async () => "ok",
+      });
+
+      await workflow.start({ id: 1 }, { executionId: "resume-unreg-1" });
+      await waitForExecution(workflow, "resume-unreg-1");
+
+      clearWorkflowRegistry();
+
+      await expect(
+        resumeWorkflow(redis, "resume-unreg-1"),
+      ).rejects.toMatchObject({
+        name: "NotFoundError",
+        message:
+          "Workflow resume-unregistered is not registered in this process",
+      });
+    });
+
+    test("rejects duplicate workflow name registration", () => {
+      const redis = createRedis();
+
+      defineWorkflow<{ id: number }, string>({
+        name: "dupe-register",
+        redis,
+        handler: async () => "ok",
+      });
+
+      expect(() => {
+        defineWorkflow<{ id: number }, string>({
+          name: "dupe-register",
+          redis,
+          handler: async () => "ok",
+        });
+      }).toThrow(
+        "Workflow dupe-register is already registered in this process",
+      );
+    });
+
+    test("rejects custom execution id collision across workflow names", async () => {
+      const redis = createRedis();
+
+      const first = defineWorkflow<{ id: number }, string>({
+        name: "collision-a",
+        redis,
+        handler: async () => "ok",
+      });
+
+      const second = defineWorkflow<{ id: number }, string>({
+        name: "collision-b",
+        redis,
+        handler: async () => "ok",
+      });
+
+      await first.start({ id: 1 }, { executionId: "shared-id" });
+
+      await expect(
+        second.start({ id: 2 }, { executionId: "shared-id" }),
+      ).rejects.toMatchObject({
+        name: "StateError",
+        message: "Workflow execution shared-id already exists",
+      });
+    });
+
+    test("get rejects execution owned by another workflow name", async () => {
+      const redis = createRedis();
+
+      const first = defineWorkflow<{ id: number }, string>({
+        name: "owner-a",
+        redis,
+        handler: async () => "ok",
+      });
+
+      const second = defineWorkflow<{ id: number }, string>({
+        name: "owner-b",
+        redis,
+        handler: async () => "ok",
+      });
+
+      await first.start({ id: 1 }, { executionId: "owned-by-a" });
+      await waitForExecution(first, "owned-by-a");
+
+      await expect(second.get("owned-by-a")).rejects.toMatchObject({
+        name: "NotFoundError",
+        message: "Workflow execution owned-by-a not found",
+      });
     });
   });
 });

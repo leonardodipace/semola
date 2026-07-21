@@ -5,7 +5,7 @@ Durable and resumable workflows backed by Redis.
 ## Import
 
 ```typescript
-import { defineWorkflow } from "semola/workflow";
+import { defineWorkflow, listWorkflows, resumeWorkflow } from "semola/workflow";
 ```
 
 ## Basic Usage
@@ -50,22 +50,51 @@ Each step persists its output in Redis using the step name as key.
 
 If a workflow crashes after one or more completed steps:
 
-- calling `resume(executionId)` reruns the handler
+- calling `resume(executionId)` or `resumeWorkflow(redis, executionId)` reruns the handler
 - completed steps are loaded from Redis and skipped
 - execution continues from the first unfinished step
 
+## Crash Recovery
+
+`defineWorkflow` registers the handler in a process-local map by `name`. On boot, after all workflow modules are loaded:
+
+```typescript
+const pending = await listWorkflows(redis, {
+  status: ["pending", "running"],
+  unlockedOnly: true,
+});
+
+for (const item of pending) {
+  await resumeWorkflow(redis, item.id);
+}
+```
+
+- `unlockedOnly: true` skips executions that still hold a Redis lock (another worker is alive).
+- Orphaned `running` executions (process died, lock TTL expired) are included.
+- Do not auto-resume all `failed` executions - those exhausted retries for a reason. Pass `status: "failed"` only when you intend to retry them.
+- Default `lockTTL` is 5 minutes. Recovery immediately after a crash may still see locks; wait or run the loop periodically.
+- Handlers must be defined (imported) before `resumeWorkflow`. An unknown `name` in Redis throws `NotFoundError`.
+
 ## API
+
+### Instance methods
 
 - `start(input, options?)` persists and schedules a new execution, then returns its ID with `pending` status.
 - `resume(executionId)` schedules a failed or interrupted execution, then returns its ID with `pending` status.
 - `get(executionId)` returns execution status, timestamps, and completed steps.
 - `cancel(executionId)` marks execution as cancelled.
+- `name` - workflow name used for registration and Redis meta.
 
-`start()` and `resume()` run handlers in the background. Use `get(executionId)` to read the eventual result or failure.
+### Top-level helpers
+
+- `listWorkflows(redis, options?)` scans all executions. Options: `name`, `status`, `unlockedOnly`.
+- `resumeWorkflow(redis, executionId)` reads the stored workflow name and resumes via the process registry.
+
+`start()`, `resume()`, and `resumeWorkflow()` run handlers in the background. Use `get(executionId)` to read the eventual result or failure.
 
 ## Options
 
-- **`name`** (required) - Workflow name for Redis keys
+- **`name`** (required) - Workflow name stored in Redis meta and used for process registration. Must be unique in the process. Execution IDs must be unique across all workflows sharing a Redis database.
 - **`redis`** (required) - Bun Redis client instance
 - **`handler`** (required) - Workflow function with `step` helper
 - **`retries`** - Step retry attempts before marking the workflow `failed` (default: 3). Set to `0` to fail on the first error with no retries.
@@ -73,6 +102,16 @@ If a workflow crashes after one or more completed steps:
 - **`hooks`** - Optional lifecycle callbacks (see [Hooks](#hooks))
 - **`lockTTL`** - Execution lock TTL in milliseconds (default: 300000)
 - **`serializeInput`**, **`deserializeInput`**, **`serializeResult`**, **`deserializeResult`**, **`serializeStepOutput`**, **`deserializeStepOutput`** - Custom serializers for Redis persistence
+
+## Redis Keys
+
+Executions use flat keys keyed only by execution id:
+
+- `workflow:execution:{id}:meta`
+- `workflow:execution:{id}:steps`
+- `workflow:execution:{id}:lock`
+
+The workflow `name` is stored as a field on the meta hash (not in the key path).
 
 ## Retries
 
@@ -82,7 +121,7 @@ Only successful step runs are persisted to Redis. Side effects inside a step may
 
 `cancel(executionId)` works during retry backoff as well as between steps.
 
-After retries are exhausted, call `resume(executionId)` to re-run the handler from the first unfinished step.
+After retries are exhausted, call `resume(executionId)` or `resumeWorkflow(redis, executionId)` to re-run the handler from the first unfinished step.
 
 ### Disable retries
 
@@ -149,3 +188,4 @@ const onboardUser = defineWorkflow<User, void>({
 - Step names should be stable and unique inside a workflow handler.
 - Semantics are at-least-once for side effects.
 - Keep step handlers idempotent whenever possible.
+- Duplicate `defineWorkflow({ name })` in the same process throws.

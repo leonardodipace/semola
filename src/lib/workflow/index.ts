@@ -14,6 +14,8 @@ import type {
   Workflow,
   WorkflowCancelResult,
   WorkflowExecution,
+  WorkflowListItem,
+  WorkflowListOptions,
   WorkflowMeta,
   WorkflowMetaField,
   WorkflowOptions,
@@ -28,8 +30,84 @@ const DEFAULT_RETRIES = 3;
 const DEFAULT_RETRY_BASE_DELAY = 1000;
 const DEFAULT_RETRY_MULTIPLIER = 2;
 const DEFAULT_RETRY_MAX_DELAY = 30000;
+const META_KEY_PREFIX = "workflow:execution:";
+const META_KEY_SUFFIX = ":meta";
+
+const knownStatuses: WorkflowStatus[] = [
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+];
+
+const workflowRegistry = new Map<string, Workflow<unknown, unknown>>();
 
 const now = () => Date.now();
+
+const executionKey = (executionId: string) => {
+  return `${META_KEY_PREFIX}${executionId}`;
+};
+
+const metaKeyFor = (executionId: string) => {
+  return `${executionKey(executionId)}${META_KEY_SUFFIX}`;
+};
+
+const lockKeyFor = (executionId: string) => {
+  return `${executionKey(executionId)}:lock`;
+};
+
+const parseExecutionIdFromMetaKey = (key: string) => {
+  if (!key.startsWith(META_KEY_PREFIX)) {
+    return null;
+  }
+
+  if (!key.endsWith(META_KEY_SUFFIX)) {
+    return null;
+  }
+
+  return key.slice(META_KEY_PREFIX.length, -META_KEY_SUFFIX.length);
+};
+
+const normalizeToSet = <T extends string>(value: T | T[] | undefined) => {
+  if (value === undefined) {
+    return null;
+  }
+
+  if (Array.isArray(value)) {
+    return new Set(value);
+  }
+
+  return new Set([value]);
+};
+
+const parseOptionalNumber = (value: string | undefined, field: string) => {
+  if (value === undefined) {
+    return null;
+  }
+
+  if (value.length === 0) {
+    return null;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    throw new StateError(`Invalid ${field} value`);
+  }
+
+  return parsed;
+};
+
+const normalizeStatusValue = (value: string) => {
+  for (const status of knownStatuses) {
+    if (status === value) {
+      return status;
+    }
+  }
+
+  return null;
+};
 
 const delay = async (
   ms: number,
@@ -95,14 +173,6 @@ const envelopeDeserialize = (raw: string) => {
 
   return undefined;
 };
-
-const knownStatuses: WorkflowStatus[] = [
-  "pending",
-  "running",
-  "completed",
-  "failed",
-  "cancelled",
-];
 
 class WorkflowDefinition<TInput, TResult> {
   private options: WorkflowOptions<TInput, TResult>;
@@ -191,6 +261,12 @@ class WorkflowDefinition<TInput, TResult> {
       throw new NotFoundError(`Workflow execution ${executionId} not found`);
     }
 
+    const storedName = await this.getMeta(executionId, "name");
+
+    if (storedName !== this.options.name) {
+      throw new NotFoundError(`Workflow execution ${executionId} not found`);
+    }
+
     const normalizedStatus = this.normalizeStatus(status);
 
     if (!normalizedStatus) {
@@ -268,11 +344,11 @@ class WorkflowDefinition<TInput, TResult> {
   }
 
   private executionKey(executionId: string) {
-    return `workflow:${this.options.name}:execution:${executionId}`;
+    return executionKey(executionId);
   }
 
   private metaKey(executionId: string) {
-    return `${this.executionKey(executionId)}:meta`;
+    return metaKeyFor(executionId);
   }
 
   private stepsKey(executionId: string) {
@@ -280,7 +356,7 @@ class WorkflowDefinition<TInput, TResult> {
   }
 
   private lockKey(executionId: string) {
-    return `${this.executionKey(executionId)}:lock`;
+    return lockKeyFor(executionId);
   }
 
   private async createExecution(executionId: string, input: TInput) {
@@ -295,6 +371,7 @@ class WorkflowDefinition<TInput, TResult> {
     }
 
     const metadata: WorkflowMeta = {
+      name: this.options.name,
       status: "pending",
       input: serializedInput,
       result: "",
@@ -1034,27 +1111,217 @@ class WorkflowDefinition<TInput, TResult> {
   }
 
   private normalizeStatus(value: string) {
-    for (const status of knownStatuses) {
-      if (status === value) {
-        return status;
-      }
-    }
-
-    return null;
+    return normalizeStatusValue(value);
   }
 }
+
+export const clearWorkflowRegistry = () => {
+  workflowRegistry.clear();
+};
+
+const readListItem = async (
+  redis: Bun.RedisClient,
+  key: string,
+  nameFilter: Set<string> | null,
+  statusFilter: Set<WorkflowStatus> | null,
+  unlockedOnly: boolean,
+) => {
+  const executionId = parseExecutionIdFromMetaKey(key);
+
+  if (!executionId) {
+    return null;
+  }
+
+  const [readError, meta] = await mightThrow(redis.hgetall(key));
+
+  if (readError) {
+    throw new WorkflowError(
+      `Unable to read metadata for execution ${executionId}`,
+    );
+  }
+
+  if (!meta) {
+    return null;
+  }
+
+  const name = meta.name;
+
+  if (!name) {
+    return null;
+  }
+
+  if (nameFilter) {
+    if (!nameFilter.has(name)) {
+      return null;
+    }
+  }
+
+  const statusRaw = meta.status;
+
+  if (!statusRaw) {
+    return null;
+  }
+
+  const status = normalizeStatusValue(statusRaw);
+
+  if (!status) {
+    return null;
+  }
+
+  if (statusFilter) {
+    if (!statusFilter.has(status)) {
+      return null;
+    }
+  }
+
+  if (unlockedOnly) {
+    const [existsError, lockExists] = await mightThrow(
+      redis.exists(lockKeyFor(executionId)),
+    );
+
+    if (existsError) {
+      throw new WorkflowError(
+        `Unable to read lock for execution ${executionId}`,
+      );
+    }
+
+    if (lockExists) {
+      return null;
+    }
+  }
+
+  const createdAt = parseOptionalNumber(meta.createdAt, "createdAt");
+  const updatedAt = parseOptionalNumber(meta.updatedAt, "updatedAt");
+
+  if (createdAt === null) {
+    throw new StateError(
+      `Workflow execution ${executionId} is missing createdAt`,
+    );
+  }
+
+  if (updatedAt === null) {
+    throw new StateError(
+      `Workflow execution ${executionId} is missing updatedAt`,
+    );
+  }
+
+  return {
+    id: executionId,
+    name,
+    status,
+    createdAt,
+    updatedAt,
+    completedAt: parseOptionalNumber(meta.completedAt, "completedAt"),
+    failedAt: parseOptionalNumber(meta.failedAt, "failedAt"),
+    cancelledAt: parseOptionalNumber(meta.cancelledAt, "cancelledAt"),
+  } satisfies WorkflowListItem;
+};
+
+export const listWorkflows = async (
+  redis: Bun.RedisClient,
+  options?: WorkflowListOptions,
+) => {
+  const nameFilter = normalizeToSet(options?.name);
+  const statusFilter = normalizeToSet(options?.status);
+  const unlockedOnly = options?.unlockedOnly === true;
+  const results: WorkflowListItem[] = [];
+  let cursor = "0";
+
+  do {
+    const [scanError, scanResult] = await mightThrow(
+      redis.scan(
+        cursor,
+        "MATCH",
+        `${META_KEY_PREFIX}*${META_KEY_SUFFIX}`,
+        "COUNT",
+        100,
+      ),
+    );
+
+    if (scanError) {
+      throw new WorkflowError("Unable to scan workflow executions");
+    }
+
+    if (!scanResult) {
+      throw new WorkflowError("Unable to scan workflow executions");
+    }
+
+    const [nextCursor, keys] = scanResult;
+    cursor = nextCursor;
+
+    for (const key of keys) {
+      const item = await readListItem(
+        redis,
+        key,
+        nameFilter,
+        statusFilter,
+        unlockedOnly,
+      );
+
+      if (!item) {
+        continue;
+      }
+
+      results.push(item);
+    }
+  } while (cursor !== "0");
+
+  return results;
+};
+
+export const resumeWorkflow = async (
+  redis: Bun.RedisClient,
+  executionId: string,
+) => {
+  const [readError, name] = await mightThrow(
+    redis.hget(metaKeyFor(executionId), "name"),
+  );
+
+  if (readError) {
+    throw new WorkflowError(`Unable to read name for execution ${executionId}`);
+  }
+
+  if (!name) {
+    throw new NotFoundError(`Workflow execution ${executionId} not found`);
+  }
+
+  if (typeof name !== "string") {
+    throw new StateError(`Invalid name value for execution ${executionId}`);
+  }
+
+  const workflow = workflowRegistry.get(name);
+
+  if (!workflow) {
+    throw new NotFoundError(
+      `Workflow ${name} is not registered in this process`,
+    );
+  }
+
+  return workflow.resume(executionId);
+};
 
 export const defineWorkflow = <TInput, TResult = void>(
   options: WorkflowOptions<TInput, TResult>,
 ): Workflow<TInput, TResult> => {
+  if (workflowRegistry.has(options.name)) {
+    throw new StateError(
+      `Workflow ${options.name} is already registered in this process`,
+    );
+  }
+
   const workflow = new WorkflowDefinition(options);
 
-  return {
+  const api: Workflow<TInput, TResult> = {
+    name: options.name,
     start: (input, startOptions) => workflow.start(input, startOptions),
     resume: (executionId) => workflow.resume(executionId),
     get: (executionId) => workflow.get(executionId),
     cancel: (executionId) => workflow.cancel(executionId),
   };
+
+  workflowRegistry.set(options.name, api as Workflow<unknown, unknown>);
+
+  return api;
 };
 
 export {
@@ -1072,6 +1339,8 @@ export type {
   WorkflowExecution,
   WorkflowHandlerContext,
   WorkflowHooks,
+  WorkflowListItem,
+  WorkflowListOptions,
   WorkflowMeta,
   WorkflowMetaField,
   WorkflowOptions,
