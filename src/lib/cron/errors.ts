@@ -5,9 +5,9 @@ export class OutOfBoundError extends Error {
   }
 }
 
-export class InvalidRetryError extends TypeError {
+export class EmptyListError extends Error {
   public constructor(message: string) {
     super(message);
-    this.name = "InvalidRetryError";
+    this.name = "EmptyListError";
   }
 }

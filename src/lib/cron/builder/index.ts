@@ -1,4 +1,4 @@
-import { OutOfBoundError } from "../errors.js";
+import { EmptyListError, OutOfBoundError } from "../errors.js";
 import type {
   BuilderFn,
   CronBuilderType,
@@ -127,7 +127,7 @@ function checkExpr<T>(expr: CronExpr<T>) {
   if (expr.type === "list") {
     const { values } = expr;
     if (values.length === 0) {
-      throw new Error("EmptyListError: List expression cannot be empty");
+      throw new EmptyListError("List expression cannot be empty");
     }
 
     const data = values.map((e) => handleSimpleExpression(e));

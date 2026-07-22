@@ -1,24 +1,23 @@
 # Cron
 
-A lightweight cron scheduler for executing periodic tasks built on top of Bun's native cron module. Supports standard cron expressions, convenient aliases, retries, an expression builder and in-process and OS level jobs.
+A lightweight cron scheduler for executing periodic tasks built on top of Bun's native cron module. Supports standard cron expressions, convenient aliases, an expression builder and in-process and OS level jobs.
 
 ## Import
 
 ```typescript
 import {
-  Cron,
+  Cron, 
   CronOS,
-  RetryCronJob,
-  InvalidRetryError,
-  OutOfBoundError,
-  Month,
-  WeekDay, 
   cronJobBuilder,
   any,
+  list,
   number,
   range,
   step,
-  list
+  Month, 
+  WeekDay,
+  EmptyListError, 
+  OutOfBoundError
 } from "semola/cron"
 ```
 
@@ -56,10 +55,6 @@ await osJob.stop();
   - **`name: string`** (required) - Job's name
   - **`schedule: string`** (required) - Cron expression or alias
   - **`handler: () => unknown`** (required) - Function to execute on schedule. Support both sync and async functions
-  - **`jobId: string`** (optional) - A unique id assigned for each cron jobs. If not provided, the class will generate a random uuid
-  - **`retry: RetryCronJob`** (optional) - Instance of `RetryCronJob` class containing retries' handling logic. You can 
-  use the same instance for multiple `Cron` instances. For more information about errors and retries, check 
-  the [Error Handling and Retries](#error-handling-and-retries) section 
 - `CronOS` class:
   - **`name`** (required) - Unique job name
   - **`schedule`** (required) - Cron expression or alias
@@ -128,14 +123,16 @@ job.unref();
 
 **Note:** `ref()`, `unref()` and `getStatus()` methods are available only for in-process jobs.
 
-### Handler errors without retry
+### Errors in the handler
 
-When no `retry` option is passed, an error in `handler` causes the cron callback to reject. Bun treats this like an unhandled promise rejection:
+An error fired inside the `handler` causes the cron callback to reject. Bun treats this like an unhandled promise rejection or as an uncaught exception. From [Bun's documentation](https://bun.com/docs/runtime/cron#error-handling)
 
-- **Without a `process.on("unhandledRejection")` listener** the process exits with code `1`.
-- **With a listener** the process keeps running and Bun reschedules the job for the next tick. `Cron` does not call `stop()`, so `getStatus()` stays `"running"`.
+- Use **`process.on("uncaughtException")`** in case of a synchronous `throw`
+- Use **`process.on("unhandledRejection")`** in case of a rejected `Promise`
 
-Use `retry` or handle errors inside `handler` if you want failures contained without taking down the process.
+Without a listener, the process exits with code `1`. With a listener the process keeps running and Bun reschedules the job for the next tick. 
+
+In case a listener is added, `Cron` does not call `stop()`, so `getStatus()` stays `"running"`.
 
 ## Common Utilities
 
@@ -170,7 +167,7 @@ console.log(job.next(new Date(1990, 1)));
 using job = new Cron({...})
 ```
 
-When using the `using` keyword, the job will auto-stop when out of scope. This works only for in-process jobs.
+When using the `using` keyword, the job will auto-stop when out of scope. This works only for **in-process jobs**.
 
 ## Expression Builder
 
@@ -201,64 +198,39 @@ console.log(expr);
 // Output: * 10 1 */7 1,3
 ```
 
-**Note:** If a field is not defined, it defaults to `'*'` (any).
+**Note:** If a field is not defined, it defaults to `'*'`. This is equivalent to using the `any()` function. 
 
-Invalid builder ranges and steps raise `OutOfBoundError`.
+Note that invalid ranges and steps values will raise an `OutOfBoundError`. In addition, if creating an empty list, it will raise an `EmptyListError`.
 
 ## Error Handling and Retries
 
-Pass an optional `RetryCronJob` instance to retry failed in-process runs up to a fixed number of times.
-
-Bun invokes the cron callback on each schedule tick. Inside that callback, `Cron` runs your `handler`. On failure:
-
-- **With `retry`:** the error is caught, `RetryCronJob` updates the attempt count, applies a backoff delay, and returns without rejecting. The job stays scheduled; Bun invokes the callback again on the next tick. A successful `handler` run resets the attempt count.
-- **Without `retry`:** the error propagates as a rejected cron callback. By default Bun exits the process with code `1` (same as an unhandled rejection). From [Bun's documentation](https://bun.com/docs/runtime/cron#error-handling), if you attach a `process.on("unhandledRejection")` listener, the process survives and Bun reschedules the job; `Cron` still does not call `stop()`.
-
-`RetryCronJob.update()` only tracks attempts and backoff. It does not call `handler` itself; Bun re-invokes the callback on the next scheduled run.
-
-Create one `RetryCronJob` per `Cron` job or share the same instance with multiple `Cron` jobs. When sharing one `RetryCronJob` instance, it internally uses the cron job's id to ensure state isolation.
-
-`maxAttempts` is validated in the `RetryCronJob` constructor. Invalid values raise `InvalidRetryError` at construction time.
+Cron has no built-in retry. Wrap the work with [`createRetry`](./extra.md) from `semola/extra`.
 
 ```typescript
+import { Cron } from "semola/cron";
+import { createRetry } from "semola/extra";
+
+const retriable = createRetry(checkEndpoint, {
+  maxRetries: 2,
+  onError: (ctx) => console.log(`An error: ${ctx.error.message}`),
+  retryOnError: ({ error: err }) => !(err instanceof MyCustomError),
+  onFailedAttempt: async ({ attemptNumber, delay, error, retriesLeft }) => {
+    console.log(
+      `Attempt ${attemptNumber} failed. Retrying in ${delay}ms. ${retriesLeft} retries left.`,
+    );
+
+    await recover();
+  },
+});
+
 const cleanup = new Cron({
   name: "endpoint-check",
   schedule: "@minutely",
   handler: async () => {
-    await checkEndpoint();
+    await retriable();
   },
-  retry: new RetryCronJob({
-    maxAttempts: 2,
-    onError: (ctx) => console.log(`An error: ${ctx.error.message}`),
-    retryOnError: ({ error: err }) => !(err instanceof MyCustomError),
-    onFailedAttempt: async ({ attemptNumber, delay, error, retriesLeft }) => {
-      console.log(
-        `Attempt ${attemptNumber} failed. Retrying in ${delay}ms. ${retriesLeft} retries left.`,
-      );
-
-      await recover();
-    },
-  }),
 });
 ```
-
-- **`maxAttempts`** (required) - Number of retries after the first failure on a given schedule tick sequence; a successful `handler` run resets the count. Must be a finite non-negative integer; invalid values raise `InvalidRetryError` in the constructor.
-- **`onError(ctx: ErrorMetadataType): void | Promise<void>`** (optional) - Function called when an error is raised inside the `handler` function, after all retries have been exhausted, with the final error passed in as the argument. If not provided, the instance re-raises that error. The `ErrorMetadataType` type contains the following properties:
-  - `name: string` - The job's name
-  - `failedAt: number` - When the job failed, expressed in milliseconds
-  - `error: Error` - Which error was fired
-  - `jobId: string` - Job's id
-- **`retryOnError(ctx: RetryOnErrorContextType): boolean`** (optional) - Function called before each attempt. This function return `true` if a job should consume the current retry, otherwise it must return `false`. By default, if not provided, a job will retry on every error raised by the `handler` function. The `RetryOnErrorContextType` type contains the following properties:
-    - `error: Error` - Which error was fired in the `handler` function 
-    - `jobName: string` - Job's name
-    - `jobId: string` - Job's id
-- **`onFailedAttempt(ctx: OnFailedAttemptContextType): void | Promise<void>`** (optional) - Function called on every attempt. The `OnFailedAttemptContextType` type contains the following properties:
-  - `error: Error` - Which error was fired in the `handler` function
-  - `jobName: string` - Job's name
-  - `attemptNumber: number` - The attempt number. Note that they start at 1
-  - `retriesLeft: number` - How many retries remains before stopping the job
-  - `jobId: string` - Job's id
-  - `delay: number` - Backoff delay in milliseconds before the next scheduled run. Calculated with exponential backoff and [Full Jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/). The callback returns after this delay; Bun invokes `handler` again on the next schedule tick. Note that the `delay` is capped to 1 minute.
 
 
 ## Examples
@@ -297,24 +269,34 @@ cleanup.run();
 ### Retry generating a report
 
 ```typescript
+import { Cron } from "semola/cron";
+import { createRetry } from "semola/extra";
+
+const dataPoint: ReportDataType = [{...}]
+
+async function createReport(data: ReportDataType) {
+  const metrics = await fetchDailyMetrics();
+  const report = await generateReport(metrics);
+  await sendEmail("admin@company.com", "Daily Report", report);
+}
+
+const callable = createRetry(async () => await createReport(dataPoint), {
+  maxRetries: 10,
+  onFailedAttempt: async ({ id, error, attemptNumber }) => {
+    console.log(
+      `${id} => Attempt number ${attemptNumber} for error: ${error.name} => ${error.message}`,
+    );
+
+    await retryEmail();
+  },
+});
+
 const reports = new Cron({
   name: "daily-reports",
   schedule: "0 6 * * *",
   handler: async () => {
-    const data = await fetchDailyMetrics();
-    const report = await generateReport(data);
-    await sendEmail("admin@company.com", "Daily Report", report);
+    await callable();
   },
-  retry: new RetryCronJob({
-    maxAttempts: 10,
-    onFailedAttempt: async ({ jobName, error, attemptNumber }) => {
-      console.log(
-        `${jobName} => Attempt number ${attemptNumber} for error: ${error.name} => ${error.message}`,
-      );
-
-      await retryEmail();
-    },
-  }),
 });
 
 reports.run();
