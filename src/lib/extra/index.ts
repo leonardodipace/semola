@@ -1,5 +1,5 @@
 import { mightThrow } from "../errors/index.js";
-import { InvalidRetryError } from "./error.js";
+import { InvalidRetryError } from "./errors.js";
 import type {
   ErrorMetadataType,
   OnFailedAttemptContextType,
@@ -33,6 +33,7 @@ class Retry {
       const delay = this.calculateDelay(this.currentAttempt);
 
       if (this.options.onFailedAttempt) {
+        const onFailedAttempt = this.options.onFailedAttempt;
         const context: OnFailedAttemptContextType = {
           attemptNumber: this.currentAttempt + 1,
           delay,
@@ -41,7 +42,11 @@ class Retry {
           id: this.id,
         };
 
-        await this.options.onFailedAttempt(context);
+        const [callbackError] = await mightThrow(
+          Promise.resolve().then(() => onFailedAttempt(context)),
+        );
+
+        if (callbackError) throw ctx.error;
       }
 
       this.currentAttempt += 1;
@@ -56,13 +61,19 @@ class Retry {
   public async fireOnError(ctx: RetryContext) {
     if (!this.options.onError) return true;
 
+    const onError = this.options.onError;
     const data: ErrorMetadataType = {
       failedAt: Date.now(),
       error: ctx.error,
       id: this.id,
     };
 
-    await this.options.onError(data);
+    const [callbackError] = await mightThrow(
+      Promise.resolve().then(() => onError(data)),
+    );
+
+    if (callbackError) throw ctx.error;
+
     return false;
   }
 
@@ -125,7 +136,7 @@ export function createRetry<RetryValue = void>(
   };
 }
 
-export { InvalidRetryError } from "./error.js";
+export { InvalidRetryError } from "./errors.js";
 export type {
   ErrorMetadataType,
   OnFailedAttemptContextType,

@@ -8,7 +8,7 @@ import {
   test,
 } from "bun:test";
 import { mightThrow, mightThrowSync } from "../errors/index.js";
-import { InvalidRetryError } from "./error.js";
+import { InvalidRetryError } from "./errors.js";
 import { createRetry } from "./index.js";
 import type { OnFailedAttemptContextType } from "./types.js";
 
@@ -261,6 +261,42 @@ describe("Create retry", () => {
       attemptsOnSecondCall[1]?.retriesLeft,
     );
     expect(attemptsOnFirstCall[1]?.id).not.toBe(attemptsOnSecondCall[1]?.id);
+  });
+
+  test("should rethrow original error when onFailedAttempt() throws", async () => {
+    const original = new Error("A generic error");
+    const callable = createRetry(
+      () => {
+        throw original;
+      },
+      {
+        maxRetries: 2,
+        onFailedAttempt: () => {
+          throw new Error("callback failed");
+        },
+      },
+    );
+
+    const [error] = await mightThrow(callable());
+    expect(error).toBe(original);
+  });
+
+  test("should rethrow original error when onError() throws", async () => {
+    const original = new Error("A generic error");
+    const callable = createRetry(
+      () => {
+        throw original;
+      },
+      {
+        maxRetries: 0,
+        onError: () => {
+          throw new Error("callback failed");
+        },
+      },
+    );
+
+    const [error] = await mightThrow(callable());
+    expect(error).toBe(original);
   });
 });
 

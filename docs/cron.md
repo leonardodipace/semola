@@ -204,10 +204,11 @@ Note that invalid ranges and steps values will raise an `OutOfBoundError`. In ad
 
 ## Error Handling and Retries
 
-For more information on how `createRetry()` works, check out [semola/retry](./retry.md) package.
+Cron has no built-in retry. Wrap the work with [`createRetry`](./extra.md) from `semola/extra`.
 
 ```typescript
-import { createRetry } from "semola/retry";
+import { Cron } from "semola/cron";
+import { createRetry } from "semola/extra";
 
 const retriable = createRetry(checkEndpoint, {
   maxRetries: 2,
@@ -268,6 +269,9 @@ cleanup.run();
 ### Retry generating a report
 
 ```typescript
+import { Cron } from "semola/cron";
+import { createRetry } from "semola/extra";
+
 const dataPoint: ReportDataType = [{...}]
 
 async function createReport(data: ReportDataType) {
