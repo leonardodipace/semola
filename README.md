@@ -33,6 +33,7 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 | **⌨️ Prompts**       | Interactive zero-dependency CLI prompts                | `semola/prompts`  |
 | **🖥️ CLI**           | Non-interactive CLI builder with schema validation     | `semola/cli`      |
 | **🗄️ ORM**           | Type-safe data layer with query APIs                   | `semola/orm`      |
+| **💡 Extra**         | A collection of tiny utilities                      | `semola/extra`      |
 
 ---
 
@@ -154,7 +155,7 @@ console.log(user);
 ### Schedule Recurring Tasks
 
 ```typescript
-import { Cron, RetryCronJob } from "semola/cron";
+import { Cron } from "semola/cron";
 
 const cleanup = new Cron({
   name: "daily-cleanup",
@@ -162,18 +163,7 @@ const cleanup = new Cron({
   handler: async () => {
     await deleteOldLogs();
     await archiveInactiveUsers();
-  },
-  retry: new RetryCronJob({
-    maxAttempts: 2,
-    onError: (err) => console.log(`An error: ${err.error.message}`),
-    onFailedAttempt: async ({ attemptNumber, delay, error, retriesLeft }) => {
-      console.log(
-        `Attempt ${attemptNumber} failed. Retrying in ${delay}ms. ${retriesLeft} retries left.`,
-      );
-
-      await recover();
-    },
-  }),
+  }
 });
 
 cleanup.run();
@@ -267,6 +257,39 @@ const logger = new Logger("database", [new ConsoleProvider()]);
 logger.info("Hello!");
 ```
 
+### Retry a function multiple times
+
+```typescript
+import { createRetry } from "semola/extra";
+
+type FriendRequest = {
+  from: string;
+  to: string;
+};
+
+async function sendFriendRequest(req: FriendRequest) {
+  console.log(`sending from ${req.from} to ${req.to}`);
+  await sender(req);
+}
+
+const callable = createRetry(
+  async () => {
+    await sendFriendRequest({ from: "user1@gmail.com", to: "user2@gmail.com" });
+  },
+  {
+    maxRetries: 3,
+    onFailedAttempt: () => {
+      console.log(`Resending the request`);
+    },
+    onError: ({ error }) => {
+      console.error(error.message);
+    },
+  },
+);
+
+await callable();
+```
+
 ---
 
 ## 📦 Installation
@@ -340,6 +363,7 @@ _Higher is better for req/sec, lower is better for latency._
 - [Prompts](./docs/prompts.md) - Interactive CLI prompts
 - [CLI](./docs/cli.md) - Non-interactive CLI builder
 - [ORM](./docs/orm.md) - Type-safe data layer with SQLite support
+- [Extra](./docs/extra.md) - A collection of tiny utilities
 
 ---
 
