@@ -285,7 +285,13 @@ class WorkflowDefinition<TInput, TResult> {
   public async stop() {
     this.running = false;
 
+    const deadline = now() + this.lockTTL;
+
     while (this.activeWorkers > 0) {
+      if (now() >= deadline) {
+        return;
+      }
+
       await new Promise((resolve) =>
         setTimeout(resolve, SHUTDOWN_POLL_INTERVAL),
       );
