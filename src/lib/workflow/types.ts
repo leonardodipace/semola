@@ -102,6 +102,8 @@ export type WorkflowOptions<TInput, TResult> = {
   retryBackoff?: WorkflowRetryBackoff;
   hooks?: WorkflowHooks<TInput, TResult>;
   lockTTL?: number;
+  concurrency?: number;
+  pollInterval?: number;
   serializeInput?: SerializeValue<TInput>;
   deserializeInput?: DeserializeValue<TInput>;
   serializeResult?: SerializeValue<TResult>;
@@ -169,4 +171,5 @@ export type Workflow<TInput, TResult> = {
   resume: (executionId: string) => Promise<WorkflowStartResult>;
   get: (executionId: string) => Promise<WorkflowExecution<TInput, TResult>>;
   cancel: (executionId: string) => Promise<WorkflowCancelResult>;
+  stop: () => Promise<void>;
 };
