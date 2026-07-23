@@ -544,8 +544,10 @@ describe("Ignoring Errors", () => {
       {
         maxRetries: 3,
         ignoreErrors: [UserDefinedError, SpecificError],
-        onFailedAttempt: () => {
+        onFailedAttempt: ({ retriesLeft, attemptNumber }) => {
           called++;
+          expect(attemptNumber).toBe(1);
+          expect(retriesLeft).toBe(2);
         },
       },
     );
