@@ -9,6 +9,7 @@ import {
 class MockRedisClient {
   private hashes = new Map<string, Map<string, string>>();
   private strings = new Map<string, string>();
+  private lists = new Map<string, string[]>();
   private expirations = new Map<string, number>();
   private failCommands = new Set<string>();
   private hsetCallsBeforeFail: number | null = null;
@@ -37,7 +38,9 @@ class MockRedisClient {
     return regex.test(key);
   }
 
-  public setCommandFailure(command: "hset" | "hget" | "set" | "get" | "del") {
+  public setCommandFailure(
+    command: "hset" | "hget" | "set" | "get" | "del" | "lpush" | "rpop",
+  ) {
     this.failCommands.add(command);
   }
 
@@ -270,7 +273,39 @@ class MockRedisClient {
       count++;
     }
 
+    if (this.lists.delete(key)) {
+      count++;
+    }
+
     return count;
+  }
+
+  public async lpush(key: string, value: string) {
+    if (this.failCommands.has("lpush")) {
+      throw new Error("lpush failed");
+    }
+
+    if (!this.lists.has(key)) {
+      this.lists.set(key, []);
+    }
+
+    this.lists.get(key)?.unshift(value);
+
+    return this.lists.get(key)?.length ?? 0;
+  }
+
+  public async rpop(key: string) {
+    if (this.failCommands.has("rpop")) {
+      throw new Error("rpop failed");
+    }
+
+    const list = this.lists.get(key);
+
+    if (!list || list.length === 0) {
+      return null;
+    }
+
+    return list.pop() ?? null;
   }
 
   public async send(command: string, args: string[]) {
@@ -410,6 +445,7 @@ const createWorkflowWithEchoResult = (
   return defineWorkflow<{ id: number }, string>({
     name,
     redis,
+    pollInterval: 1,
     handler: async ({ input, step }) => {
       if (callCounter) {
         callCounter.value++;
@@ -435,6 +471,7 @@ const createTwoStepFailResumeWorkflow = (
     name,
     redis,
     retries: 0,
+    pollInterval: 1,
     handler: async ({ input, step }) => {
       await step("step-1", async () => {
         executedSteps.push(`step-1:${input.id}`);
@@ -458,8 +495,8 @@ const createTwoStepFailResumeWorkflow = (
 };
 
 describe("workflow", () => {
-  beforeEach(() => {
-    clearWorkflowRegistry();
+  beforeEach(async () => {
+    await clearWorkflowRegistry();
   });
 
   test("starts workflow in the background and stores result", async () => {
@@ -1307,6 +1344,7 @@ describe("workflow", () => {
       const workflow = defineWorkflow<{ id: number }, string>({
         name: "step-serializers",
         redis,
+        pollInterval: 1,
         serializeStepOutput: (value) => {
           serializeCalled++;
           return `custom:${JSON.stringify(value)}`;
@@ -1756,6 +1794,7 @@ describe("workflow", () => {
         name: "default-backoff-delay",
         redis,
         retries: 3,
+        pollInterval: 1,
         hooks: {
           onRetry: (context) => {
             retryDelays.push(context.nextRetryDelayMs);
@@ -1775,7 +1814,14 @@ describe("workflow", () => {
         { executionId: "default-backoff-1" },
       );
 
-      await sleep(20);
+      for (let attempt = 0; attempt < 3000; attempt++) {
+        if (retryDelays.length > 0) {
+          break;
+        }
+
+        await sleep(1);
+      }
+
       await workflow.cancel("default-backoff-1");
 
       const execution = await waitForExecution(workflow, "default-backoff-1");
@@ -1947,7 +1993,7 @@ describe("workflow", () => {
       await workflow.start({ id: 1 }, { executionId: "resume-unreg-1" });
       await waitForExecution(workflow, "resume-unreg-1");
 
-      clearWorkflowRegistry();
+      await clearWorkflowRegistry();
 
       await expect(
         resumeWorkflow(redis, "resume-unreg-1"),
@@ -2026,5 +2072,45 @@ describe("workflow", () => {
         message: "Workflow execution owned-by-a not found",
       });
     });
+  });
+
+  test("respects concurrency limits", async () => {
+    const redis = createRedis();
+    let maxConcurrent = 0;
+    let currentConcurrent = 0;
+
+    const workflow = defineWorkflow<{ id: number }, string>({
+      name: "concurrency-cap",
+      redis,
+      concurrency: 2,
+      pollInterval: 1,
+      handler: async ({ input, step }) => {
+        currentConcurrent++;
+        maxConcurrent = Math.max(maxConcurrent, currentConcurrent);
+
+        await step("work", async () => {
+          await sleep(50);
+          return input.id;
+        });
+
+        currentConcurrent--;
+        return "done";
+      },
+    });
+
+    await workflow.start({ id: 1 }, { executionId: "conc-1" });
+    await workflow.start({ id: 2 }, { executionId: "conc-2" });
+    await workflow.start({ id: 3 }, { executionId: "conc-3" });
+    await workflow.start({ id: 4 }, { executionId: "conc-4" });
+
+    await waitForExecution(workflow, "conc-1");
+    await waitForExecution(workflow, "conc-2");
+    await waitForExecution(workflow, "conc-3");
+    await waitForExecution(workflow, "conc-4");
+
+    expect(maxConcurrent).toBeLessThanOrEqual(2);
+    expect(maxConcurrent).toBeGreaterThan(0);
+
+    await workflow.stop();
   });
 });

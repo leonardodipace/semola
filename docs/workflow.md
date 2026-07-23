@@ -35,7 +35,7 @@ const started = await onboardUser.start({
   email: "leo@example.com",
 });
 
-// start() schedules work in the background, so this is initially pending
+// start() enqueues work for background workers, so this is initially pending
 let execution = await onboardUser.get(started.executionId);
 
 while (execution.status === "pending" || execution.status === "running") {
@@ -79,10 +79,11 @@ for (const item of pending) {
 
 ### Instance methods
 
-- `start(input, options?)` persists and schedules a new execution, then returns its ID with `pending` status.
-- `resume(executionId)` schedules a failed or interrupted execution, then returns its ID with `pending` status.
+- `start(input, options?)` persists and enqueues a new execution on a Redis list, then returns its ID with `pending` status.
+- `resume(executionId)` enqueues a failed or interrupted execution, then returns its ID with `pending` status.
 - `get(executionId)` returns execution status, timestamps, and completed steps.
 - `cancel(executionId)` marks execution as cancelled.
+- `stop()` stops worker loops and waits for in-flight executions to finish.
 - `name` - workflow name used for registration and Redis meta.
 
 ### Top-level helpers
@@ -90,13 +91,17 @@ for (const item of pending) {
 - `listWorkflows(redis, options?)` scans all executions. Options: `name`, `status`, `unlockedOnly`.
 - `resumeWorkflow(redis, executionId)` reads the stored workflow name and resumes via the process registry.
 
-`start()`, `resume()`, and `resumeWorkflow()` run handlers in the background. Use `get(executionId)` to read the eventual result or failure.
+`start()`, `resume()`, and `resumeWorkflow()` enqueue work for background workers. Use `get(executionId)` to read the eventual result or failure.
+
+Workers are per process. With multiple replicas, each process runs up to `concurrency` executions; Redis distributes jobs across them. Total parallelism is roughly the sum of each process's concurrency.
 
 ## Options
 
 - **`name`** (required) - Workflow name stored in Redis meta and used for process registration. Must be unique in the process. Execution IDs must be unique across all workflows sharing a Redis database.
 - **`redis`** (required) - Bun Redis client instance
 - **`handler`** (required) - Workflow function with `step` helper
+- **`concurrency`** - Number of parallel workers in this process (default: 1)
+- **`pollInterval`** - Milliseconds to wait when the job list is empty (default: 100)
 - **`retries`** - Step retry attempts before marking the workflow `failed` (default: 3). Set to `0` to fail on the first error with no retries.
 - **`retryBackoff`** - Optional `{ baseDelay, multiplier, maxDelay }` for retry delays (defaults: 1000ms, 2x, 30000ms cap)
 - **`hooks`** - Optional lifecycle callbacks (see [Hooks](#hooks))
@@ -111,7 +116,26 @@ Executions use flat keys keyed only by execution id:
 - `workflow:execution:{id}:steps`
 - `workflow:execution:{id}:lock`
 
-The workflow `name` is stored as a field on the meta hash (not in the key path).
+Pending work for a workflow name uses a Redis list:
+
+- `workflow:{name}:jobs`
+
+The workflow `name` is also stored as a field on the meta hash (not in the execution key path).
+
+### Concurrency example
+
+```typescript
+const onboardUser = defineWorkflow<User>({
+  name: "onboard-user",
+  redis: redisClient,
+  concurrency: 3,
+  handler: async ({ input, step }) => {
+    await step("send-email", async () => {
+      await emailClient.send(input.email, "Welcome!");
+    });
+  },
+});
+```
 
 ## Retries
 

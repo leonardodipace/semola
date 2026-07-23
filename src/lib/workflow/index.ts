@@ -30,6 +30,9 @@ const DEFAULT_RETRIES = 3;
 const DEFAULT_RETRY_BASE_DELAY = 1000;
 const DEFAULT_RETRY_MULTIPLIER = 2;
 const DEFAULT_RETRY_MAX_DELAY = 30000;
+const DEFAULT_CONCURRENCY = 1;
+const DEFAULT_POLL_INTERVAL = 100;
+const SHUTDOWN_POLL_INTERVAL = 10;
 const META_KEY_PREFIX = "workflow:execution:";
 const META_KEY_SUFFIX = ":meta";
 
@@ -181,6 +184,10 @@ class WorkflowDefinition<TInput, TResult> {
   private retryBaseDelay: number;
   private retryMultiplier: number;
   private retryMaxDelay: number;
+  private concurrency: number;
+  private pollInterval: number;
+  private running = true;
+  private activeWorkers = 0;
 
   public constructor(options: WorkflowOptions<TInput, TResult>) {
     this.options = options;
@@ -192,6 +199,8 @@ class WorkflowDefinition<TInput, TResult> {
       options.retryBackoff?.multiplier ?? DEFAULT_RETRY_MULTIPLIER;
     this.retryMaxDelay =
       options.retryBackoff?.maxDelay ?? DEFAULT_RETRY_MAX_DELAY;
+    this.concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
+    this.pollInterval = options.pollInterval ?? DEFAULT_POLL_INTERVAL;
 
     assert.ok(
       Number.isFinite(this.retries) && this.retries >= 0,
@@ -209,6 +218,16 @@ class WorkflowDefinition<TInput, TResult> {
       Number.isFinite(this.retryMaxDelay) && this.retryMaxDelay > 0,
       "Invalid retryBackoff.maxDelay: must be a positive finite number",
     );
+    assert.ok(
+      Number.isFinite(this.concurrency) && this.concurrency > 0,
+      "Invalid concurrency: must be a positive finite number",
+    );
+    assert.ok(
+      Number.isFinite(this.pollInterval) && this.pollInterval >= 0,
+      "Invalid pollInterval: must be a non-negative finite number",
+    );
+
+    this.startWorkers();
   }
 
   private runHook<T>(hook: () => T | Promise<T>) {
@@ -227,7 +246,7 @@ class WorkflowDefinition<TInput, TResult> {
 
     await this.createExecution(executionId, input);
 
-    this.scheduleExecution(executionId, input);
+    await this.enqueueExecution(executionId);
 
     return { executionId, status: "pending" } satisfies WorkflowStartResult;
   }
@@ -249,9 +268,28 @@ class WorkflowDefinition<TInput, TResult> {
       } satisfies WorkflowStartResult;
     }
 
-    this.scheduleExecution(executionId, execution.input);
+    if (execution.status === "failed") {
+      const timestamp = now();
+
+      await this.setMeta(executionId, "status", "pending");
+      await this.setMeta(executionId, "updatedAt", String(timestamp));
+      await this.setMeta(executionId, "error", "");
+      await this.setMeta(executionId, "failedAt", "");
+    }
+
+    await this.enqueueExecution(executionId);
 
     return { executionId, status: "pending" } satisfies WorkflowStartResult;
+  }
+
+  public async stop() {
+    this.running = false;
+
+    while (this.activeWorkers > 0) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, SHUTDOWN_POLL_INTERVAL),
+      );
+    }
   }
 
   public async get(executionId: string) {
@@ -395,16 +433,93 @@ class WorkflowDefinition<TInput, TResult> {
     }
   }
 
-  private scheduleExecution(executionId: string, input: TInput) {
-    queueMicrotask(() => {
-      void this.executeInBackground(executionId, input);
-    });
+  private jobsKey() {
+    return `workflow:${this.options.name}:jobs`;
+  }
+
+  private waitForPollInterval() {
+    return new Promise((resolve) => setTimeout(resolve, this.pollInterval));
+  }
+
+  private async enqueueExecution(executionId: string) {
+    const [enqueueError] = await mightThrow(
+      this.options.redis.lpush(this.jobsKey(), executionId),
+    );
+
+    if (enqueueError) {
+      throw new WorkflowError(`Unable to enqueue execution ${executionId}`);
+    }
+  }
+
+  private startWorkers() {
+    for (let i = 0; i < this.concurrency; i++) {
+      this.processJobs();
+    }
+  }
+
+  private async processJobs() {
+    while (this.running) {
+      const queueKey = this.jobsKey();
+
+      const [popError, executionId] = await mightThrow(
+        this.options.redis.rpop(queueKey),
+      );
+
+      if (popError) {
+        await this.waitForPollInterval();
+        continue;
+      }
+
+      if (!executionId) {
+        await this.waitForPollInterval();
+        continue;
+      }
+
+      if (!this.running) {
+        await mightThrow(this.options.redis.lpush(queueKey, executionId));
+        break;
+      }
+
+      this.activeWorkers++;
+
+      await mightThrow(this.runQueuedExecution(executionId));
+      this.activeWorkers--;
+    }
+  }
+
+  private async runQueuedExecution(executionId: string) {
+    const [loadError, execution] = await mightThrow(this.get(executionId));
+
+    if (loadError) {
+      return;
+    }
+
+    if (!execution) {
+      return;
+    }
+
+    if (execution.status === "completed") {
+      return;
+    }
+
+    if (execution.status === "cancelled") {
+      return;
+    }
+
+    await this.executeInBackground(executionId, execution.input);
   }
 
   private async executeInBackground(executionId: string, input: TInput) {
     const [executionError] = await mightThrow(this.execute(executionId, input));
 
     if (!executionError) {
+      return;
+    }
+
+    if (
+      executionError instanceof LockError &&
+      executionError.message.includes("already running")
+    ) {
       return;
     }
 
@@ -1115,8 +1230,13 @@ class WorkflowDefinition<TInput, TResult> {
   }
 }
 
-export const clearWorkflowRegistry = () => {
+export const clearWorkflowRegistry = async () => {
+  const workflows = [...workflowRegistry.values()];
   workflowRegistry.clear();
+
+  for (const workflow of workflows) {
+    await workflow.stop();
+  }
 };
 
 const readListItem = async (
@@ -1317,6 +1437,7 @@ export const defineWorkflow = <TInput, TResult = void>(
     resume: (executionId) => workflow.resume(executionId),
     get: (executionId) => workflow.get(executionId),
     cancel: (executionId) => workflow.cancel(executionId),
+    stop: () => workflow.stop(),
   };
 
   workflowRegistry.set(options.name, api as Workflow<unknown, unknown>);
