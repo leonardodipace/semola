@@ -32,34 +32,30 @@ class Retry {
     const isRetriableError = this.checkRetryErrors(ctx.error);
     const hasMoreAttempts = this.currentAttempt < maxRetries;
     const canRetry = hasMoreAttempts && onRetryErrorResult && isRetriableError;
+    if (!canRetry) return false;
 
-    if (canRetry) {
-      const delay = this.calculateDelay(this.currentAttempt);
+    const delay = this.calculateDelay(this.currentAttempt);
+    if (this.options.onFailedAttempt) {
+      const onFailedAttempt = this.options.onFailedAttempt;
+      const context: OnFailedAttemptContextType = {
+        attemptNumber: this.currentAttempt + 1,
+        delay,
+        error: ctx.error,
+        retriesLeft: maxRetries - this.currentAttempt,
+        id: this.id,
+      };
 
-      if (this.options.onFailedAttempt) {
-        const onFailedAttempt = this.options.onFailedAttempt;
-        const context: OnFailedAttemptContextType = {
-          attemptNumber: this.currentAttempt + 1,
-          delay,
-          error: ctx.error,
-          retriesLeft: maxRetries - this.currentAttempt,
-          id: this.id,
-        };
+      const [callbackError] = await mightThrow(
+        Promise.resolve().then(() => onFailedAttempt(context)),
+      );
 
-        const [callbackError] = await mightThrow(
-          Promise.resolve().then(() => onFailedAttempt(context)),
-        );
-
-        if (callbackError) throw ctx.error;
-      }
-
-      this.currentAttempt += 1;
-      await this.runDelay(delay);
-
-      return true;
+      if (callbackError) throw ctx.error;
     }
 
-    return false;
+    this.currentAttempt += 1;
+    await this.runDelay(delay);
+
+    return true;
   }
 
   public async fireOnError(ctx: RetryContext) {
