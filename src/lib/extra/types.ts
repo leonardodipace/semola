@@ -24,7 +24,8 @@ export type ErrorClassType<E extends Error = Error> = new (
 export type RetryOptions = {
   maxRetries: number;
   id?: string;
-  ignoreOnErrors?: ErrorClassType[];
+  ignoreErrors?: ErrorClassType[];
+  retryErrors?: ErrorClassType[];
   onError?: (error: ErrorMetadataType) => void | Promise<void>;
   onFailedAttempt?: (ctx: OnFailedAttemptContextType) => void | Promise<void>;
   retryOnError?: (ctx: RetryOnErrorContextType) => boolean;

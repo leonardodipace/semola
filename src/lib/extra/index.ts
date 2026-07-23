@@ -1,7 +1,6 @@
 import { mightThrow } from "../errors/index.js";
 import { InvalidRetryError } from "./errors.js";
 import type {
-  ErrorClassType,
   ErrorMetadataType,
   OnFailedAttemptContextType,
   RetryContext,
@@ -25,13 +24,14 @@ class Retry {
   }
 
   public async update(ctx: RetryContext) {
-    const shouldIgnore = this.checkIgnoreOnErrors(ctx.error);
+    const shouldIgnore = this.checkIgnoreErrors(ctx.error);
     if (shouldIgnore) return false;
 
     const { maxRetries } = this.options;
     const onRetryErrorResult = this.runOnRetryError(ctx.error, this.id);
+    const isRetriableError = this.checkRetryErrors(ctx.error);
     const hasMoreAttempts = this.currentAttempt < maxRetries;
-    const canRetry = hasMoreAttempts && onRetryErrorResult;
+    const canRetry = hasMoreAttempts && onRetryErrorResult && isRetriableError;
 
     if (canRetry) {
       const delay = this.calculateDelay(this.currentAttempt);
@@ -81,11 +81,18 @@ class Retry {
     return false;
   }
 
-  private checkIgnoreOnErrors(error: Error) {
-    const { ignoreOnErrors } = this.options;
-    if (!ignoreOnErrors) return false;
+  private checkIgnoreErrors(error: Error) {
+    const { ignoreErrors } = this.options;
+    if (!ignoreErrors) return false;
 
-    return ignoreOnErrors.some((e) => error.constructor === e);
+    return ignoreErrors.some((e) => error.constructor === e);
+  }
+
+  private checkRetryErrors(error: Error) {
+    const { retryErrors } = this.options;
+    if (!retryErrors) return true;
+
+    return retryErrors.some((e) => error.constructor === e);
   }
 
   private runOnRetryError(error: Error, id: string) {

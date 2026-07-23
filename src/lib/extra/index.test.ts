@@ -400,7 +400,7 @@ describe("Ignoring Errors", () => {
       },
       {
         maxRetries: 3,
-        ignoreOnErrors: [Error],
+        ignoreErrors: [Error],
       },
     );
 
@@ -430,7 +430,7 @@ describe("Ignoring Errors", () => {
       },
       {
         maxRetries: 3,
-        ignoreOnErrors: [Error, TypeError, RangeError],
+        ignoreErrors: [Error, TypeError, RangeError],
       },
     );
 
@@ -465,7 +465,7 @@ describe("Ignoring Errors", () => {
       },
       {
         maxRetries: 3,
-        ignoreOnErrors: [UserDefinedError, SpecificError],
+        ignoreErrors: [UserDefinedError, SpecificError],
       },
     );
 
@@ -501,7 +501,7 @@ describe("Ignoring Errors", () => {
       },
       {
         maxRetries: 3,
-        ignoreOnErrors: [Error, UserDefinedError, TypeError],
+        ignoreErrors: [Error, UserDefinedError, TypeError],
       },
     );
 
@@ -543,7 +543,7 @@ describe("Ignoring Errors", () => {
       },
       {
         maxRetries: 3,
-        ignoreOnErrors: [UserDefinedError, SpecificError],
+        ignoreErrors: [UserDefinedError, SpecificError],
         onFailedAttempt: () => {
           called++;
         },
