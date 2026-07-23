@@ -10,7 +10,7 @@ import {
 import { mightThrow, mightThrowSync } from "../errors/index.js";
 import { InvalidRetryError } from "./errors.js";
 import { createRetry } from "./index.js";
-import type { OnFailedAttemptContextType } from "./types.js";
+import type { ErrorClassType, OnFailedAttemptContextType } from "./types.js";
 
 class UserDefinedError extends Error {}
 class SpecificError extends UserDefinedError {}
@@ -562,5 +562,246 @@ describe("Ignoring Errors", () => {
 
     const _ = await mightThrow(callable());
     expect(called).toBe(1);
+  });
+});
+
+describe("Retriable Errors", () => {
+  test("should retry on every errors", async () => {
+    const errorsTypes: ErrorClassType<Error>[] = [Error, RangeError, TypeError];
+    const messages = ["generic error", "range error", "type error"];
+    let state = 0;
+    let idx = 0;
+
+    const callable = createRetry(
+      () => {
+        if (state === 0) {
+          state++;
+          throw new Error(messages[0]);
+        }
+
+        if (state === 1) {
+          state++;
+          throw new RangeError(messages[1]);
+        }
+
+        if (state === 2) {
+          state = 0;
+          throw new TypeError(messages[2]);
+        }
+      },
+      {
+        maxRetries: 3,
+        onFailedAttempt: ({ error }) => {
+          const errType = errorsTypes[idx];
+          const message = messages[idx];
+          if (!errType) return;
+          if (!message) return;
+
+          expect(error.constructor).toBe(errType);
+          expect(error?.message).toBe(message);
+          idx++;
+        },
+      },
+    );
+
+    await mightThrow(callable());
+    expect(idx).toBe(3);
+  });
+
+  test("should retry only over a strict subset of errors", async () => {
+    const errorsTypes: ErrorClassType<Error>[] = [RangeError, TypeError];
+    const messages = ["range error", "type error"];
+    let state = 0;
+    let idx = 0;
+
+    const callable = createRetry(
+      () => {
+        if (state === 0) {
+          state++;
+          throw new RangeError(messages[0]);
+        }
+
+        if (state === 1) {
+          state++;
+          throw new TypeError(messages[1]);
+        }
+
+        if (state === 2) {
+          state = 0;
+          throw new Error("do not retry");
+        }
+      },
+      {
+        maxRetries: 3,
+        retryErrors: [RangeError, TypeError],
+        onFailedAttempt: ({ error }) => {
+          const errType = errorsTypes[idx];
+          const message = messages[idx];
+          if (!errType) return;
+          if (!message) return;
+
+          expect(error.constructor).toBe(errType);
+          expect(error?.message).toBe(message);
+          idx++;
+        },
+      },
+    );
+
+    const [error] = await mightThrow(callable());
+    expect(error).not.toBeNull();
+    expect(error?.constructor).toBe(Error);
+    expect(error?.message).toBe("do not retry");
+    expect(idx).toBe(2);
+  });
+
+  test("should retry only over user provided errors", async () => {
+    const errorsTypes: ErrorClassType<Error>[] = [
+      UserDefinedError,
+      SpecificError,
+    ];
+    const messages = ["user error", "specific error"];
+    let state = 0;
+    let idx = 0;
+
+    const callable = createRetry(
+      () => {
+        if (state === 0) {
+          state++;
+          throw new UserDefinedError(messages[0]);
+        }
+
+        if (state === 1) {
+          state++;
+          throw new SpecificError(messages[1]);
+        }
+
+        if (state === 2) {
+          state = 0;
+          throw new TypeError("do not retry");
+        }
+      },
+      {
+        maxRetries: 3,
+        retryErrors: [UserDefinedError, SpecificError],
+        onFailedAttempt: ({ error }) => {
+          const errType = errorsTypes[idx];
+          const message = messages[idx];
+          if (!errType) return;
+          if (!message) return;
+
+          expect(error.constructor).toBe(errType);
+          expect(error?.message).toBe(message);
+          idx++;
+        },
+      },
+    );
+
+    const [error] = await mightThrow(callable());
+    expect(error).not.toBeNull();
+    expect(error?.constructor).toBe(TypeError);
+    expect(error?.message).toBe("do not retry");
+    expect(idx).toBe(2);
+  });
+
+  test("should ignore a specific error and retry over other errors", async () => {
+    const errorsTypes: ErrorClassType<Error>[] = [
+      UserDefinedError,
+      SpecificError,
+    ];
+
+    const messages = ["user error", "specific error"];
+    let state = 0;
+    let idx = 0;
+
+    const callable = createRetry(
+      () => {
+        if (state === 0) {
+          state++;
+          throw new UserDefinedError(messages[0]);
+        }
+
+        if (state === 1) {
+          state++;
+          throw new SpecificError(messages[1]);
+        }
+
+        if (state === 2) {
+          state = 0;
+          throw new TypeError("ignore TypeError");
+        }
+      },
+      {
+        maxRetries: 3,
+        retryErrors: [UserDefinedError, SpecificError],
+        ignoreErrors: [TypeError],
+        onFailedAttempt: ({ error }) => {
+          const errType = errorsTypes[idx];
+          const message = messages[idx];
+          if (!errType) return;
+          if (!message) return;
+
+          expect(error.constructor).toBe(errType);
+          expect(error?.message).toBe(message);
+          idx++;
+        },
+      },
+    );
+
+    const [error] = await mightThrow(callable());
+    expect(error).not.toBeNull();
+    expect(error?.constructor).toBe(TypeError);
+    expect(error?.message).toBe("ignore TypeError");
+    expect(idx).toBe(2);
+  });
+
+  test("should ignore a specific error and stop the execution of the function", async () => {
+    const errorsTypes: ErrorClassType<Error>[] = [
+      UserDefinedError,
+      SpecificError,
+    ];
+
+    const messages = ["user error", "specific error"];
+    let state = 0;
+    let idx = 0;
+
+    const callable = createRetry(
+      () => {
+        if (state === 0) {
+          state++;
+          throw new UserDefinedError(messages[0]);
+        }
+
+        if (state === 1) {
+          state++;
+          throw new TypeError("ignore TypeError");
+        }
+
+        if (state === 2) {
+          state = 0;
+          throw new SpecificError(messages[1]);
+        }
+      },
+      {
+        maxRetries: 3,
+        retryErrors: [UserDefinedError, SpecificError],
+        ignoreErrors: [TypeError],
+        onFailedAttempt: ({ error }) => {
+          const errType = errorsTypes[idx];
+          const message = messages[idx];
+          if (!errType) return;
+          if (!message) return;
+
+          expect(error.constructor).toBe(errType);
+          expect(error?.message).toBe(message);
+          idx++;
+        },
+      },
+    );
+
+    const [error] = await mightThrow(callable());
+    expect(error).not.toBeNull();
+    expect(error?.constructor).toBe(TypeError);
+    expect(error?.message).toBe("ignore TypeError");
+    expect(idx).toBe(1);
   });
 });
