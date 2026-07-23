@@ -448,6 +448,10 @@ class WorkflowDefinition<TInput, TResult> {
   }
 
   private async enqueueExecution(executionId: string) {
+    if (!this.running) {
+      throw new StateError(`Workflow ${this.options.name} has been stopped`);
+    }
+
     const [enqueueError] = await mightThrow(
       this.options.redis.lpush(this.jobsKey(), executionId),
     );
