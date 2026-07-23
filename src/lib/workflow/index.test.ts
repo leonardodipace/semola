@@ -2098,19 +2098,21 @@ describe("workflow", () => {
       },
     });
 
-    await workflow.start({ id: 1 }, { executionId: "conc-1" });
-    await workflow.start({ id: 2 }, { executionId: "conc-2" });
-    await workflow.start({ id: 3 }, { executionId: "conc-3" });
-    await workflow.start({ id: 4 }, { executionId: "conc-4" });
+    try {
+      await workflow.start({ id: 1 }, { executionId: "conc-1" });
+      await workflow.start({ id: 2 }, { executionId: "conc-2" });
+      await workflow.start({ id: 3 }, { executionId: "conc-3" });
+      await workflow.start({ id: 4 }, { executionId: "conc-4" });
 
-    await waitForExecution(workflow, "conc-1");
-    await waitForExecution(workflow, "conc-2");
-    await waitForExecution(workflow, "conc-3");
-    await waitForExecution(workflow, "conc-4");
+      await waitForExecution(workflow, "conc-1");
+      await waitForExecution(workflow, "conc-2");
+      await waitForExecution(workflow, "conc-3");
+      await waitForExecution(workflow, "conc-4");
 
-    expect(maxConcurrent).toBeLessThanOrEqual(2);
-    expect(maxConcurrent).toBeGreaterThan(0);
-
-    await workflow.stop();
+      expect(maxConcurrent).toBeLessThanOrEqual(2);
+      expect(maxConcurrent).toBeGreaterThan(1);
+    } finally {
+      await workflow.stop();
+    }
   });
 });
