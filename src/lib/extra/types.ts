@@ -17,9 +17,14 @@ export type RetryOnErrorContextType = {
   id: string;
 };
 
+export type ErrorClassType<E extends Error = Error> = new (
+  ...args: never[]
+) => E;
+
 export type RetryOptions = {
   maxRetries: number;
   id?: string;
+  ignoreOnErrors?: ErrorClassType[];
   onError?: (error: ErrorMetadataType) => void | Promise<void>;
   onFailedAttempt?: (ctx: OnFailedAttemptContextType) => void | Promise<void>;
   retryOnError?: (ctx: RetryOnErrorContextType) => boolean;

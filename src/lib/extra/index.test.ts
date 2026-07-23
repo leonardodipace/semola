@@ -13,6 +13,7 @@ import { createRetry } from "./index.js";
 import type { OnFailedAttemptContextType } from "./types.js";
 
 class UserDefinedError extends Error {}
+class SpecificError extends UserDefinedError {}
 
 const instantTimeout = ((fn: () => void) => {
   fn();
@@ -20,21 +21,21 @@ const instantTimeout = ((fn: () => void) => {
   return 0;
 }) as unknown as typeof setTimeout;
 
+let timeoutSpy: ReturnType<typeof spyOn<typeof globalThis, "setTimeout">>;
+
+beforeEach(() => {
+  setSystemTime(new Date("2020-01-10T00:00:00.000Z"));
+  timeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(
+    instantTimeout,
+  );
+});
+
+afterEach(() => {
+  setSystemTime();
+  timeoutSpy.mockRestore();
+});
+
 describe("Create retry", () => {
-  let timeoutSpy: ReturnType<typeof spyOn<typeof globalThis, "setTimeout">>;
-
-  beforeEach(() => {
-    setSystemTime(new Date("2020-01-10T00:00:00.000Z"));
-    timeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(
-      instantTimeout,
-    );
-  });
-
-  afterEach(() => {
-    setSystemTime();
-    timeoutSpy.mockRestore();
-  });
-
   test("should create a callable object", () => {
     const callable = createRetry(() => {}, { maxRetries: 1 });
     expect(callable).toBeDefined();
@@ -388,5 +389,178 @@ describe("Validate attempts", () => {
 
     expect(secondInfinityRetry).toBeDefined();
     expect(secondInfinityRetry).toBeInstanceOf(InvalidRetryError);
+  });
+});
+
+describe("Ignoring Errors", () => {
+  test("should ignore base error classe", async () => {
+    const callable = createRetry(
+      () => {
+        throw new Error("Ignored generic error");
+      },
+      {
+        maxRetries: 3,
+        ignoreOnErrors: [Error],
+      },
+    );
+
+    const [error] = await mightThrow(callable());
+    expect(error).not.toBeNull();
+    expect(error).toBeInstanceOf(Error);
+    expect(error?.message).toBe("Ignored generic error");
+  });
+
+  test("should ignore base error classes and subclasses", async () => {
+    let state = 0;
+    const callable = createRetry(
+      () => {
+        if (state === 0) {
+          state++;
+          throw new Error("Ignored generic error");
+        }
+
+        if (state === 1) {
+          state++;
+          throw new RangeError("Ignored range error");
+        }
+
+        if (state === 2) {
+          throw new TypeError("Ignored type error");
+        }
+      },
+      {
+        maxRetries: 3,
+        ignoreOnErrors: [Error, TypeError, RangeError],
+      },
+    );
+
+    const [genericError] = await mightThrow(callable());
+    expect(genericError).not.toBeNull();
+    expect(genericError).toBeInstanceOf(Error);
+    expect(genericError?.message).toBe("Ignored generic error");
+
+    const [rangeError] = await mightThrow(callable());
+    expect(rangeError).not.toBeNull();
+    expect(rangeError).toBeInstanceOf(RangeError);
+    expect(rangeError?.message).toBe("Ignored range error");
+
+    const [typeError] = await mightThrow(callable());
+    expect(typeError).not.toBeNull();
+    expect(typeError).toBeInstanceOf(TypeError);
+    expect(typeError?.message).toBe("Ignored type error");
+  });
+
+  test("should ignore both custom classes and subclasses errors", async () => {
+    let state = 0;
+    const callable = createRetry(
+      () => {
+        if (state === 0) {
+          state++;
+          throw new UserDefinedError("base user defined error class");
+        }
+
+        if (state === 1) {
+          throw new SpecificError("child user defined error class");
+        }
+      },
+      {
+        maxRetries: 3,
+        ignoreOnErrors: [UserDefinedError, SpecificError],
+      },
+    );
+
+    const [userDefinedError] = await mightThrow(callable());
+    expect(userDefinedError).not.toBeNull();
+    expect(userDefinedError).toBeInstanceOf(UserDefinedError);
+    expect(userDefinedError?.message).toBe("base user defined error class");
+
+    const [specificError] = await mightThrow(callable());
+    expect(specificError).not.toBeNull();
+    expect(specificError).toBeInstanceOf(SpecificError);
+    expect(specificError?.message).toBe("child user defined error class");
+  });
+
+  test("should ignore both custom and base errors", async () => {
+    let state = 0;
+    const callable = createRetry(
+      () => {
+        if (state === 0) {
+          state++;
+          throw new UserDefinedError("base user defined error class");
+        }
+
+        if (state === 1) {
+          state++;
+          throw new TypeError("type error");
+        }
+
+        if (state === 2) {
+          state++;
+          throw new Error("generic error");
+        }
+      },
+      {
+        maxRetries: 3,
+        ignoreOnErrors: [Error, UserDefinedError, TypeError],
+      },
+    );
+
+    const [userDefinedError] = await mightThrow(callable());
+    expect(userDefinedError).not.toBeNull();
+    expect(userDefinedError).toBeInstanceOf(UserDefinedError);
+    expect(userDefinedError?.message).toBe("base user defined error class");
+
+    const [typeError] = await mightThrow(callable());
+    expect(typeError).not.toBeNull();
+    expect(typeError).toBeInstanceOf(TypeError);
+    expect(typeError?.message).toBe("type error");
+
+    const [genericError] = await mightThrow(callable());
+    expect(genericError).not.toBeNull();
+    expect(genericError).toBeInstanceOf(Error);
+    expect(genericError?.message).toBe("generic error");
+  });
+
+  test("should retry on a specific error", async () => {
+    let state = 0;
+    let called = 0;
+    const callable = createRetry(
+      () => {
+        if (state === 0) {
+          state++;
+          throw new UserDefinedError("base user defined error class");
+        }
+
+        if (state === 1) {
+          state++;
+          throw new SpecificError("child user defined error class");
+        }
+
+        if (state === 2) {
+          state = 0;
+          throw new TypeError("invalid type");
+        }
+      },
+      {
+        maxRetries: 3,
+        ignoreOnErrors: [UserDefinedError, SpecificError],
+        onFailedAttempt: () => {
+          called++;
+        },
+      },
+    );
+
+    const [userDefinedError] = await mightThrow(callable());
+    expect(userDefinedError).not.toBeNull();
+    expect(userDefinedError).toBeInstanceOf(UserDefinedError);
+    expect(userDefinedError?.message).toBe("base user defined error class");
+
+    const [specificError] = await mightThrow(callable());
+    expect(specificError).not.toBeNull();
+    expect(specificError).toBeInstanceOf(SpecificError);
+    expect(specificError?.message).toBe("child user defined error class");
+
+    const _ = await mightThrow(callable());
+    expect(called).toBe(1);
   });
 });
