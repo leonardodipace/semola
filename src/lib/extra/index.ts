@@ -119,10 +119,7 @@ function checkAttempts(options: RetryOptions) {
   return isNaturalNumber && isValidInteger && !isNegativeZero;
 }
 
-export function createRetry<RetryValue = void>(
-  fn: RetryFnType<RetryValue>,
-  options: RetryOptions,
-) {
+export function createRetry(options: RetryOptions) {
   if (!checkAttempts(options)) {
     throw new InvalidRetryError(
       "Expected 'maxRetries' to be a finite non-negative integer",
@@ -131,6 +128,7 @@ export function createRetry<RetryValue = void>(
 
   return async () => {
     const retry = new Retry(options);
+    const { input: fn } = options;
 
     for (;;) {
       const [fnError, result] = await mightThrow(
