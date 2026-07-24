@@ -21,12 +21,8 @@ export type ErrorClassType<E extends Error = Error> = new (
   ...args: never[]
 ) => E;
 
-export type RetryFnType<RetryValue = void> = () =>
-  | RetryValue
-  | Promise<RetryValue>;
-
-export type RetryOptions = {
-  input: RetryFnType;
+export type RetryOptions<RetryValue> = {
+  input: () => RetryValue | Promise<RetryValue>;
   maxRetries: number;
   id?: string;
   ignoreErrors?: ErrorClassType[];

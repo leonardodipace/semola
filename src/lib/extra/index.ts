@@ -4,7 +4,6 @@ import type {
   ErrorMetadataType,
   OnFailedAttemptContextType,
   RetryContext,
-  RetryFnType,
   RetryOptions,
 } from "./types.js";
 
@@ -12,12 +11,12 @@ const BASE_BACKOFF_DELAY = 1000;
 const MAX_BACKOFF_DELAY = 1000 * 60; // 1 minute
 const BACKOFF_MULTIPLIER = 2;
 
-class Retry {
-  private options: RetryOptions;
+class Retry<RetryValue> {
+  private options: RetryOptions<RetryValue>;
   private currentAttempt: number;
   private id: string;
 
-  public constructor(options: RetryOptions) {
+  public constructor(options: RetryOptions<RetryValue>) {
     this.options = options;
     this.currentAttempt = 0;
     this.id = this.options.id ?? crypto.randomUUID();
@@ -109,7 +108,7 @@ class Retry {
   }
 }
 
-function checkAttempts(options: RetryOptions) {
+function checkAttempts<RetryValue>(options: RetryOptions<RetryValue>) {
   const { maxRetries } = options;
 
   const isValidInteger = Number.isSafeInteger(maxRetries);
@@ -119,15 +118,17 @@ function checkAttempts(options: RetryOptions) {
   return isNaturalNumber && isValidInteger && !isNegativeZero;
 }
 
-export function createRetry(options: RetryOptions) {
-  if (!checkAttempts(options)) {
+export function createRetry<RetryValue = void>(
+  options: RetryOptions<RetryValue>,
+) {
+  if (!checkAttempts<RetryValue>(options)) {
     throw new InvalidRetryError(
       "Expected 'maxRetries' to be a finite non-negative integer",
     );
   }
 
   return async () => {
-    const retry = new Retry(options);
+    const retry = new Retry<RetryValue>(options);
     const { input: fn } = options;
 
     for (;;) {
@@ -153,7 +154,6 @@ export type {
   ErrorMetadataType,
   OnFailedAttemptContextType,
   RetryContext,
-  RetryFnType,
   RetryOnErrorContextType,
   RetryOptions,
 } from "./types.js";
