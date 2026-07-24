@@ -11,12 +11,12 @@ const BASE_BACKOFF_DELAY = 1000;
 const MAX_BACKOFF_DELAY = 1000 * 60; // 1 minute
 const BACKOFF_MULTIPLIER = 2;
 
-class Retry<RetryValue> {
-  private options: RetryOptions<RetryValue>;
+class Retry<TRetryResult> {
+  private options: RetryOptions<TRetryResult>;
   private currentAttempt: number;
   private id: string;
 
-  public constructor(options: RetryOptions<RetryValue>) {
+  public constructor(options: RetryOptions<TRetryResult>) {
     this.options = options;
     this.currentAttempt = 0;
     this.id = this.options.id ?? crypto.randomUUID();
@@ -108,7 +108,7 @@ class Retry<RetryValue> {
   }
 }
 
-function checkAttempts<RetryValue>(options: RetryOptions<RetryValue>) {
+function checkAttempts<TRetryResult>(options: RetryOptions<TRetryResult>) {
   const { maxRetries } = options;
 
   const isValidInteger = Number.isSafeInteger(maxRetries);
@@ -118,17 +118,17 @@ function checkAttempts<RetryValue>(options: RetryOptions<RetryValue>) {
   return isNaturalNumber && isValidInteger && !isNegativeZero;
 }
 
-export function createRetry<RetryValue = void>(
-  options: RetryOptions<RetryValue>,
+export function createRetry<TRetryResult = void>(
+  options: RetryOptions<TRetryResult>,
 ) {
-  if (!checkAttempts<RetryValue>(options)) {
+  if (!checkAttempts<TRetryResult>(options)) {
     throw new InvalidRetryError(
       "Expected 'maxRetries' to be a finite non-negative integer",
     );
   }
 
   return async () => {
-    const retry = new Retry<RetryValue>(options);
+    const retry = new Retry<TRetryResult>(options);
     const { input: fn } = options;
 
     for (;;) {
