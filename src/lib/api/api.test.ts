@@ -702,3 +702,141 @@ describe("Api Core", () => {
     expect(await second.json()).toEqual({ name: "Bob", age: 40 });
   });
 });
+
+describe("Api SSE", () => {
+  test("should stream SSE events with text/event-stream content type", async () => {
+    const api = new Api();
+
+    api.defineSSERoute({
+      path: "/events",
+      handler: async function* () {
+        yield { event: "tick", data: { n: 1 } };
+        yield { data: { n: 2 }, id: "2" };
+        yield { data: "done", retry: 1000 };
+      },
+    });
+
+    const res = await api.fetch(new Request("http://localhost/events"));
+    const body = await res.text();
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("text/event-stream");
+    expect(res.headers.get("Cache-Control")).toBe("no-cache");
+    expect(body).toBe(
+      'event: tick\ndata: {"n":1}\n\nid: 2\ndata: {"n":2}\n\nretry: 1000\ndata: done\n\n',
+    );
+  });
+
+  test("should validate request schema on SSE routes", async () => {
+    const api = new Api();
+
+    api.defineSSERoute({
+      path: "/rooms/:roomId/events",
+      request: {
+        params: z.object({ roomId: z.string() }),
+        query: z.object({ since: z.string() }),
+      },
+      handler: async function* (c) {
+        yield {
+          event: "joined",
+          data: { roomId: c.req.params.roomId, since: c.req.query.since },
+        };
+      },
+    });
+
+    const bad = await api.fetch(
+      new Request("http://localhost/rooms/abc/events"),
+    );
+    expect(bad.status).toBe(400);
+
+    const good = await api.fetch(
+      new Request("http://localhost/rooms/abc/events?since=0"),
+    );
+    expect(good.status).toBe(200);
+    expect(await good.text()).toBe(
+      'event: joined\ndata: {"roomId":"abc","since":"0"}\n\n',
+    );
+  });
+
+  test("should expose middleware extensions via c.get on SSE routes", async () => {
+    const auth = new Middleware({
+      handler: () => ({ userId: "user-1" }),
+    });
+
+    const api = new Api({ middlewares: [auth] as const });
+
+    api.defineSSERoute({
+      path: "/notifications",
+      handler: async function* (c) {
+        yield { event: "connected", data: { userId: c.get("userId") } };
+      },
+    });
+
+    const res = await api.fetch(new Request("http://localhost/notifications"));
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe(
+      'event: connected\ndata: {"userId":"user-1"}\n\n',
+    );
+  });
+
+  test("should short-circuit SSE when middleware returns a Response", async () => {
+    let handlerCalled = false;
+
+    const guard = new Middleware({
+      handler: (c) => c.json(401, { message: "Unauthorized" }),
+    });
+
+    const api = new Api();
+
+    api.defineSSERoute({
+      path: "/secret",
+      middlewares: [guard],
+      handler: async function* () {
+        handlerCalled = true;
+        yield { data: "should-not-send" };
+      },
+    });
+
+    const res = await api.fetch(new Request("http://localhost/secret"));
+
+    expect(res.status).toBe(401);
+    expect(res.headers.get("Content-Type")).not.toBe("text/event-stream");
+    expect(await res.json()).toEqual({ message: "Unauthorized" });
+    expect(handlerCalled).toBe(false);
+  });
+
+  test("should call gen.return when the client disconnects", async () => {
+    let cleanedUp = false;
+    const api = new Api();
+
+    api.defineSSERoute({
+      path: "/live",
+      handler: async function* () {
+        try {
+          yield { data: "start" };
+          yield { data: "never" };
+        } finally {
+          cleanedUp = true;
+        }
+      },
+    });
+
+    api.serve(0, (s) => {
+      server = s;
+    });
+
+    const res = await fetch(`http://localhost:${server?.port}/live`);
+    const reader = res.body?.getReader();
+
+    expect(reader).toBeDefined();
+
+    const first = await reader?.read();
+    expect(first?.done).toBe(false);
+
+    await reader?.cancel();
+    await Bun.sleep(20);
+
+    expect(cleanedUp).toBe(true);
+  });
+});
