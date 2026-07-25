@@ -808,6 +808,10 @@ describe("Api SSE", () => {
 
   test("should call gen.return when the client disconnects", async () => {
     let cleanedUp = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const api = new Api();
 
     api.defineSSERoute({
@@ -815,6 +819,7 @@ describe("Api SSE", () => {
       handler: async function* () {
         try {
           yield { data: "start" };
+          await gate;
           yield { data: "never" };
         } finally {
           cleanedUp = true;
@@ -835,6 +840,7 @@ describe("Api SSE", () => {
     expect(first?.done).toBe(false);
 
     await reader?.cancel();
+    release();
     await Bun.sleep(20);
 
     expect(cleanedUp).toBe(true);

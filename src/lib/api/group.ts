@@ -45,8 +45,11 @@ const formatSSEEvent = (event: SSEEvent) => {
   if (event.id !== undefined) message += `id: ${event.id}\n`;
   if (event.retry !== undefined) message += `retry: ${event.retry}\n`;
 
-  const data =
-    typeof event.data === "string" ? event.data : JSON.stringify(event.data);
+  let data = JSON.stringify(event.data) ?? "";
+
+  if (typeof event.data === "string") {
+    data = event.data;
+  }
 
   for (const line of data.split("\n")) {
     message += `data: ${line}\n`;
