@@ -850,6 +850,29 @@ describe("Retry on results", () => {
     expect(onFailedCalles).toBe(4);
   });
 
+  test("should not retry when 'retryErrors' does not contains an 'InvalidResultError' error's type", async () => {
+    let onFailedCalles = 0;
+
+    const callable = createRetry({
+      input: () => {
+        return new Response(undefined, { status: 404 });
+      },
+      retryOnResult: (res) => res.status === 404,
+      onFailedAttempt: () => {
+        onFailedCalles++;
+      },
+      retryErrors: [RangeError],
+      maxRetries: 4,
+    });
+
+    const [error, result] = await mightThrow(callable());
+    expect(result).toBeNull();
+    expect(error).not.toBeNull();
+    expect(error).toBeInstanceOf(InvalidResultError);
+    expect((error as InvalidResultError<Response>).data.status).toBe(404);
+    expect(onFailedCalles).toBe(0);
+  });
+
   test("'retryOnError()' should not influence 'retryOnResult()' execution when the former return true", async () => {
     let onFailedCalles = 0;
 
