@@ -45,7 +45,7 @@ Modules live in `src/lib/<name>/` and export via `semola/<name>`. Discover the c
 ## Tech Stack
 
 - **Runtime**: Bun
-- **Language**: TypeScript 5+ (strict mode)
+- **Language**: TypeScript 7 (strict mode)
 - **Linting/Formatting**: Biomejs
 - **Testing**: Bun test
 - **Schema**: Standard Schema (framework-agnostic, works with Zod, Valibot, etc.)
