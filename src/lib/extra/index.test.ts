@@ -827,7 +827,7 @@ describe("Retry on results", () => {
     expect(onFailedCalles).toBe(0);
   });
 
-  test("'retryErrors' should not influence 'retryOnResult()' execution", async () => {
+  test("should retry when 'retryErrors' contains an 'InvalidResultError' error's type", async () => {
     let onFailedCalles = 0;
 
     const callable = createRetry({
@@ -838,7 +838,7 @@ describe("Retry on results", () => {
       onFailedAttempt: () => {
         onFailedCalles++;
       },
-      retryErrors: [InvalidResultError],
+      retryErrors: [InvalidResultError, RangeError],
       maxRetries: 4,
     });
 
