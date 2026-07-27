@@ -8,7 +8,7 @@ import {
   test,
 } from "bun:test";
 import { mightThrow, mightThrowSync } from "../errors/index.js";
-import { InvalidRetryError } from "./errors.js";
+import { InvalidResultError, InvalidRetryError } from "./errors.js";
 import { createRetry } from "./index.js";
 import type { ErrorClassType, OnFailedAttemptContextType } from "./types.js";
 
@@ -765,5 +765,36 @@ describe("Retriable Errors", () => {
     expect(error?.constructor).toBe(TypeError);
     expect(error?.message).toBe("ignore TypeError");
     expect(idx).toBe(1);
+  });
+});
+
+describe("Retry on results", () => {
+  test("should skip retries when retryOnResult() is not provided", async () => {
+    const callable = createRetry({
+      input: () => {
+        return "success";
+      },
+      maxRetries: 4,
+    });
+
+    const result = await callable();
+    expect(result).not.toBeUndefined();
+    expect(result).toBeTypeOf("string");
+    expect(result).toBe("success");
+  });
+
+  test("should retry on failed result", async () => {
+    const callable = createRetry({
+      input: () => {
+        return new Response(undefined, { status: 404 });
+      },
+      retryOnResult: (res) => res.status === 404,
+      maxRetries: 1,
+    });
+
+    const [error, result] = await mightThrow(callable());
+    expect(result).toBeNull();
+    expect(error).not.toBeNull();
+    expect(error).toBeInstanceOf(InvalidResultError);
   });
 });
