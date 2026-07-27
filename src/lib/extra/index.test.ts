@@ -784,17 +784,171 @@ describe("Retry on results", () => {
   });
 
   test("should retry on failed result", async () => {
+    let onFailedCalles = 0;
     const callable = createRetry({
       input: () => {
         return new Response(undefined, { status: 404 });
       },
       retryOnResult: (res) => res.status === 404,
-      maxRetries: 1,
+      onFailedAttempt: () => {
+        onFailedCalles++;
+      },
+      maxRetries: 4,
     });
 
     const [error, result] = await mightThrow(callable());
     expect(result).toBeNull();
     expect(error).not.toBeNull();
     expect(error).toBeInstanceOf(InvalidResultError);
+    expect(onFailedCalles).toBe(4);
+  });
+
+  test("should ignore result's error", async () => {
+    let onFailedCalles = 0;
+
+    const callable = createRetry({
+      input: () => {
+        return new Response(undefined, { status: 404 });
+      },
+      retryOnResult: (res) => res.status === 404,
+      onFailedAttempt: () => {
+        onFailedCalles++;
+      },
+      ignoreErrors: [InvalidResultError],
+      maxRetries: 4,
+    });
+
+    const [error, result] = await mightThrow(callable());
+    expect(result).toBeNull();
+    expect(error).not.toBeNull();
+    expect(error).toBeInstanceOf(InvalidResultError);
+    expect(onFailedCalles).toBe(0);
+  });
+
+  test("'retryErrors' should not influence 'retryOnResult()' execution", async () => {
+    let onFailedCalles = 0;
+
+    const callable = createRetry({
+      input: () => {
+        return new Response(undefined, { status: 404 });
+      },
+      retryOnResult: (res) => res.status === 404,
+      onFailedAttempt: () => {
+        onFailedCalles++;
+      },
+      retryErrors: [InvalidResultError],
+      maxRetries: 4,
+    });
+
+    const [error, result] = await mightThrow(callable());
+    expect(result).toBeNull();
+    expect(error).not.toBeNull();
+    expect(error).toBeInstanceOf(InvalidResultError);
+    expect(onFailedCalles).toBe(4);
+  });
+
+  test("'retryOnError()' should not influence 'retryOnResult()' execution when the former return true", async () => {
+    let onFailedCalles = 0;
+
+    const callable = createRetry({
+      input: () => {
+        return new Response(undefined, { status: 404 });
+      },
+      retryOnResult: (res) => res.status === 404,
+      retryOnError: ({ error }) => error instanceof InvalidResultError,
+      onFailedAttempt: () => {
+        onFailedCalles++;
+      },
+      maxRetries: 4,
+    });
+
+    const [error, result] = await mightThrow(callable());
+    expect(result).toBeNull();
+    expect(error).not.toBeNull();
+    expect(error).toBeInstanceOf(InvalidResultError);
+    expect(onFailedCalles).toBe(4);
+  });
+
+  test("should not retry if 'retryOnError()' return false", async () => {
+    let onFailedCalles = 0;
+
+    const callable = createRetry({
+      input: () => {
+        return new Response(undefined, { status: 404 });
+      },
+      retryOnResult: (res) => res.status === 404,
+      retryOnError: ({ error }) => !(error instanceof InvalidResultError),
+      onFailedAttempt: () => {
+        onFailedCalles++;
+      },
+      maxRetries: 4,
+    });
+
+    const [error, result] = await mightThrow(callable());
+    expect(result).toBeNull();
+    expect(error).not.toBeNull();
+    expect(error).toBeInstanceOf(InvalidResultError);
+    expect(onFailedCalles).toBe(0);
+  });
+
+  test("should call onError() over invalid results", async () => {
+    let onErrorCalled = 0;
+    const callable = createRetry({
+      input: () => {
+        return new Response(undefined, { status: 404 });
+      },
+      retryOnResult: (res) => res.status === 404,
+      onError: ({ error, failedAt, id }) => {
+        expect(error).toBeInstanceOf(InvalidResultError);
+        expect(failedAt).toBe(Date.now());
+        expect(id).toBe("1");
+
+        onErrorCalled++;
+      },
+      maxRetries: 4,
+      id: "1",
+    });
+
+    const [error, result] = await mightThrow(callable());
+    expect(result).toBeUndefined();
+    expect(error).toBeNull();
+    expect(onErrorCalled).toBe(1);
+  });
+
+  test("should call onFailedAttempt() when retring over an invalid result", async () => {
+    const failsData: {
+      error: Error;
+      attemptNumber: number;
+      retriesLeft: number;
+    }[] = [];
+
+    let onFailedCalles = 0;
+    const callable = createRetry({
+      input: () => {
+        return new Response(undefined, { status: 404 });
+      },
+      retryOnResult: (res) => res.status === 404,
+      onFailedAttempt: ({ error, attemptNumber, retriesLeft }) => {
+        onFailedCalles++;
+        failsData.push({ error, attemptNumber, retriesLeft });
+      },
+      maxRetries: 2,
+    });
+
+    const [error, result] = await mightThrow(callable());
+    expect(result).toBeNull();
+    expect(error).not.toBeNull();
+    expect(error).toBeInstanceOf(InvalidResultError);
+    expect(onFailedCalles).toBe(2);
+
+    expect(failsData).toHaveLength(2);
+    expect(failsData[0]?.error).toBeInstanceOf(InvalidResultError);
+    expect(failsData[1]?.error).toBeInstanceOf(InvalidResultError);
+
+    expect(failsData[0]?.attemptNumber).toBe(1);
+    expect(failsData[1]?.attemptNumber).toBe(2);
+
+    expect(failsData[0]?.retriesLeft).toBe(2);
+    expect(failsData[1]?.retriesLeft).toBe(1);
   });
 });
