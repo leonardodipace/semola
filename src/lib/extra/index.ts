@@ -28,15 +28,14 @@ class Retry<TRetryResult> {
 
     const onRetryErrorResult = this.runOnRetryError(ctx.error, this.id);
     const isRetriableError = this.checkRetryErrors(ctx.error);
-    const shouldUpdate = onRetryErrorResult && isRetriableError;
+    const hasAttempts = this.hasMoreAttempts();
+    const shouldUpdate = hasAttempts && onRetryErrorResult && isRetriableError;
     if (!shouldUpdate) return false;
 
     return await this.update(ctx);
   }
 
   public async update(ctx: RetryContext) {
-    if (!this.checkAttempts()) return false;
-
     const delay = this.calculateDelay(this.currentAttempt);
     await this.runOnFailedAttempt(delay, ctx.error);
 
@@ -85,12 +84,13 @@ class Retry<TRetryResult> {
     return retryErrors.some((e) => error.constructor === e);
   }
 
-  private checkAttempts() {
+  private hasMoreAttempts() {
     return this.currentAttempt < this.options.maxRetries;
   }
 
   private runOnRetryError(error: Error, id: string) {
     if (!this.options.retryOnError) return true;
+
     return this.options.retryOnError({ error, id });
   }
 
@@ -157,13 +157,16 @@ export function createRetry<TRetryResult = void>(
 
       if (!fnError) {
         const shouldRetryOnResult = retry.retryOverResult(result);
-
         if (!shouldRetryOnResult) return result;
+
         const resultError = new InvalidResultError(
           `Cannot retry for result '${result}'`,
         );
 
-        const shouldContinue = await retry.update({ error: resultError });
+        const shouldContinue = await retry.retryOverError({
+          error: resultError,
+        });
+
         if (shouldContinue) continue;
 
         const shouldThrow = await retry.fireOnError(resultError);
