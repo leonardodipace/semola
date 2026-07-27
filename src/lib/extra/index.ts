@@ -1,5 +1,5 @@
 import { mightThrow } from "../errors/index.js";
-import { InvalidRetryError } from "./errors.js";
+import { InvalidResultError, InvalidRetryError } from "./errors.js";
 import type {
   ErrorMetadataType,
   OnFailedAttemptContextType,
@@ -22,34 +22,23 @@ class Retry<TRetryResult> {
     this.id = this.options.id ?? crypto.randomUUID();
   }
 
-  public async update(ctx: RetryContext) {
+  public async retryOverError(ctx: RetryContext) {
     const shouldIgnore = this.checkIgnoreErrors(ctx.error);
     if (shouldIgnore) return false;
 
-    const { maxRetries } = this.options;
     const onRetryErrorResult = this.runOnRetryError(ctx.error, this.id);
     const isRetriableError = this.checkRetryErrors(ctx.error);
-    const hasMoreAttempts = this.currentAttempt < maxRetries;
-    const canRetry = hasMoreAttempts && onRetryErrorResult && isRetriableError;
-    if (!canRetry) return false;
+    const shouldUpdate = onRetryErrorResult && isRetriableError;
+    if (!shouldUpdate) return false;
+
+    return await this.update(ctx);
+  }
+
+  public async update(ctx: RetryContext) {
+    if (!this.checkAttempts()) return false;
 
     const delay = this.calculateDelay(this.currentAttempt);
-    if (this.options.onFailedAttempt) {
-      const onFailedAttempt = this.options.onFailedAttempt;
-      const context: OnFailedAttemptContextType = {
-        attemptNumber: this.currentAttempt + 1,
-        delay,
-        error: ctx.error,
-        retriesLeft: maxRetries - this.currentAttempt,
-        id: this.id,
-      };
-
-      const [callbackError] = await mightThrow(
-        Promise.resolve().then(() => onFailedAttempt(context)),
-      );
-
-      if (callbackError) throw ctx.error;
-    }
+    await this.runOnFailedAttempt(delay, ctx.error);
 
     this.currentAttempt += 1;
     await this.runDelay(delay);
@@ -57,13 +46,13 @@ class Retry<TRetryResult> {
     return true;
   }
 
-  public async fireOnError(ctx: RetryContext) {
+  public async fireOnError(error: Error) {
     if (!this.options.onError) return true;
 
     const onError = this.options.onError;
     const data: ErrorMetadataType = {
       failedAt: Date.now(),
-      error: ctx.error,
+      error,
       id: this.id,
     };
 
@@ -71,9 +60,15 @@ class Retry<TRetryResult> {
       Promise.resolve().then(() => onError(data)),
     );
 
-    if (callbackError) throw ctx.error;
+    if (callbackError) throw error;
 
     return false;
+  }
+
+  public retryOverResult(result: TRetryResult | undefined) {
+    if (!this.options.retryOnResult) return false;
+
+    return this.options.retryOnResult(result);
   }
 
   private checkIgnoreErrors(error: Error) {
@@ -90,9 +85,33 @@ class Retry<TRetryResult> {
     return retryErrors.some((e) => error.constructor === e);
   }
 
+  private checkAttempts() {
+    return this.currentAttempt < this.options.maxRetries;
+  }
+
   private runOnRetryError(error: Error, id: string) {
     if (!this.options.retryOnError) return true;
     return this.options.retryOnError({ error, id });
+  }
+
+  private async runOnFailedAttempt(delay: number, error: Error) {
+    if (!this.options.onFailedAttempt) return;
+
+    const { maxRetries } = this.options;
+    const onFailedAttempt = this.options.onFailedAttempt;
+    const context: OnFailedAttemptContextType = {
+      attemptNumber: this.currentAttempt + 1,
+      delay,
+      error,
+      retriesLeft: maxRetries - this.currentAttempt,
+      id: this.id,
+    };
+
+    const [callbackError] = await mightThrow(
+      Promise.resolve().then(() => onFailedAttempt(context)),
+    );
+
+    if (callbackError) throw error;
   }
 
   private calculateDelay(attempt: number) {
@@ -136,12 +155,29 @@ export function createRetry<TRetryResult = void>(
         Promise.resolve().then(() => fn()),
       );
 
-      if (!fnError) return result;
+      if (!fnError) {
+        const shouldRetryOnResult = retry.retryOverResult(
+          result === null ? undefined : result,
+        );
 
-      const shouldContinue = await retry.update({ error: fnError });
+        if (!shouldRetryOnResult) return result;
+        const resultError = new InvalidResultError(
+          `Cannot retry for result '${result}'`,
+        );
+
+        const shouldContinue = await retry.update({ error: resultError });
+        if (shouldContinue) continue;
+
+        const shouldThrow = await retry.fireOnError(resultError);
+        if (!shouldThrow) return undefined;
+
+        throw resultError;
+      }
+
+      const shouldContinue = await retry.retryOverError({ error: fnError });
       if (shouldContinue) continue;
 
-      const shouldThrow = await retry.fireOnError({ error: fnError });
+      const shouldThrow = await retry.fireOnError(fnError);
       if (!shouldThrow) return undefined;
 
       throw fnError;
