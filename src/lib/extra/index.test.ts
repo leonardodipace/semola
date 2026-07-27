@@ -800,6 +800,7 @@ describe("Retry on results", () => {
     expect(result).toBeNull();
     expect(error).not.toBeNull();
     expect(error).toBeInstanceOf(InvalidResultError);
+    expect((error as InvalidResultError<Response>).data.status).toBe(404);
     expect(onFailedCalles).toBe(4);
   });
 
@@ -822,6 +823,7 @@ describe("Retry on results", () => {
     expect(result).toBeNull();
     expect(error).not.toBeNull();
     expect(error).toBeInstanceOf(InvalidResultError);
+    expect((error as InvalidResultError<Response>).data.status).toBe(404);
     expect(onFailedCalles).toBe(0);
   });
 
@@ -844,6 +846,7 @@ describe("Retry on results", () => {
     expect(result).toBeNull();
     expect(error).not.toBeNull();
     expect(error).toBeInstanceOf(InvalidResultError);
+    expect((error as InvalidResultError<Response>).data.status).toBe(404);
     expect(onFailedCalles).toBe(4);
   });
 
@@ -866,6 +869,7 @@ describe("Retry on results", () => {
     expect(result).toBeNull();
     expect(error).not.toBeNull();
     expect(error).toBeInstanceOf(InvalidResultError);
+    expect((error as InvalidResultError<Response>).data.status).toBe(404);
     expect(onFailedCalles).toBe(4);
   });
 
@@ -888,6 +892,7 @@ describe("Retry on results", () => {
     expect(result).toBeNull();
     expect(error).not.toBeNull();
     expect(error).toBeInstanceOf(InvalidResultError);
+    expect((error as InvalidResultError<Response>).data.status).toBe(404);
     expect(onFailedCalles).toBe(0);
   });
 
@@ -939,6 +944,7 @@ describe("Retry on results", () => {
     expect(result).toBeNull();
     expect(error).not.toBeNull();
     expect(error).toBeInstanceOf(InvalidResultError);
+    expect((error as InvalidResultError<Response>).data.status).toBe(404);
     expect(onFailedCalles).toBe(2);
 
     expect(failsData).toHaveLength(2);
@@ -952,3 +958,5 @@ describe("Retry on results", () => {
     expect(failsData[1]?.retriesLeft).toBe(1);
   });
 });
+
+describe("Life cycle", () => {});

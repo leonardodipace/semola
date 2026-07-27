@@ -159,8 +159,9 @@ export function createRetry<TRetryResult = void>(
         const shouldRetryOnResult = retry.retryOverResult(result);
         if (!shouldRetryOnResult) return result;
 
-        const resultError = new InvalidResultError(
-          `Cannot retry for result '${result}'`,
+        const resultError = new InvalidResultError<TRetryResult>(
+          result,
+          `Retrying because 'retryOnResult' rejected the returned result`,
         );
 
         const shouldContinue = await retry.retryOverError({
