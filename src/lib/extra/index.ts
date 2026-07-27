@@ -65,7 +65,7 @@ class Retry<TRetryResult> {
     return false;
   }
 
-  public retryOverResult(result: TRetryResult | undefined) {
+  public retryOverResult(result: TRetryResult) {
     if (!this.options.retryOnResult) return false;
 
     return this.options.retryOnResult(result);
@@ -156,9 +156,7 @@ export function createRetry<TRetryResult = void>(
       );
 
       if (!fnError) {
-        const shouldRetryOnResult = retry.retryOverResult(
-          result === null ? undefined : result,
-        );
+        const shouldRetryOnResult = retry.retryOverResult(result);
 
         if (!shouldRetryOnResult) return result;
         const resultError = new InvalidResultError(

@@ -29,7 +29,7 @@ export type RetryOptions<TRetryResult> = {
   retryErrors?: ErrorClassType[];
   onError?: (error: ErrorMetadataType) => void | Promise<void>;
   onFailedAttempt?: (ctx: OnFailedAttemptContextType) => void | Promise<void>;
-  retryOnResult?: (result: TRetryResult | undefined) => boolean;
+  retryOnResult?: (result: TRetryResult) => boolean;
   retryOnError?: (ctx: RetryOnErrorContextType) => boolean;
 };
 
