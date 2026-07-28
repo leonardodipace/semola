@@ -1086,4 +1086,78 @@ describe("Hooks", () => {
     await mightThrow(callable());
     expect(afterRetryCalled).toBe(true);
   });
+
+  test("should rethrow original error when beforeRetry() throws", async () => {
+    const original = new Error("A generic error");
+    const callable = createRetry({
+      input: () => {
+        throw original;
+      },
+      maxRetries: 0,
+      beforeRetry: () => {
+        throw new Error("callback failed");
+      },
+    });
+
+    const [error] = await mightThrow(callable());
+    expect(error).toBe(original);
+  });
+
+  test("should not call onError() when beforeRetry() fails", async () => {
+    const original = new Error("A generic error");
+    let onErrorCalled = false;
+    const callable = createRetry({
+      input: () => {
+        throw original;
+      },
+      maxRetries: 2,
+      beforeRetry: () => {
+        throw new Error("callback failed");
+      },
+      onError: () => {
+        onErrorCalled = true;
+      },
+    });
+
+    const [error] = await mightThrow(callable());
+    expect(error).toBe(original);
+    expect(onErrorCalled).toBe(false);
+  });
+
+  test("should rethrow original error when afterRetry() throws", async () => {
+    const original = new Error("A generic error");
+    const callable = createRetry({
+      input: () => {
+        throw original;
+      },
+      maxRetries: 0,
+      afterRetry: () => {
+        throw new Error("callback failed");
+      },
+    });
+
+    const [error] = await mightThrow(callable());
+    expect(error).toBe(original);
+  });
+
+  test("should not call onError() when afterRetry() fails", async () => {
+    const original = new Error("A generic error");
+    let onErrorCalled = false;
+    const callable = createRetry({
+      input: () => {
+        throw original;
+      },
+      maxRetries: 2,
+      afterRetry: () => {
+        throw new Error("callback failed");
+      },
+      onError: () => {
+        onErrorCalled = true;
+      },
+    });
+
+    const [error] = await mightThrow(callable());
+    expect(error).toBe(original);
+    expect(onErrorCalled).toBe(false);
+  });
 });
