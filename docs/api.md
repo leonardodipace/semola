@@ -98,7 +98,25 @@ users.defineRoute({
 api.mount(users);
 ```
 
-`Group` supports `defineRoute()` and `mount()` (including nested groups). Runtime methods like `fetch()` and `serve()` are only available on `Api`.
+`Group` supports `defineRoute()`, `defineSSERoute()`, and `mount()` (including nested groups). Runtime methods like `fetch()` and `serve()` are only available on `Api`.
+
+### `api.defineSSERoute(definition)`
+
+Always `GET`. Handler is an async generator - each `yield` sends one SSE event, return closes the stream. Client disconnect calls `gen.return()`.
+
+```typescript
+api.defineSSERoute({
+  path: "/heartbeat",
+  handler: async function* (c) {
+    while (!c.raw.signal.aborted) {
+      yield { event: "ping", data: { time: Date.now() } };
+      await Bun.sleep(5000);
+    }
+  },
+});
+```
+
+Supports the same `request` schemas and `middlewares` as `defineRoute`. Yielded events: `data` (required), optional `event`, `id`, `retry`.
 
 ### `api.getOpenApiSpec()`
 

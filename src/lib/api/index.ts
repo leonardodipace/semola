@@ -23,4 +23,8 @@ export type {
   SecuritySchemeOAuth2,
   SecuritySchemeOAuth2Flow,
   SecuritySchemeOpenIdConnect,
+  SSEContext,
+  SSEEvent,
+  SSERouteConfig,
+  SSERouteHandler,
 } from "./types.js";
