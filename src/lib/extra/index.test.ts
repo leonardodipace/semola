@@ -1002,3 +1002,88 @@ describe("Retry on results", () => {
     expect(failsData[1]?.retriesLeft).toBe(1);
   });
 });
+
+describe("Hooks", () => {
+  test("should call beforeRetry() hook, before each attempt", async () => {
+    let beforeRetryCalled = false;
+
+    const callable = createRetry({
+      input: () => {
+        throw new Error("A generic error");
+      },
+      beforeRetry: ({ id, currentAttempt, error, retriesLeft }) => {
+        beforeRetryCalled = true;
+        expect(id).toBe("1");
+        expect(currentAttempt).toBe(1);
+        expect(error).toBeInstanceOf(Error);
+        expect(retriesLeft).toBe(1);
+      },
+      onFailedAttempt: () => {
+        expect(beforeRetryCalled).toBe(true);
+      },
+      maxRetries: 1,
+      id: "1",
+    });
+
+    await mightThrow(callable());
+  });
+
+  test("should call afterRetry() hook, after each attempt", async () => {
+    let afterRetryCalled = false;
+
+    const callable = createRetry({
+      input: () => {
+        throw new Error("A generic error");
+      },
+      onFailedAttempt: () => {
+        expect(afterRetryCalled).toBe(false);
+      },
+      afterRetry: ({ id, currentAttempt, error, retriesLeft }) => {
+        expect(id).toBe("1");
+        expect(currentAttempt).toBe(1);
+        expect(error).toBeInstanceOf(Error);
+        expect(retriesLeft).toBe(0);
+        afterRetryCalled = true;
+      },
+      maxRetries: 1,
+      id: "1",
+    });
+
+    await mightThrow(callable());
+    expect(afterRetryCalled).toBe(true);
+  });
+
+  test("full life cycle", async () => {
+    let afterRetryCalled = false;
+    let beforeRetryCalled = false;
+
+    const callable = createRetry({
+      input: () => {
+        throw new Error("A generic error");
+      },
+      beforeRetry: ({ id, currentAttempt, error, retriesLeft }) => {
+        beforeRetryCalled = true;
+        expect(id).toBe("1");
+        expect(currentAttempt).toBe(1);
+        expect(error).toBeInstanceOf(Error);
+        expect(retriesLeft).toBe(1);
+      },
+      onFailedAttempt: () => {
+        expect(beforeRetryCalled).toBe(true);
+        expect(afterRetryCalled).toBe(false);
+      },
+      afterRetry: ({ id, currentAttempt, error, retriesLeft }) => {
+        expect(id).toBe("1");
+        expect(currentAttempt).toBe(1);
+        expect(error).toBeInstanceOf(Error);
+        expect(retriesLeft).toBe(0);
+        afterRetryCalled = true;
+      },
+      maxRetries: 1,
+      id: "1",
+    });
+
+    await mightThrow(callable());
+    expect(afterRetryCalled).toBe(true);
+  });
+});
