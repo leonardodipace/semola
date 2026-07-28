@@ -281,6 +281,27 @@ describe("Create retry", () => {
     const [error] = await mightThrow(callable());
     expect(error).toBe(original);
   });
+
+  test("should not call onError() when onFailedAttempt() fails", async () => {
+    const original = new Error("A generic error");
+    let onErrorCalled = false;
+    const callable = createRetry({
+      input: () => {
+        throw original;
+      },
+      maxRetries: 2,
+      onFailedAttempt: () => {
+        throw new Error("callback failed");
+      },
+      onError: () => {
+        onErrorCalled = true;
+      },
+    });
+
+    const [error] = await mightThrow(callable());
+    expect(error).toBe(original);
+    expect(onErrorCalled).toBe(false);
+  });
 });
 
 describe("Validate attempts", () => {
@@ -981,5 +1002,3 @@ describe("Retry on results", () => {
     expect(failsData[1]?.retriesLeft).toBe(1);
   });
 });
-
-describe("Life cycle", () => {});
