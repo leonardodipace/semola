@@ -206,6 +206,52 @@ export type RouteConfig<
   tags?: string[];
 };
 
+export type SSEEvent = {
+  data: unknown;
+  event?: string;
+  id?: string;
+  retry?: number;
+};
+
+export type SSEContext<
+  TReq extends RequestSchema = RequestSchema,
+  TExt extends Record<string, unknown> = Record<string, unknown>,
+> = {
+  raw: Request;
+  req: {
+    body: InferOutput<TReq["body"]>;
+    query: InferOutput<TReq["query"]>;
+    headers: InferOutput<TReq["headers"]>;
+    cookies: InferOutput<TReq["cookies"]>;
+    params: InferOutput<TReq["params"]>;
+  };
+  get: <K extends keyof TExt>(key: K) => TExt[K];
+};
+
+export type SSERouteHandler<
+  TReq extends RequestSchema = RequestSchema,
+  TExt extends Record<string, unknown> = Record<string, unknown>,
+> = (c: SSEContext<TReq, TExt>) => AsyncGenerator<SSEEvent, void, unknown>;
+
+export type SSERouteConfig<
+  TReq extends RequestSchema = RequestSchema,
+  TGlobalMiddlewares extends readonly Middleware[] = readonly [],
+  TRouteMiddlewares extends readonly Middleware[] = readonly [],
+> = {
+  path: string;
+  request?: TReq;
+  middlewares?: TRouteMiddlewares;
+  handler: SSERouteHandler<
+    TReq,
+    MergeMiddlewareExtensions<TGlobalMiddlewares> &
+      MergeMiddlewareExtensions<TRouteMiddlewares>
+  >;
+  summary?: string;
+  description?: string;
+  operationId?: string;
+  tags?: string[];
+};
+
 export type ResolvedValidation = {
   input: boolean;
   output: boolean;
