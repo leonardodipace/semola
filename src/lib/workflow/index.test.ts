@@ -2121,6 +2121,12 @@ describe("workflow", () => {
       const redis = createRedis();
       let maxConcurrent = 0;
       let currentConcurrent = 0;
+      let entered = 0;
+      let releaseBarrier: (() => void) | undefined;
+
+      const barrier = new Promise<void>((resolve) => {
+        releaseBarrier = resolve;
+      });
 
       const workflow = defineWorkflow<{ envId: string }, string>({
         name: "partition-cap",
@@ -2131,9 +2137,15 @@ describe("workflow", () => {
         handler: async ({ step }) => {
           currentConcurrent++;
           maxConcurrent = Math.max(maxConcurrent, currentConcurrent);
+          entered++;
+
+          if (entered >= 2) {
+            releaseBarrier?.();
+          }
+
+          await barrier;
 
           await step("work", async () => {
-            await sleep(50);
             return "ok";
           });
 

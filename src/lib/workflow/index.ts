@@ -589,7 +589,18 @@ class WorkflowDefinition<TInput, TResult> {
     }
 
     if (executionError instanceof PartitionError) {
-      await mightThrow(this.options.redis.lpush(this.jobsKey(), executionId));
+      if (!this.running) {
+        return;
+      }
+
+      const [enqueueError] = await mightThrow(
+        this.enqueueExecution(executionId),
+      );
+
+      if (enqueueError) {
+        return;
+      }
+
       await this.waitForPollInterval();
       return;
     }
@@ -625,16 +636,28 @@ class WorkflowDefinition<TInput, TResult> {
     const token = crypto.randomUUID();
     const partitionKey = await this.getMeta(executionId, "partitionKey");
 
-    if (partitionKey) {
-      await this.acquirePartition(partitionKey, token);
-    }
+    await this.acquireLock(executionId, token);
+
+    let partitionSlot: number | null = null;
 
     try {
-      return await this.runExecute(executionId, input, token, partitionKey);
-    } finally {
       if (partitionKey) {
-        await this.releasePartition(partitionKey, token);
+        partitionSlot = await this.acquirePartition(partitionKey, token);
       }
+
+      return await this.runExecute(
+        executionId,
+        input,
+        token,
+        partitionKey,
+        partitionSlot,
+      );
+    } finally {
+      if (partitionKey !== null && partitionSlot !== null) {
+        await this.releasePartition(partitionKey, token, partitionSlot);
+      }
+
+      await this.releaseLock(executionId, token);
     }
   }
 
@@ -643,13 +666,11 @@ class WorkflowDefinition<TInput, TResult> {
     input: TInput,
     token: string,
     partitionKey: string | null,
+    partitionSlot: number | null,
   ) {
-    await this.acquireLock(executionId, token);
-
     const currentStatus = await this.getMeta(executionId, "status");
 
     if (currentStatus === "cancelled") {
-      await this.releaseLock(executionId, token);
       throw new StateError(`Workflow execution ${executionId} was cancelled`);
     }
 
@@ -663,6 +684,7 @@ class WorkflowDefinition<TInput, TResult> {
     const renewInterval = Math.floor(this.lockTTL / 3);
 
     let lockLost = false;
+    let partitionLost = false;
 
     const renewTimer = setInterval(async () => {
       const [renewError] = await mightThrow(
@@ -676,16 +698,20 @@ class WorkflowDefinition<TInput, TResult> {
         return;
       }
 
-      if (!partitionKey) {
+      if (partitionKey === null) {
+        return;
+      }
+
+      if (partitionSlot === null) {
         return;
       }
 
       const [partitionRenewError] = await mightThrow(
-        this.extendPartition(partitionKey, token),
+        this.extendPartition(partitionKey, token, partitionSlot),
       );
 
       if (partitionRenewError) {
-        lockLost = true;
+        partitionLost = true;
         controller.abort();
         clearInterval(renewTimer);
       }
@@ -741,6 +767,14 @@ class WorkflowDefinition<TInput, TResult> {
     );
 
     clearInterval(renewTimer);
+
+    if (partitionLost) {
+      await this.releaseLock(executionId, token);
+
+      throw new PartitionError(
+        `Partition ownership lost for ${partitionKey} on workflow ${this.options.name}`,
+      );
+    }
 
     if (lockLost) {
       await this.releaseLock(executionId, token);
@@ -1006,7 +1040,7 @@ class WorkflowDefinition<TInput, TResult> {
       }
 
       if (setResult === "OK") {
-        return;
+        return slot;
       }
     }
 
@@ -1015,69 +1049,52 @@ class WorkflowDefinition<TInput, TResult> {
     );
   }
 
-  private async findPartitionSlot(partitionKey: string, token: string) {
-    for (let slot = 0; slot < this.concurrency; slot++) {
-      const slotKey = this.partitionSlotKey(partitionKey, slot);
+  private async extendPartition(
+    partitionKey: string,
+    token: string,
+    slot: number,
+  ) {
+    const script =
+      "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('PEXPIRE', KEYS[1], ARGV[2]) else return 0 end";
 
-      const [getError, value] = await mightThrow(
-        this.options.redis.get(slotKey),
-      );
-
-      if (getError) {
-        throw new PartitionError(
-          `Unable to read partition ${partitionKey} for workflow ${this.options.name}`,
-        );
-      }
-
-      if (value === token) {
-        return slot;
-      }
-    }
-
-    return null;
-  }
-
-  private async extendPartition(partitionKey: string, token: string) {
-    const slot = await this.findPartitionSlot(partitionKey, token);
-
-    if (slot === null) {
-      throw new PartitionError(
-        `Partition ownership lost for ${partitionKey} on workflow ${this.options.name}`,
-      );
-    }
-
-    const [setError, setResult] = await mightThrow(
-      this.options.redis.set(
+    const [evalError, extendResult] = await mightThrow(
+      this.options.redis.send("EVAL", [
+        script,
+        "1",
         this.partitionSlotKey(partitionKey, slot),
         token,
-        "PX",
         String(this.lockTTL),
-        "XX",
-      ),
+      ]),
     );
 
-    if (setError) {
+    if (evalError) {
       throw new PartitionError(
         `Unable to extend partition ${partitionKey} for workflow ${this.options.name}`,
       );
     }
 
-    if (setResult !== "OK") {
+    if (extendResult === 0) {
       throw new PartitionError(
         `Partition ownership lost for ${partitionKey} on workflow ${this.options.name}`,
       );
     }
   }
 
-  private async releasePartition(partitionKey: string, token: string) {
-    const slot = await this.findPartitionSlot(partitionKey, token);
-
-    if (slot === null) {
-      return;
-    }
+  private async releasePartition(
+    partitionKey: string,
+    token: string,
+    slot: number,
+  ) {
+    const script =
+      "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end";
 
     await mightThrow(
-      this.options.redis.del(this.partitionSlotKey(partitionKey, slot)),
+      this.options.redis.send("EVAL", [
+        script,
+        "1",
+        this.partitionSlotKey(partitionKey, slot),
+        token,
+      ]),
     );
   }
 

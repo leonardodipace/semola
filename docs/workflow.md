@@ -95,14 +95,14 @@ for (const item of pending) {
 
 Workers are per process. With multiple replicas, each process runs up to `concurrency` executions; Redis distributes jobs across them. Total parallelism is roughly the sum of each process's concurrency.
 
-With `partitionBy` / `start({ partitionKey })`, the same `concurrency` value also caps how many executions with the same key may run at once across all replicas.
+With `partitionBy` / `start({ partitionKey })`, the same `concurrency` value also caps how many executions with the same key may run at once across all replicas. That Redis-wide per-key cap is accurate only when every replica uses the same `concurrency` value; if replicas differ, the effective cap is the maximum configured value.
 
 ## Options
 
 - **`name`** (required) - Workflow name stored in Redis meta and used for process registration. Must be unique in the process. Execution IDs must be unique across all workflows sharing a Redis database.
 - **`redis`** (required) - Bun Redis client instance
 - **`handler`** (required) - Workflow function with `step` helper
-- **`concurrency`** - Parallel workers in this process (default: 1). With partitions, also the max concurrent executions per partition key (Redis-wide).
+- **`concurrency`** - Parallel workers in this process (default: 1). With partitions, also the max concurrent executions per partition key (Redis-wide when all replicas share the same value; otherwise the effective cap is the max across replicas).
 - **`partitionBy`** - Optional `(input) => string` to derive a partition key at `start()`. Empty keys throw.
 - **`pollInterval`** - Milliseconds to wait when the job list is empty (default: 100)
 - **`retries`** - Step retry attempts before marking the workflow `failed` (default: 3). Set to `0` to fail on the first error with no retries.
