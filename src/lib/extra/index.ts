@@ -32,7 +32,11 @@ class Retry<TRetryResult> {
     const shouldUpdate = hasAttempts && onRetryErrorResult && isRetriableError;
     if (!shouldUpdate) return false;
 
-    return await this.update(ctx);
+    this.fireBeforeAttempt(ctx.error);
+    const result = await this.update(ctx);
+    this.fireAfterAttempt(ctx.error);
+
+    return result;
   }
 
   public async update(ctx: RetryContext) {
@@ -200,11 +204,9 @@ export function createRetry<TRetryResult = void>(
           `Retrying because 'retryOnResult' rejected the returned result`,
         );
 
-        await retry.fireBeforeAttempt(resultError);
         const shouldContinue = await retry.retryOverError({
           error: resultError,
         });
-        await retry.fireAfterAttempt(resultError);
 
         if (shouldContinue) continue;
 
@@ -214,10 +216,7 @@ export function createRetry<TRetryResult = void>(
         throw resultError;
       }
 
-      await retry.fireBeforeAttempt(fnError);
       const shouldContinue = await retry.retryOverError({ error: fnError });
-      await retry.fireAfterAttempt(fnError);
-
       if (shouldContinue) continue;
 
       const shouldThrow = await retry.fireOnError(fnError);
