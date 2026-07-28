@@ -40,6 +40,13 @@ export class LockError extends Error {
   }
 }
 
+export class PartitionError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = "PartitionError";
+  }
+}
+
 export class CancelledError extends Error {
   public constructor(message: string) {
     super(message);

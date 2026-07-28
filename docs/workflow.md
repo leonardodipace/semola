@@ -95,18 +95,23 @@ for (const item of pending) {
 
 Workers are per process. With multiple replicas, each process runs up to `concurrency` executions; Redis distributes jobs across them. Total parallelism is roughly the sum of each process's concurrency.
 
+With `partitionBy` / `start({ partitionKey })`, the same `concurrency` value also caps how many executions with the same key may run at once across all replicas.
+
 ## Options
 
 - **`name`** (required) - Workflow name stored in Redis meta and used for process registration. Must be unique in the process. Execution IDs must be unique across all workflows sharing a Redis database.
 - **`redis`** (required) - Bun Redis client instance
 - **`handler`** (required) - Workflow function with `step` helper
-- **`concurrency`** - Number of parallel workers in this process (default: 1)
+- **`concurrency`** - Parallel workers in this process (default: 1). With partitions, also the max concurrent executions per partition key (Redis-wide).
+- **`partitionBy`** - Optional `(input) => string` to derive a partition key at `start()`. Empty keys throw.
 - **`pollInterval`** - Milliseconds to wait when the job list is empty (default: 100)
 - **`retries`** - Step retry attempts before marking the workflow `failed` (default: 3). Set to `0` to fail on the first error with no retries.
 - **`retryBackoff`** - Optional `{ baseDelay, multiplier, maxDelay }` for retry delays (defaults: 1000ms, 2x, 30000ms cap)
 - **`hooks`** - Optional lifecycle callbacks (see [Hooks](#hooks))
-- **`lockTTL`** - Execution lock TTL in milliseconds (default: 300000)
+- **`lockTTL`** - Execution lock TTL in milliseconds (default: 300000). Also used as partition slot TTL.
 - **`serializeInput`**, **`deserializeInput`**, **`serializeResult`**, **`deserializeResult`**, **`serializeStepOutput`**, **`deserializeStepOutput`** - Custom serializers for Redis persistence
+
+`start(input, options?)` accepts `executionId` and `partitionKey`. `partitionKey` overrides `partitionBy` when both are present. The resolved key is stored on execution meta so `resume` keeps the original partition.
 
 ## Redis Keys
 
@@ -119,6 +124,12 @@ Executions use flat keys keyed only by execution id:
 Pending work for a workflow name uses a Redis list:
 
 - `workflow:{name}:jobs`
+
+Per-partition concurrency uses one Redis string per slot (`0` .. `concurrency - 1`):
+
+- `workflow:{name}:partition:{key}:{slot}`
+
+Slots are claimed with `SET NX PX` (same pattern as execution locks). Crash recovery relies on TTL.
 
 The workflow `name` is also stored as a field on the meta hash (not in the execution key path).
 
@@ -135,6 +146,25 @@ const onboardUser = defineWorkflow<User>({
     });
   },
 });
+```
+
+### Partition example
+
+```typescript
+const deploy = defineWorkflow<{ cloudEnvironmentId: string }>({
+  name: "deploy",
+  redis: redisClient,
+  concurrency: 3,
+  partitionBy: (input) => input.cloudEnvironmentId,
+  handler: async ({ step }) => {
+    await step("apply", async () => {
+      // at most 3 deploys per cloudEnvironmentId at once
+    });
+  },
+});
+
+// or override / set key at start time
+await deploy.start(input, { partitionKey: input.cloudEnvironmentId });
 ```
 
 ## Retries

@@ -5,6 +5,7 @@ import {
   ExecutionError,
   LockError,
   NotFoundError,
+  PartitionError,
   SerializationError,
   StateError,
   WorkflowError,
@@ -244,7 +245,7 @@ class WorkflowDefinition<TInput, TResult> {
   public async start(input: TInput, options?: WorkflowStartOptions) {
     const executionId = options?.executionId ?? crypto.randomUUID();
 
-    await this.createExecution(executionId, input);
+    await this.createExecution(executionId, input, options);
 
     await this.enqueueExecution(executionId);
 
@@ -403,7 +404,60 @@ class WorkflowDefinition<TInput, TResult> {
     return lockKeyFor(executionId);
   }
 
-  private async createExecution(executionId: string, input: TInput) {
+  private partitionKeyPrefix(partitionKey: string) {
+    return `workflow:${this.options.name}:partition:${partitionKey}`;
+  }
+
+  private partitionSlotKey(partitionKey: string, slot: number) {
+    return `${this.partitionKeyPrefix(partitionKey)}:${slot}`;
+  }
+
+  private resolvePartitionKey(
+    input: TInput,
+    startOptions?: WorkflowStartOptions,
+  ) {
+    if (startOptions?.partitionKey !== undefined) {
+      if (typeof startOptions.partitionKey !== "string") {
+        throw new StateError(
+          "Invalid partitionKey: must be a non-empty string",
+        );
+      }
+
+      if (startOptions.partitionKey.length === 0) {
+        throw new StateError(
+          "Invalid partitionKey: must be a non-empty string",
+        );
+      }
+
+      return startOptions.partitionKey;
+    }
+
+    if (!this.options.partitionBy) {
+      return "";
+    }
+
+    const key = this.options.partitionBy(input);
+
+    if (typeof key !== "string") {
+      throw new StateError(
+        "Invalid partitionBy result: must be a non-empty string",
+      );
+    }
+
+    if (key.length === 0) {
+      throw new StateError(
+        "Invalid partitionBy result: must be a non-empty string",
+      );
+    }
+
+    return key;
+  }
+
+  private async createExecution(
+    executionId: string,
+    input: TInput,
+    startOptions?: WorkflowStartOptions,
+  ) {
     const serializedInput = this.serializeInput(input);
 
     const timestamp = now();
@@ -426,6 +480,7 @@ class WorkflowDefinition<TInput, TResult> {
       failedAt: "",
       cancelledAt: "",
       steps: "[]",
+      partitionKey: this.resolvePartitionKey(input, startOptions),
     };
 
     const [writeError] = await mightThrow(
@@ -533,6 +588,12 @@ class WorkflowDefinition<TInput, TResult> {
       return;
     }
 
+    if (executionError instanceof PartitionError) {
+      await mightThrow(this.options.redis.lpush(this.jobsKey(), executionId));
+      await this.waitForPollInterval();
+      return;
+    }
+
     const [recordError] = await mightThrow(
       this.recordBackgroundFailure(executionId, executionError),
     );
@@ -562,7 +623,27 @@ class WorkflowDefinition<TInput, TResult> {
 
   private async execute(executionId: string, input: TInput) {
     const token = crypto.randomUUID();
+    const partitionKey = await this.getMeta(executionId, "partitionKey");
 
+    if (partitionKey) {
+      await this.acquirePartition(partitionKey, token);
+    }
+
+    try {
+      return await this.runExecute(executionId, input, token, partitionKey);
+    } finally {
+      if (partitionKey) {
+        await this.releasePartition(partitionKey, token);
+      }
+    }
+  }
+
+  private async runExecute(
+    executionId: string,
+    input: TInput,
+    token: string,
+    partitionKey: string | null,
+  ) {
     await this.acquireLock(executionId, token);
 
     const currentStatus = await this.getMeta(executionId, "status");
@@ -589,6 +670,21 @@ class WorkflowDefinition<TInput, TResult> {
       );
 
       if (renewError) {
+        lockLost = true;
+        controller.abort();
+        clearInterval(renewTimer);
+        return;
+      }
+
+      if (!partitionKey) {
+        return;
+      }
+
+      const [partitionRenewError] = await mightThrow(
+        this.extendPartition(partitionKey, token),
+      );
+
+      if (partitionRenewError) {
         lockLost = true;
         controller.abort();
         clearInterval(renewTimer);
@@ -889,6 +985,100 @@ class WorkflowDefinition<TInput, TResult> {
     if (extendResult === 0) {
       throw new LockError(`Lock ownership lost for execution ${executionId}`);
     }
+  }
+
+  private async acquirePartition(partitionKey: string, token: string) {
+    for (let slot = 0; slot < this.concurrency; slot++) {
+      const [setError, setResult] = await mightThrow(
+        this.options.redis.set(
+          this.partitionSlotKey(partitionKey, slot),
+          token,
+          "PX",
+          String(this.lockTTL),
+          "NX",
+        ),
+      );
+
+      if (setError) {
+        throw new PartitionError(
+          `Unable to acquire partition ${partitionKey} for workflow ${this.options.name}`,
+        );
+      }
+
+      if (setResult === "OK") {
+        return;
+      }
+    }
+
+    throw new PartitionError(
+      `Partition ${partitionKey} is at capacity for workflow ${this.options.name}`,
+    );
+  }
+
+  private async findPartitionSlot(partitionKey: string, token: string) {
+    for (let slot = 0; slot < this.concurrency; slot++) {
+      const slotKey = this.partitionSlotKey(partitionKey, slot);
+
+      const [getError, value] = await mightThrow(
+        this.options.redis.get(slotKey),
+      );
+
+      if (getError) {
+        throw new PartitionError(
+          `Unable to read partition ${partitionKey} for workflow ${this.options.name}`,
+        );
+      }
+
+      if (value === token) {
+        return slot;
+      }
+    }
+
+    return null;
+  }
+
+  private async extendPartition(partitionKey: string, token: string) {
+    const slot = await this.findPartitionSlot(partitionKey, token);
+
+    if (slot === null) {
+      throw new PartitionError(
+        `Partition ownership lost for ${partitionKey} on workflow ${this.options.name}`,
+      );
+    }
+
+    const [setError, setResult] = await mightThrow(
+      this.options.redis.set(
+        this.partitionSlotKey(partitionKey, slot),
+        token,
+        "PX",
+        String(this.lockTTL),
+        "XX",
+      ),
+    );
+
+    if (setError) {
+      throw new PartitionError(
+        `Unable to extend partition ${partitionKey} for workflow ${this.options.name}`,
+      );
+    }
+
+    if (setResult !== "OK") {
+      throw new PartitionError(
+        `Partition ownership lost for ${partitionKey} on workflow ${this.options.name}`,
+      );
+    }
+  }
+
+  private async releasePartition(partitionKey: string, token: string) {
+    const slot = await this.findPartitionSlot(partitionKey, token);
+
+    if (slot === null) {
+      return;
+    }
+
+    await mightThrow(
+      this.options.redis.del(this.partitionSlotKey(partitionKey, slot)),
+    );
   }
 
   private async isCancelled(executionId: string) {
@@ -1460,6 +1650,7 @@ export {
   ExecutionError,
   LockError,
   NotFoundError,
+  PartitionError,
   SerializationError,
   StateError,
   WorkflowError,
