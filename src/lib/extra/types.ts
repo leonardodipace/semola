@@ -19,7 +19,7 @@ export type RetryOnErrorContextType = {
   id: string;
 };
 
-export type HookContextType<TRetryResult> = {
+export type HookContextType<TRetryResult = void> = {
   error: Error | InvalidResultError<TRetryResult>;
   id: string;
   currentAttempt: number;
