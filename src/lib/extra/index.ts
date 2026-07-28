@@ -32,9 +32,9 @@ class Retry<TRetryResult> {
     const shouldUpdate = hasAttempts && onRetryErrorResult && isRetriableError;
     if (!shouldUpdate) return false;
 
-    this.fireBeforeAttempt(ctx.error);
+    await this.fireBeforeAttempt(ctx.error);
     const result = await this.update(ctx);
-    this.fireAfterAttempt(ctx.error);
+    await this.fireAfterAttempt(ctx.error);
 
     return result;
   }
