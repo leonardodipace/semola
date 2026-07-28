@@ -22,6 +22,8 @@ export type RetryOnErrorContextType = {
 export type HookContextType<TRetryResult> = {
   error: Error | InvalidResultError<TRetryResult>;
   id: string;
+  currentAttempt: number;
+  retriesLeft: number;
 };
 
 export type ErrorClassType<E extends Error = Error> = new (

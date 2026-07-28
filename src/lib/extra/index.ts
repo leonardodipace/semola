@@ -71,22 +71,36 @@ class Retry<TRetryResult> {
   }
 
   public async fireBeforeAttempt(error: Error) {
-    const { beforeRetry } = this.options;
+    const { beforeRetry, maxRetries } = this.options;
     if (!beforeRetry) return;
 
     const [callbackError] = await mightThrow(
-      Promise.resolve().then(() => beforeRetry({ id: this.id, error })),
+      Promise.resolve().then(() =>
+        beforeRetry({
+          currentAttempt: this.currentAttempt + 1,
+          retriesLeft: maxRetries - this.currentAttempt,
+          id: this.id,
+          error,
+        }),
+      ),
     );
 
     if (callbackError) throw error;
   }
 
   public async fireAfterAttempt(error: Error) {
-    const { afterRetry } = this.options;
+    const { afterRetry, maxRetries } = this.options;
     if (!afterRetry) return;
 
     const [callbackError] = await mightThrow(
-      Promise.resolve().then(() => afterRetry({ id: this.id, error })),
+      Promise.resolve().then(() =>
+        afterRetry({
+          currentAttempt: this.currentAttempt,
+          retriesLeft: maxRetries - this.currentAttempt,
+          id: this.id,
+          error,
+        }),
+      ),
     );
 
     if (callbackError) throw error;
