@@ -33,10 +33,10 @@ class Retry<TRetryResult> {
     if (!shouldUpdate) return false;
 
     await this.fireBeforeAttempt(ctx.error);
-    const result = await this.update(ctx);
+    await this.update(ctx);
     await this.fireAfterAttempt(ctx.error);
 
-    return result;
+    return true;
   }
 
   public async update(ctx: RetryContext) {
@@ -45,8 +45,6 @@ class Retry<TRetryResult> {
 
     this.currentAttempt += 1;
     await this.runDelay(delay);
-
-    return true;
   }
 
   public async fireOnError(error: Error) {
