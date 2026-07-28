@@ -25,9 +25,14 @@ export type WorkflowExecution<TInput, TResult> = {
   steps: StepSnapshot[];
 };
 
+export type StepContext<TInput> = {
+  input: TInput;
+  signal: AbortSignal;
+  fail: (message: string) => never;
+};
+
 export type StepHandler<TInput, TStep> = (
-  input: TInput,
-  signal: AbortSignal,
+  context: StepContext<TInput>,
 ) => TStep | Promise<TStep>;
 
 export type WorkflowHandlerContext<TInput> = {

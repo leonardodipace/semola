@@ -1478,6 +1478,56 @@ describe("workflow", () => {
       expect(stepAttempts).toBe(3);
     });
 
+    test("fail skips retries and fails the workflow", async () => {
+      const redis = createRedis();
+      let stepAttempts = 0;
+      let onRetryCalls = 0;
+      const errorContexts: Array<{
+        stepName: string;
+        error: string;
+        totalAttempts: number;
+      }> = [];
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "step-fail",
+        redis,
+        retries: 3,
+        retryBackoff: fastRetryBackoff,
+        hooks: {
+          onRetry: () => {
+            onRetryCalls++;
+          },
+          onError: (context) => {
+            errorContexts.push({
+              stepName: context.stepName,
+              error: context.error,
+              totalAttempts: context.totalAttempts,
+            });
+          },
+        },
+        handler: async ({ step }) => {
+          await step("risky", async ({ fail }) => {
+            stepAttempts++;
+            fail("permanent");
+          });
+
+          return "done";
+        },
+      });
+
+      await workflow.start({ id: 1 }, { executionId: "step-fail-1" });
+      const execution = await waitForExecution(workflow, "step-fail-1");
+
+      expect(execution.status).toBe("failed");
+      expect(execution.error).toBe("permanent");
+      expect(stepAttempts).toBe(1);
+      expect(onRetryCalls).toBe(0);
+      expect(errorContexts.length).toBe(1);
+      expect(errorContexts[0]?.stepName).toBe("risky");
+      expect(errorContexts[0]?.error).toBe("permanent");
+      expect(errorContexts[0]?.totalAttempts).toBe(1);
+    });
+
     test("calls onRetry with correct context", async () => {
       const redis = createRedis();
       const retryContexts: Array<{
