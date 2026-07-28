@@ -1,3 +1,5 @@
+import type { InvalidResultError } from "./errors.js";
+
 export type ErrorMetadataType = {
   failedAt: number;
   error: Error;
@@ -17,6 +19,11 @@ export type RetryOnErrorContextType = {
   id: string;
 };
 
+export type HookContextType<TRetryResult> = {
+  error: Error | InvalidResultError<TRetryResult>;
+  id: string;
+};
+
 export type ErrorClassType<E extends Error = Error> = new (
   ...args: never[]
 ) => E;
@@ -31,6 +38,8 @@ export type RetryOptions<TRetryResult> = {
   onFailedAttempt?: (ctx: OnFailedAttemptContextType) => void | Promise<void>;
   retryOnResult?: (result: TRetryResult) => boolean;
   retryOnError?: (ctx: RetryOnErrorContextType) => boolean;
+  beforeRetry?: (ctx: HookContextType<TRetryResult>) => void | Promise<void>;
+  afterRetry?: (ctx: HookContextType<TRetryResult>) => void | Promise<void>;
 };
 
 export type RetryContext = {

@@ -70,6 +70,28 @@ class Retry<TRetryResult> {
     return this.options.retryOnResult(result);
   }
 
+  public async fireBeforeAttempt(error: Error) {
+    const { beforeRetry } = this.options;
+    if (!beforeRetry) return;
+
+    const [callbackError] = await mightThrow(
+      Promise.resolve().then(() => beforeRetry({ id: this.id, error })),
+    );
+
+    if (callbackError) throw error;
+  }
+
+  public async fireAfterAttempt(error: Error) {
+    const { afterRetry } = this.options;
+    if (!afterRetry) return;
+
+    const [callbackError] = await mightThrow(
+      Promise.resolve().then(() => afterRetry({ id: this.id, error })),
+    );
+
+    if (callbackError) throw error;
+  }
+
   private checkIgnoreErrors(error: Error) {
     const { ignoreErrors } = this.options;
     if (!ignoreErrors) return false;
@@ -164,9 +186,11 @@ export function createRetry<TRetryResult = void>(
           `Retrying because 'retryOnResult' rejected the returned result`,
         );
 
+        await retry.fireBeforeAttempt(resultError);
         const shouldContinue = await retry.retryOverError({
           error: resultError,
         });
+        await retry.fireAfterAttempt(resultError);
 
         if (shouldContinue) continue;
 
@@ -176,7 +200,10 @@ export function createRetry<TRetryResult = void>(
         throw resultError;
       }
 
+      await retry.fireBeforeAttempt(fnError);
       const shouldContinue = await retry.retryOverError({ error: fnError });
+      await retry.fireAfterAttempt(fnError);
+
       if (shouldContinue) continue;
 
       const shouldThrow = await retry.fireOnError(fnError);
