@@ -18,7 +18,7 @@ class Retry<TRetryResult> {
 
   public constructor(options: RetryOptions<TRetryResult>) {
     this.options = options;
-    this.currentAttempt = 0;
+    this.currentAttempt = 1;
     this.id = this.options.id ?? crypto.randomUUID();
   }
 
@@ -79,8 +79,8 @@ class Retry<TRetryResult> {
     const [callbackError] = await mightThrow(
       Promise.resolve().then(() =>
         beforeRetry({
-          currentAttempt: this.currentAttempt + 1,
-          retriesLeft: maxRetries - this.currentAttempt,
+          currentAttempt: this.currentAttempt,
+          retriesLeft: maxRetries,
           id: this.id,
           error,
         }),
@@ -123,7 +123,7 @@ class Retry<TRetryResult> {
   }
 
   private hasMoreAttempts() {
-    return this.currentAttempt < this.options.maxRetries;
+    return this.currentAttempt <= this.options.maxRetries;
   }
 
   private runOnRetryError(error: Error, id: string) {
@@ -138,7 +138,7 @@ class Retry<TRetryResult> {
     const { maxRetries } = this.options;
     const onFailedAttempt = this.options.onFailedAttempt;
     const context: OnFailedAttemptContextType = {
-      attemptNumber: this.currentAttempt + 1,
+      attemptNumber: this.currentAttempt,
       delay,
       error,
       retriesLeft: maxRetries - this.currentAttempt,
