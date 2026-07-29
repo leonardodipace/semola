@@ -225,7 +225,7 @@ export function createRetry<TRetryResult = void>(
   };
 }
 
-export { InvalidRetryError } from "./errors.js";
+export { InvalidRetryError, InvalidResultError } from "./errors.js";
 export type {
   ErrorMetadataType,
   OnFailedAttemptContextType,
