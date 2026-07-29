@@ -92,13 +92,13 @@ describe("Create retry", () => {
     expect(attempts).toBeArrayOfSize(3);
 
     expect(attempts[0]?.attemptNumber).toBe(1);
-    expect(attempts[0]?.retriesLeft).toBe(3);
+    expect(attempts[0]?.retriesLeft).toBe(2);
 
     expect(attempts[1]?.attemptNumber).toBe(2);
-    expect(attempts[1]?.retriesLeft).toBe(2);
+    expect(attempts[1]?.retriesLeft).toBe(1);
 
     expect(attempts[2]?.attemptNumber).toBe(3);
-    expect(attempts[2]?.retriesLeft).toBe(1);
+    expect(attempts[2]?.retriesLeft).toBe(0);
 
     expect(err).not.toBeNull();
     expect(err?.message).toBe("A generic error");
@@ -130,7 +130,7 @@ describe("Create retry", () => {
     expect(attempts).toBeArrayOfSize(1);
 
     expect(attempts[0]?.attemptNumber).toBe(1);
-    expect(attempts[0]?.retriesLeft).toBe(3);
+    expect(attempts[0]?.retriesLeft).toBe(2);
 
     expect(err).not.toBeNull();
     expect(err).toBeInstanceOf(UserDefinedError);
@@ -169,7 +169,7 @@ describe("Create retry", () => {
 
     expect(attempts).toBeArrayOfSize(1);
     expect(attempts[0]?.attemptNumber).toBe(1);
-    expect(attempts[0]?.retriesLeft).toBe(3);
+    expect(attempts[0]?.retriesLeft).toBe(2);
   });
 
   test("should return a value after some failed attempts", async () => {
@@ -194,13 +194,13 @@ describe("Create retry", () => {
     const [error, result] = await mightThrow(callable());
     expect(attempts).toBeArrayOfSize(3);
     expect(attempts[0]?.attemptNumber).toBe(1);
-    expect(attempts[0]?.retriesLeft).toBe(4);
+    expect(attempts[0]?.retriesLeft).toBe(3);
 
     expect(attempts[1]?.attemptNumber).toBe(2);
-    expect(attempts[1]?.retriesLeft).toBe(3);
+    expect(attempts[1]?.retriesLeft).toBe(2);
 
     expect(attempts[2]?.attemptNumber).toBe(3);
-    expect(attempts[2]?.retriesLeft).toBe(2);
+    expect(attempts[2]?.retriesLeft).toBe(1);
 
     expect(error).toBeNull();
     expect(result).not.toBeNull();
@@ -996,10 +996,10 @@ describe("Retry on results", () => {
     expect(failsData[1]?.error).toBeInstanceOf(InvalidResultError);
 
     expect(failsData[0]?.attemptNumber).toBe(1);
-    expect(failsData[1]?.attemptNumber).toBe(2);
+    expect(failsData[0]?.retriesLeft).toBe(1);
 
-    expect(failsData[0]?.retriesLeft).toBe(2);
-    expect(failsData[1]?.retriesLeft).toBe(1);
+    expect(failsData[1]?.attemptNumber).toBe(2);
+    expect(failsData[1]?.retriesLeft).toBe(0);
   });
 });
 
