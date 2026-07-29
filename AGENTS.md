@@ -121,8 +121,11 @@ bunx fallow audit --base main --format json --quiet 2>/dev/null || true   # chan
 ## Documentation
 
 - New modules need a doc at `docs/<module>.md` (match existing module docs in `/docs`).
+- Each doc page needs YAML frontmatter with `title` and `description` for the Fumadocs site (`apps/docs`).
+- Update `docs/meta.json` sidebar order (and section separators) when adding a page.
 - Update existing docs when public API, behavior, or usage changes.
 - Skip docs only for internal refactors with no user-facing change.
+- Docs site: `bun run docs:dev` (not part of the published package).
 
 ## Boundaries
 

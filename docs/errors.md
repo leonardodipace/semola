@@ -1,66 +1,60 @@
-# Error Utilities
+---
+title: Errors
+description: Result tuples and mightThrow for explicit error handling
+---
 
-Result-based error handling inspired by functional programming patterns. Avoid throwing exceptions and handle errors explicitly with type-safe tuples.
-
-## Import
+Semola's error helpers turn fallible work into **`[error, data]`** tuples. You branch on the error instead of nesting try/catch.
 
 ```typescript
 import { ok, err, mightThrow, mightThrowSync } from "semola/errors";
 ```
 
-## API
+## The pattern
 
-**`ok<T>(data: T)`**
+Every result is a two-element tuple:
 
-Creates a successful result tuple.
-
-```typescript
-const result = ok({ userId: 123, name: "John" });
-// [null, { userId: 123, name: "John" }]
-
-const [error, data] = result;
-
-if (error) {
-  // Handle error
-} else {
-  console.log(data.userId); // Type-safe access
-}
-```
-
-**`err<T>(type: T, message: string)`**
-
-Creates an error result tuple with a typed error object.
+- Success: `[null, data]`
+- Failure: `[{ type, message }, null]`
 
 ```typescript
-const result = err("NotFoundError", "User not found");
-// [{ type: "NotFoundError", message: "User not found" }, null]
-
-const [error, data] = result;
+const [error, user] = await getUser("123");
 
 if (error) {
-  console.log(error.type); // "NotFoundError"
-  console.log(error.message); // "User not found"
-}
-```
-
-**Common error types:** `NotFoundError`, `UnauthorizedError`, `InternalServerError`, `ValidationError`, or any custom string.
-
-**`mightThrow<T, E = Error>(promise: Promise<T>)`**
-
-Wraps async operations that might throw into result tuples.
-
-By default, `E` is `Error`. If the promise can reject with a non-Error value, pass a custom `E` generic.
-
-```typescript
-const [error, data] = await mightThrow(fetch("/api/users"));
-
-if (error) {
-  console.error("Request failed:", error);
+  console.error(error.type, error.message);
   return;
 }
 
-console.log("Success:", data);
+console.log(user.email);
 ```
+
+After the guard, `user` is narrowed. No optional chaining gymnastics.
+
+## Wrap things that throw
+
+**Async:**
+
+```typescript
+const [error, response] = await mightThrow(fetch("/api/users"));
+
+if (error) {
+  // network failure, abort, etc.
+  return;
+}
+
+const [parseError, body] = await mightThrow(response.json());
+```
+
+**Sync:**
+
+```typescript
+const [error, value] = mightThrowSync(() => JSON.parse(input));
+
+if (error) {
+  return err("ValidationError", "Invalid JSON");
+}
+```
+
+By default the error side is typed as `Error`. If something rejects with a custom shape, pass a generic:
 
 ```typescript
 const [error] = await mightThrow<never, { code: string }>(
@@ -68,32 +62,15 @@ const [error] = await mightThrow<never, { code: string }>(
 );
 
 if (error) {
-  console.log(error.code); // RATE_LIMITED
+  console.log(error.code);
 }
 ```
 
-**`mightThrowSync<T, E = Error>(fn: () => T)`**
+## Return your own results
 
-Wraps synchronous operations that might throw into result tuples.
-
-By default, `E` is `Error`. If the function can throw a non-Error value, pass a custom `E` generic.
+Build functions that speak the same dialect:
 
 ```typescript
-const [error, data] = mightThrowSync(() => JSON.parse(input));
-
-if (error) {
-  console.error("Parse failed:", error);
-  return;
-}
-
-console.log("Parsed:", data);
-```
-
-## Usage Example
-
-```typescript
-import { ok, err, mightThrow } from "semola/errors";
-
 async function getUser(id: string) {
   if (!id) {
     return err("ValidationError", "User ID is required");
@@ -114,21 +91,20 @@ async function getUser(id: string) {
   return ok(user);
 }
 
-// Usage
 const [error, user] = await getUser("123");
 
 if (error) {
   switch (error.type) {
     case "ValidationError":
-      console.log("Validation failed:", error.message);
-      break;
-    case "NotFoundError":
-      console.log("User not found");
+      // ...
       break;
     default:
-      console.log("Error:", error.message);
+      console.error(error.message);
   }
-} else {
-  console.log("User:", user);
+  return;
 }
+
+console.log(user);
 ```
+
+`err(type, message)` accepts common labels like `NotFoundError`, `UnauthorizedError`, `ValidationError`, `InternalServerError`, `MigrationError`, `SchemaError`, or any other string you want to use as a discriminant.
