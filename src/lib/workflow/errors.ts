@@ -46,3 +46,10 @@ export class CancelledError extends Error {
     this.name = "CancelledError";
   }
 }
+
+export class StepFailedError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = "StepFailedError";
+  }
+}

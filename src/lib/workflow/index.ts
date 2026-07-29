@@ -7,9 +7,11 @@ import {
   NotFoundError,
   SerializationError,
   StateError,
+  StepFailedError,
   WorkflowError,
 } from "./errors.js";
 import type {
+  StepHandler,
   StepSnapshot,
   Workflow,
   WorkflowCancelResult,
@@ -606,10 +608,7 @@ class WorkflowDefinition<TInput, TResult> {
 
     const step = async <TStep>(
       name: string,
-      handler: (
-        inputValue: TInput,
-        signal: AbortSignal,
-      ) => TStep | Promise<TStep>,
+      handler: StepHandler<TInput, TStep>,
     ) => {
       await this.throwIfCancelled(executionId, () => {
         controller.abort();
@@ -749,10 +748,7 @@ class WorkflowDefinition<TInput, TResult> {
     executionId: string,
     input: TInput,
     stepName: string,
-    handler: (
-      inputValue: TInput,
-      signal: AbortSignal,
-    ) => TStep | Promise<TStep>,
+    handler: StepHandler<TInput, TStep>,
     signal: AbortSignal,
     abort: () => void,
   ) {
@@ -760,11 +756,21 @@ class WorkflowDefinition<TInput, TResult> {
 
     const errorHistory: WorkflowStepErrorRecord[] = [];
 
+    const fail = (message: string): never => {
+      throw new StepFailedError(message);
+    };
+
     while (true) {
       await this.throwIfCancelled(executionId, abort);
 
       const stepOutcome = await mightThrow(
-        Promise.resolve(handler(input, signal)),
+        Promise.resolve(
+          handler({
+            input,
+            signal,
+            fail,
+          }),
+        ),
       );
 
       const [stepError, output] = stepOutcome;
@@ -783,7 +789,10 @@ class WorkflowDefinition<TInput, TResult> {
         timestamp: now(),
       });
 
-      if (attempt <= this.retries) {
+      const shouldRetry =
+        !(stepError instanceof StepFailedError) && attempt <= this.retries;
+
+      if (shouldRetry) {
         const nextRetryDelayMs = this.computeBackoffDelay(attempt);
 
         if (this.options.hooks?.onRetry) {
@@ -1462,9 +1471,11 @@ export {
   NotFoundError,
   SerializationError,
   StateError,
+  StepFailedError,
   WorkflowError,
 } from "./errors.js";
 export type {
+  StepContext,
   StepHandler,
   Workflow,
   WorkflowExecution,

@@ -141,6 +141,20 @@ const onboardUser = defineWorkflow<User>({
 
 Failed steps retry automatically with exponential backoff before the workflow is marked `failed`. By default, each step gets 3 retries (4 total attempts). This applies to every workflow unless you override `retries`.
 
+Call `fail(message)` inside a step to skip retries and fail the workflow immediately:
+
+```typescript
+handler: async ({ step }) => {
+  await step("charge", async ({ input, fail }) => {
+    if (!input.cardId) {
+      fail("missing card");
+    }
+  });
+},
+```
+
+Step handlers receive `{ input, signal, fail }`.
+
 Only successful step runs are persisted to Redis. Side effects inside a step may run more than once during retries, so keep step handlers idempotent.
 
 `cancel(executionId)` works during retry backoff as well as between steps.
@@ -203,7 +217,7 @@ const onboardUser = defineWorkflow<User, void>({
 
 - `onStart` runs each time the handler executes, including on `resume()`.
 - `onRetry` runs before each step retry backoff delay.
-- `onError` runs when a step fails after all retries are exhausted.
+- `onError` runs when a step fails after all retries are exhausted, or immediately after `fail()`.
 - `onComplete` runs after a successful execution.
 - `onCancel` runs when execution ends as cancelled.
 
