@@ -108,6 +108,7 @@ export type WorkflowOptions<TInput, TResult> = {
   hooks?: WorkflowHooks<TInput, TResult>;
   lockTTL?: number;
   concurrency?: number;
+  partitionBy?: (input: TInput) => string;
   pollInterval?: number;
   serializeInput?: SerializeValue<TInput>;
   deserializeInput?: DeserializeValue<TInput>;
@@ -119,6 +120,7 @@ export type WorkflowOptions<TInput, TResult> = {
 
 export type WorkflowStartOptions = {
   executionId?: string;
+  partitionKey?: string;
 };
 
 export type WorkflowStartResult = {
@@ -146,6 +148,7 @@ export type WorkflowMeta = {
   failedAt: string;
   cancelledAt: string;
   steps: string;
+  partitionKey: string;
 };
 
 export type WorkflowMetaField = keyof WorkflowMeta;
