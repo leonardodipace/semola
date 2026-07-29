@@ -209,7 +209,7 @@ export function createRetry<TRetryResult = void>(
         if (shouldContinue) continue;
 
         const shouldThrow = await retry.fireOnError(resultError);
-        if (!shouldThrow) return undefined;
+        if (!shouldThrow) break;
 
         throw resultError;
       }
@@ -218,7 +218,7 @@ export function createRetry<TRetryResult = void>(
       if (shouldContinue) continue;
 
       const shouldThrow = await retry.fireOnError(fnError);
-      if (!shouldThrow) return undefined;
+      if (!shouldThrow) break;
 
       throw fnError;
     }
