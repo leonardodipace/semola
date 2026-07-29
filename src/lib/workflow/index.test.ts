@@ -1478,6 +1478,56 @@ describe("workflow", () => {
       expect(stepAttempts).toBe(3);
     });
 
+    test("fail skips retries and fails the workflow", async () => {
+      const redis = createRedis();
+      let stepAttempts = 0;
+      let onRetryCalls = 0;
+      const errorContexts: Array<{
+        stepName: string;
+        error: string;
+        totalAttempts: number;
+      }> = [];
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "step-fail",
+        redis,
+        retries: 3,
+        retryBackoff: fastRetryBackoff,
+        hooks: {
+          onRetry: () => {
+            onRetryCalls++;
+          },
+          onError: (context) => {
+            errorContexts.push({
+              stepName: context.stepName,
+              error: context.error,
+              totalAttempts: context.totalAttempts,
+            });
+          },
+        },
+        handler: async ({ step }) => {
+          await step("risky", async ({ fail }) => {
+            stepAttempts++;
+            fail("permanent");
+          });
+
+          return "done";
+        },
+      });
+
+      await workflow.start({ id: 1 }, { executionId: "step-fail-1" });
+      const execution = await waitForExecution(workflow, "step-fail-1");
+
+      expect(execution.status).toBe("failed");
+      expect(execution.error).toBe("permanent");
+      expect(stepAttempts).toBe(1);
+      expect(onRetryCalls).toBe(0);
+      expect(errorContexts.length).toBe(1);
+      expect(errorContexts[0]?.stepName).toBe("risky");
+      expect(errorContexts[0]?.error).toBe("permanent");
+      expect(errorContexts[0]?.totalAttempts).toBe(1);
+    });
+
     test("calls onRetry with correct context", async () => {
       const redis = createRedis();
       const retryContexts: Array<{
@@ -2114,5 +2164,282 @@ describe("workflow", () => {
     } finally {
       await workflow.stop();
     }
+  });
+
+  describe("partitions", () => {
+    test("caps concurrent executions per partition key", async () => {
+      const redis = createRedis();
+      let maxConcurrent = 0;
+      let currentConcurrent = 0;
+      let entered = 0;
+      let releaseBarrier: (() => void) | undefined;
+
+      const barrier = new Promise<void>((resolve) => {
+        releaseBarrier = resolve;
+      });
+
+      const workflow = defineWorkflow<{ envId: string }, string>({
+        name: "partition-cap",
+        redis,
+        concurrency: 2,
+        partitionBy: (input) => input.envId,
+        pollInterval: 1,
+        handler: async ({ step }) => {
+          currentConcurrent++;
+          maxConcurrent = Math.max(maxConcurrent, currentConcurrent);
+          entered++;
+
+          if (entered >= 2) {
+            releaseBarrier?.();
+          }
+
+          await barrier;
+
+          await step("work", async () => {
+            return "ok";
+          });
+
+          currentConcurrent--;
+          return "done";
+        },
+      });
+
+      try {
+        await workflow.start({ envId: "env-a" }, { executionId: "pc-1" });
+        await workflow.start({ envId: "env-a" }, { executionId: "pc-2" });
+        await workflow.start({ envId: "env-a" }, { executionId: "pc-3" });
+        await workflow.start({ envId: "env-a" }, { executionId: "pc-4" });
+
+        await waitForExecution(workflow, "pc-1");
+        await waitForExecution(workflow, "pc-2");
+        await waitForExecution(workflow, "pc-3");
+        await waitForExecution(workflow, "pc-4");
+
+        expect(maxConcurrent).toBeLessThanOrEqual(2);
+        expect(maxConcurrent).toBeGreaterThan(1);
+      } finally {
+        await workflow.stop();
+      }
+    });
+
+    test("serializes same partition key when concurrency is 1", async () => {
+      const redis = createRedis();
+      let maxConcurrent = 0;
+      let currentConcurrent = 0;
+
+      const workflow = defineWorkflow<{ envId: string }, string>({
+        name: "partition-serial",
+        redis,
+        concurrency: 1,
+        partitionBy: (input) => input.envId,
+        pollInterval: 1,
+        handler: async ({ step }) => {
+          currentConcurrent++;
+          maxConcurrent = Math.max(maxConcurrent, currentConcurrent);
+
+          await step("work", async () => {
+            await sleep(40);
+            return "ok";
+          });
+
+          currentConcurrent--;
+          return "done";
+        },
+      });
+
+      try {
+        await workflow.start({ envId: "env-a" }, { executionId: "pd-1" });
+        await workflow.start({ envId: "env-a" }, { executionId: "pd-2" });
+        await workflow.start({ envId: "env-a" }, { executionId: "pd-3" });
+
+        await waitForExecution(workflow, "pd-1");
+        await waitForExecution(workflow, "pd-2");
+        await waitForExecution(workflow, "pd-3");
+
+        expect(maxConcurrent).toBe(1);
+      } finally {
+        await workflow.stop();
+      }
+    });
+
+    test("allows overlap across different partition keys", async () => {
+      const redis = createRedis();
+      let maxGlobal = 0;
+      let currentGlobal = 0;
+
+      const workflow = defineWorkflow<{ envId: string }, string>({
+        name: "partition-overlap",
+        redis,
+        concurrency: 2,
+        partitionBy: (input) => input.envId,
+        pollInterval: 1,
+        handler: async ({ step }) => {
+          currentGlobal++;
+          maxGlobal = Math.max(maxGlobal, currentGlobal);
+
+          await step("work", async () => {
+            await sleep(50);
+            return "ok";
+          });
+
+          currentGlobal--;
+          return "done";
+        },
+      });
+
+      try {
+        await workflow.start({ envId: "a" }, { executionId: "po-a1" });
+        await workflow.start({ envId: "b" }, { executionId: "po-b1" });
+
+        await waitForExecution(workflow, "po-a1");
+        await waitForExecution(workflow, "po-b1");
+
+        expect(maxGlobal).toBe(2);
+      } finally {
+        await workflow.stop();
+      }
+    });
+
+    test("accepts partitionKey on start without partitionBy", async () => {
+      const redis = createRedis();
+      let maxConcurrent = 0;
+      let currentConcurrent = 0;
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "partition-start-key",
+        redis,
+        concurrency: 1,
+        pollInterval: 1,
+        handler: async ({ step }) => {
+          currentConcurrent++;
+          maxConcurrent = Math.max(maxConcurrent, currentConcurrent);
+
+          await step("work", async () => {
+            await sleep(40);
+            return "ok";
+          });
+
+          currentConcurrent--;
+          return "done";
+        },
+      });
+
+      try {
+        await workflow.start(
+          { id: 1 },
+          { executionId: "psk-1", partitionKey: "shared" },
+        );
+        await workflow.start(
+          { id: 2 },
+          { executionId: "psk-2", partitionKey: "shared" },
+        );
+
+        await waitForExecution(workflow, "psk-1");
+        await waitForExecution(workflow, "psk-2");
+
+        expect(maxConcurrent).toBe(1);
+      } finally {
+        await workflow.stop();
+      }
+    });
+
+    test("start partitionKey overrides partitionBy", async () => {
+      const redis = createRedis();
+      let maxConcurrent = 0;
+      let currentConcurrent = 0;
+
+      const workflow = defineWorkflow<{ envId: string }, string>({
+        name: "partition-override",
+        redis,
+        concurrency: 1,
+        partitionBy: (input) => input.envId,
+        pollInterval: 1,
+        handler: async ({ step }) => {
+          currentConcurrent++;
+          maxConcurrent = Math.max(maxConcurrent, currentConcurrent);
+
+          await step("work", async () => {
+            await sleep(40);
+            return "ok";
+          });
+
+          currentConcurrent--;
+          return "done";
+        },
+      });
+
+      try {
+        await workflow.start(
+          { envId: "a" },
+          { executionId: "pov-1", partitionKey: "shared" },
+        );
+        await workflow.start(
+          { envId: "b" },
+          { executionId: "pov-2", partitionKey: "shared" },
+        );
+
+        await waitForExecution(workflow, "pov-1");
+        await waitForExecution(workflow, "pov-2");
+
+        expect(maxConcurrent).toBe(1);
+      } finally {
+        await workflow.stop();
+      }
+    });
+
+    test("resume honors stored partitionKey", async () => {
+      const redis = createRedis();
+      let maxConcurrent = 0;
+      let currentConcurrent = 0;
+      let attempts = 0;
+      let partitionFn = (input: { envId: string }) => input.envId;
+
+      const workflow = defineWorkflow<{ envId: string }, string>({
+        name: "partition-resume",
+        redis,
+        concurrency: 1,
+        partitionBy: (input) => partitionFn(input),
+        pollInterval: 1,
+        retries: 0,
+        handler: async ({ step }) => {
+          attempts++;
+
+          if (attempts === 1) {
+            throw new Error("boom");
+          }
+
+          currentConcurrent++;
+          maxConcurrent = Math.max(maxConcurrent, currentConcurrent);
+
+          await step("work", async () => {
+            await sleep(40);
+            return "ok";
+          });
+
+          currentConcurrent--;
+          return "done";
+        },
+      });
+
+      try {
+        await workflow.start({ envId: "env-a" }, { executionId: "pr-1" });
+        await waitForExecution(workflow, "pr-1");
+
+        partitionFn = () => "should-not-use";
+
+        await workflow.start(
+          { envId: "x" },
+          { executionId: "pr-2", partitionKey: "env-a" },
+        );
+        await workflow.resume("pr-1");
+
+        await waitForExecution(workflow, "pr-1");
+        await waitForExecution(workflow, "pr-2");
+
+        expect(maxConcurrent).toBe(1);
+      } finally {
+        await workflow.stop();
+      }
+    });
   });
 });
