@@ -39,7 +39,15 @@ class MockRedisClient {
   }
 
   public setCommandFailure(
-    command: "hset" | "hget" | "set" | "get" | "del" | "lpush" | "rpop",
+    command:
+      | "hset"
+      | "hget"
+      | "set"
+      | "get"
+      | "del"
+      | "lpush"
+      | "rpop"
+      | "eval",
   ) {
     this.failCommands.add(command);
   }
@@ -313,6 +321,10 @@ class MockRedisClient {
       throw new Error(`Unsupported command: ${command}`);
     }
 
+    if (this.failCommands.has("eval")) {
+      throw new Error("eval failed");
+    }
+
     const script = args[0];
     const numKeys = parseInt(args[1] ?? "0", 10);
     const keys = args.slice(2, 2 + numKeys);
@@ -571,6 +583,38 @@ describe("workflow", () => {
     ).rejects.toMatchObject({
       name: "StateError",
       message: "Workflow execution exec-1 already exists",
+    });
+  });
+
+  test("rejects concurrent duplicate custom execution ids", async () => {
+    const redis = createRedis();
+
+    const workflow = defineWorkflow<{ id: number }, string>({
+      name: "concurrent-dupe",
+      redis,
+      handler: async () => "ok",
+    });
+
+    const results = await Promise.allSettled([
+      workflow.start({ id: 1 }, { executionId: "exec-race" }),
+      workflow.start({ id: 2 }, { executionId: "exec-race" }),
+    ]);
+
+    const fulfilled = results.filter((result) => result.status === "fulfilled");
+    const rejected = results.filter((result) => result.status === "rejected");
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+
+    const failure = rejected[0];
+
+    if (!failure || failure.status !== "rejected") {
+      throw new Error("expected one start to reject");
+    }
+
+    expect(failure.reason).toMatchObject({
+      name: "StateError",
+      message: "Workflow execution exec-race already exists",
     });
   });
 
@@ -1003,7 +1047,7 @@ describe("workflow", () => {
   });
 
   describe("redis write failure matrix", () => {
-    const commands: Array<"hset" | "set"> = ["hset", "set"];
+    const commands: Array<"eval" | "set"> = ["eval", "set"];
 
     for (const command of commands) {
       test(`handles redis ${command} failures during start`, async () => {
@@ -1015,7 +1059,7 @@ describe("workflow", () => {
           redis,
         );
 
-        if (command === "hset") {
+        if (command === "eval") {
           await expect(workflow.start({ id: 1 })).rejects.toMatchObject({
             name: "WorkflowError",
             message: expect.stringContaining(
@@ -1040,20 +1084,30 @@ describe("workflow", () => {
   });
 
   describe("execute hset failure matrix", () => {
-    test("fails when hset fails during running status write", async () => {
+    test("leaves execution pending when running status write fails", async () => {
       const redis = createRedis() as MockRedisClient & Bun.RedisClient;
       redis.failHsetAfterNCalls(0);
 
       const workflow = createWorkflowWithEchoResult("hset-running-fail", redis);
 
-      await expect(workflow.start({ id: 1 })).rejects.toMatchObject({
-        name: "WorkflowError",
-      });
+      const started = await workflow.start(
+        { id: 1 },
+        { executionId: "hset-running-fail-1" },
+      );
+
+      expect(started.status).toBe("pending");
+
+      await sleep(50);
+
+      const execution = await workflow.get(started.executionId);
+
+      expect(execution.status).toBe("pending");
+      expect(redis.hsetFailureCount).toBeGreaterThanOrEqual(1);
     });
 
     test("fails when hset fails during completed status write", async () => {
       const redis = createRedis() as MockRedisClient & Bun.RedisClient;
-      redis.failHsetAfterNCalls(3);
+      redis.failHsetAfterNCalls(2);
 
       const workflow = defineWorkflow<{ id: number }, string>({
         name: "hset-completed-fail",
@@ -1145,7 +1199,7 @@ describe("workflow", () => {
       };
 
       try {
-        redis.failHsetAfterNCalls(1);
+        redis.failHsetAfterNCalls(0);
 
         const workflow = createWorkflowWithEchoResult(
           "background-record-failure",
