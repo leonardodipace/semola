@@ -1107,7 +1107,7 @@ describe("workflow", () => {
 
     test("fails when hset fails during completed status write", async () => {
       const redis = createRedis() as MockRedisClient & Bun.RedisClient;
-      redis.failHsetAfterNCalls(2);
+      redis.failHsetAfterNCalls(3);
 
       const workflow = defineWorkflow<{ id: number }, string>({
         name: "hset-completed-fail",
