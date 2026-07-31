@@ -101,13 +101,13 @@ describe("Create retry", () => {
     expect(attempts).toBeArrayOfSize(3);
 
     expect(attempts[0]?.attemptNumber).toBe(1);
-    expect(attempts[0]?.retriesLeft).toBe(2);
+    expect(attempts[0]?.retriesRemaining).toBe(2);
 
     expect(attempts[1]?.attemptNumber).toBe(2);
-    expect(attempts[1]?.retriesLeft).toBe(1);
+    expect(attempts[1]?.retriesRemaining).toBe(1);
 
     expect(attempts[2]?.attemptNumber).toBe(3);
-    expect(attempts[2]?.retriesLeft).toBe(0);
+    expect(attempts[2]?.retriesRemaining).toBe(0);
 
     expect(err).not.toBeNull();
     expect(err?.message).toBe("A generic error");
@@ -139,7 +139,7 @@ describe("Create retry", () => {
     expect(attempts).toBeArrayOfSize(1);
 
     expect(attempts[0]?.attemptNumber).toBe(1);
-    expect(attempts[0]?.retriesLeft).toBe(2);
+    expect(attempts[0]?.retriesRemaining).toBe(2);
 
     expect(err).not.toBeNull();
     expect(err).toBeInstanceOf(UserDefinedError);
@@ -178,7 +178,7 @@ describe("Create retry", () => {
 
     expect(attempts).toBeArrayOfSize(1);
     expect(attempts[0]?.attemptNumber).toBe(1);
-    expect(attempts[0]?.retriesLeft).toBe(2);
+    expect(attempts[0]?.retriesRemaining).toBe(2);
   });
 
   test("should return a value after some failed attempts", async () => {
@@ -203,13 +203,13 @@ describe("Create retry", () => {
     const [error, result] = await mightThrow(callable());
     expect(attempts).toBeArrayOfSize(3);
     expect(attempts[0]?.attemptNumber).toBe(1);
-    expect(attempts[0]?.retriesLeft).toBe(3);
+    expect(attempts[0]?.retriesRemaining).toBe(3);
 
     expect(attempts[1]?.attemptNumber).toBe(2);
-    expect(attempts[1]?.retriesLeft).toBe(2);
+    expect(attempts[1]?.retriesRemaining).toBe(2);
 
     expect(attempts[2]?.attemptNumber).toBe(3);
-    expect(attempts[2]?.retriesLeft).toBe(1);
+    expect(attempts[2]?.retriesRemaining).toBe(1);
 
     expect(error).toBeNull();
     expect(result).not.toBeNull();
@@ -245,16 +245,16 @@ describe("Create retry", () => {
     expect(attemptsOnFirstCall[0]?.attemptNumber).toBe(
       attemptsOnSecondCall[0]?.attemptNumber,
     );
-    expect(attemptsOnFirstCall[0]?.retriesLeft).toBe(
-      attemptsOnSecondCall[0]?.retriesLeft,
+    expect(attemptsOnFirstCall[0]?.retriesRemaining).toBe(
+      attemptsOnSecondCall[0]?.retriesRemaining,
     );
     expect(attemptsOnFirstCall[0]?.id).not.toBe(attemptsOnSecondCall[0]?.id);
 
     expect(attemptsOnFirstCall[1]?.attemptNumber).toBe(
       attemptsOnSecondCall[1]?.attemptNumber,
     );
-    expect(attemptsOnFirstCall[1]?.retriesLeft).toBe(
-      attemptsOnSecondCall[1]?.retriesLeft,
+    expect(attemptsOnFirstCall[1]?.retriesRemaining).toBe(
+      attemptsOnSecondCall[1]?.retriesRemaining,
     );
     expect(attemptsOnFirstCall[1]?.id).not.toBe(attemptsOnSecondCall[1]?.id);
   });
@@ -545,10 +545,10 @@ describe("Ignoring Errors", () => {
       },
       maxRetries: 3,
       ignoreErrors: [UserDefinedError, SpecificError],
-      onFailedAttempt: ({ retriesLeft, attemptNumber }) => {
+      onFailedAttempt: ({ retriesRemaining, attemptNumber }) => {
         called++;
         expect(attemptNumber).toBe(1);
-        expect(retriesLeft).toBe(2);
+        expect(retriesRemaining).toBe(2);
       },
     });
 
@@ -977,7 +977,7 @@ describe("Retry on results", () => {
     const failsData: {
       error: Error;
       attemptNumber: number;
-      retriesLeft: number;
+      retriesRemaining: number;
     }[] = [];
 
     let onFailedCalles = 0;
@@ -986,9 +986,9 @@ describe("Retry on results", () => {
         return new Response(undefined, { status: 404 });
       },
       retryOnResult: (res) => res.status === 404,
-      onFailedAttempt: ({ error, attemptNumber, retriesLeft }) => {
+      onFailedAttempt: ({ error, attemptNumber, retriesRemaining }) => {
         onFailedCalles++;
-        failsData.push({ error, attemptNumber, retriesLeft });
+        failsData.push({ error, attemptNumber, retriesRemaining });
       },
       maxRetries: 2,
     });
@@ -1005,10 +1005,10 @@ describe("Retry on results", () => {
     expect(failsData[1]?.error).toBeInstanceOf(InvalidResultError);
 
     expect(failsData[0]?.attemptNumber).toBe(1);
-    expect(failsData[0]?.retriesLeft).toBe(1);
+    expect(failsData[0]?.retriesRemaining).toBe(1);
 
     expect(failsData[1]?.attemptNumber).toBe(2);
-    expect(failsData[1]?.retriesLeft).toBe(0);
+    expect(failsData[1]?.retriesRemaining).toBe(0);
   });
 });
 
