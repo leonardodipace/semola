@@ -526,6 +526,7 @@ describe("Ignoring Errors", () => {
   test("should retry on a specific error", async () => {
     let state = 0;
     let called = 0;
+    let onFailedCtx: Record<string, number> = {};
     const callable = createRetry({
       input: () => {
         if (state === 0) {
@@ -547,8 +548,7 @@ describe("Ignoring Errors", () => {
       ignoreErrors: [UserDefinedError, SpecificError],
       onFailedAttempt: ({ retriesRemaining, attempt }) => {
         called++;
-        expect(attempt).toBe(1);
-        expect(retriesRemaining).toBe(2);
+        onFailedCtx = { attempt, retriesRemaining };
       },
     });
 
@@ -564,6 +564,7 @@ describe("Ignoring Errors", () => {
 
     const _ = await mightThrow(callable());
     expect(called).toBe(1);
+    expect(onFailedCtx).toMatchObject({ attempt: 1, retriesRemaining: 2 });
   });
 });
 
