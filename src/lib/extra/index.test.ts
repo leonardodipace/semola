@@ -15,6 +15,15 @@ import type { ErrorClassType, OnFailedAttemptContextType } from "./types.js";
 class UserDefinedError extends Error {}
 class SpecificError extends UserDefinedError {}
 
+type CallSequence =
+  | "inputFn"
+  | "retryOnResult"
+  | "onFailedAttempt"
+  | "beforeRetry"
+  | "afterRetry"
+  | "onError"
+  | "retryOnError";
+
 const instantTimeout = ((fn: () => void) => {
   fn();
 
@@ -1004,8 +1013,6 @@ describe("Retry on results", () => {
 });
 
 describe("Hooks", () => {
-  type CallSequence = "onFailedAttempt" | "beforeRetry" | "afterRetry";
-
   test("should call beforeRetry() hook, before each attempt", async () => {
     const callSequence: CallSequence[] = [];
     const callable = createRetry({
@@ -1179,5 +1186,89 @@ describe("Hooks", () => {
     const [error] = await mightThrow(callable());
     expect(error).toBe(original);
     expect(onErrorCalled).toBe(false);
+  });
+});
+
+describe("Life cycle", () => {
+  test("should follow the whole life cycle releated to an error", async () => {
+    const callSequence: CallSequence[] = [];
+    const callable = createRetry({
+      maxRetries: 1,
+      input: () => {
+        callSequence.push("inputFn");
+        throw new Error("the error");
+      },
+      retryOnError: () => {
+        callSequence.push("retryOnError");
+        return true;
+      },
+      beforeRetry: () => {
+        callSequence.push("beforeRetry");
+      },
+      onFailedAttempt: () => {
+        callSequence.push("onFailedAttempt");
+      },
+      afterRetry: () => {
+        callSequence.push("afterRetry");
+      },
+      onError: () => {
+        callSequence.push("onError");
+      },
+    });
+
+    await callable();
+
+    expect(callSequence).toHaveLength(7);
+    expect(callSequence[0]).toBe("inputFn");
+    expect(callSequence[1]).toBe("retryOnError");
+    expect(callSequence[2]).toBe("beforeRetry");
+    expect(callSequence[3]).toBe("onFailedAttempt");
+    expect(callSequence[4]).toBe("afterRetry");
+    expect(callSequence[5]).toBe("inputFn");
+    expect(callSequence[6]).toBe("onError");
+  });
+
+  test("should follow the whole life cycle releated to an invalid result", async () => {
+    const callSequence: CallSequence[] = [];
+    const callable = createRetry({
+      maxRetries: 1,
+      input: () => {
+        callSequence.push("inputFn");
+        return { body: null, status: 404 };
+      },
+      retryOnResult: ({ body, status }) => {
+        callSequence.push("retryOnResult");
+        return !body && status === 404;
+      },
+      retryOnError: () => {
+        callSequence.push("retryOnError");
+        return true;
+      },
+      beforeRetry: () => {
+        callSequence.push("beforeRetry");
+      },
+      onFailedAttempt: () => {
+        callSequence.push("onFailedAttempt");
+      },
+      afterRetry: () => {
+        callSequence.push("afterRetry");
+      },
+      onError: () => {
+        callSequence.push("onError");
+      },
+    });
+
+    await callable();
+
+    expect(callSequence).toHaveLength(9);
+    expect(callSequence[0]).toBe("inputFn");
+    expect(callSequence[1]).toBe("retryOnResult");
+    expect(callSequence[2]).toBe("retryOnError");
+    expect(callSequence[3]).toBe("beforeRetry");
+    expect(callSequence[4]).toBe("onFailedAttempt");
+    expect(callSequence[5]).toBe("afterRetry");
+    expect(callSequence[6]).toBe("inputFn");
+    expect(callSequence[7]).toBe("retryOnResult");
+    expect(callSequence[8]).toBe("onError");
   });
 });
