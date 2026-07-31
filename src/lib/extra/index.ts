@@ -72,9 +72,6 @@ class Retry<TRetryResult> {
   public retryOverResult(result: TRetryResult) {
     if (!this.options.retryOnResult) return false;
 
-    const hasAttempts = this.hasMoreAttempts();
-    if (!hasAttempts) return false;
-
     return this.options.retryOnResult(result);
   }
 
