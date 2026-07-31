@@ -30,6 +30,10 @@ export type ErrorClassType<E extends Error = Error> = new (
   ...args: never[]
 ) => E;
 
+export type RetryOutcomeType<TRetryResult> =
+  | { ok: true; result: TRetryResult }
+  | { ok: false };
+
 export type RetryOptions<TRetryResult> = {
   input: () => TRetryResult | Promise<TRetryResult>;
   maxRetries: number;

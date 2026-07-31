@@ -5,6 +5,7 @@ import type {
   OnFailedAttemptContextType,
   RetryContext,
   RetryOptions,
+  RetryOutcomeType,
 } from "./types.js";
 
 const BASE_BACKOFF_DELAY = 1000;
@@ -187,7 +188,7 @@ export function createRetry<TRetryResult = void>(
     );
   }
 
-  return async () => {
+  return async (): Promise<RetryOutcomeType<TRetryResult>> => {
     const retry = new Retry<TRetryResult>(options);
     const { input: fn } = options;
 
@@ -198,7 +199,7 @@ export function createRetry<TRetryResult = void>(
 
       if (!fnError) {
         const shouldRetryOnResult = retry.retryOverResult(result);
-        if (!shouldRetryOnResult) return result;
+        if (!shouldRetryOnResult) return { ok: true, result };
 
         const resultError = new InvalidResultError<TRetryResult>(
           result,
@@ -225,11 +226,14 @@ export function createRetry<TRetryResult = void>(
 
       throw fnError;
     }
+
+    return { ok: false };
   };
 }
 
 export { InvalidResultError, InvalidRetryError } from "./errors.js";
 export type {
+  RetryOutcomeType,
   ErrorMetadataType,
   HookContextType,
   OnFailedAttemptContextType,

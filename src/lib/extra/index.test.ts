@@ -67,7 +67,7 @@ describe("Create retry", () => {
     });
 
     const result = await callable();
-    expect(result).toBeUndefined();
+    expect(result).toMatchObject({ ok: false });
   });
 
   test("should throw an error when onError() callback is not provided", async () => {
@@ -213,8 +213,8 @@ describe("Create retry", () => {
 
     expect(error).toBeNull();
     expect(result).not.toBeNull();
-    expect(result).toBeTypeOf("string");
-    expect(result).toBe("success");
+    expect(result).toBeTypeOf("object");
+    expect(result).toMatchObject({ ok: true, result: "success" });
   });
 
   test("should not duplicate retry state when calling the function multiple times", async () => {
@@ -810,8 +810,8 @@ describe("Retry on results", () => {
 
     const result = await callable();
     expect(result).not.toBeUndefined();
-    expect(result).toBeTypeOf("string");
-    expect(result).toBe("success");
+    expect(result).toBeTypeOf("object");
+    expect(result).toMatchObject({ ok: true, result: "success" });
   });
 
   test("should retry on failed result", async () => {
@@ -969,7 +969,8 @@ describe("Retry on results", () => {
     });
 
     const [error, result] = await mightThrow(callable());
-    expect(result).toBeUndefined();
+    expect(result).not.toBeNull();
+    expect(result).toMatchObject({ ok: false });
     expect(error).toBeNull();
     expect(onErrorCalled).toBe(1);
   });
