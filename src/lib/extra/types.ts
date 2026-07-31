@@ -1,12 +1,12 @@
 import type { InvalidResultError } from "./errors.js";
 
-export type ErrorMetadataType<TRetryResult = void> = {
+export type ErrorMetadataType<TRetryResult> = {
   failedAt: number;
   error: Error | InvalidResultError<TRetryResult>;
   id: string;
 };
 
-export type OnFailedAttemptContextType<TRetryResult = void> = {
+export type OnFailedAttemptContextType<TRetryResult> = {
   error: Error | InvalidResultError<TRetryResult>;
   attempt: number;
   retriesRemaining: number;
@@ -14,12 +14,12 @@ export type OnFailedAttemptContextType<TRetryResult = void> = {
   id: string;
 };
 
-export type RetryOnErrorContextType<TRetryResult = void> = {
+export type RetryOnErrorContextType<TRetryResult> = {
   error: Error | InvalidResultError<TRetryResult>;
   id: string;
 };
 
-export type HookContextType<TRetryResult = void> = {
+export type HookContextType<TRetryResult> = {
   error: Error | InvalidResultError<TRetryResult>;
   id: string;
   currentAttempt: number;
@@ -30,16 +30,18 @@ export type ErrorClassType<E extends Error = Error> = new (
   ...args: never[]
 ) => E;
 
-export type RetryOptions<TRetryResult> = {
+export type RetryOptions<TRetryResult = void> = {
   input: () => TRetryResult | Promise<TRetryResult>;
   maxRetries: number;
   id?: string;
   ignoreErrors?: ErrorClassType[];
   retryErrors?: ErrorClassType[];
-  onError?: (error: ErrorMetadataType) => void | Promise<void>;
-  onFailedAttempt?: (ctx: OnFailedAttemptContextType) => void | Promise<void>;
+  onError?: (error: ErrorMetadataType<TRetryResult>) => void | Promise<void>;
+  onFailedAttempt?: (
+    ctx: OnFailedAttemptContextType<TRetryResult>,
+  ) => void | Promise<void>;
   retryOnResult?: (result: TRetryResult) => boolean;
-  retryOnError?: (ctx: RetryOnErrorContextType) => boolean;
+  retryOnError?: (ctx: RetryOnErrorContextType<TRetryResult>) => boolean;
   beforeRetry?: (ctx: HookContextType<TRetryResult>) => void | Promise<void>;
   afterRetry?: (ctx: HookContextType<TRetryResult>) => void | Promise<void>;
 };
