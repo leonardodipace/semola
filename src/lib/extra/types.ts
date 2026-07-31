@@ -34,12 +34,19 @@ export type RetryOutcomeType<TRetryResult> =
   | { ok: true; result: TRetryResult }
   | { ok: false };
 
+export type BackoffOptions = {
+  baseDelay?: number;
+  multiplier?: number;
+  maxDelay?: number;
+};
+
 export type RetryOptions<TRetryResult> = {
   input: () => TRetryResult | Promise<TRetryResult>;
   maxRetries: number;
   id?: string;
   ignoreErrors?: ErrorClassType[];
   retryErrors?: ErrorClassType[];
+  backoff?: BackoffOptions;
   onError?: (error: ErrorMetadataType<TRetryResult>) => void | Promise<void>;
   onFailedAttempt?: (
     ctx: OnFailedAttemptContextType<TRetryResult>,
