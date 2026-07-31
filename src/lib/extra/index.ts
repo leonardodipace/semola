@@ -23,14 +23,17 @@ class Retry<TRetryResult> {
   }
 
   public async retryOverError(ctx: RetryContext) {
+    const hasAttempts = this.hasMoreAttempts();
+    if (!hasAttempts) return false;
+
     const shouldIgnore = this.checkIgnoreErrors(ctx.error);
     if (shouldIgnore) return false;
 
-    const onRetryErrorResult = this.runOnRetryError(ctx.error, this.id);
+    const onRetryErrorResult = this.runRetryOnError(ctx.error, this.id);
+    if (!onRetryErrorResult) return false;
+
     const isRetriableError = this.checkRetryErrors(ctx.error);
-    const hasAttempts = this.hasMoreAttempts();
-    const shouldUpdate = hasAttempts && onRetryErrorResult && isRetriableError;
-    if (!shouldUpdate) return false;
+    if (!isRetriableError) return false;
 
     await this.fireBeforeAttempt(ctx.error);
     await this.update(ctx);
@@ -126,7 +129,7 @@ class Retry<TRetryResult> {
     return this.currentAttempt <= this.options.maxRetries;
   }
 
-  private runOnRetryError(error: Error, id: string) {
+  private runRetryOnError(error: Error, id: string) {
     if (!this.options.retryOnError) return true;
 
     return this.options.retryOnError({ error, id });
