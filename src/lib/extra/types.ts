@@ -23,7 +23,7 @@ export type HookContextType<TRetryResult = void> = {
   error: Error | InvalidResultError<TRetryResult>;
   id: string;
   currentAttempt: number;
-  retriesLeft: number;
+  retriesRemaining: number;
 };
 
 export type ErrorClassType<E extends Error = Error> = new (

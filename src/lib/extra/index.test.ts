@@ -1019,12 +1019,12 @@ describe("Hooks", () => {
       input: () => {
         throw new Error("A generic error");
       },
-      beforeRetry: ({ id, currentAttempt, error, retriesLeft }) => {
+      beforeRetry: ({ id, currentAttempt, error, retriesRemaining }) => {
         callSequence.push("beforeRetry");
         expect(id).toBe("1");
         expect(currentAttempt).toBe(1);
         expect(error).toBeInstanceOf(Error);
-        expect(retriesLeft).toBe(1);
+        expect(retriesRemaining).toBe(1);
       },
       onFailedAttempt: () => {
         callSequence.push("onFailedAttempt");
@@ -1053,12 +1053,12 @@ describe("Hooks", () => {
       onFailedAttempt: () => {
         callSequence.push("onFailedAttempt");
       },
-      afterRetry: ({ id, currentAttempt, error, retriesLeft }) => {
+      afterRetry: ({ id, currentAttempt, error, retriesRemaining }) => {
         callSequence.push("afterRetry");
         expect(id).toBe("1");
         expect(currentAttempt).toBe(1);
         expect(error).toBeInstanceOf(Error);
-        expect(retriesLeft).toBe(0);
+        expect(retriesRemaining).toBe(0);
       },
       maxRetries: 1,
       id: "1",
@@ -1081,22 +1081,22 @@ describe("Hooks", () => {
       input: () => {
         throw new Error("A generic error");
       },
-      beforeRetry: ({ id, currentAttempt, error, retriesLeft }) => {
+      beforeRetry: ({ id, currentAttempt, error, retriesRemaining }) => {
         callSequence.push("beforeRetry");
         expect(id).toBe("1");
         expect(currentAttempt).toBe(1);
         expect(error).toBeInstanceOf(Error);
-        expect(retriesLeft).toBe(1);
+        expect(retriesRemaining).toBe(1);
       },
       onFailedAttempt: () => {
         callSequence.push("onFailedAttempt");
       },
-      afterRetry: ({ id, currentAttempt, error, retriesLeft }) => {
+      afterRetry: ({ id, currentAttempt, error, retriesRemaining }) => {
         callSequence.push("afterRetry");
         expect(id).toBe("1");
         expect(currentAttempt).toBe(1);
         expect(error).toBeInstanceOf(Error);
-        expect(retriesLeft).toBe(0);
+        expect(retriesRemaining).toBe(0);
       },
       maxRetries: 1,
       id: "1",

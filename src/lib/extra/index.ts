@@ -83,7 +83,7 @@ class Retry<TRetryResult> {
       Promise.resolve().then(() =>
         beforeRetry({
           currentAttempt: this.currentAttempt,
-          retriesLeft: maxRetries,
+          retriesRemaining: maxRetries,
           id: this.id,
           error,
         }),
@@ -101,7 +101,7 @@ class Retry<TRetryResult> {
       Promise.resolve().then(() =>
         afterRetry({
           currentAttempt: this.currentAttempt,
-          retriesLeft: maxRetries - this.currentAttempt,
+          retriesRemaining: maxRetries - this.currentAttempt,
           id: this.id,
           error,
         }),
