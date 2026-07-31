@@ -1,12 +1,12 @@
 import type { InvalidResultError } from "./errors.js";
 
-export type ErrorMetadataType<TRetryResult = void> = {
+export type ErrorMetadataType<TRetryResult> = {
   failedAt: number;
   error: Error | InvalidResultError<TRetryResult>;
   id: string;
 };
 
-export type OnFailedAttemptContextType<TRetryResult = void> = {
+export type OnFailedAttemptContextType<TRetryResult> = {
   error: Error | InvalidResultError<TRetryResult>;
   attempt: number;
   retriesRemaining: number;
@@ -14,12 +14,12 @@ export type OnFailedAttemptContextType<TRetryResult = void> = {
   id: string;
 };
 
-export type RetryOnErrorContextType<TRetryResult = void> = {
+export type RetryOnErrorContextType<TRetryResult> = {
   error: Error | InvalidResultError<TRetryResult>;
   id: string;
 };
 
-export type HookContextType<TRetryResult = void> = {
+export type HookContextType<TRetryResult> = {
   error: Error | InvalidResultError<TRetryResult>;
   id: string;
   currentAttempt: number;
@@ -30,7 +30,7 @@ export type ErrorClassType<E extends Error = Error> = new (
   ...args: never[]
 ) => E;
 
-export type RetryOptions<TRetryResult = void> = {
+export type RetryOptions<TRetryResult> = {
   input: () => TRetryResult | Promise<TRetryResult>;
   maxRetries: number;
   id?: string;

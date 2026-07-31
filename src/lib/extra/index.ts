@@ -54,7 +54,7 @@ class Retry<TRetryResult> {
     if (!this.options.onError) return true;
 
     const onError = this.options.onError;
-    const data: ErrorMetadataType = {
+    const data: ErrorMetadataType<TRetryResult> = {
       failedAt: Date.now(),
       error,
       id: this.id,
@@ -140,7 +140,7 @@ class Retry<TRetryResult> {
 
     const { maxRetries } = this.options;
     const onFailedAttempt = this.options.onFailedAttempt;
-    const context: OnFailedAttemptContextType = {
+    const context: OnFailedAttemptContextType<TRetryResult> = {
       attempt: this.currentAttempt,
       nextRetryDelayMs: delay,
       error,

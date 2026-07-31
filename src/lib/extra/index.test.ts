@@ -85,7 +85,7 @@ describe("Create retry", () => {
   });
 
   test("should successfully call onFailedAttempt() callback", async () => {
-    const attempts: OnFailedAttemptContextType[] = [];
+    const attempts: OnFailedAttemptContextType<void>[] = [];
     const callable = createRetry({
       input: () => {
         throw new Error("A generic error");
@@ -115,7 +115,7 @@ describe("Create retry", () => {
 
   test("should not retry when retryOnError() callback return false", async () => {
     let counter = 1;
-    const attempts: OnFailedAttemptContextType[] = [];
+    const attempts: OnFailedAttemptContextType<void>[] = [];
     const callable = createRetry({
       input: () => {
         if (counter === 1) {
@@ -148,7 +148,7 @@ describe("Create retry", () => {
 
   test("should not retry when retryOnError() callback return false and also call onError() callback", async () => {
     let counter = 1;
-    const attempts: OnFailedAttemptContextType[] = [];
+    const attempts: OnFailedAttemptContextType<void>[] = [];
     const callable = createRetry({
       input: () => {
         if (counter === 1) {
@@ -183,7 +183,7 @@ describe("Create retry", () => {
 
   test("should return a value after some failed attempts", async () => {
     let counter = 0;
-    const attempts: OnFailedAttemptContextType[] = [];
+    const attempts: OnFailedAttemptContextType<void>[] = [];
 
     const callable = createRetry({
       input: () => {
@@ -219,8 +219,8 @@ describe("Create retry", () => {
 
   test("should not duplicate retry state when calling the function multiple times", async () => {
     let secondCall = false;
-    const attemptsOnFirstCall: OnFailedAttemptContextType[] = [];
-    const attemptsOnSecondCall: OnFailedAttemptContextType[] = [];
+    const attemptsOnFirstCall: OnFailedAttemptContextType<void>[] = [];
+    const attemptsOnSecondCall: OnFailedAttemptContextType<void>[] = [];
 
     const callable = createRetry({
       input: () => {
