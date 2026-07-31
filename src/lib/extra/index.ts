@@ -141,7 +141,7 @@ class Retry<TRetryResult> {
     const { maxRetries } = this.options;
     const onFailedAttempt = this.options.onFailedAttempt;
     const context: OnFailedAttemptContextType = {
-      attemptNumber: this.currentAttempt,
+      attempt: this.currentAttempt,
       nextRetryDelayMs: delay,
       error,
       retriesRemaining: maxRetries - this.currentAttempt,

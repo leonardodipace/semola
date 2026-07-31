@@ -8,7 +8,7 @@ export type ErrorMetadataType = {
 
 export type OnFailedAttemptContextType = {
   error: Error;
-  attemptNumber: number;
+  attempt: number;
   retriesRemaining: number;
   nextRetryDelayMs: number;
   id: string;
