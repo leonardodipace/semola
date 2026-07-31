@@ -233,11 +233,11 @@ export function createRetry<TRetryResult = void>(
 
 export { InvalidResultError, InvalidRetryError } from "./errors.js";
 export type {
-  RetryOutcomeType,
   ErrorMetadataType,
   HookContextType,
   OnFailedAttemptContextType,
   RetryContext,
   RetryOnErrorContextType,
   RetryOptions,
+  RetryOutcomeType,
 } from "./types.js";
