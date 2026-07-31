@@ -6,16 +6,16 @@ export type ErrorMetadataType = {
   id: string;
 };
 
-export type OnFailedAttemptContextType = {
-  error: Error;
+export type OnFailedAttemptContextType<TRetryResult = void> = {
+  error: Error | InvalidResultError<TRetryResult>;
   attempt: number;
   retriesRemaining: number;
   nextRetryDelayMs: number;
   id: string;
 };
 
-export type RetryOnErrorContextType = {
-  error: Error;
+export type RetryOnErrorContextType<TRetryResult = void> = {
+  error: Error | InvalidResultError<TRetryResult>;
   id: string;
 };
 
