@@ -1,8 +1,8 @@
 import type { InvalidResultError } from "./errors.js";
 
-export type ErrorMetadataType = {
+export type ErrorMetadataType<TRetryResult = void> = {
   failedAt: number;
-  error: Error;
+  error: Error | InvalidResultError<TRetryResult>;
   id: string;
 };
 
