@@ -10,10 +10,21 @@ import {
 import { mightThrow, mightThrowSync } from "../errors/index.js";
 import { InvalidResultError, InvalidRetryError } from "./errors.js";
 import { createRetry } from "./index.js";
+import {
+  BACKOFF_MULTIPLIER,
+  BASE_BACKOFF_DELAY,
+  MAX_BACKOFF_DELAY,
+  Retry,
+} from "./retry.manager.js";
 import type { ErrorClassType, OnFailedAttemptContextType } from "./types.js";
 
 class UserDefinedError extends Error {}
 class SpecificError extends UserDefinedError {}
+class TestBackOffRetry<TRetryResult> extends Retry<TRetryResult> {
+  public readBackoffOptions() {
+    return this.backoff;
+  }
+}
 
 type CallSequence =
   | "inputFn"
@@ -30,6 +41,7 @@ const instantTimeout = ((fn: () => void) => {
   return 0;
 }) as unknown as typeof setTimeout;
 
+const noop = () => {};
 let timeoutSpy: ReturnType<typeof spyOn<typeof globalThis, "setTimeout">>;
 
 beforeEach(() => {
@@ -314,8 +326,6 @@ describe("Create retry", () => {
 });
 
 describe("Validate attempts", () => {
-  const noop = () => {};
-
   test("should raise an error when passing a negative number", () => {
     const [retryNegativeNumber] = mightThrowSync(() =>
       createRetry({ input: noop, maxRetries: -10 }),
@@ -399,6 +409,178 @@ describe("Validate attempts", () => {
 
     expect(secondInfinityRetry).toBeDefined();
     expect(secondInfinityRetry).toBeInstanceOf(InvalidRetryError);
+  });
+});
+
+describe("Validate exponential backoff parameters", () => {
+  test("should use default parameters", () => {
+    const tester = new TestBackOffRetry({ input: noop, maxRetries: 1 });
+    const options = tester.readBackoffOptions();
+
+    expect(options).toMatchObject({
+      baseDelay: BASE_BACKOFF_DELAY,
+      multiplier: BACKOFF_MULTIPLIER,
+      maxDelay: MAX_BACKOFF_DELAY,
+    });
+  });
+
+  test("should use default parameters when passing an empty object", () => {
+    const tester = new TestBackOffRetry({
+      input: noop,
+      maxRetries: 1,
+      backoff: {},
+    });
+    const options = tester.readBackoffOptions();
+
+    expect(options).toMatchObject({
+      baseDelay: BASE_BACKOFF_DELAY,
+      multiplier: BACKOFF_MULTIPLIER,
+      maxDelay: MAX_BACKOFF_DELAY,
+    });
+  });
+
+  test("should use custom values", () => {
+    const tester = new TestBackOffRetry({
+      input: noop,
+      maxRetries: 1,
+      backoff: {
+        baseDelay: 100,
+        maxDelay: 5000,
+        multiplier: 1.3,
+      },
+    });
+    const options = tester.readBackoffOptions();
+
+    expect(options).toMatchObject({
+      baseDelay: 100,
+      maxDelay: 5000,
+      multiplier: 1.3,
+    });
+  });
+
+  describe("Backoff options", () => {
+    function runCheck(optName: string, value: number) {
+      return mightThrowSync(() => {
+        const parameter: Record<string, number> = {};
+        parameter[optName] = value;
+
+        createRetry({
+          input: noop,
+          maxRetries: 1,
+          backoff: parameter,
+        });
+      });
+    }
+
+    test.each([
+      {
+        optName: "baseDelay",
+      },
+      {
+        optName: "maxDelay",
+      },
+      {
+        optName: "multiplier",
+      },
+    ])("should throw when '$optName' is negative", (data) => {
+      const [negativeNumberError] = runCheck(data.optName, -1);
+      expect(negativeNumberError).not.toBeNull();
+      expect(negativeNumberError).toBeInstanceOf(InvalidRetryError);
+      expect(negativeNumberError?.message).toBe(
+        `Expected '${data.optName}' to be a positive number`,
+      );
+
+      const [negativeInfinityError] = runCheck(
+        data.optName,
+        Number.NEGATIVE_INFINITY,
+      );
+      expect(negativeInfinityError).not.toBeNull();
+      expect(negativeInfinityError).toBeInstanceOf(InvalidRetryError);
+      expect(negativeInfinityError?.message).toBe(
+        `Expected '${data.optName}' to be a positive number`,
+      );
+
+      const [negativeInfinityErrorSecond] = runCheck(data.optName, -Infinity);
+      expect(negativeInfinityErrorSecond).not.toBeNull();
+      expect(negativeInfinityErrorSecond).toBeInstanceOf(InvalidRetryError);
+      expect(negativeInfinityErrorSecond?.message).toBe(
+        `Expected '${data.optName}' to be a positive number`,
+      );
+    });
+
+    test.each([
+      {
+        optName: "baseDelay",
+      },
+      {
+        optName: "maxDelay",
+      },
+      {
+        optName: "multiplier",
+      },
+    ])("should throw when '$optName' is NaN", (data) => {
+      const [nanError] = runCheck(data.optName, NaN);
+      expect(nanError).not.toBeNull();
+      expect(nanError).toBeInstanceOf(InvalidRetryError);
+      expect(nanError?.message).toBe(
+        `Expected '${data.optName}' to be a valid number`,
+      );
+
+      const [nanErrorSecond] = runCheck(data.optName, Number.NaN);
+      expect(nanErrorSecond).not.toBeNull();
+      expect(nanErrorSecond).toBeInstanceOf(InvalidRetryError);
+      expect(nanErrorSecond?.message).toBe(
+        `Expected '${data.optName}' to be a valid number`,
+      );
+    });
+
+    test.each([
+      {
+        optName: "baseDelay",
+      },
+      {
+        optName: "maxDelay",
+      },
+      {
+        optName: "multiplier",
+      },
+    ])("should throw when '$optName' is not finite", (data) => {
+      const [infinityError] = runCheck(data.optName, Infinity);
+      expect(infinityError).not.toBeNull();
+      expect(infinityError).toBeInstanceOf(InvalidRetryError);
+      expect(infinityError?.message).toBe(
+        `Expected '${data.optName}' to be a finite number`,
+      );
+
+      const [infinityErrorSecond] = runCheck(
+        data.optName,
+        Number.POSITIVE_INFINITY,
+      );
+      expect(infinityErrorSecond).not.toBeNull();
+      expect(infinityErrorSecond).toBeInstanceOf(InvalidRetryError);
+      expect(infinityErrorSecond?.message).toBe(
+        `Expected '${data.optName}' to be a finite number`,
+      );
+    });
+
+    test.each([
+      {
+        optName: "baseDelay",
+      },
+      {
+        optName: "maxDelay",
+      },
+      {
+        optName: "multiplier",
+      },
+    ])("should throw when '$optName' is zero", (data) => {
+      const [zeroError] = runCheck(data.optName, 0);
+      expect(zeroError).not.toBeNull();
+      expect(zeroError).toBeInstanceOf(InvalidRetryError);
+      expect(zeroError?.message).toBe(
+        `Expected '${data.optName}' to be greater than zero`,
+      );
+    });
   });
 });
 
