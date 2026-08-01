@@ -5,13 +5,7 @@ description: Install Semola and pick a module to start with
 
 ## Install
 
-```bash
-bun add semola
-```
-
-npm, pnpm, and yarn work too:
-
-```bash
+```npm
 npm install semola
 ```
 
