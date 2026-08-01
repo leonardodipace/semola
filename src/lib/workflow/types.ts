@@ -25,9 +25,14 @@ export type WorkflowExecution<TInput, TResult> = {
   steps: StepSnapshot[];
 };
 
+export type StepContext<TInput> = {
+  input: TInput;
+  signal: AbortSignal;
+  fail: (message: string) => never;
+};
+
 export type StepHandler<TInput, TStep> = (
-  input: TInput,
-  signal: AbortSignal,
+  context: StepContext<TInput>,
 ) => TStep | Promise<TStep>;
 
 export type WorkflowHandlerContext<TInput> = {
@@ -103,6 +108,7 @@ export type WorkflowOptions<TInput, TResult> = {
   hooks?: WorkflowHooks<TInput, TResult>;
   lockTTL?: number;
   concurrency?: number;
+  partitionBy?: (input: TInput) => string;
   pollInterval?: number;
   serializeInput?: SerializeValue<TInput>;
   deserializeInput?: DeserializeValue<TInput>;
@@ -114,6 +120,7 @@ export type WorkflowOptions<TInput, TResult> = {
 
 export type WorkflowStartOptions = {
   executionId?: string;
+  partitionKey?: string;
 };
 
 export type WorkflowStartResult = {
@@ -141,6 +148,7 @@ export type WorkflowMeta = {
   failedAt: string;
   cancelledAt: string;
   steps: string;
+  partitionKey: string;
 };
 
 export type WorkflowMetaField = keyof WorkflowMeta;
