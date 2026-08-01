@@ -57,7 +57,7 @@ Workers start as soon as you construct the queue. `enqueue` returns a job id. Fa
 | `onError` | - | When retries are exhausted |
 | `onParseError` | - | When a Redis payload cannot be parsed |
 
-Use `signal` in the handler to abort work when the job times out or the queue stops.
+Use `signal` in the handler to abort work when the job times out.
 
 ## Shutdown
 
