@@ -21,6 +21,8 @@ type Post = {
 
 const posts = new Policy<Post>();
 
+const currentUser = { id: 1 };
+
 posts.allow({
   action: "read",
   conditions: { status: eq("published") },
@@ -42,6 +44,13 @@ posts.forbid({
 ## Check
 
 ```typescript
+const post = {
+  id: 1,
+  authorId: 1,
+  status: "draft" as const,
+  tags: ["notes"],
+};
+
 const result = posts.can("update", post);
 
 if (!result.allowed) {

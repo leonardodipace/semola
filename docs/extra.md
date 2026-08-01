@@ -14,23 +14,25 @@ import { createRetry } from "semola/extra";
 Wrap an async function so transient failures retry with full-jitter backoff (about 1s base, capped at 60s):
 
 ```typescript
-const fetchUser = createRetry(
-  async (id: string) => {
-    const res = await fetch(`/users/${id}`);
+function fetchUser(id: string) {
+  return createRetry(
+    async () => {
+      const res = await fetch(`/users/${id}`);
 
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
 
-    return res.json();
-  },
-  {
-    maxRetries: 3,
-    onFailedAttempt: ({ error, attemptNumber }) => {
-      console.warn(`attempt ${attemptNumber} failed`, error);
+      return res.json();
     },
-  },
-);
+    {
+      maxRetries: 3,
+      onFailedAttempt: ({ error, attemptNumber }) => {
+        console.warn(`attempt ${attemptNumber} failed`, error);
+      },
+    },
+  )();
+}
 
 const user = await fetchUser("123");
 ```

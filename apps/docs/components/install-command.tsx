@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckIcon, CopyIcon } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 const COMMAND = "bun add semola";
 
@@ -11,11 +11,22 @@ export function InstallCommand({
   variant?: "pill" | "solid";
 }) {
   const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<number>(undefined);
 
   const onCopy = async () => {
-    await navigator.clipboard.writeText(COMMAND);
+    try {
+      await navigator.clipboard.writeText(COMMAND);
+    } catch {
+      return;
+    }
+
     setCopied(true);
-    window.setTimeout(() => setCopied(false), 1600);
+
+    if (resetTimer.current !== undefined) {
+      window.clearTimeout(resetTimer.current);
+    }
+
+    resetTimer.current = window.setTimeout(() => setCopied(false), 1600);
   };
 
   return (

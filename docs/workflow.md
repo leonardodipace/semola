@@ -37,7 +37,7 @@ const fulfillOrder = defineWorkflow<{ orderId: string }, string>({
 const { executionId, status } = await fulfillOrder.start({
   orderId: "ord_123",
 });
-// status is "pending" — work runs in the background
+// status is "pending" - work runs in the background
 ```
 
 `start` enqueues an execution and returns immediately. Poll status with `get`:
@@ -58,7 +58,7 @@ Statuses: `pending`, `running`, `completed`, `failed`, `cancelled`.
 
 ```typescript
 await step("name", async ({ input, signal, fail }) => {
-  // return a value — cached for resume
+  // return a value - cached for resume
   return value;
 });
 ```

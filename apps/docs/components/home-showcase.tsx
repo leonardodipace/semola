@@ -1,7 +1,14 @@
 "use client";
 
 import { DynamicCodeBlock } from "fumadocs-ui/components/dynamic-codeblock";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { codeThemes } from "@/lib/code-themes";
 import { homeModules } from "@/lib/home-modules";
 
 const INTERVAL_MS = 6500;
@@ -11,13 +18,6 @@ const SLIDE_PX = 12;
 const examples = homeModules.filter(
   (m) => m.id !== "cli" && m.id !== "prompts" && m.id !== "extra",
 );
-
-const codeThemes = {
-  themes: {
-    light: "github-light",
-    dark: "github-dark",
-  },
-} as const;
 
 function usePrefersReducedMotion() {
   const [reduced, setReduced] = useState(false);
@@ -50,10 +50,13 @@ export function HomeShowcase() {
   });
 
   const reduceMotion = usePrefersReducedMotion();
+  const activeRef = useRef(active);
   const topHalfRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLDivElement>(null);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const slideRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  activeRef.current = active;
 
   const paused = hovered || !inView || reduceMotion;
 
@@ -128,12 +131,12 @@ export function HomeShowcase() {
     if (paused) return;
 
     const id = window.setInterval(() => {
-      setActive((current) => {
-        setPrevious(current);
-        setDirection(1);
+      const current = activeRef.current;
+      const next = (current + 1) % examples.length;
 
-        return (current + 1) % examples.length;
-      });
+      setPrevious(current);
+      setDirection(1);
+      setActive(next);
     }, INTERVAL_MS);
 
     return () => window.clearInterval(id);
@@ -167,6 +170,11 @@ export function HomeShowcase() {
       <section
         aria-label="Code examples"
         className="relative overflow-hidden border-y border-fd-border bg-fd-background/80 backdrop-blur-md sm:rounded-2xl sm:border"
+        style={
+          {
+            "--home-showcase-interval": `${INTERVAL_MS}ms`,
+          } as CSSProperties
+        }
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         onFocusCapture={() => setHovered(true)}
@@ -184,6 +192,8 @@ export function HomeShowcase() {
         <div className="flex flex-col sm:flex-row">
           <div
             ref={navRef}
+            role="tablist"
+            aria-label="Example modules"
             className="relative flex max-h-64 gap-1 overflow-x-auto border-b border-fd-border px-3 py-3 sm:max-h-none sm:w-44 sm:shrink-0 sm:flex-col sm:gap-0.5 sm:overflow-y-auto sm:border-r sm:border-b-0 sm:px-2 sm:py-3"
           >
             <div
@@ -216,6 +226,11 @@ export function HomeShowcase() {
                   tabRefs.current[index] = element;
                 }}
                 type="button"
+                role="tab"
+                id={`showcase-tab-${item.id}`}
+                aria-selected={index === active}
+                aria-controls={`showcase-panel-${item.id}`}
+                tabIndex={index === active ? 0 : -1}
                 onClick={() => goTo(index)}
                 className={`home-press home-ease relative z-10 shrink-0 rounded-md px-3 py-2 text-left text-sm font-medium transition-[color,transform] sm:w-full sm:pl-3.5 ${
                   index === active
@@ -259,6 +274,9 @@ export function HomeShowcase() {
                   ref={(element) => {
                     slideRefs.current[index] = element;
                   }}
+                  role="tabpanel"
+                  id={`showcase-panel-${item.id}`}
+                  aria-labelledby={`showcase-tab-${item.id}`}
                   className="absolute inset-x-0 top-0 overflow-hidden"
                   style={{
                     ...slideStyle(index),
@@ -275,7 +293,8 @@ export function HomeShowcase() {
                         "rounded-none border-0 bg-transparent shadow-none my-0 max-w-full",
                       keepBackground: false,
                       viewportProps: {
-                        className: "!overflow-x-hidden",
+                        className:
+                          "home-showcase-viewport !overflow-x-hidden",
                       },
                     }}
                     options={codeThemes}
@@ -286,7 +305,7 @@ export function HomeShowcase() {
           </div>
         </div>
 
-        <p className="sr-only">
+        <p className="sr-only" role="status" aria-live="polite">
           Showing {current.label} example from {current.pkg}
         </p>
       </section>

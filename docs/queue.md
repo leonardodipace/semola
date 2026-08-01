@@ -14,7 +14,12 @@ Needs a `Bun.RedisClient`.
 ## Basic usage
 
 ```typescript
-const emails = new Queue({
+type EmailJob = {
+  to: string;
+  subject: string;
+};
+
+const emails = new Queue<EmailJob>({
   name: "emails",
   redis: redisClient,
   concurrency: 4,
@@ -60,4 +65,4 @@ Use `signal` in the handler to abort work when the job times out or the queue st
 await emails.stop();
 ```
 
-Stops polling and waits for in-flight handlers to finish (or abort via their signal).
+Stops polling and waits for in-flight handlers to finish.

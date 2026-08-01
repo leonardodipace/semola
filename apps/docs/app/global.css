@@ -96,6 +96,13 @@ html > body[data-scroll-locked] {
   transform: translateY(0);
 }
 
+@media (scripting: none) {
+  .home-reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .home-grain {
   animation: home-grain 12s var(--ease-in-out) infinite;
 }
@@ -171,7 +178,8 @@ html > body[data-scroll-locked] {
 .home-showcase-progress-fill {
   width: 100%;
   height: 0%;
-  animation: home-showcase-progress-y 6.5s linear forwards;
+  animation: home-showcase-progress-y var(--home-showcase-interval, 6.5s) linear
+    forwards;
 }
 
 .home-showcase-progress-fill.is-paused {
@@ -180,7 +188,7 @@ html > body[data-scroll-locked] {
   width: 100%;
 }
 
-@media (max-width: 639px) {
+@media (width < theme(--breakpoint-sm)) {
   .home-showcase-progress-fill {
     width: 0%;
     height: 100%;
@@ -189,7 +197,7 @@ html > body[data-scroll-locked] {
 }
 
 .home-showcase-code pre,
-.home-showcase-code [class*="viewport"],
+.home-showcase-code .home-showcase-viewport,
 .home-showcase-code figure {
   overflow-x: hidden !important;
   max-width: 100%;

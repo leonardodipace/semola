@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { CodeSnippet } from "@/components/code-snippet";
 import { HomeShowcase } from "@/components/home-showcase";
@@ -87,7 +88,7 @@ export default function HomePage() {
         />
 
         <div className="relative mx-auto flex w-full max-w-5xl flex-col items-center px-6 pt-16 pb-10 text-center sm:pt-24 sm:pb-14">
-          <img
+          <Image
             src="/logo.png"
             alt=""
             width={56}
@@ -280,7 +281,7 @@ export default function HomePage() {
                 href="/"
                 className="home-press home-ease inline-flex items-center gap-2 text-lg font-semibold tracking-tight transition-transform"
               >
-                <img
+                <Image
                   src="/logo.png"
                   alt=""
                   width={28}
@@ -290,7 +291,7 @@ export default function HomePage() {
                 Semola
               </Link>
               <p className="mt-3 max-w-sm text-sm text-fd-muted-foreground">
-                Zero-dependency TypeScript utilities for type-safe backends.
+                {appDescription}
               </p>
               <div className="mt-5">
                 <InstallCommand />

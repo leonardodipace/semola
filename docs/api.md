@@ -145,7 +145,8 @@ Route metadata (`summary`, `description`, `operationId`, `tags`) and schemas fee
 ```typescript
 const api = new Api({
   openapi: {
-    info: { title: "My API", version: "1.0.0" },
+    title: "My API",
+    version: "1.0.0",
   },
 });
 
@@ -159,7 +160,7 @@ Serve that JSON from a route if you want a public `/openapi.json`.
 ```typescript
 new Api({
   prefix: "/v1",
-  openapi: { info: { title: "API", version: "1.0.0" } },
+  openapi: { title: "API", version: "1.0.0" },
   middlewares: [],
   validation: true, // or { input, output }
 });

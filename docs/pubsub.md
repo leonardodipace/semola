@@ -35,7 +35,11 @@ await events.publish({
 });
 
 await unsubscribe();
-// or tear everything down:
+```
+
+Or tear everything down with `events.unsubscribe()` instead of the handler returned by `subscribe`.
+
+```typescript
 await events.unsubscribe();
 ```
 

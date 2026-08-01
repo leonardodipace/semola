@@ -1,6 +1,7 @@
 "use client";
 
 import { DynamicCodeBlock } from "fumadocs-ui/components/dynamic-codeblock";
+import { codeThemes } from "@/lib/code-themes";
 
 export function CodeSnippet({
   code,
@@ -18,12 +19,7 @@ export function CodeSnippet({
         keepBackground: false,
         className: "my-0 shadow-none",
       }}
-      options={{
-        themes: {
-          light: "github-light",
-          dark: "github-dark",
-        },
-      }}
+      options={codeThemes}
     />
   );
 }
