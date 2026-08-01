@@ -166,3 +166,4 @@ new Api({
 ```
 
 `api.serve(port, callback?)` starts the server. There is no `listen` method.
+

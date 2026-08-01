@@ -165,6 +165,7 @@
     "test": "bun test",
     "docs:dev": "bun run --filter @semola/docs dev",
     "docs:build": "bun run --filter @semola/docs build",
+    "docs:start": "bun run --filter @semola/docs start",
     "prepublishOnly": "bun run build"
   },
   "keywords": [

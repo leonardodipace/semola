@@ -59,7 +59,3 @@ export function baseOptions(): BaseLayoutProps {
     githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
   };
 }
-
-export function homeOptions(): BaseLayoutProps {
-  return baseOptions();
-}
