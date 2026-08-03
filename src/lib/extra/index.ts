@@ -104,8 +104,8 @@ export {
 } from "./retry.manager.js";
 export type {
   BackoffOptions,
-  HookContextType,
   ErrorMetadataType,
+  HookContextType,
   OnFailedAttemptContextType,
   RetryContext,
   RetryOnErrorContextType,
