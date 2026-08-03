@@ -18,7 +18,7 @@ import { createRetry, InvalidRetryError } from "semola/extra";
 createRetry<TRetryResult = void>(options: RetryOptions<TRetryResult>): () => Promise<RetryOutcomeType<TRetryResult>>
 `
 
-`createRetry()` gives you the ability to create a retriable function, by specifing how many times it should retry the provided function.
+`createRetry()` gives you the ability to create a retriable function, by specifying how many times it should retry the provided function.
 
 ```typescript
 async function getTodo() {
@@ -40,9 +40,9 @@ console.log(await callable());
   - `input: () => TRetryResult | Promise<TRetryResult>` (required) -  A synchronous or an asynchronous function you want retry `n` times
   - `maxRetries: number` (required) - Number of retries after the first failure. A successful `input` call will stop its execution. The number of retries must be a finite non-negative integer; if passed an invalid number, `createRetry()` will raise an `InvalidRetryError` error
   - `id?: string` (optional) - Retry's id. By default it's a randomly generated UUID
-  - `ignoreErrors?: ErrorClassType[]` (optinal) - A list of exception classes and subclasses you want to ignore from retries. By default it's an empty list, meaning all exceptions are retried
-  - `retryErrors?: ErrorClassType[]` (optinal) - A list of exception classes and subclasses reported as errors and must be retried. If an error is not in the `retryErrors` list, it is passed to `onError`, if present, or thrown; By default it's an empty list, meaning no exceptions are matched
-  - `backoff: BackoffOptions` (optional) - A configuration object for handling exponential backoff's parameters. Note that if any of these parameters are invalid, `createRetry()` will thorw an `InvalidRetryError` error. All these paremeters must be a finite non-negative number:
+  - `ignoreErrors?: ErrorClassType[]` (optional) - A list of exception classes and subclasses you want to ignore from retries. By default it's an empty list, meaning all exceptions are retried
+  - `retryErrors?: ErrorClassType[]` (optional) - A list of exception classes and subclasses reported as errors and must be retried. If an error is not in the `retryErrors` list, it is passed to `onError`, if present, or thrown; By default it's an empty list, meaning no exceptions are matched
+  - `backoff: BackoffOptions` (optional) - A configuration object for handling exponential backoff's parameters. Note that if any of these parameters are invalid, `createRetry()` will throw an `InvalidRetryError` error. All these parameters must be a finite non-negative number:
     - `baseDelay?: number` (optional) - Base delay in milliseconds. By default it's `1000ms`
     - `multiplier?: number` (optional) - Backoff multiplier. By default it's `2`
     - `maxDelay?: number` (optional) - Maximum delay in milliseconds. By default it's `60000ms` (1 minute)
@@ -62,17 +62,17 @@ console.log(await callable());
     - `id: string` - Retry's id
   - `beforeRetry?: (ctx: HookContextType<TRetryResult>) => void | Promise<void>` (optional) - Function called before `onFailedAttempt`. `HookContextType<TRetryResult>` type contains the following properties:
       - `error: Error | InvalidResultError<TRetryResult>` - Which error was fired inside `input` or which value caused the retry
-      - `retriesRemaining: number` - How many attempts are still avaiable, before retring
+      - `retriesRemaining: number` - How many attempts are still available, before retrying
       - `attempt: number` - Which attempt triggered this retry. Note that they start at 1
       - `id: string` - Retry's id
   - `afterRetry?: (ctx: HookContextType<TRetryResult>) => void | Promise<void>` (optional) - Function called after `onFailedAttempt`. `HookContextType<TRetryResult>` type contains the following properties:
       - `error: Error | InvalidResultError<TRetryResult>` - Which error was fired inside `input` or which value caused the retry
-      - `retriesRemaining: number` - How many attempts are still avaiable, after retring
+      - `retriesRemaining: number` - How many attempts are still available, after retrying
       - `attempt: number` - Which attempt triggered this retry. Note that they start at 1
       - `id: string` - Retry's id
 
 `createRetry()` returns a function that automatically handles all the retry logic and, after its execution, it returns a `RetryOutcomeType<TRetryResult>` type:
-- If `input` succeded, it returns an object of type `{ ok: true; result: TRetryResult }`; you can find `input`'s result inside the `result` property
+- If `input` succeeded, it returns an object of type `{ ok: true; result: TRetryResult }`; you can find `input`'s result inside the `result` property
 - If `input` failed, and `onError` was defined, it returns an object of type `{ ok: false }`. 
 
 Note that `InvalidResultError` is created when `input`'s return value need to be retried; this class provide a `data` attribute, of type `TRetryResult` containing the value that caused the retry.
@@ -185,7 +185,7 @@ const callable = createRetry({
   beforeRetry: (ctx) => {
     console.log(
       `[${ctx.id}] Attempt #${ctx.attempt} failed: ${ctx.error.message}. ` +
-        `${ctx.retriesRemaining} retries avaiables`,
+        `${ctx.retriesRemaining} retries availables`,
     );
   },
   onFailedAttempt: (ctx) => {
