@@ -9,7 +9,13 @@ A tiny wrapper for retrying any sync or async functions.
 ### Import 
 
 ```typescript
-import { createRetry, InvalidRetryError } from "semola/extra";
+import { 
+  createRetry, InvalidResultError, InvalidRetryError,
+  BACKOFF_MULTIPLIER, BASE_BACKOFF_DELAY, MAX_BACKOFF_DELAY,
+  BackoffOptions, ErrorMetadataType, HookContextType,
+  OnFailedAttemptContextType, RetryContext, RetryOnErrorContextType,
+  RetryOptions, RetryOutcomeType,
+} from "semola/extra";
 ```
 
 ### API
