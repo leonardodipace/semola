@@ -19,12 +19,21 @@ export type RetryOnErrorContextType<TRetryResult> = {
   id: string;
 };
 
-export type HookContextType<TRetryResult> = {
+type CommonHookContextType<TRetryResult> = {
   error: Error | InvalidResultError<TRetryResult>;
   id: string;
-  currentAttempt: number;
   retriesRemaining: number;
 };
+
+export type BeforeRetryHookContextType<TRetryResult> =
+  CommonHookContextType<TRetryResult> & {
+    prevAttempt: number;
+  };
+
+export type AfterRetryHookContextType<TRetryResult> =
+  CommonHookContextType<TRetryResult> & {
+    nextAttempt: number;
+  };
 
 export type ErrorClassType<E extends Error = Error> = new (
   ...args: never[]
@@ -53,8 +62,12 @@ export type RetryOptions<TRetryResult> = {
   ) => void | Promise<void>;
   retryOnResult?: (result: TRetryResult) => boolean;
   retryOnError?: (ctx: RetryOnErrorContextType<TRetryResult>) => boolean;
-  beforeRetry?: (ctx: HookContextType<TRetryResult>) => void | Promise<void>;
-  afterRetry?: (ctx: HookContextType<TRetryResult>) => void | Promise<void>;
+  beforeRetry?: (
+    ctx: BeforeRetryHookContextType<TRetryResult>,
+  ) => void | Promise<void>;
+  afterRetry?: (
+    ctx: AfterRetryHookContextType<TRetryResult>,
+  ) => void | Promise<void>;
 };
 
 export type RetryContext = {
