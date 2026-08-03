@@ -16,7 +16,11 @@ import {
   MAX_BACKOFF_DELAY,
   Retry,
 } from "./retry.manager.js";
-import type { ErrorClassType, OnFailedAttemptContextType } from "./types.js";
+import type {
+  ErrorClassType,
+  HookContextType,
+  OnFailedAttemptContextType,
+} from "./types.js";
 
 class UserDefinedError extends Error {}
 class SpecificError extends UserDefinedError {}
@@ -1199,16 +1203,15 @@ describe("Retry on results", () => {
 describe("Hooks", () => {
   test("should call beforeRetry() hook, before each attempt", async () => {
     const callSequence: CallSequence[] = [];
+    const onBeforeData: HookContextType<never>[] = [];
+
     const callable = createRetry({
       input: () => {
         throw new Error("A generic error");
       },
       beforeRetry: ({ id, attempt, error, retriesRemaining }) => {
         callSequence.push("beforeRetry");
-        expect(id).toBe("1");
-        expect(attempt).toBe(1);
-        expect(error).toBeInstanceOf(Error);
-        expect(retriesRemaining).toBe(1);
+        onBeforeData.push({ id, attempt, error, retriesRemaining });
       },
       onFailedAttempt: () => {
         callSequence.push("onFailedAttempt");
@@ -1218,6 +1221,12 @@ describe("Hooks", () => {
     });
 
     const [error] = await mightThrow(callable());
+    expect(onBeforeData).toHaveLength(1);
+    expect(onBeforeData[0]?.id).toBe("1");
+    expect(onBeforeData[0]?.attempt).toBe(1);
+    expect(onBeforeData[0]?.retriesRemaining).toBe(1);
+    expect(onBeforeData[0]?.error).toBeInstanceOf(Error);
+    expect(onBeforeData[0]?.error.message).toBe("A generic error");
 
     expect(error).not.toBeNull();
     expect(error).toBeInstanceOf(Error);
@@ -1230,6 +1239,8 @@ describe("Hooks", () => {
 
   test("should call afterRetry() hook, after each attempt", async () => {
     const callSequence: CallSequence[] = [];
+    const onAfterData: HookContextType<never>[] = [];
+
     const callable = createRetry({
       input: () => {
         throw new Error("A generic error");
@@ -1239,16 +1250,19 @@ describe("Hooks", () => {
       },
       afterRetry: ({ id, attempt, error, retriesRemaining }) => {
         callSequence.push("afterRetry");
-        expect(id).toBe("1");
-        expect(attempt).toBe(1);
-        expect(error).toBeInstanceOf(Error);
-        expect(retriesRemaining).toBe(0);
+        onAfterData.push({ id, attempt, error, retriesRemaining });
       },
       maxRetries: 1,
       id: "1",
     });
 
     const [error] = await mightThrow(callable());
+    expect(onAfterData).toHaveLength(1);
+    expect(onAfterData[0]?.id).toBe("1");
+    expect(onAfterData[0]?.attempt).toBe(1);
+    expect(onAfterData[0]?.retriesRemaining).toBe(0);
+    expect(onAfterData[0]?.error).toBeInstanceOf(Error);
+    expect(onAfterData[0]?.error.message).toBe("A generic error");
 
     expect(error).not.toBeNull();
     expect(error).toBeInstanceOf(Error);
@@ -1261,32 +1275,42 @@ describe("Hooks", () => {
 
   test("should call beforeRetry(), onFailedAttempt() and afterRetry()", async () => {
     const callSequence: CallSequence[] = [];
+    const onBeforeData: HookContextType<never>[] = [];
+    const onAfterData: HookContextType<never>[] = [];
+
     const callable = createRetry({
       input: () => {
         throw new Error("A generic error");
       },
       beforeRetry: ({ id, attempt, error, retriesRemaining }) => {
         callSequence.push("beforeRetry");
-        expect(id).toBe("1");
-        expect(attempt).toBe(1);
-        expect(error).toBeInstanceOf(Error);
-        expect(retriesRemaining).toBe(1);
+        onBeforeData.push({ id, attempt, error, retriesRemaining });
       },
       onFailedAttempt: () => {
         callSequence.push("onFailedAttempt");
       },
       afterRetry: ({ id, attempt, error, retriesRemaining }) => {
         callSequence.push("afterRetry");
-        expect(id).toBe("1");
-        expect(attempt).toBe(1);
-        expect(error).toBeInstanceOf(Error);
-        expect(retriesRemaining).toBe(0);
+        onAfterData.push({ id, attempt, error, retriesRemaining });
       },
       maxRetries: 1,
       id: "1",
     });
 
     const [error] = await mightThrow(callable());
+    expect(onBeforeData).toHaveLength(1);
+    expect(onBeforeData[0]?.id).toBe("1");
+    expect(onBeforeData[0]?.attempt).toBe(1);
+    expect(onBeforeData[0]?.retriesRemaining).toBe(1);
+    expect(onBeforeData[0]?.error).toBeInstanceOf(Error);
+    expect(onBeforeData[0]?.error.message).toBe("A generic error");
+
+    expect(onAfterData).toHaveLength(1);
+    expect(onAfterData[0]?.id).toBe("1");
+    expect(onAfterData[0]?.attempt).toBe(1);
+    expect(onAfterData[0]?.retriesRemaining).toBe(0);
+    expect(onAfterData[0]?.error).toBeInstanceOf(Error);
+    expect(onAfterData[0]?.error.message).toBe("A generic error");
 
     expect(error).not.toBeNull();
     expect(error).toBeInstanceOf(Error);
