@@ -27,7 +27,7 @@ type CommonHookContextType<TRetryResult> = {
 
 export type BeforeRetryHookContextType<TRetryResult> =
   CommonHookContextType<TRetryResult> & {
-    prevAttempt: number;
+    attempt: number;
   };
 
 export type AfterRetryHookContextType<TRetryResult> =

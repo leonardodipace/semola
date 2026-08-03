@@ -88,7 +88,7 @@ export class Retry<TRetryResult> {
     const [callbackError] = await mightThrow(
       Promise.resolve().then(() =>
         beforeRetry({
-          prevAttempt: this.currentAttempt,
+          attempt: this.currentAttempt,
           retriesRemaining: maxRetries - (this.currentAttempt - 1),
           id: this.id,
           error,

@@ -1203,10 +1203,10 @@ describe("Hooks", () => {
       input: () => {
         throw new Error("A generic error");
       },
-      beforeRetry: ({ id, prevAttempt, error, retriesRemaining }) => {
+      beforeRetry: ({ id, attempt, error, retriesRemaining }) => {
         callSequence.push("beforeRetry");
         expect(id).toBe("1");
-        expect(prevAttempt).toBe(1);
+        expect(attempt).toBe(1);
         expect(error).toBeInstanceOf(Error);
         expect(retriesRemaining).toBe(1);
       },
@@ -1265,10 +1265,10 @@ describe("Hooks", () => {
       input: () => {
         throw new Error("A generic error");
       },
-      beforeRetry: ({ id, prevAttempt, error, retriesRemaining }) => {
+      beforeRetry: ({ id, attempt, error, retriesRemaining }) => {
         callSequence.push("beforeRetry");
         expect(id).toBe("1");
-        expect(prevAttempt).toBe(1);
+        expect(attempt).toBe(1);
         expect(error).toBeInstanceOf(Error);
         expect(retriesRemaining).toBe(1);
       },
