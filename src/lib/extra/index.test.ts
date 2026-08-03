@@ -1371,22 +1371,28 @@ describe("Hooks", () => {
 
     expect(onBeforeData[0]?.attempt).toBe(1);
     expect(onBeforeData[0]?.retriesRemaining).toBe(3);
+
     expect(onFailedData[0]?.attempt).toBe(1);
     expect(onFailedData[0]?.retriesRemaining).toBe(2);
+
     expect(onAfterData[0]?.attempt).toBe(1);
     expect(onAfterData[0]?.retriesRemaining).toBe(2);
 
     expect(onBeforeData[1]?.attempt).toBe(2);
     expect(onBeforeData[1]?.retriesRemaining).toBe(2);
-    expect(onAfterData[1]?.attempt).toBe(2);
-    expect(onAfterData[1]?.retriesRemaining).toBe(1);
+
+    expect(onFailedData[1]?.attempt).toBe(2);
+    expect(onFailedData[1]?.retriesRemaining).toBe(1);
+
     expect(onAfterData[1]?.attempt).toBe(2);
     expect(onAfterData[1]?.retriesRemaining).toBe(1);
 
     expect(onBeforeData[2]?.attempt).toBe(3);
     expect(onBeforeData[2]?.retriesRemaining).toBe(1);
+
     expect(onFailedData[2]?.attempt).toBe(3);
     expect(onFailedData[2]?.retriesRemaining).toBe(0);
+
     expect(onAfterData[2]?.attempt).toBe(3);
     expect(onAfterData[2]?.retriesRemaining).toBe(0);
 
