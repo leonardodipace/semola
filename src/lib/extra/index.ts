@@ -103,9 +103,8 @@ export {
   MAX_BACKOFF_DELAY,
 } from "./retry.manager.js";
 export type {
-  AfterRetryHookContextType,
   BackoffOptions,
-  BeforeRetryHookContextType,
+  HookContextType,
   ErrorMetadataType,
   OnFailedAttemptContextType,
   RetryContext,

@@ -1237,10 +1237,10 @@ describe("Hooks", () => {
       onFailedAttempt: () => {
         callSequence.push("onFailedAttempt");
       },
-      afterRetry: ({ id, nextAttempt, error, retriesRemaining }) => {
+      afterRetry: ({ id, attempt, error, retriesRemaining }) => {
         callSequence.push("afterRetry");
         expect(id).toBe("1");
-        expect(nextAttempt).toBe(1);
+        expect(attempt).toBe(1);
         expect(error).toBeInstanceOf(Error);
         expect(retriesRemaining).toBe(0);
       },
@@ -1275,10 +1275,10 @@ describe("Hooks", () => {
       onFailedAttempt: () => {
         callSequence.push("onFailedAttempt");
       },
-      afterRetry: ({ id, nextAttempt, error, retriesRemaining }) => {
+      afterRetry: ({ id, attempt, error, retriesRemaining }) => {
         callSequence.push("afterRetry");
         expect(id).toBe("1");
-        expect(nextAttempt).toBe(1);
+        expect(attempt).toBe(1);
         expect(error).toBeInstanceOf(Error);
         expect(retriesRemaining).toBe(0);
       },
