@@ -38,7 +38,7 @@ console.log(await callable());
 
 `createRetry()` use the following options:
   - `input: () => TRetryResult | Promise<TRetryResult>` (required) -  A synchronous or an asynchronous function you want retry `n` times
-  - `maxRetries: number` (required) - Number of retries after the first failure. A successful `input` call will stop its execution. The number of retries must be a finite non-negative number; if passed an invalid number, `createRetry()` will raise an `InvalidRetryError` error
+  - `maxRetries: number` (required) - Number of retries after the first failure. A successful `input` call will stop its execution. The number of retries must be a finite non-negative integer; if passed an invalid number, `createRetry()` will raise an `InvalidRetryError` error
   - `id?: string` (optional) - Retry's id. By default it's a randomly generated UUID
   - `ignoreErrors?: ErrorClassType[]` (optinal) - A list of exception classes and subclasses you want to ignore from retries. By default it's an empty list, meaning all exceptions are retried
   - `retryErrors?: ErrorClassType[]` (optinal) - A list of exception classes and subclasses reported as errors and must be retried. If an error is not in the `retryErrors` list, it is passed to `onError`, if present, or thrown; By default it's an empty list, meaning no exceptions are matched
