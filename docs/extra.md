@@ -204,3 +204,8 @@ const callable = createRetry({
 
 await callable();
 ```
+
+
+### Credits
+
+The retry module was hugely inspired by [Resilience4j](https://resilience4j.readme.io/docs/retry) and [p-ertry](https://github.com/sindresorhus/p-retry)
