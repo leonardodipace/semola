@@ -1203,10 +1203,10 @@ describe("Hooks", () => {
       input: () => {
         throw new Error("A generic error");
       },
-      beforeRetry: ({ id, currentAttempt, error, retriesRemaining }) => {
+      beforeRetry: ({ id, prevAttempt, error, retriesRemaining }) => {
         callSequence.push("beforeRetry");
         expect(id).toBe("1");
-        expect(currentAttempt).toBe(1);
+        expect(prevAttempt).toBe(1);
         expect(error).toBeInstanceOf(Error);
         expect(retriesRemaining).toBe(1);
       },
@@ -1237,10 +1237,10 @@ describe("Hooks", () => {
       onFailedAttempt: () => {
         callSequence.push("onFailedAttempt");
       },
-      afterRetry: ({ id, currentAttempt, error, retriesRemaining }) => {
+      afterRetry: ({ id, nextAttempt, error, retriesRemaining }) => {
         callSequence.push("afterRetry");
         expect(id).toBe("1");
-        expect(currentAttempt).toBe(1);
+        expect(nextAttempt).toBe(1);
         expect(error).toBeInstanceOf(Error);
         expect(retriesRemaining).toBe(0);
       },
@@ -1265,20 +1265,20 @@ describe("Hooks", () => {
       input: () => {
         throw new Error("A generic error");
       },
-      beforeRetry: ({ id, currentAttempt, error, retriesRemaining }) => {
+      beforeRetry: ({ id, prevAttempt, error, retriesRemaining }) => {
         callSequence.push("beforeRetry");
         expect(id).toBe("1");
-        expect(currentAttempt).toBe(1);
+        expect(prevAttempt).toBe(1);
         expect(error).toBeInstanceOf(Error);
         expect(retriesRemaining).toBe(1);
       },
       onFailedAttempt: () => {
         callSequence.push("onFailedAttempt");
       },
-      afterRetry: ({ id, currentAttempt, error, retriesRemaining }) => {
+      afterRetry: ({ id, nextAttempt, error, retriesRemaining }) => {
         callSequence.push("afterRetry");
         expect(id).toBe("1");
-        expect(currentAttempt).toBe(1);
+        expect(nextAttempt).toBe(1);
         expect(error).toBeInstanceOf(Error);
         expect(retriesRemaining).toBe(0);
       },
