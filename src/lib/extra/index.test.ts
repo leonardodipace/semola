@@ -1338,6 +1338,68 @@ describe("Hooks", () => {
     expect(error).toBe(original);
   });
 
+  test("should check how attempts and remaining attempts are calculated", async () => {
+    const callSequence: CallSequence[] = [];
+    const onBeforeData: Omit<HookContextType<never>, "error" | "id">[] = [];
+    const onAfterData: Omit<HookContextType<never>, "error" | "id">[] = [];
+    const onFailedData: Omit<HookContextType<never>, "error" | "id">[] = [];
+
+    const callable = createRetry({
+      input: () => {
+        throw new Error("A generic error");
+      },
+      beforeRetry: ({ attempt, retriesRemaining }) => {
+        callSequence.push("beforeRetry");
+        onBeforeData.push({ attempt, retriesRemaining });
+      },
+      onFailedAttempt: ({ attempt, retriesRemaining }) => {
+        callSequence.push("onFailedAttempt");
+        onFailedData.push({ attempt, retriesRemaining });
+      },
+      afterRetry: ({ attempt, retriesRemaining }) => {
+        callSequence.push("afterRetry");
+        onAfterData.push({ attempt, retriesRemaining });
+      },
+      maxRetries: 3,
+      id: "1",
+    });
+
+    const [error] = await mightThrow(callable());
+    expect(onBeforeData).toHaveLength(3);
+    expect(onAfterData).toHaveLength(3);
+    expect(onFailedData).toHaveLength(3);
+
+    expect(onBeforeData[0]?.attempt).toBe(1);
+    expect(onBeforeData[0]?.retriesRemaining).toBe(3);
+    expect(onFailedData[0]?.attempt).toBe(1);
+    expect(onFailedData[0]?.retriesRemaining).toBe(2);
+    expect(onAfterData[0]?.attempt).toBe(1);
+    expect(onAfterData[0]?.retriesRemaining).toBe(2);
+
+    expect(onBeforeData[1]?.attempt).toBe(2);
+    expect(onBeforeData[1]?.retriesRemaining).toBe(2);
+    expect(onAfterData[1]?.attempt).toBe(2);
+    expect(onAfterData[1]?.retriesRemaining).toBe(1);
+    expect(onAfterData[1]?.attempt).toBe(2);
+    expect(onAfterData[1]?.retriesRemaining).toBe(1);
+
+    expect(onBeforeData[2]?.attempt).toBe(3);
+    expect(onBeforeData[2]?.retriesRemaining).toBe(1);
+    expect(onFailedData[2]?.attempt).toBe(3);
+    expect(onFailedData[2]?.retriesRemaining).toBe(0);
+    expect(onAfterData[2]?.attempt).toBe(3);
+    expect(onAfterData[2]?.retriesRemaining).toBe(0);
+
+    expect(error).not.toBeNull();
+    expect(error).toBeInstanceOf(Error);
+    expect(error?.message).toBe("A generic error");
+
+    expect(callSequence).toHaveLength(9);
+    expect(callSequence[0]).toBe("beforeRetry");
+    expect(callSequence[1]).toBe("onFailedAttempt");
+    expect(callSequence[2]).toBe("afterRetry");
+  });
+
   test("should not call onError() when beforeRetry() fails", async () => {
     const original = new Error("A generic error");
     let onErrorCalled = false;
