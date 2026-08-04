@@ -49,7 +49,7 @@ export class Retry<TRetryResult> {
   }
 
   public async update(ctx: RetryContext) {
-    const delay = this.calculateDelay(this.currentAttempt);
+    const delay = this.calculateDelay(this.currentAttempt - 1);
     await this.runOnFailedAttempt(delay, ctx.error);
 
     this.currentAttempt += 1;
