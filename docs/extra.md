@@ -14,7 +14,7 @@ import {
   BACKOFF_MULTIPLIER, BASE_BACKOFF_DELAY, MAX_BACKOFF_DELAY,
   BackoffOptions, ErrorMetadataType, HookContextType,
   OnFailedAttemptContextType, RetryContext, RetryOnErrorContextType,
-  RetryOptions, RetryOutcomeType,
+  RetryOptions, RetryOutcomeType
 } from "semola/extra";
 ```
 
@@ -81,7 +81,9 @@ console.log(await callable());
 - If `input` succeeded, it returns an object of type `{ ok: true; result: TRetryResult }`; you can find `input`'s result inside the `result` property
 - If `input` failed, and `onError` was defined, it returns an object of type `{ ok: false }`. 
 
-Note that `InvalidResultError` is created when `input`'s return value need to be retried; this class provide a `data` attribute, of type `TRetryResult` containing the value that caused the retry.
+An `InvalidResultError` is created when `input`'s return value need to be retried; this class provide a `data` attribute, of type `TRetryResult` containing the value that caused the retry.
+
+If an error was thrown by `onFailedAttempt()`, `beforeRetry()`, `afterRetry()` or `onError()` function, `callable` will re-throw the original error.
 
 ### Usage Example
 
