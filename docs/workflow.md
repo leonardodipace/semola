@@ -5,7 +5,12 @@ Durable and resumable workflows backed by Redis.
 ## Import
 
 ```typescript
-import { defineWorkflow, listWorkflows, resumeWorkflow } from "semola/workflow";
+import {
+  defineWorkflow,
+  listWorkflows,
+  recoverOrphanedWorkflows,
+  resumeWorkflow,
+} from "semola/workflow";
 ```
 
 ## Basic Usage
@@ -50,30 +55,40 @@ Each step persists its output in Redis using the step name as key.
 
 If a workflow crashes after one or more completed steps:
 
-- calling `resume(executionId)` or `resumeWorkflow(redis, executionId)` reruns the handler
+- calling `resume(executionId)`, `resumeWorkflow(redis, executionId)`, or automatic recovery reruns the handler
 - completed steps are loaded from Redis and skipped
 - execution continues from the first unfinished step
 
+Before a step runs, a start marker is written. If the process dies mid-step, resume sees the marker without an output and re-runs that step (at-least-once).
+
 ## Crash Recovery
 
-`defineWorkflow` registers the handler in a process-local map by `name`. On boot, after all workflow modules are loaded:
+`defineWorkflow` registers the handler in a process-local map by `name`. By default, each workflow also runs a recovery sweeper every `recoveryIntervalMs` (30000). Set `recoveryIntervalMs: 0` to disable.
+
+You can also recover on boot (or from ops) after all workflow modules are loaded:
 
 ```typescript
-const pending = await listWorkflows(redis, {
-  status: ["pending", "running"],
-  unlockedOnly: true,
-});
-
-for (const item of pending) {
-  await resumeWorkflow(redis, item.id);
-}
+await recoverOrphanedWorkflows(redis);
+// or scoped: await recoverOrphanedWorkflows(redis, { name: "onboard-user" });
 ```
 
-- `unlockedOnly: true` skips executions that still hold a Redis lock (another worker is alive).
-- Orphaned `running` executions (process died, lock TTL expired) are included.
-- Do not auto-resume all `failed` executions - those exhausted retries for a reason. Pass `status: "failed"` only when you intend to retry them.
-- Default `lockTTL` is 5 minutes. Recovery immediately after a crash may still see locks; wait or run the loop periodically.
-- Handlers must be defined (imported) before `resumeWorkflow`. An unknown `name` in Redis throws `NotFoundError`.
+`recoverOrphanedWorkflows`:
+
+1. Reclaims ids stuck on the per-workflow `processing` list when no lock is held and status is `pending` or `running`
+2. Scans unlocked `pending` / `running` executions (same rules as `listWorkflows` + `resumeWorkflow`)
+
+Notes:
+
+- Orphaned `running` executions (process died, lock TTL expired) are included once the lock is gone.
+- Failed executions are not auto-resumed - those exhausted retries for a reason.
+- Default `lockTTL` is 5 minutes. Recovery immediately after a crash may still see locks; the sweeper retries on its interval.
+- Handlers must be defined (imported) before recovery. An unknown `name` in Redis throws `NotFoundError` from `resumeWorkflow`.
+
+## Job claim
+
+Workers claim work with `RPOPLPUSH` from `workflow:{name}:jobs` onto `workflow:{name}:processing`. After the claim attempt finishes (success, failure, lock contention, or partition requeue), the id is removed from `processing` with `LREM`.
+
+If a process dies after claim and before ack, the id stays on `processing` until recovery reclaims it. This avoids losing work to a bare `RPOP`.
 
 ## API
 
@@ -83,28 +98,31 @@ for (const item of pending) {
 - `resume(executionId)` enqueues a failed or interrupted execution, then returns its ID with `pending` status.
 - `get(executionId)` returns execution status, timestamps, and completed steps.
 - `cancel(executionId)` marks execution as cancelled.
-- `stop()` stops worker loops and waits for in-flight executions to finish.
+- `stop()` stops worker loops and the recovery sweeper, then waits for in-flight executions to finish.
 - `name` - workflow name used for registration and Redis meta.
 
 ### Top-level helpers
 
 - `listWorkflows(redis, options?)` scans all executions. Options: `name`, `status`, `unlockedOnly`.
 - `resumeWorkflow(redis, executionId)` reads the stored workflow name and resumes via the process registry.
+- `recoverOrphanedWorkflows(redis, options?)` reclaims processing orphans and resumes unlocked `pending` / `running` executions. Options: `name`.
 
 `start()`, `resume()`, and `resumeWorkflow()` enqueue work for background workers. Use `get(executionId)` to read the eventual result or failure.
 
 Workers are per process. With multiple replicas, each process runs up to `concurrency` executions; Redis distributes jobs across them. Total parallelism is roughly the sum of each process's concurrency.
 
-With `partitionBy` / `start({ partitionKey })`, the same `concurrency` value also caps how many executions with the same key may run at once across all replicas. That Redis-wide per-key cap is accurate only when every replica uses the same `concurrency` value; if replicas differ, the effective cap is the maximum configured value.
+With `partitionBy` / `start({ partitionKey })`, `partitionConcurrency` (defaulting to `concurrency`) caps how many executions with the same key may run at once across all replicas. Keep `partitionConcurrency` identical on every replica; worker `concurrency` may differ per process.
 
 ## Options
 
 - **`name`** (required) - Workflow name stored in Redis meta and used for process registration. Must be unique in the process. Execution IDs must be unique across all workflows sharing a Redis database.
 - **`redis`** (required) - Bun Redis client instance
 - **`handler`** (required) - Workflow function with `step` helper
-- **`concurrency`** - Parallel workers in this process (default: 1). With partitions, also the max concurrent executions per partition key (Redis-wide when all replicas share the same value; otherwise the effective cap is the max across replicas).
+- **`concurrency`** - Parallel workers in this process (default: 1)
+- **`partitionConcurrency`** - Max concurrent executions per partition key across Redis (default: same as `concurrency`). Prefer setting this explicitly when worker `concurrency` varies by replica.
 - **`partitionBy`** - Optional `(input) => string` to derive a partition key at `start()`. Empty keys throw.
 - **`pollInterval`** - Milliseconds to wait when the job list is empty (default: 100)
+- **`recoveryIntervalMs`** - Automatic orphan recovery interval (default: 30000). Set to `0` to disable.
 - **`retries`** - Step retry attempts before marking the workflow `failed` (default: 3). Set to `0` to fail on the first error with no retries.
 - **`retryBackoff`** - Optional `{ baseDelay, multiplier, maxDelay }` for retry delays (defaults: 1000ms, 2x, 30000ms cap)
 - **`hooks`** - Optional lifecycle callbacks (see [Hooks](#hooks))
@@ -121,15 +139,16 @@ Executions use flat keys keyed only by execution id:
 - `workflow:execution:{id}:steps`
 - `workflow:execution:{id}:lock`
 
-Pending work for a workflow name uses a Redis list:
+Pending and in-flight work for a workflow name:
 
 - `workflow:{name}:jobs`
+- `workflow:{name}:processing`
 
-Per-partition concurrency uses one Redis string per slot (`0` .. `concurrency - 1`):
+Per-partition concurrency uses one Redis string per slot (`0` .. `partitionConcurrency - 1`):
 
 - `workflow:{name}:partition:{key}:{slot}`
 
-Slots are claimed with `SET NX PX` (same pattern as execution locks). Crash recovery relies on TTL.
+Slots are claimed with `SET NX PX` (same pattern as execution locks). Crash recovery relies on TTL plus the recovery sweeper.
 
 The workflow `name` is also stored as a field on the meta hash (not in the execution key path).
 
@@ -154,7 +173,8 @@ const onboardUser = defineWorkflow<User>({
 const deploy = defineWorkflow<{ cloudEnvironmentId: string }>({
   name: "deploy",
   redis: redisClient,
-  concurrency: 3,
+  concurrency: 8,
+  partitionConcurrency: 3,
   partitionBy: (input) => input.cloudEnvironmentId,
   handler: async ({ step }) => {
     await step("apply", async () => {
@@ -185,7 +205,7 @@ handler: async ({ step }) => {
 
 Step handlers receive `{ input, signal, fail }`.
 
-Only successful step runs are persisted to Redis. Side effects inside a step may run more than once during retries, so keep step handlers idempotent.
+A start marker is written before each attempt. Only successful step runs persist an output. Side effects inside a step may run more than once during retries or after a crash mid-step, so keep step handlers idempotent.
 
 `cancel(executionId)` works during retry backoff as well as between steps.
 
@@ -251,9 +271,22 @@ const onboardUser = defineWorkflow<User, void>({
 - `onComplete` runs after a successful execution.
 - `onCancel` runs when execution ends as cancelled.
 
+## Redis durability
+
+Workflow state lives entirely in Redis. Treat Redis as the system of record:
+
+- Enable AOF (`appendonly yes`). Prefer `appendfsync everysec` (or `always` if you accept the latency).
+- Run Redis with replication / HA appropriate for your RPO.
+- Back up Redis regularly. Losing Redis without durable persistence loses workflow state.
+
+## Determinism
+
+On resume, the full handler re-runs and skips steps that already have an output. Keep step names stable and unique. Avoid non-deterministic branching between steps (wall-clock, random, external reads outside `step`) unless those branches remain safe when replayed.
+
 ## Notes
 
 - Step names should be stable and unique inside a workflow handler.
-- Semantics are at-least-once for side effects.
+- Semantics are at-least-once for side effects (not exactly-once).
 - Keep step handlers idempotent whenever possible.
 - Duplicate `defineWorkflow({ name })` in the same process throws.
+- Not included: durable timers/sleep, signals, child workflows, or event-history replay like Temporal.

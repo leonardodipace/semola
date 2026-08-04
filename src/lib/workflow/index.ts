@@ -22,6 +22,7 @@ import type {
   WorkflowMeta,
   WorkflowMetaField,
   WorkflowOptions,
+  WorkflowRecoverOptions,
   WorkflowStartOptions,
   WorkflowStartResult,
   WorkflowStatus,
@@ -35,6 +36,7 @@ const DEFAULT_RETRY_MULTIPLIER = 2;
 const DEFAULT_RETRY_MAX_DELAY = 30000;
 const DEFAULT_CONCURRENCY = 1;
 const DEFAULT_POLL_INTERVAL = 100;
+const DEFAULT_RECOVERY_INTERVAL_MS = 30000;
 const SHUTDOWN_POLL_INTERVAL = 10;
 const META_KEY_PREFIX = "workflow:execution:";
 const META_KEY_SUFFIX = ":meta";
@@ -188,9 +190,12 @@ class WorkflowDefinition<TInput, TResult> {
   private retryMultiplier: number;
   private retryMaxDelay: number;
   private concurrency: number;
+  private partitionConcurrency: number;
   private pollInterval: number;
+  private recoveryIntervalMs: number;
   private running = true;
   private activeWorkers = 0;
+  private recoveryTimer: ReturnType<typeof setInterval> | null = null;
 
   public constructor(options: WorkflowOptions<TInput, TResult>) {
     this.options = options;
@@ -203,7 +208,11 @@ class WorkflowDefinition<TInput, TResult> {
     this.retryMaxDelay =
       options.retryBackoff?.maxDelay ?? DEFAULT_RETRY_MAX_DELAY;
     this.concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
+    this.partitionConcurrency =
+      options.partitionConcurrency ?? this.concurrency;
     this.pollInterval = options.pollInterval ?? DEFAULT_POLL_INTERVAL;
+    this.recoveryIntervalMs =
+      options.recoveryIntervalMs ?? DEFAULT_RECOVERY_INTERVAL_MS;
 
     assert.ok(
       Number.isFinite(this.retries) && this.retries >= 0,
@@ -226,11 +235,21 @@ class WorkflowDefinition<TInput, TResult> {
       "Invalid concurrency: must be a positive finite number",
     );
     assert.ok(
+      Number.isFinite(this.partitionConcurrency) &&
+        this.partitionConcurrency > 0,
+      "Invalid partitionConcurrency: must be a positive finite number",
+    );
+    assert.ok(
       Number.isFinite(this.pollInterval) && this.pollInterval >= 0,
       "Invalid pollInterval: must be a non-negative finite number",
     );
+    assert.ok(
+      Number.isFinite(this.recoveryIntervalMs) && this.recoveryIntervalMs >= 0,
+      "Invalid recoveryIntervalMs: must be a non-negative finite number",
+    );
 
     this.startWorkers();
+    this.startRecovery();
   }
 
   private runHook<T>(hook: () => T | Promise<T>) {
@@ -274,10 +293,12 @@ class WorkflowDefinition<TInput, TResult> {
     if (execution.status === "failed") {
       const timestamp = now();
 
-      await this.setMeta(executionId, "status", "pending");
-      await this.setMeta(executionId, "updatedAt", String(timestamp));
-      await this.setMeta(executionId, "error", "");
-      await this.setMeta(executionId, "failedAt", "");
+      await this.setMetaFields(executionId, {
+        status: "pending",
+        updatedAt: String(timestamp),
+        error: "",
+        failedAt: "",
+      });
     }
 
     await this.enqueueExecution(executionId);
@@ -287,6 +308,7 @@ class WorkflowDefinition<TInput, TResult> {
 
   public async stop() {
     this.running = false;
+    this.stopRecovery();
 
     const deadline = now() + this.lockTTL;
 
@@ -373,11 +395,13 @@ class WorkflowDefinition<TInput, TResult> {
 
     const timestamp = now();
 
-    await this.setMeta(executionId, "status", "cancelled");
-    await this.setMeta(executionId, "updatedAt", String(timestamp));
-    await this.setMeta(executionId, "cancelledAt", String(timestamp));
-    await this.setMeta(executionId, "error", "");
-    await this.setMeta(executionId, "failedAt", "");
+    await this.setMetaFields(executionId, {
+      status: "cancelled",
+      updatedAt: String(timestamp),
+      cancelledAt: String(timestamp),
+      error: "",
+      failedAt: "",
+    });
 
     const response: WorkflowCancelResult = {
       executionId,
@@ -512,6 +536,10 @@ class WorkflowDefinition<TInput, TResult> {
     return `workflow:${this.options.name}:jobs`;
   }
 
+  private processingKey() {
+    return `workflow:${this.options.name}:processing`;
+  }
+
   private waitForPollInterval() {
     return new Promise((resolve) => setTimeout(resolve, this.pollInterval));
   }
@@ -530,21 +558,72 @@ class WorkflowDefinition<TInput, TResult> {
     }
   }
 
+  private async claimExecution() {
+    const [claimError, executionId] = await mightThrow(
+      this.options.redis.rpoplpush(this.jobsKey(), this.processingKey()),
+    );
+
+    if (claimError) {
+      throw new WorkflowError(
+        `Unable to claim execution for workflow ${this.options.name}`,
+      );
+    }
+
+    if (executionId === null || executionId === undefined) {
+      return null;
+    }
+
+    if (typeof executionId !== "string") {
+      return null;
+    }
+
+    if (executionId.length === 0) {
+      return null;
+    }
+
+    return executionId;
+  }
+
+  private async ackClaim(executionId: string) {
+    await mightThrow(
+      this.options.redis.lrem(this.processingKey(), 1, executionId),
+    );
+  }
+
   private startWorkers() {
     for (let i = 0; i < this.concurrency; i++) {
       this.processJobs();
     }
   }
 
+  private startRecovery() {
+    if (this.recoveryIntervalMs === 0) {
+      return;
+    }
+
+    this.recoveryTimer = setInterval(() => {
+      void mightThrow(
+        recoverOrphanedWorkflows(this.options.redis, {
+          name: this.options.name,
+        }),
+      );
+    }, this.recoveryIntervalMs);
+  }
+
+  private stopRecovery() {
+    if (this.recoveryTimer === null) {
+      return;
+    }
+
+    clearInterval(this.recoveryTimer);
+    this.recoveryTimer = null;
+  }
+
   private async processJobs() {
     while (this.running) {
-      const queueKey = this.jobsKey();
+      const [claimError, executionId] = await mightThrow(this.claimExecution());
 
-      const [popError, executionId] = await mightThrow(
-        this.options.redis.rpop(queueKey),
-      );
-
-      if (popError) {
+      if (claimError) {
         await this.waitForPollInterval();
         continue;
       }
@@ -555,14 +634,19 @@ class WorkflowDefinition<TInput, TResult> {
       }
 
       if (!this.running) {
-        await mightThrow(this.options.redis.lpush(queueKey, executionId));
+        await this.ackClaim(executionId);
+        await mightThrow(this.options.redis.lpush(this.jobsKey(), executionId));
         break;
       }
 
       this.activeWorkers++;
 
-      await mightThrow(this.runQueuedExecution(executionId));
-      this.activeWorkers--;
+      try {
+        await mightThrow(this.runQueuedExecution(executionId));
+      } finally {
+        await this.ackClaim(executionId);
+        this.activeWorkers--;
+      }
     }
   }
 
@@ -640,10 +724,12 @@ class WorkflowDefinition<TInput, TResult> {
 
     const failedAt = now();
 
-    await this.setMeta(executionId, "status", "failed");
-    await this.setMeta(executionId, "error", error.message);
-    await this.setMeta(executionId, "updatedAt", String(failedAt));
-    await this.setMeta(executionId, "failedAt", String(failedAt));
+    await this.setMetaFields(executionId, {
+      status: "failed",
+      error: error.message,
+      updatedAt: String(failedAt),
+      failedAt: String(failedAt),
+    });
   }
 
   private async execute(executionId: string, input: TInput) {
@@ -690,8 +776,10 @@ class WorkflowDefinition<TInput, TResult> {
 
     const timestamp = now();
 
-    await this.setMeta(executionId, "status", "running");
-    await this.setMeta(executionId, "updatedAt", String(timestamp));
+    await this.setMetaFields(executionId, {
+      status: "running",
+      updatedAt: String(timestamp),
+    });
 
     const controller = new AbortController();
 
@@ -797,9 +885,11 @@ class WorkflowDefinition<TInput, TResult> {
     if (cancelled) {
       const cancelledAt = now();
 
-      await this.setMeta(executionId, "status", "cancelled");
-      await this.setMeta(executionId, "updatedAt", String(cancelledAt));
-      await this.setMeta(executionId, "cancelledAt", String(cancelledAt));
+      await this.setMetaFields(executionId, {
+        status: "cancelled",
+        updatedAt: String(cancelledAt),
+        cancelledAt: String(cancelledAt),
+      });
 
       if (this.options.hooks?.onCancel) {
         await this.runHook(() =>
@@ -820,10 +910,12 @@ class WorkflowDefinition<TInput, TResult> {
     if (handlerError) {
       const failedAt = now();
 
-      await this.setMeta(executionId, "status", "failed");
-      await this.setMeta(executionId, "error", handlerError.message);
-      await this.setMeta(executionId, "updatedAt", String(failedAt));
-      await this.setMeta(executionId, "failedAt", String(failedAt));
+      await this.setMetaFields(executionId, {
+        status: "failed",
+        error: handlerError.message,
+        updatedAt: String(failedAt),
+        failedAt: String(failedAt),
+      });
 
       await this.releaseLock(executionId, token);
 
@@ -839,10 +931,12 @@ class WorkflowDefinition<TInput, TResult> {
     if (serializeResultError) {
       const failedAt = now();
 
-      await this.setMeta(executionId, "status", "failed");
-      await this.setMeta(executionId, "error", serializeResultError.message);
-      await this.setMeta(executionId, "updatedAt", String(failedAt));
-      await this.setMeta(executionId, "failedAt", String(failedAt));
+      await this.setMetaFields(executionId, {
+        status: "failed",
+        error: serializeResultError.message,
+        updatedAt: String(failedAt),
+        failedAt: String(failedAt),
+      });
 
       await this.releaseLock(executionId, token);
 
@@ -853,12 +947,14 @@ class WorkflowDefinition<TInput, TResult> {
 
     const completedAt = now();
 
-    await this.setMeta(executionId, "result", serializedResult);
-    await this.setMeta(executionId, "status", "completed");
-    await this.setMeta(executionId, "error", "");
-    await this.setMeta(executionId, "failedAt", "");
-    await this.setMeta(executionId, "updatedAt", String(completedAt));
-    await this.setMeta(executionId, "completedAt", String(completedAt));
+    await this.setMetaFields(executionId, {
+      result: serializedResult,
+      status: "completed",
+      error: "",
+      failedAt: "",
+      updatedAt: String(completedAt),
+      completedAt: String(completedAt),
+    });
 
     if (this.options.hooks?.onComplete) {
       await this.runHook(() =>
@@ -904,6 +1000,8 @@ class WorkflowDefinition<TInput, TResult> {
 
     while (true) {
       await this.throwIfCancelled(executionId, abort);
+
+      await this.writeStepStarted(executionId, stepName, attempt);
 
       const stepOutcome = await mightThrow(
         Promise.resolve(
@@ -1043,7 +1141,7 @@ class WorkflowDefinition<TInput, TResult> {
   }
 
   private async acquirePartition(partitionKey: string, token: string) {
-    for (let slot = 0; slot < this.concurrency; slot++) {
+    for (let slot = 0; slot < this.partitionConcurrency; slot++) {
       const [setError, setResult] = await mightThrow(
         this.options.redis.set(
           this.partitionSlotKey(partitionKey, slot),
@@ -1130,13 +1228,22 @@ class WorkflowDefinition<TInput, TResult> {
     field: WorkflowMetaField,
     value: string,
   ) {
+    await this.setMetaFields(executionId, { [field]: value });
+  }
+
+  private async setMetaFields(
+    executionId: string,
+    fields: Partial<WorkflowMeta>,
+  ) {
     const [writeError] = await mightThrow(
-      this.options.redis.hset(this.metaKey(executionId), field, value),
+      this.options.redis.hset(this.metaKey(executionId), fields),
     );
 
     if (writeError) {
+      const fieldNames = Object.keys(fields).join(", ");
+
       throw new WorkflowError(
-        `Unable to persist ${field} for execution ${executionId}`,
+        `Unable to persist ${fieldNames} for execution ${executionId}`,
       );
     }
   }
@@ -1297,6 +1404,37 @@ class WorkflowDefinition<TInput, TResult> {
     return this.deserializeResult(raw);
   }
 
+  private async writeStepStarted(
+    executionId: string,
+    stepName: string,
+    attempt: number,
+  ) {
+    const payload = {
+      startedAt: now(),
+      attempt,
+    };
+
+    const [payloadError, payloadRaw] = mightThrowSync(() =>
+      JSON.stringify(payload),
+    );
+
+    if (payloadError || typeof payloadRaw !== "string") {
+      throw new SerializationError(
+        `Unable to persist step ${stepName} start marker`,
+      );
+    }
+
+    const [writeError] = await mightThrow(
+      this.options.redis.hset(this.stepsKey(executionId), stepName, payloadRaw),
+    );
+
+    if (writeError) {
+      throw new WorkflowError(
+        `Unable to persist step ${stepName} start for execution ${executionId}`,
+      );
+    }
+  }
+
   private async writeStepOutput(
     executionId: string,
     stepName: string,
@@ -1342,7 +1480,12 @@ class WorkflowDefinition<TInput, TResult> {
         );
       }
 
-      await this.setMeta(executionId, "steps", serializedSteps);
+      await this.setMetaFields(executionId, {
+        steps: serializedSteps,
+        updatedAt: String(now()),
+      });
+
+      return;
     }
 
     await this.setMeta(executionId, "updatedAt", String(now()));
@@ -1378,9 +1521,7 @@ class WorkflowDefinition<TInput, TResult> {
     }
 
     if (typeof parsed.output !== "string") {
-      throw new StateError(
-        `Invalid step output for ${stepName} in execution ${executionId}`,
-      );
+      return { found: false, value: null };
     }
 
     const outputRaw = parsed.output;
@@ -1446,6 +1587,10 @@ class WorkflowDefinition<TInput, TResult> {
         throw new StateError(
           `Invalid step payload for ${stepName} in execution ${executionId}`,
         );
+      }
+
+      if (typeof parsed.output !== "string") {
+        continue;
       }
 
       if (typeof parsed.completedAt !== "number") {
@@ -1627,6 +1772,125 @@ export const listWorkflows = async (
   return results;
 };
 
+const processingKeyFor = (name: string) => {
+  return `workflow:${name}:processing`;
+};
+
+export const recoverOrphanedWorkflows = async (
+  redis: Bun.RedisClient,
+  options?: WorkflowRecoverOptions,
+) => {
+  const nameFilter = normalizeToSet(options?.name);
+  const recoveredIds = new Set<string>();
+
+  const names =
+    nameFilter === null ? [...workflowRegistry.keys()] : [...nameFilter];
+
+  for (const name of names) {
+    const processingKey = processingKeyFor(name);
+
+    const [rangeError, ids] = await mightThrow(
+      redis.lrange(processingKey, 0, -1),
+    );
+
+    if (rangeError) {
+      throw new WorkflowError(
+        `Unable to read processing list for workflow ${name}`,
+      );
+    }
+
+    if (!ids) {
+      continue;
+    }
+
+    for (const executionId of ids) {
+      if (typeof executionId !== "string") {
+        continue;
+      }
+
+      if (executionId.length === 0) {
+        continue;
+      }
+
+      if (recoveredIds.has(executionId)) {
+        continue;
+      }
+
+      const [existsError, lockExists] = await mightThrow(
+        redis.exists(lockKeyFor(executionId)),
+      );
+
+      if (existsError) {
+        throw new WorkflowError(
+          `Unable to read lock for execution ${executionId}`,
+        );
+      }
+
+      if (lockExists) {
+        continue;
+      }
+
+      const [statusError, statusRaw] = await mightThrow(
+        redis.hget(metaKeyFor(executionId), "status"),
+      );
+
+      if (statusError) {
+        throw new WorkflowError(
+          `Unable to read status for execution ${executionId}`,
+        );
+      }
+
+      await mightThrow(redis.lrem(processingKey, 1, executionId));
+
+      if (statusRaw !== "pending") {
+        if (statusRaw !== "running") {
+          continue;
+        }
+      }
+
+      if (!workflowRegistry.has(name)) {
+        continue;
+      }
+
+      const [resumeError] = await mightThrow(
+        resumeWorkflow(redis, executionId),
+      );
+
+      if (resumeError) {
+        continue;
+      }
+
+      recoveredIds.add(executionId);
+    }
+  }
+
+  const orphans = await listWorkflows(redis, {
+    name: options?.name,
+    status: ["pending", "running"],
+    unlockedOnly: true,
+  });
+
+  for (const item of orphans) {
+    if (recoveredIds.has(item.id)) {
+      continue;
+    }
+
+    if (!workflowRegistry.has(item.name)) {
+      continue;
+    }
+
+    const [resumeError] = await mightThrow(resumeWorkflow(redis, item.id));
+
+    if (resumeError) {
+      continue;
+    }
+
+    recoveredIds.add(item.id);
+  }
+
+  return [...recoveredIds];
+};
+
 export const resumeWorkflow = async (
   redis: Bun.RedisClient,
   executionId: string,
@@ -1706,6 +1970,7 @@ export type {
   WorkflowMeta,
   WorkflowMetaField,
   WorkflowOptions,
+  WorkflowRecoverOptions,
   WorkflowRetryBackoff,
   WorkflowStartOptions,
   WorkflowStartResult,

@@ -108,14 +108,20 @@ export type WorkflowOptions<TInput, TResult> = {
   hooks?: WorkflowHooks<TInput, TResult>;
   lockTTL?: number;
   concurrency?: number;
+  partitionConcurrency?: number;
   partitionBy?: (input: TInput) => string;
   pollInterval?: number;
+  recoveryIntervalMs?: number;
   serializeInput?: SerializeValue<TInput>;
   deserializeInput?: DeserializeValue<TInput>;
   serializeResult?: SerializeValue<TResult>;
   deserializeResult?: DeserializeValue<TResult>;
   serializeStepOutput?: SerializeValue<unknown>;
   deserializeStepOutput?: DeserializeValue<unknown>;
+};
+
+export type WorkflowRecoverOptions = {
+  name?: string | string[];
 };
 
 export type WorkflowStartOptions = {

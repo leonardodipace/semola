@@ -1,10 +1,21 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
   clearWorkflowRegistry,
-  defineWorkflow,
+  defineWorkflow as defineWorkflowActual,
   listWorkflows,
+  recoverOrphanedWorkflows,
   resumeWorkflow,
 } from "./index.js";
+import type { WorkflowOptions } from "./types.js";
+
+const defineWorkflow = <TInput, TResult = void>(
+  options: WorkflowOptions<TInput, TResult>,
+) => {
+  return defineWorkflowActual<TInput, TResult>({
+    recoveryIntervalMs: 0,
+    ...options,
+  });
+};
 
 class MockRedisClient {
   private hashes = new Map<string, Map<string, string>>();
@@ -47,6 +58,9 @@ class MockRedisClient {
       | "del"
       | "lpush"
       | "rpop"
+      | "rpoplpush"
+      | "lrem"
+      | "lrange"
       | "eval",
   ) {
     this.failCommands.add(command);
@@ -316,6 +330,132 @@ class MockRedisClient {
     return list.pop() ?? null;
   }
 
+  public async rpoplpush(source: string, destination: string) {
+    if (this.failCommands.has("rpoplpush")) {
+      throw new Error("rpoplpush failed");
+    }
+
+    const value = await this.rpop(source);
+
+    if (value === null) {
+      return null;
+    }
+
+    if (!this.lists.has(destination)) {
+      this.lists.set(destination, []);
+    }
+
+    this.lists.get(destination)?.unshift(value);
+
+    return value;
+  }
+
+  public async lrem(key: string, count: number, value: string) {
+    if (this.failCommands.has("lrem")) {
+      throw new Error("lrem failed");
+    }
+
+    const list = this.lists.get(key);
+
+    if (!list) {
+      return 0;
+    }
+
+    let removed = 0;
+
+    if (count === 0) {
+      const next = list.filter((entry) => {
+        if (entry === value) {
+          removed++;
+          return false;
+        }
+
+        return true;
+      });
+
+      this.lists.set(key, next);
+      return removed;
+    }
+
+    if (count > 0) {
+      const next: string[] = [];
+
+      for (const entry of list) {
+        if (entry === value && removed < count) {
+          removed++;
+          continue;
+        }
+
+        next.push(entry);
+      }
+
+      this.lists.set(key, next);
+      return removed;
+    }
+
+    const next: string[] = [];
+    const limit = Math.abs(count);
+
+    for (let i = list.length - 1; i >= 0; i--) {
+      const entry = list[i];
+
+      if (entry === value && removed < limit) {
+        removed++;
+        continue;
+      }
+
+      next.unshift(entry ?? "");
+    }
+
+    this.lists.set(key, next);
+    return removed;
+  }
+
+  public async lrange(key: string, start: number, stop: number) {
+    if (this.failCommands.has("lrange")) {
+      throw new Error("lrange failed");
+    }
+
+    const list = this.lists.get(key) ?? [];
+
+    if (list.length === 0) {
+      return [] as string[];
+    }
+
+    let from = start;
+    let to = stop;
+
+    if (from < 0) {
+      from = list.length + from;
+    }
+
+    if (to < 0) {
+      to = list.length + to;
+    }
+
+    if (from < 0) {
+      from = 0;
+    }
+
+    if (to >= list.length) {
+      to = list.length - 1;
+    }
+
+    if (from > to) {
+      return [] as string[];
+    }
+
+    return list.slice(from, to + 1);
+  }
+
+  public seedList(key: string, values: string[]) {
+    this.lists.set(key, [...values]);
+  }
+
+  public getList(key: string) {
+    return [...(this.lists.get(key) ?? [])];
+  }
+
   public async send(command: string, args: string[]) {
     if (command !== "EVAL") {
       throw new Error(`Unsupported command: ${command}`);
@@ -458,6 +598,7 @@ const createWorkflowWithEchoResult = (
     name,
     redis,
     pollInterval: 1,
+    recoveryIntervalMs: 0,
     handler: async ({ input, step }) => {
       if (callCounter) {
         callCounter.value++;
@@ -484,6 +625,7 @@ const createTwoStepFailResumeWorkflow = (
     redis,
     retries: 0,
     pollInterval: 1,
+    recoveryIntervalMs: 0,
     handler: async ({ input, step }) => {
       await step("step-1", async () => {
         executedSteps.push(`step-1:${input.id}`);
@@ -1107,11 +1249,13 @@ describe("workflow", () => {
 
     test("fails when hset fails during completed status write", async () => {
       const redis = createRedis() as MockRedisClient & Bun.RedisClient;
-      redis.failHsetAfterNCalls(3);
+      // running batch succeeds; completed batch fails
+      redis.failHsetAfterNCalls(1);
 
       const workflow = defineWorkflow<{ id: number }, string>({
         name: "hset-completed-fail",
         redis,
+        pollInterval: 1,
         handler: async () => "done",
       });
 
@@ -1218,8 +1362,9 @@ describe("workflow", () => {
             {
               executionId: "background-record-failure-1",
               error: expect.objectContaining({
-                message:
-                  "Unable to persist status for execution background-record-failure-1",
+                message: expect.stringContaining(
+                  "Unable to persist status, error, updatedAt, failedAt for execution background-record-failure-1",
+                ),
               }),
             },
           ],
@@ -2494,6 +2639,258 @@ describe("workflow", () => {
       } finally {
         await workflow.stop();
       }
+    });
+  });
+
+  describe("multi-replica hardening", () => {
+    test("claims jobs onto processing and acks after completion", async () => {
+      const redis = createRedis() as MockRedisClient & Bun.RedisClient;
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "claim-ack",
+        redis,
+        pollInterval: 1,
+        handler: async () => "done",
+      });
+
+      await workflow.start({ id: 1 }, { executionId: "claim-ack-1" });
+      await waitForExecution(workflow, "claim-ack-1");
+
+      expect(redis.getList("workflow:claim-ack:jobs")).toEqual([]);
+      expect(redis.getList("workflow:claim-ack:processing")).toEqual([]);
+    });
+
+    test("recoverOrphanedWorkflows requeues processing orphans", async () => {
+      const redis = createRedis() as MockRedisClient & Bun.RedisClient;
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "recover-processing",
+        redis,
+        pollInterval: 1,
+        handler: async ({ step }) => {
+          await step("work", async () => "ok");
+          return "done";
+        },
+      });
+
+      await workflow.start({ id: 1 }, { executionId: "recover-proc-1" });
+      await waitForExecution(workflow, "recover-proc-1");
+
+      redis.seedHashField(
+        "workflow:execution:recover-proc-1:meta",
+        "status",
+        "pending",
+      );
+      redis.seedHashField(
+        "workflow:execution:recover-proc-1:meta",
+        "completedAt",
+        "",
+      );
+      redis.seedHashField(
+        "workflow:execution:recover-proc-1:meta",
+        "result",
+        "",
+      );
+      redis.seedList("workflow:recover-processing:processing", [
+        "recover-proc-1",
+      ]);
+
+      const recovered = await recoverOrphanedWorkflows(redis, {
+        name: "recover-processing",
+      });
+
+      expect(recovered).toContain("recover-proc-1");
+
+      const execution = await waitForStatus(
+        workflow,
+        "recover-proc-1",
+        "completed",
+      );
+
+      expect(execution.status).toBe("completed");
+      expect(redis.getList("workflow:recover-processing:processing")).toEqual(
+        [],
+      );
+    });
+
+    test("recoverOrphanedWorkflows resumes unlocked pending without processing entry", async () => {
+      const redis = createRedis() as MockRedisClient & Bun.RedisClient;
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "recover-orphan",
+        redis,
+        pollInterval: 1,
+        handler: async () => "done",
+      });
+
+      await workflow.start({ id: 1 }, { executionId: "recover-orphan-1" });
+      await waitForExecution(workflow, "recover-orphan-1");
+
+      redis.seedHashField(
+        "workflow:execution:recover-orphan-1:meta",
+        "status",
+        "pending",
+      );
+      redis.seedHashField(
+        "workflow:execution:recover-orphan-1:meta",
+        "completedAt",
+        "",
+      );
+      redis.seedHashField(
+        "workflow:execution:recover-orphan-1:meta",
+        "result",
+        "",
+      );
+
+      const recovered = await recoverOrphanedWorkflows(redis, {
+        name: "recover-orphan",
+      });
+
+      expect(recovered).toContain("recover-orphan-1");
+
+      const execution = await waitForStatus(
+        workflow,
+        "recover-orphan-1",
+        "completed",
+      );
+
+      expect(execution.status).toBe("completed");
+    });
+
+    test("partitionConcurrency caps per key independently of worker concurrency", async () => {
+      const redis = createRedis();
+      let maxConcurrent = 0;
+      let currentConcurrent = 0;
+      let entered = 0;
+      let releaseBarrier: (() => void) | undefined;
+
+      const barrier = new Promise<void>((resolve) => {
+        releaseBarrier = resolve;
+      });
+
+      const workflow = defineWorkflow<{ envId: string }, string>({
+        name: "partition-concurrency-split",
+        redis,
+        concurrency: 3,
+        partitionConcurrency: 1,
+        partitionBy: (input) => input.envId,
+        pollInterval: 1,
+        handler: async ({ step }) => {
+          currentConcurrent++;
+          maxConcurrent = Math.max(maxConcurrent, currentConcurrent);
+          entered++;
+
+          if (entered >= 1) {
+            releaseBarrier?.();
+          }
+
+          await barrier;
+
+          await step("work", async () => "ok");
+
+          currentConcurrent--;
+          return "done";
+        },
+      });
+
+      try {
+        await workflow.start({ envId: "env-a" }, { executionId: "pcs-1" });
+        await workflow.start({ envId: "env-a" }, { executionId: "pcs-2" });
+        await workflow.start({ envId: "env-a" }, { executionId: "pcs-3" });
+
+        await waitForExecution(workflow, "pcs-1");
+        await waitForExecution(workflow, "pcs-2");
+        await waitForExecution(workflow, "pcs-3");
+
+        expect(maxConcurrent).toBe(1);
+      } finally {
+        await workflow.stop();
+      }
+    });
+
+    test("re-runs step that only has a start marker", async () => {
+      const redis = createRedis() as MockRedisClient & Bun.RedisClient;
+      let stepRuns = 0;
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "step-start-marker",
+        redis,
+        pollInterval: 1,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("work", async () => {
+            stepRuns++;
+            return "ok";
+          });
+
+          return "done";
+        },
+      });
+
+      await workflow.start({ id: 1 }, { executionId: "ssm-1" });
+      await waitForExecution(workflow, "ssm-1");
+
+      expect(stepRuns).toBe(1);
+
+      redis.seedHashField(
+        "workflow:execution:ssm-1:steps",
+        "work",
+        JSON.stringify({ startedAt: Date.now(), attempt: 1 }),
+      );
+      redis.seedHashField("workflow:execution:ssm-1:meta", "status", "failed");
+      redis.seedHashField("workflow:execution:ssm-1:meta", "completedAt", "");
+      redis.seedHashField("workflow:execution:ssm-1:meta", "result", "");
+      redis.seedHashField(
+        "workflow:execution:ssm-1:meta",
+        "steps",
+        JSON.stringify([]),
+      );
+
+      await workflow.resume("ssm-1");
+      await waitForStatus(workflow, "ssm-1", "completed");
+
+      expect(stepRuns).toBe(2);
+    });
+
+    test("batches status fields into a single hset on complete", async () => {
+      const redis = createRedis() as MockRedisClient & Bun.RedisClient;
+      const objectHsets: Array<Record<string, string>> = [];
+      const originalHset = redis.hset.bind(redis);
+
+      redis.hset = (async (
+        key: string,
+        fieldOrValues: string | Record<string, string>,
+        value?: string,
+      ) => {
+        if (typeof fieldOrValues !== "string") {
+          objectHsets.push({ ...fieldOrValues });
+        }
+
+        if (typeof fieldOrValues === "string") {
+          return originalHset(key, fieldOrValues, value ?? "");
+        }
+
+        return originalHset(key, fieldOrValues);
+      }) as typeof redis.hset;
+
+      const workflow = defineWorkflow<{ id: number }, string>({
+        name: "batch-meta",
+        redis,
+        pollInterval: 1,
+        handler: async () => "done",
+      });
+
+      await workflow.start({ id: 1 }, { executionId: "batch-meta-1" });
+      await waitForExecution(workflow, "batch-meta-1");
+
+      const completedWrite = objectHsets.find(
+        (fields) => fields.status === "completed",
+      );
+
+      expect(completedWrite).toBeDefined();
+      expect(completedWrite?.result).toBeDefined();
+      expect(completedWrite?.completedAt).toBeDefined();
+      expect(completedWrite?.updatedAt).toBeDefined();
     });
   });
 });
