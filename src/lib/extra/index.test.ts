@@ -590,18 +590,83 @@ describe("Validate exponential backoff parameters", () => {
 
 describe("Ignoring Errors", () => {
   test("should ignore base error classe", async () => {
+    let called = 0;
     const callable = createRetry({
       input: () => {
         throw new Error("Ignored generic error");
+      },
+      onFailedAttempt: () => {
+        called++;
       },
       maxRetries: 3,
       ignoreErrors: [Error],
     });
 
     const [error] = await mightThrow(callable());
+    expect(called).toBe(0);
     expect(error).not.toBeNull();
     expect(error).toBeInstanceOf(Error);
     expect(error?.message).toBe("Ignored generic error");
+  });
+
+  test("should retry any base error when passing an empty list", async () => {
+    let called = 0;
+    const callable = createRetry({
+      input: () => {
+        throw new Error("this is an error");
+      },
+      maxRetries: 3,
+      onFailedAttempt: () => {
+        called++;
+      },
+      ignoreErrors: [],
+    });
+
+    const [error] = await mightThrow(callable());
+    expect(called).toBe(3);
+    expect(error).not.toBeNull();
+    expect(error).toBeInstanceOf(Error);
+    expect(error?.message).toBe("this is an error");
+  });
+
+  test("should retry any Error's subclass when passing an empty list", async () => {
+    let called = 0;
+    const callable = createRetry({
+      input: () => {
+        throw new RangeError("This is a range error");
+      },
+      maxRetries: 3,
+      onFailedAttempt: () => {
+        called++;
+      },
+      ignoreErrors: [],
+    });
+
+    const [error] = await mightThrow(callable());
+    expect(called).toBe(3);
+    expect(error).not.toBeNull();
+    expect(error).toBeInstanceOf(RangeError);
+    expect(error?.message).toBe("This is a range error");
+  });
+
+  test("should retry any custom subclass error when passing an empty list", async () => {
+    let called = 0;
+    const callable = createRetry({
+      input: () => {
+        throw new UserDefinedError("This is a user defined error");
+      },
+      maxRetries: 3,
+      onFailedAttempt: () => {
+        called++;
+      },
+      ignoreErrors: [],
+    });
+
+    const [error] = await mightThrow(callable());
+    expect(called).toBe(3);
+    expect(error).not.toBeNull();
+    expect(error).toBeInstanceOf(UserDefinedError);
+    expect(error?.message).toBe("This is a user defined error");
   });
 
   test("should ignore base error classes and subclasses", async () => {
@@ -793,6 +858,51 @@ describe("Retriable Errors", () => {
 
     await mightThrow(callable());
     expect(idx).toBe(3);
+  });
+
+  test("should retry on every errors when passing an empty list", async () => {
+    const errorsTypes: ErrorClassType<Error>[] = [Error, RangeError, TypeError];
+    const messages = ["generic error", "range error", "type error"];
+    const retriedErrorInstances: Error[] = [];
+    let state = 0;
+    let idx = 0;
+
+    const callable = createRetry({
+      input: () => {
+        if (state === 0) {
+          state++;
+          throw new Error(messages[0]);
+        }
+
+        if (state === 1) {
+          state++;
+          throw new RangeError(messages[1]);
+        }
+
+        if (state === 2) {
+          state = 0;
+          throw new TypeError(messages[2]);
+        }
+      },
+      maxRetries: 3,
+      retryErrors: [],
+      onFailedAttempt: ({ error }) => {
+        retriedErrorInstances.push(error);
+        idx++;
+      },
+    });
+
+    await mightThrow(callable());
+    expect(idx).toBe(3);
+
+    expect(retriedErrorInstances[0]?.constructor).toBe(errorsTypes[0]);
+    expect(retriedErrorInstances[0]?.message).toBe(messages[0]);
+
+    expect(retriedErrorInstances[1]?.constructor).toBe(errorsTypes[1]);
+    expect(retriedErrorInstances[1]?.message).toBe(messages[1]);
+
+    expect(retriedErrorInstances[2]?.constructor).toBe(errorsTypes[2]);
+    expect(retriedErrorInstances[2]?.message).toBe(messages[2]);
   });
 
   test("should retry only over a strict subset of errors", async () => {
