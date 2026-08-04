@@ -671,6 +671,8 @@ describe("Ignoring Errors", () => {
 
   test("should ignore base error classes and subclasses", async () => {
     let state = 0;
+    let called = 0;
+
     const callable = createRetry({
       input: () => {
         if (state === 0) {
@@ -687,21 +689,27 @@ describe("Ignoring Errors", () => {
           throw new TypeError("Ignored type error");
         }
       },
+      onFailedAttempt: () => {
+        called++;
+      },
       maxRetries: 3,
       ignoreErrors: [Error, TypeError, RangeError],
     });
 
     const [genericError] = await mightThrow(callable());
+    expect(called).toBe(0);
     expect(genericError).not.toBeNull();
     expect(genericError).toBeInstanceOf(Error);
     expect(genericError?.message).toBe("Ignored generic error");
 
     const [rangeError] = await mightThrow(callable());
+    expect(called).toBe(0);
     expect(rangeError).not.toBeNull();
     expect(rangeError).toBeInstanceOf(RangeError);
     expect(rangeError?.message).toBe("Ignored range error");
 
     const [typeError] = await mightThrow(callable());
+    expect(called).toBe(0);
     expect(typeError).not.toBeNull();
     expect(typeError).toBeInstanceOf(TypeError);
     expect(typeError?.message).toBe("Ignored type error");
@@ -709,6 +717,7 @@ describe("Ignoring Errors", () => {
 
   test("should ignore both custom classes and subclasses errors", async () => {
     let state = 0;
+    let called = 0;
     const callable = createRetry({
       input: () => {
         if (state === 0) {
@@ -720,16 +729,21 @@ describe("Ignoring Errors", () => {
           throw new SpecificError("child user defined error class");
         }
       },
+      onFailedAttempt: () => {
+        called++;
+      },
       maxRetries: 3,
       ignoreErrors: [UserDefinedError, SpecificError],
     });
 
     const [userDefinedError] = await mightThrow(callable());
+    expect(called).toBe(0);
     expect(userDefinedError).not.toBeNull();
     expect(userDefinedError).toBeInstanceOf(UserDefinedError);
     expect(userDefinedError?.message).toBe("base user defined error class");
 
     const [specificError] = await mightThrow(callable());
+    expect(called).toBe(0);
     expect(specificError).not.toBeNull();
     expect(specificError).toBeInstanceOf(SpecificError);
     expect(specificError?.message).toBe("child user defined error class");
@@ -737,6 +751,8 @@ describe("Ignoring Errors", () => {
 
   test("should ignore both custom and base errors", async () => {
     let state = 0;
+    let called = 0;
+
     const callable = createRetry({
       input: () => {
         if (state === 0) {
@@ -754,21 +770,27 @@ describe("Ignoring Errors", () => {
           throw new Error("generic error");
         }
       },
+      onFailedAttempt: () => {
+        called++;
+      },
       maxRetries: 3,
       ignoreErrors: [Error, UserDefinedError, TypeError],
     });
 
     const [userDefinedError] = await mightThrow(callable());
+    expect(called).toBe(0);
     expect(userDefinedError).not.toBeNull();
     expect(userDefinedError).toBeInstanceOf(UserDefinedError);
     expect(userDefinedError?.message).toBe("base user defined error class");
 
     const [typeError] = await mightThrow(callable());
+    expect(called).toBe(0);
     expect(typeError).not.toBeNull();
     expect(typeError).toBeInstanceOf(TypeError);
     expect(typeError?.message).toBe("type error");
 
     const [genericError] = await mightThrow(callable());
+    expect(called).toBe(0);
     expect(genericError).not.toBeNull();
     expect(genericError).toBeInstanceOf(Error);
     expect(genericError?.message).toBe("generic error");
@@ -804,11 +826,13 @@ describe("Ignoring Errors", () => {
     });
 
     const [userDefinedError] = await mightThrow(callable());
+    expect(called).toBe(0);
     expect(userDefinedError).not.toBeNull();
     expect(userDefinedError).toBeInstanceOf(UserDefinedError);
     expect(userDefinedError?.message).toBe("base user defined error class");
 
     const [specificError] = await mightThrow(callable());
+    expect(called).toBe(0);
     expect(specificError).not.toBeNull();
     expect(specificError).toBeInstanceOf(SpecificError);
     expect(specificError?.message).toBe("child user defined error class");
