@@ -120,7 +120,7 @@ export class Retry<TRetryResult> {
   private checkIgnoreErrors(error: Error) {
     const { ignoreErrors } = this.options;
     if (!ignoreErrors) return false;
-    if (ignoreErrors.length === 0) false;
+    if (ignoreErrors.length === 0) return false;
 
     return ignoreErrors.some((e) => error.constructor === e);
   }
@@ -128,7 +128,7 @@ export class Retry<TRetryResult> {
   private checkRetryErrors(error: Error) {
     const { retryErrors } = this.options;
     if (!retryErrors) return true;
-    if (retryErrors.length === 0) true;
+    if (retryErrors.length === 0) return true;
 
     return retryErrors.some((e) => error.constructor === e);
   }
