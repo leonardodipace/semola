@@ -190,6 +190,7 @@ export class WorkflowWorker<TInput, TResult> {
 
       try {
         await mightThrow(this.reclaimOrphans());
+        await mightThrow(this.refreshHeldPartitions());
       } finally {
         this.active--;
       }
@@ -264,6 +265,26 @@ export class WorkflowWorker<TInput, TResult> {
       return;
     }
 
+    let history = await this.store.loadHistory(executionId);
+
+    // Crash after markActive / before WorkflowStarted: rebuild start from meta.
+    if (history.length === 0) {
+      const hasLease = await this.ownsLease(executionId, token);
+
+      if (!hasLease) return;
+
+      await this.store.appendEvents(executionId, [
+        {
+          type: "WorkflowStarted",
+          input: meta.input,
+          partitionKey: meta.partitionKey,
+          timestamp: Number(meta.createdAt) || Date.now(),
+        },
+      ]);
+
+      history = await this.store.loadHistory(executionId);
+    }
+
     const partitionKey = meta.partitionKey;
     let partitionSlot = this.partitionSlots.get(executionId);
 
@@ -300,7 +321,7 @@ export class WorkflowWorker<TInput, TResult> {
       }
     }
 
-    const view = parseHistory(await this.store.loadHistory(executionId));
+    const view = parseHistory(history);
 
     if (view.terminal) {
       await this.finalizeFromTerminal(executionId, view.terminal, meta.input);
@@ -341,12 +362,16 @@ export class WorkflowWorker<TInput, TResult> {
       },
     );
 
-    if (!(await this.ownsLease(executionId, token))) return;
+    const hasLease = await this.ownsLease(executionId, token);
+
+    if (!hasLease) return;
 
     await this.store.appendEvents(executionId, events);
 
     for (const event of events) {
-      if (!(await this.ownsLease(executionId, token))) return;
+      const hasLease = await this.ownsLease(executionId, token);
+
+      if (!hasLease) return;
 
       if (event.type === "StepScheduled") {
         await this.store.enqueueStep({
@@ -432,7 +457,9 @@ export class WorkflowWorker<TInput, TResult> {
     );
 
     if (!handler) {
-      if (this.lostLeases.has(task.executionId)) return;
+      let hasLease = await this.ownsLease(task.executionId, token);
+
+      if (!hasLease) return;
 
       const message = `Unable to resolve step handler for ${task.stepName}`;
       const input = deserializeWith(
@@ -458,6 +485,10 @@ export class WorkflowWorker<TInput, TResult> {
         }),
       );
 
+      hasLease = await this.ownsLease(task.executionId, token);
+
+      if (!hasLease) return;
+
       await this.store.appendEvents(task.executionId, [
         {
           type: "WorkflowFailed",
@@ -475,7 +506,9 @@ export class WorkflowWorker<TInput, TResult> {
       return;
     }
 
-    if (!(await this.ownsLease(task.executionId, token))) return;
+    let hasLease = await this.ownsLease(task.executionId, token);
+
+    if (!hasLease) return;
 
     await this.store.appendEvents(task.executionId, [
       {
@@ -504,7 +537,9 @@ export class WorkflowWorker<TInput, TResult> {
       ),
     );
 
-    if (!(await this.ownsLease(task.executionId, token))) return;
+    hasLease = await this.ownsLease(task.executionId, token);
+
+    if (!hasLease) return;
 
     if (!stepError) {
       const serialized = serializeWith(
@@ -563,7 +598,9 @@ export class WorkflowWorker<TInput, TResult> {
     view: ReturnType<typeof parseHistory>,
     token: string,
   ) {
-    if (!(await this.ownsLease(task.executionId, token))) return;
+    const hasLease = await this.ownsLease(task.executionId, token);
+
+    if (!hasLease) return;
 
     const message = stepError.message;
     const retryable = !(stepError instanceof NonRetryableStepError);
@@ -652,7 +689,9 @@ export class WorkflowWorker<TInput, TResult> {
     errorHistory: WorkflowStepErrorRecord[],
     token: string,
   ) {
-    if (!(await this.ownsLease(task.executionId, token))) return;
+    const hasLease = await this.ownsLease(task.executionId, token);
+
+    if (!hasLease) return;
 
     const input = deserializeWith(
       rawInput,
@@ -818,18 +857,24 @@ export class WorkflowWorker<TInput, TResult> {
 
       const view = parseHistory(await this.store.loadHistory(executionId));
 
+      let restoredStepWork = false;
+      let waitingOnTimer = false;
+
       for (const [stepId, state] of view.steps) {
         if (state.status === "completed") continue;
 
         if (state.status === "failed") {
           if (state.retryable && state.attempt <= this.retries) {
-            await this.store.scheduleTimer(Date.now(), {
+            const added = await this.store.scheduleTimerIfAbsent(Date.now(), {
               kind: "step-retry",
               executionId,
               stepId,
               stepName: state.stepName,
               attempt: state.attempt + 1,
             });
+
+            // Existing backoff timer must keep its score; do not wake the workflow.
+            if (!added) waitingOnTimer = true;
           }
 
           continue;
@@ -841,19 +886,57 @@ export class WorkflowWorker<TInput, TResult> {
           stepName: state.stepName,
           attempt: state.attempt,
         });
+
+        restoredStepWork = true;
       }
 
       for (const [timerId, state] of view.timers) {
         if (state.status !== "started") continue;
 
-        await this.store.scheduleTimer(Math.min(state.fireAt, Date.now()), {
+        await this.store.scheduleTimerIfAbsent(state.fireAt, {
           kind: "timer",
           executionId,
           timerId,
         });
+
+        if (state.fireAt > Date.now()) {
+          waitingOnTimer = true;
+        }
       }
 
+      if (restoredStepWork) {
+        await this.store.enqueueWorkflow(executionId);
+        continue;
+      }
+
+      if (waitingOnTimer) continue;
+
       await this.store.enqueueWorkflow(executionId);
+    }
+  }
+
+  private async refreshHeldPartitions() {
+    for (const [executionId, slot] of this.partitionSlots) {
+      const meta = await this.store.getMeta(executionId);
+
+      if (!meta?.partitionKey) {
+        this.partitionSlots.delete(executionId);
+        continue;
+      }
+
+      if (isTerminalStatus(meta.status)) {
+        this.partitionSlots.delete(executionId);
+        continue;
+      }
+
+      const refreshed = await this.store.refreshPartition(
+        meta.partitionKey,
+        slot,
+        executionId,
+        this.lockTTL,
+      );
+
+      if (!refreshed) this.partitionSlots.delete(executionId);
     }
   }
 

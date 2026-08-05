@@ -20,6 +20,9 @@ const CLAIM_DUE_TIMER =
 const CREATE_META_IF_ABSENT =
   "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end redis.call('HSET', KEYS[1], unpack(ARGV)) return 1";
 
+const SCHEDULE_TIMER_IF_ABSENT =
+  "if redis.call('ZSCORE', KEYS[1], ARGV[2]) ~= false then return 0 end redis.call('ZADD', KEYS[1], ARGV[1], ARGV[2]) return 1";
+
 const stringify = (value: unknown, label: string) => {
   const [error, raw] = mightThrowSync(() => JSON.stringify(value));
 
@@ -211,6 +214,26 @@ export class WorkflowStore {
     if (zaddError) {
       throw new WorkflowStoreError("Unable to schedule timer");
     }
+  }
+
+  public async scheduleTimerIfAbsent(fireAt: number, task: TimerTask) {
+    const raw = stringify(task, "timer task");
+
+    const [error, result] = await mightThrow(
+      this.redis.send("EVAL", [
+        SCHEDULE_TIMER_IF_ABSENT,
+        "1",
+        keys.timers(this.name),
+        String(fireAt),
+        raw,
+      ]),
+    );
+
+    if (error) {
+      throw new WorkflowStoreError("Unable to schedule timer");
+    }
+
+    return Number(result) === 1;
   }
 
   public async claimDueTimer(now: number) {

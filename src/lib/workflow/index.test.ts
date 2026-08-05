@@ -305,6 +305,17 @@ class MockRedisClient {
       return member;
     }
 
+    if (script.includes("ZSCORE")) {
+      const fireAt = Number(args[3]);
+      const member = args[4] ?? "";
+      const zset = this.zsets.get(key) ?? [];
+
+      if (zset.some((row) => row.member === member)) return 0;
+
+      await this.zadd(key, fireAt, member);
+      return 1;
+    }
+
     if (script.includes("EXISTS")) {
       if (this.hashes.has(key)) return 0;
 
@@ -659,7 +670,7 @@ describe("workflow", () => {
         ...fast,
         lockTTL: 50,
         handler: async ({ step, sleep: durableSleep }) => {
-          await durableSleep(10_000);
+          await durableSleep(200);
           await step("finish", async () => "done");
           return "ok";
         },
@@ -673,7 +684,7 @@ describe("workflow", () => {
     await stop(wf1);
 
     const wf2 = make();
-    const execution = await waitStatus(wf2, executionId, "completed");
+    const execution = await waitStatus(wf2, executionId, "completed", 5000);
 
     expect(execution.result).toBe("ok");
 
@@ -712,6 +723,36 @@ describe("workflow", () => {
     expect(attempts).toBe(3);
     expect(retriesSeen.length).toBe(2);
     expect(remainingSeen).toEqual([2, 1]);
+
+    await stop(wf);
+  });
+
+  test("retry backoff honors delay under reclaim", async () => {
+    const redis = createRedis();
+    let attempts = 0;
+
+    const wf = defineWorkflow({
+      name: `retry-delay-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      lockTTL: 40,
+      retries: 2,
+      retryBackoff: { baseDelay: 500, multiplier: 1, maxDelay: 500 },
+      handler: async ({ step }) => {
+        await step("flaky", async () => {
+          attempts++;
+          throw new Error("boom");
+        });
+      },
+    });
+
+    const { executionId } = await wf.start({});
+
+    await sleep(200);
+    expect(attempts).toBe(1);
+
+    await waitStatus(wf, executionId, "failed", 5000);
+    expect(attempts).toBe(3);
 
     await stop(wf);
   });
@@ -866,15 +907,47 @@ describe("workflow", () => {
       },
     });
 
-    const starts = await Promise.all([
-      wf.start({ key: "same" }),
-      wf.start({ key: "same" }),
-      wf.start({ key: "same" }),
-    ]);
+    await wf.start({ key: "shared" }, { executionId: "p-a" });
+    await wf.start({ key: "shared" }, { executionId: "p-b" });
 
-    for (const { executionId } of starts) {
-      await waitStatus(wf, executionId, "completed");
-    }
+    await waitStatus(wf, "p-a", "completed");
+    await waitStatus(wf, "p-b", "completed");
+
+    expect(maxConcurrent).toBe(1);
+
+    await stop(wf);
+  });
+
+  test("partition held across durable sleep", async () => {
+    const redis = createRedis();
+    let concurrent = 0;
+    let maxConcurrent = 0;
+
+    const wf = defineWorkflow<{ key: string }, string>({
+      name: `part-sleep-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      concurrency: 1,
+      lockTTL: 40,
+      partitionBy: (input) => input.key,
+      handler: async ({ sleep: durableSleep, step }) => {
+        await durableSleep(200);
+        await step("work", async () => {
+          concurrent++;
+          maxConcurrent = Math.max(maxConcurrent, concurrent);
+          await sleep(20);
+          concurrent--;
+          return "ok";
+        });
+        return "done";
+      },
+    });
+
+    await wf.start({ key: "shared" }, { executionId: "ps-1" });
+    await wf.start({ key: "shared" }, { executionId: "ps-2" });
+
+    await waitStatus(wf, "ps-1", "completed", 5000);
+    await waitStatus(wf, "ps-2", "completed", 5000);
 
     expect(maxConcurrent).toBe(1);
 
@@ -943,7 +1016,7 @@ describe("workflow", () => {
         ...fast,
         lockTTL: 50,
         handler: async ({ sleep: durableSleep, step }) => {
-          await durableSleep(10_000);
+          await durableSleep(200);
           await step("after", async () => {
             finished++;
             return true;
@@ -960,12 +1033,92 @@ describe("workflow", () => {
     await stop(wf1);
 
     const wf2 = make();
-    const execution = await waitStatus(wf2, executionId, "completed");
+    const execution = await waitStatus(wf2, executionId, "completed", 5000);
 
     expect(execution.result).toBe("slept");
     expect(finished).toBe(1);
 
     await stop(wf2);
+  });
+
+  test("durable sleep honors delay under reclaim", async () => {
+    const redis = createRedis();
+    let finished = false;
+
+    const wf = defineWorkflow({
+      name: `sleep-delay-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      lockTTL: 40,
+      handler: async ({ sleep: durableSleep }) => {
+        await durableSleep(500);
+        finished = true;
+        return "ok";
+      },
+    });
+
+    const { executionId } = await wf.start({});
+
+    await sleep(200);
+    expect(finished).toBe(false);
+    expect((await wf.get(executionId)).status).not.toBe("completed");
+
+    const execution = await waitStatus(wf, executionId, "completed", 5000);
+    expect(execution.result).toBe("ok");
+    expect(finished).toBe(true);
+
+    await stop(wf);
+  });
+
+  test("reclaim recovers start after markActive without history", async () => {
+    const redis = createRedis();
+    const name = `orphan-start-${crypto.randomUUID()}`;
+    const executionId = crypto.randomUUID();
+    const now = Date.now();
+
+    await redis.hset(
+      `workflow:${name}:meta:${executionId}`,
+      "name",
+      name,
+      "status",
+      "pending",
+      "input",
+      "{}",
+      "result",
+      "",
+      "error",
+      "",
+      "createdAt",
+      String(now),
+      "updatedAt",
+      String(now),
+      "completedAt",
+      "",
+      "failedAt",
+      "",
+      "cancelledAt",
+      "",
+      "steps",
+      "[]",
+      "partitionKey",
+      "",
+    );
+    await redis.sadd(`workflow:${name}:active`, executionId);
+
+    const wf = defineWorkflow({
+      name,
+      redis,
+      ...fast,
+      handler: async ({ step }) => {
+        await step("go", async () => "ok");
+        return "done";
+      },
+    });
+
+    const execution = await waitStatus(wf, executionId, "completed");
+    expect(execution.result).toBe("done");
+
+    await stop(wf);
   });
 
   test("reclaim re-enqueues scheduled step after queue drop", async () => {

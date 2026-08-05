@@ -93,9 +93,9 @@ If a replica dies mid-run, lease expiry lets another replica (or the same proces
 - **`retries`** - step retries before workflow fails (default: 3; `0` = fail on first error)
 - **`retryBackoff`** - `{ baseDelay, multiplier, maxDelay }` (defaults: 1000 / 2x / 30000)
 - **`hooks`** - `onStart`, `onRetry`, `onError`, `onComplete`, `onCancel` (see [Hooks](#hooks))
-- **`lockTTL`** - execution lease TTL in ms (default: 300000); also used as partition slot TTL
+- **`lockTTL`** - execution lease TTL in ms (default: 300000); also used as partition slot TTL. Partition slots are refreshed for the full execution lifetime (including `sleep` and retry backoff), not only while a lease is held
 - **`concurrency`** - workflow + step pollers in this process (default: 1 each). With partitions, also the Redis per-key cap when every replica uses the same value; if replicas differ, the effective cap is the max
-- **`partitionBy`** - `(input) => string` for per-key concurrency across replicas. Empty keys throw
+- **`partitionBy`** - `(input) => string` for per-key concurrency across replicas. Empty keys throw. Cap applies for the whole execution, including durable waits
 - **`pollInterval`** - idle poll backoff ms (default: 100)
 - **`serialize*` / `deserialize*`** - custom codecs for input, result, and step output (default: plain `JSON.stringify` / `JSON.parse`)
 
@@ -159,3 +159,4 @@ Prefix: `workflow:`
 - Keep `step` / `sleep` call order and names stable across deploys; replay matches history by call sequence (`a0`, `a1`, …), and a renamed step at the same position is nondeterminism.
 - Duplicate `defineWorkflow({ name })` in the same process throws `DuplicateWorkflowError`.
 - Workers run embedded in your Bun process against Redis, not as a separate matching service.
+- Redis key layout is `workflow:{name}:…`. Older in-flight executions under a previous layout are not migrated; drain or abandon them before cutting over.

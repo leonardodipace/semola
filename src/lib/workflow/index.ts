@@ -122,6 +122,9 @@ export const defineWorkflow = <TInput, TResult = void>(
       );
     }
 
+    // Mark active before history so a crash mid-start remains reclaimable.
+    await store.markActive(executionId);
+
     await store.appendEvents(executionId, [
       {
         type: "WorkflowStarted",
@@ -131,7 +134,6 @@ export const defineWorkflow = <TInput, TResult = void>(
       },
     ]);
 
-    await store.markActive(executionId);
     await store.enqueueWorkflow(executionId);
 
     return {
