@@ -51,6 +51,11 @@ export const deserializeWith = <T>(
   return value as T;
 };
 
+type ConsumedCommands = {
+  activities: Set<string>;
+  timers: Set<string>;
+};
+
 const createContext = <TInput, TResult>(
   options: WorkflowOptions<TInput, TResult>,
   view: HistoryView,
@@ -58,6 +63,7 @@ const createContext = <TInput, TResult>(
   signal: AbortSignal,
   now: number,
   events: HistoryEvent[],
+  consumed: ConsumedCommands,
   onCapture?: (
     activityId: string,
     handler: StepHandler<TInput, unknown>,
@@ -75,6 +81,7 @@ const createContext = <TInput, TResult>(
     step: async (name, handler) => {
       const activityId = `a${activitySeq++}`;
 
+      consumed.activities.add(activityId);
       onCapture?.(activityId, handler as StepHandler<TInput, unknown>);
 
       const state = view.activities.get(activityId);
@@ -123,7 +130,15 @@ const createContext = <TInput, TResult>(
       }
 
       const timerId = `t${timerSeq++}`;
+      consumed.timers.add(timerId);
+
       const state = view.timers.get(timerId);
+
+      if (state && state.delayMs !== ms) {
+        throw new Error(
+          `nondeterminism: timer ${timerId} expected delay ${state.delayMs}, got ${ms}`,
+        );
+      }
 
       if (state?.status === "fired") return;
 
@@ -141,6 +156,27 @@ const createContext = <TInput, TResult>(
       throw new WorkflowBlocked("timer");
     },
   };
+};
+
+const assertHistoryConsumed = (
+  view: HistoryView,
+  consumed: ConsumedCommands,
+) => {
+  for (const activityId of view.activities.keys()) {
+    if (consumed.activities.has(activityId)) continue;
+
+    throw new Error(
+      `nondeterminism: historical activity ${activityId} was not replayed`,
+    );
+  }
+
+  for (const timerId of view.timers.keys()) {
+    if (consumed.timers.has(timerId)) continue;
+
+    throw new Error(
+      `nondeterminism: historical timer ${timerId} was not replayed`,
+    );
+  }
 };
 
 export const replayWorkflow = async <TInput, TResult>(
@@ -161,7 +197,25 @@ export const replayWorkflow = async <TInput, TResult>(
     return events;
   }
 
-  const ctx = createContext(options, view, executionId, signal, now, events);
+  if (view.cancelRequested) {
+    events.push({ type: "WorkflowExecutionCancelled", timestamp: now });
+    return events;
+  }
+
+  const consumed: ConsumedCommands = {
+    activities: new Set(),
+    timers: new Set(),
+  };
+
+  const ctx = createContext(
+    options,
+    view,
+    executionId,
+    signal,
+    now,
+    events,
+    consumed,
+  );
 
   const [handlerError, result] = await mightThrow(
     Promise.resolve(options.handler(ctx)),
@@ -175,6 +229,29 @@ export const replayWorkflow = async <TInput, TResult>(
     events.push({
       type: "WorkflowExecutionFailed",
       error: handlerError.message,
+      timestamp: now,
+    });
+    return events;
+  }
+
+  if (signal.aborted) {
+    events.push({ type: "WorkflowExecutionCancelled", timestamp: now });
+    return events;
+  }
+
+  if (view.cancelRequested) {
+    events.push({ type: "WorkflowExecutionCancelled", timestamp: now });
+    return events;
+  }
+
+  const [nondetError] = mightThrowSync(() =>
+    assertHistoryConsumed(view, consumed),
+  );
+
+  if (nondetError) {
+    events.push({
+      type: "WorkflowExecutionFailed",
+      error: nondetError.message,
       timestamp: now,
     });
     return events;
@@ -206,6 +283,7 @@ export const captureStepHandler = async <TInput, TResult>(
     new AbortController().signal,
     Date.now(),
     [],
+    { activities: new Set(), timers: new Set() },
     (activityId, handler) => {
       if (activityId === targetActivityId) {
         box.handler = handler;

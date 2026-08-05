@@ -89,8 +89,8 @@ export type ActivityState =
     };
 
 export type TimerState =
-  | { status: "started"; fireAt: number }
-  | { status: "fired" };
+  | { status: "started"; fireAt: number; delayMs: number }
+  | { status: "fired"; delayMs: number };
 
 export type HistoryView = {
   events: HistoryEvent[];
@@ -179,12 +179,18 @@ export const parseHistory = (rawEvents: string[]): HistoryView => {
       timers.set(event.timerId, {
         status: "started",
         fireAt: event.fireAt,
+        delayMs: event.fireAt - event.timestamp,
       });
       continue;
     }
 
     if (event.type === "TimerFired") {
-      timers.set(event.timerId, { status: "fired" });
+      const previous = timers.get(event.timerId);
+
+      timers.set(event.timerId, {
+        status: "fired",
+        delayMs: previous?.delayMs ?? 0,
+      });
       continue;
     }
 

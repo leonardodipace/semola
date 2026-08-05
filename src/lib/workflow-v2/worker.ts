@@ -44,10 +44,18 @@ const backoffDelay = (
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const parseStepSnapshots = (rawSteps: string) => {
+export const parseStepSnapshots = (rawSteps: string) => {
   if (!rawSteps) return [] as { name: string; completedAt: number }[];
 
-  return JSON.parse(rawSteps) as { name: string; completedAt: number }[];
+  const [error, steps] = mightThrowSync(
+    () => JSON.parse(rawSteps) as { name: string; completedAt: number }[],
+  );
+
+  if (error) return [];
+
+  if (!Array.isArray(steps)) return [];
+
+  return steps;
 };
 
 export class WorkflowWorker<TInput, TResult> {
@@ -164,15 +172,29 @@ export class WorkflowWorker<TInput, TResult> {
 
   private async timerLoop() {
     while (this.running) {
-      await mightThrow(this.processDueTimers());
+      this.active++;
+
+      try {
+        await mightThrow(this.processDueTimers());
+      } finally {
+        this.active--;
+      }
+
       await sleep(this.pollInterval);
     }
   }
 
   private async reclaimLoop() {
     while (this.running) {
-      await mightThrow(this.reclaimOrphans());
-      await sleep(Math.max(this.pollInterval, 200));
+      this.active++;
+
+      try {
+        await mightThrow(this.reclaimOrphans());
+      } finally {
+        this.active--;
+      }
+
+      await sleep(this.pollInterval);
     }
   }
 
@@ -405,9 +427,19 @@ export class WorkflowWorker<TInput, TResult> {
     );
 
     if (!handler) {
+      const message = `Unable to resolve step handler for ${task.stepName}`;
+
+      await this.store.appendEvents(task.executionId, [
+        {
+          type: "WorkflowExecutionFailed",
+          error: message,
+          timestamp: Date.now(),
+        },
+      ]);
+
       await this.failExecution(
         task.executionId,
-        `Unable to resolve step handler for ${task.stepName}`,
+        message,
         meta.partitionKey,
         this.partitionSlots.get(task.executionId),
       );

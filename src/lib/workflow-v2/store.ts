@@ -17,6 +17,9 @@ const EXTEND_IF_OWNER =
 const CLAIM_DUE_TIMER =
   "local m=redis.call('ZRANGEBYSCORE',KEYS[1],0,ARGV[1],'LIMIT',0,1) if #m==0 then return false end redis.call('ZREM',KEYS[1],m[1]) return m[1]";
 
+const CREATE_META_IF_ABSENT =
+  "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end redis.call('HSET', KEYS[1], unpack(ARGV)) return 1";
+
 const stringify = (value: unknown, label: string) => {
   const [error, raw] = mightThrowSync(() => JSON.stringify(value));
 
@@ -85,19 +88,23 @@ export class WorkflowStore {
 
   public async tryCreateMeta(executionId: string, fields: WorkflowMeta) {
     const key = keys.meta(this.name, executionId);
+    const entries: string[] = [];
 
-    const [claimError, claimed] = await mightThrow(
-      this.redis.send("HSETNX", [key, "createdAt", fields.createdAt]),
+    for (const [field, value] of Object.entries(fields)) {
+      if (value === undefined) continue;
+
+      entries.push(field, value);
+    }
+
+    const [error, result] = await mightThrow(
+      this.redis.send("EVAL", [CREATE_META_IF_ABSENT, "1", key, ...entries]),
     );
 
-    if (claimError) {
+    if (error) {
       throw new WorkflowStoreError(`Unable to create meta for ${executionId}`);
     }
 
-    if (Number(claimed) !== 1) return false;
-
-    await this.setMeta(executionId, fields);
-    return true;
+    return Number(result) === 1;
   }
 
   public async setMeta(executionId: string, fields: Partial<WorkflowMeta>) {
@@ -238,7 +245,15 @@ export class WorkflowStore {
   }
 
   public async markInactive(executionId: string) {
-    await mightThrow(this.redis.srem(keys.active(this.name), executionId));
+    const [error] = await mightThrow(
+      this.redis.srem(keys.active(this.name), executionId),
+    );
+
+    if (error) {
+      throw new WorkflowStoreError(
+        `Unable to mark inactive execution ${executionId}`,
+      );
+    }
   }
 
   public async listActive() {
@@ -292,7 +307,7 @@ export class WorkflowStore {
   }
 
   public async releaseLease(executionId: string, token: string) {
-    await mightThrow(
+    const [error] = await mightThrow(
       this.redis.send("EVAL", [
         RELEASE_IF_OWNER,
         "1",
@@ -300,6 +315,12 @@ export class WorkflowStore {
         token,
       ]),
     );
+
+    if (error) {
+      throw new WorkflowStoreError(
+        `Unable to release lease for ${executionId}`,
+      );
+    }
   }
 
   public async getLease(executionId: string) {
@@ -346,8 +367,15 @@ export class WorkflowStore {
     executionId: string,
     ttlMs: number,
   ) {
-    const key = keys.partition(this.name, partitionKey, slot);
-    const [error, owner] = await mightThrow(this.redis.get(key));
+    const [error, result] = await mightThrow(
+      this.redis.send("EVAL", [
+        EXTEND_IF_OWNER,
+        "1",
+        keys.partition(this.name, partitionKey, slot),
+        executionId,
+        String(ttlMs),
+      ]),
+    );
 
     if (error) {
       throw new WorkflowStoreError(
@@ -355,10 +383,7 @@ export class WorkflowStore {
       );
     }
 
-    if (owner !== executionId) return false;
-
-    await mightThrow(this.redis.pexpire(key, ttlMs));
-    return true;
+    return Number(result) === 1;
   }
 
   public async releasePartition(
@@ -366,7 +391,7 @@ export class WorkflowStore {
     slot: number,
     executionId: string,
   ) {
-    await mightThrow(
+    const [error] = await mightThrow(
       this.redis.send("EVAL", [
         RELEASE_IF_OWNER,
         "1",
@@ -374,6 +399,12 @@ export class WorkflowStore {
         executionId,
       ]),
     );
+
+    if (error) {
+      throw new WorkflowStoreError(
+        `Unable to release partition ${partitionKey}`,
+      );
+    }
   }
 
   public async updateStatus(
@@ -382,9 +413,9 @@ export class WorkflowStore {
     extra: Partial<WorkflowMeta> = {},
   ) {
     await this.setMeta(executionId, {
+      ...extra,
       status,
       updatedAt: String(Date.now()),
-      ...extra,
     });
   }
 }

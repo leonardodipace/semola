@@ -133,7 +133,7 @@ export type WorkflowCancelResult = {
   status: WorkflowStatus;
   executionId: string;
   updatedAt: number;
-  cancelledAt: number;
+  cancelledAt: number | null;
   createdAt: number;
 };
 

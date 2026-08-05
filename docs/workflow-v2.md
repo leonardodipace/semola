@@ -62,7 +62,7 @@ If a replica dies mid-run, lease expiry lets another replica (or the same proces
 
 - `start(input, options?)` - persist started event, enqueue workflow task, return `{ executionId, status: "pending" }`
 - `get(executionId)` - status, result, error, step snapshots
-- `cancel(executionId)` - durable cancel request + `AbortSignal`; returns current status until terminal `cancelled` (poll `get`)
+- `cancel(executionId)` - durable cancel request + `AbortSignal`; returns current status with `cancelledAt: number | null` (null until terminal `cancelled`; poll `get`)
 - `resume(executionId)` - re-queue a **failed** execution
 - `stop()` - stop polling, wait for in-flight work, release process registration
 

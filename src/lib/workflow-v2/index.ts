@@ -7,13 +7,12 @@ import { isTerminalStatus, parseHistory } from "./history.js";
 import { deserializeWith, serializeWith } from "./runtime.js";
 import { WorkflowStore } from "./store.js";
 import type {
-  StepSnapshot,
   Workflow,
   WorkflowOptions,
   WorkflowStartOptions,
   WorkflowStatus,
 } from "./types.js";
-import { WorkflowWorker } from "./worker.js";
+import { parseStepSnapshots, WorkflowWorker } from "./worker.js";
 
 // Process-local only: blocks duplicate defineWorkflow(name) in this process.
 const registry = new Set<string>();
@@ -71,10 +70,17 @@ export const defineWorkflow = <TInput, TResult = void>(
 
   registry.add(options.name);
 
-  const store = new WorkflowStore(options.redis, options.name);
-  const worker = new WorkflowWorker(options, store);
+  let store: WorkflowStore;
+  let worker: WorkflowWorker<TInput, TResult>;
 
-  worker.start();
+  try {
+    store = new WorkflowStore(options.redis, options.name);
+    worker = new WorkflowWorker(options, store);
+    worker.start();
+  } catch (error) {
+    registry.delete(options.name);
+    throw error;
+  }
 
   const start = async (
     input: TInput,
@@ -110,6 +116,8 @@ export const defineWorkflow = <TInput, TResult = void>(
       );
     }
 
+    await store.markActive(executionId);
+
     await store.appendEvents(executionId, [
       {
         type: "WorkflowExecutionStarted",
@@ -119,7 +127,6 @@ export const defineWorkflow = <TInput, TResult = void>(
       },
     ]);
 
-    await store.markActive(executionId);
     await store.enqueueWorkflow(executionId);
 
     return {
@@ -224,7 +231,7 @@ export const defineWorkflow = <TInput, TResult = void>(
       completedAt: optionalTimestamp(meta.completedAt),
       failedAt: optionalTimestamp(meta.failedAt),
       cancelledAt: optionalTimestamp(meta.cancelledAt),
-      steps: JSON.parse(meta.steps) as StepSnapshot[],
+      steps: parseStepSnapshots(meta.steps),
     };
   };
 
@@ -236,7 +243,7 @@ export const defineWorkflow = <TInput, TResult = void>(
         status: meta.status as WorkflowStatus,
         executionId,
         updatedAt: Number(meta.updatedAt),
-        cancelledAt: Number(meta.cancelledAt || meta.updatedAt),
+        cancelledAt: optionalTimestamp(meta.cancelledAt),
         createdAt: Number(meta.createdAt),
       };
     }
@@ -257,7 +264,7 @@ export const defineWorkflow = <TInput, TResult = void>(
       status: meta.status as WorkflowStatus,
       executionId,
       updatedAt: now,
-      cancelledAt: Number(meta.cancelledAt) || 0,
+      cancelledAt: optionalTimestamp(meta.cancelledAt),
       createdAt: Number(meta.createdAt),
     };
   };
