@@ -36,17 +36,17 @@ const stringify = (value: unknown, label: string) => {
 
 const keys = {
   history: (name: string, executionId: string) =>
-    `workflow-v2:${name}:history:${executionId}`,
+    `workflow:${name}:history:${executionId}`,
   meta: (name: string, executionId: string) =>
-    `workflow-v2:${name}:meta:${executionId}`,
+    `workflow:${name}:meta:${executionId}`,
   lease: (name: string, executionId: string) =>
-    `workflow-v2:${name}:lease:${executionId}`,
-  wfQueue: (name: string) => `workflow-v2:${name}:wf-queue`,
-  actQueue: (name: string) => `workflow-v2:${name}:act-queue`,
-  timers: (name: string) => `workflow-v2:${name}:timers`,
-  active: (name: string) => `workflow-v2:${name}:active`,
+    `workflow:${name}:lease:${executionId}`,
+  wfQueue: (name: string) => `workflow:${name}:wf-queue`,
+  actQueue: (name: string) => `workflow:${name}:act-queue`,
+  timers: (name: string) => `workflow:${name}:timers`,
+  active: (name: string) => `workflow:${name}:active`,
   partition: (name: string, partitionKey: string, slot: number) =>
-    `workflow-v2:${name}:partition:${partitionKey}:${slot}`,
+    `workflow:${name}:partition:${partitionKey}:${slot}`,
 };
 
 export class WorkflowStore {

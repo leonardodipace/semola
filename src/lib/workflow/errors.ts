@@ -1,7 +1,7 @@
-export class WorkflowError extends Error {
+export class SerializationError extends Error {
   public constructor(message: string) {
     super(message);
-    this.name = "WorkflowError";
+    this.name = "SerializationError";
   }
 }
 
@@ -12,51 +12,30 @@ export class NotFoundError extends Error {
   }
 }
 
-export class StateError extends Error {
+export class DuplicateWorkflowError extends Error {
   public constructor(message: string) {
     super(message);
-    this.name = "StateError";
+    this.name = "DuplicateWorkflowError";
   }
 }
 
-export class SerializationError extends Error {
+export class WorkflowStoreError extends Error {
   public constructor(message: string) {
     super(message);
-    this.name = "SerializationError";
+    this.name = "WorkflowStoreError";
   }
 }
 
-export class ExecutionError extends Error {
+export class NonRetryableStepError extends Error {
   public constructor(message: string) {
     super(message);
-    this.name = "ExecutionError";
+    this.name = "NonRetryableStepError";
   }
 }
 
-export class LockError extends Error {
-  public constructor(message: string) {
-    super(message);
-    this.name = "LockError";
-  }
-}
-
-export class PartitionError extends Error {
-  public constructor(message: string) {
-    super(message);
-    this.name = "PartitionError";
-  }
-}
-
-export class CancelledError extends Error {
-  public constructor(message: string) {
-    super(message);
-    this.name = "CancelledError";
-  }
-}
-
-export class StepFailedError extends Error {
-  public constructor(message: string) {
-    super(message);
-    this.name = "StepFailedError";
+export class WorkflowBlocked extends Error {
+  public constructor(reason: "activity" | "timer") {
+    super(`workflow blocked on ${reason}`);
+    this.name = "WorkflowBlocked";
   }
 }

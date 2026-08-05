@@ -43,6 +43,7 @@ export type WorkflowHandlerContext<TInput> = {
     name: string,
     handler: StepHandler<TInput, TStep>,
   ) => Promise<TStep>;
+  sleep: (ms: number) => Promise<void>;
 };
 
 export type SerializeValue<T> = (value: T) => string;
@@ -132,13 +133,13 @@ export type WorkflowCancelResult = {
   status: WorkflowStatus;
   executionId: string;
   updatedAt: number;
-  cancelledAt: number;
+  cancelledAt: number | null;
   createdAt: number;
 };
 
 export type WorkflowMeta = {
   name: string;
-  status: string;
+  status: WorkflowStatus;
   input: string;
   result: string;
   error: string;
@@ -149,25 +150,6 @@ export type WorkflowMeta = {
   cancelledAt: string;
   steps: string;
   partitionKey: string;
-};
-
-export type WorkflowMetaField = keyof WorkflowMeta;
-
-export type WorkflowListOptions = {
-  name?: string | string[];
-  status?: WorkflowStatus | WorkflowStatus[];
-  unlockedOnly?: boolean;
-};
-
-export type WorkflowListItem = {
-  id: string;
-  name: string;
-  status: WorkflowStatus;
-  createdAt: number;
-  updatedAt: number;
-  completedAt: number | null;
-  failedAt: number | null;
-  cancelledAt: number | null;
 };
 
 export type Workflow<TInput, TResult> = {
@@ -181,3 +163,24 @@ export type Workflow<TInput, TResult> = {
   cancel: (executionId: string) => Promise<WorkflowCancelResult>;
   stop: () => Promise<void>;
 };
+
+export type ActivityTask = {
+  executionId: string;
+  activityId: string;
+  stepName: string;
+  attempt: number;
+};
+
+export type TimerTask =
+  | {
+      kind: "timer";
+      executionId: string;
+      timerId: string;
+    }
+  | {
+      kind: "activity-retry";
+      executionId: string;
+      activityId: string;
+      stepName: string;
+      attempt: number;
+    };

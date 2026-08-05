@@ -131,16 +131,6 @@
         "default": "./dist/lib/workflow/index.cjs"
       }
     },
-    "./workflow-v2": {
-      "import": {
-        "types": "./dist/lib/workflow-v2/index.d.mts",
-        "default": "./dist/lib/workflow-v2/index.mjs"
-      },
-      "require": {
-        "types": "./dist/lib/workflow-v2/index.d.cts",
-        "default": "./dist/lib/workflow-v2/index.cjs"
-      }
-    },
     "./orm": {
       "import": {
         "types": "./dist/lib/orm/index.d.mts",

@@ -14,7 +14,6 @@ export default defineConfig({
     "lib/prompts/index": "src/lib/prompts/index.ts",
     "lib/cli/index": "src/lib/cli/index.ts",
     "lib/workflow/index": "src/lib/workflow/index.ts",
-    "lib/workflow-v2/index": "src/lib/workflow-v2/index.ts",
     "lib/orm/index": "src/lib/orm/index.ts",
     "lib/extra/index": "src/lib/extra/index.ts",
   },
