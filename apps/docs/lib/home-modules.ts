@@ -4,9 +4,9 @@ export const homeModules = [
     label: "API",
     pkg: "semola/api",
     href: "/docs/api",
-    blurb: "Typed REST routes + OpenAPI",
-    title: "Typed routes, any schema",
-    body: "Define REST handlers with request and response schemas. Works with Zod, Valibot, ArkType, or any Standard Schema library.",
+    blurb: "Typed REST API + OpenAPI",
+    title: "A typed HTTP API framework",
+    body: "Define REST routes with request and response schemas. Works with Zod, Valibot, ArkType, or any Standard Schema library.",
     file: "hello.ts",
     code: `import { Api } from "semola/api";
 import { z } from "zod";
@@ -91,9 +91,9 @@ await program.parse();`,
     label: "Cron",
     pkg: "semola/cron",
     href: "/docs/cron",
-    blurb: "Schedulers that actually run",
-    title: "Schedules in-process",
-    body: "Run handlers on a cron expression or alias. Start, stop, and ask for the next fire time from one object.",
+    blurb: "In-process cron jobs",
+    title: "Cron jobs that run in-process",
+    body: "Schedule handlers with a cron expression or alias. Start, stop, and ask for the next fire time from one object.",
     file: "jobs.ts",
     code: `import { Cron } from "semola/cron";
 
@@ -203,9 +203,9 @@ log.error("request failed");`,
     label: "ORM",
     pkg: "semola/orm",
     href: "/docs/orm",
-    blurb: "Typed tables and queries",
-    title: "Typed tables and queries",
-    body: "Define columns once. findFirst, inserts, and relations infer from the table definition.",
+    blurb: "Typed ORM for Bun SQL",
+    title: "A typed ORM for Bun",
+    body: "Define tables once. findFirst, inserts, relations, and transactions infer from the schema - SQLite or Postgres via Bun SQL.",
     file: "users.ts",
     code: `import {
   createOrm,
@@ -234,9 +234,9 @@ const user = await db.users.findFirst({
     label: "Policy",
     pkg: "semola/policy",
     href: "/docs/policy",
-    blurb: "Authorization as typed rules",
-    title: "Authorization as rules",
-    body: "Allow and forbid actions with composable conditions over your domain types. Forbid always wins.",
+    blurb: "ABAC authorization rules",
+    title: "ABAC authorization as rules",
+    body: "Attribute-based access control with allow and forbid rules over your domain types. Forbid always wins.",
     file: "posts.ts",
     code: `import { Policy, eq } from "semola/policy";
 
@@ -325,9 +325,9 @@ await events.publish({
     label: "Queue",
     pkg: "semola/queue",
     href: "/docs/queue",
-    blurb: "Redis jobs, retries, concurrency",
-    title: "Jobs with retries built in",
-    body: "Redis-backed queues with concurrency, timeouts, and exponential backoff. Enqueue work without reinventing the worker loop.",
+    blurb: "Redis job queues",
+    title: "Redis queues with retries",
+    body: "Background job queues on Redis with concurrency, timeouts, and exponential backoff. Enqueue work without reinventing the worker loop.",
     file: "jobs.ts",
     code: `import { Queue } from "semola/queue";
 
@@ -351,9 +351,9 @@ await emails.enqueue({
     label: "Workflow",
     pkg: "semola/workflow",
     href: "/docs/workflow",
-    blurb: "Durable steps that survive crashes",
-    title: "Durable steps",
-    body: "Named steps persist outputs. Resume after a process death and skip work that already completed.",
+    blurb: "Durable workflows",
+    title: "Durable workflows that resume",
+    body: "Multi-step workflows with named steps that persist outputs. Resume after a crash and skip work that already completed.",
     file: "order.ts",
     code: `import { defineWorkflow } from "semola/workflow";
 
