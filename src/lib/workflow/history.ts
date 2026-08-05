@@ -1,3 +1,6 @@
+import { mightThrowSync } from "../errors/index.js";
+import { SerializationError } from "./errors.js";
+
 export type HistoryEvent =
   | {
       type: "WorkflowExecutionStarted";
@@ -125,7 +128,14 @@ export const parseHistory = (rawEvents: string[]): HistoryView => {
   let terminal: HistoryView["terminal"] = null;
 
   for (const raw of rawEvents) {
-    const event = JSON.parse(raw) as HistoryEvent;
+    const [error, event] = mightThrowSync(
+      () => JSON.parse(raw) as HistoryEvent,
+    );
+
+    if (error) {
+      throw new SerializationError("Unable to parse history event");
+    }
+
     events.push(event);
 
     if (event.type === "WorkflowExecutionStarted") {

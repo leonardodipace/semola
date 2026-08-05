@@ -184,6 +184,7 @@ export const replayWorkflow = async <TInput, TResult>(
   view: HistoryView,
   executionId: string,
   signal: AbortSignal,
+  isCancelRequested: () => boolean | Promise<boolean>,
 ) => {
   const events: HistoryEvent[] = [];
   const now = Date.now();
@@ -239,7 +240,7 @@ export const replayWorkflow = async <TInput, TResult>(
     return events;
   }
 
-  if (view.cancelRequested) {
+  if (await isCancelRequested()) {
     events.push({ type: "WorkflowExecutionCancelled", timestamp: now });
     return events;
   }

@@ -59,6 +59,22 @@ const resolvePartitionKey = <TInput, TResult>(
   return partitionKey;
 };
 
+const resolveExecutionId = (startOptions: WorkflowStartOptions) => {
+  if (startOptions.executionId === undefined) {
+    return crypto.randomUUID();
+  }
+
+  if (!startOptions.executionId) {
+    throw new WorkflowStoreError("Execution id must be a non-empty string");
+  }
+
+  if (startOptions.executionId.includes(":")) {
+    throw new WorkflowStoreError('Execution id must not contain ":"');
+  }
+
+  return startOptions.executionId;
+};
+
 export const defineWorkflow = <TInput, TResult = void>(
   options: WorkflowOptions<TInput, TResult>,
 ): Workflow<TInput, TResult> => {
@@ -76,7 +92,7 @@ export const defineWorkflow = <TInput, TResult = void>(
     input: TInput,
     startOptions: WorkflowStartOptions = {},
   ) => {
-    const executionId = startOptions.executionId ?? crypto.randomUUID();
+    const executionId = resolveExecutionId(startOptions);
     const partitionKey = resolvePartitionKey(options, input, startOptions);
     const serializedInput = serializeWith(
       input,
@@ -106,8 +122,6 @@ export const defineWorkflow = <TInput, TResult = void>(
       );
     }
 
-    await store.markActive(executionId);
-
     await store.appendEvents(executionId, [
       {
         type: "WorkflowExecutionStarted",
@@ -117,6 +131,7 @@ export const defineWorkflow = <TInput, TResult = void>(
       },
     ]);
 
+    await store.markActive(executionId);
     await store.enqueueWorkflow(executionId);
 
     return {

@@ -194,7 +194,7 @@ export class WorkflowWorker<TInput, TResult> {
         this.active--;
       }
 
-      await sleep(this.pollInterval);
+      await sleep(Math.max(this.pollInterval, 200));
     }
   }
 
@@ -334,6 +334,11 @@ export class WorkflowWorker<TInput, TResult> {
       view,
       executionId,
       controller.signal,
+      async () => {
+        const latest = parseHistory(await this.store.loadHistory(executionId));
+
+        return latest.cancelRequested;
+      },
     );
 
     if (!(await this.ownsLease(executionId, token))) return;
@@ -427,7 +432,31 @@ export class WorkflowWorker<TInput, TResult> {
     );
 
     if (!handler) {
+      if (this.lostLeases.has(task.executionId)) return;
+
       const message = `Unable to resolve step handler for ${task.stepName}`;
+      const input = deserializeWith(
+        meta.input,
+        this.options.deserializeInput,
+        "input",
+      );
+
+      await runHook(() =>
+        this.options.hooks?.onError?.({
+          executionId: task.executionId,
+          input,
+          stepName: task.stepName,
+          error: message,
+          totalAttempts: task.attempt,
+          errorHistory: [
+            {
+              attempt: task.attempt,
+              error: message,
+              timestamp: Date.now(),
+            },
+          ],
+        }),
+      );
 
       await this.store.appendEvents(task.executionId, [
         {

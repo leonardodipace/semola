@@ -352,16 +352,15 @@ class MockRedisClient {
 const createRedis = () =>
   new MockRedisClient() as MockRedisClient & Bun.RedisClient;
 
-// Bun does not expose Jest 29.5 `*Async` timer APIs. Polyfill the ones we need.
-const runOnlyPendingTimersAsync = async () => {
-  jest.runOnlyPendingTimers();
+const drainMicrotasks = async () => {
+  await Promise.resolve();
+  await Promise.resolve();
   await Promise.resolve();
 };
 
 let advancing = false;
 
 const advanceTimersByTimeAsync = async (ms: number) => {
-  // Nested waits (hang loops) just park on setTimeout; outer advance owns the clock.
   if (advancing) {
     await new Promise<void>((resolve) => setTimeout(resolve, ms));
     return;
@@ -376,10 +375,13 @@ const advanceTimersByTimeAsync = async (ms: number) => {
     while (Date.now() < end) {
       if (jest.getTimerCount() === 0) {
         jest.advanceTimersByTime(end - Date.now());
+        await drainMicrotasks();
         break;
       }
 
-      await runOnlyPendingTimersAsync();
+      const step = Math.min(5, end - Date.now());
+      jest.advanceTimersByTime(step);
+      await drainMicrotasks();
     }
 
     await done;
@@ -657,7 +659,7 @@ describe("workflow", () => {
         ...fast,
         lockTTL: 50,
         handler: async ({ step, sleep: durableSleep }) => {
-          await durableSleep(5);
+          await durableSleep(10_000);
           await step("finish", async () => "done");
           return "ok";
         },
@@ -667,7 +669,6 @@ describe("workflow", () => {
     const { executionId } = await wf1.start({});
 
     await sleep(25);
-    expireLeases(redis);
 
     await stop(wf1);
 
@@ -744,8 +745,6 @@ describe("workflow", () => {
     await waitFor(() => attempts >= 1, 2000);
     await sleep(15);
     redis.clearZset(`workflow:${name}:timers`);
-
-    expireLeases(redis);
 
     await stop(wf1);
 
@@ -944,7 +943,7 @@ describe("workflow", () => {
         ...fast,
         lockTTL: 50,
         handler: async ({ sleep: durableSleep, step }) => {
-          await durableSleep(10);
+          await durableSleep(10_000);
           await step("after", async () => {
             finished++;
             return true;
@@ -957,8 +956,6 @@ describe("workflow", () => {
     const { executionId } = await wf1.start({});
 
     await sleep(20);
-
-    expireLeases(redis);
 
     await stop(wf1);
 
@@ -1237,6 +1234,29 @@ describe("workflow", () => {
       ).rejects.toMatchObject({
         name: "WorkflowStoreError",
         message: "Workflow execution exec-1 already exists",
+      });
+
+      await stop(wf);
+    });
+
+    test("rejects empty or colon-containing execution ids", async () => {
+      const redis = createRedis();
+
+      const wf = defineWorkflow({
+        name: `bad-id-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        handler: async () => "ok",
+      });
+
+      await expect(wf.start({}, { executionId: "" })).rejects.toMatchObject({
+        name: "WorkflowStoreError",
+        message: "Execution id must be a non-empty string",
+      });
+
+      await expect(wf.start({}, { executionId: "a:b" })).rejects.toMatchObject({
+        name: "WorkflowStoreError",
+        message: 'Execution id must not contain ":"',
       });
 
       await stop(wf);
