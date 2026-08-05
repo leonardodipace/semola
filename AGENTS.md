@@ -91,6 +91,8 @@ const [error, data] = await mightThrow(fetch(url));
 if (error) throw new FetchError(error.message);
 ```
 
+Thrown values are always `Error` instances (library errors extend `Error`). Use `error.message` directly - never `instanceof Error` guards or ternaries when reading the message in code or docs.
+
 ### TypeScript edge cases
 
 - Const type parameters for literal types.

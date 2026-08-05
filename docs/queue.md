@@ -62,10 +62,10 @@ const emails = new Queue<EmailJob>({
     console.warn("retry", job.id, error, retriesRemaining);
   },
   onError: ({ job, lastError }) => {
-    console.error("dead letter", job.data, lastError);
+    console.error("dead letter", job.id, lastError.message);
   },
-  onParseError: ({ rawJobData, parseError }) => {
-    console.error("bad payload", rawJobData, parseError);
+  onParseError: ({ parseError }) => {
+    console.error("bad payload", parseError.message);
   },
 });
 ```
@@ -125,8 +125,8 @@ const jobs = new Queue({
   },
   onError: async ({ job, lastError }) => {
     await alertOps("webhook dead-lettered", {
-      data: job.data,
-      error: lastError,
+      jobId: job.id,
+      error: lastError.message,
     });
   },
 });

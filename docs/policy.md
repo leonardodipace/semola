@@ -42,6 +42,13 @@ posts.forbid({
   reason: "Published posts cannot be deleted",
 });
 
+const post: Post = {
+  id: 1,
+  authorId: currentUser.id,
+  status: "draft",
+  tags: [],
+};
+
 const result = posts.can("update", post);
 
 if (!result.allowed) {
@@ -105,6 +112,7 @@ type Document = {
   visibility: "private" | "public";
 };
 
+const user = { id: "user-1" };
 const docs = new Policy<Document>();
 
 docs.allow({
@@ -126,6 +134,14 @@ docs.allow({
 ### Example: Forbid overrides allow
 
 ```typescript
+const user = { id: 1 };
+const publishedPost: Post = {
+  id: 1,
+  authorId: user.id,
+  status: "published",
+  tags: [],
+};
+
 posts.allow({
   action: "delete",
   conditions: { authorId: eq(user.id) },
