@@ -1,6 +1,6 @@
 # Workflow
 
-Durable workflows on Redis. Event history, deterministic replay, activity tasks, multi-replica leases, and automatic orphan recovery.
+Durable workflows on Redis. Event history, deterministic replay, steps, multi-replica leases, and automatic orphan recovery.
 
 ## Import
 
@@ -48,11 +48,11 @@ Each execution has an append-only event history in Redis. Workers advance the wo
 1. Loading history
 2. Replaying the workflow function from the start
 3. Resolving completed `step` / `sleep` calls from history (no side effects)
-4. Scheduling the next activity or timer, or completing / failing / cancelling
+4. Scheduling the next step or timer, or completing / failing / cancelling
 
-Side effects belong inside `step` (activities). Workflow code outside `step` / `sleep` must be deterministic relative to history: no raw `Date.now()`, `Math.random()`, network, or unseeded nondeterminism.
+Side effects belong inside `step`. Workflow code outside `step` / `sleep` must be deterministic relative to history: no raw `Date.now()`, `Math.random()`, network, or unseeded nondeterminism.
 
-Activities are **at-least-once**. `step` bodies must be idempotent; a crash mid-activity may re-run the handler.
+Steps are **at-least-once**. `step` bodies must be idempotent; a crash mid-step may re-run the handler.
 
 ## Multi-replica and automatic recovery
 
@@ -79,7 +79,7 @@ If a replica dies mid-run, lease expiry lets another replica (or the same proces
 ### Handler context
 
 - `input`, `executionId`, `signal`
-- `step(name, handler)` - durable activity
+- `step(name, handler)` - durable side effect
 - `sleep(ms)` - durable timer
 
 Inside a step: `fail(message)` marks a non-retryable failure.
@@ -89,11 +89,11 @@ Inside a step: `fail(message)` marks a non-retryable failure.
 - **`name`** (required) - unique per process
 - **`redis`** (required) - `Bun.RedisClient`
 - **`handler`** (required)
-- **`retries`** - activity retries before workflow fails (default: 3; `0` = fail on first error)
+- **`retries`** - step retries before workflow fails (default: 3; `0` = fail on first error)
 - **`retryBackoff`** - `{ baseDelay, multiplier, maxDelay }` (defaults: 1000 / 2x / 30000)
 - **`hooks`** - `onStart`, `onRetry`, `onError`, `onComplete`, `onCancel` (errors in hooks never fail the workflow; hooks fire on real transitions, not every replay)
 - **`lockTTL`** - execution lease TTL in ms (default: 300000)
-- **`concurrency`** - workflow + activity pollers in this process (default: 1 each). With partitions, also Redis per-key cap when replicas share the value
+- **`concurrency`** - workflow + step pollers in this process (default: 1 each). With partitions, also Redis per-key cap when replicas share the value
 - **`partitionBy`** - `(input) => string` for per-key concurrency
 - **`pollInterval`** - idle poll backoff ms (default: 100)
 - **`serialize*` / `deserialize*`** - custom codecs for input, result, and step output (default: plain `JSON.stringify` / `JSON.parse`)
@@ -110,7 +110,7 @@ Prefix: `workflow:`
 | `workflow:{name}:meta:{executionId}` | status cache for `get()` |
 | `workflow:{name}:lease:{executionId}` | owner token + TTL |
 | `workflow:{name}:wf-queue` | workflow task queue |
-| `workflow:{name}:act-queue` | activity task queue |
+| `workflow:{name}:step-queue` | step task queue |
 | `workflow:{name}:timers` | sorted set of due timers / retry delays |
 | `workflow:{name}:active` | non-terminal execution ids (reclaimer) |
 | `workflow:{name}:partition:{key}:{slot}` | per-key concurrency slots (`SET NX PX`) |
@@ -119,8 +119,5 @@ Prefix: `workflow:`
 
 `pending` | `running` | `completed` | `failed` | `cancelled`
 
-## Out of scope
-
-Not included: signals, queries, child workflows, continue-as-new, workflow versioning / `patched`, schedules / cron, non-Redis stores.
 
 Workers run embedded in your Bun process against Redis, not as a separate matching service.

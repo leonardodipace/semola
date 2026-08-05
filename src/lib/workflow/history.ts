@@ -3,34 +3,34 @@ import { SerializationError } from "./errors.js";
 
 export type HistoryEvent =
   | {
-      type: "WorkflowExecutionStarted";
+      type: "WorkflowStarted";
       input: string;
       partitionKey: string;
       timestamp: number;
     }
   | {
-      type: "ActivityTaskScheduled";
-      activityId: string;
+      type: "StepScheduled";
+      stepId: string;
       stepName: string;
       attempt: number;
       timestamp: number;
     }
   | {
-      type: "ActivityTaskStarted";
-      activityId: string;
+      type: "StepStarted";
+      stepId: string;
       attempt: number;
       timestamp: number;
     }
   | {
-      type: "ActivityTaskCompleted";
-      activityId: string;
+      type: "StepCompleted";
+      stepId: string;
       stepName: string;
       result: string;
       timestamp: number;
     }
   | {
-      type: "ActivityTaskFailed";
-      activityId: string;
+      type: "StepFailed";
+      stepId: string;
       stepName: string;
       error: string;
       retryable: boolean;
@@ -49,29 +49,29 @@ export type HistoryEvent =
       timestamp: number;
     }
   | {
-      type: "WorkflowExecutionCancelRequested";
+      type: "WorkflowCancelRequested";
       timestamp: number;
     }
   | {
-      type: "WorkflowExecutionCancelled";
+      type: "WorkflowCancelled";
       timestamp: number;
     }
   | {
-      type: "WorkflowExecutionCompleted";
+      type: "WorkflowCompleted";
       result: string;
       timestamp: number;
     }
   | {
-      type: "WorkflowExecutionFailed";
+      type: "WorkflowFailed";
       error: string;
       timestamp: number;
     }
   | {
-      type: "WorkflowExecutionResumed";
+      type: "WorkflowResumed";
       timestamp: number;
     };
 
-export type ActivityState =
+export type StepState =
   | {
       status: "scheduled" | "started";
       stepName: string;
@@ -99,7 +99,7 @@ export type HistoryView = {
   events: HistoryEvent[];
   input: string;
   partitionKey: string;
-  activities: Map<string, ActivityState>;
+  steps: Map<string, StepState>;
   timers: Map<string, TimerState>;
   cancelRequested: boolean;
   terminal:
@@ -119,7 +119,7 @@ export const isTerminalStatus = (status: string) => {
 
 export const parseHistory = (rawEvents: string[]): HistoryView => {
   const events: HistoryEvent[] = [];
-  const activities = new Map<string, ActivityState>();
+  const steps = new Map<string, StepState>();
   const timers = new Map<string, TimerState>();
 
   let input = "";
@@ -138,14 +138,14 @@ export const parseHistory = (rawEvents: string[]): HistoryView => {
 
     events.push(event);
 
-    if (event.type === "WorkflowExecutionStarted") {
+    if (event.type === "WorkflowStarted") {
       input = event.input;
       partitionKey = event.partitionKey;
       continue;
     }
 
-    if (event.type === "ActivityTaskScheduled") {
-      activities.set(event.activityId, {
+    if (event.type === "StepScheduled") {
+      steps.set(event.stepId, {
         status: "scheduled",
         stepName: event.stepName,
         attempt: event.attempt,
@@ -153,10 +153,10 @@ export const parseHistory = (rawEvents: string[]): HistoryView => {
       continue;
     }
 
-    if (event.type === "ActivityTaskStarted") {
-      const previous = activities.get(event.activityId);
+    if (event.type === "StepStarted") {
+      const previous = steps.get(event.stepId);
 
-      activities.set(event.activityId, {
+      steps.set(event.stepId, {
         status: "started",
         stepName: previous?.stepName ?? "",
         attempt: event.attempt,
@@ -164,8 +164,8 @@ export const parseHistory = (rawEvents: string[]): HistoryView => {
       continue;
     }
 
-    if (event.type === "ActivityTaskCompleted") {
-      activities.set(event.activityId, {
+    if (event.type === "StepCompleted") {
+      steps.set(event.stepId, {
         status: "completed",
         stepName: event.stepName,
         result: event.result,
@@ -174,8 +174,8 @@ export const parseHistory = (rawEvents: string[]): HistoryView => {
       continue;
     }
 
-    if (event.type === "ActivityTaskFailed") {
-      activities.set(event.activityId, {
+    if (event.type === "StepFailed") {
+      steps.set(event.stepId, {
         status: "failed",
         stepName: event.stepName,
         error: event.error,
@@ -204,27 +204,27 @@ export const parseHistory = (rawEvents: string[]): HistoryView => {
       continue;
     }
 
-    if (event.type === "WorkflowExecutionCancelRequested") {
+    if (event.type === "WorkflowCancelRequested") {
       cancelRequested = true;
       continue;
     }
 
-    if (event.type === "WorkflowExecutionCancelled") {
+    if (event.type === "WorkflowCancelled") {
       terminal = { kind: "cancelled" };
       continue;
     }
 
-    if (event.type === "WorkflowExecutionCompleted") {
+    if (event.type === "WorkflowCompleted") {
       terminal = { kind: "completed", result: event.result };
       continue;
     }
 
-    if (event.type === "WorkflowExecutionFailed") {
+    if (event.type === "WorkflowFailed") {
       terminal = { kind: "failed", error: event.error };
       continue;
     }
 
-    if (event.type === "WorkflowExecutionResumed") {
+    if (event.type === "WorkflowResumed") {
       terminal = null;
       cancelRequested = false;
     }
@@ -234,7 +234,7 @@ export const parseHistory = (rawEvents: string[]): HistoryView => {
     events,
     input,
     partitionKey,
-    activities,
+    steps,
     timers,
     cancelRequested,
     terminal,

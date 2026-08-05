@@ -527,7 +527,7 @@ describe("workflow", () => {
     await stop(wf2);
   });
 
-  test("crash mid-activity re-executes then continues", async () => {
+  test("crash mid-step re-executes then continues", async () => {
     const redis = createRedis();
     let attempts = 0;
     const name = `crash-act-${crypto.randomUUID()}`;
@@ -716,7 +716,7 @@ describe("workflow", () => {
     await stop(wf);
   });
 
-  test("reclaim restores activity retry after timer drop", async () => {
+  test("reclaim restores step retry after timer drop", async () => {
     const redis = createRedis();
     const name = `retry-reclaim-${crypto.randomUUID()}`;
     let attempts = 0;
@@ -968,7 +968,7 @@ describe("workflow", () => {
     await stop(wf2);
   });
 
-  test("reclaim re-enqueues scheduled activity after queue drop", async () => {
+  test("reclaim re-enqueues scheduled step after queue drop", async () => {
     const redis = createRedis();
     const name = `sched-stuck-${crypto.randomUUID()}`;
     const executionId = crypto.randomUUID();
@@ -978,14 +978,14 @@ describe("workflow", () => {
     await redis.rpush(
       `workflow:${name}:history:${executionId}`,
       JSON.stringify({
-        type: "WorkflowExecutionStarted",
+        type: "WorkflowStarted",
         input: "{}",
         partitionKey: "",
         timestamp: now,
       }),
       JSON.stringify({
-        type: "ActivityTaskScheduled",
-        activityId: "a0",
+        type: "StepScheduled",
+        stepId: "a0",
         stepName: "only",
         attempt: 1,
         timestamp: now,
@@ -1115,7 +1115,7 @@ describe("workflow", () => {
     await redis.rpush(
       `workflow:${name}:history:${executionId}`,
       JSON.stringify({
-        type: "WorkflowExecutionCancelRequested",
+        type: "WorkflowCancelRequested",
         timestamp: Date.now(),
       }),
     );
@@ -2112,7 +2112,7 @@ describe("workflow", () => {
       const execution = await waitStatus(wf, executionId, "failed");
 
       expect(execution.error).toContain("nondeterminism");
-      expect(execution.error).toContain("historical activity");
+      expect(execution.error).toContain("historical step");
 
       await stop(wf);
     });

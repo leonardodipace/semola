@@ -2,7 +2,7 @@ import { mightThrow, mightThrowSync } from "../errors/index.js";
 import { SerializationError, WorkflowStoreError } from "./errors.js";
 import type { HistoryEvent } from "./history.js";
 import type {
-  ActivityTask,
+  StepTask,
   TimerTask,
   WorkflowMeta,
   WorkflowStatus,
@@ -42,7 +42,7 @@ const keys = {
   lease: (name: string, executionId: string) =>
     `workflow:${name}:lease:${executionId}`,
   wfQueue: (name: string) => `workflow:${name}:wf-queue`,
-  actQueue: (name: string) => `workflow:${name}:act-queue`,
+  stepQueue: (name: string) => `workflow:${name}:step-queue`,
   timers: (name: string) => `workflow:${name}:timers`,
   active: (name: string) => `workflow:${name}:active`,
   partition: (name: string, partitionKey: string, slot: number) =>
@@ -167,35 +167,35 @@ export class WorkflowStore {
     return executionId;
   }
 
-  public async enqueueActivity(task: ActivityTask) {
-    const raw = stringify(task, "activity task");
+  public async enqueueStep(task: StepTask) {
+    const raw = stringify(task, "step task");
 
     const [pushError] = await mightThrow(
-      this.redis.lpush(keys.actQueue(this.name), raw),
+      this.redis.lpush(keys.stepQueue(this.name), raw),
     );
 
     if (pushError) {
-      throw new WorkflowStoreError("Unable to enqueue activity task");
+      throw new WorkflowStoreError("Unable to enqueue step task");
     }
   }
 
-  public async dequeueActivity() {
+  public async dequeueStep() {
     const [error, raw] = await mightThrow(
-      this.redis.rpop(keys.actQueue(this.name)),
+      this.redis.rpop(keys.stepQueue(this.name)),
     );
 
     if (error) {
-      throw new WorkflowStoreError("Unable to dequeue activity task");
+      throw new WorkflowStoreError("Unable to dequeue step task");
     }
 
     if (!raw) return null;
 
     const [parseError, task] = mightThrowSync(
-      () => JSON.parse(raw) as ActivityTask,
+      () => JSON.parse(raw) as StepTask,
     );
 
     if (parseError) {
-      throw new SerializationError("Unable to parse activity task");
+      throw new SerializationError("Unable to parse step task");
     }
 
     return task;

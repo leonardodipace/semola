@@ -13,7 +13,7 @@ import {
 } from "./runtime.js";
 import type { WorkflowStore } from "./store.js";
 import type {
-  ActivityTask,
+  StepTask,
   TimerTask,
   WorkflowOptions,
   WorkflowStepErrorRecord,
@@ -97,7 +97,7 @@ export class WorkflowWorker<TInput, TResult> {
   public start() {
     for (let i = 0; i < this.concurrency; i++) {
       void this.workflowLoop();
-      void this.activityLoop();
+      void this.stepLoop();
     }
 
     void this.timerLoop();
@@ -144,9 +144,9 @@ export class WorkflowWorker<TInput, TResult> {
     }
   }
 
-  private async activityLoop() {
+  private async stepLoop() {
     while (this.running) {
-      const [error, task] = await mightThrow(this.store.dequeueActivity());
+      const [error, task] = await mightThrow(this.store.dequeueStep());
 
       if (error) {
         await sleep(this.pollInterval);
@@ -162,8 +162,8 @@ export class WorkflowWorker<TInput, TResult> {
       await mightThrow(
         this.withLease(
           task.executionId,
-          (token) => this.runActivityTask(task, token),
-          () => this.store.enqueueActivity(task),
+          (token) => this.runStepTask(task, token),
+          () => this.store.enqueueStep(task),
         ),
       );
       this.active--;
@@ -348,10 +348,10 @@ export class WorkflowWorker<TInput, TResult> {
     for (const event of events) {
       if (!(await this.ownsLease(executionId, token))) return;
 
-      if (event.type === "ActivityTaskScheduled") {
-        await this.store.enqueueActivity({
+      if (event.type === "StepScheduled") {
+        await this.store.enqueueStep({
           executionId,
-          activityId: event.activityId,
+          stepId: event.stepId,
           stepName: event.stepName,
           attempt: event.attempt,
         });
@@ -367,7 +367,7 @@ export class WorkflowWorker<TInput, TResult> {
         continue;
       }
 
-      if (event.type === "WorkflowExecutionCompleted") {
+      if (event.type === "WorkflowCompleted") {
         await this.completeExecution(
           executionId,
           event.result,
@@ -378,7 +378,7 @@ export class WorkflowWorker<TInput, TResult> {
         continue;
       }
 
-      if (event.type === "WorkflowExecutionFailed") {
+      if (event.type === "WorkflowFailed") {
         await this.failExecution(
           executionId,
           event.error,
@@ -388,7 +388,7 @@ export class WorkflowWorker<TInput, TResult> {
         continue;
       }
 
-      if (event.type === "WorkflowExecutionCancelled") {
+      if (event.type === "WorkflowCancelled") {
         await this.cancelExecution(
           executionId,
           meta.input,
@@ -399,7 +399,7 @@ export class WorkflowWorker<TInput, TResult> {
     }
   }
 
-  private async runActivityTask(task: ActivityTask, token: string) {
+  private async runStepTask(task: StepTask, token: string) {
     const meta = await this.store.getMeta(task.executionId);
 
     if (!meta) return;
@@ -415,7 +415,7 @@ export class WorkflowWorker<TInput, TResult> {
       return;
     }
 
-    const existing = view.activities.get(task.activityId);
+    const existing = view.steps.get(task.stepId);
 
     if (existing?.status === "completed") {
       await this.store.enqueueWorkflow(task.executionId);
@@ -428,7 +428,7 @@ export class WorkflowWorker<TInput, TResult> {
       this.options,
       view,
       task.executionId,
-      task.activityId,
+      task.stepId,
     );
 
     if (!handler) {
@@ -460,7 +460,7 @@ export class WorkflowWorker<TInput, TResult> {
 
       await this.store.appendEvents(task.executionId, [
         {
-          type: "WorkflowExecutionFailed",
+          type: "WorkflowFailed",
           error: message,
           timestamp: Date.now(),
         },
@@ -479,8 +479,8 @@ export class WorkflowWorker<TInput, TResult> {
 
     await this.store.appendEvents(task.executionId, [
       {
-        type: "ActivityTaskStarted",
-        activityId: task.activityId,
+        type: "StepStarted",
+        stepId: task.stepId,
         attempt: task.attempt,
         timestamp: Date.now(),
       },
@@ -521,8 +521,8 @@ export class WorkflowWorker<TInput, TResult> {
 
       await this.store.appendEvents(task.executionId, [
         {
-          type: "ActivityTaskCompleted",
-          activityId: task.activityId,
+          type: "StepCompleted",
+          stepId: task.stepId,
           stepName: task.stepName,
           result: serialized,
           timestamp: Date.now(),
@@ -545,7 +545,7 @@ export class WorkflowWorker<TInput, TResult> {
       return;
     }
 
-    await this.handleActivityFailure(
+    await this.handleStepFailure(
       task,
       meta.input,
       meta.partitionKey,
@@ -555,8 +555,8 @@ export class WorkflowWorker<TInput, TResult> {
     );
   }
 
-  private async handleActivityFailure(
-    task: ActivityTask,
+  private async handleStepFailure(
+    task: StepTask,
     rawInput: string,
     partitionKey: string,
     stepError: Error,
@@ -571,8 +571,8 @@ export class WorkflowWorker<TInput, TResult> {
 
     await this.store.appendEvents(task.executionId, [
       {
-        type: "ActivityTaskFailed",
-        activityId: task.activityId,
+        type: "StepFailed",
+        stepId: task.stepId,
         stepName: task.stepName,
         error: message,
         retryable,
@@ -592,7 +592,7 @@ export class WorkflowWorker<TInput, TResult> {
 
     const errorHistory = this.collectErrorHistory(
       view.events,
-      task.activityId,
+      task.stepId,
       task.attempt,
       message,
       now,
@@ -625,16 +625,16 @@ export class WorkflowWorker<TInput, TResult> {
       );
 
       await this.store.scheduleTimer(Date.now() + delay, {
-        kind: "activity-retry",
+        kind: "step-retry",
         executionId: task.executionId,
-        activityId: task.activityId,
+        stepId: task.stepId,
         stepName: task.stepName,
         attempt: task.attempt + 1,
       });
       return;
     }
 
-    await this.failAfterActivityExhausted(
+    await this.failAfterStepExhausted(
       task,
       rawInput,
       partitionKey,
@@ -644,8 +644,8 @@ export class WorkflowWorker<TInput, TResult> {
     );
   }
 
-  private async failAfterActivityExhausted(
-    task: ActivityTask,
+  private async failAfterStepExhausted(
+    task: StepTask,
     rawInput: string,
     partitionKey: string,
     message: string,
@@ -673,7 +673,7 @@ export class WorkflowWorker<TInput, TResult> {
 
     await this.store.appendEvents(task.executionId, [
       {
-        type: "WorkflowExecutionFailed",
+        type: "WorkflowFailed",
         error: message,
         timestamp: Date.now(),
       },
@@ -689,7 +689,7 @@ export class WorkflowWorker<TInput, TResult> {
 
   private collectErrorHistory(
     events: HistoryEvent[],
-    activityId: string,
+    stepId: string,
     attempt: number,
     error: string,
     timestamp: number,
@@ -697,8 +697,8 @@ export class WorkflowWorker<TInput, TResult> {
     const history: WorkflowStepErrorRecord[] = [];
 
     for (const event of events) {
-      if (event.type !== "ActivityTaskFailed") continue;
-      if (event.activityId !== activityId) continue;
+      if (event.type !== "StepFailed") continue;
+      if (event.stepId !== stepId) continue;
 
       history.push({
         attempt: event.attempt,
@@ -726,7 +726,7 @@ export class WorkflowWorker<TInput, TResult> {
       const work =
         task.kind === "timer"
           ? () => this.fireDurableTimer(task.executionId, task.timerId)
-          : () => this.fireActivityRetry(task);
+          : () => this.fireStepRetry(task);
 
       await this.withLease(task.executionId, work, () =>
         this.store.scheduleTimer(Date.now(), task),
@@ -764,8 +764,8 @@ export class WorkflowWorker<TInput, TResult> {
     await this.store.enqueueWorkflow(executionId);
   }
 
-  private async fireActivityRetry(
-    task: Extract<TimerTask, { kind: "activity-retry" }>,
+  private async fireStepRetry(
+    task: Extract<TimerTask, { kind: "step-retry" }>,
   ) {
     const meta = await this.store.getMeta(task.executionId);
 
@@ -782,17 +782,17 @@ export class WorkflowWorker<TInput, TResult> {
 
     await this.store.appendEvents(task.executionId, [
       {
-        type: "ActivityTaskScheduled",
-        activityId: task.activityId,
+        type: "StepScheduled",
+        stepId: task.stepId,
         stepName: task.stepName,
         attempt: task.attempt,
         timestamp: Date.now(),
       },
     ]);
 
-    await this.store.enqueueActivity({
+    await this.store.enqueueStep({
       executionId: task.executionId,
-      activityId: task.activityId,
+      stepId: task.stepId,
       stepName: task.stepName,
       attempt: task.attempt,
     });
@@ -818,15 +818,15 @@ export class WorkflowWorker<TInput, TResult> {
 
       const view = parseHistory(await this.store.loadHistory(executionId));
 
-      for (const [activityId, state] of view.activities) {
+      for (const [stepId, state] of view.steps) {
         if (state.status === "completed") continue;
 
         if (state.status === "failed") {
           if (state.retryable && state.attempt <= this.retries) {
             await this.store.scheduleTimer(Date.now(), {
-              kind: "activity-retry",
+              kind: "step-retry",
               executionId,
-              activityId,
+              stepId,
               stepName: state.stepName,
               attempt: state.attempt + 1,
             });
@@ -835,9 +835,9 @@ export class WorkflowWorker<TInput, TResult> {
           continue;
         }
 
-        await this.store.enqueueActivity({
+        await this.store.enqueueStep({
           executionId,
-          activityId,
+          stepId,
           stepName: state.stepName,
           attempt: state.attempt,
         });

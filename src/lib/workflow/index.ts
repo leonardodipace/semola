@@ -124,7 +124,7 @@ export const defineWorkflow = <TInput, TResult = void>(
 
     await store.appendEvents(executionId, [
       {
-        type: "WorkflowExecutionStarted",
+        type: "WorkflowStarted",
         input: serializedInput,
         partitionKey,
         timestamp: now,
@@ -153,7 +153,7 @@ export const defineWorkflow = <TInput, TResult = void>(
 
     await store.appendEvents(executionId, [
       {
-        type: "WorkflowExecutionResumed",
+        type: "WorkflowResumed",
         timestamp: now,
       },
     ]);
@@ -161,12 +161,12 @@ export const defineWorkflow = <TInput, TResult = void>(
     const view = parseHistory(await store.loadHistory(executionId));
     const retryEvents = [];
 
-    for (const [activityId, state] of view.activities) {
+    for (const [stepId, state] of view.steps) {
       if (state.status !== "failed") continue;
 
       retryEvents.push({
-        type: "ActivityTaskScheduled" as const,
-        activityId,
+        type: "StepScheduled" as const,
+        stepId,
         stepName: state.stepName,
         attempt: 1,
         timestamp: now,
@@ -177,9 +177,9 @@ export const defineWorkflow = <TInput, TResult = void>(
       await store.appendEvents(executionId, retryEvents);
 
       for (const event of retryEvents) {
-        await store.enqueueActivity({
+        await store.enqueueStep({
           executionId,
-          activityId: event.activityId,
+          stepId: event.stepId,
           stepName: event.stepName,
           attempt: event.attempt,
         });
@@ -257,7 +257,7 @@ export const defineWorkflow = <TInput, TResult = void>(
 
     await store.appendEvents(executionId, [
       {
-        type: "WorkflowExecutionCancelRequested",
+        type: "WorkflowCancelRequested",
         timestamp: now,
       },
     ]);

@@ -164,9 +164,9 @@ export type Workflow<TInput, TResult> = {
   stop: () => Promise<void>;
 };
 
-export type ActivityTask = {
+export type StepTask = {
   executionId: string;
-  activityId: string;
+  stepId: string;
   stepName: string;
   attempt: number;
 };
@@ -178,9 +178,9 @@ export type TimerTask =
       timerId: string;
     }
   | {
-      kind: "activity-retry";
+      kind: "step-retry";
       executionId: string;
-      activityId: string;
+      stepId: string;
       stepName: string;
       attempt: number;
     };
