@@ -5,6 +5,10 @@ description: Durable multi-step jobs on Redis with resumable steps
 
 Workflows run multi-step processes that survive restarts. Each named `step` caches its result in Redis, so a resume skips work that already succeeded.
 
+Needs a `Bun.RedisClient`. Workflow names must be unique in the process. Execution IDs must be unique across all workflows sharing a Redis database.
+
+## Import
+
 ```typescript
 import {
   defineWorkflow,
@@ -13,9 +17,7 @@ import {
 } from "semola/workflow";
 ```
 
-Needs a `Bun.RedisClient`. Workflow names must be unique in the process. Execution IDs must be unique across all workflows sharing a Redis database.
-
-## Define and start
+## Quick start
 
 ```typescript
 const fulfillOrder = defineWorkflow<{ orderId: string }, string>({
@@ -63,7 +65,13 @@ await step("name", async ({ input, signal, fail }) => {
 });
 ```
 
-On resume, completed steps are not re-run. Call `fail(message)` to skip retries and fail the workflow immediately. Keep step handlers idempotent: side effects may run more than once during retries.
+### Resume semantics
+
+On resume, completed steps are not re-run. Keep step handlers idempotent: side effects may run more than once during retries.
+
+### Fail without retry
+
+Call `fail(message)` to skip retries and fail the workflow immediately (`StepFailedError`).
 
 ## Control an execution
 
@@ -103,7 +111,75 @@ const deploy = defineWorkflow<{ cloudEnvironmentId: string }>({
 
 `partitionKey` on `start` overrides `partitionBy` when both are present. Empty keys throw. The resolved key is stored on execution meta so `resume` keeps the original partition.
 
-## Options
+## Examples
+
+### Example: Resume after crash
+
+```typescript
+const sync = defineWorkflow<{ accountId: string }>({
+  name: "account-sync",
+  redis: redisClient,
+  handler: async ({ input, step }) => {
+    const data = await step("fetch", async () => fetchRemote(input.accountId));
+    await step("write", async () => persist(data));
+  },
+});
+
+const { executionId } = await sync.start({ accountId: "acc_1" });
+
+// process dies mid-run… later:
+await sync.resume(executionId);
+```
+
+### Example: Fail a step permanently
+
+```typescript
+await step("validate", async ({ fail }) => {
+  if (!isValid(order)) {
+    fail("invalid order");
+  }
+
+  return order;
+});
+```
+
+### Example: Partitioned deploys
+
+```typescript
+const deploy = defineWorkflow<{ envId: string }>({
+  name: "deploy",
+  redis: redisClient,
+  concurrency: 2,
+  partitionBy: (input) => input.envId,
+  handler: async ({ step }) => {
+    await step("apply", async () => applyInfra());
+  },
+});
+
+await deploy.start({ envId: "prod" });
+await deploy.start({ envId: "prod" }); // queued behind the first for this key
+```
+
+### Example: Lifecycle hooks
+
+```typescript
+const job = defineWorkflow({
+  name: "report",
+  redis: redisClient,
+  hooks: {
+    onStart: ({ executionId }) => console.log("start", executionId),
+    onRetry: ({ executionId, attempt }) => console.warn(executionId, attempt),
+    onError: ({ executionId, error }) => console.error(executionId, error),
+    onComplete: ({ executionId }) => console.log("done", executionId),
+    onCancel: ({ executionId }) => console.log("cancelled", executionId),
+  },
+  handler: async ({ step }) => {
+    await step("run", async () => buildReport());
+  },
+});
+```
+
+## Reference
 
 | Option | Default | Meaning |
 | --- | --- | --- |
@@ -116,11 +192,29 @@ const deploy = defineWorkflow<{ cloudEnvironmentId: string }>({
 | `retryBackoff` | 1s base, 2x, 30s cap | Exponential backoff |
 | `pollInterval` | `100` | Idle poll delay in ms |
 | `lockTTL` | `300000` | Execution lock TTL (also partition slot TTL) |
-| `hooks` | - | Lifecycle callbacks (`onStart`, `onRetry`, `onError`, `onComplete`, `onCancel`) |
+| `hooks` | - | `onStart`, `onRetry`, `onError`, `onComplete`, `onCancel` |
 | serializers | - | Optional input / result / step output (de)serializers |
 
-## Errors you can catch
+### Instance methods
 
-These are exported from `semola/workflow`:
+| Method | Meaning |
+| --- | --- |
+| `start(input, options?)` | Enqueue; options: `executionId`, `partitionKey` |
+| `get(executionId)` | Read execution status / result |
+| `resume(executionId)` | Continue a failed or interrupted run |
+| `cancel(executionId)` | Cancel an execution |
+| `stop()` | Stop this workflow's workers (waits up to `lockTTL`) |
 
-`WorkflowError`, `NotFoundError`, `StateError`, `SerializationError`, `ExecutionError`, `LockError`, `CancelledError`.
+### Process helpers
+
+| Function | Meaning |
+| --- | --- |
+| `listWorkflows(redis, filters?)` | List executions (`name`, `status`, `unlockedOnly`) |
+| `resumeWorkflow(redis, executionId)` | Resume by id (workflow must be registered) |
+| `clearWorkflowRegistry()` | Clear the in-process registry |
+
+## Errors
+
+Exported from `semola/workflow`:
+
+`WorkflowError`, `NotFoundError`, `StateError`, `SerializationError`, `ExecutionError`, `LockError`, `PartitionError`, `CancelledError`, `StepFailedError`.

@@ -374,3 +374,34 @@ const fulfillOrder = defineWorkflow<{ orderId: string }>({
 await fulfillOrder.start({ orderId: "ord_123" });`,
   },
 ] as const;
+
+const featuredIds = [
+  "api",
+  "cron",
+  "orm",
+  "policy",
+  "queue",
+  "workflow",
+] as const;
+
+const showcaseIds = [
+  "api",
+  "cache",
+  "cron",
+  "errors",
+  "i18n",
+  "logging",
+  "orm",
+  "policy",
+  "pubsub",
+  "queue",
+  "workflow",
+] as const;
+
+export const featuredHomeModules = homeModules.filter((module) =>
+  (featuredIds as readonly string[]).includes(module.id),
+);
+
+export const showcaseHomeModules = homeModules.filter((module) =>
+  (showcaseIds as readonly string[]).includes(module.id),
+);

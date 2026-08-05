@@ -5,6 +5,10 @@ description: Typed tables and queries on Bun SQL (SQLite or Postgres)
 
 Define tables once, get typed create / find / update / delete helpers. Uses Bun's SQL client under the hood.
 
+You still create the physical schema yourself (migrations / `$raw`). The ORM does not auto-migrate.
+
+## Import
+
 ```typescript
 import {
   createOrm,
@@ -18,7 +22,7 @@ import {
 } from "semola/orm";
 ```
 
-## Define tables and open a client
+## Quick start
 
 ```typescript
 const users = defineTable("users", {
@@ -27,6 +31,36 @@ const users = defineTable("users", {
   email: string("email").notNull().unique(),
 });
 
+const db = createOrm({
+  adapter: "sqlite", // or "postgres"
+  url: ":memory:",
+  tables: { users },
+});
+
+await db.users.create({
+  data: {
+    id: "u1",
+    name: "Ada",
+    email: "ada@example.com",
+  },
+});
+
+const user = await db.users.findFirst({
+  where: { email: "ada@example.com" },
+});
+```
+
+## Tables and columns
+
+### Column builders
+
+`string`, `number`, `boolean`, `uuid`, `date`, `json`, `jsonb`, `enumType`.
+
+Chain `.primaryKey()`, `.notNull()`, `.nullable()`, `.unique()`, `.default(fn)`, `.references(() => other.columns.col)`. Columns start nullable until you mark otherwise.
+
+### Relations
+
+```typescript
 const posts = defineTable("posts", {
   id: uuid("id").primaryKey().notNull(),
   title: string("title").notNull(),
@@ -36,7 +70,7 @@ const posts = defineTable("posts", {
 });
 
 const db = createOrm({
-  adapter: "sqlite", // or "postgres"
+  adapter: "sqlite",
   url: ":memory:",
   tables: { users, posts },
   relations: {
@@ -50,13 +84,11 @@ const db = createOrm({
 });
 ```
 
-Column builders: `string`, `number`, `boolean`, `uuid`, `date`, `json`, `jsonb`, `enumType`. Chain `.primaryKey()`, `.notNull()`, `.nullable()`, `.unique()`, `.default(fn)`, `.references(() => other.columns.col)`.
-
 `one(foreignKeyColumn, () => table)` uses the **source** table's FK column name. `many(() => table)` is the reverse side.
 
-You still create the physical schema yourself (migrations / `$raw`). The ORM does not auto-migrate.
-
 ## Queries
+
+### CRUD
 
 ```typescript
 await db.users.create({
@@ -89,7 +121,11 @@ await db.posts.deleteMany({
 });
 ```
 
-`where` supports column operators and `$and` / `$or` / `$not`. Relation filters use `every` / `some` / `none`. Pass `select` to shape the returned fields. `$skipHooks` bypasses hooks for that call.
+### Filters and shaping
+
+`where` supports column operators and `$and` / `$or` / `$not`. Relation filters use `every` / `some` / `none`. Pass `select` to shape returned fields. `$skipHooks` bypasses hooks for that call.
+
+Table methods: `findMany`, `findFirst`, `findUnique`, `create`, `createMany`, `update`, `updateMany`, `delete`, `deleteMany`.
 
 ## Transactions and raw SQL
 
@@ -132,3 +168,73 @@ const db = createOrm({
   },
 });
 ```
+
+## Examples
+
+### Example: Find with include
+
+```typescript
+const post = await db.posts.findFirst({
+  where: { id: "p1" },
+  include: { author: true },
+});
+
+console.log(post?.author.email);
+```
+
+### Example: Compound where
+
+```typescript
+const active = await db.users.findMany({
+  where: {
+    $and: [{ name: { startsWith: "A" } }, { email: { contains: "@" } }],
+  },
+  orderBy: { name: "asc" },
+  take: 10,
+});
+```
+
+### Example: Transaction rollback
+
+```typescript
+await db.$transaction(async (tx) => {
+  await tx.users.create({
+    data: { id: "u2", name: "Grace", email: "grace@example.com" },
+  });
+
+  // throw to roll back
+  throw new Error("abort");
+});
+```
+
+### Example: Schema via `$raw`
+
+```typescript
+await db.$raw.unsafe(`
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE
+  )
+`);
+```
+
+## Reference
+
+### `createOrm` options
+
+| Option | Meaning |
+| --- | --- |
+| `adapter` | `"sqlite"` or `"postgres"` |
+| `url` | Connection URL (e.g. `":memory:"`) |
+| `tables` | Map of `defineTable` results |
+| `relations` | Optional `one` / `many` map |
+| `hooks` | Global and per-table lifecycle hooks |
+
+### Client
+
+| Member | Meaning |
+| --- | --- |
+| `db.<table>` | Typed table client |
+| `db.$raw` | Underlying `Bun.SQL` |
+| `db.$transaction(cb)` | Run work in a transaction |

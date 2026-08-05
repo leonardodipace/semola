@@ -5,7 +5,7 @@ import { CodeSnippet } from "@/components/code-snippet";
 import { HomeShowcase } from "@/components/home-showcase";
 import { InstallCommand } from "@/components/install-command";
 import { Reveal } from "@/components/reveal";
-import { homeModules } from "@/lib/home-modules";
+import { featuredHomeModules, homeModules } from "@/lib/home-modules";
 import { appDescription, appName } from "@/lib/shared";
 
 export const metadata: Metadata = {
@@ -215,7 +215,7 @@ export default function HomePage() {
           </Reveal>
 
           <div className="space-y-16 sm:space-y-20">
-            {homeModules.map((feature, index) => (
+            {featuredHomeModules.map((feature, index) => (
               <Reveal key={feature.pkg}>
                 <article>
                   <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">

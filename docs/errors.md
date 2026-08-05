@@ -5,16 +5,13 @@ description: Result tuples and mightThrow for explicit error handling
 
 Semola's error helpers turn fallible work into **`[error, data]`** tuples. You branch on the error instead of nesting try/catch.
 
+## Import
+
 ```typescript
 import { ok, err, mightThrow, mightThrowSync } from "semola/errors";
 ```
 
-## The pattern
-
-Every result is a two-element tuple:
-
-- Success: `[null, data]`
-- Failure: `[{ type, message }, null]`
+## Quick start
 
 ```typescript
 const [error, user] = await getUser("123");
@@ -29,9 +26,16 @@ console.log(user.email);
 
 After the guard, `user` is narrowed. No optional chaining gymnastics.
 
+## The pattern
+
+Every result is a two-element tuple:
+
+- Success: `[null, data]`
+- Failure: `[{ type, message }, null]`
+
 ## Wrap things that throw
 
-**Async:**
+### Async
 
 ```typescript
 const [error, response] = await mightThrow(fetch("/api/users"));
@@ -44,7 +48,7 @@ if (error) {
 const [parseError, body] = await mightThrow(response.json());
 ```
 
-**Sync:**
+### Sync
 
 ```typescript
 const [error, value] = mightThrowSync(() => JSON.parse(input));
@@ -108,3 +112,65 @@ console.log(user);
 ```
 
 `err(type, message)` accepts common labels like `NotFoundError`, `UnauthorizedError`, `ValidationError`, `InternalServerError`, `MigrationError`, `SchemaError`, or any other string you want to use as a discriminant.
+
+## Examples
+
+### Example: Fetch and parse
+
+```typescript
+const [error, response] = await mightThrow(fetch("/api/users"));
+
+if (error) {
+  return;
+}
+
+const [parseError, body] = await mightThrow(response.json());
+
+if (parseError) {
+  return;
+}
+
+console.log(body);
+```
+
+### Example: Sync parse with err
+
+```typescript
+function parseConfig(input: string) {
+  const [error, value] = mightThrowSync(() => JSON.parse(input));
+
+  if (error) {
+    return err("ValidationError", "Invalid JSON");
+  }
+
+  return ok(value);
+}
+```
+
+### Example: Switch on error type
+
+```typescript
+const [error, user] = await getUser(id);
+
+if (error) {
+  switch (error.type) {
+    case "ValidationError":
+      return respond(400, error.message);
+    case "NotFoundError":
+      return respond(404, error.message);
+    default:
+      return respond(500, "Unexpected error");
+  }
+}
+
+return respond(200, user);
+```
+
+## Reference
+
+| Export | Meaning |
+| --- | --- |
+| `ok(data)` | Success tuple `[null, data]` |
+| `err(type, message)` | Failure tuple `[{ type, message }, null]` |
+| `mightThrow(promise)` | Await a promise into a result tuple |
+| `mightThrowSync(fn)` | Run a sync function into a result tuple |

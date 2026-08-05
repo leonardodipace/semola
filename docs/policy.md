@@ -3,13 +3,15 @@ title: Policy
 description: Allow / forbid rules with composable conditions
 ---
 
-Express authorization as small rules over an object. Forbid always wins over allow.
+Express authorization as small rules over an object. Forbid always wins over allow. If no rule matches, the action is denied.
+
+## Import
 
 ```typescript
 import { Policy, eq, and, or, has } from "semola/policy";
 ```
 
-## Define rules
+## Quick start
 
 ```typescript
 type Post = {
@@ -39,17 +41,6 @@ posts.forbid({
   conditions: { status: eq("published") },
   reason: "Published posts cannot be deleted",
 });
-```
-
-## Check
-
-```typescript
-const post = {
-  id: 1,
-  authorId: 1,
-  status: "draft" as const,
-  tags: ["notes"],
-};
 
 const result = posts.can("update", post);
 
@@ -57,11 +48,21 @@ if (!result.allowed) {
   console.log(result.reason);
   return;
 }
-
-// proceed
 ```
 
-`action` can be a string or an array (one rule covers many verbs). Omit `conditions` to match every object for that action.
+## Rules
+
+### Allow and forbid
+
+`action` can be a string or an array (one rule covers many verbs). Built-in labels include `"read"`, `"create"`, `"update"`, `"delete"`; custom strings work too.
+
+Omit `conditions` to match every object for that action. Optional `reason` is returned when the rule decides the outcome.
+
+### Evaluation order
+
+1. Matching **forbid** rules win first
+2. Then matching **allow** rules
+3. Otherwise deny
 
 ## Condition helpers
 
@@ -93,3 +94,94 @@ posts.allow({
   },
 });
 ```
+
+## Examples
+
+### Example: Role-based create
+
+```typescript
+type Document = {
+  ownerId: string;
+  visibility: "private" | "public";
+};
+
+const docs = new Policy<Document>();
+
+docs.allow({
+  action: "create",
+  reason: "Authenticated users can create",
+});
+
+docs.allow({
+  action: "read",
+  conditions: { visibility: eq("public") },
+});
+
+docs.allow({
+  action: ["read", "update", "delete"],
+  conditions: { ownerId: eq(user.id) },
+});
+```
+
+### Example: Forbid overrides allow
+
+```typescript
+posts.allow({
+  action: "delete",
+  conditions: { authorId: eq(user.id) },
+});
+
+posts.forbid({
+  action: "delete",
+  conditions: { status: eq("published") },
+  reason: "Cannot delete published posts",
+});
+
+// author of a published post → denied with the forbid reason
+posts.can("delete", publishedPost);
+```
+
+### Example: Tag helpers
+
+```typescript
+posts.allow({
+  action: "promote",
+  conditions: {
+    tags: hasAny(["featured", "editors-pick"]),
+    status: eq("published"),
+  },
+});
+```
+
+### Example: Custom field predicate
+
+```typescript
+posts.allow({
+  action: "publish",
+  conditions: {
+    tags: {
+      fn: (tags: string[]) => tags.length > 0,
+    },
+  },
+});
+```
+
+## Reference
+
+### Methods
+
+| Method | Meaning |
+| --- | --- |
+| `allow({ action, conditions?, reason? })` | Add an allow rule |
+| `forbid({ action, conditions?, reason? })` | Add a forbid rule |
+| `can(action, object?)` | Returns `{ allowed: boolean, reason?: string }` |
+
+### Helpers
+
+Comparison: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`
+
+Logic: `not`, `and`, `or`
+
+Strings / collections: `startsWith`, `endsWith`, `includes`, `matches`, `has`, `hasAny`, `hasLength`, `isEmpty`
+
+Presence: `isDefined`, `isNullish`

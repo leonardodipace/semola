@@ -9,15 +9,13 @@ import {
   useState,
 } from "react";
 import { codeThemes } from "@/lib/code-themes";
-import { homeModules } from "@/lib/home-modules";
+import { showcaseHomeModules } from "@/lib/home-modules";
 
 const INTERVAL_MS = 6500;
 const SLIDE_MS = 400;
 const SLIDE_PX = 12;
 
-const examples = homeModules.filter(
-  (m) => m.id !== "cli" && m.id !== "prompts" && m.id !== "extra",
-);
+const examples = showcaseHomeModules;
 
 function usePrefersReducedMotion() {
   const [reduced, setReduced] = useState(false);
