@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import {
   DuplicateWorkflowError,
+  defineWorkflow,
   NonRetryableStepError,
   NotFoundError,
   SerializationError,
+  type Workflow,
   WorkflowStoreError,
-} from "./errors.js";
-import { defineWorkflow } from "./index.js";
-import type { Workflow } from "./types.js";
+} from "./index.js";
 
 type ZMember = { score: number; member: string };
 

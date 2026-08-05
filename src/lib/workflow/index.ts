@@ -68,19 +68,9 @@ export const defineWorkflow = <TInput, TResult = void>(
     );
   }
 
-  registry.add(options.name);
-
-  let store: WorkflowStore;
-  let worker: WorkflowWorker<TInput, TResult>;
-
-  try {
-    store = new WorkflowStore(options.redis, options.name);
-    worker = new WorkflowWorker(options, store);
-    worker.start();
-  } catch (error) {
-    registry.delete(options.name);
-    throw error;
-  }
+  const store = new WorkflowStore(options.redis, options.name);
+  const worker = new WorkflowWorker(options, store);
+  worker.start();
 
   const start = async (
     input: TInput,
@@ -274,6 +264,8 @@ export const defineWorkflow = <TInput, TResult = void>(
     registry.delete(options.name);
   };
 
+  registry.add(options.name);
+
   return {
     name: options.name,
     start,
@@ -283,3 +275,30 @@ export const defineWorkflow = <TInput, TResult = void>(
     stop,
   };
 };
+
+export {
+  DuplicateWorkflowError,
+  NonRetryableStepError,
+  NotFoundError,
+  SerializationError,
+  WorkflowStoreError,
+} from "./errors.js";
+
+export type {
+  StepContext,
+  StepHandler,
+  StepSnapshot,
+  Workflow,
+  WorkflowCancelResult,
+  WorkflowExecution,
+  WorkflowHandlerContext,
+  WorkflowHooks,
+  WorkflowOptions,
+  WorkflowRetryBackoff,
+  WorkflowStartOptions,
+  WorkflowStartResult,
+  WorkflowStatus,
+  WorkflowStepErrorContext,
+  WorkflowStepErrorRecord,
+  WorkflowStepRetryContext,
+} from "./types.js";

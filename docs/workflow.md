@@ -5,8 +5,14 @@ Durable workflows on Redis. Event history, deterministic replay, activity tasks,
 ## Import
 
 ```typescript
-import { defineWorkflow } from "semola/workflow";
+import {
+  defineWorkflow,
+  NotFoundError,
+  type WorkflowExecution,
+} from "semola/workflow";
 ```
+
+Also exported: `DuplicateWorkflowError`, `NonRetryableStepError`, `SerializationError`, `WorkflowStoreError`, and the public workflow types (`Workflow`, `WorkflowOptions`, hooks/status/start/cancel shapes, etc.).
 
 ## Basic Usage
 
@@ -66,6 +72,10 @@ If a replica dies mid-run, lease expiry lets another replica (or the same proces
 - `resume(executionId)` - re-queue a **failed** execution
 - `stop()` - stop polling, wait for in-flight work, release process registration
 
+### Top-level
+
+- `defineWorkflow(options)` - register and start workers
+
 ### Handler context
 
 - `input`, `executionId`, `signal`
@@ -86,7 +96,7 @@ Inside a step: `fail(message)` marks a non-retryable failure.
 - **`concurrency`** - workflow + activity pollers in this process (default: 1 each). With partitions, also Redis per-key cap when replicas share the value
 - **`partitionBy`** - `(input) => string` for per-key concurrency
 - **`pollInterval`** - idle poll backoff ms (default: 100)
-- **`serialize*` / `deserialize*`** - custom codecs for input, result, and step output
+- **`serialize*` / `deserialize*`** - custom codecs for input, result, and step output (default: plain `JSON.stringify` / `JSON.parse`)
 
 `start(input, { executionId?, partitionKey? })` - `partitionKey` overrides `partitionBy`.
 
