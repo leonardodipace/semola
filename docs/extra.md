@@ -40,7 +40,7 @@ const user = await fetchUser("123");
 | `id` | Optional label for callbacks |
 | `onFailedAttempt` | Called after each failed attempt |
 | `onError` | Called when retries are exhausted; if it returns, the wrapper resolves to `undefined` instead of throwing |
-| `retryOnError` | `({ error, id }) => boolean` — return `false` to stop (default: retry all) |
+| `retryOnError` | `({ error, id }) => boolean` - return `false` to stop (default: retry all) |
 
 Invalid config throws `InvalidRetryError` (exported from `semola/extra`).
 
