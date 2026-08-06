@@ -5,10 +5,10 @@ COPY package.json bun.lock ./
 COPY apps/docs ./apps/docs
 COPY docs ./docs
 
-RUN bun install --frozen-lockfile
+RUN bun install --frozen-lockfile --filter @semola/docs
 
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN bun run docs:build
+RUN bun run --filter @semola/docs build
 
 FROM node:22-alpine AS runner
 WORKDIR /app
