@@ -115,6 +115,22 @@ export class MockRedisClient {
     return Object.fromEntries(hash.entries());
   }
 
+  public async scan(
+    cursor: string | number,
+    ...options: (string | number)[]
+  ): Promise<[string, string[]]> {
+    // ponytail: one-shot scan; real Redis paginates
+    if (String(cursor) !== "0") return ["0", []];
+
+    const matchAt = options.indexOf("MATCH");
+    const pattern = matchAt >= 0 ? String(options[matchAt + 1] ?? "*") : "*";
+    const regex = new RegExp(
+      `^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`,
+    );
+
+    return ["0", [...this.hashes.keys()].filter((key) => regex.test(key))];
+  }
+
   public async sadd(key: string, ...members: string[]) {
     return this.saddSync(key, ...members);
   }

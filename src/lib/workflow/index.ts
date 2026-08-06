@@ -1,3 +1,4 @@
+import { mightThrow } from "../errors/index.js";
 import { WorkflowEngine } from "./engine.js";
 import {
   DuplicateWorkflowError,
@@ -11,6 +12,8 @@ import type {
   ResolvePartitionKeyInput,
   StepSnapshot,
   Workflow,
+  WorkflowListItem,
+  WorkflowListOptions,
   WorkflowOptions,
   WorkflowStartOptions,
   WorkflowStatus,
@@ -22,6 +25,77 @@ const optionalTimestamp = (raw: string) => {
   if (!raw) return null;
 
   return Number(raw);
+};
+
+const toFilter = <T extends string>(value: T | T[] | undefined) => {
+  if (value === undefined) return null;
+
+  if (Array.isArray(value)) return new Set(value);
+
+  return new Set([value]);
+};
+
+export const listWorkflows = async (
+  redis: Bun.RedisClient,
+  options?: WorkflowListOptions,
+) => {
+  const names = toFilter(options?.name);
+  const statuses = toFilter(options?.status);
+  const results: WorkflowListItem[] = [];
+
+  let cursor = "0";
+
+  do {
+    const [scanError, scanned] = await mightThrow(
+      redis.scan(cursor, "MATCH", "workflow:*:meta:*", "COUNT", 100),
+    );
+
+    if (scanError) {
+      throw new WorkflowStoreError("Unable to scan workflow executions");
+    }
+
+    if (!scanned) {
+      throw new WorkflowStoreError("Unable to scan workflow executions");
+    }
+
+    const [next, keys] = scanned;
+
+    cursor = next;
+
+    for (const key of keys) {
+      const id = key.split(":meta:")[1];
+
+      if (!id) continue;
+
+      const [readError, meta] = await mightThrow(redis.hgetall(key));
+
+      if (readError) {
+        throw new WorkflowStoreError(
+          `Unable to read metadata for execution ${id}`,
+        );
+      }
+
+      if (!meta?.name) continue;
+      if (!meta.status) continue;
+      if (names && !names.has(meta.name)) continue;
+      if (statuses && !statuses.has(meta.status as WorkflowStatus)) continue;
+      if (!meta.createdAt) continue;
+      if (!meta.updatedAt) continue;
+
+      results.push({
+        id,
+        name: meta.name,
+        status: meta.status as WorkflowStatus,
+        createdAt: Number(meta.createdAt),
+        updatedAt: Number(meta.updatedAt),
+        completedAt: optionalTimestamp(meta.completedAt ?? ""),
+        failedAt: optionalTimestamp(meta.failedAt ?? ""),
+        cancelledAt: optionalTimestamp(meta.cancelledAt ?? ""),
+      });
+    }
+  } while (cursor !== "0");
+
+  return results;
 };
 
 const requireMeta = async (store: WorkflowStore, executionId: string) => {
@@ -310,6 +384,8 @@ export type {
   WorkflowExecution,
   WorkflowHandlerContext,
   WorkflowHooks,
+  WorkflowListItem,
+  WorkflowListOptions,
   WorkflowOptions,
   WorkflowRetryBackoff,
   WorkflowStartOptions,

@@ -3,6 +3,7 @@ import { WorkflowEngine } from "./engine.js";
 import {
   DuplicateWorkflowError,
   defineWorkflow,
+  listWorkflows,
   NonRetryableStepError,
   NotFoundError,
   SerializationError,
@@ -2663,6 +2664,137 @@ describe("workflow", () => {
       expect(completes).toBe(1);
 
       await stop(wf2);
+    });
+  });
+
+  describe("listWorkflows", () => {
+    test("returns empty list when no executions exist", async () => {
+      const redis = createRedis();
+
+      expect(await listWorkflows(redis)).toEqual([]);
+    });
+
+    test("lists executions across workflow names without defineWorkflow", async () => {
+      const redis = createRedis();
+      const now = String(Date.now());
+
+      await redis.hset(
+        "workflow:list-onboard:meta:onboard-1",
+        "name",
+        "list-onboard",
+        "status",
+        "completed",
+        "createdAt",
+        now,
+        "updatedAt",
+        now,
+        "completedAt",
+        now,
+        "failedAt",
+        "",
+        "cancelledAt",
+        "",
+      );
+
+      await redis.hset(
+        "workflow:list-provision:meta:provision-1",
+        "name",
+        "list-provision",
+        "status",
+        "failed",
+        "createdAt",
+        now,
+        "updatedAt",
+        now,
+        "completedAt",
+        "",
+        "failedAt",
+        now,
+        "cancelledAt",
+        "",
+      );
+
+      const listed = await listWorkflows(redis);
+      const names = listed.map((item) => item.name).sort();
+      const ids = listed.map((item) => item.id).sort();
+
+      expect(listed.length).toBe(2);
+      expect(names).toEqual(["list-onboard", "list-provision"]);
+      expect(ids).toEqual(["onboard-1", "provision-1"]);
+    });
+
+    test("filters by name and status", async () => {
+      const redis = createRedis();
+      const now = String(Date.now());
+
+      await redis.hset(
+        "workflow:filter-onboard:meta:filter-onboard-1",
+        "name",
+        "filter-onboard",
+        "status",
+        "completed",
+        "createdAt",
+        now,
+        "updatedAt",
+        now,
+        "completedAt",
+        now,
+        "failedAt",
+        "",
+        "cancelledAt",
+        "",
+      );
+
+      await redis.hset(
+        "workflow:filter-provision:meta:filter-provision-1",
+        "name",
+        "filter-provision",
+        "status",
+        "failed",
+        "createdAt",
+        now,
+        "updatedAt",
+        now,
+        "completedAt",
+        "",
+        "failedAt",
+        now,
+        "cancelledAt",
+        "",
+      );
+
+      const byName = await listWorkflows(redis, { name: "filter-onboard" });
+      const byStatus = await listWorkflows(redis, { status: "failed" });
+
+      expect(byName.map((item) => item.id)).toEqual(["filter-onboard-1"]);
+      expect(byStatus.map((item) => item.id)).toEqual(["filter-provision-1"]);
+    });
+
+    test("lists live executions started via defineWorkflow", async () => {
+      const redis = createRedis();
+      const name = `list-live-${crypto.randomUUID()}`;
+
+      const wf = defineWorkflow<Record<string, never>, string>({
+        name,
+        redis,
+        ...fast,
+        handler: async () => "ok",
+      });
+
+      await wf.start({}, { executionId: "live-1" });
+      await waitStatus(wf, "live-1", "completed");
+
+      const listed = await listWorkflows(redis, { name });
+
+      expect(listed).toEqual([
+        expect.objectContaining({
+          id: "live-1",
+          name,
+          status: "completed",
+        }),
+      ]);
+
+      await stop(wf);
     });
   });
 });

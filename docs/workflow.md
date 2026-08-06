@@ -7,12 +7,13 @@ Durable workflows on Redis. Event history, deterministic replay, inline steps, m
 ```typescript
 import {
   defineWorkflow,
+  listWorkflows,
   NotFoundError,
   type WorkflowExecution,
 } from "semola/workflow";
 ```
 
-Also exported: `DuplicateWorkflowError`, `NonRetryableStepError`, `SerializationError`, `WorkflowStoreError`, and the public workflow types (`Workflow`, `WorkflowOptions`, hooks/status/start/cancel shapes, etc.).
+Also exported: `DuplicateWorkflowError`, `NonRetryableStepError`, `SerializationError`, `WorkflowStoreError`, and the public workflow types (`Workflow`, `WorkflowOptions`, hooks/status/start/cancel shapes, `WorkflowListItem`, etc.).
 
 ## Basic Usage
 
@@ -78,6 +79,26 @@ History and status writes are lease-fenced (Redis compare-and-append / compare-a
 ### Top-level
 
 - `defineWorkflow(options)` - register and start workers
+- `listWorkflows(redis, options?)` - scan all executions in Redis (any workflow name). Options: `name`, `status` (string or array). Does not require `defineWorkflow`. Returns lightweight meta snapshots (`WorkflowListItem`), not full `get()` detail.
+
+```typescript
+const all = await listWorkflows(redis);
+
+const active = await listWorkflows(redis, {
+  status: ["pending", "running"],
+});
+
+const failed = await listWorkflows(redis, {
+  name: "onboard-user",
+  status: "failed",
+});
+
+for (const item of failed) {
+  await onboard.resume(item.id);
+}
+```
+
+Crash recovery stays automatic via leases. Use `listWorkflows` for ops and admin surfaces, then instance `get` / `resume` when you need detail or retry.
 
 ### Handler context
 

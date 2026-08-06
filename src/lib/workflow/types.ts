@@ -128,6 +128,22 @@ export type WorkflowCancelResult = {
   createdAt: number;
 };
 
+export type WorkflowListOptions = {
+  name?: string | string[];
+  status?: WorkflowStatus | WorkflowStatus[];
+};
+
+export type WorkflowListItem = {
+  id: string;
+  name: string;
+  status: WorkflowStatus;
+  createdAt: number;
+  updatedAt: number;
+  completedAt: number | null;
+  failedAt: number | null;
+  cancelledAt: number | null;
+};
+
 export type WorkflowMeta = {
   name: string;
   status: WorkflowStatus;
