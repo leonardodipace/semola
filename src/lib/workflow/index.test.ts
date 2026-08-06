@@ -1464,6 +1464,94 @@ describe("workflow", () => {
     await stop(wf);
   });
 
+  test("resume under live workers leaves failed before enqueue", async () => {
+    const redis = createRedis();
+    let attempts = 0;
+
+    const wf = defineWorkflow({
+      name: `resume-live-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      concurrency: 2,
+      retries: 0,
+      handler: async ({ step }) => {
+        const value = await step("once", async () => {
+          attempts++;
+
+          if (attempts === 1) throw new Error("boom");
+
+          return "ok";
+        });
+
+        return value;
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    await waitStatus(wf, executionId, "failed");
+
+    // Workers already polling; status must flip to pending before step enqueue.
+    const resumed = await wf.resume(executionId);
+
+    expect(resumed.status).toBe("pending");
+    expect((await wf.get(executionId)).status).not.toBe("failed");
+
+    const execution = await waitStatus(wf, executionId, "completed");
+
+    expect(execution.result).toBe("ok");
+    expect(attempts).toBe(2);
+
+    await stop(wf);
+  });
+
+  test("step retry timer does not revive completed step", async () => {
+    const redis = createRedis();
+    const name = `retry-done-${crypto.randomUUID()}`;
+    let attempts = 0;
+
+    const wf = defineWorkflow({
+      name,
+      redis,
+      ...fast,
+      retries: 2,
+      retryBackoff: { baseDelay: 10_000, multiplier: 1, maxDelay: 10_000 },
+      handler: async ({ step }) => {
+        await step("flaky", async () => {
+          attempts++;
+
+          if (attempts === 1) throw new Error("boom");
+
+          return "ok";
+        });
+
+        return "done";
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    await waitFor(() => attempts >= 1, 2000);
+    await sleep(15);
+
+    await redis.rpush(
+      `workflow:${name}:history:${executionId}`,
+      JSON.stringify({
+        type: "StepCompleted",
+        stepId: "a0",
+        stepName: "flaky",
+        result: JSON.stringify("ok"),
+        timestamp: Date.now(),
+      }),
+    );
+
+    await sleep(10_000);
+    const execution = await waitStatus(wf, executionId, "completed");
+
+    expect(execution.result).toBe("done");
+    expect(attempts).toBe(1);
+
+    await stop(wf);
+  });
+
   test("resume clears sticky cancel after fail race", async () => {
     const redis = createRedis();
     let attempts = 0;

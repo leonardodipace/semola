@@ -872,6 +872,13 @@ export class WorkflowWorker<TInput, TResult> {
       return;
     }
 
+    const existing = view.steps.get(task.stepId);
+
+    if (existing?.status === "completed") {
+      await this.store.enqueueWorkflow(task.executionId);
+      return;
+    }
+
     const appended = await this.store.appendEvents(
       task.executionId,
       [

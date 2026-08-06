@@ -158,6 +158,12 @@ export const defineWorkflow = <TInput, TResult = void>(
       },
     ]);
 
+    // Leave failed before enqueue: step workers drop terminal tasks.
+    await store.updateStatus(executionId, "pending", {
+      error: "",
+      failedAt: "",
+    });
+
     const view = parseHistory(await store.loadHistory(executionId));
     const retryEvents = [];
 
@@ -186,10 +192,6 @@ export const defineWorkflow = <TInput, TResult = void>(
       }
     }
 
-    await store.updateStatus(executionId, "pending", {
-      error: "",
-      failedAt: "",
-    });
     await store.markActive(executionId);
     await store.enqueueWorkflow(executionId);
 
