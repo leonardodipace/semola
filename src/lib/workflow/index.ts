@@ -464,12 +464,6 @@ class WorkflowDefinition<TInput, TResult> {
 
     const timestamp = now();
 
-    const existingStatus = await this.getMeta(executionId, "status");
-
-    if (existingStatus) {
-      throw new StateError(`Workflow execution ${executionId} already exists`);
-    }
-
     const metadata: WorkflowMeta = {
       name: this.options.name,
       status: "pending",
@@ -485,14 +479,32 @@ class WorkflowDefinition<TInput, TResult> {
       partitionKey: this.resolvePartitionKey(input, startOptions),
     };
 
-    const [writeError] = await mightThrow(
-      this.options.redis.hset(this.metaKey(executionId), metadata),
+    const script =
+      "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end return redis.call('HSET', KEYS[1], unpack(ARGV))";
+
+    const argv: string[] = [];
+
+    for (const [field, value] of Object.entries(metadata)) {
+      argv.push(field, value);
+    }
+
+    const [writeError, created] = await mightThrow(
+      this.options.redis.send("EVAL", [
+        script,
+        "1",
+        this.metaKey(executionId),
+        ...argv,
+      ]),
     );
 
     if (writeError) {
       throw new WorkflowError(
         `Unable to persist metadata for execution ${executionId}`,
       );
+    }
+
+    if (created === 0) {
+      throw new StateError(`Workflow execution ${executionId} already exists`);
     }
   }
 
