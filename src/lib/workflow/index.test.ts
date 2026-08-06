@@ -913,6 +913,33 @@ describe("workflow", () => {
     await stop(wf);
   });
 
+  test("null timer payload is dead-lettered", async () => {
+    const redis = createRedis();
+    const name = `timer-null-${crypto.randomUUID()}`;
+
+    const wf = defineWorkflow({
+      name,
+      redis,
+      ...fast,
+      handler: async ({ step }) => {
+        await step("go", async () => "ok");
+        return "done";
+      },
+    });
+
+    await redis.zadd(`workflow:${name}:timers`, Date.now() - 1, "null");
+
+    const { executionId } = await wf.start({});
+    const execution = await waitStatus(wf, executionId, "completed");
+
+    expect(execution.result).toBe("done");
+
+    const dead = await redis.lrange(`workflow:${name}:timer-dead`, 0, -1);
+    expect(dead).toContain("null");
+
+    await stop(wf);
+  });
+
   test("cancel during durable sleep", async () => {
     const redis = createRedis();
 

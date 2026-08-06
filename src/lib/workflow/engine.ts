@@ -965,6 +965,11 @@ export class WorkflowEngine<TInput, TResult> {
         continue;
       }
 
+      if (typeof task !== "object" || task === null) {
+        await this.store.deadLetterTimer(raw);
+        continue;
+      }
+
       if (task.kind === "step-retry") {
         await this.withLease({
           executionId: task.executionId,
@@ -1236,16 +1241,24 @@ export class WorkflowEngine<TInput, TResult> {
 
         if (slot === undefined) return;
 
-        const meta = await this.store.getMeta(executionId);
+        const [metaError, meta] = await mightThrow(
+          this.store.getMeta(executionId),
+        );
+
+        if (metaError) return;
 
         if (!meta?.partitionKey) return;
 
-        const refreshed = await this.store.refreshPartition({
-          partitionKey: meta.partitionKey,
-          slot,
-          executionId,
-          ttlMs: this.lockTTL,
-        });
+        const [refreshError, refreshed] = await mightThrow(
+          this.store.refreshPartition({
+            partitionKey: meta.partitionKey,
+            slot,
+            executionId,
+            ttlMs: this.lockTTL,
+          }),
+        );
+
+        if (refreshError) return;
 
         if (!refreshed) this.partitionSlots.delete(executionId);
       })();
