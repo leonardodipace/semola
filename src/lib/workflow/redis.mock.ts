@@ -26,12 +26,137 @@ export class MockRedisClient {
   }
 
   public async get(key: string) {
+    return this.getSync(key);
+  }
+
+  public async set(
+    key: string,
+    value: string,
+    mode?: string,
+    ttl?: string | number,
+    flag?: string,
+  ) {
+    return this.setSync(key, value, mode, ttl, flag);
+  }
+
+  public async del(...keys: string[]) {
+    return this.delSync(...keys);
+  }
+
+  public async pexpire(key: string, ttlMs: number) {
+    return this.pexpireSync(key, ttlMs);
+  }
+
+  public async pttl(key: string) {
+    const entry = this.strings.get(key);
+
+    if (!entry) return -2;
+
+    if (entry.expiresAt === null) return -1;
+
+    if (Date.now() >= entry.expiresAt) {
+      this.strings.delete(key);
+      return -2;
+    }
+
+    return entry.expiresAt - Date.now();
+  }
+
+  public async lpush(key: string, ...values: string[]) {
+    const list = this.lists.get(key) ?? [];
+
+    for (const value of values) {
+      list.unshift(value);
+    }
+
+    this.lists.set(key, list);
+    return list.length;
+  }
+
+  public async rpush(key: string, ...values: string[]) {
+    return this.rpushSync(key, ...values);
+  }
+
+  public async rpop(key: string) {
+    const list = this.lists.get(key);
+
+    if (!list) return null;
+
+    if (list.length === 0) return null;
+
+    return list.pop() ?? null;
+  }
+
+  public async lrange(key: string, start: number, stop: number) {
+    const list = this.lists.get(key) ?? [];
+
+    let end = stop + 1;
+
+    if (stop < 0) {
+      end = list.length + stop + 1;
+    }
+
+    return list.slice(start, end);
+  }
+
+  public async hset(key: string, ...fieldValues: string[]) {
+    return this.hsetSync(key, fieldValues);
+  }
+
+  public async hget(key: string, field: string) {
+    return this.hashes.get(key)?.get(field) ?? null;
+  }
+
+  public async hgetall(key: string) {
+    const hash = this.hashes.get(key);
+
+    if (!hash) return {};
+
+    return Object.fromEntries(hash.entries());
+  }
+
+  public async sadd(key: string, ...members: string[]) {
+    return this.saddSync(key, ...members);
+  }
+
+  public async srem(key: string, ...members: string[]) {
+    const set = this.sets.get(key);
+
+    if (!set) return 0;
+
+    let removed = 0;
+
+    for (const member of members) {
+      if (set.delete(member)) removed++;
+    }
+
+    return removed;
+  }
+
+  public async smembers(key: string) {
+    return [...(this.sets.get(key) ?? [])];
+  }
+
+  public async zadd(key: string, score: number, member: string) {
+    this.zaddSync(key, score, member);
+    return 1;
+  }
+
+  public async zrangebyscore(key: string, min: number, max: number) {
+    return this.zrangebyscoreSync(key, min, max);
+  }
+
+  public async zrem(key: string, ...members: string[]) {
+    return this.zremSync(key, members);
+  }
+
+  private getSync(key: string) {
     if (this.isExpired(key)) return null;
 
     return this.strings.get(key)?.value ?? null;
   }
 
-  public async set(
+  private setSync(
     key: string,
     value: string,
     mode?: string,
@@ -70,7 +195,7 @@ export class MockRedisClient {
     return "OK";
   }
 
-  public async del(...keys: string[]) {
+  private delSync(...keys: string[]) {
     let count = 0;
 
     for (const key of keys) {
@@ -84,7 +209,7 @@ export class MockRedisClient {
     return count;
   }
 
-  public async pexpire(key: string, ttlMs: number) {
+  private pexpireSync(key: string, ttlMs: number) {
     const entry = this.strings.get(key);
 
     if (!entry) return 0;
@@ -95,66 +220,7 @@ export class MockRedisClient {
     return 1;
   }
 
-  public async pttl(key: string) {
-    const entry = this.strings.get(key);
-
-    if (!entry) return -2;
-
-    if (entry.expiresAt === null) return -1;
-
-    if (Date.now() >= entry.expiresAt) {
-      this.strings.delete(key);
-      return -2;
-    }
-
-    return entry.expiresAt - Date.now();
-  }
-
-  public async lpush(key: string, ...values: string[]) {
-    const list = this.lists.get(key) ?? [];
-
-    for (const value of values) {
-      list.unshift(value);
-    }
-
-    this.lists.set(key, list);
-    return list.length;
-  }
-
-  public async rpush(key: string, ...values: string[]) {
-    const list = this.lists.get(key) ?? [];
-
-    for (const value of values) {
-      list.push(value);
-    }
-
-    this.lists.set(key, list);
-    return list.length;
-  }
-
-  public async rpop(key: string) {
-    const list = this.lists.get(key);
-
-    if (!list) return null;
-
-    if (list.length === 0) return null;
-
-    return list.pop() ?? null;
-  }
-
-  public async lrange(key: string, start: number, stop: number) {
-    const list = this.lists.get(key) ?? [];
-
-    let end = stop + 1;
-
-    if (stop < 0) {
-      end = list.length + stop + 1;
-    }
-
-    return list.slice(start, end);
-  }
-
-  public async hset(key: string, ...fieldValues: string[]) {
+  private hsetSync(key: string, fieldValues: string[]) {
     const hash = this.hashes.get(key) ?? new Map<string, string>();
 
     for (let i = 0; i < fieldValues.length; i += 2) {
@@ -172,19 +238,7 @@ export class MockRedisClient {
     return fieldValues.length / 2;
   }
 
-  public async hget(key: string, field: string) {
-    return this.hashes.get(key)?.get(field) ?? null;
-  }
-
-  public async hgetall(key: string) {
-    const hash = this.hashes.get(key);
-
-    if (!hash) return {};
-
-    return Object.fromEntries(hash.entries());
-  }
-
-  public async sadd(key: string, ...members: string[]) {
+  private saddSync(key: string, ...members: string[]) {
     const set = this.sets.get(key) ?? new Set<string>();
     let added = 0;
 
@@ -199,25 +253,18 @@ export class MockRedisClient {
     return added;
   }
 
-  public async srem(key: string, ...members: string[]) {
-    const set = this.sets.get(key);
+  private rpushSync(key: string, ...values: string[]) {
+    const list = this.lists.get(key) ?? [];
 
-    if (!set) return 0;
-
-    let removed = 0;
-
-    for (const member of members) {
-      if (set.delete(member)) removed++;
+    for (const value of values) {
+      list.push(value);
     }
 
-    return removed;
+    this.lists.set(key, list);
+    return list.length;
   }
 
-  public async smembers(key: string) {
-    return [...(this.sets.get(key) ?? [])];
-  }
-
-  public async zadd(key: string, score: number, member: string) {
+  private zaddSync(key: string, score: number, member: string) {
     const zset = this.zsets.get(key) ?? [];
     const existing = zset.findIndex((row) => row.member === member);
 
@@ -228,19 +275,26 @@ export class MockRedisClient {
     }
 
     this.zsets.set(key, zset);
-    return 1;
   }
 
-  public async zrangebyscore(key: string, min: number, max: number) {
+  private zrangebyscoreSync(key: string, min: number, max: number) {
     const zset = this.zsets.get(key) ?? [];
 
     return zset
       .filter((row) => row.score >= min && row.score <= max)
-      .sort((a, b) => a.score - b.score)
+      .sort((a, b) => {
+        if (a.score !== b.score) return a.score - b.score;
+
+        if (a.member < b.member) return -1;
+
+        if (a.member > b.member) return 1;
+
+        return 0;
+      })
       .map((row) => row.member);
   }
 
-  public async zrem(key: string, ...members: string[]) {
+  private zremSync(key: string, members: string[]) {
     const zset = this.zsets.get(key) ?? [];
     const next = zset.filter((row) => !members.includes(row.member));
     const removed = zset.length - next.length;
@@ -279,6 +333,8 @@ export class MockRedisClient {
       throw new Error(`Unsupported command ${command}`);
     }
 
+    // EVAL branches stay synchronous (no await) so concurrent send() calls
+    // cannot interleave mid-script — matches Redis Lua atomicity.
     const script = args[0] ?? "";
     const numKeys = Number(args[1] ?? "1");
     const keyArgs = args.slice(2, 2 + numKeys);
@@ -288,12 +344,12 @@ export class MockRedisClient {
 
     if (script.includes("ZRANGEBYSCORE")) {
       const now = Number(argv[0]);
-      const members = await this.zrangebyscore(key, 0, now);
+      const members = this.zrangebyscoreSync(key, 0, now);
       const member = members[0];
 
       if (!member) return false;
 
-      await this.zrem(key, member);
+      this.zremSync(key, [member]);
       return member;
     }
 
@@ -304,7 +360,7 @@ export class MockRedisClient {
 
       if (zset.some((row) => row.member === member)) return 0;
 
-      await this.zadd(key, fireAt, member);
+      this.zaddSync(key, fireAt, member);
       return 1;
     }
 
@@ -315,8 +371,8 @@ export class MockRedisClient {
 
       if (this.hashes.has(metaKey)) return 0;
 
-      await this.hset(metaKey, ...argv.slice(1));
-      await this.sadd(activeKey, executionId);
+      this.hsetSync(metaKey, argv.slice(1));
+      this.saddSync(activeKey, executionId);
       return 1;
     }
 
@@ -325,48 +381,48 @@ export class MockRedisClient {
       const activeKey = keyArgs[1] ?? "";
       const executionId = argv[0] ?? "";
 
-      await this.hset(metaKey, ...argv.slice(1));
-      await this.sadd(activeKey, executionId);
+      this.hsetSync(metaKey, argv.slice(1));
+      this.saddSync(activeKey, executionId);
       return 1;
     }
 
     if (script.includes("EXISTS")) {
       if (this.hashes.has(key)) return 0;
 
-      await this.hset(key, ...argv);
+      this.hsetSync(key, argv);
       return 1;
     }
 
     if (script.includes("RPUSH")) {
       const historyKey = keyArgs[1] ?? "";
-      const current = await this.get(key);
+      const current = this.getSync(key);
 
       if (current !== token) return 0;
 
-      await this.rpush(historyKey, ...argv.slice(1));
+      this.rpushSync(historyKey, ...argv.slice(1));
       return 1;
     }
 
     if (script.includes("HSET") && script.includes("GET")) {
       const metaKey = keyArgs[1] ?? "";
-      const current = await this.get(key);
+      const current = this.getSync(key);
 
       if (current !== token) return 0;
 
-      await this.hset(metaKey, ...argv.slice(1));
+      this.hsetSync(metaKey, argv.slice(1));
       return 1;
     }
 
     if (script.includes("SET") && script.includes("NX")) {
       const ttlMs = Number(argv[1]);
-      const owned = await this.get(key);
+      const owned = this.getSync(key);
 
       if (owned === token) {
-        await this.pexpire(key, ttlMs);
+        this.pexpireSync(key, ttlMs);
         return 1;
       }
 
-      const result = await this.set(key, token, "PX", String(ttlMs), "NX");
+      const result = this.setSync(key, token, "PX", String(ttlMs), "NX");
 
       if (result === "OK") return 1;
 
@@ -374,20 +430,20 @@ export class MockRedisClient {
     }
 
     if (script.includes("DEL")) {
-      const current = await this.get(key);
+      const current = this.getSync(key);
 
       if (current !== token) return 0;
 
-      await this.del(key);
+      this.delSync(key);
       return 1;
     }
 
     if (script.includes("PEXPIRE")) {
-      const current = await this.get(key);
+      const current = this.getSync(key);
 
       if (current !== token) return 0;
 
-      return this.pexpire(key, Number(argv[1]));
+      return this.pexpireSync(key, Number(argv[1]));
     }
 
     return 0;

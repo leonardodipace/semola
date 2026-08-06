@@ -196,6 +196,65 @@ describe("WorkflowStore", () => {
     expect(again).toBe(false);
   });
 
+  test("zrangebyscore orders equal scores lexicographically", async () => {
+    const redis = createRedis();
+
+    await redis.zadd("z", 1, "b-member");
+    await redis.zadd("z", 1, "a-member");
+    await redis.zadd("z", 0, "z-first");
+
+    expect(await redis.zrangebyscore("z", 0, 2)).toEqual([
+      "z-first",
+      "a-member",
+      "b-member",
+    ]);
+  });
+
+  test("concurrent claimDueTimer never returns the same timer twice", async () => {
+    const store = new WorkflowStore(createRedis(), "store-timer-race");
+    const now = Date.now();
+    const taskA = {
+      kind: "timer" as const,
+      executionId: "exec-a",
+      timerId: "t0",
+    };
+    const taskB = {
+      kind: "timer" as const,
+      executionId: "exec-b",
+      timerId: "t1",
+    };
+
+    await store.scheduleTimer(now - 2, taskA);
+    await store.scheduleTimer(now - 1, taskB);
+
+    const results = await Promise.all([
+      store.claimDueTimer(now),
+      store.claimDueTimer(now),
+      store.claimDueTimer(now),
+    ]);
+
+    const claimed = results.filter((value) => value !== null);
+
+    expect(claimed).toHaveLength(2);
+    expect(new Set(claimed).size).toBe(2);
+    expect(await store.claimDueTimer(now)).toBeNull();
+  });
+
+  test("concurrent tryCreateMetaAndActive creates once", async () => {
+    const store = new WorkflowStore(createRedis(), "store-create-race");
+    const executionId = "exec-race";
+    const meta = baseMeta("store-create-race");
+
+    const results = await Promise.all([
+      store.tryCreateMetaAndActive(executionId, meta),
+      store.tryCreateMetaAndActive(executionId, meta),
+      store.tryCreateMetaAndActive(executionId, meta),
+    ]);
+
+    expect(results.filter((value) => value)).toHaveLength(1);
+    expect(await store.getMeta(executionId)).not.toBeNull();
+  });
+
   test("deadLetterTimer stores corrupt payloads", async () => {
     const redis = createRedis();
     const store = new WorkflowStore(redis, "store-dead");
