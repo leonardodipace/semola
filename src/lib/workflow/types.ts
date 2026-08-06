@@ -150,6 +150,7 @@ export type WorkflowMeta = {
   cancelledAt: string;
   steps: string;
   partitionKey: string;
+  partitionSlot: string;
 };
 
 export type Workflow<TInput, TResult> = {

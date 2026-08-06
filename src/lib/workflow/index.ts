@@ -101,7 +101,7 @@ export const defineWorkflow = <TInput, TResult = void>(
     );
     const now = Date.now();
 
-    const created = await store.tryCreateMeta(executionId, {
+    const created = await store.tryCreateMetaAndActive(executionId, {
       name: options.name,
       status: "pending",
       input: serializedInput,
@@ -114,6 +114,7 @@ export const defineWorkflow = <TInput, TResult = void>(
       cancelledAt: "",
       steps: "[]",
       partitionKey,
+      partitionSlot: "",
     });
 
     if (!created) {
@@ -121,9 +122,6 @@ export const defineWorkflow = <TInput, TResult = void>(
         `Workflow execution ${executionId} already exists`,
       );
     }
-
-    // Mark active before history so a crash mid-start remains reclaimable.
-    await store.markActive(executionId);
 
     await store.appendEvents(executionId, [
       {

@@ -291,11 +291,14 @@ class MockRedisClient {
     }
 
     const script = args[0] ?? "";
-    const key = args[2] ?? "";
-    const token = args[3] ?? "";
+    const numKeys = Number(args[1] ?? "1");
+    const keyArgs = args.slice(2, 2 + numKeys);
+    const argv = args.slice(2 + numKeys);
+    const key = keyArgs[0] ?? "";
+    const token = argv[0] ?? "";
 
     if (script.includes("ZRANGEBYSCORE")) {
-      const now = Number(args[3]);
+      const now = Number(argv[0]);
       const members = await this.zrangebyscore(key, 0, now);
       const member = members[0];
 
@@ -306,8 +309,8 @@ class MockRedisClient {
     }
 
     if (script.includes("ZSCORE")) {
-      const fireAt = Number(args[3]);
-      const member = args[4] ?? "";
+      const fireAt = Number(argv[0]);
+      const member = argv[1] ?? "";
       const zset = this.zsets.get(key) ?? [];
 
       if (zset.some((row) => row.member === member)) return 0;
@@ -316,11 +319,59 @@ class MockRedisClient {
       return 1;
     }
 
+    if (script.includes("SADD") && script.includes("EXISTS")) {
+      const metaKey = keyArgs[0] ?? "";
+      const activeKey = keyArgs[1] ?? "";
+      const executionId = argv[0] ?? "";
+
+      if (this.hashes.has(metaKey)) return 0;
+
+      await this.hset(metaKey, ...argv.slice(1));
+      await this.sadd(activeKey, executionId);
+      return 1;
+    }
+
     if (script.includes("EXISTS")) {
       if (this.hashes.has(key)) return 0;
 
-      await this.hset(key, ...args.slice(3));
+      await this.hset(key, ...argv);
       return 1;
+    }
+
+    if (script.includes("RPUSH")) {
+      const historyKey = keyArgs[1] ?? "";
+      const current = await this.get(key);
+
+      if (current !== token) return 0;
+
+      await this.rpush(historyKey, ...argv.slice(1));
+      return 1;
+    }
+
+    if (script.includes("HSET") && script.includes("GET")) {
+      const metaKey = keyArgs[1] ?? "";
+      const current = await this.get(key);
+
+      if (current !== token) return 0;
+
+      await this.hset(metaKey, ...argv.slice(1));
+      return 1;
+    }
+
+    if (script.includes("SET") && script.includes("NX")) {
+      const ttlMs = Number(argv[1]);
+      const owned = await this.get(key);
+
+      if (owned === token) {
+        await this.pexpire(key, ttlMs);
+        return 1;
+      }
+
+      const result = await this.set(key, token, "PX", String(ttlMs), "NX");
+
+      if (result === "OK") return 1;
+
+      return 0;
     }
 
     if (script.includes("DEL")) {
@@ -337,7 +388,7 @@ class MockRedisClient {
 
       if (current !== token) return 0;
 
-      return this.pexpire(key, Number(args[4]));
+      return this.pexpire(key, Number(argv[1]));
     }
 
     return 0;
@@ -522,7 +573,12 @@ describe("workflow", () => {
     const wf1 = make();
     const { executionId } = await wf1.start({});
 
-    await waitFor(() => counts.first === 1);
+    await waitFor(async () => {
+      const execution = await wf1.get(executionId);
+      return execution.steps.some((step) => step.name === "first");
+    });
+
+    expect(counts.first).toBe(1);
 
     expireLeases(redis);
 
@@ -532,7 +588,7 @@ describe("workflow", () => {
     const execution = await waitStatus(wf2, executionId, "completed");
 
     expect(execution.result).toBe("ok");
-    expect(counts.first).toBeGreaterThanOrEqual(1);
+    expect(counts.first).toBe(1);
     expect(counts.second).toBe(1);
 
     await stop(wf2);
@@ -727,7 +783,7 @@ describe("workflow", () => {
     await stop(wf);
   });
 
-  test("retry backoff honors delay under reclaim", async () => {
+  test("retry backoff honors delay with short lockTTL", async () => {
     const redis = createRedis();
     let attempts = 0;
 
@@ -1041,7 +1097,7 @@ describe("workflow", () => {
     await stop(wf2);
   });
 
-  test("durable sleep honors delay under reclaim", async () => {
+  test("durable sleep honors delay with short lockTTL", async () => {
     const redis = createRedis();
     let finished = false;
 
@@ -1066,6 +1122,171 @@ describe("workflow", () => {
     const execution = await waitStatus(wf, executionId, "completed", 5000);
     expect(execution.result).toBe("ok");
     expect(finished).toBe(true);
+
+    await stop(wf);
+  });
+
+  test("partition re-owned after lease loss during sleep", async () => {
+    const redis = createRedis();
+    let finished = false;
+
+    const wf = defineWorkflow<{ key: string }, string>({
+      name: `part-reown-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      concurrency: 1,
+      lockTTL: 40,
+      partitionBy: (input) => input.key,
+      handler: async ({ sleep: durableSleep }) => {
+        await durableSleep(200);
+        finished = true;
+        return "done";
+      },
+    });
+
+    const { executionId } = await wf.start({ key: "shared" });
+
+    await sleep(60);
+    expireLeases(redis);
+
+    const execution = await waitStatus(wf, executionId, "completed", 5000);
+
+    expect(execution.result).toBe("done");
+    expect(finished).toBe(true);
+
+    await stop(wf);
+  });
+
+  test("partition slot survives holder stop during sleep until reclaim", async () => {
+    const redis = createRedis();
+    const name = `part-death-${crypto.randomUUID()}`;
+    let concurrent = 0;
+    let maxConcurrent = 0;
+    const order: string[] = [];
+
+    const make = () =>
+      defineWorkflow<{ key: string }, string>({
+        name,
+        redis,
+        ...fast,
+        concurrency: 1,
+        lockTTL: 10_000,
+        partitionBy: (input) => input.key,
+        handler: async ({ executionId, sleep: durableSleep, step }) => {
+          await durableSleep(300);
+          await step("work", async () => {
+            concurrent++;
+            maxConcurrent = Math.max(maxConcurrent, concurrent);
+            order.push(executionId);
+            await sleep(20);
+            concurrent--;
+            return "ok";
+          });
+          return "done";
+        },
+      });
+
+    const wf1 = make();
+    await wf1.start({ key: "shared" }, { executionId: "holder" });
+
+    await sleep(40);
+    await stop(wf1);
+
+    const wf2 = make();
+    await wf2.start({ key: "shared" }, { executionId: "waiter" });
+
+    await waitStatus(wf2, "holder", "completed", 5000);
+    await waitStatus(wf2, "waiter", "completed", 5000);
+
+    expect(maxConcurrent).toBe(1);
+    expect(order).toEqual(["holder", "waiter"]);
+
+    await stop(wf2);
+  });
+
+  test("timer claim crash restored from history", async () => {
+    const redis = createRedis();
+    const name = `timer-claim-${crypto.randomUUID()}`;
+    let finished = 0;
+
+    const make = () =>
+      defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        lockTTL: 60,
+        handler: async ({ sleep: durableSleep }) => {
+          await durableSleep(100);
+          finished++;
+          return "ok";
+        },
+      });
+
+    const wf1 = make();
+    const { executionId } = await wf1.start({});
+
+    await sleep(30);
+    redis.clearZset(`workflow:${name}:timers`);
+    await stop(wf1);
+
+    const wf2 = make();
+    const execution = await waitStatus(wf2, executionId, "completed", 5000);
+
+    expect(execution.result).toBe("ok");
+    expect(finished).toBe(1);
+
+    await stop(wf2);
+  });
+
+  test("corrupt timer payload is dead-lettered", async () => {
+    const redis = createRedis();
+    const name = `timer-dead-${crypto.randomUUID()}`;
+
+    const wf = defineWorkflow({
+      name,
+      redis,
+      ...fast,
+      handler: async ({ step }) => {
+        await step("go", async () => "ok");
+        return "done";
+      },
+    });
+
+    await redis.zadd(`workflow:${name}:timers`, Date.now() - 1, "not-json");
+
+    const { executionId } = await wf.start({});
+    const execution = await waitStatus(wf, executionId, "completed");
+
+    expect(execution.result).toBe("done");
+
+    const dead = await redis.lrange(`workflow:${name}:timer-dead`, 0, -1);
+    expect(dead).toContain("not-json");
+
+    await stop(wf);
+  });
+
+  test("cancel during durable sleep", async () => {
+    const redis = createRedis();
+
+    const wf = defineWorkflow({
+      name: `cancel-sleep-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      handler: async ({ sleep: durableSleep }) => {
+        await durableSleep(500);
+        return "ok";
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    await sleep(30);
+
+    const cancelResult = await wf.cancel(executionId);
+    expect(cancelResult.cancelledAt).toBeNull();
+    expect(cancelResult.status).not.toBe("cancelled");
+
+    const execution = await waitStatus(wf, executionId, "cancelled");
+    expect(execution.cancelledAt).not.toBeNull();
 
     await stop(wf);
   });
@@ -1101,6 +1322,8 @@ describe("workflow", () => {
       "steps",
       "[]",
       "partitionKey",
+      "",
+      "partitionSlot",
       "",
     );
     await redis.sadd(`workflow:${name}:active`, executionId);
@@ -1170,6 +1393,8 @@ describe("workflow", () => {
       "steps",
       "[]",
       "partitionKey",
+      "",
+      "partitionSlot",
       "",
     );
 

@@ -60,6 +60,8 @@ N Bun processes may register the same workflow `name` against the same Redis. Wo
 
 If a replica dies mid-run, lease expiry lets another replica (or the same process after restart) reclaim the execution. **No** boot-time recovery loop is required.
 
+Worker history and status writes are lease-fenced (Redis compare-and-append / compare-and-set against the lease token). A writer that loses the lease cannot append; the new owner continues from history. Client paths (`start` cancel/resume) append without a lease.
+
 `resume(executionId)` is only for **failed** executions: it appends a resume event, re-schedules failed steps from history, and re-queues the workflow. Crash recovery is automatic via leases.
 
 ## API
@@ -93,7 +95,7 @@ If a replica dies mid-run, lease expiry lets another replica (or the same proces
 - **`retries`** - step retries before workflow fails (default: 3; `0` = fail on first error)
 - **`retryBackoff`** - `{ baseDelay, multiplier, maxDelay }` (defaults: 1000 / 2x / 30000)
 - **`hooks`** - `onStart`, `onRetry`, `onError`, `onComplete`, `onCancel` (see [Hooks](#hooks))
-- **`lockTTL`** - execution lease TTL in ms (default: 300000); also used as partition slot TTL. Partition slots are refreshed for the full execution lifetime (including `sleep` and retry backoff), not only while a lease is held
+- **`lockTTL`** - execution lease TTL in ms (default: 300000); also used as partition slot TTL. While a process holds an execution, it refreshes that execution's partition slot for the full lifetime (including `sleep` and retry backoff). After process death, the Redis slot remains owned until TTL; the next reclaim re-attaches via the same `executionId`. Differing replica `concurrency` values mean the effective cap is the max.
 - **`concurrency`** - workflow + step pollers in this process (default: 1 each). With partitions, also the Redis per-key cap when every replica uses the same value; if replicas differ, the effective cap is the max
 - **`partitionBy`** - `(input) => string` for per-key concurrency across replicas. Empty keys throw. Cap applies for the whole execution, including durable waits
 - **`pollInterval`** - idle poll backoff ms (default: 100)
@@ -147,8 +149,9 @@ Prefix: `workflow:`
 | `workflow:{name}:wf-queue` | workflow task queue |
 | `workflow:{name}:step-queue` | step task queue |
 | `workflow:{name}:timers` | sorted set of due timers / retry delays |
+| `workflow:{name}:timer-dead` | unparseable timer payloads (dead letter) |
 | `workflow:{name}:active` | non-terminal execution ids (reclaimer) |
-| `workflow:{name}:partition:{key}:{slot}` | per-key concurrency slots (`SET NX PX`) |
+| `workflow:{name}:partition:{key}:{slot}` | per-key concurrency slots (`SET NX PX`, re-ownable by same execution) |
 
 ## Statuses
 

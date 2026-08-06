@@ -14,14 +14,23 @@ const RELEASE_IF_OWNER =
 const EXTEND_IF_OWNER =
   "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('PEXPIRE', KEYS[1], ARGV[2]) else return 0 end";
 
+const CLAIM_OR_REOWN_PARTITION =
+  "if redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2], 'NX') then return 1 end if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('PEXPIRE', KEYS[1], ARGV[2]) return 1 end return 0";
+
 const CLAIM_DUE_TIMER =
   "local m=redis.call('ZRANGEBYSCORE',KEYS[1],0,ARGV[1],'LIMIT',0,1) if #m==0 then return false end redis.call('ZREM',KEYS[1],m[1]) return m[1]";
 
-const CREATE_META_IF_ABSENT =
-  "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end redis.call('HSET', KEYS[1], unpack(ARGV)) return 1";
+const CREATE_META_AND_ACTIVE =
+  "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end redis.call('HSET', KEYS[1], unpack(ARGV, 2)) redis.call('SADD', KEYS[2], ARGV[1]) return 1";
 
 const SCHEDULE_TIMER_IF_ABSENT =
   "if redis.call('ZSCORE', KEYS[1], ARGV[2]) ~= false then return 0 end redis.call('ZADD', KEYS[1], ARGV[1], ARGV[2]) return 1";
+
+const APPEND_IF_LEASE =
+  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end for i = 2, #ARGV do redis.call('RPUSH', KEYS[2], ARGV[i]) end return 1";
+
+const HSET_IF_LEASE =
+  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('HSET', KEYS[2], unpack(ARGV, 2)) return 1";
 
 const stringify = (value: unknown, label: string) => {
   const [error, raw] = mightThrowSync(() => JSON.stringify(value));
@@ -47,6 +56,7 @@ const keys = {
   wfQueue: (name: string) => `workflow:${name}:wf-queue`,
   stepQueue: (name: string) => `workflow:${name}:step-queue`,
   timers: (name: string) => `workflow:${name}:timers`,
+  timerDead: (name: string) => `workflow:${name}:timer-dead`,
   active: (name: string) => `workflow:${name}:active`,
   partition: (name: string, partitionKey: string, slot: number) =>
     `workflow:${name}:partition:${partitionKey}:${slot}`,
@@ -58,23 +68,52 @@ export class WorkflowStore {
     private name: string,
   ) {}
 
-  public async appendEvents(executionId: string, events: HistoryEvent[]) {
-    if (events.length === 0) return;
+  public async appendEvents(
+    executionId: string,
+    events: HistoryEvent[],
+    leaseToken?: string,
+  ) {
+    if (events.length === 0) return true;
 
-    const key = keys.history(this.name, executionId);
     const payloads = events.map((event) =>
       stringify(event, `history event for ${executionId}`),
     );
 
-    const [pushError] = await mightThrow(
-      this.redis.send("RPUSH", [key, ...payloads]),
+    if (leaseToken === undefined) {
+      const [pushError] = await mightThrow(
+        this.redis.send("RPUSH", [
+          keys.history(this.name, executionId),
+          ...payloads,
+        ]),
+      );
+
+      if (pushError) {
+        throw new WorkflowStoreError(
+          `Unable to append history for ${executionId}`,
+        );
+      }
+
+      return true;
+    }
+
+    const [error, result] = await mightThrow(
+      this.redis.send("EVAL", [
+        APPEND_IF_LEASE,
+        "2",
+        keys.lease(this.name, executionId),
+        keys.history(this.name, executionId),
+        leaseToken,
+        ...payloads,
+      ]),
     );
 
-    if (pushError) {
+    if (error) {
       throw new WorkflowStoreError(
         `Unable to append history for ${executionId}`,
       );
     }
+
+    return Number(result) === 1;
   }
 
   public async loadHistory(executionId: string) {
@@ -89,8 +128,12 @@ export class WorkflowStore {
     return rows ?? [];
   }
 
-  public async tryCreateMeta(executionId: string, fields: WorkflowMeta) {
-    const key = keys.meta(this.name, executionId);
+  public async tryCreateMetaAndActive(
+    executionId: string,
+    fields: WorkflowMeta,
+  ) {
+    const metaKey = keys.meta(this.name, executionId);
+    const activeKey = keys.active(this.name);
     const entries: string[] = [];
 
     for (const [field, value] of Object.entries(fields)) {
@@ -100,7 +143,14 @@ export class WorkflowStore {
     }
 
     const [error, result] = await mightThrow(
-      this.redis.send("EVAL", [CREATE_META_IF_ABSENT, "1", key, ...entries]),
+      this.redis.send("EVAL", [
+        CREATE_META_AND_ACTIVE,
+        "2",
+        metaKey,
+        activeKey,
+        executionId,
+        ...entries,
+      ]),
     );
 
     if (error) {
@@ -110,7 +160,11 @@ export class WorkflowStore {
     return Number(result) === 1;
   }
 
-  public async setMeta(executionId: string, fields: Partial<WorkflowMeta>) {
+  public async setMeta(
+    executionId: string,
+    fields: Partial<WorkflowMeta>,
+    leaseToken?: string,
+  ) {
     const entries: string[] = [];
 
     for (const [field, value] of Object.entries(fields)) {
@@ -119,15 +173,41 @@ export class WorkflowStore {
       entries.push(field, value);
     }
 
-    if (entries.length === 0) return;
+    if (entries.length === 0) return true;
 
-    const [error] = await mightThrow(
-      this.redis.send("HSET", [keys.meta(this.name, executionId), ...entries]),
+    if (leaseToken === undefined) {
+      const [error] = await mightThrow(
+        this.redis.send("HSET", [
+          keys.meta(this.name, executionId),
+          ...entries,
+        ]),
+      );
+
+      if (error) {
+        throw new WorkflowStoreError(
+          `Unable to update meta for ${executionId}`,
+        );
+      }
+
+      return true;
+    }
+
+    const [error, result] = await mightThrow(
+      this.redis.send("EVAL", [
+        HSET_IF_LEASE,
+        "2",
+        keys.lease(this.name, executionId),
+        keys.meta(this.name, executionId),
+        leaseToken,
+        ...entries,
+      ]),
     );
 
     if (error) {
       throw new WorkflowStoreError(`Unable to update meta for ${executionId}`);
     }
+
+    return Number(result) === 1;
   }
 
   public async getMeta(executionId: string) {
@@ -255,6 +335,16 @@ export class WorkflowStore {
     return String(raw);
   }
 
+  public async deadLetterTimer(raw: string) {
+    const [error] = await mightThrow(
+      this.redis.lpush(keys.timerDead(this.name), raw),
+    );
+
+    if (error) {
+      throw new WorkflowStoreError("Unable to dead-letter timer");
+    }
+  }
+
   public async markActive(executionId: string) {
     const [error] = await mightThrow(
       this.redis.sadd(keys.active(this.name), executionId),
@@ -367,7 +457,13 @@ export class WorkflowStore {
     for (let slot = 0; slot < concurrency; slot++) {
       const key = keys.partition(this.name, partitionKey, slot);
       const [error, result] = await mightThrow(
-        this.redis.set(key, executionId, "PX", String(ttlMs), "NX"),
+        this.redis.send("EVAL", [
+          CLAIM_OR_REOWN_PARTITION,
+          "1",
+          key,
+          executionId,
+          String(ttlMs),
+        ]),
       );
 
       if (error) {
@@ -376,7 +472,7 @@ export class WorkflowStore {
         );
       }
 
-      if (result === "OK") {
+      if (Number(result) === 1) {
         return slot;
       }
     }
@@ -430,15 +526,30 @@ export class WorkflowStore {
     }
   }
 
+  public async releaseOwnedPartitions(
+    partitionKey: string,
+    executionId: string,
+    concurrency: number,
+  ) {
+    for (let slot = 0; slot < concurrency; slot++) {
+      await this.releasePartition(partitionKey, slot, executionId);
+    }
+  }
+
   public async updateStatus(
     executionId: string,
     status: WorkflowStatus,
     extra: Partial<WorkflowMeta> = {},
+    leaseToken?: string,
   ) {
-    await this.setMeta(executionId, {
-      ...extra,
-      status,
-      updatedAt: String(Date.now()),
-    });
+    return this.setMeta(
+      executionId,
+      {
+        ...extra,
+        status,
+        updatedAt: String(Date.now()),
+      },
+      leaseToken,
+    );
   }
 }
