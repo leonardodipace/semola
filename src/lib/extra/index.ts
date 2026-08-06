@@ -1,101 +1,13 @@
 import { mightThrow } from "../errors/index.js";
-import { InvalidRetryError } from "./errors.js";
+import { InvalidResultError, InvalidRetryError } from "./errors.js";
+import { Retry } from "./retry.manager.js";
 import type {
-  ErrorMetadataType,
-  OnFailedAttemptContextType,
-  RetryContext,
-  RetryFnType,
+  BackoffOptions,
   RetryOptions,
+  RetryOutcomeType,
 } from "./types.js";
 
-const BASE_BACKOFF_DELAY = 1000;
-const MAX_BACKOFF_DELAY = 1000 * 60; // 1 minute
-const BACKOFF_MULTIPLIER = 2;
-
-class Retry {
-  private options: RetryOptions;
-  private currentAttempt: number;
-  private id: string;
-
-  public constructor(options: RetryOptions) {
-    this.options = options;
-    this.currentAttempt = 0;
-    this.id = this.options.id ?? crypto.randomUUID();
-  }
-
-  public async update(ctx: RetryContext) {
-    const { maxRetries } = this.options;
-    const onRetryErrorResult = this.runOnRetryError(ctx.error, this.id);
-    const hasMoreAttempts = this.currentAttempt < maxRetries;
-    const canRetry = hasMoreAttempts && onRetryErrorResult;
-
-    if (canRetry) {
-      const delay = this.calculateDelay(this.currentAttempt);
-
-      if (this.options.onFailedAttempt) {
-        const onFailedAttempt = this.options.onFailedAttempt;
-        const context: OnFailedAttemptContextType = {
-          attemptNumber: this.currentAttempt + 1,
-          delay,
-          error: ctx.error,
-          retriesLeft: maxRetries - this.currentAttempt,
-          id: this.id,
-        };
-
-        const [callbackError] = await mightThrow(
-          Promise.resolve().then(() => onFailedAttempt(context)),
-        );
-
-        if (callbackError) throw ctx.error;
-      }
-
-      this.currentAttempt += 1;
-      await this.runDelay(delay);
-
-      return true;
-    }
-
-    return false;
-  }
-
-  public async fireOnError(ctx: RetryContext) {
-    if (!this.options.onError) return true;
-
-    const onError = this.options.onError;
-    const data: ErrorMetadataType = {
-      failedAt: Date.now(),
-      error: ctx.error,
-      id: this.id,
-    };
-
-    const [callbackError] = await mightThrow(
-      Promise.resolve().then(() => onError(data)),
-    );
-
-    if (callbackError) throw ctx.error;
-
-    return false;
-  }
-
-  private runOnRetryError(error: Error, id: string) {
-    if (!this.options.retryOnError) return true;
-    return this.options.retryOnError({ error, id });
-  }
-
-  private calculateDelay(attempt: number) {
-    // exponential backoff with "Full Jitter" algorithm
-
-    const deltaTime = BASE_BACKOFF_DELAY * BACKOFF_MULTIPLIER ** attempt;
-    const minDeltaTime = Math.min(deltaTime, MAX_BACKOFF_DELAY);
-    return Math.round(Math.random() * (minDeltaTime + 1));
-  }
-
-  private async runDelay(delay: number) {
-    await new Promise((resolve) => setTimeout(resolve, delay));
-  }
-}
-
-function checkAttempts(options: RetryOptions) {
+function checkAttempts<TRetryResult>(options: RetryOptions<TRetryResult>) {
   const { maxRetries } = options;
 
   const isValidInteger = Number.isSafeInteger(maxRetries);
@@ -105,43 +17,98 @@ function checkAttempts(options: RetryOptions) {
   return isNaturalNumber && isValidInteger && !isNegativeZero;
 }
 
-export function createRetry<RetryValue = void>(
-  fn: RetryFnType<RetryValue>,
-  options: RetryOptions,
+function checkBackoffParameter(
+  name: keyof BackoffOptions,
+  paramValue?: number,
 ) {
-  if (!checkAttempts(options)) {
+  if (paramValue === undefined) return;
+
+  if (paramValue < 0) {
+    throw new InvalidRetryError(`Expected '${name}' to be a positive number`);
+  }
+
+  if (paramValue === 0) {
+    throw new InvalidRetryError(`Expected '${name}' to be greater than zero`);
+  }
+
+  if (Number.isNaN(paramValue)) {
+    throw new InvalidRetryError(`Expected '${name}' to be a valid number`);
+  }
+
+  if (!Number.isFinite(paramValue)) {
+    throw new InvalidRetryError(`Expected '${name}' to be a finite number`);
+  }
+}
+
+export function createRetry<TRetryResult = void>(
+  options: RetryOptions<TRetryResult>,
+) {
+  if (!checkAttempts<TRetryResult>(options)) {
     throw new InvalidRetryError(
       "Expected 'maxRetries' to be a finite non-negative integer",
     );
   }
 
-  return async () => {
-    const retry = new Retry(options);
+  checkBackoffParameter("baseDelay", options.backoff?.baseDelay);
+  checkBackoffParameter("multiplier", options.backoff?.multiplier);
+  checkBackoffParameter("maxDelay", options.backoff?.maxDelay);
+
+  return async (): Promise<RetryOutcomeType<TRetryResult>> => {
+    const retry = new Retry<TRetryResult>(options);
+    const { input: fn } = options;
 
     for (;;) {
       const [fnError, result] = await mightThrow(
         Promise.resolve().then(() => fn()),
       );
 
-      if (!fnError) return result;
+      if (!fnError) {
+        const shouldRetryOnResult = retry.retryOverResult(result);
+        if (!shouldRetryOnResult) return { ok: true, result };
 
-      const shouldContinue = await retry.update({ error: fnError });
+        const resultError = new InvalidResultError<TRetryResult>(
+          result,
+          `Retrying because 'retryOnResult' rejected the returned result`,
+        );
+
+        const shouldContinue = await retry.retryOverError({
+          error: resultError,
+        });
+
+        if (shouldContinue) continue;
+
+        const shouldThrow = await retry.fireOnError(resultError);
+        if (!shouldThrow) break;
+
+        throw resultError;
+      }
+
+      const shouldContinue = await retry.retryOverError({ error: fnError });
       if (shouldContinue) continue;
 
-      const shouldThrow = await retry.fireOnError({ error: fnError });
-      if (!shouldThrow) return undefined;
+      const shouldThrow = await retry.fireOnError(fnError);
+      if (!shouldThrow) break;
 
       throw fnError;
     }
+
+    return { ok: false };
   };
 }
 
-export { InvalidRetryError } from "./errors.js";
+export { InvalidResultError, InvalidRetryError } from "./errors.js";
+export {
+  BACKOFF_MULTIPLIER,
+  BASE_BACKOFF_DELAY,
+  MAX_BACKOFF_DELAY,
+} from "./retry.manager.js";
 export type {
+  BackoffOptions,
   ErrorMetadataType,
+  HookContextType,
   OnFailedAttemptContextType,
   RetryContext,
-  RetryFnType,
   RetryOnErrorContextType,
   RetryOptions,
+  RetryOutcomeType,
 } from "./types.js";
