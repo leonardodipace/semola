@@ -95,9 +95,9 @@ History and status writes are lease-fenced (Redis compare-and-append / compare-a
 - **`retries`** - step retries before workflow fails (default: 3; `0` = fail on first error)
 - **`retryBackoff`** - `{ baseDelay, multiplier, maxDelay }` (defaults: 1000 / 2x / 30000)
 - **`hooks`** - `onStart`, `onRetry`, `onError`, `onComplete`, `onCancel` (see [Hooks](#hooks))
-- **`lockTTL`** - execution lease TTL in ms (default: 300000); also used as partition slot TTL. While a process holds an execution, it refreshes that execution's partition slot for the full lifetime (including `sleep` and retry backoff). After process death, the Redis slot remains owned until TTL; the next reclaim re-attaches via the same `executionId`. Differing replica `concurrency` values mean the effective cap is the max.
-- **`concurrency`** - workflow pollers in this process (default: 1). With partitions, also the Redis per-key cap when every replica uses the same value; if replicas differ, the effective cap is the max
-- **`partitionBy`** - `(input) => string` for per-key concurrency across replicas. Empty keys throw. Cap applies for the whole execution, including durable waits
+- **`lockTTL`** - execution lease TTL in ms (default: 300000); also used as capacity slot TTL. While a process holds an execution, it refreshes that execution's capacity slots (global `*` and partition key if any) for the full lifetime (including `sleep` and retry backoff). After process death, the Redis slot remains owned until TTL; the next reclaim re-attaches via the same `executionId`. Differing replica `concurrency` values mean the effective cap is the max.
+- **`concurrency`** - max parallel instances across replicas (default: 1). Also the number of workflow pollers in this process. Without `partitionBy`, all executions share one Redis slot pool of size `concurrency` (key `*`). With `partitionBy`, both the global pool and the per-key pool apply (each size `concurrency`). If replicas disagree on `concurrency`, the effective cap is the max.
+- **`partitionBy`** - `(input) => string` for per-key concurrency across replicas. Empty keys throw. Cap applies for the whole execution, including durable waits. Does not replace the global `concurrency` cap — both apply. The key `*` is reserved for the global pool.
 - **`pollInterval`** - idle poll backoff ms (default: 100)
 
 `start(input, { executionId?, partitionKey? })` - `partitionKey` overrides `partitionBy`. Custom `executionId` must be non-empty and must not contain `:`. Empty `partitionKey` throws.
@@ -149,7 +149,7 @@ Prefix: `workflow:`
 | `workflow:{name}:timers` | sorted set of due timers / retry delays |
 | `workflow:{name}:timer-dead` | unparseable timer payloads (dead letter) |
 | `workflow:{name}:active` | non-terminal execution ids (reclaimer) |
-| `workflow:{name}:partition:{key}:{slot}` | per-key concurrency slots (`SET NX PX`, re-ownable by same execution) |
+| `workflow:{name}:partition:{key}:{slot}` | concurrency slots (`SET NX PX`, re-ownable by same execution). Key `*` is the global pool; `partitionBy` keys are additional per-key pools |
 
 ## Notes
 
@@ -163,7 +163,7 @@ Prefix: `workflow:`
 
 - Redis keys: `wf-queue` / `step-queue` replaced by a single `queue`. No migration - drain or abandon in-flight work before cutover.
 - Custom `serialize*` / `deserialize*` options removed. Payloads use `JSON.stringify` / `JSON.parse` only.
-- `concurrency` is the number of workflow pollers in this process. Steps run **inline** under the lease, so a long step occupies one poller for its full duration (no separate step-worker pool).
+- `concurrency` is the max parallel instances across replicas (partition slots; key `*` globally, plus per-key slots when `partitionBy` is set) and the number of workflow pollers in this process. Steps run **inline** under the lease, so a long step occupies one poller for its full duration (no separate step-worker pool).
 - Step snapshots on `get()` come from event history, not `meta.steps`.
 
 ## Statuses

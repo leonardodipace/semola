@@ -48,7 +48,8 @@ const resolvePartitionKey = <TInput, TResult>(
   }
 
   if (!options.partitionBy) {
-    return "";
+    // Shared default key → concurrency is cluster-wide across replicas.
+    return "*";
   }
 
   const partitionKey = options.partitionBy(workflowInput);
@@ -111,6 +112,7 @@ export const defineWorkflow = <TInput, TResult = void>(
       cancelledAt: "",
       partitionKey,
       partitionSlot: "",
+      concurrencySlot: "",
     });
 
     if (!created) {

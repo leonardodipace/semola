@@ -16,6 +16,7 @@ const baseMeta = (name: string): WorkflowMeta => ({
   cancelledAt: "",
   partitionKey: "",
   partitionSlot: "",
+  concurrencySlot: "",
 });
 
 describe("WorkflowStore", () => {

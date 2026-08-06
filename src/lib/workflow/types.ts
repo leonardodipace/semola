@@ -141,6 +141,7 @@ export type WorkflowMeta = {
   cancelledAt: string;
   partitionKey: string;
   partitionSlot: string;
+  concurrencySlot: string;
 };
 
 export type Workflow<TInput, TResult> = {
@@ -480,4 +481,16 @@ export type UpdateStatusInput = {
 export type RedisZMember = {
   score: number;
   member: string;
+};
+
+export type CapacityTarget = {
+  key: string;
+  field: "partitionSlot" | "concurrencySlot";
+};
+
+export type EnsureCapacityInput = {
+  executionId: string;
+  token: string;
+  partitionKey: string;
+  meta: WorkflowMeta;
 };

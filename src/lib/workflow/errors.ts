@@ -32,3 +32,10 @@ export class NonRetryableStepError extends Error {
     this.name = "NonRetryableStepError";
   }
 }
+
+export class Paused extends Error {
+  public constructor() {
+    super("workflow paused");
+    this.name = "Paused";
+  }
+}

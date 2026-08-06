@@ -70,6 +70,7 @@ const baseMeta = (name: string, input = "{}"): WorkflowMeta => ({
   cancelledAt: "",
   partitionKey: "",
   partitionSlot: "",
+  concurrencySlot: "",
 });
 
 describe("WorkflowEngine", () => {

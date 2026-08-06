@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
+import { WorkflowEngine } from "./engine.js";
 import {
   DuplicateWorkflowError,
   defineWorkflow,
@@ -9,6 +10,7 @@ import {
   WorkflowStoreError,
 } from "./index.js";
 import { createRedis, type MockRedisClient } from "./redis.mock.js";
+import { WorkflowStore } from "./store.js";
 
 const drainMicrotasks = async () => {
   await Promise.resolve();
@@ -568,6 +570,191 @@ describe("workflow", () => {
     expect(maxConcurrent).toBe(1);
 
     await stop(wf);
+  });
+
+  test("global concurrency caps different partition keys", async () => {
+    const redis = createRedis();
+    let concurrent = 0;
+    let maxConcurrent = 0;
+
+    const wf = defineWorkflow<{ key: string }, boolean>({
+      name: `part-global-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      concurrency: 1,
+      partitionBy: (input) => input.key,
+      handler: async ({ step }) => {
+        await step("work", async () => {
+          concurrent++;
+          maxConcurrent = Math.max(maxConcurrent, concurrent);
+          await sleep(20);
+          concurrent--;
+          return true;
+        });
+
+        return true;
+      },
+    });
+
+    await wf.start({ key: "a" }, { executionId: "pg-a" });
+    await wf.start({ key: "b" }, { executionId: "pg-b" });
+
+    await waitStatus(wf, "pg-a", "completed");
+    await waitStatus(wf, "pg-b", "completed");
+
+    expect(maxConcurrent).toBe(1);
+
+    await stop(wf);
+  });
+
+  test("global concurrency caps parallel instances", async () => {
+    const redis = createRedis();
+    let concurrent = 0;
+    let maxConcurrent = 0;
+
+    const wf = defineWorkflow({
+      name: `global-conc-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      concurrency: 1,
+      handler: async ({ step }) => {
+        await step("work", async () => {
+          concurrent++;
+          maxConcurrent = Math.max(maxConcurrent, concurrent);
+          await sleep(20);
+          concurrent--;
+          return true;
+        });
+
+        return true;
+      },
+    });
+
+    await wf.start({}, { executionId: "g-a" });
+    await wf.start({}, { executionId: "g-b" });
+
+    await waitStatus(wf, "g-a", "completed");
+    await waitStatus(wf, "g-b", "completed");
+
+    expect(maxConcurrent).toBe(1);
+
+    await stop(wf);
+  });
+
+  test("global concurrency held across durable sleep", async () => {
+    const redis = createRedis();
+    let concurrent = 0;
+    let maxConcurrent = 0;
+
+    const wf = defineWorkflow({
+      name: `global-sleep-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      concurrency: 1,
+      lockTTL: 40,
+      handler: async ({ sleep: durableSleep, step }) => {
+        await durableSleep(200);
+        await step("work", async () => {
+          concurrent++;
+          maxConcurrent = Math.max(maxConcurrent, concurrent);
+          await sleep(20);
+          concurrent--;
+          return "ok";
+        });
+        return "done";
+      },
+    });
+
+    await wf.start({}, { executionId: "gs-1" });
+    await wf.start({}, { executionId: "gs-2" });
+
+    await waitStatus(wf, "gs-1", "completed", 5000);
+    await waitStatus(wf, "gs-2", "completed", 5000);
+
+    expect(maxConcurrent).toBe(1);
+
+    await stop(wf);
+  });
+
+  test("global concurrency shared across replica engines", async () => {
+    const redis = createRedis();
+    const name = `global-replica-${crypto.randomUUID()}`;
+    let concurrent = 0;
+    let maxConcurrent = 0;
+
+    const handler = async ({
+      step,
+    }: {
+      step: <T>(n: string, h: () => T | Promise<T>) => Promise<T>;
+    }) => {
+      await step("work", async () => {
+        concurrent++;
+        maxConcurrent = Math.max(maxConcurrent, concurrent);
+        await sleep(20);
+        concurrent--;
+        return true;
+      });
+
+      return true;
+    };
+
+    const store1 = new WorkflowStore(redis, name);
+    const store2 = new WorkflowStore(redis, name);
+    const engine1 = new WorkflowEngine(
+      { name, redis, ...fast, concurrency: 1, handler },
+      store1,
+    );
+    const engine2 = new WorkflowEngine(
+      { name, redis, ...fast, concurrency: 1, handler },
+      store2,
+    );
+
+    engine1.start();
+    engine2.start();
+
+    const start = async (executionId: string, store: WorkflowStore) => {
+      await store.tryCreateMetaAndActive(executionId, {
+        name,
+        status: "pending",
+        input: "{}",
+        result: "",
+        error: "",
+        createdAt: String(Date.now()),
+        updatedAt: String(Date.now()),
+        completedAt: "",
+        failedAt: "",
+        cancelledAt: "",
+        partitionKey: "*",
+        partitionSlot: "",
+        concurrencySlot: "",
+      });
+      await store.appendEvents({
+        executionId,
+        events: [
+          {
+            type: "WorkflowStarted",
+            input: "{}",
+            partitionKey: "*",
+            timestamp: Date.now(),
+          },
+        ],
+      });
+      await store.enqueue(executionId);
+    };
+
+    await start("gr-a", store1);
+    await start("gr-b", store2);
+
+    await waitFor(async () => {
+      const a = await store1.getMeta("gr-a");
+      const b = await store2.getMeta("gr-b");
+      return a?.status === "completed" && b?.status === "completed";
+    });
+
+    expect(maxConcurrent).toBe(1);
+
+    await engine1.stop();
+    await engine2.stop();
   });
 
   test("partition held across durable sleep", async () => {

@@ -1,5 +1,5 @@
 import { mightThrow, mightThrowSync } from "../errors/index.js";
-import { NonRetryableStepError } from "./errors.js";
+import { NonRetryableStepError, Paused } from "./errors.js";
 import { isTerminalStatus, parseHistory } from "./history.js";
 import { fromJson, toJson } from "./json.js";
 import type { WorkflowStore } from "./store.js";
@@ -7,9 +7,11 @@ import type {
   AdvanceInput,
   BackoffDelayInput,
   CancelExecutionInput,
+  CapacityTarget,
   ClearExecutionLocalStateInput,
   CollectErrorHistoryInput,
   CompleteExecutionInput,
+  EnsureCapacityInput,
   ExecuteStepInput,
   FailAfterStepExhaustedInput,
   FailExecutionInput,
@@ -34,13 +36,7 @@ const DEFAULT_RETRY_MULTIPLIER = 2;
 const DEFAULT_RETRY_MAX = 30_000;
 const HEARTBEAT_RATIO = 0.4;
 const SHUTDOWN_POLL = 10;
-
-class Paused extends Error {
-  public constructor() {
-    super("workflow paused");
-    this.name = "Paused";
-  }
-}
+const GLOBAL_CAPACITY_KEY = "*";
 
 const runHook = async (fn: (() => void | Promise<void>) | undefined) => {
   if (!fn) return;
@@ -282,7 +278,7 @@ export class WorkflowEngine<TInput, TResult> {
   private readonly retryMultiplier: number;
   private readonly retryMaxDelay: number;
   private readonly aborts = new Map<string, AbortController>();
-  private readonly partitionSlots = new Map<string, number>();
+  private readonly capacitySlots = new Map<string, Map<string, number>>();
   private readonly lostLeases = new Set<string>();
 
   public constructor(
@@ -407,7 +403,7 @@ export class WorkflowEngine<TInput, TResult> {
 
     if (this.lostLeases.has(executionId)) {
       this.lostLeases.delete(executionId);
-      this.partitionSlots.delete(executionId);
+      this.capacitySlots.delete(executionId);
     }
 
     // RELEASE_IF_OWNER no-ops if token no longer owns the key
@@ -431,20 +427,134 @@ export class WorkflowEngine<TInput, TResult> {
     return controller;
   }
 
-  private resolvePartitionSlot(executionId: string, meta: WorkflowMeta | null) {
-    const local = this.partitionSlots.get(executionId);
+  private capacityTargets(partitionKey: string): CapacityTarget[] {
+    if (partitionKey === GLOBAL_CAPACITY_KEY) {
+      return [{ key: GLOBAL_CAPACITY_KEY, field: "partitionSlot" }];
+    }
 
-    if (local !== undefined) return local;
+    return [
+      { key: GLOBAL_CAPACITY_KEY, field: "concurrencySlot" },
+      { key: partitionKey, field: "partitionSlot" },
+    ];
+  }
 
-    if (!meta?.partitionSlot) return undefined;
+  private parseSlot(raw: string | undefined) {
+    if (!raw) return undefined;
 
-    const slot = Number(meta.partitionSlot);
+    const slot = Number(raw);
 
     if (!Number.isInteger(slot)) return undefined;
 
     if (slot < 0) return undefined;
 
     return slot;
+  }
+
+  private slotsFromMeta(meta: WorkflowMeta | null, partitionKey: string) {
+    const slots = new Map<string, number>();
+
+    if (!meta) return slots;
+
+    const concurrencySlot = this.parseSlot(meta.concurrencySlot);
+
+    if (concurrencySlot !== undefined) {
+      slots.set(GLOBAL_CAPACITY_KEY, concurrencySlot);
+    }
+
+    const partitionSlot = this.parseSlot(meta.partitionSlot);
+
+    if (partitionSlot !== undefined) {
+      const key = partitionKey || meta.partitionKey || GLOBAL_CAPACITY_KEY;
+      slots.set(key, partitionSlot);
+    }
+
+    return slots;
+  }
+
+  private heldSlots(executionId: string, meta: WorkflowMeta | null) {
+    const local = this.capacitySlots.get(executionId);
+
+    if (local && local.size > 0) return local;
+
+    return this.slotsFromMeta(meta, meta?.partitionKey ?? "");
+  }
+
+  private resolvePartitionSlot(executionId: string, meta: WorkflowMeta | null) {
+    const partitionKey = meta?.partitionKey ?? "";
+    const held = this.heldSlots(executionId, meta);
+
+    return held.get(partitionKey);
+  }
+
+  private async ensureCapacity(input: EnsureCapacityInput) {
+    const { executionId, token, partitionKey, meta } = input;
+    const held = new Map(this.heldSlots(executionId, meta));
+
+    const persistHeld = () => {
+      if (held.size === 0) {
+        this.capacitySlots.delete(executionId);
+        return;
+      }
+
+      this.capacitySlots.set(executionId, held);
+    };
+
+    for (const target of this.capacityTargets(partitionKey)) {
+      let slot = held.get(target.key);
+
+      if (
+        slot !== undefined &&
+        !(await this.store.refreshPartition({
+          partitionKey: target.key,
+          slot,
+          executionId,
+          ttlMs: this.lockTTL,
+        }))
+      ) {
+        held.delete(target.key);
+        slot = undefined;
+      }
+
+      if (slot === undefined) {
+        const claimed = await this.store.claimPartition({
+          partitionKey: target.key,
+          executionId,
+          concurrency: this.concurrency,
+          ttlMs: this.lockTTL,
+        });
+
+        if (claimed === null) {
+          persistHeld();
+          await sleepMs(this.pollInterval);
+          await this.store.enqueue(executionId);
+          return null;
+        }
+
+        if (
+          !(await this.store.setMeta({
+            executionId,
+            fields: { [target.field]: String(claimed) },
+            leaseToken: token,
+          }))
+        ) {
+          // Meta not durable — release Redis claim so refresh cannot pin the slot.
+          await this.store.releasePartition({
+            partitionKey: target.key,
+            slot: claimed,
+            executionId,
+          });
+          persistHeld();
+          return null;
+        }
+
+        held.set(target.key, claimed);
+      } else {
+        held.set(target.key, slot);
+      }
+    }
+
+    persistHeld();
+    return held.get(partitionKey) ?? null;
   }
 
   private async runExecution(executionId: string, token: string) {
@@ -485,53 +595,15 @@ export class WorkflowEngine<TInput, TResult> {
       history = await this.store.loadHistory(executionId);
     }
 
-    const partitionKey = meta.partitionKey;
-    let partitionSlot = this.resolvePartitionSlot(executionId, meta);
+    const partitionKey = meta.partitionKey || GLOBAL_CAPACITY_KEY;
+    const partitionSlot = await this.ensureCapacity({
+      executionId,
+      token,
+      partitionKey,
+      meta,
+    });
 
-    if (partitionKey) {
-      if (
-        partitionSlot !== undefined &&
-        !(await this.store.refreshPartition({
-          partitionKey,
-          slot: partitionSlot,
-          executionId,
-          ttlMs: this.lockTTL,
-        }))
-      ) {
-        this.partitionSlots.delete(executionId);
-        partitionSlot = undefined;
-      }
-
-      if (partitionSlot === undefined) {
-        const slot = await this.store.claimPartition({
-          partitionKey,
-          executionId,
-          concurrency: this.concurrency,
-          ttlMs: this.lockTTL,
-        });
-
-        if (slot === null) {
-          await sleepMs(this.pollInterval);
-          await this.store.enqueue(executionId);
-          return;
-        }
-
-        partitionSlot = slot;
-        this.partitionSlots.set(executionId, slot);
-
-        if (
-          !(await this.store.setMeta({
-            executionId,
-            fields: { partitionSlot: String(slot) },
-            leaseToken: token,
-          }))
-        ) {
-          return;
-        }
-      } else {
-        this.partitionSlots.set(executionId, partitionSlot);
-      }
-    }
+    if (partitionSlot == null) return;
 
     let view = parseHistory(history);
 
@@ -1190,11 +1262,11 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private async refreshHeldPartitions() {
-    for (const [executionId, slot] of this.partitionSlots) {
+    for (const [executionId, held] of this.capacitySlots) {
       const meta = await this.store.getMeta(executionId);
 
-      if (!meta?.partitionKey) {
-        this.partitionSlots.delete(executionId);
+      if (!meta) {
+        this.capacitySlots.delete(executionId);
         continue;
       }
 
@@ -1202,19 +1274,23 @@ export class WorkflowEngine<TInput, TResult> {
         await this.clearExecutionLocalState({
           executionId,
           partitionKey: meta.partitionKey,
-          partitionSlot: slot,
+          partitionSlot: held.get(meta.partitionKey),
         });
         continue;
       }
 
-      const refreshed = await this.store.refreshPartition({
-        partitionKey: meta.partitionKey,
-        slot,
-        executionId,
-        ttlMs: this.lockTTL,
-      });
+      for (const [partitionKey, slot] of held) {
+        const refreshed = await this.store.refreshPartition({
+          partitionKey,
+          slot,
+          executionId,
+          ttlMs: this.lockTTL,
+        });
 
-      if (!refreshed) this.partitionSlots.delete(executionId);
+        if (!refreshed) held.delete(partitionKey);
+      }
+
+      if (held.size === 0) this.capacitySlots.delete(executionId);
     }
   }
 
@@ -1233,64 +1309,68 @@ export class WorkflowEngine<TInput, TResult> {
 
         if (error || !ok) {
           this.lostLeases.add(executionId);
-          this.partitionSlots.delete(executionId);
+          this.capacitySlots.delete(executionId);
           return;
         }
 
-        const slot = this.partitionSlots.get(executionId);
+        const held = this.capacitySlots.get(executionId);
 
-        if (slot === undefined) return;
+        if (!held) return;
 
-        const [metaError, meta] = await mightThrow(
-          this.store.getMeta(executionId),
-        );
+        for (const [partitionKey, slot] of held) {
+          const [refreshError, refreshed] = await mightThrow(
+            this.store.refreshPartition({
+              partitionKey,
+              slot,
+              executionId,
+              ttlMs: this.lockTTL,
+            }),
+          );
 
-        if (metaError) return;
+          if (refreshError) return;
 
-        if (!meta?.partitionKey) return;
+          if (!refreshed) held.delete(partitionKey);
+        }
 
-        const [refreshError, refreshed] = await mightThrow(
-          this.store.refreshPartition({
-            partitionKey: meta.partitionKey,
-            slot,
-            executionId,
-            ttlMs: this.lockTTL,
-          }),
-        );
-
-        if (refreshError) return;
-
-        if (!refreshed) this.partitionSlots.delete(executionId);
+        if (held.size === 0) this.capacitySlots.delete(executionId);
       })();
     }, interval);
   }
 
   private async clearExecutionLocalState(input: ClearExecutionLocalStateInput) {
-    const { executionId, partitionKey, partitionSlot } = input;
+    const { executionId, partitionKey } = input;
+    const meta = await this.store.getMeta(executionId);
+    const held = this.heldSlots(executionId, meta);
+    const key = partitionKey || meta?.partitionKey || GLOBAL_CAPACITY_KEY;
+    const keys = new Set(this.capacityTargets(key).map((target) => target.key));
+
+    for (const heldKey of held.keys()) {
+      keys.add(heldKey);
+    }
 
     await this.store.markInactive(executionId);
     this.aborts.delete(executionId);
 
-    if (!partitionKey) {
-      this.partitionSlots.delete(executionId);
-      return;
-    }
+    for (const capacityKey of keys) {
+      const slot = held.get(capacityKey);
 
-    if (partitionSlot !== undefined) {
-      await this.store.releasePartition({
-        partitionKey,
-        slot: partitionSlot,
-        executionId,
-      });
-    } else {
+      if (slot !== undefined) {
+        await this.store.releasePartition({
+          partitionKey: capacityKey,
+          slot,
+          executionId,
+        });
+        continue;
+      }
+
       await this.store.releaseOwnedPartitions({
-        partitionKey,
+        partitionKey: capacityKey,
         executionId,
         concurrency: this.concurrency,
       });
     }
 
-    this.partitionSlots.delete(executionId);
+    this.capacitySlots.delete(executionId);
   }
 
   private async completeExecution(input: CompleteExecutionInput) {
@@ -1311,6 +1391,7 @@ export class WorkflowEngine<TInput, TResult> {
         completedAt: String(Date.now()),
         error: "",
         partitionSlot: "",
+        concurrencySlot: "",
       },
       leaseToken: token,
     });
@@ -1344,6 +1425,7 @@ export class WorkflowEngine<TInput, TResult> {
         error,
         failedAt: String(Date.now()),
         partitionSlot: "",
+        concurrencySlot: "",
       },
       leaseToken: token,
     });
@@ -1367,6 +1449,7 @@ export class WorkflowEngine<TInput, TResult> {
         cancelledAt: String(Date.now()),
         error: "",
         partitionSlot: "",
+        concurrencySlot: "",
       },
       leaseToken: token,
     });
