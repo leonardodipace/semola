@@ -929,11 +929,53 @@ export class WorkflowWorker<TInput, TResult> {
 
       let restoredStepWork = false;
       let waitingOnTimer = false;
+      let lastResumeIdx = -1;
+
+      for (let i = 0; i < view.events.length; i++) {
+        if (view.events[i]?.type === "WorkflowResumed") lastResumeIdx = i;
+      }
 
       for (const [stepId, state] of view.steps) {
         if (state.status === "completed") continue;
 
         if (state.status === "failed") {
+          // Mid-resume crash: WorkflowResumed written, StepScheduled not yet.
+          if (lastResumeIdx >= 0) {
+            let scheduledAfterResume = false;
+
+            for (let i = lastResumeIdx + 1; i < view.events.length; i++) {
+              const event = view.events[i];
+
+              if (event?.type !== "StepScheduled") continue;
+              if (event.stepId !== stepId) continue;
+
+              scheduledAfterResume = true;
+              break;
+            }
+
+            if (!scheduledAfterResume) {
+              await this.store.appendEvents(executionId, [
+                {
+                  type: "StepScheduled",
+                  stepId,
+                  stepName: state.stepName,
+                  attempt: 1,
+                  timestamp: Date.now(),
+                },
+              ]);
+
+              await this.store.enqueueStep({
+                executionId,
+                stepId,
+                stepName: state.stepName,
+                attempt: 1,
+              });
+
+              restoredStepWork = true;
+              continue;
+            }
+          }
+
           if (state.retryable && state.attempt <= this.retries) {
             const added = await this.store.scheduleTimerIfAbsent(Date.now(), {
               kind: "step-retry",

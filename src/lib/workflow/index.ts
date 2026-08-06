@@ -150,20 +150,6 @@ export const defineWorkflow = <TInput, TResult = void>(
     }
 
     const now = Date.now();
-
-    await store.appendEvents(executionId, [
-      {
-        type: "WorkflowResumed",
-        timestamp: now,
-      },
-    ]);
-
-    // Leave failed before enqueue: step workers drop terminal tasks.
-    await store.updateStatus(executionId, "pending", {
-      error: "",
-      failedAt: "",
-    });
-
     const view = parseHistory(await store.loadHistory(executionId));
     const retryEvents = [];
 
@@ -179,17 +165,29 @@ export const defineWorkflow = <TInput, TResult = void>(
       });
     }
 
-    if (retryEvents.length > 0) {
-      await store.appendEvents(executionId, retryEvents);
+    // Resumed + StepScheduled together: crash after pending must not leave
+    // failed steps under a non-terminal status (reclaim would re-fail them).
+    await store.appendEvents(executionId, [
+      {
+        type: "WorkflowResumed",
+        timestamp: now,
+      },
+      ...retryEvents,
+    ]);
 
-      for (const event of retryEvents) {
-        await store.enqueueStep({
-          executionId,
-          stepId: event.stepId,
-          stepName: event.stepName,
-          attempt: event.attempt,
-        });
-      }
+    // Leave failed before enqueue: step workers drop terminal tasks.
+    await store.updateStatus(executionId, "pending", {
+      error: "",
+      failedAt: "",
+    });
+
+    for (const event of retryEvents) {
+      await store.enqueueStep({
+        executionId,
+        stepId: event.stepId,
+        stepName: event.stepName,
+        attempt: event.attempt,
+      });
     }
 
     await store.markActive(executionId);

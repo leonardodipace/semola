@@ -1504,6 +1504,109 @@ describe("workflow", () => {
     await stop(wf);
   });
 
+  test("reclaim recovers resume after pending without StepScheduled", async () => {
+    const redis = createRedis();
+    const name = `resume-crash-${crypto.randomUUID()}`;
+    const executionId = crypto.randomUUID();
+    let attempts = 0;
+    const now = Date.now();
+
+    await redis.hset(
+      `workflow:${name}:meta:${executionId}`,
+      "name",
+      name,
+      "status",
+      "pending",
+      "input",
+      "{}",
+      "result",
+      "",
+      "error",
+      "",
+      "createdAt",
+      String(now),
+      "updatedAt",
+      String(now),
+      "completedAt",
+      "",
+      "failedAt",
+      "",
+      "cancelledAt",
+      "",
+      "steps",
+      "[]",
+      "partitionKey",
+      "",
+      "partitionSlot",
+      "",
+    );
+
+    await redis.rpush(
+      `workflow:${name}:history:${executionId}`,
+      JSON.stringify({
+        type: "WorkflowStarted",
+        input: "{}",
+        partitionKey: "",
+        timestamp: now,
+      }),
+      JSON.stringify({
+        type: "StepScheduled",
+        stepId: "a0",
+        stepName: "once",
+        attempt: 1,
+        timestamp: now,
+      }),
+      JSON.stringify({
+        type: "StepStarted",
+        stepId: "a0",
+        attempt: 1,
+        timestamp: now,
+      }),
+      JSON.stringify({
+        type: "StepFailed",
+        stepId: "a0",
+        stepName: "once",
+        error: "boom",
+        retryable: true,
+        attempt: 1,
+        timestamp: now,
+      }),
+      JSON.stringify({
+        type: "WorkflowFailed",
+        error: "boom",
+        timestamp: now,
+      }),
+      JSON.stringify({
+        type: "WorkflowResumed",
+        timestamp: now,
+      }),
+    );
+
+    await redis.sadd(`workflow:${name}:active`, executionId);
+
+    const wf = defineWorkflow({
+      name,
+      redis,
+      ...fast,
+      retries: 0,
+      handler: async ({ step }) => {
+        const value = await step("once", async () => {
+          attempts++;
+          return "ok";
+        });
+
+        return value;
+      },
+    });
+
+    const execution = await waitStatus(wf, executionId, "completed");
+
+    expect(execution.result).toBe("ok");
+    expect(attempts).toBe(1);
+
+    await stop(wf);
+  });
+
   test("step retry timer does not revive completed step", async () => {
     const redis = createRedis();
     const name = `retry-done-${crypto.randomUUID()}`;
