@@ -1,11 +1,19 @@
-import { mightThrow, mightThrowSync } from "../errors/index.js";
-import { SerializationError, WorkflowStoreError } from "./errors.js";
-import type { HistoryEvent } from "./history.js";
+import { mightThrow } from "../errors/index.js";
+import { WorkflowStoreError } from "./errors.js";
+import { toJson } from "./json.js";
 import type {
-  StepTask,
+  AcquireLeaseInput,
+  AppendEventsInput,
+  ClaimPartitionInput,
+  ExtendLeaseInput,
+  PartitionKeyInput,
+  RefreshPartitionInput,
+  ReleaseOwnedPartitionsInput,
+  ReleasePartitionInput,
+  SetMetaInput,
   TimerTask,
+  UpdateStatusInput,
   WorkflowMeta,
-  WorkflowStatus,
 } from "./types.js";
 
 const RELEASE_IF_OWNER =
@@ -23,6 +31,9 @@ const CLAIM_DUE_TIMER =
 const CREATE_META_AND_ACTIVE =
   "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end redis.call('HSET', KEYS[1], unpack(ARGV, 2)) redis.call('SADD', KEYS[2], ARGV[1]) return 1";
 
+const UPDATE_META_AND_ACTIVE =
+  "redis.call('HSET', KEYS[1], unpack(ARGV, 2)) redis.call('SADD', KEYS[2], ARGV[1]) return 1";
+
 const SCHEDULE_TIMER_IF_ABSENT =
   "if redis.call('ZSCORE', KEYS[1], ARGV[2]) ~= false then return 0 end redis.call('ZADD', KEYS[1], ARGV[1], ARGV[2]) return 1";
 
@@ -32,20 +43,6 @@ const APPEND_IF_LEASE =
 const HSET_IF_LEASE =
   "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('HSET', KEYS[2], unpack(ARGV, 2)) return 1";
 
-const stringify = (value: unknown, label: string) => {
-  const [error, raw] = mightThrowSync(() => JSON.stringify(value));
-
-  if (error) {
-    throw new SerializationError(`Unable to serialize ${label}`);
-  }
-
-  if (typeof raw !== "string") {
-    throw new SerializationError(`Unable to serialize ${label}`);
-  }
-
-  return raw;
-};
-
 const keys = {
   history: (name: string, executionId: string) =>
     `workflow:${name}:history:${executionId}`,
@@ -53,13 +50,15 @@ const keys = {
     `workflow:${name}:meta:${executionId}`,
   lease: (name: string, executionId: string) =>
     `workflow:${name}:lease:${executionId}`,
-  wfQueue: (name: string) => `workflow:${name}:wf-queue`,
-  stepQueue: (name: string) => `workflow:${name}:step-queue`,
+  queue: (name: string) => `workflow:${name}:queue`,
   timers: (name: string) => `workflow:${name}:timers`,
   timerDead: (name: string) => `workflow:${name}:timer-dead`,
   active: (name: string) => `workflow:${name}:active`,
-  partition: (name: string, partitionKey: string, slot: number) =>
-    `workflow:${name}:partition:${partitionKey}:${slot}`,
+  partition: (input: PartitionKeyInput) => {
+    const { name, partitionKey, slot } = input;
+
+    return `workflow:${name}:partition:${partitionKey}:${slot}`;
+  },
 };
 
 export class WorkflowStore {
@@ -68,15 +67,13 @@ export class WorkflowStore {
     private name: string,
   ) {}
 
-  public async appendEvents(
-    executionId: string,
-    events: HistoryEvent[],
-    leaseToken?: string,
-  ) {
+  public async appendEvents(input: AppendEventsInput) {
+    const { executionId, events, leaseToken } = input;
+
     if (events.length === 0) return true;
 
     const payloads = events.map((event) =>
-      stringify(event, `history event for ${executionId}`),
+      toJson(event, `history event for ${executionId}`),
     );
 
     if (leaseToken === undefined) {
@@ -160,11 +157,8 @@ export class WorkflowStore {
     return Number(result) === 1;
   }
 
-  public async setMeta(
-    executionId: string,
-    fields: Partial<WorkflowMeta>,
-    leaseToken?: string,
-  ) {
+  public async setMeta(input: SetMetaInput) {
+    const { executionId, fields, leaseToken } = input;
     const entries: string[] = [];
 
     for (const [field, value] of Object.entries(fields)) {
@@ -226,9 +220,9 @@ export class WorkflowStore {
     return data as unknown as WorkflowMeta;
   }
 
-  public async enqueueWorkflow(executionId: string) {
+  public async enqueue(executionId: string) {
     const [error] = await mightThrow(
-      this.redis.lpush(keys.wfQueue(this.name), executionId),
+      this.redis.lpush(keys.queue(this.name), executionId),
     );
 
     if (error) {
@@ -238,9 +232,9 @@ export class WorkflowStore {
     }
   }
 
-  public async dequeueWorkflow() {
+  public async dequeue() {
     const [error, executionId] = await mightThrow(
-      this.redis.rpop(keys.wfQueue(this.name)),
+      this.redis.rpop(keys.queue(this.name)),
     );
 
     if (error) {
@@ -250,42 +244,8 @@ export class WorkflowStore {
     return executionId;
   }
 
-  public async enqueueStep(task: StepTask) {
-    const raw = stringify(task, "step task");
-
-    const [pushError] = await mightThrow(
-      this.redis.lpush(keys.stepQueue(this.name), raw),
-    );
-
-    if (pushError) {
-      throw new WorkflowStoreError("Unable to enqueue step task");
-    }
-  }
-
-  public async dequeueStep() {
-    const [error, raw] = await mightThrow(
-      this.redis.rpop(keys.stepQueue(this.name)),
-    );
-
-    if (error) {
-      throw new WorkflowStoreError("Unable to dequeue step task");
-    }
-
-    if (!raw) return null;
-
-    const [parseError, task] = mightThrowSync(
-      () => JSON.parse(raw) as StepTask,
-    );
-
-    if (parseError) {
-      throw new SerializationError("Unable to parse step task");
-    }
-
-    return task;
-  }
-
   public async scheduleTimer(fireAt: number, task: TimerTask) {
-    const raw = stringify(task, "timer task");
+    const raw = toJson(task, "timer task");
 
     const [zaddError] = await mightThrow(
       this.redis.zadd(keys.timers(this.name), fireAt, raw),
@@ -297,7 +257,7 @@ export class WorkflowStore {
   }
 
   public async scheduleTimerIfAbsent(fireAt: number, task: TimerTask) {
-    const raw = stringify(task, "timer task");
+    const raw = toJson(task, "timer task");
 
     const [error, result] = await mightThrow(
       this.redis.send("EVAL", [
@@ -381,7 +341,9 @@ export class WorkflowStore {
     return members ?? [];
   }
 
-  public async acquireLease(executionId: string, token: string, ttlMs: number) {
+  public async acquireLease(input: AcquireLeaseInput) {
+    const { executionId, token, ttlMs } = input;
+
     const [error, result] = await mightThrow(
       this.redis.set(
         keys.lease(this.name, executionId),
@@ -401,7 +363,9 @@ export class WorkflowStore {
     return result === "OK";
   }
 
-  public async extendLease(executionId: string, token: string, ttlMs: number) {
+  public async extendLease(input: ExtendLeaseInput) {
+    const { executionId, token, ttlMs } = input;
+
     const [error, result] = await mightThrow(
       this.redis.send("EVAL", [
         EXTEND_IF_OWNER,
@@ -448,14 +412,11 @@ export class WorkflowStore {
     return value;
   }
 
-  public async claimPartition(
-    partitionKey: string,
-    executionId: string,
-    concurrency: number,
-    ttlMs: number,
-  ) {
+  public async claimPartition(input: ClaimPartitionInput) {
+    const { partitionKey, executionId, concurrency, ttlMs } = input;
+
     for (let slot = 0; slot < concurrency; slot++) {
-      const key = keys.partition(this.name, partitionKey, slot);
+      const key = keys.partition({ name: this.name, partitionKey, slot });
       const [error, result] = await mightThrow(
         this.redis.send("EVAL", [
           CLAIM_OR_REOWN_PARTITION,
@@ -480,17 +441,14 @@ export class WorkflowStore {
     return null;
   }
 
-  public async refreshPartition(
-    partitionKey: string,
-    slot: number,
-    executionId: string,
-    ttlMs: number,
-  ) {
+  public async refreshPartition(input: RefreshPartitionInput) {
+    const { partitionKey, slot, executionId, ttlMs } = input;
+
     const [error, result] = await mightThrow(
       this.redis.send("EVAL", [
         EXTEND_IF_OWNER,
         "1",
-        keys.partition(this.name, partitionKey, slot),
+        keys.partition({ name: this.name, partitionKey, slot }),
         executionId,
         String(ttlMs),
       ]),
@@ -505,16 +463,14 @@ export class WorkflowStore {
     return Number(result) === 1;
   }
 
-  public async releasePartition(
-    partitionKey: string,
-    slot: number,
-    executionId: string,
-  ) {
+  public async releasePartition(input: ReleasePartitionInput) {
+    const { partitionKey, slot, executionId } = input;
+
     const [error] = await mightThrow(
       this.redis.send("EVAL", [
         RELEASE_IF_OWNER,
         "1",
-        keys.partition(this.name, partitionKey, slot),
+        keys.partition({ name: this.name, partitionKey, slot }),
         executionId,
       ]),
     );
@@ -526,30 +482,60 @@ export class WorkflowStore {
     }
   }
 
-  public async releaseOwnedPartitions(
-    partitionKey: string,
-    executionId: string,
-    concurrency: number,
-  ) {
+  public async releaseOwnedPartitions(input: ReleaseOwnedPartitionsInput) {
+    const { partitionKey, executionId, concurrency } = input;
+
     for (let slot = 0; slot < concurrency; slot++) {
-      await this.releasePartition(partitionKey, slot, executionId);
+      await this.releasePartition({ partitionKey, slot, executionId });
     }
   }
 
-  public async updateStatus(
-    executionId: string,
-    status: WorkflowStatus,
-    extra: Partial<WorkflowMeta> = {},
-    leaseToken?: string,
-  ) {
-    return this.setMeta(
+  public async updateStatus(input: UpdateStatusInput) {
+    const { executionId, status, extra = {}, leaseToken } = input;
+
+    return this.setMeta({
       executionId,
-      {
+      fields: {
         ...extra,
         status,
         updatedAt: String(Date.now()),
       },
       leaseToken,
+    });
+  }
+
+  public async updateStatusAndMarkActive(input: UpdateStatusInput) {
+    const { executionId, status, extra = {} } = input;
+    const fields: Record<string, string> = {
+      ...extra,
+      status,
+      updatedAt: String(Date.now()),
+    };
+    const entries: string[] = [];
+
+    for (const [field, value] of Object.entries(fields)) {
+      if (value === undefined) continue;
+
+      entries.push(field, value);
+    }
+
+    const [error] = await mightThrow(
+      this.redis.send("EVAL", [
+        UPDATE_META_AND_ACTIVE,
+        "2",
+        keys.meta(this.name, executionId),
+        keys.active(this.name),
+        executionId,
+        ...entries,
+      ]),
     );
+
+    if (error) {
+      throw new WorkflowStoreError(
+        `Unable to update status and mark active for ${executionId}`,
+      );
+    }
+
+    return true;
   }
 }

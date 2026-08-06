@@ -32,10 +32,3 @@ export class NonRetryableStepError extends Error {
     this.name = "NonRetryableStepError";
   }
 }
-
-export class WorkflowBlocked extends Error {
-  public constructor(reason: "step" | "timer") {
-    super(`workflow blocked on ${reason}`);
-    this.name = "WorkflowBlocked";
-  }
-}

@@ -1,113 +1,11 @@
 import { mightThrowSync } from "../errors/index.js";
 import { SerializationError } from "./errors.js";
-
-export type HistoryEvent =
-  | {
-      type: "WorkflowStarted";
-      input: string;
-      partitionKey: string;
-      timestamp: number;
-    }
-  | {
-      type: "StepScheduled";
-      stepId: string;
-      stepName: string;
-      attempt: number;
-      timestamp: number;
-    }
-  | {
-      type: "StepStarted";
-      stepId: string;
-      attempt: number;
-      timestamp: number;
-    }
-  | {
-      type: "StepCompleted";
-      stepId: string;
-      stepName: string;
-      result: string;
-      timestamp: number;
-    }
-  | {
-      type: "StepFailed";
-      stepId: string;
-      stepName: string;
-      error: string;
-      retryable: boolean;
-      attempt: number;
-      timestamp: number;
-    }
-  | {
-      type: "TimerStarted";
-      timerId: string;
-      fireAt: number;
-      timestamp: number;
-    }
-  | {
-      type: "TimerFired";
-      timerId: string;
-      timestamp: number;
-    }
-  | {
-      type: "WorkflowCancelRequested";
-      timestamp: number;
-    }
-  | {
-      type: "WorkflowCancelled";
-      timestamp: number;
-    }
-  | {
-      type: "WorkflowCompleted";
-      result: string;
-      timestamp: number;
-    }
-  | {
-      type: "WorkflowFailed";
-      error: string;
-      timestamp: number;
-    }
-  | {
-      type: "WorkflowResumed";
-      timestamp: number;
-    };
-
-export type StepState =
-  | {
-      status: "scheduled" | "started";
-      stepName: string;
-      attempt: number;
-    }
-  | {
-      status: "completed";
-      stepName: string;
-      result: string;
-      completedAt: number;
-    }
-  | {
-      status: "failed";
-      stepName: string;
-      error: string;
-      retryable: boolean;
-      attempt: number;
-    };
-
-export type TimerState =
-  | { status: "started"; fireAt: number; delayMs: number }
-  | { status: "fired"; delayMs: number };
-
-export type HistoryView = {
-  events: HistoryEvent[];
-  input: string;
-  partitionKey: string;
-  steps: Map<string, StepState>;
-  timers: Map<string, TimerState>;
-  cancelRequested: boolean;
-  terminal:
-    | { kind: "completed"; result: string }
-    | { kind: "failed"; error: string }
-    | { kind: "cancelled" }
-    | null;
-};
+import type {
+  HistoryEvent,
+  HistoryView,
+  StepState,
+  TimerState,
+} from "./types.js";
 
 export const isTerminalStatus = (status: string) => {
   if (status === "completed") return true;

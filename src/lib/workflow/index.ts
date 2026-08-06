@@ -1,20 +1,21 @@
+import { WorkflowEngine } from "./engine.js";
 import {
   DuplicateWorkflowError,
   NotFoundError,
   WorkflowStoreError,
 } from "./errors.js";
 import { isTerminalStatus, parseHistory } from "./history.js";
-import { deserializeWith, serializeWith } from "./runtime.js";
+import { fromJson, toJson } from "./json.js";
 import { WorkflowStore } from "./store.js";
 import type {
+  ResolvePartitionKeyInput,
+  StepSnapshot,
   Workflow,
   WorkflowOptions,
   WorkflowStartOptions,
   WorkflowStatus,
 } from "./types.js";
-import { parseStepSnapshots, WorkflowWorker } from "./worker.js";
 
-// Process-local only: blocks duplicate defineWorkflow(name) in this process.
 const registry = new Set<string>();
 
 const optionalTimestamp = (raw: string) => {
@@ -34,10 +35,10 @@ const requireMeta = async (store: WorkflowStore, executionId: string) => {
 };
 
 const resolvePartitionKey = <TInput, TResult>(
-  options: WorkflowOptions<TInput, TResult>,
-  input: TInput,
-  startOptions: WorkflowStartOptions,
+  input: ResolvePartitionKeyInput<TInput, TResult>,
 ) => {
+  const { options, input: workflowInput, startOptions } = input;
+
   if (startOptions.partitionKey !== undefined) {
     if (!startOptions.partitionKey) {
       throw new WorkflowStoreError("Partition key must be a non-empty string");
@@ -50,7 +51,7 @@ const resolvePartitionKey = <TInput, TResult>(
     return "";
   }
 
-  const partitionKey = options.partitionBy(input);
+  const partitionKey = options.partitionBy(workflowInput);
 
   if (!partitionKey) {
     throw new WorkflowStoreError("Partition key must be a non-empty string");
@@ -85,20 +86,16 @@ export const defineWorkflow = <TInput, TResult = void>(
   }
 
   const store = new WorkflowStore(options.redis, options.name);
-  const worker = new WorkflowWorker(options, store);
-  worker.start();
+  const engine = new WorkflowEngine(options, store);
+  engine.start();
 
   const start = async (
     input: TInput,
     startOptions: WorkflowStartOptions = {},
   ) => {
     const executionId = resolveExecutionId(startOptions);
-    const partitionKey = resolvePartitionKey(options, input, startOptions);
-    const serializedInput = serializeWith(
-      input,
-      options.serializeInput,
-      "input",
-    );
+    const partitionKey = resolvePartitionKey({ options, input, startOptions });
+    const serializedInput = toJson(input, "input");
     const now = Date.now();
 
     const created = await store.tryCreateMetaAndActive(executionId, {
@@ -112,7 +109,6 @@ export const defineWorkflow = <TInput, TResult = void>(
       completedAt: "",
       failedAt: "",
       cancelledAt: "",
-      steps: "[]",
       partitionKey,
       partitionSlot: "",
     });
@@ -123,16 +119,19 @@ export const defineWorkflow = <TInput, TResult = void>(
       );
     }
 
-    await store.appendEvents(executionId, [
-      {
-        type: "WorkflowStarted",
-        input: serializedInput,
-        partitionKey,
-        timestamp: now,
-      },
-    ]);
+    await store.appendEvents({
+      executionId,
+      events: [
+        {
+          type: "WorkflowStarted",
+          input: serializedInput,
+          partitionKey,
+          timestamp: now,
+        },
+      ],
+    });
 
-    await store.enqueueWorkflow(executionId);
+    await store.enqueue(executionId);
 
     return {
       executionId,
@@ -165,33 +164,29 @@ export const defineWorkflow = <TInput, TResult = void>(
       });
     }
 
-    // Resumed + StepScheduled together: crash after pending must not leave
-    // failed steps under a non-terminal status (reclaim would re-fail them).
-    await store.appendEvents(executionId, [
-      {
-        type: "WorkflowResumed",
-        timestamp: now,
-      },
-      ...retryEvents,
-    ]);
-
-    // Leave failed before enqueue: step workers drop terminal tasks.
-    await store.updateStatus(executionId, "pending", {
-      error: "",
-      failedAt: "",
+    await store.appendEvents({
+      executionId,
+      events: [
+        {
+          type: "WorkflowResumed",
+          timestamp: now,
+        },
+        ...retryEvents,
+      ],
     });
 
-    for (const event of retryEvents) {
-      await store.enqueueStep({
-        executionId,
-        stepId: event.stepId,
-        stepName: event.stepName,
-        attempt: event.attempt,
-      });
-    }
+    // Atomic pending + active: crash between flip and markActive would orphan
+    // (pending but reclaim-blind).
+    await store.updateStatusAndMarkActive({
+      executionId,
+      status: "pending",
+      extra: {
+        error: "",
+        failedAt: "",
+      },
+    });
 
-    await store.markActive(executionId);
-    await store.enqueueWorkflow(executionId);
+    await store.enqueue(executionId);
 
     return {
       executionId,
@@ -201,21 +196,23 @@ export const defineWorkflow = <TInput, TResult = void>(
 
   const get = async (executionId: string) => {
     const meta = await requireMeta(store, executionId);
+    const input = fromJson<TInput>(meta.input, "input");
+    const view = parseHistory(await store.loadHistory(executionId));
+    const steps: StepSnapshot[] = [];
 
-    const input = deserializeWith(
-      meta.input,
-      options.deserializeInput,
-      "input",
-    );
+    for (const state of view.steps.values()) {
+      if (state.status !== "completed") continue;
+
+      steps.push({
+        name: state.stepName,
+        completedAt: state.completedAt,
+      });
+    }
 
     let result: TResult | null = null;
 
     if (meta.result) {
-      result = deserializeWith(
-        meta.result,
-        options.deserializeResult,
-        "result",
-      );
+      result = fromJson<TResult>(meta.result, "result");
     }
 
     let error: string | null = null;
@@ -236,7 +233,7 @@ export const defineWorkflow = <TInput, TResult = void>(
       completedAt: optionalTimestamp(meta.completedAt),
       failedAt: optionalTimestamp(meta.failedAt),
       cancelledAt: optionalTimestamp(meta.cancelledAt),
-      steps: parseStepSnapshots(meta.steps),
+      steps,
     };
   };
 
@@ -255,15 +252,18 @@ export const defineWorkflow = <TInput, TResult = void>(
 
     const now = Date.now();
 
-    await store.appendEvents(executionId, [
-      {
-        type: "WorkflowCancelRequested",
-        timestamp: now,
-      },
-    ]);
+    await store.appendEvents({
+      executionId,
+      events: [
+        {
+          type: "WorkflowCancelRequested",
+          timestamp: now,
+        },
+      ],
+    });
 
-    worker.requestAbort(executionId);
-    await store.enqueueWorkflow(executionId);
+    engine.requestAbort(executionId);
+    await store.enqueue(executionId);
 
     return {
       status: meta.status as WorkflowStatus,
@@ -275,7 +275,7 @@ export const defineWorkflow = <TInput, TResult = void>(
   };
 
   const stop = async () => {
-    await worker.stop();
+    await engine.stop();
     registry.delete(options.name);
   };
 
