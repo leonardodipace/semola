@@ -8,12 +8,12 @@ COPY docs ./docs
 RUN bun install --frozen-lockfile
 
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN bun run docs:build \
-	&& cp -r apps/docs/public apps/docs/.next/standalone/apps/docs/ \
-	&& cp -r apps/docs/.next/static apps/docs/.next/standalone/apps/docs/.next/
+RUN bun run docs:build
 
 FROM node:22-alpine AS runner
 WORKDIR /app
+
+RUN apk add --no-cache libc6-compat
 
 ENV NODE_ENV=production
 ENV PORT=3000
@@ -21,6 +21,8 @@ ENV HOSTNAME=0.0.0.0
 ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY --from=builder /app/apps/docs/.next/standalone ./
+COPY --from=builder /app/apps/docs/public ./apps/docs/public
+COPY --from=builder /app/apps/docs/.next/static ./apps/docs/.next/static
 
 EXPOSE 3000
 CMD ["node", "apps/docs/server.js"]
