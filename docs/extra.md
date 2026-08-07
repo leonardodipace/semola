@@ -8,110 +8,211 @@ Odds and ends that are useful but too small for a dedicated module. Today that m
 ## Import
 
 ```typescript
-import { createRetry } from "semola/extra";
+import { 
+  createRetry, InvalidResultError, InvalidRetryError,
+  BACKOFF_MULTIPLIER, BASE_BACKOFF_DELAY, MAX_BACKOFF_DELAY,
+  BackoffOptions, ErrorMetadataType, HookContextType,
+  OnFailedAttemptContextType, RetryContext, RetryOnErrorContextType,
+  RetryOptions, RetryOutcomeType
+} from "semola/extra";
 ```
 
-## Quick start
+### API
+
+`
+createRetry<TRetryResult = void>(options: RetryOptions<TRetryResult>): () => Promise<RetryOutcomeType<TRetryResult>>
+`
+
+`createRetry()` gives you the ability to create a retriable function, by specifying how many times it should retry the provided function.
 
 ```typescript
-const fetchUser = createRetry(
-  async (id: string) => {
-    const res = await fetch(`/users/${id}`);
+async function getTodo() {
+  const url = "https://endpoint/v1/todos/5";
+  const response = await fetch(url);
 
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
+  if (response.status === 404) {
+    return undefined;
+  }
 
-    return res.json();
-  },
-  { maxRetries: 3 },
-);
+  return await response.json();
+}
 
-const user = await fetchUser("123");
+const callable = createRetry({ input: getTodo, maxRetries: 3 });
+console.log(await callable());
 ```
 
-`createRetry` returns an async function with the same parameters as `fn`. Backoff uses full jitter: about 1s base, ×2 per attempt, capped at 60s.
+`createRetry()` use the following options:
+  - `input: () => TRetryResult | Promise<TRetryResult>` (required) -  A synchronous or an asynchronous function you want retry `n` times
+  - `maxRetries: number` (required) - Number of retries after the first failure. A successful `input` call will stop its execution. The number of retries must be a finite non-negative integer; if passed an invalid number, `createRetry()` will raise an `InvalidRetryError` error
+  - `id?: string` (optional) - Retry's id. By default it's a randomly generated UUID
+  - `ignoreErrors?: ErrorClassType[]` (optional) - A list of exception classes and subclasses you want to ignore from retries. By default it's an empty list, meaning all exceptions are retried
+  - `retryErrors?: ErrorClassType[]` (optional) - A list of exception classes and subclasses reported as errors and must be retried. If an error is not in the `retryErrors` list, it is passed to `onError`, if present, or thrown; By default it's an empty list, meaning no exceptions are matched
+  - `backoff: BackoffOptions` (optional) - A configuration object for handling exponential backoff's parameters. Note that if any of these parameters are invalid, `createRetry()` will throw an `InvalidRetryError` error. All these parameters must be a finite non-negative number:
+    - `baseDelay?: number` (optional) - Base delay in milliseconds. By default it's `1000ms`
+    - `multiplier?: number` (optional) - Backoff multiplier. By default it's `2`
+    - `maxDelay?: number` (optional) - Maximum delay in milliseconds. By default it's `60000ms` (1 minute)
+  - `onError?: (error: ErrorMetadataType<TRetryResult>) => void | Promise<void>` (optional) - Function called when an error is raised inside `input`, after all retries have been exhausted, with the final error passed in as the argument. If not provided, the instance re-raises that error. The `ErrorMetadataType<TRetryResult>` type contains the following properties:
+    - `failedAt: number` - When the function failed, expressed in milliseconds
+    - `error: Error | InvalidResultError<TRetryResult>` - Which error was fired inside `input` or which value caused the retry
+    - `id: string` - Retry's id
+  - `onFailedAttempt?: (ctx: OnFailedAttemptContextType<TRetryResult>) => void | Promise<void>` (optional) - Function called on every failed attempt. The `OnFailedAttemptContextType<TRetryResult>` type contains the following properties:
+    - `error: Error | InvalidResultError<TRetryResult>` - Which error was fired inside `input` or which value caused the retry
+    - `attempt: number` - The attempt number. Note that they start at 1
+    - `retriesRemaining: number` - How many retries remains before stopping
+    - `nextRetryDelayMs: number` - Backoff delay, in milliseconds, before the next run, calculated with exponential backoff and [Full Jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/). By default, this value is capped at 1 minute
+    - `id: string` - Retry's id
+  - `retryOnResult?: (result: TRetryResult) => boolean` (optional) - Function that evaluates `input`'s result. This function return `true` if `result` should be retried, otherwise it must return `false`. By default, if not provided, no results are retried;
+  - `retryOnError?: (ctx: RetryOnErrorContextType<TRetryResult>) => boolean` (optional) - Function called when `input` throw an error and before consuming a retry. This function return `true` if `input` should consume the current retry, otherwise it must return `false`. By default, if not provided, `input` will retry on every errors. The `RetryOnErrorContextType<TRetryResult>` type contains the following properties:
+    - `error: Error | InvalidResultError<TRetryResult>` - Which error was fired inside `input` or which value caused the retry
+    - `id: string` - Retry's id
+  - `beforeRetry?: (ctx: HookContextType<TRetryResult>) => void | Promise<void>` (optional) - Function called before `onFailedAttempt`. `HookContextType<TRetryResult>` type contains the following properties:
+      - `error: Error | InvalidResultError<TRetryResult>` - Which error was fired inside `input` or which value caused the retry
+      - `retriesRemaining: number` - How many attempts are still available, before retrying
+      - `attempt: number` - Which attempt triggered this retry. Note that they start at 1
+      - `id: string` - Retry's id
+  - `afterRetry?: (ctx: HookContextType<TRetryResult>) => void | Promise<void>` (optional) - Function called after `onFailedAttempt`. `HookContextType<TRetryResult>` type contains the following properties:
+      - `error: Error | InvalidResultError<TRetryResult>` - Which error was fired inside `input` or which value caused the retry
+      - `retriesRemaining: number` - How many attempts are still available, after retrying
+      - `attempt: number` - Which attempt triggered this retry. Note that they start at 1
+      - `id: string` - Retry's id
 
-## Options
+`createRetry()` returns a function that automatically handles all the retry logic and, after its execution, it returns a `RetryOutcomeType<TRetryResult>` type:
+- If `input` succeeded, it returns an object of type `{ ok: true; result: TRetryResult }`; you can find `input`'s result inside the `result` property
+- If `input` failed, and `onError` was defined, it returns an object of type `{ ok: false }`. 
 
-| Option | Meaning |
-| --- | --- |
-| `maxRetries` | Required. Non-negative integer |
-| `id` | Optional label for callbacks |
-| `onFailedAttempt` | Called after each failed attempt |
-| `onError` | Called when retries are exhausted; if it returns, the wrapper resolves to `undefined` instead of throwing |
-| `retryOnError` | `({ error, id }) => boolean` - return `false` to stop (default: retry all) |
+An `InvalidResultError` is created when `input`'s return value need to be retried; this class provide a `data` attribute, of type `TRetryResult` containing the value that caused the retry.
 
-Invalid config throws `InvalidRetryError` (exported from `semola/extra`).
+If an error was thrown by `onFailedAttempt()`, `beforeRetry()`, `afterRetry()` or `onError()` function, `callable` will re-throw the original error.
 
-## Examples
+### Usage Example
 
-### Example: Log failed attempts
+**Save something inside a file**
 
 ```typescript
-const fetchUser = createRetry(
-  async (id: string) => {
-    const res = await fetch(`/users/${id}`);
-
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-
-    return res.json();
+const callable = createRetry({
+  input: async () => {
+    const path = "/path/to/file.txt";
+    return await Bun.write(path, "Some data");
   },
-  {
-    maxRetries: 3,
-    onFailedAttempt: ({ error, attemptNumber }) => {
-      console.warn(`attempt ${attemptNumber} failed`, error);
-    },
+  maxRetries: 3,
+  backoff: { baseDelay: 1000 * 60, maxDelay: 1000 * 60 * 60 },
+  onError: ({ error, failedAt }) => {
+    console.error(`[${error.name}]: ${error.message}. Failed at ${failedAt}`);
   },
-);
+});
+
+const outcome = await callable();
+if (outcome.ok) {
+  console.log(`Bytes written: ${outcome.result}`);
+}
 ```
 
-### Example: Stop retrying on 404
+**Stop at a specific error**
 
 ```typescript
-const fetchUser = createRetry(
-  async (id: string) => {
-    const res = await fetch(`/users/${id}`);
+type Report = { name: string; completed: boolean; author: string };
+class ReportNotFoundError extends Error {}
 
-    if (res.status === 404) {
-      throw Object.assign(new Error("not found"), { status: 404 });
+async function findReport(path: string, id: string) { ... }
+
+const callable = createRetry({
+  input: async () => {
+    const report = await findReport("/path/to/reports/folder/", "1");
+
+    if (!report) {
+      throw new ReportNotFoundError("Report not found: '1'");
     }
 
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
+    return { name: report.name, author: report.author };
+  },
+  maxRetries: 3,
+  retryOnError: ({ error }) => !(error instanceof ReportNotFoundError),
+});
 
-    return res.json();
-  },
-  {
-    maxRetries: 5,
-    retryOnError: ({ error }) =>
-      !(error instanceof Error && "status" in error && error.status === 404),
-  },
-);
+try {
+  const outcome = await callable();
+
+  if (outcome.ok) {
+    console.log(
+      `Author: ${outcome.result.author}  Report's name: ${outcome.result.name}`,
+    );
+  }
+} catch (error) {
+  console.error(error);
+}
 ```
 
-### Example: Swallow final error
+**Log every attempt**
 
 ```typescript
-const maybeUser = createRetry(
-  async () => fetchUserOrThrow(),
-  {
-    maxRetries: 2,
-    onError: () => {
-      // resolve to undefined instead of throwing
-    },
-  },
-);
+const callable = createRetry({
+  input: async () => {
+    const report = await findReport("/path/to/reports/folder/", "1");
 
-const user = await maybeUser();
+    if (!report) {
+      throw new ReportNotFoundError("Report not found: '1'");
+    }
+
+    return { name: report.name, author: report.author };
+  },
+  maxRetries: 3,
+  onFailedAttempt: ({ attempt, nextRetryDelayMs }) => {
+    console.log(
+      `Attempt number: ${attempt}. Waiting ${nextRetryDelayMs}ms before the next run`,
+    );
+  },
+});
 ```
 
-## Reference
+**Call a function with arguments**
 
-| Export | Meaning |
-| --- | --- |
-| `createRetry(fn, options)` | Wrap `fn` with retries |
-| `InvalidRetryError` | Thrown for bad options |
+```typescript
+async function execute(command: string) { ... }
+const callable = createRetry({
+  input: async () => execute("fetch"),
+  maxRetries: 5,
+});
+
+await callable();
+```
+
+**Retry over a small set of errors**
+
+In this example, only `ConnectionTimeOutError` is retried, while `InvalidArgumentError` and `CommandNotFoundError` are ignored. If either of these errors is thrown inside `runCommand()`, `callable()` will re-throw it.
+
+```typescript
+class InvalidArgumentError extends Error {}
+class CommandNotFoundError extends Error {}
+class ConnectionTimeOutError extends Error {}
+
+async function runCommand(command: string, args: string[]) { ... }
+
+const callable = createRetry({
+  input: async () => runCommand("push", ["origin", "main"]),
+  beforeRetry: (ctx) => {
+    console.log(
+      `[${ctx.id}] Attempt #${ctx.attempt} failed: ${ctx.error.message}. ` +
+        `${ctx.retriesRemaining} retries availables`,
+    );
+  },
+  onFailedAttempt: (ctx) => {
+    console.log(`[${ctx.id}] Processing Retry #${ctx.attempt}...`);
+  },
+  afterRetry: (ctx) => {
+    console.log(
+      `[${ctx.id}] Retry #${ctx.attempt} finished. ` +
+        `${ctx.retriesRemaining} retries remaining`,
+    );
+  },
+  maxRetries: 5,
+  ignoreErrors: [InvalidArgumentError, CommandNotFoundError],
+  retryErrors: [ConnectionTimeOutError],
+});
+
+await callable();
+```
+
+
+### Credits
+
+The retry module was hugely inspired by [Resilience4j](https://resilience4j.readme.io/docs/retry) and [p-ertry](https://github.com/sindresorhus/p-retry) packages.
