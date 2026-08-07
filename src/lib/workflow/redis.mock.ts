@@ -9,6 +9,26 @@ export class MockRedisClient {
   private lists = new Map<string, string[]>();
   private sets = new Map<string, Set<string>>();
   private zsets = new Map<string, RedisZMember[]>();
+  private failCommands = new Map<string, number>();
+
+  public failNext(command: string, times = 1) {
+    const key = command.toLowerCase();
+    this.failCommands.set(key, (this.failCommands.get(key) ?? 0) + times);
+  }
+
+  private maybeFail(command: string) {
+    const remaining = this.failCommands.get(command);
+
+    if (!remaining) return;
+
+    if (remaining <= 1) {
+      this.failCommands.delete(command);
+    } else {
+      this.failCommands.set(command, remaining - 1);
+    }
+
+    throw new Error(`mock redis ${command} failed`);
+  }
 
   private isExpired(key: string) {
     const entry = this.strings.get(key);
@@ -63,6 +83,8 @@ export class MockRedisClient {
   }
 
   public async lpush(key: string, ...values: string[]) {
+    this.maybeFail("lpush");
+
     const list = this.lists.get(key) ?? [];
 
     for (const value of values) {
@@ -88,6 +110,8 @@ export class MockRedisClient {
   }
 
   public async lrange(key: string, start: number, stop: number) {
+    this.maybeFail("lrange");
+
     const list = this.lists.get(key) ?? [];
 
     let end = stop + 1;
@@ -108,6 +132,8 @@ export class MockRedisClient {
   }
 
   public async hgetall(key: string) {
+    this.maybeFail("hgetall");
+
     const hash = this.hashes.get(key);
 
     if (!hash) return {};

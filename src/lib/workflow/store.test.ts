@@ -414,4 +414,40 @@ describe("WorkflowStore", () => {
 
     expect(await store.loadHistory("exec-7")).toEqual([]);
   });
+
+  test("getMeta wraps redis read failures", async () => {
+    const redis = createRedis();
+    const store = new WorkflowStore(redis, "store-meta-fail");
+
+    redis.failNext("hgetall");
+
+    await expect(store.getMeta("exec-x")).rejects.toMatchObject({
+      name: "WorkflowStoreError",
+      message: "Unable to read meta for exec-x",
+    });
+  });
+
+  test("loadHistory wraps redis read failures", async () => {
+    const redis = createRedis();
+    const store = new WorkflowStore(redis, "store-history-fail");
+
+    redis.failNext("lrange");
+
+    await expect(store.loadHistory("exec-y")).rejects.toMatchObject({
+      name: "WorkflowStoreError",
+      message: "Unable to load history for exec-y",
+    });
+  });
+
+  test("enqueue wraps redis write failures", async () => {
+    const redis = createRedis();
+    const store = new WorkflowStore(redis, "store-enqueue-fail");
+
+    redis.failNext("lpush");
+
+    await expect(store.enqueue("exec-z")).rejects.toMatchObject({
+      name: "WorkflowStoreError",
+      message: "Unable to enqueue workflow task for exec-z",
+    });
+  });
 });

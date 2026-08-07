@@ -137,6 +137,12 @@ describe("workflow", () => {
 
     expect(execution.result).toBe(43);
     expect(execution.steps.map((s) => s.name)).toEqual(["double", "add"]);
+    expect(Number.isFinite(execution.completedAt)).toBe(true);
+
+    for (const step of execution.steps) {
+      expect(Number.isFinite(step.completedAt)).toBe(true);
+    }
+
     expect(calls).toEqual(["double", "add"]);
 
     await stop(wf);
@@ -2423,6 +2429,39 @@ describe("workflow", () => {
       await waitStatus(wf, executionId, "completed");
 
       expect(onRetryCalls).toBe(0);
+
+      await stop(wf);
+    });
+
+    test("reports default backoff delay in onRetry context", async () => {
+      const redis = createRedis();
+      const retryDelays: number[] = [];
+
+      const wf = defineWorkflow({
+        name: `default-backoff-${crypto.randomUUID()}`,
+        redis,
+        pollInterval: 5,
+        lockTTL: 40,
+        retries: 3,
+        hooks: {
+          onRetry: (context) => {
+            retryDelays.push(context.nextRetryDelayMs);
+          },
+        },
+        handler: async ({ step }) => {
+          await step("flaky", async () => {
+            throw new Error("fail");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+
+      await waitFor(() => retryDelays.length > 0);
+      await wf.cancel(executionId);
+      await waitStatus(wf, executionId, "cancelled");
+
+      expect(retryDelays[0]).toBe(1000);
 
       await stop(wf);
     });
