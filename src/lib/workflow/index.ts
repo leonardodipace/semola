@@ -43,11 +43,17 @@ export const listWorkflows = async (
   const statuses = toFilter(options?.status);
   const results: WorkflowListItem[] = [];
 
+  let match = "workflow:*:meta:*";
+
+  if (typeof options?.name === "string") {
+    match = `workflow:${options.name}:meta:*`;
+  }
+
   let cursor = "0";
 
   do {
     const [scanError, scanned] = await mightThrow(
-      redis.scan(cursor, "MATCH", "workflow:*:meta:*", "COUNT", 100),
+      redis.scan(cursor, "MATCH", match, "COUNT", 100),
     );
 
     if (scanError) {
@@ -344,7 +350,7 @@ export const defineWorkflow = <TInput, TResult = void>(
     return {
       status: meta.status as WorkflowStatus,
       executionId,
-      updatedAt: now,
+      updatedAt: Number(meta.updatedAt),
       cancelledAt: optionalTimestamp(meta.cancelledAt),
       createdAt: Number(meta.createdAt),
     };

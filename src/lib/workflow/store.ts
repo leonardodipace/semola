@@ -16,34 +16,34 @@ import type {
   WorkflowMeta,
 } from "./types.js";
 
-const RELEASE_IF_OWNER =
+export const RELEASE_IF_OWNER =
   "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end";
 
-const EXTEND_IF_OWNER =
+export const EXTEND_IF_OWNER =
   "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('PEXPIRE', KEYS[1], ARGV[2]) else return 0 end";
 
-const CLAIM_OR_REOWN_PARTITION =
+export const CLAIM_OR_REOWN_PARTITION =
   "if redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2], 'NX') then return 1 end if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('PEXPIRE', KEYS[1], ARGV[2]) return 1 end return 0";
 
-const CLAIM_DUE_TIMER =
+export const CLAIM_DUE_TIMER =
   "local m=redis.call('ZRANGEBYSCORE',KEYS[1],0,ARGV[1],'LIMIT',0,1) if #m==0 then return false end redis.call('ZREM',KEYS[1],m[1]) return m[1]";
 
-const CREATE_META_AND_ACTIVE =
+export const CREATE_META_AND_ACTIVE =
   "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end redis.call('HSET', KEYS[1], unpack(ARGV, 2)) redis.call('SADD', KEYS[2], ARGV[1]) return 1";
 
-const UPDATE_META_AND_ACTIVE =
+export const UPDATE_META_AND_ACTIVE =
   "redis.call('HSET', KEYS[1], unpack(ARGV, 2)) redis.call('SADD', KEYS[2], ARGV[1]) return 1";
 
-const SCHEDULE_TIMER_IF_ABSENT =
+export const SCHEDULE_TIMER_IF_ABSENT =
   "if redis.call('ZSCORE', KEYS[1], ARGV[2]) ~= false then return 0 end redis.call('ZADD', KEYS[1], ARGV[1], ARGV[2]) return 1";
 
-const APPEND_IF_LEASE =
+export const APPEND_IF_LEASE =
   "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end for i = 2, #ARGV do redis.call('RPUSH', KEYS[2], ARGV[i]) end return 1";
 
-const HSET_IF_LEASE =
+export const HSET_IF_LEASE =
   "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('HSET', KEYS[2], unpack(ARGV, 2)) return 1";
 
-const keys = {
+export const keys = {
   history: (name: string, executionId: string) =>
     `workflow:${name}:history:${executionId}`,
   meta: (name: string, executionId: string) =>

@@ -1217,11 +1217,11 @@ describe("workflow", () => {
       "",
       "cancelledAt",
       "",
-      "steps",
-      "[]",
       "partitionKey",
       "",
       "partitionSlot",
+      "",
+      "concurrencySlot",
       "",
     );
     await redis.sadd(`workflow:${name}:active`, executionId);
@@ -1288,11 +1288,11 @@ describe("workflow", () => {
       "",
       "cancelledAt",
       "",
-      "steps",
-      "[]",
       "partitionKey",
       "",
       "partitionSlot",
+      "",
+      "concurrencySlot",
       "",
     );
 
@@ -1431,11 +1431,11 @@ describe("workflow", () => {
       "",
       "cancelledAt",
       "",
-      "steps",
-      "[]",
       "partitionKey",
       "",
       "partitionSlot",
+      "",
+      "concurrencySlot",
       "",
     );
 

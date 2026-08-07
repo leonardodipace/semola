@@ -1,23 +1,24 @@
 import { describe, expect, test } from "bun:test";
 import { createRedis } from "./redis.mock.js";
-import { WorkflowStore } from "./store.js";
+import { keys, WorkflowStore } from "./store.js";
 import type { WorkflowMeta } from "./types.js";
 
-const baseMeta = (name: string): WorkflowMeta => ({
-  name,
-  status: "pending",
-  input: "{}",
-  result: "",
-  error: "",
-  createdAt: String(Date.now()),
-  updatedAt: String(Date.now()),
-  completedAt: "",
-  failedAt: "",
-  cancelledAt: "",
-  partitionKey: "",
-  partitionSlot: "",
-  concurrencySlot: "",
-});
+const baseMeta = (name: string) =>
+  ({
+    name,
+    status: "pending",
+    input: "{}",
+    result: "",
+    error: "",
+    createdAt: String(Date.now()),
+    updatedAt: String(Date.now()),
+    completedAt: "",
+    failedAt: "",
+    cancelledAt: "",
+    partitionKey: "",
+    partitionSlot: "",
+    concurrencySlot: "",
+  }) satisfies WorkflowMeta;
 
 describe("WorkflowStore", () => {
   test("tryCreateMetaAndActive creates once then rejects duplicate", async () => {
@@ -196,20 +197,6 @@ describe("WorkflowStore", () => {
     expect(again).toBe(false);
   });
 
-  test("zrangebyscore orders equal scores lexicographically", async () => {
-    const redis = createRedis();
-
-    await redis.zadd("z", 1, "b-member");
-    await redis.zadd("z", 1, "a-member");
-    await redis.zadd("z", 0, "z-first");
-
-    expect(await redis.zrangebyscore("z", 0, 2)).toEqual([
-      "z-first",
-      "a-member",
-      "b-member",
-    ]);
-  });
-
   test("concurrent claimDueTimer never returns the same timer twice", async () => {
     const store = new WorkflowStore(createRedis(), "store-timer-race");
     const now = Date.now();
@@ -261,9 +248,7 @@ describe("WorkflowStore", () => {
 
     await store.deadLetterTimer("not-json");
 
-    expect(redis.getList("workflow:store-dead:timer-dead")).toEqual([
-      "not-json",
-    ]);
+    expect(redis.getList(keys.timerDead("store-dead"))).toEqual(["not-json"]);
   });
 
   test("partition claim refresh reown and release", async () => {

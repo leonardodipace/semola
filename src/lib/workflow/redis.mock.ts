@@ -1,3 +1,14 @@
+import {
+  APPEND_IF_LEASE,
+  CLAIM_DUE_TIMER,
+  CLAIM_OR_REOWN_PARTITION,
+  CREATE_META_AND_ACTIVE,
+  EXTEND_IF_OWNER,
+  HSET_IF_LEASE,
+  RELEASE_IF_OWNER,
+  SCHEDULE_TIMER_IF_ABSENT,
+  UPDATE_META_AND_ACTIVE,
+} from "./store.js";
 import type { RedisZMember } from "./types.js";
 
 export class MockRedisClient {
@@ -46,6 +57,8 @@ export class MockRedisClient {
   }
 
   public async get(key: string) {
+    this.maybeFail("get");
+
     return this.getSync(key);
   }
 
@@ -56,18 +69,26 @@ export class MockRedisClient {
     ttl?: string | number,
     flag?: string,
   ) {
+    this.maybeFail("set");
+
     return this.setSync(key, value, mode, ttl, flag);
   }
 
   public async del(...keys: string[]) {
+    this.maybeFail("del");
+
     return this.delSync(...keys);
   }
 
   public async pexpire(key: string, ttlMs: number) {
+    this.maybeFail("pexpire");
+
     return this.pexpireSync(key, ttlMs);
   }
 
   public async pttl(key: string) {
+    this.maybeFail("pttl");
+
     const entry = this.strings.get(key);
 
     if (!entry) return -2;
@@ -96,10 +117,14 @@ export class MockRedisClient {
   }
 
   public async rpush(key: string, ...values: string[]) {
+    this.maybeFail("rpush");
+
     return this.rpushSync(key, ...values);
   }
 
   public async rpop(key: string) {
+    this.maybeFail("rpop");
+
     const list = this.lists.get(key);
 
     if (!list) return null;
@@ -124,10 +149,14 @@ export class MockRedisClient {
   }
 
   public async hset(key: string, ...fieldValues: string[]) {
+    this.maybeFail("hset");
+
     return this.hsetSync(key, fieldValues);
   }
 
   public async hget(key: string, field: string) {
+    this.maybeFail("hget");
+
     return this.hashes.get(key)?.get(field) ?? null;
   }
 
@@ -145,6 +174,8 @@ export class MockRedisClient {
     cursor: string | number,
     ...options: (string | number)[]
   ): Promise<[string, string[]]> {
+    this.maybeFail("scan");
+
     // ponytail: one-shot scan; real Redis paginates
     if (String(cursor) !== "0") return ["0", []];
 
@@ -158,10 +189,14 @@ export class MockRedisClient {
   }
 
   public async sadd(key: string, ...members: string[]) {
+    this.maybeFail("sadd");
+
     return this.saddSync(key, ...members);
   }
 
   public async srem(key: string, ...members: string[]) {
+    this.maybeFail("srem");
+
     const set = this.sets.get(key);
 
     if (!set) return 0;
@@ -176,19 +211,27 @@ export class MockRedisClient {
   }
 
   public async smembers(key: string) {
+    this.maybeFail("smembers");
+
     return [...(this.sets.get(key) ?? [])];
   }
 
   public async zadd(key: string, score: number, member: string) {
+    this.maybeFail("zadd");
+
     this.zaddSync(key, score, member);
     return 1;
   }
 
   public async zrangebyscore(key: string, min: number, max: number) {
+    this.maybeFail("zrangebyscore");
+
     return this.zrangebyscoreSync(key, min, max);
   }
 
   public async zrem(key: string, ...members: string[]) {
+    this.maybeFail("zrem");
+
     return this.zremSync(key, members);
   }
 
@@ -346,6 +389,8 @@ export class MockRedisClient {
   }
 
   public async send(command: string, args: string[]) {
+    this.maybeFail("send");
+
     if (command === "RPUSH") {
       const [key, ...values] = args;
 
@@ -384,18 +429,18 @@ export class MockRedisClient {
     const key = keyArgs[0] ?? "";
     const token = argv[0] ?? "";
 
-    if (script.includes("ZRANGEBYSCORE")) {
+    if (script === CLAIM_DUE_TIMER) {
       const now = Number(argv[0]);
       const members = this.zrangebyscoreSync(key, 0, now);
       const member = members[0];
 
-      if (!member) return false;
+      if (!member) return null;
 
       this.zremSync(key, [member]);
       return member;
     }
 
-    if (script.includes("ZSCORE")) {
+    if (script === SCHEDULE_TIMER_IF_ABSENT) {
       const fireAt = Number(argv[0]);
       const member = argv[1] ?? "";
       const zset = this.zsets.get(key) ?? [];
@@ -406,7 +451,7 @@ export class MockRedisClient {
       return 1;
     }
 
-    if (script.includes("SADD") && script.includes("EXISTS")) {
+    if (script === CREATE_META_AND_ACTIVE) {
       const metaKey = keyArgs[0] ?? "";
       const activeKey = keyArgs[1] ?? "";
       const executionId = argv[0] ?? "";
@@ -418,7 +463,7 @@ export class MockRedisClient {
       return 1;
     }
 
-    if (script.includes("SADD") && script.includes("HSET")) {
+    if (script === UPDATE_META_AND_ACTIVE) {
       const metaKey = keyArgs[0] ?? "";
       const activeKey = keyArgs[1] ?? "";
       const executionId = argv[0] ?? "";
@@ -428,14 +473,7 @@ export class MockRedisClient {
       return 1;
     }
 
-    if (script.includes("EXISTS")) {
-      if (this.hashes.has(key)) return 0;
-
-      this.hsetSync(key, argv);
-      return 1;
-    }
-
-    if (script.includes("RPUSH")) {
+    if (script === APPEND_IF_LEASE) {
       const historyKey = keyArgs[1] ?? "";
       const current = this.getSync(key);
 
@@ -445,7 +483,7 @@ export class MockRedisClient {
       return 1;
     }
 
-    if (script.includes("HSET") && script.includes("GET")) {
+    if (script === HSET_IF_LEASE) {
       const metaKey = keyArgs[1] ?? "";
       const current = this.getSync(key);
 
@@ -455,7 +493,7 @@ export class MockRedisClient {
       return 1;
     }
 
-    if (script.includes("SET") && script.includes("NX")) {
+    if (script === CLAIM_OR_REOWN_PARTITION) {
       const ttlMs = Number(argv[1]);
       const owned = this.getSync(key);
 
@@ -471,7 +509,7 @@ export class MockRedisClient {
       return 0;
     }
 
-    if (script.includes("DEL")) {
+    if (script === RELEASE_IF_OWNER) {
       const current = this.getSync(key);
 
       if (current !== token) return 0;
@@ -480,7 +518,7 @@ export class MockRedisClient {
       return 1;
     }
 
-    if (script.includes("PEXPIRE")) {
+    if (script === EXTEND_IF_OWNER) {
       const current = this.getSync(key);
 
       if (current !== token) return 0;
