@@ -1154,6 +1154,35 @@ describe("workflow", () => {
     await stop(wf);
   });
 
+  test("cancel mid-step still records completed step then cancels", async () => {
+    const redis = createRedis();
+
+    const wf = defineWorkflow({
+      name: `cancel-complete-step-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      handler: async ({ executionId, step }) => {
+        await step("finish-anyway", async () => {
+          await wf.cancel(executionId);
+          return "saved";
+        });
+
+        await step("after", async () => "should-not-run");
+
+        return "done";
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    const execution = await waitStatus(wf, executionId, "cancelled");
+
+    expect(execution.status).toBe("cancelled");
+    expect(execution.steps.map((s) => s.name)).toEqual(["finish-anyway"]);
+    expect(execution.steps.some((s) => s.name === "after")).toBe(false);
+
+    await stop(wf);
+  });
+
   test("reclaim recovers start after markActive without history", async () => {
     const redis = createRedis();
     const name = `orphan-start-${crypto.randomUUID()}`;
@@ -1803,6 +1832,88 @@ describe("workflow", () => {
       await stop(wf);
     });
 
+    test("start returns pending immediately", async () => {
+      const redis = createRedis();
+
+      const wf = defineWorkflow({
+        name: `start-pending-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        handler: async () => "done",
+      });
+
+      const started = await wf.start({}, { executionId: "pending-1" });
+
+      expect(started).toEqual({
+        executionId: "pending-1",
+        status: "pending",
+      });
+
+      await waitStatus(wf, "pending-1", "completed");
+      await stop(wf);
+    });
+
+    test("retries 0 fails on first thrown error", async () => {
+      const redis = createRedis();
+      let attempts = 0;
+
+      const wf = defineWorkflow({
+        name: `retries-zero-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("once", async () => {
+            attempts++;
+            throw new Error("no retry");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(attempts).toBe(1);
+      expect(execution.error).toBe("no retry");
+
+      await stop(wf);
+    });
+
+    test("resume rejects cancelled executions", async () => {
+      const redis = createRedis();
+
+      const wf = defineWorkflow({
+        name: `resume-cancelled-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        handler: async ({ step }) => {
+          await step("long", async ({ signal }) => {
+            await sleep(20);
+
+            if (signal.aborted) {
+              throw new NonRetryableStepError("aborted");
+            }
+
+            return "ok";
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await sleep(20);
+      await wf.cancel(executionId);
+      await waitStatus(wf, executionId, "cancelled");
+
+      await expect(wf.resume(executionId)).rejects.toMatchObject({
+        name: "WorkflowStoreError",
+        message: expect.stringContaining(
+          "only failed executions can be resumed",
+        ),
+      });
+
+      await stop(wf);
+    });
+
     test("get returns error and failedAt on failed workflow", async () => {
       const redis = createRedis();
 
@@ -1892,6 +2003,67 @@ describe("workflow", () => {
 
       expect(execution.result).toBe("done");
       expect(stepAttempts).toBe(3);
+
+      await stop(wf);
+    });
+
+    test("default retries is 3 meaning 4 total attempts", async () => {
+      const redis = createRedis();
+      let attempts = 0;
+
+      const wf = defineWorkflow({
+        name: `default-retries-${crypto.randomUUID()}`,
+        redis,
+        pollInterval: 5,
+        lockTTL: 40,
+        retryBackoff: { baseDelay: 5, multiplier: 2, maxDelay: 20 },
+        handler: async ({ step }) => {
+          await step("flaky", async () => {
+            attempts++;
+            throw new Error("always");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(attempts).toBe(4);
+      expect(execution.error).toBe("always");
+
+      await stop(wf);
+    });
+
+    test("retryBackoff maxDelay caps nextRetryDelayMs", async () => {
+      const redis = createRedis();
+      const delays: number[] = [];
+
+      const wf = defineWorkflow({
+        name: `max-delay-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 3,
+        retryBackoff: { baseDelay: 100, multiplier: 10, maxDelay: 150 },
+        hooks: {
+          onRetry: (context) => {
+            delays.push(context.nextRetryDelayMs);
+          },
+        },
+        handler: async ({ step }) => {
+          await step("flaky", async () => {
+            throw new Error("boom");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "failed");
+
+      expect(delays.length).toBe(3);
+      expect(delays.every((delay) => delay <= 150)).toBe(true);
+      expect(delays[0]).toBe(100);
+      expect(delays[1]).toBe(150);
+      expect(delays[2]).toBe(150);
 
       await stop(wf);
     });
@@ -2120,6 +2292,114 @@ describe("workflow", () => {
       await stop(wf);
     });
 
+    test("onRetry and onError hook errors do not change failure outcome", async () => {
+      const redis = createRedis();
+      let attempts = 0;
+
+      const wf = defineWorkflow({
+        name: `hook-retry-error-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 1,
+        hooks: {
+          onRetry: () => {
+            throw new Error("retry hook boom");
+          },
+          onError: () => {
+            throw new Error("error hook boom");
+          },
+        },
+        handler: async ({ step }) => {
+          await step("flaky", async () => {
+            attempts++;
+            throw new Error("step boom");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(execution.error).toBe("step boom");
+      expect(attempts).toBe(2);
+
+      await stop(wf);
+    });
+
+    test("onCancel hook errors do not change cancel outcome", async () => {
+      const redis = createRedis();
+
+      const wf = defineWorkflow({
+        name: `hook-cancel-error-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        hooks: {
+          onCancel: () => {
+            throw new Error("cancel hook boom");
+          },
+        },
+        handler: async ({ step }) => {
+          await step("long", async ({ signal }) => {
+            await sleep(20);
+
+            if (signal.aborted) {
+              throw new NonRetryableStepError("aborted");
+            }
+
+            return "ok";
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await sleep(20);
+      await wf.cancel(executionId);
+
+      const execution = await waitStatus(wf, executionId, "cancelled");
+
+      expect(execution.status).toBe("cancelled");
+
+      await stop(wf);
+    });
+
+    test("thrown NonRetryableStepError is non-retryable", async () => {
+      const redis = createRedis();
+      let attempts = 0;
+      let onRetryCalls = 0;
+      let onErrorCalls = 0;
+
+      const wf = defineWorkflow({
+        name: `throw-nonretry-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 5,
+        hooks: {
+          onRetry: () => {
+            onRetryCalls++;
+          },
+          onError: () => {
+            onErrorCalls++;
+          },
+        },
+        handler: async ({ step }) => {
+          await step("hard", async () => {
+            attempts++;
+            throw new NonRetryableStepError("hard stop");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(execution.error).toBe("hard stop");
+      expect(attempts).toBe(1);
+      expect(onRetryCalls).toBe(0);
+      expect(onErrorCalls).toBe(1);
+
+      await stop(wf);
+    });
+
     test("does not call onRetry when step succeeds on first try", async () => {
       const redis = createRedis();
       let onRetryCalls = 0;
@@ -2244,6 +2524,34 @@ describe("workflow", () => {
       await expect(wf.get(executionId)).rejects.toBeInstanceOf(
         SerializationError,
       );
+
+      await stop(wf);
+    });
+
+    test("fails when step returns circular value", async () => {
+      const redis = createRedis();
+
+      const wf = defineWorkflow({
+        name: `ser-step-err-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("circular", async () => {
+            const value: { self?: unknown } = {};
+            value.self = value;
+            return value;
+          });
+
+          return "done";
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(execution.status).toBe("failed");
+      expect(execution.error).toMatch(/serializ/i);
 
       await stop(wf);
     });
@@ -2768,6 +3076,134 @@ describe("workflow", () => {
 
       expect(byName.map((item) => item.id)).toEqual(["filter-onboard-1"]);
       expect(byStatus.map((item) => item.id)).toEqual(["filter-provision-1"]);
+    });
+
+    test("filters by name and status arrays", async () => {
+      const redis = createRedis();
+      const now = String(Date.now());
+
+      await redis.hset(
+        "workflow:arr-a:meta:arr-a-1",
+        "name",
+        "arr-a",
+        "status",
+        "pending",
+        "createdAt",
+        now,
+        "updatedAt",
+        now,
+        "completedAt",
+        "",
+        "failedAt",
+        "",
+        "cancelledAt",
+        "",
+      );
+
+      await redis.hset(
+        "workflow:arr-b:meta:arr-b-1",
+        "name",
+        "arr-b",
+        "status",
+        "running",
+        "createdAt",
+        now,
+        "updatedAt",
+        now,
+        "completedAt",
+        "",
+        "failedAt",
+        "",
+        "cancelledAt",
+        "",
+      );
+
+      await redis.hset(
+        "workflow:arr-c:meta:arr-c-1",
+        "name",
+        "arr-c",
+        "status",
+        "failed",
+        "createdAt",
+        now,
+        "updatedAt",
+        now,
+        "completedAt",
+        "",
+        "failedAt",
+        now,
+        "cancelledAt",
+        "",
+      );
+
+      const byStatus = await listWorkflows(redis, {
+        status: ["pending", "running"],
+      });
+      const byName = await listWorkflows(redis, { name: ["arr-a", "arr-c"] });
+
+      expect(byStatus.map((item) => item.id).sort()).toEqual([
+        "arr-a-1",
+        "arr-b-1",
+      ]);
+      expect(byName.map((item) => item.id).sort()).toEqual([
+        "arr-a-1",
+        "arr-c-1",
+      ]);
+    });
+
+    test("skips incomplete meta rows", async () => {
+      const redis = createRedis();
+      const now = String(Date.now());
+
+      await redis.hset(
+        "workflow:skip-ok:meta:skip-ok-1",
+        "name",
+        "skip-ok",
+        "status",
+        "completed",
+        "createdAt",
+        now,
+        "updatedAt",
+        now,
+        "completedAt",
+        now,
+        "failedAt",
+        "",
+        "cancelledAt",
+        "",
+      );
+
+      await redis.hset(
+        "workflow:skip-noname:meta:skip-noname-1",
+        "status",
+        "completed",
+        "createdAt",
+        now,
+        "updatedAt",
+        now,
+      );
+
+      await redis.hset(
+        "workflow:skip-nostatus:meta:skip-nostatus-1",
+        "name",
+        "skip-nostatus",
+        "createdAt",
+        now,
+        "updatedAt",
+        now,
+      );
+
+      await redis.hset(
+        "workflow:skip-nots:meta:skip-nots-1",
+        "name",
+        "skip-nots",
+        "status",
+        "completed",
+      );
+
+      const listed = await listWorkflows(redis);
+
+      expect(listed.map((item) => item.id)).toEqual(["skip-ok-1"]);
     });
 
     test("lists live executions started via defineWorkflow", async () => {

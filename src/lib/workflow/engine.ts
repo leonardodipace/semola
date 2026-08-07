@@ -808,7 +808,35 @@ export class WorkflowEngine<TInput, TResult> {
     if (!(await this.ownsLease(executionId, token))) return false;
 
     if (!stepError) {
-      const serialized = toJson(stepResult, `step ${stepName}`);
+      const [serializeError, serialized] = mightThrowSync(() =>
+        toJson(stepResult, `step ${stepName}`),
+      );
+
+      if (serializeError) {
+        const view = parseHistory(await this.store.loadHistory(executionId));
+
+        if (view.cancelRequested || controller.signal.aborted) {
+          await this.store.enqueue(executionId);
+          return false;
+        }
+
+        return this.handleStepFailure({
+          executionId,
+          stepId,
+          stepName,
+          attempt,
+          rawInput,
+          partitionKey,
+          partitionSlot,
+          stepError: new NonRetryableStepError(
+            serializeError instanceof Error
+              ? serializeError.message
+              : "Unable to serialize step",
+          ),
+          view,
+          token,
+        });
+      }
 
       const completed = await this.store.appendEvents({
         executionId,
