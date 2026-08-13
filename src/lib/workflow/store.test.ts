@@ -20,6 +20,12 @@ const baseMeta = (name: string) =>
     concurrencySlot: "",
   }) satisfies WorkflowMeta;
 
+const failedMeta = (name: string) => ({
+  ...baseMeta(name),
+  status: "failed" as const,
+  failedAt: String(Date.now()),
+});
+
 describe("WorkflowStore", () => {
   test("tryCreateMetaAndActive creates once then rejects duplicate", async () => {
     const redis = createRedis();
@@ -434,5 +440,180 @@ describe("WorkflowStore", () => {
       name: "WorkflowStoreError",
       message: "Unable to enqueue workflow task for exec-z",
     });
+  });
+
+  test("persistExecution removes TTL without marking active", async () => {
+    const redis = createRedis();
+    const store = new WorkflowStore(redis, "store-persist");
+    const executionId = "exec-persist";
+
+    await store.tryCreateMetaAndActive(
+      executionId,
+      failedMeta("store-persist"),
+    );
+    await store.appendEvents({
+      executionId,
+      events: [
+        {
+          type: "WorkflowStarted",
+          input: "{}",
+          partitionKey: "",
+          timestamp: 1,
+        },
+      ],
+    });
+    await store.markInactive(executionId);
+    await store.retainIfTerminal({ executionId, ttlMs: 60_000 });
+    await store.persistExecution(executionId);
+
+    expect(await redis.pttl(keys.meta("store-persist", executionId))).toBe(-1);
+    expect(await redis.pttl(keys.history("store-persist", executionId))).toBe(
+      -1,
+    );
+    expect(await store.listActive()).not.toContain(executionId);
+  });
+
+  test("retainIfTerminal without ttl does not expire", async () => {
+    const redis = createRedis();
+    const store = new WorkflowStore(redis, "store-retain-none");
+    const executionId = "exec-keep";
+
+    await store.tryCreateMetaAndActive(executionId, {
+      ...baseMeta("store-retain-none"),
+      status: "completed",
+      completedAt: String(Date.now()),
+    });
+
+    expect(
+      await store.retainIfTerminal({
+        executionId,
+        endedAt: 1,
+      }),
+    ).toBe(true);
+
+    expect(await redis.pttl(keys.meta("store-retain-none", executionId))).toBe(
+      -1,
+    );
+    expect(await store.getMeta(executionId)).not.toBeNull();
+  });
+
+  test("trimTerminal unlinks oldest executions over max", async () => {
+    const store = new WorkflowStore(createRedis(), "store-trim");
+
+    await store.tryCreateMetaAndActive("old", failedMeta("store-trim"));
+    await store.tryCreateMetaAndActive("mid", failedMeta("store-trim"));
+    await store.tryCreateMetaAndActive("new", failedMeta("store-trim"));
+
+    await store.retainIfTerminal({ executionId: "old", endedAt: 1 });
+    await store.retainIfTerminal({ executionId: "mid", endedAt: 2 });
+    await store.retainIfTerminal({ executionId: "new", endedAt: 3 });
+    await store.trimTerminal(2);
+
+    expect(await store.getMeta("old")).toBeNull();
+    expect(await store.getMeta("mid")).not.toBeNull();
+    expect(await store.getMeta("new")).not.toBeNull();
+  });
+
+  test("scheduleTimerIfAbsent after timer zset expiry reschedules", async () => {
+    const redis = createRedis();
+    const store = new WorkflowStore(redis, "store-timer-expire");
+    const task = {
+      kind: "timer" as const,
+      executionId: "exec-t",
+      timerId: "t0",
+    };
+
+    expect(await store.scheduleTimerIfAbsent(Date.now() + 1000, task)).toBe(
+      true,
+    );
+    expect(await store.scheduleTimerIfAbsent(Date.now() + 2000, task)).toBe(
+      false,
+    );
+
+    await redis.pexpire(keys.timers("store-timer-expire"), 0);
+
+    expect(await store.scheduleTimerIfAbsent(Date.now() + 1000, task)).toBe(
+      true,
+    );
+  });
+
+  test("scanMetaIds keeps id when workflow name contains :meta:", async () => {
+    const name = "has:meta:in-name";
+    const store = new WorkflowStore(createRedis(), name);
+
+    await store.tryCreateMetaAndActive("exec-1", baseMeta(name));
+
+    const scanned = await store.scanMetaIds("0");
+
+    expect(scanned.ids).toEqual(["exec-1"]);
+  });
+
+  test("retainIfTerminal skips after persistExecution leaves terminal status", async () => {
+    const redis = createRedis();
+    const store = new WorkflowStore(redis, "store-retain-race");
+    const executionId = "exec-race";
+
+    await store.tryCreateMetaAndActive(
+      executionId,
+      failedMeta("store-retain-race"),
+    );
+    await store.appendEvents({
+      executionId,
+      events: [
+        {
+          type: "WorkflowStarted",
+          input: "{}",
+          partitionKey: "",
+          timestamp: 1,
+        },
+      ],
+    });
+
+    expect(await store.persistExecution(executionId)).toBe(true);
+    expect(
+      await store.retainIfTerminal({
+        executionId,
+        ttlMs: 0,
+      }),
+    ).toBe(false);
+
+    expect(await store.getMeta(executionId)).not.toBeNull();
+    expect((await store.getMeta(executionId))?.status).toBe("pending");
+  });
+
+  test("retainIfTerminal ttl 0 unlinks before persistExecution", async () => {
+    const store = new WorkflowStore(createRedis(), "store-retain-first");
+    const executionId = "exec-gone";
+
+    await store.tryCreateMetaAndActive(
+      executionId,
+      failedMeta("store-retain-first"),
+    );
+
+    expect(
+      await store.retainIfTerminal({
+        executionId,
+        ttlMs: 0,
+      }),
+    ).toBe(true);
+
+    expect(await store.persistExecution(executionId)).toBe(false);
+    expect(await store.getMeta(executionId)).toBeNull();
+  });
+
+  test("trim cannot delete execution after persistExecution removes terminal member", async () => {
+    const store = new WorkflowStore(createRedis(), "store-trim-race");
+
+    await store.tryCreateMetaAndActive("old", failedMeta("store-trim-race"));
+    await store.tryCreateMetaAndActive("newer", failedMeta("store-trim-race"));
+    await store.retainIfTerminal({ executionId: "old", endedAt: 1 });
+    await store.retainIfTerminal({ executionId: "newer", endedAt: 2 });
+
+    expect(await store.persistExecution("old")).toBe(true);
+    await store.trimTerminal(1);
+
+    expect(await store.getMeta("old")).not.toBeNull();
+    expect((await store.getMeta("old"))?.status).toBe("pending");
+    expect(await store.getMeta("newer")).not.toBeNull();
   });
 });

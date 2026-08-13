@@ -43,6 +43,15 @@ export const APPEND_IF_LEASE =
 export const HSET_IF_LEASE =
   "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('HSET', KEYS[2], unpack(ARGV, 2)) return 1";
 
+export const PERSIST_EXECUTION =
+  "if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end redis.call('PERSIST', KEYS[1]) redis.call('PERSIST', KEYS[2]) redis.call('ZREM', KEYS[3], ARGV[1]) redis.call('HSET', KEYS[1], 'status', 'pending', 'error', '', 'failedAt', '', 'updatedAt', ARGV[2]) return 1";
+
+export const RETAIN_IF_TERMINAL =
+  "local s=redis.call('HGET', KEYS[1], 'status') if s~='completed' and s~='failed' and s~='cancelled' then return 0 end local ttl=tonumber(ARGV[2]) if ttl then local pttl=redis.call('PTTL', KEYS[1]) if pttl<=0 then if ttl<=0 then redis.call('UNLINK', KEYS[1], KEYS[2], KEYS[3]) redis.call('SREM', KEYS[4], ARGV[1]) redis.call('ZREM', KEYS[5], ARGV[1]) return 1 end redis.call('PEXPIRE', KEYS[1], ARGV[2]) redis.call('PEXPIRE', KEYS[2], ARGV[2]) end end if ARGV[3]~='' then redis.call('ZADD', KEYS[5], ARGV[3], ARGV[1]) end return 1";
+
+export const TRIM_IF_MEMBER =
+  "if redis.call('ZREM', KEYS[1], ARGV[1]) == 0 then return 0 end redis.call('UNLINK', KEYS[2], KEYS[3], KEYS[4]) redis.call('SREM', KEYS[5], ARGV[1]) return 1";
+
 export const keys = {
   history: (name: string, executionId: string) =>
     `workflow:${name}:history:${executionId}`,
@@ -54,6 +63,7 @@ export const keys = {
   timers: (name: string) => `workflow:${name}:timers`,
   timerDead: (name: string) => `workflow:${name}:timer-dead`,
   active: (name: string) => `workflow:${name}:active`,
+  terminal: (name: string) => `workflow:${name}:terminal`,
   partition: (input: PartitionKeyInput) => {
     const { name, partitionKey, slot } = input;
 
@@ -537,5 +547,138 @@ export class WorkflowStore {
     }
 
     return true;
+  }
+
+  public async persistExecution(executionId: string) {
+    const [error, result] = await mightThrow(
+      this.redis.send("EVAL", [
+        PERSIST_EXECUTION,
+        "3",
+        keys.meta(this.name, executionId),
+        keys.history(this.name, executionId),
+        keys.terminal(this.name),
+        executionId,
+        String(Date.now()),
+      ]),
+    );
+
+    if (error) {
+      throw new WorkflowStoreError(
+        `Unable to persist execution ${executionId}`,
+      );
+    }
+
+    return Number(result) === 1;
+  }
+
+  public async retainIfTerminal(input: {
+    executionId: string;
+    ttlMs?: number;
+    endedAt?: number;
+  }) {
+    const { executionId, ttlMs, endedAt } = input;
+    const ended = endedAt === undefined ? "" : String(endedAt);
+    const ttl = ttlMs === undefined ? "" : String(ttlMs);
+
+    const [error, result] = await mightThrow(
+      this.redis.send("EVAL", [
+        RETAIN_IF_TERMINAL,
+        "5",
+        keys.meta(this.name, executionId),
+        keys.history(this.name, executionId),
+        keys.lease(this.name, executionId),
+        keys.active(this.name),
+        keys.terminal(this.name),
+        executionId,
+        ttl,
+        ended,
+      ]),
+    );
+
+    if (error) {
+      throw new WorkflowStoreError(`Unable to retain execution ${executionId}`);
+    }
+
+    return Number(result) === 1;
+  }
+
+  public async trimTerminal(max: number) {
+    const terminalKey = keys.terminal(this.name);
+    const [cardError, card] = await mightThrow(
+      this.redis.send("ZCARD", [terminalKey]),
+    );
+
+    if (cardError) {
+      throw new WorkflowStoreError("Unable to count terminal executions");
+    }
+
+    const extra = Number(card) - max;
+
+    if (extra <= 0) return;
+
+    const [rangeError, oldest] = await mightThrow(
+      this.redis.send("ZRANGE", [terminalKey, "0", String(extra - 1)]),
+    );
+
+    if (rangeError) {
+      throw new WorkflowStoreError("Unable to trim terminal executions");
+    }
+
+    for (const executionId of oldest ?? []) {
+      const id = String(executionId);
+
+      const [trimError] = await mightThrow(
+        this.redis.send("EVAL", [
+          TRIM_IF_MEMBER,
+          "5",
+          terminalKey,
+          keys.meta(this.name, id),
+          keys.history(this.name, id),
+          keys.lease(this.name, id),
+          keys.active(this.name),
+          id,
+        ]),
+      );
+
+      if (trimError) {
+        throw new WorkflowStoreError("Unable to trim terminal executions");
+      }
+    }
+  }
+
+  public async scanMetaIds(cursor: string) {
+    const [error, scanned] = await mightThrow(
+      this.redis.scan(
+        cursor,
+        "MATCH",
+        `workflow:${this.name}:meta:*`,
+        "COUNT",
+        50,
+      ),
+    );
+
+    if (error) {
+      throw new WorkflowStoreError("Unable to scan workflow executions");
+    }
+
+    if (!scanned) {
+      throw new WorkflowStoreError("Unable to scan workflow executions");
+    }
+
+    const [next, found] = scanned;
+    const prefix = `workflow:${this.name}:meta:`;
+    const ids: string[] = [];
+
+    for (const key of found) {
+      if (!key.startsWith(prefix)) continue;
+
+      const id = key.slice(prefix.length);
+
+      if (!id) continue;
+
+      ids.push(id);
+    }
+
+    return { cursor: next, ids };
   }
 }
