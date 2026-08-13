@@ -63,7 +63,7 @@ If a replica dies mid-run, lease expiry lets another replica (or the same proces
 
 History and status writes are lease-fenced (Redis compare-and-append / compare-and-set against the lease token). A writer that loses the lease cannot append; the new owner continues from history. Client paths (`start` / cancel / resume) append without a lease.
 
-`resume(executionId)` is only for **failed** executions: it appends a resume event, re-schedules failed steps from history, and re-queues the workflow. Crash recovery is automatic via leases.
+`resume(executionId)` re-queues a **failed** execution: persist keys, append a resume event, re-schedule failed steps, then mark active. Also finishes an interrupted resume (`pending` after persist, or after resume events but before active). A later failure needs a new resume event even if an older `WorkflowResumed` is already in history. Crash recovery is automatic via leases.
 
 ## API
 

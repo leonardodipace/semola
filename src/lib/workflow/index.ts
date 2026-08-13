@@ -265,7 +265,9 @@ export const defineWorkflow = <TInput, TResult = void>(
 
     const now = Date.now();
 
-    if (!hasResume) {
+    // A prior resume may already be in history. Append only if this
+    // failure is not yet resumed (`parseHistory` still has terminal failed).
+    if (view.terminal?.kind === "failed") {
       const retryEvents = [];
 
       for (const [stepId, state] of view.steps) {

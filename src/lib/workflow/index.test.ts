@@ -3609,6 +3609,51 @@ describe("workflow", () => {
       await stop(wf);
     });
 
+    test("resume after a later failure appends a new resume event", async () => {
+      const redis = createRedis();
+      const name = `retain-resume-again-${crypto.randomUUID()}`;
+      let attempts = 0;
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retries: 0,
+        retentionTTL: 60_000,
+        handler: async ({ step }) => {
+          const value = await step("once", async () => {
+            attempts++;
+
+            if (attempts < 3) throw new Error("boom");
+
+            return "ok";
+          });
+
+          return value;
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "failed");
+
+      await wf.resume(executionId);
+      await waitStatus(wf, executionId, "failed");
+
+      const store = new WorkflowStore(redis, name);
+
+      expect(await store.persistExecution(executionId)).toBe(true);
+      expect((await wf.get(executionId)).status).toBe("pending");
+
+      await wf.resume(executionId);
+
+      const execution = await waitStatus(wf, executionId, "completed");
+
+      expect(execution.result).toBe("ok");
+      expect(attempts).toBe(3);
+
+      await stop(wf);
+    });
+
     test("persist does not mark active so reclaim cannot re-fail mid-resume", async () => {
       const redis = createRedis();
       const name = `retain-reclaim-${crypto.randomUUID()}`;
