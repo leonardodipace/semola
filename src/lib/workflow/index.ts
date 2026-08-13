@@ -81,7 +81,9 @@ export const listWorkflows = async (
         );
       }
 
-      if (!meta?.name) continue;
+      if (!meta) continue;
+      if (Object.keys(meta).length === 0) continue;
+      if (!meta.name) continue;
       if (!meta.status) continue;
       if (names && !names.has(meta.name)) continue;
       if (statuses && !statuses.has(meta.status as WorkflowStatus)) continue;
@@ -229,6 +231,8 @@ export const defineWorkflow = <TInput, TResult = void>(
         `Workflow execution ${executionId} is ${meta.status}, only failed executions can be resumed`,
       );
     }
+
+    await store.persistExecution(executionId);
 
     const now = Date.now();
     const view = parseHistory(await store.loadHistory(executionId));

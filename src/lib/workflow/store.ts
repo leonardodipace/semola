@@ -43,6 +43,9 @@ export const APPEND_IF_LEASE =
 export const HSET_IF_LEASE =
   "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('HSET', KEYS[2], unpack(ARGV, 2)) return 1";
 
+export const PEXPIRE_BOTH =
+  "redis.call('PEXPIRE', KEYS[1], ARGV[1]) redis.call('PEXPIRE', KEYS[2], ARGV[1]) return 1";
+
 export const keys = {
   history: (name: string, executionId: string) =>
     `workflow:${name}:history:${executionId}`,
@@ -54,6 +57,7 @@ export const keys = {
   timers: (name: string) => `workflow:${name}:timers`,
   timerDead: (name: string) => `workflow:${name}:timer-dead`,
   active: (name: string) => `workflow:${name}:active`,
+  terminal: (name: string) => `workflow:${name}:terminal`,
   partition: (input: PartitionKeyInput) => {
     const { name, partitionKey, slot } = input;
 
@@ -537,5 +541,166 @@ export class WorkflowStore {
     }
 
     return true;
+  }
+
+  public async persistExecution(executionId: string) {
+    const [metaError] = await mightThrow(
+      this.redis.send("PERSIST", [keys.meta(this.name, executionId)]),
+    );
+
+    if (metaError) {
+      throw new WorkflowStoreError(
+        `Unable to persist execution ${executionId}`,
+      );
+    }
+
+    const [historyError] = await mightThrow(
+      this.redis.send("PERSIST", [keys.history(this.name, executionId)]),
+    );
+
+    if (historyError) {
+      throw new WorkflowStoreError(
+        `Unable to persist execution ${executionId}`,
+      );
+    }
+
+    const [zremError] = await mightThrow(
+      this.redis.zrem(keys.terminal(this.name), executionId),
+    );
+
+    if (zremError) {
+      throw new WorkflowStoreError(
+        `Unable to persist execution ${executionId}`,
+      );
+    }
+  }
+
+  public async expireExecution(executionId: string, ttlMs: number) {
+    if (ttlMs <= 0) {
+      await this.deleteExecution(executionId);
+      return;
+    }
+
+    const [error] = await mightThrow(
+      this.redis.send("EVAL", [
+        PEXPIRE_BOTH,
+        "2",
+        keys.meta(this.name, executionId),
+        keys.history(this.name, executionId),
+        String(ttlMs),
+      ]),
+    );
+
+    if (error) {
+      throw new WorkflowStoreError(`Unable to expire execution ${executionId}`);
+    }
+  }
+
+  public async pttlMeta(executionId: string) {
+    const [error, ttl] = await mightThrow(
+      this.redis.send("PTTL", [keys.meta(this.name, executionId)]),
+    );
+
+    if (error) {
+      throw new WorkflowStoreError(`Unable to read TTL for ${executionId}`);
+    }
+
+    return Number(ttl);
+  }
+
+  public async rememberTerminal(executionId: string, endedAt: number) {
+    const [error] = await mightThrow(
+      this.redis.zadd(keys.terminal(this.name), endedAt, executionId),
+    );
+
+    if (error) {
+      throw new WorkflowStoreError(
+        `Unable to record terminal execution ${executionId}`,
+      );
+    }
+  }
+
+  public async trimTerminal(max: number) {
+    const terminalKey = keys.terminal(this.name);
+    const [cardError, card] = await mightThrow(
+      this.redis.send("ZCARD", [terminalKey]),
+    );
+
+    if (cardError) {
+      throw new WorkflowStoreError("Unable to count terminal executions");
+    }
+
+    const extra = Number(card) - max;
+
+    if (extra <= 0) return;
+
+    const [rangeError, oldest] = await mightThrow(
+      this.redis.send("ZRANGE", [terminalKey, "0", String(extra - 1)]),
+    );
+
+    if (rangeError) {
+      throw new WorkflowStoreError("Unable to trim terminal executions");
+    }
+
+    for (const executionId of oldest ?? []) {
+      await this.deleteExecution(String(executionId));
+    }
+  }
+
+  public async scanMetaIds(cursor: string) {
+    const [error, scanned] = await mightThrow(
+      this.redis.scan(
+        cursor,
+        "MATCH",
+        `workflow:${this.name}:meta:*`,
+        "COUNT",
+        50,
+      ),
+    );
+
+    if (error) {
+      throw new WorkflowStoreError("Unable to scan workflow executions");
+    }
+
+    if (!scanned) {
+      throw new WorkflowStoreError("Unable to scan workflow executions");
+    }
+
+    const [next, found] = scanned;
+    const ids: string[] = [];
+
+    for (const key of found) {
+      const id = key.split(":meta:")[1];
+
+      if (!id) continue;
+
+      ids.push(id);
+    }
+
+    return { cursor: next, ids };
+  }
+
+  public async deleteExecution(executionId: string) {
+    const [unlinkError] = await mightThrow(
+      this.redis.send("UNLINK", [
+        keys.meta(this.name, executionId),
+        keys.history(this.name, executionId),
+        keys.lease(this.name, executionId),
+      ]),
+    );
+
+    if (unlinkError) {
+      throw new WorkflowStoreError(`Unable to delete execution ${executionId}`);
+    }
+
+    await this.markInactive(executionId);
+
+    const [zremError] = await mightThrow(
+      this.redis.zrem(keys.terminal(this.name), executionId),
+    );
+
+    if (zremError) {
+      throw new WorkflowStoreError(`Unable to delete execution ${executionId}`);
+    }
   }
 }

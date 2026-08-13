@@ -435,4 +435,111 @@ describe("WorkflowStore", () => {
       message: "Unable to enqueue workflow task for exec-z",
     });
   });
+
+  test("expireExecution sets TTL on meta and history", async () => {
+    const redis = createRedis();
+    const store = new WorkflowStore(redis, "store-expire");
+    const executionId = "exec-ttl";
+
+    await store.tryCreateMetaAndActive(executionId, baseMeta("store-expire"));
+    await store.appendEvents({
+      executionId,
+      events: [
+        {
+          type: "WorkflowStarted",
+          input: "{}",
+          partitionKey: "",
+          timestamp: 1,
+        },
+      ],
+    });
+
+    await store.expireExecution(executionId, 60_000);
+
+    expect(
+      await redis.pttl(keys.meta("store-expire", executionId)),
+    ).toBeGreaterThan(0);
+    expect(
+      await redis.pttl(keys.history("store-expire", executionId)),
+    ).toBeGreaterThan(0);
+    expect(await redis.pttl(keys.lease("store-expire", executionId))).toBe(-2);
+  });
+
+  test("expireExecution with ttl 0 unlinks meta history and lease", async () => {
+    const redis = createRedis();
+    const store = new WorkflowStore(redis, "store-expire-0");
+    const executionId = "exec-gone";
+
+    await store.tryCreateMetaAndActive(executionId, baseMeta("store-expire-0"));
+    await store.appendEvents({
+      executionId,
+      events: [
+        {
+          type: "WorkflowStarted",
+          input: "{}",
+          partitionKey: "",
+          timestamp: 1,
+        },
+      ],
+    });
+    await store.acquireLease({
+      executionId,
+      token: "t1",
+      ttlMs: 60_000,
+    });
+
+    await store.expireExecution(executionId, 0);
+
+    expect(await redis.pttl(keys.meta("store-expire-0", executionId))).toBe(-2);
+    expect(await redis.pttl(keys.history("store-expire-0", executionId))).toBe(
+      -2,
+    );
+    expect(await redis.pttl(keys.lease("store-expire-0", executionId))).toBe(
+      -2,
+    );
+    expect(await store.listActive()).not.toContain(executionId);
+  });
+
+  test("persistExecution removes TTL so resume can keep keys", async () => {
+    const redis = createRedis();
+    const store = new WorkflowStore(redis, "store-persist");
+    const executionId = "exec-persist";
+
+    await store.tryCreateMetaAndActive(executionId, baseMeta("store-persist"));
+    await store.appendEvents({
+      executionId,
+      events: [
+        {
+          type: "WorkflowStarted",
+          input: "{}",
+          partitionKey: "",
+          timestamp: 1,
+        },
+      ],
+    });
+    await store.expireExecution(executionId, 60_000);
+    await store.persistExecution(executionId);
+
+    expect(await redis.pttl(keys.meta("store-persist", executionId))).toBe(-1);
+    expect(await redis.pttl(keys.history("store-persist", executionId))).toBe(
+      -1,
+    );
+  });
+
+  test("trimTerminal unlinks oldest executions over max", async () => {
+    const store = new WorkflowStore(createRedis(), "store-trim");
+
+    await store.tryCreateMetaAndActive("old", baseMeta("store-trim"));
+    await store.tryCreateMetaAndActive("mid", baseMeta("store-trim"));
+    await store.tryCreateMetaAndActive("new", baseMeta("store-trim"));
+
+    await store.rememberTerminal("old", 1);
+    await store.rememberTerminal("mid", 2);
+    await store.rememberTerminal("new", 3);
+    await store.trimTerminal(2);
+
+    expect(await store.getMeta("old")).toBeNull();
+    expect(await store.getMeta("mid")).not.toBeNull();
+    expect(await store.getMeta("new")).not.toBeNull();
+  });
 });

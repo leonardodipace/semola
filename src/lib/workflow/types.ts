@@ -105,6 +105,8 @@ export type WorkflowOptions<TInput, TResult> = {
   retryBackoff?: WorkflowRetryBackoff;
   hooks?: WorkflowHooks<TInput, TResult>;
   lockTTL?: number;
+  retentionTTL?: number;
+  retentionMax?: number;
   concurrency?: number;
   partitionBy?: (input: TInput) => string;
   pollInterval?: number;
