@@ -518,12 +518,14 @@ describe("WorkflowStore", () => {
       ],
     });
     await store.expireExecution(executionId, 60_000);
+    await store.markInactive(executionId);
     await store.persistExecution(executionId);
 
     expect(await redis.pttl(keys.meta("store-persist", executionId))).toBe(-1);
     expect(await redis.pttl(keys.history("store-persist", executionId))).toBe(
       -1,
     );
+    expect(await store.listActive()).toContain(executionId);
   });
 
   test("retainIfTerminal without ttl does not expire", async () => {

@@ -265,8 +265,6 @@ export const defineWorkflow = <TInput, TResult = void>(
       ],
     });
 
-    // Atomic pending + active: crash between flip and markActive would orphan
-    // (pending but reclaim-blind).
     await store.updateStatusAndMarkActive({
       executionId,
       status: "pending",
