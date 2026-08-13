@@ -1562,9 +1562,7 @@ export class WorkflowEngine<TInput, TResult> {
     }
 
     if (this.retentionMax !== undefined) {
-      if (ttlMs === undefined) {
-        endedAt = this.terminalAt(meta);
-      } else if (ttlMs > 0) {
+      if (ttlMs !== 0) {
         endedAt = this.terminalAt(meta);
       }
     }

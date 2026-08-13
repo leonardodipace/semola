@@ -635,7 +635,6 @@ export class MockRedisClient {
       const metaKey = keyArgs[0] ?? "";
       const historyKey = keyArgs[1] ?? "";
       const terminalKey = keyArgs[2] ?? "";
-      const activeKey = keyArgs[3] ?? "";
       const executionId = argv[0] ?? "";
       const updatedAt = argv[1] ?? "";
 
@@ -644,7 +643,6 @@ export class MockRedisClient {
       this.persistSync(metaKey);
       this.persistSync(historyKey);
       this.zremSync(terminalKey, [executionId]);
-      this.saddSync(activeKey, executionId);
       this.hsetSync(metaKey, [
         "status",
         "pending",

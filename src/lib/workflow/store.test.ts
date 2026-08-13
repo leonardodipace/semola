@@ -500,7 +500,7 @@ describe("WorkflowStore", () => {
     expect(await store.listActive()).not.toContain(executionId);
   });
 
-  test("persistExecution removes TTL so resume can keep keys", async () => {
+  test("persistExecution removes TTL without marking active", async () => {
     const redis = createRedis();
     const store = new WorkflowStore(redis, "store-persist");
     const executionId = "exec-persist";
@@ -525,7 +525,7 @@ describe("WorkflowStore", () => {
     expect(await redis.pttl(keys.history("store-persist", executionId))).toBe(
       -1,
     );
-    expect(await store.listActive()).toContain(executionId);
+    expect(await store.listActive()).not.toContain(executionId);
   });
 
   test("retainIfTerminal without ttl does not expire", async () => {

@@ -69,7 +69,12 @@ export const listWorkflows = async (
     cursor = next;
 
     for (const key of keys) {
-      const id = key.split(":meta:")[1];
+      const marker = ":meta:";
+      const index = key.lastIndexOf(marker);
+
+      if (index === -1) continue;
+
+      const id = key.slice(index + marker.length);
 
       if (!id) continue;
 
@@ -225,13 +230,33 @@ export const defineWorkflow = <TInput, TResult = void>(
 
   const resume = async (executionId: string) => {
     const meta = await requireMeta(store, executionId);
+    const view = parseHistory(await store.loadHistory(executionId));
+    let hasResume = false;
 
-    if (meta.status !== "failed") {
-      throw new WorkflowStoreError(
-        `Workflow execution ${executionId} is ${meta.status}, only failed executions can be resumed`,
-      );
+    for (const event of view.events) {
+      if (event.type !== "WorkflowResumed") continue;
+
+      hasResume = true;
+      break;
     }
 
+    if (meta.status !== "failed") {
+      if (meta.status !== "pending") {
+        throw new WorkflowStoreError(
+          `Workflow execution ${executionId} is ${meta.status}, only failed executions can be resumed`,
+        );
+      }
+
+      if (view.terminal?.kind !== "failed") {
+        if (!hasResume) {
+          throw new WorkflowStoreError(
+            `Workflow execution ${executionId} is ${meta.status}, only failed executions can be resumed`,
+          );
+        }
+      }
+    }
+
+    // Persist keys, but stay inactive until resume events exist.
     const persisted = await store.persistExecution(executionId);
 
     if (!persisted) {
@@ -239,31 +264,33 @@ export const defineWorkflow = <TInput, TResult = void>(
     }
 
     const now = Date.now();
-    const view = parseHistory(await store.loadHistory(executionId));
-    const retryEvents = [];
 
-    for (const [stepId, state] of view.steps) {
-      if (state.status !== "failed") continue;
+    if (!hasResume) {
+      const retryEvents = [];
 
-      retryEvents.push({
-        type: "StepScheduled" as const,
-        stepId,
-        stepName: state.stepName,
-        attempt: 1,
-        timestamp: now,
+      for (const [stepId, state] of view.steps) {
+        if (state.status !== "failed") continue;
+
+        retryEvents.push({
+          type: "StepScheduled" as const,
+          stepId,
+          stepName: state.stepName,
+          attempt: 1,
+          timestamp: now,
+        });
+      }
+
+      await store.appendEvents({
+        executionId,
+        events: [
+          {
+            type: "WorkflowResumed",
+            timestamp: now,
+          },
+          ...retryEvents,
+        ],
       });
     }
-
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowResumed",
-          timestamp: now,
-        },
-        ...retryEvents,
-      ],
-    });
 
     await store.updateStatusAndMarkActive({
       executionId,

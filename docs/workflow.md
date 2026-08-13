@@ -73,7 +73,7 @@ History and status writes are lease-fenced (Redis compare-and-append / compare-a
 - `start(input, options?)` - persist `WorkflowStarted`, enqueue workflow task, return `{ executionId, status: "pending" }`
 - `get(executionId)` - status, result, error, step snapshots
 - `cancel(executionId)` - append `WorkflowCancelRequested` and abort in-process work; returns current status with `cancelledAt: number | null` (null until terminal `cancelled`; poll `get`)
-- `resume(executionId)` - re-queue a **failed** execution (throws if not `failed`). Persists keys first so retention TTL cannot drop the execution mid-resume
+- `resume(executionId)` - re-queue a **failed** execution (throws if not `failed`, except to finish an interrupted resume). Persists keys first so retention TTL cannot drop the execution mid-resume; active registration waits until resume events are in history
 - `stop()` - stop polling, wait for in-flight work, release process registration
 
 ### Top-level
