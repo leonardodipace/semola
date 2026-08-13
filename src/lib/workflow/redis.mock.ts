@@ -6,12 +6,10 @@ import {
   EXTEND_IF_OWNER,
   HSET_IF_LEASE,
   PERSIST_EXECUTION,
-  PEXPIRE_BOTH,
   RELEASE_IF_OWNER,
   RETAIN_IF_TERMINAL,
   SCHEDULE_TIMER_IF_ABSENT,
   TRIM_IF_MEMBER,
-  UNLINK_EXECUTION,
   UPDATE_META_AND_ACTIVE,
 } from "./store.js";
 import type { RedisZMember } from "./types.js";
@@ -623,14 +621,6 @@ export class MockRedisClient {
       return this.pexpireSync(key, Number(argv[1]));
     }
 
-    if (script === PEXPIRE_BOTH) {
-      const ttlMs = Number(argv[0]);
-
-      this.pexpireSync(keyArgs[0] ?? "", ttlMs);
-      this.pexpireSync(keyArgs[1] ?? "", ttlMs);
-      return 1;
-    }
-
     if (script === PERSIST_EXECUTION) {
       const metaKey = keyArgs[0] ?? "";
       const historyKey = keyArgs[1] ?? "";
@@ -709,13 +699,6 @@ export class MockRedisClient {
 
       this.delSync(keyArgs[1] ?? "", keyArgs[2] ?? "", keyArgs[3] ?? "");
       this.sremSync(keyArgs[4] ?? "", executionId);
-      return 1;
-    }
-
-    if (script === UNLINK_EXECUTION) {
-      this.delSync(keyArgs[0] ?? "", keyArgs[1] ?? "", keyArgs[2] ?? "");
-      this.sremSync(keyArgs[3] ?? "", argv[0] ?? "");
-      this.zremSync(keyArgs[4] ?? "", [argv[0] ?? ""]);
       return 1;
     }
 

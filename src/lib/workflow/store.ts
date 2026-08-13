@@ -43,9 +43,6 @@ export const APPEND_IF_LEASE =
 export const HSET_IF_LEASE =
   "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('HSET', KEYS[2], unpack(ARGV, 2)) return 1";
 
-export const PEXPIRE_BOTH =
-  "redis.call('PEXPIRE', KEYS[1], ARGV[1]) redis.call('PEXPIRE', KEYS[2], ARGV[1]) return 1";
-
 export const PERSIST_EXECUTION =
   "if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end redis.call('PERSIST', KEYS[1]) redis.call('PERSIST', KEYS[2]) redis.call('ZREM', KEYS[3], ARGV[1]) redis.call('HSET', KEYS[1], 'status', 'pending', 'error', '', 'failedAt', '', 'updatedAt', ARGV[2]) return 1";
 
@@ -54,9 +51,6 @@ export const RETAIN_IF_TERMINAL =
 
 export const TRIM_IF_MEMBER =
   "if redis.call('ZREM', KEYS[1], ARGV[1]) == 0 then return 0 end redis.call('UNLINK', KEYS[2], KEYS[3], KEYS[4]) redis.call('SREM', KEYS[5], ARGV[1]) return 1";
-
-export const UNLINK_EXECUTION =
-  "redis.call('UNLINK', KEYS[1], KEYS[2], KEYS[3]) redis.call('SREM', KEYS[4], ARGV[1]) redis.call('ZREM', KEYS[5], ARGV[1]) return 1";
 
 export const keys = {
   history: (name: string, executionId: string) =>
@@ -577,27 +571,6 @@ export class WorkflowStore {
     return Number(result) === 1;
   }
 
-  public async expireExecution(executionId: string, ttlMs: number) {
-    if (ttlMs <= 0) {
-      await this.deleteExecution(executionId);
-      return;
-    }
-
-    const [error] = await mightThrow(
-      this.redis.send("EVAL", [
-        PEXPIRE_BOTH,
-        "2",
-        keys.meta(this.name, executionId),
-        keys.history(this.name, executionId),
-        String(ttlMs),
-      ]),
-    );
-
-    if (error) {
-      throw new WorkflowStoreError(`Unable to expire execution ${executionId}`);
-    }
-  }
-
   public async retainIfTerminal(input: {
     executionId: string;
     ttlMs?: number;
@@ -627,18 +600,6 @@ export class WorkflowStore {
     }
 
     return Number(result) === 1;
-  }
-
-  public async rememberTerminal(executionId: string, endedAt: number) {
-    const [error] = await mightThrow(
-      this.redis.zadd(keys.terminal(this.name), endedAt, executionId),
-    );
-
-    if (error) {
-      throw new WorkflowStoreError(
-        `Unable to record terminal execution ${executionId}`,
-      );
-    }
   }
 
   public async trimTerminal(max: number) {
@@ -719,24 +680,5 @@ export class WorkflowStore {
     }
 
     return { cursor: next, ids };
-  }
-
-  public async deleteExecution(executionId: string) {
-    const [error] = await mightThrow(
-      this.redis.send("EVAL", [
-        UNLINK_EXECUTION,
-        "5",
-        keys.meta(this.name, executionId),
-        keys.history(this.name, executionId),
-        keys.lease(this.name, executionId),
-        keys.active(this.name),
-        keys.terminal(this.name),
-        executionId,
-      ]),
-    );
-
-    if (error) {
-      throw new WorkflowStoreError(`Unable to delete execution ${executionId}`);
-    }
   }
 }

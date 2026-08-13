@@ -1529,20 +1529,6 @@ export class WorkflowEngine<TInput, TResult> {
     await this.retainTerminal(executionId);
   }
 
-  private terminalAt(meta: WorkflowMeta) {
-    return (
-      Number(meta.completedAt) ||
-      Number(meta.failedAt) ||
-      Number(meta.cancelledAt) ||
-      Number(meta.updatedAt) ||
-      Date.now()
-    );
-  }
-
-  private retentionRemaining(meta: WorkflowMeta) {
-    return Math.max(0, this.terminalAt(meta) + this.retentionTTL - Date.now());
-  }
-
   private async retainTerminal(executionId: string) {
     const meta = await this.store.getMeta(executionId);
 
@@ -1550,27 +1536,36 @@ export class WorkflowEngine<TInput, TResult> {
 
     if (!isTerminalStatus(meta.status)) return;
 
-    if (!Number.isFinite(this.retentionTTL)) {
+    const infiniteTtl = !Number.isFinite(this.retentionTTL);
+
+    if (infiniteTtl) {
       if (this.retentionMax === undefined) return;
     }
 
-    let ttlMs: number | undefined;
-    let endedAt: number | undefined;
+    const endedAt =
+      Number(meta.completedAt) ||
+      Number(meta.failedAt) ||
+      Number(meta.cancelledAt) ||
+      Number(meta.updatedAt) ||
+      Date.now();
 
-    if (Number.isFinite(this.retentionTTL)) {
-      ttlMs = this.retentionRemaining(meta);
+    let ttlMs: number | undefined;
+    let trackedAt: number | undefined;
+
+    if (!infiniteTtl) {
+      ttlMs = Math.max(0, endedAt + this.retentionTTL - Date.now());
     }
 
     if (this.retentionMax !== undefined) {
       if (ttlMs !== 0) {
-        endedAt = this.terminalAt(meta);
+        trackedAt = endedAt;
       }
     }
 
     await this.store.retainIfTerminal({
       executionId,
       ttlMs,
-      endedAt,
+      endedAt: trackedAt,
     });
 
     if (this.retentionMax !== undefined) {

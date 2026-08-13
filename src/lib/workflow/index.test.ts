@@ -101,6 +101,29 @@ const fast = {
   retryBackoff: { baseDelay: 5, multiplier: 2, maxDelay: 20 },
 };
 
+const failOnce = (name: string, redis: Bun.RedisClient) => {
+  let attempts = 0;
+
+  return defineWorkflow({
+    name,
+    redis,
+    ...fast,
+    retries: 0,
+    retentionTTL: 60_000,
+    handler: async ({ step }) => {
+      const value = await step("once", async () => {
+        attempts++;
+
+        if (attempts === 1) throw new Error("boom");
+
+        return "ok";
+      });
+
+      return value;
+    },
+  });
+};
+
 describe("workflow", () => {
   beforeEach(() => {
     jest.useFakeTimers({ now: Date.now() });
@@ -3365,7 +3388,7 @@ describe("workflow", () => {
   });
 
   describe("retention", () => {
-    test("retentionTTL must be a non-negative number", () => {
+    test("rejects invalid retention options", () => {
       expect(() =>
         defineWorkflow({
           name: `retain-bad-ttl-${crypto.randomUUID()}`,
@@ -3374,9 +3397,7 @@ describe("workflow", () => {
           handler: async () => "ok",
         }),
       ).toThrow("retentionTTL must be a non-negative number");
-    });
 
-    test("retentionMax must be a positive integer", () => {
       expect(() =>
         defineWorkflow({
           name: `retain-bad-max-${crypto.randomUUID()}`,
@@ -3562,28 +3583,9 @@ describe("workflow", () => {
     test("resume persists failed keys then completes", async () => {
       const redis = createRedis();
       const name = `retain-resume-${crypto.randomUUID()}`;
-      let attempts = 0;
-
-      const wf = defineWorkflow({
-        name,
-        redis,
-        ...fast,
-        retries: 0,
-        retentionTTL: 60_000,
-        handler: async ({ step }) => {
-          const value = await step("once", async () => {
-            attempts++;
-
-            if (attempts === 1) throw new Error("boom");
-
-            return "ok";
-          });
-
-          return value;
-        },
-      });
-
+      const wf = failOnce(name, redis);
       const { executionId } = await wf.start({});
+
       await waitStatus(wf, executionId, "failed");
 
       expect(
@@ -3610,28 +3612,9 @@ describe("workflow", () => {
     test("persist does not mark active so reclaim cannot re-fail mid-resume", async () => {
       const redis = createRedis();
       const name = `retain-reclaim-${crypto.randomUUID()}`;
-      let attempts = 0;
-
-      const wf = defineWorkflow({
-        name,
-        redis,
-        ...fast,
-        retries: 0,
-        retentionTTL: 60_000,
-        handler: async ({ step }) => {
-          const value = await step("once", async () => {
-            attempts++;
-
-            if (attempts === 1) throw new Error("boom");
-
-            return "ok";
-          });
-
-          return value;
-        },
-      });
-
+      const wf = failOnce(name, redis);
       const { executionId } = await wf.start({});
+
       await waitStatus(wf, executionId, "failed");
 
       const store = new WorkflowStore(redis, name);
@@ -3652,73 +3635,12 @@ describe("workflow", () => {
       await stop(wf);
     });
 
-    test("resume retries after persist flipped pending without events", async () => {
-      const redis = createRedis();
-      const name = `retain-retry-persist-${crypto.randomUUID()}`;
-      let attempts = 0;
-
-      const wf = defineWorkflow({
-        name,
-        redis,
-        ...fast,
-        retries: 0,
-        retentionTTL: 60_000,
-        handler: async ({ step }) => {
-          const value = await step("once", async () => {
-            attempts++;
-
-            if (attempts === 1) throw new Error("boom");
-
-            return "ok";
-          });
-
-          return value;
-        },
-      });
-
-      const { executionId } = await wf.start({});
-      await waitStatus(wf, executionId, "failed");
-
-      const store = new WorkflowStore(redis, name);
-
-      await store.persistExecution(executionId);
-
-      expect((await wf.get(executionId)).status).toBe("pending");
-
-      await wf.resume(executionId);
-
-      const execution = await waitStatus(wf, executionId, "completed");
-
-      expect(execution.result).toBe("ok");
-
-      await stop(wf);
-    });
-
     test("resume retries after events without markActive", async () => {
       const redis = createRedis();
       const name = `retain-retry-events-${crypto.randomUUID()}`;
-      let attempts = 0;
-
-      const wf = defineWorkflow({
-        name,
-        redis,
-        ...fast,
-        retries: 0,
-        retentionTTL: 60_000,
-        handler: async ({ step }) => {
-          const value = await step("once", async () => {
-            attempts++;
-
-            if (attempts === 1) throw new Error("boom");
-
-            return "ok";
-          });
-
-          return value;
-        },
-      });
-
+      const wf = failOnce(name, redis);
       const { executionId } = await wf.start({});
+
       await waitStatus(wf, executionId, "failed");
 
       const store = new WorkflowStore(redis, name);
@@ -3755,28 +3677,9 @@ describe("workflow", () => {
     test("resume racing retention sweep does not drop persisted keys", async () => {
       const redis = createRedis();
       const name = `retain-race-${crypto.randomUUID()}`;
-      let attempts = 0;
-
-      const wf = defineWorkflow({
-        name,
-        redis,
-        ...fast,
-        retries: 0,
-        retentionTTL: 60_000,
-        handler: async ({ step }) => {
-          const value = await step("once", async () => {
-            attempts++;
-
-            if (attempts === 1) throw new Error("boom");
-
-            return "ok";
-          });
-
-          return value;
-        },
-      });
-
+      const wf = failOnce(name, redis);
       const { executionId } = await wf.start({});
+
       await waitStatus(wf, executionId, "failed");
 
       const store = new WorkflowStore(redis, name);

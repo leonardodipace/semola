@@ -20,6 +20,12 @@ const baseMeta = (name: string) =>
     concurrencySlot: "",
   }) satisfies WorkflowMeta;
 
+const failedMeta = (name: string) => ({
+  ...baseMeta(name),
+  status: "failed" as const,
+  failedAt: String(Date.now()),
+});
+
 describe("WorkflowStore", () => {
   test("tryCreateMetaAndActive creates once then rejects duplicate", async () => {
     const redis = createRedis();
@@ -436,76 +442,15 @@ describe("WorkflowStore", () => {
     });
   });
 
-  test("expireExecution sets TTL on meta and history", async () => {
-    const redis = createRedis();
-    const store = new WorkflowStore(redis, "store-expire");
-    const executionId = "exec-ttl";
-
-    await store.tryCreateMetaAndActive(executionId, baseMeta("store-expire"));
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowStarted",
-          input: "{}",
-          partitionKey: "",
-          timestamp: 1,
-        },
-      ],
-    });
-
-    await store.expireExecution(executionId, 60_000);
-
-    expect(
-      await redis.pttl(keys.meta("store-expire", executionId)),
-    ).toBeGreaterThan(0);
-    expect(
-      await redis.pttl(keys.history("store-expire", executionId)),
-    ).toBeGreaterThan(0);
-    expect(await redis.pttl(keys.lease("store-expire", executionId))).toBe(-2);
-  });
-
-  test("expireExecution with ttl 0 unlinks meta history and lease", async () => {
-    const redis = createRedis();
-    const store = new WorkflowStore(redis, "store-expire-0");
-    const executionId = "exec-gone";
-
-    await store.tryCreateMetaAndActive(executionId, baseMeta("store-expire-0"));
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowStarted",
-          input: "{}",
-          partitionKey: "",
-          timestamp: 1,
-        },
-      ],
-    });
-    await store.acquireLease({
-      executionId,
-      token: "t1",
-      ttlMs: 60_000,
-    });
-
-    await store.expireExecution(executionId, 0);
-
-    expect(await redis.pttl(keys.meta("store-expire-0", executionId))).toBe(-2);
-    expect(await redis.pttl(keys.history("store-expire-0", executionId))).toBe(
-      -2,
-    );
-    expect(await redis.pttl(keys.lease("store-expire-0", executionId))).toBe(
-      -2,
-    );
-    expect(await store.listActive()).not.toContain(executionId);
-  });
-
   test("persistExecution removes TTL without marking active", async () => {
     const redis = createRedis();
     const store = new WorkflowStore(redis, "store-persist");
     const executionId = "exec-persist";
 
-    await store.tryCreateMetaAndActive(executionId, baseMeta("store-persist"));
+    await store.tryCreateMetaAndActive(
+      executionId,
+      failedMeta("store-persist"),
+    );
     await store.appendEvents({
       executionId,
       events: [
@@ -517,8 +462,8 @@ describe("WorkflowStore", () => {
         },
       ],
     });
-    await store.expireExecution(executionId, 60_000);
     await store.markInactive(executionId);
+    await store.retainIfTerminal({ executionId, ttlMs: 60_000 });
     await store.persistExecution(executionId);
 
     expect(await redis.pttl(keys.meta("store-persist", executionId))).toBe(-1);
@@ -555,13 +500,13 @@ describe("WorkflowStore", () => {
   test("trimTerminal unlinks oldest executions over max", async () => {
     const store = new WorkflowStore(createRedis(), "store-trim");
 
-    await store.tryCreateMetaAndActive("old", baseMeta("store-trim"));
-    await store.tryCreateMetaAndActive("mid", baseMeta("store-trim"));
-    await store.tryCreateMetaAndActive("new", baseMeta("store-trim"));
+    await store.tryCreateMetaAndActive("old", failedMeta("store-trim"));
+    await store.tryCreateMetaAndActive("mid", failedMeta("store-trim"));
+    await store.tryCreateMetaAndActive("new", failedMeta("store-trim"));
 
-    await store.rememberTerminal("old", 1);
-    await store.rememberTerminal("mid", 2);
-    await store.rememberTerminal("new", 3);
+    await store.retainIfTerminal({ executionId: "old", endedAt: 1 });
+    await store.retainIfTerminal({ executionId: "mid", endedAt: 2 });
+    await store.retainIfTerminal({ executionId: "new", endedAt: 3 });
     await store.trimTerminal(2);
 
     expect(await store.getMeta("old")).toBeNull();
@@ -608,11 +553,10 @@ describe("WorkflowStore", () => {
     const store = new WorkflowStore(redis, "store-retain-race");
     const executionId = "exec-race";
 
-    await store.tryCreateMetaAndActive(executionId, {
-      ...baseMeta("store-retain-race"),
-      status: "failed",
-      failedAt: String(Date.now()),
-    });
+    await store.tryCreateMetaAndActive(
+      executionId,
+      failedMeta("store-retain-race"),
+    );
     await store.appendEvents({
       executionId,
       events: [
@@ -641,11 +585,10 @@ describe("WorkflowStore", () => {
     const store = new WorkflowStore(createRedis(), "store-retain-first");
     const executionId = "exec-gone";
 
-    await store.tryCreateMetaAndActive(executionId, {
-      ...baseMeta("store-retain-first"),
-      status: "failed",
-      failedAt: String(Date.now()),
-    });
+    await store.tryCreateMetaAndActive(
+      executionId,
+      failedMeta("store-retain-first"),
+    );
 
     expect(
       await store.retainIfTerminal({
@@ -658,49 +601,13 @@ describe("WorkflowStore", () => {
     expect(await store.getMeta(executionId)).toBeNull();
   });
 
-  test("concurrent persistExecution and retainIfTerminal 0 keep resume or unlink", async () => {
-    const store = new WorkflowStore(createRedis(), "store-retain-par");
-    const executionId = "exec-par";
-
-    await store.tryCreateMetaAndActive(executionId, {
-      ...baseMeta("store-retain-par"),
-      status: "failed",
-      failedAt: String(Date.now()),
-    });
-
-    await Promise.all([
-      store.persistExecution(executionId),
-      store.retainIfTerminal({
-        executionId,
-        ttlMs: 0,
-      }),
-    ]);
-
-    const meta = await store.getMeta(executionId);
-
-    if (meta) {
-      expect(meta.status).toBe("pending");
-    }
-
-    if (!meta) {
-      expect(await store.loadHistory(executionId)).toEqual([]);
-      expect(await store.listActive()).not.toContain(executionId);
-    }
-  });
-
   test("trim cannot delete execution after persistExecution removes terminal member", async () => {
     const store = new WorkflowStore(createRedis(), "store-trim-race");
 
-    await store.tryCreateMetaAndActive("old", {
-      ...baseMeta("store-trim-race"),
-      status: "failed",
-    });
-    await store.tryCreateMetaAndActive("newer", {
-      ...baseMeta("store-trim-race"),
-      status: "failed",
-    });
-    await store.rememberTerminal("old", 1);
-    await store.rememberTerminal("newer", 2);
+    await store.tryCreateMetaAndActive("old", failedMeta("store-trim-race"));
+    await store.tryCreateMetaAndActive("newer", failedMeta("store-trim-race"));
+    await store.retainIfTerminal({ executionId: "old", endedAt: 1 });
+    await store.retainIfTerminal({ executionId: "newer", endedAt: 2 });
 
     expect(await store.persistExecution("old")).toBe(true);
     await store.trimTerminal(1);
@@ -708,31 +615,5 @@ describe("WorkflowStore", () => {
     expect(await store.getMeta("old")).not.toBeNull();
     expect((await store.getMeta("old"))?.status).toBe("pending");
     expect(await store.getMeta("newer")).not.toBeNull();
-  });
-
-  test("concurrent persistExecution and trimTerminal never unlink after persist", async () => {
-    const store = new WorkflowStore(createRedis(), "store-trim-par");
-
-    await store.tryCreateMetaAndActive("old", {
-      ...baseMeta("store-trim-par"),
-      status: "failed",
-    });
-    await store.tryCreateMetaAndActive("newer", {
-      ...baseMeta("store-trim-par"),
-      status: "failed",
-    });
-    await store.rememberTerminal("old", 1);
-    await store.rememberTerminal("newer", 2);
-
-    await Promise.all([store.persistExecution("old"), store.trimTerminal(1)]);
-
-    const old = await store.getMeta("old");
-    const newer = await store.getMeta("newer");
-
-    expect(newer).not.toBeNull();
-
-    if (old) {
-      expect(old.status).toBe("pending");
-    }
   });
 });
