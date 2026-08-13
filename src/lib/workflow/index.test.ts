@@ -3275,6 +3275,54 @@ describe("workflow", () => {
   });
 
   describe("retention", () => {
+    test("omitted retentionTTL expires terminal keys after 24h", async () => {
+      const redis = createRedis();
+      const name = `retain-default-${crypto.randomUUID()}`;
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        handler: async () => "ok",
+      });
+
+      const { executionId } = await wf.start({});
+      const execution = await waitStatus(wf, executionId, "completed");
+
+      expect(execution.result).toBe("ok");
+      expect(
+        await redis.pttl(`workflow:${name}:meta:${executionId}`),
+      ).toBeGreaterThan(86_400_000 - 5_000);
+      expect(
+        await redis.pttl(`workflow:${name}:history:${executionId}`),
+      ).toBeGreaterThan(86_400_000 - 5_000);
+
+      await stop(wf);
+    });
+
+    test("retentionTTL Infinity leaves terminal keys persistent", async () => {
+      const redis = createRedis();
+      const name = `retain-inf-${crypto.randomUUID()}`;
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retentionTTL: Infinity,
+        handler: async () => "ok",
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "completed");
+
+      expect(await redis.pttl(`workflow:${name}:meta:${executionId}`)).toBe(-1);
+      expect(await redis.pttl(`workflow:${name}:history:${executionId}`)).toBe(
+        -1,
+      );
+
+      await stop(wf);
+    });
+
     test("terminal keys get TTL and running keys do not", async () => {
       const redis = createRedis();
       const name = `retain-ttl-${crypto.randomUUID()}`;
@@ -3512,6 +3560,35 @@ describe("workflow", () => {
       expect(await redis.pttl(`workflow:${name}:meta:t1`)).toBe(-2);
       expect(await redis.pttl(`workflow:${name}:meta:t2`)).toBeGreaterThan(0);
       expect(await redis.pttl(`workflow:${name}:meta:t3`)).toBeGreaterThan(0);
+
+      await stop(wf);
+    });
+
+    test("retentionMax with Infinity TTL unlinks oldest and keeps the rest persistent", async () => {
+      const redis = createRedis();
+      const name = `retain-max-inf-${crypto.randomUUID()}`;
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retentionTTL: Infinity,
+        retentionMax: 2,
+        handler: async () => "ok",
+      });
+
+      await wf.start({}, { executionId: "t1" });
+      await waitStatus(wf, "t1", "completed");
+      await sleep(5);
+      await wf.start({}, { executionId: "t2" });
+      await waitStatus(wf, "t2", "completed");
+      await sleep(5);
+      await wf.start({}, { executionId: "t3" });
+      await waitStatus(wf, "t3", "completed");
+
+      expect(await redis.pttl(`workflow:${name}:meta:t1`)).toBe(-2);
+      expect(await redis.pttl(`workflow:${name}:meta:t2`)).toBe(-1);
+      expect(await redis.pttl(`workflow:${name}:meta:t3`)).toBe(-1);
 
       await stop(wf);
     });

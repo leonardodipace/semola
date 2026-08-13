@@ -117,8 +117,8 @@ Crash recovery stays automatic via leases. Use `listWorkflows` for ops and admin
 - **`retryBackoff`** - `{ baseDelay, multiplier, maxDelay }` (defaults: 1000 / 2x / 30000)
 - **`hooks`** - `onStart`, `onRetry`, `onError`, `onComplete`, `onCancel` (see [Hooks](#hooks))
 - **`lockTTL`** - execution lease TTL in ms (default: 300000); also used as capacity slot TTL. While a process holds an execution, it refreshes that execution's capacity slots (global `*` and partition key if any) for the full lifetime (including `sleep` and retry backoff). After process death, the Redis slot remains owned until TTL; the next reclaim re-attaches via the same `executionId`. Differing replica `concurrency` values mean the effective cap is the max.
-- **`retentionTTL`** - how long terminal executions (`completed` / `failed` / `cancelled`) stay in Redis, in ms (default: 86400000, 24h). Must be a finite non-negative number. `0` unlinks immediately after terminal. Pending and running keys are never expired. Failed executions can be `resume`d only while they still exist. A background sweep also expires leftover terminal keys with no TTL (including data from older semola versions).
-- **`retentionMax`** - optional cap on terminal executions per workflow name. Must be a positive integer. Oldest are `UNLINK`ed when the cap is exceeded.
+- **`retentionTTL`** - how long terminal executions (`completed` / `failed` / `cancelled`) stay in Redis, in ms (default: 86400000, 24h). `Infinity` keeps them forever. Any other value must be a non-negative number. `0` unlinks immediately after terminal. Pending and running keys are never expired. Failed executions can be `resume`d only while they still exist. A background sweep also expires leftover terminal keys with no TTL (including data from older semola versions).
+- **`retentionMax`** - optional cap on terminal executions per workflow name. Must be a positive integer. Oldest are `UNLINK`ed when the cap is exceeded. Works with or without a finite `retentionTTL`.
 - **`concurrency`** - max parallel instances across replicas (default: 1). Also the number of workflow pollers in this process. Without `partitionBy`, all executions share one Redis slot pool of size `concurrency` (key `*`). With `partitionBy`, both the global pool and the per-key pool apply (each size `concurrency`). If replicas disagree on `concurrency`, the effective cap is the max.
 - **`partitionBy`** - `(input) => string` for per-key concurrency across replicas. Empty keys throw. Cap applies for the whole execution, including durable waits. Does not replace the global `concurrency` cap — both apply. The key `*` is reserved for the global pool.
 - **`pollInterval`** - idle poll backoff ms (default: 100)
@@ -191,6 +191,7 @@ Terminal `meta` and `history` keys receive `PEXPIRE` from `retentionTTL` (or are
 - Custom `serialize*` / `deserialize*` options removed. Payloads use `JSON.stringify` / `JSON.parse` only.
 - `concurrency` is the max parallel instances across replicas (partition slots; key `*` globally, plus per-key slots when `partitionBy` is set) and the number of workflow pollers in this process. Steps run **inline** under the lease, so a long step occupies one poller for its full duration (no separate step-worker pool).
 - Step snapshots on `get()` come from event history, not `meta.steps`.
+- Terminal executions expire after 24h by default (`retentionTTL`). Pass `Infinity` to keep them forever. A sweep also applies this to leftover keys from older versions.
 
 ## Statuses
 

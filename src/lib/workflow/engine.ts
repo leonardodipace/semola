@@ -297,9 +297,9 @@ export class WorkflowEngine<TInput, TResult> {
     this.retentionMax = options.retentionMax;
     this.concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
 
-    if (!Number.isFinite(this.retentionTTL) || this.retentionTTL < 0) {
+    if (!(this.retentionTTL >= 0)) {
       throw new WorkflowStoreError(
-        "retentionTTL must be a finite non-negative number",
+        "retentionTTL must be a non-negative number",
       );
     }
 
@@ -1550,18 +1550,28 @@ export class WorkflowEngine<TInput, TResult> {
 
     if (!isTerminalStatus(meta.status)) return;
 
-    const remaining = this.retentionRemaining(meta);
+    if (!Number.isFinite(this.retentionTTL)) {
+      if (this.retentionMax === undefined) return;
+    }
+
+    let ttlMs: number | undefined;
     let endedAt: number | undefined;
 
+    if (Number.isFinite(this.retentionTTL)) {
+      ttlMs = this.retentionRemaining(meta);
+    }
+
     if (this.retentionMax !== undefined) {
-      if (remaining > 0) {
+      if (ttlMs === undefined) {
+        endedAt = this.terminalAt(meta);
+      } else if (ttlMs > 0) {
         endedAt = this.terminalAt(meta);
       }
     }
 
     await this.store.retainIfTerminal({
       executionId,
-      ttlMs: remaining,
+      ttlMs,
       endedAt,
     });
 
@@ -1571,6 +1581,10 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private async sweepRetention() {
+    if (!Number.isFinite(this.retentionTTL)) {
+      if (this.retentionMax === undefined) return;
+    }
+
     const scanned = await this.store.scanMetaIds(this.sweepCursor);
 
     this.sweepCursor = scanned.cursor;

@@ -526,6 +526,30 @@ describe("WorkflowStore", () => {
     );
   });
 
+  test("retainIfTerminal without ttl does not expire", async () => {
+    const redis = createRedis();
+    const store = new WorkflowStore(redis, "store-retain-none");
+    const executionId = "exec-keep";
+
+    await store.tryCreateMetaAndActive(executionId, {
+      ...baseMeta("store-retain-none"),
+      status: "completed",
+      completedAt: String(Date.now()),
+    });
+
+    expect(
+      await store.retainIfTerminal({
+        executionId,
+        endedAt: 1,
+      }),
+    ).toBe(true);
+
+    expect(await redis.pttl(keys.meta("store-retain-none", executionId))).toBe(
+      -1,
+    );
+    expect(await store.getMeta(executionId)).not.toBeNull();
+  });
+
   test("trimTerminal unlinks oldest executions over max", async () => {
     const store = new WorkflowStore(createRedis(), "store-trim");
 

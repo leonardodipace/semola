@@ -663,7 +663,6 @@ export class MockRedisClient {
       const activeKey = keyArgs[3] ?? "";
       const terminalKey = keyArgs[4] ?? "";
       const executionId = argv[0] ?? "";
-      const ttlMs = Number(argv[1]);
       const endedAt = argv[2] ?? "";
 
       this.sweep(metaKey);
@@ -676,25 +675,24 @@ export class MockRedisClient {
         }
       }
 
-      const pttl = this.pttlSync(metaKey);
+      const ttlRaw = argv[1] ?? "";
 
-      if (pttl > 0) {
-        if (endedAt !== "") {
-          this.zaddSync(terminalKey, Number(endedAt), executionId);
+      if (ttlRaw !== "") {
+        const ttlMs = Number(ttlRaw);
+        const pttl = this.pttlSync(metaKey);
+
+        if (pttl <= 0) {
+          if (ttlMs <= 0) {
+            this.delSync(metaKey, historyKey, leaseKey);
+            this.sremSync(activeKey, executionId);
+            this.zremSync(terminalKey, [executionId]);
+            return 1;
+          }
+
+          this.pexpireSync(metaKey, ttlMs);
+          this.pexpireSync(historyKey, ttlMs);
         }
-
-        return 1;
       }
-
-      if (ttlMs <= 0) {
-        this.delSync(metaKey, historyKey, leaseKey);
-        this.sremSync(activeKey, executionId);
-        this.zremSync(terminalKey, [executionId]);
-        return 1;
-      }
-
-      this.pexpireSync(metaKey, ttlMs);
-      this.pexpireSync(historyKey, ttlMs);
 
       if (endedAt !== "") {
         this.zaddSync(terminalKey, Number(endedAt), executionId);
