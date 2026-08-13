@@ -46,6 +46,18 @@ export const HSET_IF_LEASE =
 export const PEXPIRE_BOTH =
   "redis.call('PEXPIRE', KEYS[1], ARGV[1]) redis.call('PEXPIRE', KEYS[2], ARGV[1]) return 1";
 
+export const PERSIST_EXECUTION =
+  "if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end redis.call('PERSIST', KEYS[1]) redis.call('PERSIST', KEYS[2]) redis.call('ZREM', KEYS[3], ARGV[1]) redis.call('HSET', KEYS[1], 'status', 'pending', 'error', '', 'failedAt', '', 'updatedAt', ARGV[2]) return 1";
+
+export const RETAIN_IF_TERMINAL =
+  "local s=redis.call('HGET', KEYS[1], 'status') if s~='completed' and s~='failed' and s~='cancelled' then return 0 end local ttl=tonumber(ARGV[2]) local pttl=redis.call('PTTL', KEYS[1]) if pttl>0 then if ARGV[3]~='' then redis.call('ZADD', KEYS[5], ARGV[3], ARGV[1]) end return 1 end if ttl<=0 then redis.call('UNLINK', KEYS[1], KEYS[2], KEYS[3]) redis.call('SREM', KEYS[4], ARGV[1]) redis.call('ZREM', KEYS[5], ARGV[1]) return 1 end redis.call('PEXPIRE', KEYS[1], ARGV[2]) redis.call('PEXPIRE', KEYS[2], ARGV[2]) if ARGV[3]~='' then redis.call('ZADD', KEYS[5], ARGV[3], ARGV[1]) end return 1";
+
+export const TRIM_IF_MEMBER =
+  "if redis.call('ZREM', KEYS[1], ARGV[1]) == 0 then return 0 end redis.call('UNLINK', KEYS[2], KEYS[3], KEYS[4]) redis.call('SREM', KEYS[5], ARGV[1]) return 1";
+
+export const UNLINK_EXECUTION =
+  "redis.call('UNLINK', KEYS[1], KEYS[2], KEYS[3]) redis.call('SREM', KEYS[4], ARGV[1]) redis.call('ZREM', KEYS[5], ARGV[1]) return 1";
+
 export const keys = {
   history: (name: string, executionId: string) =>
     `workflow:${name}:history:${executionId}`,
@@ -544,35 +556,25 @@ export class WorkflowStore {
   }
 
   public async persistExecution(executionId: string) {
-    const [metaError] = await mightThrow(
-      this.redis.send("PERSIST", [keys.meta(this.name, executionId)]),
+    const [error, result] = await mightThrow(
+      this.redis.send("EVAL", [
+        PERSIST_EXECUTION,
+        "3",
+        keys.meta(this.name, executionId),
+        keys.history(this.name, executionId),
+        keys.terminal(this.name),
+        executionId,
+        String(Date.now()),
+      ]),
     );
 
-    if (metaError) {
+    if (error) {
       throw new WorkflowStoreError(
         `Unable to persist execution ${executionId}`,
       );
     }
 
-    const [historyError] = await mightThrow(
-      this.redis.send("PERSIST", [keys.history(this.name, executionId)]),
-    );
-
-    if (historyError) {
-      throw new WorkflowStoreError(
-        `Unable to persist execution ${executionId}`,
-      );
-    }
-
-    const [zremError] = await mightThrow(
-      this.redis.zrem(keys.terminal(this.name), executionId),
-    );
-
-    if (zremError) {
-      throw new WorkflowStoreError(
-        `Unable to persist execution ${executionId}`,
-      );
-    }
+    return Number(result) === 1;
   }
 
   public async expireExecution(executionId: string, ttlMs: number) {
@@ -596,16 +598,34 @@ export class WorkflowStore {
     }
   }
 
-  public async pttlMeta(executionId: string) {
-    const [error, ttl] = await mightThrow(
-      this.redis.send("PTTL", [keys.meta(this.name, executionId)]),
+  public async retainIfTerminal(input: {
+    executionId: string;
+    ttlMs: number;
+    endedAt?: number;
+  }) {
+    const { executionId, ttlMs, endedAt } = input;
+    const ended = endedAt === undefined ? "" : String(endedAt);
+
+    const [error, result] = await mightThrow(
+      this.redis.send("EVAL", [
+        RETAIN_IF_TERMINAL,
+        "5",
+        keys.meta(this.name, executionId),
+        keys.history(this.name, executionId),
+        keys.lease(this.name, executionId),
+        keys.active(this.name),
+        keys.terminal(this.name),
+        executionId,
+        String(ttlMs),
+        ended,
+      ]),
     );
 
     if (error) {
-      throw new WorkflowStoreError(`Unable to read TTL for ${executionId}`);
+      throw new WorkflowStoreError(`Unable to retain execution ${executionId}`);
     }
 
-    return Number(ttl);
+    return Number(result) === 1;
   }
 
   public async rememberTerminal(executionId: string, endedAt: number) {
@@ -643,7 +663,24 @@ export class WorkflowStore {
     }
 
     for (const executionId of oldest ?? []) {
-      await this.deleteExecution(String(executionId));
+      const id = String(executionId);
+
+      const [trimError] = await mightThrow(
+        this.redis.send("EVAL", [
+          TRIM_IF_MEMBER,
+          "5",
+          terminalKey,
+          keys.meta(this.name, id),
+          keys.history(this.name, id),
+          keys.lease(this.name, id),
+          keys.active(this.name),
+          id,
+        ]),
+      );
+
+      if (trimError) {
+        throw new WorkflowStoreError("Unable to trim terminal executions");
+      }
     }
   }
 
@@ -667,10 +704,13 @@ export class WorkflowStore {
     }
 
     const [next, found] = scanned;
+    const prefix = `workflow:${this.name}:meta:`;
     const ids: string[] = [];
 
     for (const key of found) {
-      const id = key.split(":meta:")[1];
+      if (!key.startsWith(prefix)) continue;
+
+      const id = key.slice(prefix.length);
 
       if (!id) continue;
 
@@ -681,25 +721,20 @@ export class WorkflowStore {
   }
 
   public async deleteExecution(executionId: string) {
-    const [unlinkError] = await mightThrow(
-      this.redis.send("UNLINK", [
+    const [error] = await mightThrow(
+      this.redis.send("EVAL", [
+        UNLINK_EXECUTION,
+        "5",
         keys.meta(this.name, executionId),
         keys.history(this.name, executionId),
         keys.lease(this.name, executionId),
+        keys.active(this.name),
+        keys.terminal(this.name),
+        executionId,
       ]),
     );
 
-    if (unlinkError) {
-      throw new WorkflowStoreError(`Unable to delete execution ${executionId}`);
-    }
-
-    await this.markInactive(executionId);
-
-    const [zremError] = await mightThrow(
-      this.redis.zrem(keys.terminal(this.name), executionId),
-    );
-
-    if (zremError) {
+    if (error) {
       throw new WorkflowStoreError(`Unable to delete execution ${executionId}`);
     }
   }

@@ -1550,27 +1550,24 @@ export class WorkflowEngine<TInput, TResult> {
 
     if (!isTerminalStatus(meta.status)) return;
 
-    const ttl = await this.store.pttlMeta(executionId);
-
-    if (ttl > 0) {
-      if (this.retentionMax !== undefined) {
-        await this.store.rememberTerminal(executionId, this.terminalAt(meta));
-        await this.store.trimTerminal(this.retentionMax);
-      }
-
-      return;
-    }
-
     const remaining = this.retentionRemaining(meta);
+    let endedAt: number | undefined;
 
     if (this.retentionMax !== undefined) {
       if (remaining > 0) {
-        await this.store.rememberTerminal(executionId, this.terminalAt(meta));
-        await this.store.trimTerminal(this.retentionMax);
+        endedAt = this.terminalAt(meta);
       }
     }
 
-    await this.store.expireExecution(executionId, remaining);
+    await this.store.retainIfTerminal({
+      executionId,
+      ttlMs: remaining,
+      endedAt,
+    });
+
+    if (this.retentionMax !== undefined) {
+      await this.store.trimTerminal(this.retentionMax);
+    }
   }
 
   private async sweepRetention() {

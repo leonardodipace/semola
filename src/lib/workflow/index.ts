@@ -232,7 +232,11 @@ export const defineWorkflow = <TInput, TResult = void>(
       );
     }
 
-    await store.persistExecution(executionId);
+    const persisted = await store.persistExecution(executionId);
+
+    if (!persisted) {
+      throw new NotFoundError(`Workflow execution ${executionId} not found`);
+    }
 
     const now = Date.now();
     const view = parseHistory(await store.loadHistory(executionId));

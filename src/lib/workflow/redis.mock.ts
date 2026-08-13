@@ -5,9 +5,13 @@ import {
   CREATE_META_AND_ACTIVE,
   EXTEND_IF_OWNER,
   HSET_IF_LEASE,
+  PERSIST_EXECUTION,
   PEXPIRE_BOTH,
   RELEASE_IF_OWNER,
+  RETAIN_IF_TERMINAL,
   SCHEDULE_TIMER_IF_ABSENT,
+  TRIM_IF_MEMBER,
+  UNLINK_EXECUTION,
   UPDATE_META_AND_ACTIVE,
 } from "./store.js";
 import type { RedisZMember } from "./types.js";
@@ -206,19 +210,8 @@ export class MockRedisClient {
 
   public async srem(key: string, ...members: string[]) {
     this.maybeFail("srem");
-    this.sweep(key);
 
-    const set = this.sets.get(key);
-
-    if (!set) return 0;
-
-    let removed = 0;
-
-    for (const member of members) {
-      if (set.delete(member)) removed++;
-    }
-
-    return removed;
+    return this.sremSync(key, ...members);
   }
 
   public async smembers(key: string) {
@@ -358,6 +351,22 @@ export class MockRedisClient {
 
     this.sets.set(key, set);
     return added;
+  }
+
+  private sremSync(key: string, ...members: string[]) {
+    this.sweep(key);
+
+    const set = this.sets.get(key);
+
+    if (!set) return 0;
+
+    let removed = 0;
+
+    for (const member of members) {
+      if (set.delete(member)) removed++;
+    }
+
+    return removed;
   }
 
   private rpushSync(key: string, ...values: string[]) {
@@ -528,6 +537,9 @@ export class MockRedisClient {
     if (script === SCHEDULE_TIMER_IF_ABSENT) {
       const fireAt = Number(argv[0]);
       const member = argv[1] ?? "";
+
+      this.sweep(key);
+
       const zset = this.zsets.get(key) ?? [];
 
       if (zset.some((row) => row.member === member)) return 0;
@@ -616,6 +628,96 @@ export class MockRedisClient {
 
       this.pexpireSync(keyArgs[0] ?? "", ttlMs);
       this.pexpireSync(keyArgs[1] ?? "", ttlMs);
+      return 1;
+    }
+
+    if (script === PERSIST_EXECUTION) {
+      const metaKey = keyArgs[0] ?? "";
+      const historyKey = keyArgs[1] ?? "";
+      const terminalKey = keyArgs[2] ?? "";
+      const executionId = argv[0] ?? "";
+      const updatedAt = argv[1] ?? "";
+
+      if (!this.existsSync(metaKey)) return 0;
+
+      this.persistSync(metaKey);
+      this.persistSync(historyKey);
+      this.zremSync(terminalKey, [executionId]);
+      this.hsetSync(metaKey, [
+        "status",
+        "pending",
+        "error",
+        "",
+        "failedAt",
+        "",
+        "updatedAt",
+        updatedAt,
+      ]);
+      return 1;
+    }
+
+    if (script === RETAIN_IF_TERMINAL) {
+      const metaKey = keyArgs[0] ?? "";
+      const historyKey = keyArgs[1] ?? "";
+      const leaseKey = keyArgs[2] ?? "";
+      const activeKey = keyArgs[3] ?? "";
+      const terminalKey = keyArgs[4] ?? "";
+      const executionId = argv[0] ?? "";
+      const ttlMs = Number(argv[1]);
+      const endedAt = argv[2] ?? "";
+
+      this.sweep(metaKey);
+
+      const status = this.hashes.get(metaKey)?.get("status");
+
+      if (status !== "completed") {
+        if (status !== "failed") {
+          if (status !== "cancelled") return 0;
+        }
+      }
+
+      const pttl = this.pttlSync(metaKey);
+
+      if (pttl > 0) {
+        if (endedAt !== "") {
+          this.zaddSync(terminalKey, Number(endedAt), executionId);
+        }
+
+        return 1;
+      }
+
+      if (ttlMs <= 0) {
+        this.delSync(metaKey, historyKey, leaseKey);
+        this.sremSync(activeKey, executionId);
+        this.zremSync(terminalKey, [executionId]);
+        return 1;
+      }
+
+      this.pexpireSync(metaKey, ttlMs);
+      this.pexpireSync(historyKey, ttlMs);
+
+      if (endedAt !== "") {
+        this.zaddSync(terminalKey, Number(endedAt), executionId);
+      }
+
+      return 1;
+    }
+
+    if (script === TRIM_IF_MEMBER) {
+      const terminalKey = keyArgs[0] ?? "";
+      const executionId = argv[0] ?? "";
+
+      if (this.zremSync(terminalKey, [executionId]) === 0) return 0;
+
+      this.delSync(keyArgs[1] ?? "", keyArgs[2] ?? "", keyArgs[3] ?? "");
+      this.sremSync(keyArgs[4] ?? "", executionId);
+      return 1;
+    }
+
+    if (script === UNLINK_EXECUTION) {
+      this.delSync(keyArgs[0] ?? "", keyArgs[1] ?? "", keyArgs[2] ?? "");
+      this.sremSync(keyArgs[3] ?? "", argv[0] ?? "");
+      this.zremSync(keyArgs[4] ?? "", [argv[0] ?? ""]);
       return 1;
     }
 

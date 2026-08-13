@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
+import { mightThrow } from "../errors/index.js";
 import { WorkflowEngine } from "./engine.js";
 import {
   DuplicateWorkflowError,
@@ -3326,12 +3327,9 @@ describe("workflow", () => {
       const { executionId } = await wf.start({});
 
       await waitFor(async () => {
-        try {
-          await wf.get(executionId);
-          return false;
-        } catch (error) {
-          return error instanceof NotFoundError;
-        }
+        const [error] = await mightThrow(wf.get(executionId));
+
+        return error instanceof NotFoundError;
       });
 
       expect(await redis.pttl(`workflow:${name}:meta:${executionId}`)).toBe(-2);
@@ -3436,6 +3434,55 @@ describe("workflow", () => {
       expect(
         await redis.pttl(`workflow:${name}:meta:${executionId}`),
       ).toBeGreaterThan(0);
+
+      await stop(wf);
+    });
+
+    test("resume racing retention sweep does not drop persisted keys", async () => {
+      const redis = createRedis();
+      const name = `retain-race-${crypto.randomUUID()}`;
+      let attempts = 0;
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retries: 0,
+        retentionTTL: 60_000,
+        handler: async ({ step }) => {
+          const value = await step("once", async () => {
+            attempts++;
+
+            if (attempts === 1) throw new Error("boom");
+
+            return "ok";
+          });
+
+          return value;
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "failed");
+
+      const store = new WorkflowStore(redis, name);
+      const [resumed] = await Promise.allSettled([
+        wf.resume(executionId),
+        store.retainIfTerminal({
+          executionId,
+          ttlMs: 0,
+        }),
+      ]);
+
+      if (resumed.status === "fulfilled") {
+        const execution = await wf.get(executionId);
+
+        expect(execution.status).not.toBe("failed");
+      }
+
+      if (resumed.status === "rejected") {
+        await expect(wf.get(executionId)).rejects.toBeInstanceOf(NotFoundError);
+      }
 
       await stop(wf);
     });
