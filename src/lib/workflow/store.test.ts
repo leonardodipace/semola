@@ -681,6 +681,11 @@ describe("WorkflowStore", () => {
     if (meta) {
       expect(meta.status).toBe("pending");
     }
+
+    if (!meta) {
+      expect(await store.loadHistory(executionId)).toEqual([]);
+      expect(await store.listActive()).not.toContain(executionId);
+    }
   });
 
   test("trim cannot delete execution after persistExecution removes terminal member", async () => {

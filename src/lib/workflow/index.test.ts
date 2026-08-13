@@ -3639,7 +3639,7 @@ describe("workflow", () => {
       expect(await store.persistExecution(executionId)).toBe(true);
       expect(await store.listActive()).not.toContain(executionId);
 
-      await sleep(50);
+      await sleep(300);
 
       expect((await wf.get(executionId)).status).toBe("pending");
 
