@@ -148,6 +148,7 @@ export type Context<
   text: (status: number, text: string) => Response;
   html: (status: number, html: string) => Response;
   redirect: (status: number, url: string) => Response;
+  header: (name: string, value: string) => void;
   get: <K extends keyof TExt>(key: K) => TExt[K];
 };
 
@@ -316,6 +317,8 @@ export type InternalContext = {
   text: (status: number, text: string) => Response;
   html: (status: number, html: string) => Response;
   redirect: (status: number, url: string) => Response;
+  header: (name: string, value: string) => void;
+  responseHeaders?: Headers;
 };
 
 export type BunRouteHandler = (
