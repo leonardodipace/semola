@@ -74,6 +74,22 @@ describe("runtime", () => {
       expect(res.headers.get("Content-Type")).toContain("application/json");
     });
 
+    test("header copies onto redirect responses", () => {
+      const req = new Request("http://localhost") as Bun.BunRequest;
+      const context = createContext(req);
+
+      context.header("Authorization", "Bearer test");
+
+      const res = applyHeaders(
+        context,
+        context.redirect(302, "https://example.com"),
+      );
+
+      expect(res.status).toBe(302);
+      expect(res.headers.get("Authorization")).toBe("Bearer test");
+      expect(res.headers.get("Location")).toBe("https://example.com");
+    });
+
     test("emptyValidated is frozen defaults", () => {
       expect(emptyValidated.body).toBeUndefined();
       expect(Object.isFrozen(emptyValidated)).toBe(true);

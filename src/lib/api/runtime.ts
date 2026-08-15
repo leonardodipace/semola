@@ -16,11 +16,17 @@ const badRequestInit = { status: 400 };
 export const applyHeaders = (c: InternalContext, res: Response) => {
   if (!c.responseHeaders) return res;
 
+  const headers = new Headers(res.headers);
+
   for (const [key, value] of c.responseHeaders) {
-    res.headers.set(key, value);
+    headers.set(key, value);
   }
 
-  return res;
+  return new Response(res.body, {
+    status: res.status,
+    statusText: res.statusText,
+    headers,
+  });
 };
 
 export const json = (status: number, data: unknown) => {
