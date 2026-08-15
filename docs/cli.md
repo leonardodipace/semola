@@ -14,6 +14,8 @@ import { z } from "zod";
 
 ## Quick start
 
+This defines `split`, validates its positional string and boolean flag, runs its action, then parses the process arguments.
+
 ```typescript
 const program = new CLI({
   name: "semola",
@@ -39,6 +41,8 @@ await program.parse();
 `parse()` reads `process.argv.slice(2)` by default; pass an array for tests. Empty argv prints help and exits with code 1.
 
 ## Nested commands
+
+Each `command()` call descends one level, producing `app orm migrate`; the final action receives validated options.
 
 ```typescript
 program
@@ -66,13 +70,17 @@ Chain on a command:
 
 ## Examples
 
-### Example: Parse in tests
+### Parse explicit arguments
+
+Passing an array to `parse()` runs the matching command without reading `process.argv`.
 
 ```typescript
 await program.parse(["split", "hello world", "--first"]);
 ```
 
-### Example: Nested migrate
+### Add a nested command
+
+The two `command()` calls create `db migrate`; `-d` resolves through the option alias before the action runs.
 
 ```typescript
 const cli = new CLI({ name: "app", version: "1.0.0" });
@@ -91,7 +99,9 @@ cli
 await cli.parse(["db", "migrate", "-d"]);
 ```
 
-### Example: Required string option
+### Add a required option
+
+The string schema makes `--name` required and gives the action a typed value.
 
 ```typescript
 program
@@ -100,6 +110,29 @@ program
   .action((_args, options) => {
     console.log(`Hello, ${options.name}`);
   });
+```
+
+### Add a positional argument
+
+`argument()` validates a positional token before passing it to the action.
+
+```typescript
+program
+  .command("echo")
+  .argument("message", { schema: z.string() })
+  .action((args) => {
+    console.log(args.message);
+  });
+```
+
+### Run an action
+
+`action()` attaches the handler that runs after all selected command arguments and options validate.
+
+```typescript
+program.command("version").action(() => {
+  console.log("1.0.0");
+});
 ```
 
 ## Reference

@@ -23,6 +23,8 @@ Also exported: `DuplicateWorkflowError`, `NonRetryableStepError`, `Serialization
 
 ## Quick start
 
+This registers embedded workers, starts one execution, then reads its current status. During replay, completed named steps are loaded from Redis instead of running again.
+
 ```typescript
 const onboard = defineWorkflow<{ userId: string }, { ok: true }>({
   name: "onboard-user",
@@ -75,17 +77,64 @@ History and status writes are lease-fenced (Redis compare-and-append / compare-a
 
 ### Instance
 
-- `name` - workflow name used for registration and Redis keys
-- `start(input, options?)` - persist `WorkflowStarted`, enqueue workflow task, return `{ executionId, status: "pending" }`
-- `get(executionId)` - status, result, error, step snapshots
-- `cancel(executionId)` - append `WorkflowCancelRequested` and abort in-process work; returns current status with `cancelledAt: number | null` (null until terminal `cancelled`; poll `get`)
-- `resume(executionId)` - re-queue a **failed** execution (throws if not `failed`, except to finish an interrupted resume). Persists keys first so retention TTL cannot drop the execution mid-resume; active registration waits until resume events are in history
-- `stop()` - stop polling, wait for in-flight work, release process registration
+`name` is the workflow name used for registration and Redis keys.
+
+#### Start an execution
+
+`start()` persists `WorkflowStarted`, enqueues work, and immediately returns a pending execution.
+
+```typescript
+const { executionId, status } = await onboard.start({ userId: "u_1" });
+// status: "pending"
+```
+
+#### Read an execution
+
+`get()` returns current status, result, error, and completed step snapshots.
+
+```typescript
+const execution = await onboard.get(executionId);
+console.log(execution.status, execution.steps);
+```
+
+#### Cancel an execution
+
+`cancel()` records the request and aborts local work. Poll `get()` until status becomes `cancelled`.
+
+```typescript
+await onboard.cancel(executionId);
+
+const execution = await onboard.get(executionId);
+console.log(execution.cancelledAt);
+```
+
+#### Resume a failed execution
+
+`resume()` persists a new resume event and re-queues a failed execution. It rejects executions in other terminal states.
+
+```typescript
+const execution = await onboard.get(executionId);
+
+if (execution.status === "failed") {
+  await onboard.resume(executionId);
+}
+```
+
+#### Stop workers
+
+`stop()` ends polling, waits for in-flight work, and releases this process registration.
+
+```typescript
+await onboard.stop();
+```
 
 ### Top-level
 
-- `defineWorkflow(options)` - register and start workers
-- `listWorkflows(redis, options?)` - scan all executions in Redis (any workflow name). Options: `name`, `status` (string or array). Does not require `defineWorkflow`. Returns lightweight meta snapshots (`WorkflowListItem`), not full `get()` detail.
+`defineWorkflow(options)` registers the workflow and starts embedded workers, as shown in the quick start.
+
+`listWorkflows(redis, options?)` scans executions for every workflow name without requiring `defineWorkflow`. Filters accept `name` and one or more statuses. Results are lightweight `WorkflowListItem` snapshots, not full `get()` detail.
+
+This finds all active executions, then resumes every failed onboarding execution.
 
 ```typescript
 const all = await listWorkflows(redis);
@@ -114,6 +163,19 @@ Crash recovery stays automatic via leases. Use `listWorkflows` for ops and admin
 
 `fail(message)` inside a step marks a non-retryable failure (`NonRetryableStepError`).
 
+`step()` records a side effect's result, `sleep()` creates a durable wait, and `fail()` ends the current step without retrying.
+
+```typescript
+handler: async ({ input, step, sleep }) => {
+  await step("charge", async ({ fail }) => {
+    const charged = await charge(input.orderId);
+    if (!charged) fail("card declined");
+  });
+
+  await sleep(1_000);
+}
+```
+
 ## Options
 
 - **`name`** (required) - unique per process
@@ -126,7 +188,7 @@ Crash recovery stays automatic via leases. Use `listWorkflows` for ops and admin
 - **`retentionTTL`** - how long terminal executions (`completed` / `failed` / `cancelled`) stay in Redis, in ms (default: 86400000, 24h). `Infinity` keeps them forever. Any other value must be a non-negative number. `0` unlinks immediately after terminal. Pending and running keys are never expired. Failed executions can be `resume`d only while they still exist. A background sweep also expires leftover terminal keys with no TTL (including data from older semola versions).
 - **`retentionMax`** - optional cap on terminal executions per workflow name. Must be a positive integer. Oldest are `UNLINK`ed when the cap is exceeded. Works with or without a finite `retentionTTL`.
 - **`concurrency`** - max parallel instances across replicas (default: 1). Also the number of workflow pollers in this process. Without `partitionBy`, all executions share one Redis slot pool of size `concurrency` (key `*`). With `partitionBy`, both the global pool and the per-key pool apply (each size `concurrency`). If replicas disagree on `concurrency`, the effective cap is the max.
-- **`partitionBy`** - `(input) => string` for per-key concurrency across replicas. Empty keys throw. Cap applies for the whole execution, including durable waits. Does not replace the global `concurrency` cap — both apply. The key `*` is reserved for the global pool.
+- **`partitionBy`** - `(input) => string` for per-key concurrency across replicas. Empty keys throw. Cap applies for the whole execution, including durable waits. Does not replace the global `concurrency` cap - both apply. The key `*` is reserved for the global pool.
 - **`pollInterval`** - idle poll backoff ms (default: 100)
 
 `start(input, { executionId?, partitionKey? })` - `partitionKey` overrides `partitionBy`. Custom `executionId` must be non-empty and must not contain `:`. Empty `partitionKey` throws.
@@ -143,6 +205,8 @@ defineWorkflow({
 });
 ```
 
+This caps active executions globally and per environment, so one environment cannot consume every slot.
+
 `partitionKey` on `start` overrides `partitionBy` when both are present. Empty keys throw. The resolved key is stored on execution meta so `resume` keeps the original partition.
 
 Failed steps retry with exponential backoff before the workflow is marked `failed`. Default `retries: 3` means 4 total attempts. `retries: 0` fails on the first error.
@@ -152,6 +216,8 @@ await step("charge", async ({ fail }) => {
   if (!cardId) fail("missing card");
 });
 ```
+
+This marks a missing card as non-retryable, so the workflow fails immediately instead of using its retry budget.
 
 `cancel` is honored during retry backoff and `sleep`, not only between steps. After terminal failure, `resume(executionId)` re-queues the execution.
 

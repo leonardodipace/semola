@@ -15,6 +15,8 @@ import { Api, Group, Middleware } from "semola/api";
 
 ## Quick start
 
+This registers a validated `GET /users/:id` route, then starts Bun's HTTP server on port 3000.
+
 ```typescript
 import { Api } from "semola/api";
 import { z } from "zod";
@@ -48,6 +50,8 @@ For tests or embedding, call `api.fetch(request)` instead of serving.
 All request fields are optional. Whatever you declare is validated and typed into the handler.
 
 ### Params, query, body, headers
+
+This route validates request body, query, and headers before calling `createPost`, then checks the `201` response against its schema.
 
 ```typescript
 api.defineRoute({
@@ -85,6 +89,8 @@ You can also return a plain string or object; Semola wraps it as a response.
 
 Middleware can validate, short-circuit with a `Response`, or attach typed data to the context:
 
+Middleware runs before the route handler. Here, a missing token returns `401` without running the route; a valid token adds `userId`, which the route reads with `c.get`.
+
 ```typescript
 const auth = new Middleware({
   handler: async (c) => {
@@ -109,10 +115,13 @@ api.defineRoute({
 ```
 
 Pass middleware on the API (`new Api({ middlewares: [...] })`), a group, or a single route.
+Execution order is API middleware, outer-to-inner group middleware, route middleware, then the route handler. Any middleware that returns a `Response` stops the chain.
 
 ## Groups
 
 Share a path prefix and middleware across routes:
+
+This creates `GET /admin/stats`. The group's authentication middleware runs before the route handler.
 
 ```typescript
 const admin = new Group({
@@ -133,6 +142,8 @@ api.mount(admin);
 
 Server-sent events use a generator handler (GET only):
 
+This route streams two events in order, then closes the connection when the generator finishes.
+
 ```typescript
 api.defineSSERoute({
   path: "/events",
@@ -149,6 +160,8 @@ String `data` is sent raw; other values are JSON-encoded.
 
 Route metadata (`summary`, `description`, `operationId`, `tags`) and schemas feed the spec:
 
+This configures document metadata and builds the OpenAPI object from all registered routes.
+
 ```typescript
 const api = new Api({
   openapi: {
@@ -164,7 +177,9 @@ Serve that JSON from a route if you want a public `/openapi.json`.
 
 ## Examples
 
-### Example: Authenticated route
+### Authenticated route
+
+The `auth` middleware runs first. It either returns `401` immediately or contributes `userId`, then the `/me` route builds the successful response.
 
 ```typescript
 const auth = new Middleware({
@@ -192,7 +207,9 @@ api.defineRoute({
 });
 ```
 
-### Example: Nested groups
+### Nested groups
+
+Mounting `users` inside `v1`, then `v1` inside the API, combines both prefixes into `GET /v1/users/:id`.
 
 ```typescript
 const v1 = new Group({ prefix: "/v1" });
@@ -212,13 +229,11 @@ api.mount(v1);
 // GET /v1/users/:id
 ```
 
-### Example: OpenAPI + fetch in tests
+### Fetch in tests
+
+`fetch()` dispatches a `Request` through the same route pipeline without opening a network port.
 
 ```typescript
-const api = new Api({
-  openapi: { title: "Users", version: "1.0.0" },
-});
-
 api.defineRoute({
   path: "/health",
   method: "GET",
@@ -228,12 +243,24 @@ api.defineRoute({
 
 const res = await api.fetch(new Request("http://localhost/health"));
 expect(res.status).toBe(200);
+```
+
+### Build an OpenAPI document
+
+`getOpenApiSpec()` collects registered route metadata and schemas into an OpenAPI document.
+
+```typescript
+const api = new Api({
+  openapi: { title: "Users", version: "1.0.0" },
+});
 
 const spec = api.getOpenApiSpec();
 expect(spec.info.title).toBe("Users");
 ```
 
-### Example: Disable output validation
+### Disable output validation
+
+This keeps request validation enabled while returning handler output without checking response schemas.
 
 ```typescript
 const api = new Api({
@@ -241,7 +268,9 @@ const api = new Api({
 });
 ```
 
-### Example: Response headers
+### Response headers
+
+Middleware sets the request ID first, then the route adds download metadata and returns the CSV body. Both headers are copied to the response.
 
 ```typescript
 const requestId = new Middleware({
@@ -264,6 +293,29 @@ api.defineRoute({
 
 Headers from middleware and the route are copied onto the returned `Response`.
 
+### Get Bun route handlers
+
+`getRouteHandlers()` compiles registered routes into the map expected by `Bun.serve`.
+
+```typescript
+const routes = api.getRouteHandlers();
+
+const server = Bun.serve({
+  routes,
+  fetch: () => new Response("Not found", { status: 404 }),
+});
+```
+
+### Start a server
+
+`serve()` starts `Bun.serve` and passes the server instance to the optional callback.
+
+```typescript
+api.serve(3000, (server) => {
+  console.log(`Listening on ${server.url}`);
+});
+```
+
 ## Reference
 
 ### `Api` options
@@ -283,6 +335,7 @@ Headers from middleware and the route are copied onto the returned `Response`.
 | `defineSSERoute(config)` | Register a GET SSE route |
 | `mount(group)` | Mount a `Group` |
 | `fetch(request)` | Handle a request without listening |
+| `getRouteHandlers()` | Build Bun's route handler map |
 | `getOpenApiSpec()` | Build the OpenAPI document |
 | `serve(port, callback?)` | Start `Bun.serve` |
 

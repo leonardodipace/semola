@@ -24,6 +24,8 @@ import {
 
 ## Quick start
 
+This defines a typed table, opens an in-memory SQLite client, inserts one user, then finds it by email.
+
 ```typescript
 const users = defineTable("users", {
   id: uuid("id").primaryKey().notNull(),
@@ -60,6 +62,8 @@ Chain `.primaryKey()`, `.notNull()`, `.nullable()`, `.unique()`, `.default(fn)`,
 
 ### Relations
 
+The relation map links each post to one author and each user to many posts through `authorId`.
+
 ```typescript
 const posts = defineTable("posts", {
   id: uuid("id").primaryKey().notNull(),
@@ -89,6 +93,8 @@ const db = createOrm({
 ## Queries
 
 ### CRUD
+
+These calls show create, single and list queries, update, and bulk delete on typed table clients.
 
 ```typescript
 await db.users.create({
@@ -129,6 +135,8 @@ Table methods: `findMany`, `findFirst`, `findUnique`, `create`, `createMany`, `u
 
 ## Transactions and raw SQL
 
+The transaction commits both inserts together or rolls both back when the callback throws. `$raw` runs SQL directly.
+
 ```typescript
 await db.$transaction(async (tx) => {
   await tx.users.create({ data: { /* ... */ } });
@@ -143,6 +151,8 @@ await db.$raw.unsafe(`CREATE TABLE IF NOT EXISTS users (...)`);
 ## Hooks
 
 Hooks receive a context and may return patched options:
+
+The global hook trims user names before insert, then the table hook logs the created row.
 
 ```typescript
 const db = createOrm({
@@ -171,7 +181,19 @@ const db = createOrm({
 
 ## Examples
 
-### Example: Find with include
+### Create one row
+
+`create()` inserts one typed row and returns it.
+
+```typescript
+const user = await db.users.create({
+  data: { id: "u1", name: "Ada", email: "ada@example.com" },
+});
+```
+
+### Find with include
+
+`findFirst()` returns the first matching post and loads its related author.
 
 ```typescript
 const post = await db.posts.findFirst({
@@ -182,7 +204,9 @@ const post = await db.posts.findFirst({
 console.log(post?.author.email);
 ```
 
-### Example: Compound where
+### Compound where
+
+`findMany()` combines filters, sorts matches, and limits the result to ten rows.
 
 ```typescript
 const active = await db.users.findMany({
@@ -194,7 +218,74 @@ const active = await db.users.findMany({
 });
 ```
 
-### Example: Transaction rollback
+### Find a unique row
+
+`findUnique()` expects a unique filter and returns that row or `null`.
+
+```typescript
+const user = await db.users.findUnique({
+  where: { id: "u1" },
+});
+```
+
+### Create many rows
+
+`createMany()` inserts all supplied rows in one operation.
+
+```typescript
+await db.users.createMany({
+  data: [
+    { id: "u2", name: "Grace", email: "grace@example.com" },
+    { id: "u3", name: "Linus", email: "linus@example.com" },
+  ],
+});
+```
+
+### Update many rows
+
+`updateMany()` applies the same patch to every row matching the filter.
+
+```typescript
+await db.users.updateMany({
+  where: { name: { startsWith: "A" } },
+  data: { name: "Anonymous" },
+});
+```
+
+### Update one row
+
+`update()` patches the row selected by a unique filter and returns the updated value.
+
+```typescript
+const user = await db.users.update({
+  where: { id: "u1" },
+  data: { name: "Augusta" },
+});
+```
+
+### Delete one row
+
+`delete()` removes the row selected by a unique filter.
+
+```typescript
+await db.users.delete({
+  where: { id: "u3" },
+});
+```
+
+### Delete many rows
+
+`deleteMany()` removes every matching row and returns the affected rows.
+
+```typescript
+const deleted = await db.posts.deleteMany({
+  where: { authorId: "u1" },
+});
+```
+
+### Transaction rollback
+
+Throwing inside `$transaction()` rolls back every write made through the transaction client.
 
 ```typescript
 await db.$transaction(async (tx) => {
@@ -207,7 +298,9 @@ await db.$transaction(async (tx) => {
 });
 ```
 
-### Example: Schema via `$raw`
+### Schema via `$raw`
+
+`$raw` exposes Bun's SQL client for schema operations or queries outside the typed table API.
 
 ```typescript
 await db.$raw.unsafe(`

@@ -15,6 +15,8 @@ import { Cache } from "semola/cache";
 
 ## Quick start
 
+This stores a typed user for one minute, reads it from the prefixed Redis key, then deletes it.
+
 ```typescript
 const users = new Cache<{ name: string; email: string }>({
   redis: redisClient,
@@ -34,6 +36,8 @@ await users.delete("1");
 
 ## Soft-disable
 
+This cache performs no writes or deletes, and every read behaves like a miss.
+
 ```typescript
 const cache = new Cache({
   redis: redisClient,
@@ -49,7 +53,33 @@ Pass `serializer` / `deserializer` if JSON is not enough. Keep them inverse of e
 
 ## Examples
 
-### Example: Dynamic TTL
+### Store a value with `set()`
+
+`set()` serializes the value, applies the configured TTL, and returns the original typed value.
+
+```typescript
+await users.set("1", { name: "Ada", email: "ada@example.com" });
+```
+
+### Read a value with `get()`
+
+`get()` resolves the prefixed key, deserializes its value, and throws on a miss.
+
+```typescript
+const user = await users.get("1");
+```
+
+### Remove a value with `delete()`
+
+`delete()` removes the resolved Redis key and returns Redis's deletion count.
+
+```typescript
+const deleted = await users.delete("1");
+```
+
+### Dynamic TTL
+
+The TTL callback keeps admin sessions for one hour and all other sessions for one minute.
 
 ```typescript
 const sessions = new Cache<{ userId: string }>({
@@ -59,7 +89,9 @@ const sessions = new Cache<{ userId: string }>({
 });
 ```
 
-### Example: Soft-disable in development
+### Soft-disable in development
+
+The same call sites keep working in development, but cache operations only reach Redis in production.
 
 ```typescript
 const cache = new Cache({
@@ -69,7 +101,9 @@ const cache = new Cache({
 });
 ```
 
-### Example: Custom serializer
+### Custom serializer
+
+Values are encoded as base64 before storage and restored to `Uint8Array` after reading.
 
 ```typescript
 const blobs = new Cache<Uint8Array>({

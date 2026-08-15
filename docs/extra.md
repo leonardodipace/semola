@@ -8,12 +8,23 @@ Odds and ends that are useful but too small for a dedicated module. Today that m
 ## Import
 
 ```typescript
-import { 
-  createRetry, InvalidResultError, InvalidRetryError,
-  BACKOFF_MULTIPLIER, BASE_BACKOFF_DELAY, MAX_BACKOFF_DELAY,
-  BackoffOptions, ErrorMetadataType, HookContextType,
-  OnFailedAttemptContextType, RetryContext, RetryOnErrorContextType,
-  RetryOptions, RetryOutcomeType
+import {
+  BACKOFF_MULTIPLIER,
+  BASE_BACKOFF_DELAY,
+  createRetry,
+  InvalidResultError,
+  InvalidRetryError,
+  MAX_BACKOFF_DELAY,
+} from "semola/extra";
+import type {
+  BackoffOptions,
+  ErrorMetadataType,
+  HookContextType,
+  OnFailedAttemptContextType,
+  RetryContext,
+  RetryOnErrorContextType,
+  RetryOptions,
+  RetryOutcomeType,
 } from "semola/extra";
 ```
 
@@ -84,9 +95,11 @@ An `InvalidResultError` is created when `input`'s return value need to be retrie
 
 If an error was thrown by `onFailedAttempt()`, `beforeRetry()`, `afterRetry()` or `onError()` function, `callable` will re-throw the original error.
 
-### Usage Example
+### Examples
 
 **Save something inside a file**
+
+The callable retries a failed write up to three times, reports the final failure through `onError`, and returns the byte count on success.
 
 ```typescript
 const callable = createRetry({
@@ -108,6 +121,8 @@ if (outcome.ok) {
 ```
 
 **Stop at a specific error**
+
+`retryOnError` stops retrying when the report is missing, so that error is thrown immediately.
 
 ```typescript
 type Report = { name: string; completed: boolean; author: string };
@@ -144,6 +159,8 @@ try {
 
 **Log every attempt**
 
+`onFailedAttempt` receives the attempt number and calculated jitter delay after each failed call.
+
 ```typescript
 const callable = createRetry({
   input: async () => {
@@ -165,6 +182,8 @@ const callable = createRetry({
 ```
 
 **Call a function with arguments**
+
+The `input` closure captures arguments while the returned callable keeps a zero-argument API.
 
 ```typescript
 async function execute(command: string) { ... }

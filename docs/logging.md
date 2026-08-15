@@ -19,6 +19,8 @@ import {
 
 ## Quick start
 
+One `Logger` sends five severity levels to the console, prefixing every line with `api`.
+
 ```typescript
 const log = new Logger("api", [new ConsoleProvider()]);
 
@@ -34,6 +36,8 @@ The first argument is a prefix shown on every line.
 ## Providers
 
 Pass several providers to fan out:
+
+Each log call writes the same formatted entry to both the console and file.
 
 ```typescript
 const log = new Logger("worker", [
@@ -52,7 +56,9 @@ const log = new Logger("worker", [
 
 ## Examples
 
-### Example: Console + file
+### Console and file providers
+
+Info-and-higher entries go to the console, while the file provider writes and rotates `api.log`.
 
 ```typescript
 const log = new Logger("api", [
@@ -65,7 +71,9 @@ const log = new Logger("api", [
 log.info("listening");
 ```
 
-### Example: JSON formatter
+### JSON formatter
+
+The provider formats each entry as one JSON object per line.
 
 ```typescript
 const log = new Logger("jobs", [
@@ -77,7 +85,9 @@ const log = new Logger("jobs", [
 log.warning("retry scheduled");
 ```
 
-### Example: Filter noise
+### Filter noise
+
+The warning threshold drops the debug entry and emits the warning.
 
 ```typescript
 const log = new Logger("http", [
@@ -86,6 +96,49 @@ const log = new Logger("http", [
 
 log.debug("ignored");
 log.warning("slow request");
+```
+
+### Date formatter helpers
+
+Date helpers return timestamp strings and can be passed directly to a formatter.
+
+```typescript
+const formatter = new BaseFormatter(isoDateTimeFormat);
+
+const log = new Logger("api", [
+  new ConsoleProvider({ formatter }),
+]);
+```
+
+### Custom logger
+
+Extending `AbstractLogger` lets a specialized logger define its own severity behavior.
+
+```typescript
+class SilentLogger extends AbstractLogger {
+  public debug() {}
+  public info() {}
+  public warning() {}
+  public error() {}
+  public critical() {}
+}
+
+const log = new SilentLogger("app", [new ConsoleProvider()]);
+log.info("ready");
+```
+
+### Custom provider
+
+Extending `LoggerProvider` creates a new sink. `execute()` receives each routed entry, and `getLogLevel()` exposes its configured threshold.
+
+```typescript
+class MemoryProvider extends LoggerProvider {
+  public entries: LogDataType[] = [];
+
+  public execute(data: LogDataType) {
+    this.entries.push(data);
+  }
+}
 ```
 
 ## Reference

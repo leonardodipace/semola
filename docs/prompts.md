@@ -22,6 +22,8 @@ import {
 
 ## Quick start
 
+The first prompt requires a project name; the second returns a boolean, defaulting to `true` when the user presses Enter.
+
 ```typescript
 const name = await input({
   message: "Project name",
@@ -52,7 +54,9 @@ Selects take `choices` with `value`, and optional `label`, `hint`, `disabled`. M
 
 ## Examples
 
-### Example: Full setup flow
+### Text input with `input()`
+
+`input()` reads a line of text and enforces the required value before returning.
 
 ```typescript
 const name = await input({
@@ -60,24 +64,48 @@ const name = await input({
   placeholder: "my-app",
   required: true,
 });
+```
 
+### Hidden input with `password()`
+
+`password()` masks each typed character and returns the secret text.
+
+```typescript
 const secret = await password({
   message: "API token",
   mask: "*",
 });
+```
 
+### Boolean input with `confirm()`
+
+`confirm()` asks a yes-or-no question and uses `true` when the user accepts the default.
+
+```typescript
 const proceed = await confirm({
   message: "Create the project?",
   defaultValue: true,
 });
+```
 
+### Numeric input with `number()`
+
+`number()` rejects non-finite values and enforces the configured range.
+
+```typescript
 const port = await number({
   message: "Port",
   min: 1,
   max: 65535,
   defaultValue: 3000,
 });
+```
 
+### One choice with `select()`
+
+`select()` returns the selected choice's typed `value`; labels and hints only affect display.
+
+```typescript
 const framework = await select({
   message: "Framework",
   choices: [
@@ -85,7 +113,13 @@ const framework = await select({
     { value: "node", label: "Node", hint: "legacy" },
   ],
 });
+```
 
+### Many choices with `multiselect()`
+
+`multiselect()` returns selected values and keeps prompting until at least one is selected.
+
+```typescript
 const features = await multiselect({
   message: "Features",
   choices: [
@@ -97,7 +131,9 @@ const features = await multiselect({
 });
 ```
 
-### Example: Validation
+### Validate input
+
+Returning an error string keeps the prompt open; returning `undefined` accepts the value.
 
 ```typescript
 const email = await input({
@@ -107,7 +143,9 @@ const email = await input({
 });
 ```
 
-### Example: Testing with a mock runtime
+### Test with a mock runtime
+
+Passing a runtime as the second argument keeps the prompt away from the real terminal.
 
 ```typescript
 await input({ message: "Name" }, mockRuntime);
@@ -124,4 +162,4 @@ await input({ message: "Name" }, mockRuntime);
 | `select` | Single choice |
 | `multiselect` | Multiple choices |
 
-Pass `runtime` on options or as the second argument for non-TTY / tests.
+Pass `runtime` as the second argument for non-TTY use or tests.

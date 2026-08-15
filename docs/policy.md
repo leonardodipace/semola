@@ -13,6 +13,8 @@ import { Policy, eq, and, or, has } from "semola/policy";
 
 ## Quick start
 
+Two allow rules grant reading and author edits, then a forbid rule blocks deletion of published posts. `can()` evaluates forbids first.
+
 ```typescript
 type Post = {
   id: number;
@@ -79,6 +81,8 @@ Import what you need from `semola/policy`:
 
 Combine helpers on fields:
 
+Both field conditions must match for the rule to allow `feature`.
+
 ```typescript
 posts.allow({
   action: "feature",
@@ -90,6 +94,8 @@ posts.allow({
 ```
 
 For a one-off check on a field, any object with a `fn` that receives the field value works:
+
+This custom predicate only allows draft posts to be archived.
 
 ```typescript
 posts.allow({
@@ -104,7 +110,9 @@ posts.allow({
 
 ## Examples
 
-### Example: Role-based create
+### Role-based create
+
+Every authenticated user can create, while only public or owned documents can be read.
 
 ```typescript
 type Document = {
@@ -131,7 +139,9 @@ docs.allow({
 });
 ```
 
-### Example: Forbid overrides allow
+### Forbid overrides allow
+
+Although the author matches the allow rule, the published-state forbid rule wins and returns its reason.
 
 ```typescript
 const user = { id: 1 };
@@ -157,7 +167,9 @@ posts.forbid({
 posts.can("delete", publishedPost);
 ```
 
-### Example: Tag helpers
+### Tag helpers
+
+The rule allows promotion only when a published post has at least one featured tag.
 
 ```typescript
 posts.allow({
@@ -169,7 +181,9 @@ posts.allow({
 });
 ```
 
-### Example: Custom field predicate
+### Custom field predicate
+
+The inline predicate allows publishing only when the post has at least one tag.
 
 ```typescript
 posts.allow({

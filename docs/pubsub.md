@@ -15,6 +15,8 @@ import { PubSub } from "semola/pubsub";
 
 ## Quick start
 
+This subscribes one handler, publishes a typed JSON message, then removes that handler.
+
 ```typescript
 type UserEvent = {
   userId: string;
@@ -47,6 +49,8 @@ await unsubscribe();
 await events.unsubscribe();
 ```
 
+This removes every local handler and the underlying Redis subscription.
+
 Messages are JSON-serialized. Payloads that fail to parse are dropped. Handler errors are swallowed. `isActive()` tells you whether the Redis subscription is live.
 
 Multiple handlers can share one channel; Redis unsubscribe runs when the last handler is removed.
@@ -54,6 +58,8 @@ Multiple handlers can share one channel; Redis unsubscribe runs when the last ha
 ## Async iteration
 
 Use the `PubSub` instance as an async iterable. Each iterator buffers messages and removes its handler when the loop exits.
+
+This loop handles each published message until it breaks or the subscription ends.
 
 ```typescript
 for await (const message of events) {
@@ -63,6 +69,8 @@ for await (const message of events) {
 
 Use `listen({ signal })` when an `AbortSignal` should stop iteration, including a pending wait:
 
+Aborting the request also stops this iterator and removes its temporary handler.
+
 ```typescript
 for await (const message of events.listen({ signal: request.signal })) {
   console.log(message);
@@ -71,7 +79,9 @@ for await (const message of events.listen({ signal: request.signal })) {
 
 ## Examples
 
-### Example: Fan-out notifications
+### Fan-out notifications
+
+Publishing once sends the notification to every subscribed handler on the Redis channel.
 
 ```typescript
 const notify = new PubSub<{ userId: string; text: string }>({
@@ -87,7 +97,9 @@ await notify.subscribe(async (message) => {
 await notify.publish({ userId: "u1", text: "Welcome!" });
 ```
 
-### Example: Temporary handler
+### Temporary handler
+
+The handler unsubscribes itself after receiving the first logout event.
 
 ```typescript
 const stop = await events.subscribe(async (message) => {
@@ -97,7 +109,9 @@ const stop = await events.subscribe(async (message) => {
 });
 ```
 
-### Example: Check subscription state
+### Check subscription state
+
+`isActive()` prevents creating a duplicate Redis subscription when one is already live.
 
 ```typescript
 if (!events.isActive()) {
@@ -105,7 +119,9 @@ if (!events.isActive()) {
 }
 ```
 
-### Example: Async iteration with abort
+### Async iteration with abort
+
+The iterator consumes both messages, then the logout event aborts its pending subscription and ends the loop.
 
 ```typescript
 const controller = new AbortController();

@@ -15,6 +15,8 @@ import { Queue } from "semola/queue";
 
 ## Quick start
 
+Constructing the queue starts four workers. `enqueue()` stores the email job in Redis, and `stop()` later drains active work before shutdown.
+
 ```typescript
 type EmailJob = {
   to: string;
@@ -44,11 +46,13 @@ Workers start as soon as you construct the queue. `enqueue` returns a job id.
 
 ## Retries and timeouts
 
-Failed jobs retry until `retries` is exhausted, then land on a dead-letter list (`queue:{name}:dead-letter`).
+Failed jobs retry until `retries` is exhausted, then call `onError`. Malformed Redis payloads land on the dead-letter list (`queue:{name}:dead-letter`) and call `onParseError`.
 
 Use `signal` in the handler to abort work when the job times out (default 30s).
 
 ### Hooks
+
+These hooks report successful jobs, retries, exhausted retries, and malformed Redis payloads at their corresponding lifecycle points.
 
 ```typescript
 const emails = new Queue<EmailJob>({
@@ -62,15 +66,17 @@ const emails = new Queue<EmailJob>({
     console.warn("retry", job.id, error, retriesRemaining);
   },
   onError: ({ job, lastError }) => {
-    console.error("dead letter", job.id, lastError.message);
+    console.error("dead letter", job.id, lastError);
   },
   onParseError: ({ parseError }) => {
-    console.error("bad payload", parseError.message);
+    console.error("bad payload", parseError);
   },
 });
 ```
 
 ## Shutdown
+
+`stop()` ends polling, re-queues interrupted pops, and waits for active handlers.
 
 ```typescript
 await emails.stop();
@@ -80,7 +86,20 @@ Stops polling and waits for in-flight handlers to finish. In-flight pops are re-
 
 ## Examples
 
-### Example: Low concurrency, many retries
+### Add work with `enqueue()`
+
+`enqueue()` JSON-serializes a job, pushes it to Redis, and returns its generated ID.
+
+```typescript
+const jobId = await emails.enqueue({
+  to: "user@example.com",
+  subject: "Welcome",
+});
+```
+
+### Low concurrency, many retries
+
+One worker processes invoices serially, retrying failures with capped exponential backoff.
 
 ```typescript
 const invoices = new Queue({
@@ -99,7 +118,9 @@ const invoices = new Queue({
 });
 ```
 
-### Example: Abort on timeout
+### Abort on timeout
+
+After ten seconds, the queue aborts the handler's signal, which also cancels the in-flight fetch.
 
 ```typescript
 const downloads = new Queue<{ url: string }>({
@@ -113,7 +134,9 @@ const downloads = new Queue<{ url: string }>({
 });
 ```
 
-### Example: Dead-letter logging
+### Exhausted retry logging
+
+After two retries are exhausted, `onError` alerts operators. Handler failures are not added to the parse-failure dead-letter list.
 
 ```typescript
 const jobs = new Queue({
@@ -124,15 +147,17 @@ const jobs = new Queue({
     await deliverWebhook(data);
   },
   onError: async ({ job, lastError }) => {
-    await alertOps("webhook dead-lettered", {
+    await alertOps("webhook failed", {
       jobId: job.id,
-      error: lastError.message,
+      error: lastError,
     });
   },
 });
 ```
 
-### Example: Graceful process exit
+### Graceful process exit
+
+The signal handler waits for `stop()` to drain active jobs before ending the process.
 
 ```typescript
 process.on("SIGINT", async () => {

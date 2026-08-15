@@ -13,6 +13,8 @@ import { ok, err, mightThrow, mightThrowSync } from "semola/errors";
 
 ## Quick start
 
+The error guard narrows the result tuple: failure logs and returns, while success exposes a typed user.
+
 ```typescript
 const [error, user] = await getUser("123");
 
@@ -37,6 +39,8 @@ Every result is a two-element tuple:
 
 ### Async
 
+`mightThrow()` converts each rejected promise into an error-first tuple without throwing.
+
 ```typescript
 const [error, response] = await mightThrow(fetch("/api/users"));
 
@@ -50,12 +54,16 @@ const [parseError, body] = await mightThrow(response.json());
 
 ### Sync
 
+`mightThrowSync()` catches a synchronous parse error, which this function maps to its own `ValidationError`.
+
 ```typescript
 const [error, value] = mightThrowSync(() => JSON.parse(input));
 
 if (error) {
   return err("ValidationError", "Invalid JSON");
 }
+
+return ok(value);
 ```
 
 By default the error side is typed as `Error`. If something rejects with a custom shape, pass a generic:
@@ -73,6 +81,8 @@ if (error) {
 ## Return your own results
 
 Build functions that speak the same dialect:
+
+This function returns `err()` for validation, network, and parsing failures, or `ok()` with the parsed user.
 
 ```typescript
 async function getUser(id: string) {
@@ -115,7 +125,9 @@ console.log(user);
 
 ## Examples
 
-### Example: Fetch and parse
+### Fetch and parse
+
+Each async operation is handled independently, so parsing only runs after a successful fetch.
 
 ```typescript
 const [error, response] = await mightThrow(fetch("/api/users"));
@@ -133,7 +145,9 @@ if (parseError) {
 console.log(body);
 ```
 
-### Example: Sync parse with err
+### Sync parse with `err()`
+
+The parser converts thrown JSON errors into a typed failure tuple and valid JSON into a success tuple.
 
 ```typescript
 function parseConfig(input: string) {
@@ -147,7 +161,9 @@ function parseConfig(input: string) {
 }
 ```
 
-### Example: Switch on error type
+### Switch on error type
+
+The discriminant maps expected failures to HTTP status codes while preserving the typed success path.
 
 ```typescript
 const [error, user] = await getUser(id);
