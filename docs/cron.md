@@ -1,367 +1,310 @@
-# Cron
+---
+title: Cron
+description: In-process and OS-level cron schedules on Bun
+---
 
-A lightweight cron scheduler for executing periodic tasks built on top of Bun's native cron module. Supports standard cron expressions, convenient aliases, an expression builder and in-process and OS level jobs.
+Schedule work either in-process or through the operating system. `Cron` runs a handler inside the current Bun process. `CronOS` registers a script with Bun's OS-level cron helper so it runs independently of the current process.
 
 ## Import
 
 ```typescript
-import {
-  Cron, 
-  CronOS,
-  cronJobBuilder,
-  any,
-  list,
-  number,
-  range,
-  step,
-  Month, 
-  WeekDay,
-  EmptyListError, 
-  OutOfBoundError
-} from "semola/cron"
+import { Cron, CronOS, cronJobBuilder, any, number } from "semola/cron";
 ```
 
-## Basic Usage
+## Quick start
+
+This starts an in-process daily handler. Calling `stop()` later cancels its timer.
 
 ```typescript
-// Define an in-process job
-const endpointCheckCron = new Cron({
-  name: "endpoint-check",
-  schedule: "@minutely",
-  handler: async () => {
-    await checkEndpoint();
-  },
-});
-
-// Define an OS-level job
-const osJob = new CronOS({
+const daily = new Cron({
   name: "daily-report",
   schedule: "@daily",
-  path: "./report-worker.ts",
-});
-
-endpointCheckCron.run();
-await osJob.run();
-
-// Later...
-
-endpointCheckCron.stop();
-await osJob.stop();
-```
-
-## Options
-
-- `Cron` class:
-  - **`name: string`** (required) - Job's name
-  - **`schedule: string`** (required) - Cron expression or alias
-  - **`handler: () => unknown`** (required) - Function to execute on schedule. Support both sync and async functions
-- `CronOS` class:
-  - **`name`** (required) - Unique job name
-  - **`schedule`** (required) - Cron expression or alias
-  - **`path: string`** (required) - Script's path. Note that Bun resolves it relative to the caller.
-
-
-## Schedule Formats
-
-### Standard Cron Expression (5 fields)
-
-Five fields: minute, hour, day of month, month, day of week
-
-```typescript
-"0 0 * * *"      // Daily at midnight
-"0 */6 * * *"    // Every 6 hours
-"30 9 * * 1-5"   // 9:30 AM on weekdays
-"0 0 1 * *"      // First day of month
-"0 0 * * 0"      // Every Sunday
-```
-
-### Convenient Aliases
-
-```typescript
-"@yearly", "@annually"    // 0 0 1 1 *
-"@monthly"                // 0 0 1 * *
-"@weekly"                 // 0 0 * * 0
-"@daily", "@midnight"     // 0 0 * * *
-"@hourly"                 // 0 * * * *
-"@minutely"               // * * * * *
-```
-
-### Advanced Patterns
-
-```typescript
-"0 9 * * TUE-FRI"      
-"0 0 1 JUN,JUL,AUG *" 
-
-// or...
-
-"0 9 * * TUESDAY-FRIDAY"      
-"0 0 1 JUNE,JULY,AUGUST *"    
-```
-
-**Note**: Both `0` and `7` represent _"Sunday"_ in the weekday field.
-
-## Job Control
-
-```typescript
-const job = new Cron({...});
-const osJob = new CronOS({...});
-
-// Start scheduling
-job.run();
-await osJob.run()
-
-// Stop completely
-job.stop();
-await osJob.stop()
-
-// Check status: "idle" | "running"
-const status = job.getStatus();
-
-job.ref()
-job.unref();
-```
-
-**Note:** `ref()`, `unref()` and `getStatus()` methods are available only for in-process jobs.
-
-### Errors in the handler
-
-An error fired inside the `handler` causes the cron callback to reject. Bun treats this like an unhandled promise rejection or as an uncaught exception. From [Bun's documentation](https://bun.com/docs/runtime/cron#error-handling)
-
-- Use **`process.on("uncaughtException")`** in case of a synchronous `throw`
-- Use **`process.on("unhandledRejection")`** in case of a rejected `Promise`
-
-Without a listener, the process exits with code `1`. With a listener the process keeps running and Bun reschedules the job for the next tick. 
-
-In case a listener is added, `Cron` does not call `stop()`, so `getStatus()` stays `"running"`.
-
-## Common Utilities
-
-This is a list of methods available for both `Cron` and `CronOS` classes:
-- `getExpression(): string` - returns the job's expression 
-- `getJobName(): string` - returns the job's name 
-- `next(from?: Date | number): Date | null` - returns the next matching Date in UTC format or `null` if no match exists within 8 years. 
-  - `from` - Starting point for the search. This parameter can be a `Date` object or a date expressed in milliseconds
-
-```typescript
-const job = new Cron({
-  name: "monthly-job",
-  schedule: "@monthly",
   handler: async () => {
-    await cleanDB();
+    await sendReport();
   },
 });
 
-console.log(job.next());
-console.log(job.next(new Date(1990, 1)));
+daily.run();
 
-// Output:
-// 2026-07-01T00:00:00.000Z
-// 1990-02-01T00:00:00.000Z
+// later
+daily.stop();
 ```
 
-**Note**: the `next()` method will raise an error if the used expression is invalid or if it is `NaN` or `Infinity`. 
+## Schedules
 
-## Disposable Job
+### Aliases
 
-```typescript
-using job = new Cron({...})
-```
+`@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`, `@midnight`, `@hourly`, `@minutely`. You can also pass a standard cron expression string.
 
-When using the `using` keyword, the job will auto-stop when out of scope. This works only for **in-process jobs**.
+### Builder
 
-## Expression Builder
+For typed schedule pieces:
 
-Build cron expressions programmatically with full type-safety supported by a fluent and an intuitive API.
+This builds a Monday-Friday 09:00 expression and gives it to an in-process job.
 
 ```typescript
-import { 
-  any,
+import {
   cronJobBuilder,
+  any,
   list,
   number,
   range,
   step,
-  Month, 
-  WeekDay
+  Month,
+  WeekDay,
 } from "semola/cron";
 
-const expr = cronJobBuilder((builder) =>
-  builder
-    .minute(any())
-    .hour(number(10))
-    .day(number(1))
-    .month(step({ step: Month.jul }))
-    .weekday(list((l) => l.number(WeekDay.mon).number(WeekDay.wed))),
+const schedule = cronJobBuilder((b) =>
+  b
+    .minute(number(0))
+    .hour(number(9))
+    .weekday(range({ min: WeekDay.mon, max: WeekDay.fri })),
 );
 
-console.log(expr);
-// Output: * 10 1 */7 1,3
+const job = new Cron({
+  name: "weekday-nudge",
+  schedule,
+  handler: () => console.log("good morning"),
+});
 ```
 
-**Note:** If a field is not defined, it defaults to `'*'`. This is equivalent to using the `any()` function. 
+Helpers: `any`, `list`, `number`, `range`, `step`, plus `Month` and `WeekDay` enums. Unset fields default to `*`.
 
-Note that invalid ranges and steps values will raise an `OutOfBoundError`. In addition, if creating an empty list, it will raise an `EmptyListError`.
-
-## Error Handling and Retries
-
-Cron has no built-in retry. Wrap the work with [`createRetry`](./extra.md) from `semola/extra`.
+`list()` selects exact values, `range()` selects an inclusive span, and `step()` repeats through a span at a fixed interval.
 
 ```typescript
-import { Cron } from "semola/cron";
-import { createRetry } from "semola/extra";
-
-const retriable = createRetry(checkEndpoint, {
-  maxRetries: 2,
-  onError: (ctx) => console.log(`An error: ${ctx.error.message}`),
-  retryOnError: ({ error: err }) => !(err instanceof MyCustomError),
-  onFailedAttempt: async ({ attemptNumber, delay, error, retriesLeft }) => {
-    console.log(
-      `Attempt ${attemptNumber} failed. Retrying in ${delay}ms. ${retriesLeft} retries left.`,
-    );
-
-    await recover();
-  },
-});
-
-const cleanup = new Cron({
-  name: "endpoint-check",
-  schedule: "@minutely",
-  handler: async () => {
-    await retriable();
-  },
-});
+const schedule = cronJobBuilder((b) =>
+  b
+    .minute(step({ range: { min: 0, max: 59 }, step: 15 }))
+    .hour(list((values) => values.number(9).number(17)))
+    .day(range({ min: 1, max: 7 }))
+    .month(number(Month.jan))
+    .weekday(number(WeekDay.mon)),
+);
 ```
 
+### Lifecycle
+
+`next()` returns the next fire time, or `null` if there is no match. `ref()` / `unref()` control whether the timer keeps the process alive. `getStatus()`, `getExpression()`, and `getJobName()` inspect the job. Disposing the instance (`Symbol.dispose`) calls `stop`.
+
+## OS crontab
+
+`CronOS` registers a job with Bun's OS cron helper. It needs a script `path`, plus `name` and `schedule` (no in-process handler):
+
+This registers `backup.ts` at OS level, then removes that registration.
+
+```typescript
+import { CronOS } from "semola/cron";
+
+const job = new CronOS({
+  name: "nightly-backup",
+  schedule: "@daily",
+  path: "./scripts/backup.ts",
+});
+
+await job.run();
+await job.stop();
+```
 
 ## Examples
 
-### Daily Report Generation
+### Start an in-process job with `run()`
 
-```typescript
-const reports = new Cron({
-  name: "daily-reports",
-  schedule: "0 6 * * *",
-  handler: async () => {
-    const data = await fetchDailyMetrics();
-    const report = await generateReport(data);
-    await sendEmail("admin@company.com", "Daily Report", report);
-  },
-});
-
-reports.run();
-```
-
-### Database Cleanup
+`run()` schedules the handler in the current process. Repeated calls while it is running do nothing.
 
 ```typescript
 const cleanup = new Cron({
-  name: "db-cleanup",
-  schedule: "@daily",
+  name: "cleanup-temp",
+  schedule: "@hourly",
   handler: async () => {
-    await deleteOldLogs(30);
-    await archiveInactiveUsers(90);
+    await clearTempFiles();
   },
 });
 
 cleanup.run();
 ```
 
-### Retry generating a report
+### Stop an in-process job with `stop()`
+
+`stop()` cancels the active timer and returns the job to `idle`.
 
 ```typescript
-import { Cron } from "semola/cron";
-import { createRetry } from "semola/extra";
-
-const dataPoint: ReportDataType = [{...}]
-
-async function createReport(data: ReportDataType) {
-  const metrics = await fetchDailyMetrics();
-  const report = await generateReport(metrics);
-  await sendEmail("admin@company.com", "Daily Report", report);
-}
-
-const callable = createRetry(async () => await createReport(dataPoint), {
-  maxRetries: 10,
-  onFailedAttempt: async ({ id, error, attemptNumber }) => {
-    console.log(
-      `${id} => Attempt number ${attemptNumber} for error: ${error.name} => ${error.message}`,
-    );
-
-    await retryEmail();
-  },
-});
-
-const reports = new Cron({
-  name: "daily-reports",
-  schedule: "0 6 * * *",
-  handler: async () => {
-    await callable();
-  },
-});
-
-reports.run();
+cleanup.stop();
 ```
 
+### Read the next run with `next()`
 
-### Health Check Every Minute
+`next()` parses the schedule and returns its next matching `Date`, or `null` if there is no match (for example an impossible date). Pass a date or timestamp to calculate from another starting point.
 
 ```typescript
-const healthCheck = new Cron({
-  name: "health-check",
+const everyFiveMinutes = new Cron({
+  name: "sync",
+  schedule: "*/5 * * * *",
+  handler: async () => {
+    await syncRemote();
+  },
+});
+
+everyFiveMinutes.run();
+console.log(everyFiveMinutes.next());
+```
+
+### Build a schedule with `cronJobBuilder()`
+
+The builder combines typed fields into a cron expression. Unset fields remain `*`.
+
+```typescript
+const mondayMorning = new Cron({
+  name: "monday-standup",
+  schedule: cronJobBuilder((b) =>
+    b.minute(number(0)).hour(number(9)).weekday(number(WeekDay.mon)),
+  ),
+  handler: () => notifyTeam(),
+});
+```
+
+### Release the process with `unref()`
+
+`unref()` lets Bun exit even while the cron timer remains scheduled.
+
+```typescript
+const heartbeat = new Cron({
+  name: "heartbeat",
   schedule: "@minutely",
-  handler: async () => {
-    const services = ["api", "database", "cache"];
-
-    for (const service of services) {
-      const status = await checkService(service);
-
-      if (!status.healthy) {
-        await alertTeam(`${service} is down`);
-      }
-    }
-  },
+  handler: () => ping(),
 });
 
-healthCheck.run();
+heartbeat.run();
+heartbeat.unref();
 ```
 
-### Graceful Shutdown
+### Keep the process alive with `ref()`
+
+After `unref()`, `ref()` makes the running timer keep the process alive again.
 
 ```typescript
-const job = new Cron({...});
-job.run();
-
-process.on("SIGTERM", async () => {
-  console.log("Shutting down cron job...");
-  job.stop();
-  process.exit(0);
-});
+heartbeat.ref();
 ```
 
-### Save OS Level Job Status
+### Inspect status with `getStatus()`
+
+Status changes from `idle` to `running` after `run()`, then back to `idle` after `stop()`.
 
 ```typescript
-// index.ts
-const job = new CronOS({
-  name: "monthly-job",
-  schedule: "@monthly",
-  path: "./worker.ts",
+heartbeat.getStatus(); // "running"
+heartbeat.stop();
+heartbeat.getStatus(); // "idle"
+```
+
+### Expand an alias with `getExpression()`
+
+`getExpression()` returns the normalized five-field expression for aliases and returns explicit expressions unchanged.
+
+```typescript
+const daily = new Cron({
+  name: "daily",
+  schedule: "@daily",
+  handler: () => {},
 });
 
-await job.run();
-
-
-// worker.ts
-const logger = new Logger("job-status", [
-  new FileProvider("./job-status.json", {
-    formatter: new JSONFormatter(),
-    policy: { type: "time", instant: "month", duration: 12 },
-  }),
-]);
-
-export default {
-  scheduled(controller: Bun.CronController) {
-    logger.debug(controller);
-  },
-};
+daily.getExpression(); // "0 0 * * *"
 ```
+
+### Read the job name with `getJobName()`
+
+`getJobName()` returns the name supplied to the constructor.
+
+```typescript
+daily.getJobName(); // "daily"
+```
+
+### Dispose an in-process job
+
+Explicit resource management calls `stop()` through `Symbol.dispose` when the block ends.
+
+```typescript
+{
+  using report = new Cron({
+    name: "report",
+    schedule: "@daily",
+    handler: () => sendReport(),
+  });
+
+  report.run();
+}
+```
+
+### Register an OS-level job with `CronOS.run()`
+
+Unlike `Cron`, `CronOS` registers a script with the operating system and does not run an in-process handler.
+
+```typescript
+const backup = new CronOS({
+  name: "nightly-backup",
+  schedule: "@daily",
+  path: "./scripts/backup.ts",
+});
+
+await backup.run();
+```
+
+### Remove an OS-level job with `CronOS.stop()`
+
+`stop()` removes the named OS-level registration.
+
+```typescript
+await backup.stop();
+```
+
+### Inspect an OS-level job
+
+`CronOS` shares `next()`, `getExpression()`, and `getJobName()` with in-process jobs; these inspect configuration without registering it.
+
+```typescript
+backup.next();
+backup.getExpression(); // "0 0 * * *"
+backup.getJobName(); // "nightly-backup"
+```
+
+## Reference
+
+### `Cron` options
+
+| Option | Meaning |
+| --- | --- |
+| `name` | Job name |
+| `schedule` | Alias, cron string, or builder result |
+| `handler` | Async or sync function |
+
+### `Cron` methods
+
+| Method | Meaning |
+| --- | --- |
+| `run()` | Start the schedule |
+| `stop()` | Stop the schedule |
+| `next(from?)` | Next fire time, or `null` if none |
+| `ref()` / `unref()` | Keep / release the process |
+| `getStatus()` / `getExpression()` / `getJobName()` | Inspect state |
+
+Disposing a `Cron` with `Symbol.dispose` stops it.
+
+### `CronOS` options
+
+| Option | Meaning |
+| --- | --- |
+| `name` | Job name |
+| `schedule` | Alias or cron string |
+| `path` | Script path registered with Bun |
+
+### `CronOS` methods
+
+| Method | Meaning |
+| --- | --- |
+| `run()` | Register the script with OS-level cron |
+| `stop()` | Remove the OS-level registration |
+| `next(from?)` | Next fire time, or `null` if none |
+| `getExpression()` / `getJobName()` | Inspect configuration |
+
+### Errors
+
+`EmptyListError`, `OutOfBoundError` (exported from `semola/cron`).

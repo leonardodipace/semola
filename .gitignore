@@ -6,6 +6,10 @@ out
 dist
 *.tgz
 
+# docs site
+apps/docs/.next
+apps/docs/.source
+
 # code coverage
 coverage
 *.lcov

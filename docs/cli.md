@@ -1,173 +1,157 @@
-# CLI
+---
+title: CLI
+description: Typed command-line programs with Standard Schema args
+---
 
-Non-interactive CLI builder with argv parsing and Standard Schema validation. Complements `semola/prompts` for interactive TTY prompts.
+Build CLIs with nested commands, validated arguments, and options. Schemas are Standard Schema (Zod, Valibot, …).
 
 ## Import
 
 ```typescript
 import { CLI } from "semola/cli";
+import { z } from "zod";
 ```
 
-## API
+## Quick start
 
-| Export                 | Description                                      |
-| ---------------------- | ------------------------------------------------ |
-| `CLI`                  | Program builder with `.command()`, `.parse()`    |
-| `CliValidationError`   | Schema validation failed for an argument/option  |
-| `UnknownCommandError`     | Subcommand name not registered                   |
-| `CliConfigurationError`   | Command registered without an action handler     |
-| `MissingArgumentError`    | Required positional argument not provided        |
-
-Use any Standard Schema library (Zod, Valibot, ArkType, etc.) for argument and option schemas.
-
-## Examples
-
-### Split string
+This defines `split`, validates its positional string and boolean flag, runs its action, then parses the process arguments.
 
 ```typescript
-import { CLI } from "semola/cli";
-import { z } from "zod";
-
 const program = new CLI({
-  name: "string-util",
-  description: "String utilities",
-  version: "0.6.7",
+  name: "semola",
+  version: "1.0.0",
+  description: "Example CLI",
 });
 
 program
   .command("split")
-  .argument("str", { schema: z.string().min(1) })
-  .option("separator", { schema: z.string().min(1).default(",") })
-  .option("first", { schema: z.boolean().default(false) })
+  .argument("str", { schema: z.string() })
+  .option("first", {
+    schema: z.boolean().default(false),
+    aliases: ["f"],
+  })
   .action((args, options) => {
-    const parts = args.str.split(options.separator);
+    const parts = args.str.split(" ");
+    console.log(options.first ? parts[0] : parts);
+  });
 
-    if (options.first) {
-      console.log(parts[0]);
+await program.parse();
+```
+
+`parse()` reads `process.argv.slice(2)` by default; pass an array for tests. Empty argv prints help and exits with code 1.
+
+## Nested commands
+
+Each `command()` call descends one level, producing `app orm migrate`; the final action receives validated options.
+
+```typescript
+program
+  .command("orm")
+  .command("migrate")
+  .option("dryRun", { schema: z.boolean().default(false) })
+  .action(async (_args, options) => {
+    if (options.dryRun) {
+      console.log("would migrate");
       return;
     }
 
-    console.log(parts.join("\n"));
+    await migrate();
   });
-
-await program.parse();
-// string-util split "Hello, world!" --first --separator ","
 ```
 
-### Publish package
+## Arguments and options
 
-Continues from the split example above (`program` is already defined).
+Chain on a command:
+
+- `argument(name, { schema })` - positional, validated
+- `option(name, { schema, aliases? })` - flags, validated
+- `command(name, { description? })` - nest further
+- `action(handler)` - run when this command is selected; returns the root `CLI`
+
+## Examples
+
+### Parse explicit arguments
+
+Passing an array to `parse()` runs the matching command without reading `process.argv`.
 
 ```typescript
-program
-  .command("publish")
-  .argument("pkg", { schema: z.string().min(1) })
-  .option("tag", { schema: z.string().min(1), aliases: ["t"] })
-  .action((args, options) => {
-    console.log(`Publishing ${args.pkg} with tag ${options.tag}`);
-  });
-
-await program.parse(["publish", "my-package", "-t", "v1.0.0"]);
+await program.parse(["split", "hello world", "--first"]);
 ```
 
-### Git-like commands
+### Add a nested command
+
+The two `command()` calls create `db migrate`; `-d` resolves through the option alias before the action runs.
 
 ```typescript
-import { CLI } from "semola/cli";
-import { z } from "zod";
+const cli = new CLI({ name: "app", version: "1.0.0" });
 
-const program = new CLI({
-  name: "git-essential",
-  description: "Git essential commands",
-  version: "0.1.7",
-});
-
-program
-  .command("push", { description: "Push changes from local to remote" })
-  .option("verbose", { schema: z.boolean().default(false), aliases: ["v"] })
-  .action((_, options) => {
-    console.log(`Pushing with verbose=${options.verbose}`);
+cli
+  .command("db")
+  .command("migrate")
+  .option("dryRun", {
+    schema: z.boolean().default(false),
+    aliases: ["d"],
   })
-  .command("pull", { description: "Pull changes from remote to local" })
-  .option("quite", { schema: z.boolean().default(false), aliases: ["q"] })
-  .action((_, options) => {
-    console.log(`PUlling with quite=${options.quite}`);
+  .action(async (_args, options) => {
+    await runMigrations({ dryRun: options.dryRun });
   });
 
-await program.parse(["push", "-v"]);
+await cli.parse(["db", "migrate", "-d"]);
 ```
 
-### CLI with sub commands
+### Add a required option
+
+The string schema makes `--name` required and gives the action a typed value.
 
 ```typescript
-const program = new CLI({
-  name: "rainy",
-});
-
-const orm = program.command("orm");
-const db = program.command("db");
-
-orm
-  .command("push")
-  .argument("name", { schema: z.string().min(1) })
-  .option("silent", { schema: z.string().min(1) })
-  .option("force", { schema: z.string().min(1) })
-  .action((args, option) => {
-    // your implementation
+program
+  .command("greet")
+  .option("name", { schema: z.string() })
+  .action((_args, options) => {
+    console.log(`Hello, ${options.name}`);
   });
-
-orm
-  .command("pull")
-  .argument("name", { schema: z.string().min(1) })
-  .action((args, option) => {
-    // your implementation
-  });
-
-db.command("create")
-  .argument("name", { schema: z.string().min(1) })
-  .argument("dialect", { schema: z.string().min(1) })
-  .action((args, option) => {
-    // your implementation
-  });
-
-db.command("remove")
-  .argument("name", { schema: z.string().min(1) })
-  .action((args, option) => {
-    // your implementation
-  });
-
-await program.parse();
 ```
 
+### Add a positional argument
 
-## Argv parsing
+`argument()` validates a positional token before passing it to the action.
 
-- Long options: `--name`, `--name=value`, `--name value`
-- Short aliases: `-alias`, `-alias value`, `-alias=value` (full alias name after `-`)
-- Boolean flags: bare `--first` or `-f` sets the option to `true`
-- Positional arguments: tokens not starting with `-` or `--`
-- Unknown options throw `CliValidationError`
+```typescript
+program
+  .command("echo")
+  .argument("message", { schema: z.string() })
+  .action((args) => {
+    console.log(args.message);
+  });
+```
 
-Each argument and option is validated individually with its schema, so per-field `.default()` works when a value is missing.
+### Run an action
 
-Schema `.describe()` text is shown in command help (`<command> --help`) when the schema library implements Standard JSON Schema.
+`action()` attaches the handler that runs after all selected command arguments and options validate.
 
-## Global flags
+```typescript
+program.command("version").action(() => {
+  console.log("1.0.0");
+});
+```
 
-Before the subcommand name:
+## Reference
 
-- `-h`, `--help` - print usage and command list
-- `-v`, `--version` - print program version
+### `CLI` constructor
 
-Command help (`<command> --help`) lists `-h`/`--help` only. Version is a CLI-level flag, not per-command.
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `name` | required | Program name |
+| `description` | - | Shown in help |
+| `version` | `"0.0.0"` | Version string |
 
-On validation failure or unknown command, the program writes to stderr and exits with code `1`.
+### Methods
 
-## Error classes
+| Method | Meaning |
+| --- | --- |
+| `command(name, options?)` | Add / nest a command |
+| `parse(argv?)` | Parse argv and run the matching action |
 
-| Error                  | When                                        |
-| ---------------------- | ------------------------------------------- |
-| `CliValidationError`   | Schema validation failed                    |
-| `UnknownCommandError`     | Subcommand not found                        |
-| `CliConfigurationError`   | Leaf command has no `.action()` handler     |
-| `MissingArgumentError`    | Too few positional arguments for a command  |
+## Errors
+
+Exported from `semola/cli`: `CliConfigurationError`, `CliValidationError`, `MissingArgumentError`, `UnknownCommandError`.

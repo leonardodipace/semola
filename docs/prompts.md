@@ -1,288 +1,165 @@
-# Prompts
+---
+title: Prompts
+description: Interactive CLI prompts for Bun terminals
+---
 
-Interactive CLI prompts with zero dependencies. Inspired by function-first prompt APIs.
+Ask users questions in the terminal: text, passwords, confirms, numbers, and selects.
+
+Needs a real TTY (or a custom `PromptRuntime` for tests). Ctrl+C cancels.
 
 ## Import
 
 ```typescript
 import {
-  confirm,
   input,
-  multiselect,
-  number,
   password,
+  confirm,
+  number,
   select,
+  multiselect,
 } from "semola/prompts";
 ```
 
-## API
+## Quick start
 
-| Function               | Returns    | Use case                                          |
-| ---------------------- | ---------- | ------------------------------------------------- |
-| `input(options)`       | `string`   | Free-text entry - project names, URLs, file paths |
-| `password(options)`    | `string`   | Sensitive input rendered as masked characters     |
-| `confirm(options)`     | `boolean`  | Yes/no decisions - deploy, overwrite, continue    |
-| `number(options)`      | `number`   | Numeric values - ports, counts, thresholds        |
-| `select(options)`      | `TValue`   | Single choice from a list - environments, regions |
-| `multiselect(options)` | `TValue[]` | Multiple choices from a list - features, tags     |
-
-All prompt functions throw on failure and return the value directly on success.
-
-Thrown errors extend `Error` and have a `name` property identifying the error class:
-
-- `PromptEnvironmentError` - runtime is not interactive (no TTY)
-- `PromptCancelledError` - user pressed Escape or Ctrl+C
-- `PromptIOError` - unexpected I/O failure
-
-## Common options
-
-| Option      | Description                                                                                                      |
-| ----------- | ---------------------------------------------------------------------------------------------------------------- |
-| `message`   | The question text displayed to the user                                                                          |
-| `validate`  | Called with the final value before resolving. Return a string to show as an error, or `null`/`undefined` to pass |
-| `transform` | Called with the submitted value before resolving. Return the transformed value                                   |
-
-## Prompt-specific options
-
-| Option                          | Prompts                       |
-| ------------------------------- | ----------------------------- |
-| `defaultValue`                  | all                           |
-| `required`                      | `input`, `password`           |
-| `requiredMessage`               | `input`, `password`, `number` |
-| `placeholder`                   | `input`, `password`           |
-| `mask`                          | `password`                    |
-| `min` / `max`                   | `number`, `multiselect`       |
-| `invalidMessage`                | `number`                      |
-| `minMessage` / `maxMessage`     | `number`                      |
-| `activeLabel` / `inactiveLabel` | `confirm`                     |
-| `choices`                       | `select`, `multiselect`       |
-
-## Examples
-
-### Input
+The first prompt requires a project name; the second returns a boolean, defaulting to `true` when the user presses Enter.
 
 ```typescript
 const name = await input({
   message: "Project name",
-  required: true,
   placeholder: "my-app",
-  validate: (value) => (value.length < 2 ? "Too short" : null),
+  required: true,
 });
-```
 
-### Password
-
-When `mask` is omitted, the cursor stays still while typing and nothing is shown after submit - identical to the Linux `sudo` behavior. When `mask` is set, each character is replaced by the mask symbol and the same number of symbols is shown after submit.
-
-```typescript
-// hidden mode - cursor stays still, nothing shown on submit
-const secret = await password({ message: "Enter password" });
-
-// masked mode - each character shown as "*", same count shown on submit
-const secret2 = await password({
-  message: "Enter password",
-  mask: "*",
-  validate: (value) =>
-    value.length < 8 ? "Must be at least 8 characters" : null,
-});
-```
-
-### Confirm
-
-```typescript
-const shouldDeploy = await confirm({
-  message: "Deploy now?",
+const proceed = await confirm({
+  message: "Create the project?",
   defaultValue: true,
 });
 ```
 
-### Number
+## Prompt kinds
+
+Shared options across prompts: `message`, optional `validate`, optional `transform`. Pass a second argument implementing `PromptRuntime` so prompts do not touch the real terminal.
+
+Selects take `choices` with `value`, and optional `label`, `hint`, `disabled`. Multiselect: space toggles, `a` toggles all enabled (second press clears them).
+
+### Defaults
+
+| Prompt | Notable defaults |
+| --- | --- |
+| `confirm` | `defaultValue: false`; Yes/No labels |
+| `password` | Omit `mask` to hide text entirely |
+| `number` | Always requires a finite value |
+| `multiselect` | `defaultValue: []` |
+
+## Examples
+
+### Text input with `input()`
+
+`input()` reads a line of text and enforces the required value before returning.
+
+```typescript
+const name = await input({
+  message: "Project name",
+  placeholder: "my-app",
+  required: true,
+});
+```
+
+### Hidden input with `password()`
+
+`password()` masks each typed character and returns the secret text.
+
+```typescript
+const secret = await password({
+  message: "API token",
+  mask: "*",
+});
+```
+
+### Boolean input with `confirm()`
+
+`confirm()` asks a yes-or-no question and uses `true` when the user accepts the default.
+
+```typescript
+const proceed = await confirm({
+  message: "Create the project?",
+  defaultValue: true,
+});
+```
+
+### Numeric input with `number()`
+
+`number()` rejects non-finite values and enforces the configured range.
 
 ```typescript
 const port = await number({
   message: "Port",
-  defaultValue: 3000,
   min: 1,
   max: 65535,
+  defaultValue: 3000,
 });
 ```
 
-### Select
+### One choice with `select()`
+
+`select()` returns the selected choice's typed `value`; labels and hints only affect display.
 
 ```typescript
-const environment = await select({
-  message: "Choose environment",
+const framework = await select({
+  message: "Framework",
   choices: [
-    { value: "dev", label: "Development" },
-    { value: "staging", label: "Staging" },
-    { value: "prod", label: "Production", hint: "irreversible" },
+    { value: "bun", label: "Bun" },
+    { value: "node", label: "Node", hint: "legacy" },
   ],
 });
 ```
 
-### Multiselect
+### Many choices with `multiselect()`
+
+`multiselect()` returns selected values and keeps prompting until at least one is selected.
 
 ```typescript
-const tools = await multiselect({
-  message: "Enable tools",
-  choices: [{ value: "lint" }, { value: "test" }, { value: "build" }],
+const features = await multiselect({
+  message: "Features",
+  choices: [
+    { value: "auth" },
+    { value: "queue" },
+    { value: "orm" },
+  ],
   min: 1,
 });
 ```
 
-### Transform
+### Validate input
+
+Returning an error string keeps the prompt open; returning `undefined` accepts the value.
 
 ```typescript
-const port = await number({
-  message: "Port",
-  defaultValue: 3000,
-  transform: (value) => Math.floor(value),
+const email = await input({
+  message: "Email",
+  validate: (value) =>
+    value.includes("@") ? undefined : "Enter a valid email",
 });
 ```
 
-### Async validate
+### Test with a mock runtime
+
+Passing a runtime as the second argument keeps the prompt away from the real terminal.
 
 ```typescript
-const name = await input({
-  message: "Username",
-  validate: async (value) => {
-    const taken = await checkUsernameExists(value);
-    return taken ? "Username already taken" : null;
-  },
-});
+await input({ message: "Name" }, mockRuntime);
 ```
 
-### Error handling
+## Reference
 
-```typescript
-import { PromptCancelledError } from "semola/prompts";
-import { mightThrow } from "semola/errors";
+| Export | Meaning |
+| --- | --- |
+| `input` | Text |
+| `password` | Secret text |
+| `confirm` | Yes / No |
+| `number` | Numeric input |
+| `select` | Single choice |
+| `multiselect` | Multiple choices |
 
-const [error, name] = await mightThrow(input({ message: "Project name" }));
-
-if (error instanceof PromptCancelledError) {
-  console.log("Cancelled");
-}
-```
-
-## Types
-
-### `BasePromptOptions<TValue>`
-
-| Property    | Type                | Description                                                                                                      |
-| ----------- | ------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `message`   | `string`            | The question text displayed to the user                                                                          |
-| `validate`  | `Validate<TValue>`  | Called with the final value before resolving. Return a string to show as an error, or `null`/`undefined` to pass |
-| `transform` | `Transform<TValue>` | Called with the submitted value before resolving. Return the transformed value                                   |
-
-### `InputOptions`
-
-Includes all properties from `BasePromptOptions<string>`.
-
-| Property          | Type      | Description                                 |
-| ----------------- | --------- | ------------------------------------------- |
-| `defaultValue`    | `string`  | Pre-filled value shown in the input         |
-| `placeholder`     | `string`  | Ghost text shown when the input is empty    |
-| `required`        | `boolean` | Prevents submission when the input is empty |
-| `requiredMessage` | `string`  | Error message shown when required and empty |
-
-### `PasswordOptions`
-
-Includes all properties from `InputOptions`.
-
-| Property | Type     | Description                                                                                  |
-| -------- | -------- | -------------------------------------------------------------------------------------------- |
-| `mask`   | `string` | Character used to replace each typed character. When omitted, nothing is shown (hidden mode) |
-
-### `ConfirmOptions`
-
-Includes all properties from `BasePromptOptions<boolean>`.
-
-| Property        | Type      | Description                                      |
-| --------------- | --------- | ------------------------------------------------ |
-| `defaultValue`  | `boolean` | Pre-selected answer                              |
-| `activeLabel`   | `string`  | Label for the "yes" option (defaults to `"Yes"`) |
-| `inactiveLabel` | `string`  | Label for the "no" option (defaults to `"No"`)   |
-
-### `NumberOptions`
-
-Includes all properties from `BasePromptOptions<number>`.
-
-| Property          | Type     | Description                                      |
-| ----------------- | -------- | ------------------------------------------------ |
-| `defaultValue`    | `number` | Pre-filled numeric value                         |
-| `min`             | `number` | Minimum allowed value                            |
-| `max`             | `number` | Maximum allowed value                            |
-| `requiredMessage` | `string` | Error shown when no value is entered             |
-| `invalidMessage`  | `string` | Error shown when the value is not a valid number |
-| `minMessage`      | `string` | Error shown when the value is below `min`        |
-| `maxMessage`      | `string` | Error shown when the value is above `max`        |
-
-### `SelectOptions<TValue>`
-
-Includes all properties from `BasePromptOptions<TValue>`.
-
-| Property       | Type                     | Description                                       |
-| -------------- | ------------------------ | ------------------------------------------------- |
-| `choices`      | `SelectChoice<TValue>[]` | Non-empty list of options                         |
-| `defaultValue` | `TValue`                 | Value of the choice the arrow initially points to |
-
-### `MultiselectOptions<TValue>`
-
-Includes all properties from `BasePromptOptions<TValue[]>`.
-
-| Property       | Type                     | Description                                     |
-| -------------- | ------------------------ | ----------------------------------------------- |
-| `choices`      | `SelectChoice<TValue>[]` | Non-empty list of options                       |
-| `defaultValue` | `readonly TValue[]`      | Values pre-selected when the prompt opens       |
-| `min`          | `number`                 | Minimum number of choices that must be selected |
-| `max`          | `number`                 | Maximum number of choices that can be selected  |
-
-### `SelectChoice<TValue>`
-
-| Property   | Type      | Description                              |
-| ---------- | --------- | ---------------------------------------- |
-| `value`    | `TValue`  | Returned when selected                   |
-| `label`    | `string`  | Display text (defaults to `value`)       |
-| `hint`     | `string`  | Secondary text shown alongside the label |
-| `disabled` | `boolean` | Prevents the choice from being selected  |
-
-### `PromptRuntime`
-
-Used to provide a custom I/O backend (e.g. for testing).
-
-| Method               | Description                                   |
-| -------------------- | --------------------------------------------- |
-| `isInteractive()`    | Returns `true` if running in interactive mode |
-| `init()`             | Initialize the runtime                        |
-| `readKey()`          | Read the next key press                       |
-| `render(frame)`      | Display a frame during interaction            |
-| `done(frame)`        | Display the final frame and clean up          |
-| `close()`            | Close the runtime                             |
-| `interrupt(message)` | _(optional)_ Interrupt with a message         |
-
-```typescript
-import { input } from "semola/prompts";
-import type { PromptRuntime } from "semola/prompts";
-
-const runtime: PromptRuntime = { ... };
-
-const value = await input({ message: "Name" }, runtime);
-```
-
-## Interactive-only behavior
-
-Prompts require a TTY with raw mode support.
-
-If interactive mode is unavailable, a `PromptEnvironmentError` is thrown:
-
-```typescript
-import { PromptEnvironmentError } from "semola/prompts";
-import { mightThrow } from "semola/errors";
-
-const [error] = await mightThrow(input({ message: "Name" }));
-
-if (error instanceof PromptEnvironmentError) {
-  console.error("Not running in an interactive terminal");
-}
-```
+Pass `runtime` as the second argument for non-TTY use or tests.

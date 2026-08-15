@@ -1,6 +1,11 @@
-# Cache
+---
+title: Cache
+description: Typed Redis cache with TTL and optional key prefix
+---
 
-A type-safe Redis cache wrapper with TTL support. Built on Bun's native Redis client.
+Store and load typed values in Redis. Values are JSON by default.
+
+Needs a `Bun.RedisClient`.
 
 ## Import
 
@@ -8,160 +13,121 @@ A type-safe Redis cache wrapper with TTL support. Built on Bun's native Redis cl
 import { Cache } from "semola/cache";
 ```
 
-## API
+## Quick start
 
-**`new Cache<T>(options: CacheOptions<T>)`**
-
-Creates a new cache instance.
+This stores a typed user for one minute, reads it from the prefixed Redis key, then deletes it.
 
 ```typescript
-type CacheOptions<T> = {
-  redis: Bun.RedisClient;
-  ttl?: number | ((key: string, value: T) => number); // TTL in ms, or per-entry function
-  enabled?: boolean; // Enable/disable caching (default: true)
-  prefix?: string; // Key prefix, e.g. "users" -> "users:key"
-  serializer?: (value: T) => string; // Custom serializer (default: JSON.stringify)
-  deserializer?: (raw: string) => T; // Custom deserializer (default: JSON.parse)
-};
-
-const cache = new Cache<User>({
+const users = new Cache<{ name: string; email: string }>({
   redis: redisClient,
-  ttl: 60000,
-  prefix: "users",
-});
-```
-
-**`cache.get(key: string)`**
-
-Retrieves a value from the cache. Throws on error.
-
-```typescript
-const user = await cache.get("user:123");
-console.log("Cache hit:", user);
-```
-
-**`cache.set(key: string, value: T)`**
-
-Stores a value in the cache with serialization. Applies TTL if configured. Returns the stored value.
-
-```typescript
-const user = await cache.set("user:123", { id: 123, name: "John" });
-console.log("Cached successfully:", user);
-```
-
-**`cache.delete(key: string)`**
-
-Removes a key from the cache. Returns the number of keys deleted.
-
-```typescript
-const count = await cache.delete("user:123");
-console.log(`Deleted ${count} key(s)`);
-```
-
-## Usage Example
-
-```typescript
-import { Cache } from "semola/cache";
-
-type User = {
-  id: number;
-  name: string;
-  email: string;
-};
-
-// Create cache instance
-const userCache = new Cache<User>({
-  redis: new Bun.RedisClient("redis://localhost:6379"),
-  ttl: 300000, // 5 minutes
+  ttl: 60_000, // milliseconds (Redis PX)
+  prefix: "user",
 });
 
-// Get or fetch user
-async function getUser(id: string) {
-  const [cacheError, cachedUser] = await mightThrow(
-    userCache.get(`user:${id}`),
-  );
+await users.set("1", { name: "Ada", email: "ada@example.com" });
 
-  if (!cacheError) {
-    return cachedUser;
-  }
+const user = await users.get("1");
+// key in Redis: "user:1"
 
-  // Cache miss - fetch from database
-  const user = await fetchUserFromDB(id);
-
-  // Store in cache for next time
-  await userCache.set(`user:${id}`, user);
-
-  return user;
-}
+await users.delete("1");
 ```
 
-### Prefix
+`get` throws if the key is missing. `ttl` can be a number or `(key, value) => number`. Omit it (or pass `undefined`) for no expiry.
 
-When a `prefix` is provided, all keys are automatically prefixed with `prefix:key`:
+## Soft-disable
+
+This cache performs no writes or deletes, and every read behaves like a miss.
 
 ```typescript
-const usersCache = new Cache<User>({
+const cache = new Cache({
   redis: redisClient,
-  prefix: "users",
+  enabled: false,
 });
-
-await usersCache.set("123", user); // Stored as "users:123"
-await usersCache.get("123"); // Reads from "users:123"
-await usersCache.delete("123"); // Deletes "users:123"
 ```
 
-### Enabled
+When `enabled` is `false`, `set` / `delete` are no-ops and `get` behaves as a miss. Handy for local feature flags without branching call sites.
 
-When `enabled` is set to `false`, all cache operations become no-ops:
+## Custom serialization
 
-- `get` throws `NotFoundError` (cache miss)
-- `set` returns the value without storing it
-- `delete` returns `0` without deleting
+Pass `serializer` / `deserializer` if JSON is not enough. Keep them inverse of each other.
+
+## Examples
+
+### Store a value with `set()`
+
+`set()` serializes the value, applies the configured TTL, and returns the original typed value.
 
 ```typescript
-const cache = new Cache<User>({
+await users.set("1", { name: "Ada", email: "ada@example.com" });
+```
+
+### Read a value with `get()`
+
+`get()` resolves the prefixed key, deserializes its value, and throws on a miss.
+
+```typescript
+const user = await users.get("1");
+```
+
+### Remove a value with `delete()`
+
+`delete()` removes the resolved Redis key and returns Redis's deletion count.
+
+```typescript
+const deleted = await users.delete("1");
+```
+
+### Dynamic TTL
+
+The TTL callback keeps admin sessions for one hour and all other sessions for one minute.
+
+```typescript
+const sessions = new Cache<{ userId: string }>({
   redis: redisClient,
-  enabled: process.env.CACHE_ENABLED !== "false",
+  prefix: "session",
+  ttl: (_key, value) => (value.userId.startsWith("admin:") ? 3_600_000 : 60_000),
 });
 ```
 
-### Serializer / Deserializer
+### Soft-disable in development
 
-Replace the default JSON serialization with custom functions:
+The same call sites keep working in development, but cache operations only reach Redis in production.
 
 ```typescript
-const cache = new Cache<User>({
+const cache = new Cache({
   redis: redisClient,
-  serializer: (user) => `${user.id}:${user.name}:${user.email}`,
-  deserializer: (raw) => {
-    const [id, name, email] = raw.split(":");
-    return { id: Number(id), name, email };
-  },
+  enabled: process.env.NODE_ENV === "production",
+  prefix: "user",
 });
 ```
 
-### TTL as Function
+### Custom serializer
 
-Compute TTL per entry based on key and value:
+Values are encoded as base64 before storage and restored to `Uint8Array` after reading.
 
 ```typescript
-const cache = new Cache<Session>({
+const blobs = new Cache<Uint8Array>({
   redis: redisClient,
-  ttl: (_key, session) => (session.rememberMe ? 86400000 : 3600000),
+  serializer: (value) => Buffer.from(value).toString("base64"),
+  deserializer: (raw) => new Uint8Array(Buffer.from(raw, "base64")),
 });
 ```
 
-- `ttl: 0` is treated as a valid TTL and passed to Redis as `PX 0`.
-- If the TTL function throws, `set` throws `InvalidTTLError`.
+## Reference
 
-**Note on lifecycle management:** The `Cache` class does not manage the Redis client lifecycle. Since you provide the client when creating the cache, you're responsible for closing it when done:
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `redis` | required | `Bun.RedisClient` |
+| `ttl` | none | ms, or `(key, value) => number`; invalid values throw |
+| `enabled` | `true` | Soft on/off switch |
+| `prefix` | - | Key prefix (`prefix:key`) |
+| `serializer` | `JSON.stringify` | Value → string |
+| `deserializer` | `JSON.parse` | String → value |
 
-```typescript
-const redis = new Bun.RedisClient("redis://localhost:6379");
-const cache = new Cache({ redis });
+### Methods
 
-// Use the cache...
-
-// Clean up when done
-await redis.quit();
-```
+| Method | Meaning |
+| --- | --- |
+| `get(key)` | Load value; throws on miss |
+| `set(key, value)` | Store value |
+| `delete(key)` | Remove key |

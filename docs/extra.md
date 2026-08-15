@@ -1,28 +1,38 @@
-# Extra
+---
+title: Extra
+description: Small helpers that do not need their own package
+---
 
-A collection of small, focused utilities that help you reduce boilerplate.
+Odds and ends that are useful but too small for a dedicated module. Today that means retries with full-jitter backoff.
 
-## Retry
-
-A tiny wrapper for retrying any sync or async functions.
-
-### Import 
+## Import
 
 ```typescript
-import { 
-  createRetry, InvalidResultError, InvalidRetryError,
-  BACKOFF_MULTIPLIER, BASE_BACKOFF_DELAY, MAX_BACKOFF_DELAY,
-  BackoffOptions, ErrorMetadataType, HookContextType,
-  OnFailedAttemptContextType, RetryContext, RetryOnErrorContextType,
-  RetryOptions, RetryOutcomeType
+import {
+  BACKOFF_MULTIPLIER,
+  BASE_BACKOFF_DELAY,
+  createRetry,
+  InvalidResultError,
+  InvalidRetryError,
+  MAX_BACKOFF_DELAY,
+} from "semola/extra";
+import type {
+  BackoffOptions,
+  ErrorMetadataType,
+  HookContextType,
+  OnFailedAttemptContextType,
+  RetryContext,
+  RetryOnErrorContextType,
+  RetryOptions,
+  RetryOutcomeType,
 } from "semola/extra";
 ```
 
-### API
+## Quick start
 
-`
+```typescript
 createRetry<TRetryResult = void>(options: RetryOptions<TRetryResult>): () => Promise<RetryOutcomeType<TRetryResult>>
-`
+```
 
 `createRetry()` gives you the ability to create a retriable function, by specifying how many times it should retry the provided function.
 
@@ -46,13 +56,13 @@ console.log(await callable());
   - `input: () => TRetryResult | Promise<TRetryResult>` (required) -  A synchronous or an asynchronous function you want retry `n` times
   - `maxRetries: number` (required) - Number of retries after the first failure. A successful `input` call will stop its execution. The number of retries must be a finite non-negative integer; if passed an invalid number, `createRetry()` will raise an `InvalidRetryError` error
   - `id?: string` (optional) - Retry's id. By default it's a randomly generated UUID
-  - `ignoreErrors?: ErrorClassType[]` (optional) - A list of exception classes and subclasses you want to ignore from retries. By default it's an empty list, meaning all exceptions are retried
-  - `retryErrors?: ErrorClassType[]` (optional) - A list of exception classes and subclasses reported as errors and must be retried. If an error is not in the `retryErrors` list, it is passed to `onError`, if present, or thrown; By default it's an empty list, meaning no exceptions are matched
-  - `backoff: BackoffOptions` (optional) - A configuration object for handling exponential backoff's parameters. Note that if any of these parameters are invalid, `createRetry()` will throw an `InvalidRetryError` error. All these parameters must be a finite non-negative number:
+  - `ignoreErrors?: ErrorClassType[]` (optional) - A list of error constructors to skip retries for. Matching uses exact constructor identity (`error.constructor === e`), not subclasses. Omit it or pass `[]` to ignore none (all errors are retried)
+  - `retryErrors?: ErrorClassType[]` (optional) - A list of error constructors that must be retried. Matching uses exact constructor identity, not subclasses. If an error's constructor is not in the list, it is passed to `onError`, if present, or thrown. Omit it or pass `[]` to retry every error
+  - `backoff: BackoffOptions` (optional) - A configuration object for handling exponential backoff's parameters. Note that if any of these parameters are invalid, `createRetry()` will throw an `InvalidRetryError` error. All these parameters must be a finite number greater than zero:
     - `baseDelay?: number` (optional) - Base delay in milliseconds. By default it's `1000ms`
     - `multiplier?: number` (optional) - Backoff multiplier. By default it's `2`
     - `maxDelay?: number` (optional) - Maximum delay in milliseconds. By default it's `60000ms` (1 minute)
-  - `onError?: (error: ErrorMetadataType<TRetryResult>) => void | Promise<void>` (optional) - Function called when an error is raised inside `input`, after all retries have been exhausted, with the final error passed in as the argument. If not provided, the instance re-raises that error. The `ErrorMetadataType<TRetryResult>` type contains the following properties:
+  - `onError?: (error: ErrorMetadataType<TRetryResult>) => void | Promise<void>` (optional) - Function called when `input` raises an error and retrying stops: retries exhausted, the error is in `ignoreErrors`, `retryOnError` returns false, or `retryErrors` is non-empty and does not include that constructor. If not provided, the instance re-raises that error. The `ErrorMetadataType<TRetryResult>` type contains the following properties:
     - `failedAt: number` - When the function failed, expressed in milliseconds
     - `error: Error | InvalidResultError<TRetryResult>` - Which error was fired inside `input` or which value caused the retry
     - `id: string` - Retry's id
@@ -85,9 +95,11 @@ An `InvalidResultError` is created when `input`'s return value need to be retrie
 
 If an error was thrown by `onFailedAttempt()`, `beforeRetry()`, `afterRetry()` or `onError()` function, `callable` will re-throw the original error.
 
-### Usage Example
+## Examples
 
-**Save something inside a file**
+### Save something inside a file
+
+The callable retries a failed write up to three times, reports the final failure through `onError`, and returns the byte count on success.
 
 ```typescript
 const callable = createRetry({
@@ -108,7 +120,9 @@ if (outcome.ok) {
 }
 ```
 
-**Stop at a specific error**
+### Stop at a specific error
+
+`retryOnError` stops retrying when the report is missing, so that error is thrown immediately.
 
 ```typescript
 type Report = { name: string; completed: boolean; author: string };
@@ -143,7 +157,9 @@ try {
 }
 ```
 
-**Log every attempt**
+### Log every attempt
+
+`onFailedAttempt` receives the attempt number and calculated jitter delay after each failed call.
 
 ```typescript
 const callable = createRetry({
@@ -165,7 +181,9 @@ const callable = createRetry({
 });
 ```
 
-**Call a function with arguments**
+### Call a function with arguments
+
+The `input` closure captures arguments while the returned callable keeps a zero-argument API.
 
 ```typescript
 async function execute(command: string) { ... }
@@ -177,7 +195,7 @@ const callable = createRetry({
 await callable();
 ```
 
-**Retry over a small set of errors**
+### Retry over a small set of errors
 
 In this example, only `ConnectionTimeOutError` is retried, while `InvalidArgumentError` and `CommandNotFoundError` are ignored. If either of these errors is thrown inside `runCommand()`, `callable()` will re-throw it.
 
@@ -213,7 +231,17 @@ const callable = createRetry({
 await callable();
 ```
 
+## Reference
 
-### Credits
+| Export | Meaning |
+| --- | --- |
+| `createRetry(options)` | Create a zero-argument async retry callable |
+| `InvalidRetryError` | Invalid retry count or backoff configuration |
+| `InvalidResultError` | Value selected for retry by `retryOnResult` |
+| `BASE_BACKOFF_DELAY` | Default base delay (`1000`) |
+| `BACKOFF_MULTIPLIER` | Default multiplier (`2`) |
+| `MAX_BACKOFF_DELAY` | Default delay cap (`60000`) |
+
+## Credits
 
 The retry module was hugely inspired by [Resilience4j](https://resilience4j.readme.io/docs/retry) and [p-ertry](https://github.com/sindresorhus/p-retry) packages.

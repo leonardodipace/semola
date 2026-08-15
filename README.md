@@ -350,6 +350,8 @@ _Higher is better for req/sec, lower is better for latency._
 
 ## 📖 Documentation
 
+Run the docs site locally: `bun run docs:dev` (Fumadocs at http://localhost:3000).
+
 - [API Framework](./docs/api.md) - Type-safe REST API framework with OpenAPI
 - [Queue](./docs/queue.md) - Redis-backed job queue with timeouts & concurrency
 - [PubSub](./docs/pubsub.md) - Type-safe Redis pub/sub
@@ -372,6 +374,9 @@ _Higher is better for req/sec, lower is better for latency._
 ```bash
 # Install dependencies
 bun install
+
+# Run docs site
+bun run docs:dev
 
 # Run tests
 bun test

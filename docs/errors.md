@@ -1,6 +1,9 @@
-# Error Utilities
+---
+title: Errors
+description: Result tuples and mightThrow for explicit error handling
+---
 
-Result-based error handling inspired by functional programming patterns. Avoid throwing exceptions and handle errors explicitly with type-safe tuples.
+Semola's error helpers turn fallible work into **`[error, data]`** tuples. You branch on the error instead of nesting try/catch.
 
 ## Import
 
@@ -8,59 +11,62 @@ Result-based error handling inspired by functional programming patterns. Avoid t
 import { ok, err, mightThrow, mightThrowSync } from "semola/errors";
 ```
 
-## API
+## Quick start
 
-**`ok<T>(data: T)`**
-
-Creates a successful result tuple.
+The error guard narrows the result tuple: failure logs and returns, while success exposes a typed user.
 
 ```typescript
-const result = ok({ userId: 123, name: "John" });
-// [null, { userId: 123, name: "John" }]
-
-const [error, data] = result;
+const [error, user] = await getUser("123");
 
 if (error) {
-  // Handle error
-} else {
-  console.log(data.userId); // Type-safe access
-}
-```
-
-**`err<T>(type: T, message: string)`**
-
-Creates an error result tuple with a typed error object.
-
-```typescript
-const result = err("NotFoundError", "User not found");
-// [{ type: "NotFoundError", message: "User not found" }, null]
-
-const [error, data] = result;
-
-if (error) {
-  console.log(error.type); // "NotFoundError"
-  console.log(error.message); // "User not found"
-}
-```
-
-**Common error types:** `NotFoundError`, `UnauthorizedError`, `InternalServerError`, `ValidationError`, or any custom string.
-
-**`mightThrow<T, E = Error>(promise: Promise<T>)`**
-
-Wraps async operations that might throw into result tuples.
-
-By default, `E` is `Error`. If the promise can reject with a non-Error value, pass a custom `E` generic.
-
-```typescript
-const [error, data] = await mightThrow(fetch("/api/users"));
-
-if (error) {
-  console.error("Request failed:", error);
+  console.error(error.type, error.message);
   return;
 }
 
-console.log("Success:", data);
+console.log(user.email);
 ```
+
+After the guard, `user` is narrowed. No optional chaining gymnastics.
+
+## The pattern
+
+Every result is a two-element tuple:
+
+- Success: `[null, data]`
+- Failure: `[{ type, message }, null]`
+
+## Wrap things that throw
+
+### Async
+
+`mightThrow()` converts each rejected promise into an error-first tuple without throwing.
+
+```typescript
+const [error, response] = await mightThrow(fetch("/api/users"));
+
+if (error) {
+  // network failure, abort, etc.
+  return;
+}
+
+const [parseError, body] = await mightThrow(response.json());
+```
+
+### Sync
+
+`mightThrowSync()` catches a synchronous throw and returns it on the error side of the tuple. It does not map the value; the caller does (here, `JSON.parse` failure is a `SyntaxError`).
+
+```typescript
+const [error, value] = mightThrowSync(() => JSON.parse(input));
+
+if (error) {
+  return err("ValidationError", "Invalid JSON");
+}
+
+return ok(value);
+```
+
+By default the error side is typed as `Error`. If something rejects with a custom shape, pass a generic:
 
 ```typescript
 const [error] = await mightThrow<never, { code: string }>(
@@ -68,32 +74,17 @@ const [error] = await mightThrow<never, { code: string }>(
 );
 
 if (error) {
-  console.log(error.code); // RATE_LIMITED
+  console.log(error.code);
 }
 ```
 
-**`mightThrowSync<T, E = Error>(fn: () => T)`**
+## Return your own results
 
-Wraps synchronous operations that might throw into result tuples.
+Build functions that speak the same dialect:
 
-By default, `E` is `Error`. If the function can throw a non-Error value, pass a custom `E` generic.
-
-```typescript
-const [error, data] = mightThrowSync(() => JSON.parse(input));
-
-if (error) {
-  console.error("Parse failed:", error);
-  return;
-}
-
-console.log("Parsed:", data);
-```
-
-## Usage Example
+This function returns `err()` for validation, network, and parsing failures, or `ok()` with the parsed user.
 
 ```typescript
-import { ok, err, mightThrow } from "semola/errors";
-
 async function getUser(id: string) {
   if (!id) {
     return err("ValidationError", "User ID is required");
@@ -114,21 +105,88 @@ async function getUser(id: string) {
   return ok(user);
 }
 
-// Usage
 const [error, user] = await getUser("123");
 
 if (error) {
   switch (error.type) {
     case "ValidationError":
-      console.log("Validation failed:", error.message);
-      break;
-    case "NotFoundError":
-      console.log("User not found");
+      // ...
       break;
     default:
-      console.log("Error:", error.message);
+      console.error(error.message);
   }
-} else {
-  console.log("User:", user);
+  return;
+}
+
+console.log(user);
+```
+
+`err(type, message)` accepts common labels like `NotFoundError`, `UnauthorizedError`, `ValidationError`, `InternalServerError`, `MigrationError`, `SchemaError`, or any other string you want to use as a discriminant.
+
+## Examples
+
+### Fetch and parse
+
+Each async operation is handled independently, so parsing only runs after a successful fetch.
+
+```typescript
+const [error, response] = await mightThrow(fetch("/api/users"));
+
+if (error) {
+  return;
+}
+
+const [parseError, body] = await mightThrow(response.json());
+
+if (parseError) {
+  return;
+}
+
+console.log(body);
+```
+
+### Sync parse with `err()`
+
+The parser converts thrown JSON errors into a typed failure tuple and valid JSON into a success tuple.
+
+```typescript
+function parseConfig(input: string) {
+  const [error, value] = mightThrowSync(() => JSON.parse(input));
+
+  if (error) {
+    return err("ValidationError", "Invalid JSON");
+  }
+
+  return ok(value);
 }
 ```
+
+### Switch on error type
+
+The discriminant maps expected failures to HTTP status codes while preserving the typed success path.
+
+```typescript
+const [error, user] = await getUser(id);
+
+if (error) {
+  switch (error.type) {
+    case "ValidationError":
+      return respond(400, error.message);
+    case "NotFoundError":
+      return respond(404, error.message);
+    default:
+      return respond(500, "Unexpected error");
+  }
+}
+
+return respond(200, user);
+```
+
+## Reference
+
+| Export | Meaning |
+| --- | --- |
+| `ok(data)` | Success tuple `[null, data]` |
+| `err(type, message)` | Failure tuple `[{ type, message }, null]` |
+| `mightThrow(promise)` | Await a promise into a result tuple |
+| `mightThrowSync(fn)` | Run a sync function into a result tuple |

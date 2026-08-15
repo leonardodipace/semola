@@ -1,6 +1,11 @@
-# Queue
+---
+title: Queue
+description: Redis-backed background jobs with retries and concurrency
+---
 
-A Redis-backed job queue with automatic retry logic, exponential backoff, and concurrent processing.
+Run work in the background with Redis. Jobs are JSON-serialized, polled by workers, and retried with backoff when they fail.
+
+Needs a `Bun.RedisClient`.
 
 ## Import
 
@@ -8,137 +13,181 @@ A Redis-backed job queue with automatic retry logic, exponential backoff, and co
 import { Queue } from "semola/queue";
 ```
 
-## Basic Usage
+## Quick start
+
+Constructing the queue starts four workers. `enqueue()` stores the email job in Redis, and `stop()` later drains active work before shutdown.
 
 ```typescript
-const queue = new Queue({
-  name: "my-queue",
+type EmailJob = {
+  to: string;
+  subject: string;
+};
+
+const emails = new Queue<EmailJob>({
+  name: "emails",
   redis: redisClient,
-  handler: async (data) => {
-    console.log(`Processing: ${data.message}`);
-  },
-});
-
-// Add a job
-const jobId = await queue.enqueue({ message: "Hello!" });
-
-// Graceful shutdown
-await queue.stop();
-```
-
-## Options
-
-- **`name`** (required) - Queue name for Redis keys
-- **`redis`** (required) - Bun Redis client instance
-- **`handler`** (required) - Function to process each job
-- **`retries`** - Number of retry attempts (default: 3)
-- **`retryBackoff`** - Optional `{ baseDelay, multiplier, maxDelay }` for retry delays (defaults: 1000ms, 2x, 60000ms cap)
-- **`timeout`** - Job timeout in milliseconds (default: 30000)
-- **`concurrency`** - Number of parallel workers (default: 1)
-- **`onSuccess`** - Called when a job succeeds
-- **`onRetry`** - Called when a job is retried
-- **`onError`** - Called when a job fails permanently
-
-Callback errors do not fail the job or stop processing. Use callbacks for observability only.
-
-### Custom retry backoff
-
-```typescript
-const queue = new Queue({
-  name: "my-queue",
-  redis: redisClient,
+  concurrency: 4,
   retries: 3,
-  retryBackoff: {
-    baseDelay: 500,
-    multiplier: 2,
-    maxDelay: 30000,
-  },
-  handler: async (data) => {
-    await process(data);
+  handler: async (data, signal) => {
+    await sendEmail(data.to, data.subject);
   },
 });
+
+const jobId = await emails.enqueue({
+  to: "user@example.com",
+  subject: "Welcome",
+});
+
+// later, when shutting down:
+await emails.stop();
 ```
 
-## Examples
+Workers start as soon as you construct the queue. `enqueue` returns a job id.
 
-### With Error Handling
+## Retries and timeouts
 
-```typescript
-const taskQueue = new Queue({
-  name: "tasks",
-  redis: new Bun.RedisClient("redis://localhost:6379"),
-  handler: async (data) => {
-    await processTask(data.taskId, data.userId);
-  },
-  onSuccess: (job) => {
-    console.log(`✓ Task completed: ${job.id}`);
-  },
-  onRetry: (context) => {
-    console.log(`⟳ Retrying ${context.job.id} in ${context.nextRetryDelayMs}ms (${context.retriesRemaining} left)`);
-  },
-  onError: (context) => {
-    console.error(`✗ Task failed: ${context.job.id} after ${context.totalAttempts} attempts`);
-    notifyFailure(context.job.data, context.lastError);
-  },
-  retries: 3,
-  timeout: 60000,
-  concurrency: 5,
-});
+Failed jobs retry until `retries` is exhausted, then call `onError`. Malformed Redis payloads land on the dead-letter list (`queue:{name}:dead-letter`) and call `onParseError`.
 
-// Add a job
-import { mightThrow } from "semola/errors";
+Use `signal` in the handler to abort work when the job times out (default 30s).
 
-const [enqueueError, jobId] = await mightThrow(taskQueue.enqueue({
-  taskId: "task-123",
-  userId: "user-456",
-}));
+### Hooks
 
-if (enqueueError) {
-  console.error("Failed to enqueue task:", enqueueError);
-  throw enqueueError;
-}
-
-// Graceful shutdown
-process.on("SIGTERM", async () => {
-  await taskQueue.stop();
-});
-```
-
-### Email Queue
+These hooks report successful jobs, retries, exhausted retries, and malformed Redis payloads at their corresponding lifecycle points.
 
 ```typescript
-const emailQueue = new Queue({
+const emails = new Queue<EmailJob>({
   name: "emails",
   redis: redisClient,
   handler: async (data) => {
-    await sendEmail(data.to, data.subject, data.body);
+    await sendEmail(data.to, data.subject);
   },
-  retries: 5,
-  timeout: 30000,
-});
-
-await emailQueue.enqueue({
-  to: "user@example.com",
-  subject: "Welcome!",
-  body: "Thanks for signing up.",
+  onSuccess: (job) => console.log("sent", job.data.to),
+  onRetry: ({ job, error, retriesRemaining }) => {
+    console.warn("retry", job.id, error, retriesRemaining);
+  },
+  onError: ({ job, lastError }) => {
+    console.error("dead letter", job.id, lastError);
+  },
+  onParseError: ({ parseError }) => {
+    console.error("bad payload", parseError);
+  },
 });
 ```
 
-### File Processing with Concurrency
+## Shutdown
+
+`stop()` ends polling, re-queues interrupted pops, and waits for active handlers.
 
 ```typescript
-const importQueue = new Queue({
-  name: "imports",
-  redis: redisClient,
-  handler: async (data) => {
-    const file = await downloadFile(data.url);
-    await importFileData(data.fileId, file);
-  },
-  onError: (context) => {
-    logger.error(`Import failed: ${context.job.data.fileId}`);
-  },
-  retries: 2,
-  timeout: 120000,
-  concurrency: 3, // Process 3 files in parallel
+await emails.stop();
+```
+
+Stops polling and waits for in-flight handlers to finish. In-flight pops are re-queued.
+
+## Examples
+
+### Add work with `enqueue()`
+
+`enqueue()` JSON-serializes a job, pushes it to Redis, and returns its generated ID.
+
+```typescript
+const jobId = await emails.enqueue({
+  to: "user@example.com",
+  subject: "Welcome",
 });
 ```
+
+### Low concurrency, many retries
+
+One worker processes invoices serially, retrying failures with capped exponential backoff.
+
+```typescript
+const invoices = new Queue({
+  name: "invoices",
+  redis: redisClient,
+  concurrency: 1,
+  retries: 10,
+  retryBackoff: {
+    baseDelay: 2_000,
+    multiplier: 2,
+    maxDelay: 120_000,
+  },
+  handler: async (data) => {
+    await chargeInvoice(data.invoiceId);
+  },
+});
+```
+
+### Abort on timeout
+
+After ten seconds, the queue aborts the handler's signal, which also cancels the in-flight fetch.
+
+```typescript
+const downloads = new Queue<{ url: string }>({
+  name: "downloads",
+  redis: redisClient,
+  timeout: 10_000,
+  handler: async (data, signal) => {
+    const res = await fetch(data.url, { signal });
+    await save(await res.arrayBuffer());
+  },
+});
+```
+
+### Exhausted retry logging
+
+After two retries are exhausted, `onError` alerts operators. Handler failures are not added to the parse-failure dead-letter list.
+
+```typescript
+const jobs = new Queue({
+  name: "webhooks",
+  redis: redisClient,
+  retries: 2,
+  handler: async (data) => {
+    await deliverWebhook(data);
+  },
+  onError: async ({ job, lastError }) => {
+    await alertOps("webhook failed", {
+      jobId: job.id,
+      error: lastError,
+    });
+  },
+});
+```
+
+### Graceful process exit
+
+The signal handler waits for `stop()` to drain active jobs before ending the process.
+
+```typescript
+process.on("SIGINT", async () => {
+  await emails.stop();
+  process.exit(0);
+});
+```
+
+## Reference
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `name` | required | Redis key namespace |
+| `redis` | required | `Bun.RedisClient` |
+| `handler` | required | `(data, signal?) => void \| Promise<void>` |
+| `retries` | `3` | Max attempts after the first failure |
+| `retryBackoff` | `baseDelay` 1s, `multiplier` 2, `maxDelay` 60s | Exponential backoff |
+| `timeout` | `30000` | Per-job timeout in ms |
+| `concurrency` | `1` | Parallel workers |
+| `pollInterval` | `100` | Idle poll delay in ms |
+| `onSuccess` | - | After a successful job |
+| `onRetry` | - | Before a retry |
+| `onError` | - | When retries are exhausted |
+| `onParseError` | - | When a Redis payload cannot be parsed |
+
+### Methods
+
+| Method | Meaning |
+| --- | --- |
+| `enqueue(data)` | Push a job; returns job id |
+| `stop()` | Stop workers and drain in-flight work |
+
+Redis keys: `queue:{name}:jobs`, `queue:{name}:dead-letter`.

@@ -1,0 +1,25 @@
+{
+  "title": "Semola",
+  "pages": [
+    "---Guide---",
+    "index",
+    "getting-started",
+    "---HTTP & Jobs---",
+    "api",
+    "queue",
+    "pubsub",
+    "cron",
+    "workflow",
+    "---Data & Auth---",
+    "orm",
+    "cache",
+    "policy",
+    "i18n",
+    "---Utilities---",
+    "errors",
+    "logging",
+    "prompts",
+    "cli",
+    "extra"
+  ]
+}
