@@ -49,6 +49,47 @@ describe("Api Core", () => {
     expect(body).toEqual({ message: "world" });
   });
 
+  test("should set response headers via c.header", async () => {
+    const tag = new Middleware({
+      handler: (c) => {
+        c.header("X-Request-Id", "abc");
+      },
+    });
+
+    const api = new Api({ middlewares: [tag] as const });
+
+    api.defineRoute({
+      path: "/auth",
+      method: "GET",
+      handler: (c) => {
+        c.header("Authorization", "Bearer test");
+
+        return c.json(200, { ok: true });
+      },
+    });
+
+    api.defineRoute({
+      path: "/raw",
+      method: "GET",
+      handler: (c) => {
+        const res = new Response("ok");
+
+        c.header("X-Custom", "yes");
+
+        return res;
+      },
+    });
+
+    const jsonRes = await api.fetch(new Request("http://localhost/auth"));
+    const rawRes = await api.fetch(new Request("http://localhost/raw"));
+
+    expect(jsonRes.headers.get("Authorization")).toBe("Bearer test");
+    expect(jsonRes.headers.get("X-Request-Id")).toBe("abc");
+    expect(rawRes.headers.get("X-Custom")).toBe("yes");
+    expect(await jsonRes.json()).toEqual({ ok: true });
+    expect(await rawRes.text()).toBe("ok");
+  });
+
   test("should reuse compiled routes across fetch calls", async () => {
     const api = new Api();
 

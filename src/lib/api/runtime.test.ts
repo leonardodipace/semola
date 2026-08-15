@@ -4,6 +4,7 @@ import { z } from "zod";
 import { SchemaConfigError } from "./errors.js";
 import { Middleware } from "./middleware.js";
 import {
+  applyHeaders,
   badRequest,
   bodyHasMultipleReaders,
   createContext,
@@ -59,6 +60,18 @@ describe("runtime", () => {
       const res = await context.json(200, { ok: true });
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: true });
+    });
+
+    test("header copies onto the returned response", async () => {
+      const req = new Request("http://localhost") as Bun.BunRequest;
+      const context = createContext(req);
+
+      context.header("Authorization", "Bearer test");
+
+      const res = applyHeaders(context, context.json(200, { ok: true }));
+
+      expect(res.headers.get("Authorization")).toBe("Bearer test");
+      expect(res.headers.get("Content-Type")).toContain("application/json");
     });
 
     test("emptyValidated is frozen defaults", () => {

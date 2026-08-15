@@ -13,6 +13,16 @@ import { validateSchema } from "./validate.js";
 const htmlHeaders = { "Content-Type": "text/html" };
 const badRequestInit = { status: 400 };
 
+export const applyHeaders = (c: InternalContext, res: Response) => {
+  if (!c.responseHeaders) return res;
+
+  for (const [key, value] of c.responseHeaders) {
+    res.headers.set(key, value);
+  }
+
+  return res;
+};
+
 export const json = (status: number, data: unknown) => {
   if (status === 200) return Response.json(data);
 
@@ -75,6 +85,13 @@ const sharedContext = {
   req: emptyValidated,
   get: () => {
     return undefined;
+  },
+  header(this: InternalContext, name: string, value: string) {
+    if (!this.responseHeaders) {
+      this.responseHeaders = new Headers();
+    }
+
+    this.responseHeaders.set(name, value);
   },
   json,
   text,

@@ -316,6 +316,7 @@ The handler receives a context object with type-safe request data and response m
 - `c.text(status, text)` - Plain text response
 - `c.html(status, html)` - HTML response
 - `c.redirect(status, url)` - HTTP redirect
+- `c.header(name, value)` - Set a response header on the returned Response
 
 ## Features
 
