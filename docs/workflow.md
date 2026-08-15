@@ -95,7 +95,7 @@ while (execution.status === "pending" || execution.status === "running") {
 
 console.log(execution.status, execution.result, execution.error);
 console.log(execution.steps);
-// steps: { name, completedAt }[] - step return values stay in history for replay
+// steps: { name, completedAt }[] - return values stay in history, not on get()
 ```
 
 ### Cancel an execution
@@ -139,7 +139,7 @@ const active = await listWorkflows(redisClient, {
 });
 
 const failed = await listWorkflows(redisClient, {
-  name: ["onboard-user", "charge-order"],
+  name: "onboard-user",
   status: "failed",
 });
 
@@ -148,9 +148,9 @@ for (const item of failed) {
 }
 ```
 
-Results are lightweight `WorkflowListItem` snapshots. Use instance `get()` for input, result, error, and step details.
+Results are lightweight `WorkflowListItem` snapshots. Use instance `get()` for input, result, error, and step details. Filter `name` with a string or string array; resume through the matching workflow instance.
 
-### Stop without retrying
+### Fail without retrying
 
 Call `fail()` inside a step for a non-retryable failure.
 
