@@ -62,6 +62,22 @@ const unsubscribeHandler = await pubsub.subscribe(
 await unsubscribeHandler();
 ```
 
+**`pubsub[Symbol.asyncIterator]()` / `pubsub.listen(options?)`**
+
+Consumes messages as an async iterable. Each iterator registers its own local handler, buffers messages so none are dropped between iterations, and unsubscribes that handler when the loop exits.
+
+```typescript
+for await (const message of pubsub) console.log(message.text);
+```
+
+Pass a signal to end iteration while it is waiting for the next message:
+
+```typescript
+for await (const message of pubsub.listen({ signal: request.signal })) {
+  console.log(message.text);
+}
+```
+
 **`pubsub.unsubscribe()`**
 
 Unsubscribes all local handlers for this instance and removes the Redis subscription. Throws `UnsubscribeError` if not currently subscribed.

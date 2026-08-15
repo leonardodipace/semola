@@ -230,6 +230,59 @@ describe("PubSub", () => {
       expect(redis.getSubscribeCallCount("test")).toBe(1);
     });
 
+    test("should buffer async iteration and unsubscribe when the loop exits", async () => {
+      const redis = createMockRedis();
+      const pubsub = new PubSub<{ message: string }>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
+
+      const iterator = pubsub[Symbol.asyncIterator]();
+      const first = iterator.next();
+
+      await pubsub.publish({ message: "one" });
+      await pubsub.publish({ message: "two" });
+
+      expect((await first).value).toEqual({ message: "one" });
+      expect((await iterator.next()).value).toEqual({ message: "two" });
+
+      await iterator.return?.();
+
+      expect(redis.getUnsubscribeCallCount("test")).toBe(1);
+      expect(pubsub.isActive()).toBe(false);
+    });
+
+    test("should end a pending async iteration when the signal aborts", async () => {
+      const redis = createMockRedis();
+      const pubsub = new PubSub<{ message: string }>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
+
+      const controller = new AbortController();
+      const received: string[] = [];
+
+      const consumed = (async () => {
+        for await (const message of pubsub.listen({
+          signal: controller.signal,
+        })) {
+          received.push(message.message);
+        }
+      })();
+
+      await pubsub.publish({ message: "one" });
+
+      controller.abort();
+
+      await consumed;
+
+      expect(received).toEqual(["one"]);
+      expect(redis.getUnsubscribeCallCount("test")).toBe(1);
+      expect(pubsub.isActive()).toBe(false);
+    });
+
     test("should return handler-level unsubscribe function", async () => {
       const redis = createMockRedis();
       const pubsub = new PubSub<{ message: string }>({

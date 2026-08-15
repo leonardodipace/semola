@@ -107,6 +107,45 @@ export class PubSub<T extends Record<string, unknown>> {
     return count;
   }
 
+  public listen({ signal }: { signal?: AbortSignal } = {}) {
+    let unsubscribeHandler: (() => Promise<void>) | undefined;
+
+    const stop = async () => {
+      const pending = unsubscribeHandler;
+
+      unsubscribeHandler = undefined;
+
+      await pending?.();
+    };
+
+    return new ReadableStream<T>({
+      start: async (controller) => {
+        unsubscribeHandler = await this.subscribe((message) =>
+          controller.enqueue(message),
+        );
+
+        const close = async () => {
+          controller.close();
+
+          await stop();
+        };
+
+        if (signal?.aborted) {
+          return close();
+        }
+
+        signal?.addEventListener("abort", close, {
+          once: true,
+        });
+      },
+      cancel: stop,
+    }).values();
+  }
+
+  public [Symbol.asyncIterator]() {
+    return this.listen();
+  }
+
   public async subscribe(handler: MessageHandler<T>) {
     const inFlightUnsubscribe = this.unsubscribeInFlight;
 
