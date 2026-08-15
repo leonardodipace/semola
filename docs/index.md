@@ -15,16 +15,34 @@ No runtime dependencies. Validation works with any [Standard Schema](https://sta
 
 ## What you can build with
 
+### HTTP & Jobs
+
 | You need… | Start here |
 | --- | --- |
 | HTTP APIs with OpenAPI | [API](/docs/api) |
 | Background jobs | [Queue](/docs/queue) |
+| Typed real-time channels | [PubSub](/docs/pubsub) |
+| Scheduled tasks | [Cron](/docs/cron) |
 | Durable multi-step work | [Workflow](/docs/workflow) |
-| SQL / SQLite data access | [ORM](/docs/orm) |
-| Authorization rules | [Policy](/docs/policy) |
-| Errors without try/catch | [Errors](/docs/errors) |
 
-Also available: [PubSub](/docs/pubsub), [Cron](/docs/cron), [Cache](/docs/cache), [i18n](/docs/i18n), [Logging](/docs/logging), [CLI](/docs/cli), [Prompts](/docs/prompts), and [Extra](/docs/extra) helpers.
+### Data & Auth
+
+| You need… | Start here |
+| --- | --- |
+| SQL / SQLite data access | [ORM](/docs/orm) |
+| Redis caching | [Cache](/docs/cache) |
+| Authorization rules | [Policy](/docs/policy) |
+| Typed translations | [i18n](/docs/i18n) |
+
+### Utilities
+
+| You need… | Start here |
+| --- | --- |
+| Errors without try/catch | [Errors](/docs/errors) |
+| Prefixed console or file logs | [Logging](/docs/logging) |
+| Interactive terminal input | [Prompts](/docs/prompts) |
+| Typed command-line programs | [CLI](/docs/cli) |
+| Small general-purpose helpers | [Extra](/docs/extra) |
 
 ## Next step
 
