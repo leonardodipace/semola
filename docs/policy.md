@@ -9,6 +9,7 @@ Express authorization as small rules over an object. Forbid always wins over all
 
 ```typescript
 import { Policy, eq, and, or, has, hasAny, hasLength } from "semola/policy";
+```
 
 ## Quick start
 
