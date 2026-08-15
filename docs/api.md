@@ -76,6 +76,7 @@ Invalid input becomes a 400. Toggle validation with `new Api({ validation: false
 - **`c.req`** - validated `params`, `query`, `body`, `headers`, `cookies`
 - **`c.raw`** - the underlying `Request`
 - **`c.json` / `c.text` / `c.html` / `c.redirect`** - typed responses
+- **`c.header(name, value)`** - set a header on the returned response
 - **`c.get(key)`** - values contributed by middleware
 
 You can also return a plain string or object; Semola wraps it as a response.
@@ -239,6 +240,29 @@ const api = new Api({
   validation: { input: true, output: false },
 });
 ```
+
+### Example: Response headers
+
+```typescript
+const requestId = new Middleware({
+  handler: (c) => {
+    c.header("X-Request-Id", crypto.randomUUID());
+  },
+});
+
+api.defineRoute({
+  path: "/download",
+  method: "GET",
+  middlewares: [requestId],
+  handler: (c) => {
+    c.header("Content-Disposition", 'attachment; filename="report.csv"');
+
+    return c.text(200, "id,name\n1,Ada");
+  },
+});
+```
+
+Headers from middleware and the route are copied onto the returned `Response`.
 
 ## Reference
 

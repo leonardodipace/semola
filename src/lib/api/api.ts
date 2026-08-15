@@ -4,6 +4,7 @@ import { Group } from "./group.js";
 import type { Middleware } from "./middleware.js";
 import { generateOpenApiSpec } from "./openapi/index.js";
 import {
+  applyHeaders,
   bodyHasMultipleReaders,
   createContext,
   emptyValidated,
@@ -134,19 +135,14 @@ const buildBareRoute = (
 
 const buildContextRoute = (handler: AnyRouteHandler): BunRouteHandler => {
   return (req) => {
-    const result = handler(createContext(req));
+    const context = createContext(req);
+    const result = handler(context);
 
     if (result instanceof Promise) {
-      return result.then((value) => {
-        if (value instanceof Response) return value;
-
-        return toResponse(value);
-      });
+      return result.then((value) => applyHeaders(context, toResponse(value)));
     }
 
-    if (result instanceof Response) return result;
-
-    return toResponse(result);
+    return applyHeaders(context, toResponse(result));
   };
 };
 
@@ -196,6 +192,8 @@ const handleRequest = async (
     };
   }
 
+  const context = createContext(req, emptyValidated, get);
+
   for (const middleware of config.middlewares) {
     const { request: requestSchema, handler: middlewareHandler } =
       middleware.options;
@@ -214,12 +212,15 @@ const handleRequest = async (
       validated = data;
     }
 
-    const context = createContext(req, validated, get);
+    context.req = validated;
+
     const middlewareResult = await middlewareHandler(
       context as Parameters<typeof middlewareHandler>[0],
     );
 
-    if (middlewareResult instanceof Response) return middlewareResult;
+    if (middlewareResult instanceof Response) {
+      return applyHeaders(context, middlewareResult);
+    }
 
     if (middlewareResult) {
       if (!extensions) {
@@ -244,9 +245,15 @@ const handleRequest = async (
     validated = data;
   }
 
-  const context = createContext(req, validated, get, jsonHandler);
+  context.req = validated;
 
-  return config.handler(context);
+  if (jsonHandler) {
+    context.json = jsonHandler;
+  }
+
+  const result = await config.handler(context);
+
+  return applyHeaders(context, toResponse(result));
 };
 
 const buildHandler = (

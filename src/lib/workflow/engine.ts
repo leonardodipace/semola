@@ -1,5 +1,5 @@
 import { mightThrow, mightThrowSync } from "../errors/index.js";
-import { NonRetryableStepError, Paused } from "./errors.js";
+import { NonRetryableStepError, Paused, WorkflowStoreError } from "./errors.js";
 import { isTerminalStatus, parseHistory } from "./history.js";
 import { fromJson, toJson } from "./json.js";
 import type { WorkflowStore } from "./store.js";
@@ -29,6 +29,7 @@ import type {
 
 const DEFAULT_RETRIES = 3;
 const DEFAULT_LOCK_TTL = 300_000;
+const DEFAULT_RETENTION_TTL = 86_400_000;
 const DEFAULT_CONCURRENCY = 1;
 const DEFAULT_POLL_INTERVAL = 100;
 const DEFAULT_RETRY_BASE = 1000;
@@ -272,6 +273,8 @@ export class WorkflowEngine<TInput, TResult> {
   private readonly store: WorkflowStore;
   private readonly retries: number;
   private readonly lockTTL: number;
+  private readonly retentionTTL: number;
+  private readonly retentionMax: number | undefined;
   private readonly concurrency: number;
   private readonly pollInterval: number;
   private readonly retryBaseDelay: number;
@@ -280,6 +283,7 @@ export class WorkflowEngine<TInput, TResult> {
   private readonly aborts = new Map<string, AbortController>();
   private readonly capacitySlots = new Map<string, Map<string, number>>();
   private readonly lostLeases = new Set<string>();
+  private sweepCursor = "0";
 
   public constructor(
     options: WorkflowOptions<TInput, TResult>,
@@ -289,7 +293,26 @@ export class WorkflowEngine<TInput, TResult> {
     this.store = store;
     this.retries = options.retries ?? DEFAULT_RETRIES;
     this.lockTTL = options.lockTTL ?? DEFAULT_LOCK_TTL;
+    this.retentionTTL = options.retentionTTL ?? DEFAULT_RETENTION_TTL;
+    this.retentionMax = options.retentionMax;
     this.concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
+
+    if (!(this.retentionTTL >= 0)) {
+      throw new WorkflowStoreError(
+        "retentionTTL must be a non-negative number",
+      );
+    }
+
+    if (this.retentionMax !== undefined) {
+      if (!Number.isInteger(this.retentionMax)) {
+        throw new WorkflowStoreError("retentionMax must be a positive integer");
+      }
+
+      if (this.retentionMax < 1) {
+        throw new WorkflowStoreError("retentionMax must be a positive integer");
+      }
+    }
+
     this.pollInterval = options.pollInterval ?? DEFAULT_POLL_INTERVAL;
     this.retryBaseDelay = options.retryBackoff?.baseDelay ?? DEFAULT_RETRY_BASE;
     this.retryMultiplier =
@@ -369,6 +392,7 @@ export class WorkflowEngine<TInput, TResult> {
       try {
         await mightThrow(this.reclaimOrphans());
         await mightThrow(this.refreshHeldPartitions());
+        await mightThrow(this.sweepRetention());
       } finally {
         this.active--;
       }
@@ -571,6 +595,7 @@ export class WorkflowEngine<TInput, TResult> {
         partitionKey: meta.partitionKey,
         partitionSlot: this.resolvePartitionSlot(executionId, meta),
       });
+      await this.retainTerminal(executionId);
       return;
     }
 
@@ -1194,6 +1219,7 @@ export class WorkflowEngine<TInput, TResult> {
           partitionKey: meta.partitionKey,
           partitionSlot: this.resolvePartitionSlot(executionId, meta),
         });
+        await this.retainTerminal(executionId);
         continue;
       }
 
@@ -1441,6 +1467,8 @@ export class WorkflowEngine<TInput, TResult> {
         result: fromJson<TResult>(result, "result"),
       }),
     );
+
+    await this.retainTerminal(executionId);
   }
 
   private async failExecution(input: FailExecutionInput) {
@@ -1465,6 +1493,8 @@ export class WorkflowEngine<TInput, TResult> {
       partitionKey,
       partitionSlot,
     });
+
+    await this.retainTerminal(executionId);
   }
 
   private async cancelExecution(input: CancelExecutionInput) {
@@ -1495,6 +1525,66 @@ export class WorkflowEngine<TInput, TResult> {
     await runHook(() =>
       this.options.hooks?.onCancel?.({ executionId, input: workflowInput }),
     );
+
+    await this.retainTerminal(executionId);
+  }
+
+  private async retainTerminal(executionId: string) {
+    const meta = await this.store.getMeta(executionId);
+
+    if (!meta) return;
+
+    if (!isTerminalStatus(meta.status)) return;
+
+    const infiniteTtl = !Number.isFinite(this.retentionTTL);
+
+    if (infiniteTtl) {
+      if (this.retentionMax === undefined) return;
+    }
+
+    const endedAt =
+      Number(meta.completedAt) ||
+      Number(meta.failedAt) ||
+      Number(meta.cancelledAt) ||
+      Number(meta.updatedAt) ||
+      Date.now();
+
+    let ttlMs: number | undefined;
+    let trackedAt: number | undefined;
+
+    if (!infiniteTtl) {
+      ttlMs = Math.max(0, endedAt + this.retentionTTL - Date.now());
+    }
+
+    if (this.retentionMax !== undefined) {
+      if (ttlMs !== 0) {
+        trackedAt = endedAt;
+      }
+    }
+
+    await this.store.retainIfTerminal({
+      executionId,
+      ttlMs,
+      endedAt: trackedAt,
+    });
+
+    if (this.retentionMax !== undefined) {
+      await this.store.trimTerminal(this.retentionMax);
+    }
+  }
+
+  private async sweepRetention() {
+    if (!Number.isFinite(this.retentionTTL)) {
+      if (this.retentionMax === undefined) return;
+    }
+
+    const scanned = await this.store.scanMetaIds(this.sweepCursor);
+
+    this.sweepCursor = scanned.cursor;
+
+    for (const executionId of scanned.ids) {
+      await this.retainTerminal(executionId);
+    }
   }
 
   private async finalizeFromTerminal(input: FinalizeFromTerminalInput) {

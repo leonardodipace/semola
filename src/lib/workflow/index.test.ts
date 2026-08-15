@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
+import { mightThrow } from "../errors/index.js";
 import { WorkflowEngine } from "./engine.js";
 import {
   DuplicateWorkflowError,
@@ -98,6 +99,29 @@ const fast = {
   pollInterval: 5,
   lockTTL: 40,
   retryBackoff: { baseDelay: 5, multiplier: 2, maxDelay: 20 },
+};
+
+const failOnce = (name: string, redis: Bun.RedisClient) => {
+  let attempts = 0;
+
+  return defineWorkflow({
+    name,
+    redis,
+    ...fast,
+    retries: 0,
+    retentionTTL: 60_000,
+    handler: async ({ step }) => {
+      const value = await step("once", async () => {
+        attempts++;
+
+        if (attempts === 1) throw new Error("boom");
+
+        return "ok";
+      });
+
+      return value;
+    },
+  });
 };
 
 describe("workflow", () => {
@@ -1838,6 +1862,68 @@ describe("workflow", () => {
       await stop(wf);
     });
 
+    test("resume rejects pending executions that never failed", async () => {
+      const redis = createRedis();
+      const name = `resume-pending-${crypto.randomUUID()}`;
+      const executionId = crypto.randomUUID();
+      const now = String(Date.now());
+
+      await redis.hset(
+        `workflow:${name}:meta:${executionId}`,
+        "name",
+        name,
+        "status",
+        "pending",
+        "input",
+        "{}",
+        "result",
+        "",
+        "error",
+        "",
+        "createdAt",
+        now,
+        "updatedAt",
+        now,
+        "completedAt",
+        "",
+        "failedAt",
+        "",
+        "cancelledAt",
+        "",
+        "partitionKey",
+        "",
+        "partitionSlot",
+        "",
+        "concurrencySlot",
+        "",
+      );
+      await redis.rpush(
+        `workflow:${name}:history:${executionId}`,
+        JSON.stringify({
+          type: "WorkflowStarted",
+          input: "{}",
+          partitionKey: "",
+          timestamp: Number(now),
+        }),
+      );
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        handler: async () => "done",
+      });
+
+      await expect(wf.resume(executionId)).rejects.toMatchObject({
+        name: "WorkflowStoreError",
+        message: expect.stringContaining(
+          "only failed executions can be resumed",
+        ),
+      });
+
+      await stop(wf);
+    });
+
     test("start returns pending immediately", async () => {
       const redis = createRedis();
 
@@ -3245,6 +3331,34 @@ describe("workflow", () => {
       expect(listed.map((item) => item.id)).toEqual(["skip-ok-1"]);
     });
 
+    test("listWorkflows keeps id when workflow name contains :meta:", async () => {
+      const redis = createRedis();
+      const now = String(Date.now());
+      const name = "has:meta:in-name";
+
+      await redis.hset(
+        `workflow:${name}:meta:exec-1`,
+        "name",
+        name,
+        "status",
+        "running",
+        "createdAt",
+        now,
+        "updatedAt",
+        now,
+        "completedAt",
+        "",
+        "failedAt",
+        "",
+        "cancelledAt",
+        "",
+      );
+
+      const listed = await listWorkflows(redis, { name });
+
+      expect(listed.map((item) => item.id)).toEqual(["exec-1"]);
+    });
+
     test("lists live executions started via defineWorkflow", async () => {
       const redis = createRedis();
       const name = `list-live-${crypto.randomUUID()}`;
@@ -3268,6 +3382,493 @@ describe("workflow", () => {
           status: "completed",
         }),
       ]);
+
+      await stop(wf);
+    });
+  });
+
+  describe("retention", () => {
+    test("rejects invalid retention options", () => {
+      expect(() =>
+        defineWorkflow({
+          name: `retain-bad-ttl-${crypto.randomUUID()}`,
+          redis: createRedis(),
+          retentionTTL: -1,
+          handler: async () => "ok",
+        }),
+      ).toThrow("retentionTTL must be a non-negative number");
+
+      expect(() =>
+        defineWorkflow({
+          name: `retain-bad-max-${crypto.randomUUID()}`,
+          redis: createRedis(),
+          retentionMax: 0,
+          handler: async () => "ok",
+        }),
+      ).toThrow("retentionMax must be a positive integer");
+
+      expect(() =>
+        defineWorkflow({
+          name: `retain-frac-max-${crypto.randomUUID()}`,
+          redis: createRedis(),
+          retentionMax: 1.5,
+          handler: async () => "ok",
+        }),
+      ).toThrow("retentionMax must be a positive integer");
+    });
+
+    test("omitted retentionTTL expires terminal keys after 24h", async () => {
+      const redis = createRedis();
+      const name = `retain-default-${crypto.randomUUID()}`;
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        handler: async () => "ok",
+      });
+
+      const { executionId } = await wf.start({});
+      const execution = await waitStatus(wf, executionId, "completed");
+
+      expect(execution.result).toBe("ok");
+      expect(
+        await redis.pttl(`workflow:${name}:meta:${executionId}`),
+      ).toBeGreaterThan(86_400_000 - 5_000);
+      expect(
+        await redis.pttl(`workflow:${name}:history:${executionId}`),
+      ).toBeGreaterThan(86_400_000 - 5_000);
+
+      await stop(wf);
+    });
+
+    test("retentionTTL Infinity leaves terminal keys persistent", async () => {
+      const redis = createRedis();
+      const name = `retain-inf-${crypto.randomUUID()}`;
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retentionTTL: Infinity,
+        handler: async () => "ok",
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "completed");
+
+      expect(await redis.pttl(`workflow:${name}:meta:${executionId}`)).toBe(-1);
+      expect(await redis.pttl(`workflow:${name}:history:${executionId}`)).toBe(
+        -1,
+      );
+
+      await stop(wf);
+    });
+
+    test("terminal keys get TTL and running keys do not", async () => {
+      const redis = createRedis();
+      const name = `retain-ttl-${crypto.randomUUID()}`;
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retentionTTL: 60_000,
+        handler: async ({ sleep }) => {
+          await sleep(200);
+          return "ok";
+        },
+      });
+
+      const { executionId } = await wf.start({});
+
+      await waitStatus(wf, executionId, "running");
+
+      expect(await redis.pttl(`workflow:${name}:meta:${executionId}`)).toBe(-1);
+      expect(await redis.pttl(`workflow:${name}:history:${executionId}`)).toBe(
+        -1,
+      );
+
+      const execution = await waitStatus(wf, executionId, "completed", 5000);
+
+      expect(execution.result).toBe("ok");
+      expect(
+        await redis.pttl(`workflow:${name}:meta:${executionId}`),
+      ).toBeGreaterThan(0);
+      expect(
+        await redis.pttl(`workflow:${name}:history:${executionId}`),
+      ).toBeGreaterThan(0);
+
+      await stop(wf);
+    });
+
+    test("retentionTTL 0 unlinks terminal keys", async () => {
+      const redis = createRedis();
+      const name = `retain-0-${crypto.randomUUID()}`;
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retentionTTL: 0,
+        handler: async () => "ok",
+      });
+
+      const { executionId } = await wf.start({});
+
+      await waitFor(async () => {
+        const [error] = await mightThrow(wf.get(executionId));
+
+        return error instanceof NotFoundError;
+      });
+
+      expect(await redis.pttl(`workflow:${name}:meta:${executionId}`)).toBe(-2);
+      expect(await redis.pttl(`workflow:${name}:history:${executionId}`)).toBe(
+        -2,
+      );
+      expect(await redis.pttl(`workflow:${name}:lease:${executionId}`)).toBe(
+        -2,
+      );
+
+      await stop(wf);
+    });
+
+    test("listWorkflows ignores expired SCAN tombstones", async () => {
+      const redis = createRedis();
+      const now = String(Date.now());
+
+      await redis.hset(
+        "workflow:tomb:meta:dead-1",
+        "name",
+        "tomb",
+        "status",
+        "completed",
+        "createdAt",
+        now,
+        "updatedAt",
+        now,
+        "completedAt",
+        now,
+        "failedAt",
+        "",
+        "cancelledAt",
+        "",
+      );
+      await redis.hset(
+        "workflow:tomb:meta:live-1",
+        "name",
+        "tomb",
+        "status",
+        "running",
+        "createdAt",
+        now,
+        "updatedAt",
+        now,
+        "completedAt",
+        "",
+        "failedAt",
+        "",
+        "cancelledAt",
+        "",
+      );
+
+      await redis.pexpire("workflow:tomb:meta:dead-1", 1);
+      await sleep(5);
+
+      const listed = await listWorkflows(redis, { name: "tomb" });
+
+      expect(listed.map((item) => item.id)).toEqual(["live-1"]);
+    });
+
+    test("resume persists failed keys then completes", async () => {
+      const redis = createRedis();
+      const name = `retain-resume-${crypto.randomUUID()}`;
+      const wf = failOnce(name, redis);
+      const { executionId } = await wf.start({});
+
+      await waitStatus(wf, executionId, "failed");
+
+      expect(
+        await redis.pttl(`workflow:${name}:meta:${executionId}`),
+      ).toBeGreaterThan(0);
+
+      await wf.resume(executionId);
+
+      expect(await redis.pttl(`workflow:${name}:meta:${executionId}`)).toBe(-1);
+      expect(await redis.pttl(`workflow:${name}:history:${executionId}`)).toBe(
+        -1,
+      );
+
+      const execution = await waitStatus(wf, executionId, "completed");
+
+      expect(execution.result).toBe("ok");
+      expect(
+        await redis.pttl(`workflow:${name}:meta:${executionId}`),
+      ).toBeGreaterThan(0);
+
+      await stop(wf);
+    });
+
+    test("resume after a later failure appends a new resume event", async () => {
+      const redis = createRedis();
+      const name = `retain-resume-again-${crypto.randomUUID()}`;
+      let attempts = 0;
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retries: 0,
+        retentionTTL: 60_000,
+        handler: async ({ step }) => {
+          const value = await step("once", async () => {
+            attempts++;
+
+            if (attempts < 3) throw new Error("boom");
+
+            return "ok";
+          });
+
+          return value;
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "failed");
+
+      await wf.resume(executionId);
+      await waitStatus(wf, executionId, "failed");
+
+      const store = new WorkflowStore(redis, name);
+
+      expect(await store.persistExecution(executionId)).toBe(true);
+      expect((await wf.get(executionId)).status).toBe("pending");
+
+      await wf.resume(executionId);
+
+      const execution = await waitStatus(wf, executionId, "completed");
+
+      expect(execution.result).toBe("ok");
+      expect(attempts).toBe(3);
+
+      await stop(wf);
+    });
+
+    test("persist does not mark active so reclaim cannot re-fail mid-resume", async () => {
+      const redis = createRedis();
+      const name = `retain-reclaim-${crypto.randomUUID()}`;
+      const wf = failOnce(name, redis);
+      const { executionId } = await wf.start({});
+
+      await waitStatus(wf, executionId, "failed");
+
+      const store = new WorkflowStore(redis, name);
+
+      expect(await store.persistExecution(executionId)).toBe(true);
+      expect(await store.listActive()).not.toContain(executionId);
+
+      await sleep(300);
+
+      expect((await wf.get(executionId)).status).toBe("pending");
+
+      await wf.resume(executionId);
+
+      const execution = await waitStatus(wf, executionId, "completed");
+
+      expect(execution.result).toBe("ok");
+
+      await stop(wf);
+    });
+
+    test("resume retries after events without markActive", async () => {
+      const redis = createRedis();
+      const name = `retain-retry-events-${crypto.randomUUID()}`;
+      const wf = failOnce(name, redis);
+      const { executionId } = await wf.start({});
+
+      await waitStatus(wf, executionId, "failed");
+
+      const store = new WorkflowStore(redis, name);
+
+      await store.persistExecution(executionId);
+      await store.appendEvents({
+        executionId,
+        events: [
+          {
+            type: "WorkflowResumed",
+            timestamp: Date.now(),
+          },
+          {
+            type: "StepScheduled",
+            stepId: "a0",
+            stepName: "once",
+            attempt: 1,
+            timestamp: Date.now(),
+          },
+        ],
+      });
+
+      expect(await store.listActive()).not.toContain(executionId);
+
+      await wf.resume(executionId);
+
+      const execution = await waitStatus(wf, executionId, "completed");
+
+      expect(execution.result).toBe("ok");
+
+      await stop(wf);
+    });
+
+    test("resume racing retention sweep does not drop persisted keys", async () => {
+      const redis = createRedis();
+      const name = `retain-race-${crypto.randomUUID()}`;
+      const wf = failOnce(name, redis);
+      const { executionId } = await wf.start({});
+
+      await waitStatus(wf, executionId, "failed");
+
+      const store = new WorkflowStore(redis, name);
+      const [resumed] = await Promise.allSettled([
+        wf.resume(executionId),
+        store.retainIfTerminal({
+          executionId,
+          ttlMs: 0,
+        }),
+      ]);
+
+      if (resumed.status === "fulfilled") {
+        const execution = await wf.get(executionId);
+
+        expect(execution.status).not.toBe("failed");
+      }
+
+      if (resumed.status === "rejected") {
+        await expect(wf.get(executionId)).rejects.toBeInstanceOf(NotFoundError);
+      }
+
+      await stop(wf);
+    });
+
+    test("retentionMax unlinks oldest terminal executions", async () => {
+      const redis = createRedis();
+      const name = `retain-max-${crypto.randomUUID()}`;
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retentionTTL: 60_000,
+        retentionMax: 2,
+        handler: async () => "ok",
+      });
+
+      await wf.start({}, { executionId: "t1" });
+      await waitStatus(wf, "t1", "completed");
+      await sleep(5);
+      await wf.start({}, { executionId: "t2" });
+      await waitStatus(wf, "t2", "completed");
+      await sleep(5);
+      await wf.start({}, { executionId: "t3" });
+      await waitStatus(wf, "t3", "completed");
+
+      expect(await redis.pttl(`workflow:${name}:meta:t1`)).toBe(-2);
+      expect(await redis.pttl(`workflow:${name}:meta:t2`)).toBeGreaterThan(0);
+      expect(await redis.pttl(`workflow:${name}:meta:t3`)).toBeGreaterThan(0);
+
+      await stop(wf);
+    });
+
+    test("retentionMax with Infinity TTL unlinks oldest and keeps the rest persistent", async () => {
+      const redis = createRedis();
+      const name = `retain-max-inf-${crypto.randomUUID()}`;
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retentionTTL: Infinity,
+        retentionMax: 2,
+        handler: async () => "ok",
+      });
+
+      await wf.start({}, { executionId: "t1" });
+      await waitStatus(wf, "t1", "completed");
+      await sleep(5);
+      await wf.start({}, { executionId: "t2" });
+      await waitStatus(wf, "t2", "completed");
+      await sleep(5);
+      await wf.start({}, { executionId: "t3" });
+      await waitStatus(wf, "t3", "completed");
+
+      expect(await redis.pttl(`workflow:${name}:meta:t1`)).toBe(-2);
+      expect(await redis.pttl(`workflow:${name}:meta:t2`)).toBe(-1);
+      expect(await redis.pttl(`workflow:${name}:meta:t3`)).toBe(-1);
+
+      await stop(wf);
+    });
+
+    test("sweep unlinks leftover terminal keys older than retentionTTL", async () => {
+      const redis = createRedis();
+      const name = `retain-sweep-${crypto.randomUUID()}`;
+      const executionId = "stale-1";
+      const ended = Date.now() - 48 * 60 * 60 * 1000;
+
+      await redis.hset(
+        `workflow:${name}:meta:${executionId}`,
+        "name",
+        name,
+        "status",
+        "completed",
+        "input",
+        "{}",
+        "result",
+        '"ok"',
+        "error",
+        "",
+        "createdAt",
+        String(ended),
+        "updatedAt",
+        String(ended),
+        "completedAt",
+        String(ended),
+        "failedAt",
+        "",
+        "cancelledAt",
+        "",
+        "partitionKey",
+        "",
+        "partitionSlot",
+        "",
+        "concurrencySlot",
+        "",
+      );
+      await redis.rpush(
+        `workflow:${name}:history:${executionId}`,
+        JSON.stringify({
+          type: "WorkflowStarted",
+          input: "{}",
+          partitionKey: "",
+          timestamp: ended,
+        }),
+      );
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retentionTTL: 1000,
+        handler: async () => "ok",
+      });
+
+      await waitFor(async () => {
+        return (
+          (await redis.pttl(`workflow:${name}:meta:${executionId}`)) === -2
+        );
+      });
+
+      expect(await redis.pttl(`workflow:${name}:history:${executionId}`)).toBe(
+        -2,
+      );
 
       await stop(wf);
     });

@@ -5,21 +5,22 @@ import {
   CREATE_META_AND_ACTIVE,
   EXTEND_IF_OWNER,
   HSET_IF_LEASE,
+  PERSIST_EXECUTION,
   RELEASE_IF_OWNER,
+  RETAIN_IF_TERMINAL,
   SCHEDULE_TIMER_IF_ABSENT,
+  TRIM_IF_MEMBER,
   UPDATE_META_AND_ACTIVE,
 } from "./store.js";
 import type { RedisZMember } from "./types.js";
 
 export class MockRedisClient {
-  private strings = new Map<
-    string,
-    { value: string; expiresAt: number | null }
-  >();
+  private strings = new Map<string, string>();
   private hashes = new Map<string, Map<string, string>>();
   private lists = new Map<string, string[]>();
   private sets = new Map<string, Set<string>>();
   private zsets = new Map<string, RedisZMember[]>();
+  private expiresAt = new Map<string, number>();
   private failCommands = new Map<string, number>();
 
   public failNext(command: string, times = 1) {
@@ -41,17 +42,33 @@ export class MockRedisClient {
     throw new Error(`mock redis ${command} failed`);
   }
 
-  private isExpired(key: string) {
-    const entry = this.strings.get(key);
+  private drop(key: string) {
+    this.expiresAt.delete(key);
+    this.strings.delete(key);
+    this.hashes.delete(key);
+    this.lists.delete(key);
+    this.sets.delete(key);
+    this.zsets.delete(key);
+  }
 
-    if (!entry) return true;
+  private sweep(key: string) {
+    const exp = this.expiresAt.get(key);
 
-    if (entry.expiresAt === null) return false;
+    if (exp === undefined) return false;
 
-    if (Date.now() >= entry.expiresAt) {
-      this.strings.delete(key);
-      return true;
-    }
+    if (Date.now() < exp) return false;
+
+    this.drop(key);
+    return true;
+  }
+
+  private existsSync(key: string) {
+    if (this.sweep(key)) return false;
+    if (this.strings.has(key)) return true;
+    if (this.hashes.has(key)) return true;
+    if (this.lists.has(key)) return true;
+    if (this.sets.has(key)) return true;
+    if (this.zsets.has(key)) return true;
 
     return false;
   }
@@ -89,22 +106,12 @@ export class MockRedisClient {
   public async pttl(key: string) {
     this.maybeFail("pttl");
 
-    const entry = this.strings.get(key);
-
-    if (!entry) return -2;
-
-    if (entry.expiresAt === null) return -1;
-
-    if (Date.now() >= entry.expiresAt) {
-      this.strings.delete(key);
-      return -2;
-    }
-
-    return entry.expiresAt - Date.now();
+    return this.pttlSync(key);
   }
 
   public async lpush(key: string, ...values: string[]) {
     this.maybeFail("lpush");
+    this.sweep(key);
 
     const list = this.lists.get(key) ?? [];
 
@@ -124,6 +131,7 @@ export class MockRedisClient {
 
   public async rpop(key: string) {
     this.maybeFail("rpop");
+    this.sweep(key);
 
     const list = this.lists.get(key);
 
@@ -136,6 +144,7 @@ export class MockRedisClient {
 
   public async lrange(key: string, start: number, stop: number) {
     this.maybeFail("lrange");
+    this.sweep(key);
 
     const list = this.lists.get(key) ?? [];
 
@@ -156,12 +165,14 @@ export class MockRedisClient {
 
   public async hget(key: string, field: string) {
     this.maybeFail("hget");
+    this.sweep(key);
 
     return this.hashes.get(key)?.get(field) ?? null;
   }
 
   public async hgetall(key: string) {
     this.maybeFail("hgetall");
+    this.sweep(key);
 
     const hash = this.hashes.get(key);
 
@@ -185,6 +196,7 @@ export class MockRedisClient {
       `^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`,
     );
 
+    // Leave expired hashes in SCAN (tombstones); HGETALL lazy-deletes.
     return ["0", [...this.hashes.keys()].filter((key) => regex.test(key))];
   }
 
@@ -197,21 +209,12 @@ export class MockRedisClient {
   public async srem(key: string, ...members: string[]) {
     this.maybeFail("srem");
 
-    const set = this.sets.get(key);
-
-    if (!set) return 0;
-
-    let removed = 0;
-
-    for (const member of members) {
-      if (set.delete(member)) removed++;
-    }
-
-    return removed;
+    return this.sremSync(key, ...members);
   }
 
   public async smembers(key: string) {
     this.maybeFail("smembers");
+    this.sweep(key);
 
     return [...(this.sets.get(key) ?? [])];
   }
@@ -236,9 +239,9 @@ export class MockRedisClient {
   }
 
   private getSync(key: string) {
-    if (this.isExpired(key)) return null;
+    if (this.sweep(key)) return null;
 
-    return this.strings.get(key)?.value ?? null;
+    return this.strings.get(key) ?? null;
   }
 
   private setSync(
@@ -259,23 +262,16 @@ export class MockRedisClient {
     }
 
     if (nx) {
-      if (!this.isExpired(key)) {
-        if (this.strings.has(key)) {
-          return null;
-        }
-      }
+      if (this.existsSync(key)) return null;
     }
 
-    let expiresAt: number | null = null;
+    this.strings.set(key, value);
 
     if (ttlMs !== null) {
-      expiresAt = Date.now() + ttlMs;
+      this.expiresAt.set(key, Date.now() + ttlMs);
+    } else {
+      this.expiresAt.delete(key);
     }
-
-    this.strings.set(key, {
-      value,
-      expiresAt,
-    });
 
     return "OK";
   }
@@ -284,28 +280,43 @@ export class MockRedisClient {
     let count = 0;
 
     for (const key of keys) {
-      if (this.strings.delete(key)) count++;
-      if (this.hashes.delete(key)) count++;
-      if (this.lists.delete(key)) count++;
-      if (this.sets.delete(key)) count++;
-      if (this.zsets.delete(key)) count++;
+      if (this.existsSync(key)) count++;
+
+      this.drop(key);
     }
 
     return count;
   }
 
   private pexpireSync(key: string, ttlMs: number) {
-    const entry = this.strings.get(key);
+    if (!this.existsSync(key)) return 0;
 
-    if (!entry) return 0;
-
-    if (this.isExpired(key)) return 0;
-
-    entry.expiresAt = Date.now() + ttlMs;
+    this.expiresAt.set(key, Date.now() + ttlMs);
     return 1;
   }
 
+  private persistSync(key: string) {
+    if (!this.existsSync(key)) return 0;
+
+    if (!this.expiresAt.has(key)) return 0;
+
+    this.expiresAt.delete(key);
+    return 1;
+  }
+
+  private pttlSync(key: string) {
+    if (!this.existsSync(key)) return -2;
+
+    const exp = this.expiresAt.get(key);
+
+    if (exp === undefined) return -1;
+
+    return exp - Date.now();
+  }
+
   private hsetSync(key: string, fieldValues: string[]) {
+    this.sweep(key);
+
     const hash = this.hashes.get(key) ?? new Map<string, string>();
 
     for (let i = 0; i < fieldValues.length; i += 2) {
@@ -324,6 +335,8 @@ export class MockRedisClient {
   }
 
   private saddSync(key: string, ...members: string[]) {
+    this.sweep(key);
+
     const set = this.sets.get(key) ?? new Set<string>();
     let added = 0;
 
@@ -338,7 +351,25 @@ export class MockRedisClient {
     return added;
   }
 
+  private sremSync(key: string, ...members: string[]) {
+    this.sweep(key);
+
+    const set = this.sets.get(key);
+
+    if (!set) return 0;
+
+    let removed = 0;
+
+    for (const member of members) {
+      if (set.delete(member)) removed++;
+    }
+
+    return removed;
+  }
+
   private rpushSync(key: string, ...values: string[]) {
+    this.sweep(key);
+
     const list = this.lists.get(key) ?? [];
 
     for (const value of values) {
@@ -350,6 +381,8 @@ export class MockRedisClient {
   }
 
   private zaddSync(key: string, score: number, member: string) {
+    this.sweep(key);
+
     const zset = this.zsets.get(key) ?? [];
     const existing = zset.findIndex((row) => row.member === member);
 
@@ -362,24 +395,52 @@ export class MockRedisClient {
     this.zsets.set(key, zset);
   }
 
+  private zsetOrder(a: RedisZMember, b: RedisZMember) {
+    if (a.score !== b.score) return a.score - b.score;
+
+    if (a.member < b.member) return -1;
+
+    if (a.member > b.member) return 1;
+
+    return 0;
+  }
+
   private zrangebyscoreSync(key: string, min: number, max: number) {
+    this.sweep(key);
+
     const zset = this.zsets.get(key) ?? [];
 
     return zset
       .filter((row) => row.score >= min && row.score <= max)
-      .sort((a, b) => {
-        if (a.score !== b.score) return a.score - b.score;
-
-        if (a.member < b.member) return -1;
-
-        if (a.member > b.member) return 1;
-
-        return 0;
-      })
+      .sort((a, b) => this.zsetOrder(a, b))
       .map((row) => row.member);
   }
 
+  private zrangeSync(key: string, start: number, stop: number) {
+    this.sweep(key);
+
+    const zset = [...(this.zsets.get(key) ?? [])].sort((a, b) =>
+      this.zsetOrder(a, b),
+    );
+
+    let end = stop + 1;
+
+    if (stop < 0) {
+      end = zset.length + stop + 1;
+    }
+
+    return zset.slice(start, end).map((row) => row.member);
+  }
+
+  private zcardSync(key: string) {
+    this.sweep(key);
+
+    return this.zsets.get(key)?.length ?? 0;
+  }
+
   private zremSync(key: string, members: string[]) {
+    this.sweep(key);
+
     const zset = this.zsets.get(key) ?? [];
     const next = zset.filter((row) => !members.includes(row.member));
     const removed = zset.length - next.length;
@@ -403,10 +464,41 @@ export class MockRedisClient {
       return this.hset(key ?? "", ...fieldValues);
     }
 
+    if (command === "UNLINK" || command === "DEL") {
+      return this.delSync(...args);
+    }
+
+    if (command === "PEXPIRE") {
+      return this.pexpireSync(args[0] ?? "", Number(args[1]));
+    }
+
+    if (command === "PERSIST") {
+      return this.persistSync(args[0] ?? "");
+    }
+
+    if (command === "PTTL") {
+      return this.pttlSync(args[0] ?? "");
+    }
+
+    if (command === "ZCARD") {
+      return this.zcardSync(args[0] ?? "");
+    }
+
+    if (command === "ZRANGE") {
+      return this.zrangeSync(args[0] ?? "", Number(args[1]), Number(args[2]));
+    }
+
+    if (command === "ZREM") {
+      return this.zremSync(args[0] ?? "", args.slice(1));
+    }
+
     if (command === "HSETNX") {
       const key = args[0] ?? "";
       const field = args[1] ?? "";
       const value = args[2] ?? "";
+
+      this.sweep(key);
+
       const hash = this.hashes.get(key) ?? new Map<string, string>();
 
       if (hash.has(field)) return 0;
@@ -443,6 +535,9 @@ export class MockRedisClient {
     if (script === SCHEDULE_TIMER_IF_ABSENT) {
       const fireAt = Number(argv[0]);
       const member = argv[1] ?? "";
+
+      this.sweep(key);
+
       const zset = this.zsets.get(key) ?? [];
 
       if (zset.some((row) => row.member === member)) return 0;
@@ -456,7 +551,7 @@ export class MockRedisClient {
       const activeKey = keyArgs[1] ?? "";
       const executionId = argv[0] ?? "";
 
-      if (this.hashes.has(metaKey)) return 0;
+      if (this.existsSync(metaKey)) return 0;
 
       this.hsetSync(metaKey, argv.slice(1));
       this.saddSync(activeKey, executionId);
@@ -526,15 +621,94 @@ export class MockRedisClient {
       return this.pexpireSync(key, Number(argv[1]));
     }
 
+    if (script === PERSIST_EXECUTION) {
+      const metaKey = keyArgs[0] ?? "";
+      const historyKey = keyArgs[1] ?? "";
+      const terminalKey = keyArgs[2] ?? "";
+      const executionId = argv[0] ?? "";
+      const updatedAt = argv[1] ?? "";
+
+      if (!this.existsSync(metaKey)) return 0;
+
+      this.persistSync(metaKey);
+      this.persistSync(historyKey);
+      this.zremSync(terminalKey, [executionId]);
+      this.hsetSync(metaKey, [
+        "status",
+        "pending",
+        "error",
+        "",
+        "failedAt",
+        "",
+        "updatedAt",
+        updatedAt,
+      ]);
+      return 1;
+    }
+
+    if (script === RETAIN_IF_TERMINAL) {
+      const metaKey = keyArgs[0] ?? "";
+      const historyKey = keyArgs[1] ?? "";
+      const leaseKey = keyArgs[2] ?? "";
+      const activeKey = keyArgs[3] ?? "";
+      const terminalKey = keyArgs[4] ?? "";
+      const executionId = argv[0] ?? "";
+      const endedAt = argv[2] ?? "";
+
+      this.sweep(metaKey);
+
+      const status = this.hashes.get(metaKey)?.get("status");
+
+      if (status !== "completed") {
+        if (status !== "failed") {
+          if (status !== "cancelled") return 0;
+        }
+      }
+
+      const ttlRaw = argv[1] ?? "";
+
+      if (ttlRaw !== "") {
+        const ttlMs = Number(ttlRaw);
+        const pttl = this.pttlSync(metaKey);
+
+        if (pttl <= 0) {
+          if (ttlMs <= 0) {
+            this.delSync(metaKey, historyKey, leaseKey);
+            this.sremSync(activeKey, executionId);
+            this.zremSync(terminalKey, [executionId]);
+            return 1;
+          }
+
+          this.pexpireSync(metaKey, ttlMs);
+          this.pexpireSync(historyKey, ttlMs);
+        }
+      }
+
+      if (endedAt !== "") {
+        this.zaddSync(terminalKey, Number(endedAt), executionId);
+      }
+
+      return 1;
+    }
+
+    if (script === TRIM_IF_MEMBER) {
+      const terminalKey = keyArgs[0] ?? "";
+      const executionId = argv[0] ?? "";
+
+      if (this.zremSync(terminalKey, [executionId]) === 0) return 0;
+
+      this.delSync(keyArgs[1] ?? "", keyArgs[2] ?? "", keyArgs[3] ?? "");
+      this.sremSync(keyArgs[4] ?? "", executionId);
+      return 1;
+    }
+
     return 0;
   }
 
   public expireLeaseNow(key: string) {
-    const entry = this.strings.get(key);
+    if (!this.strings.has(key)) return;
 
-    if (entry) {
-      entry.expiresAt = Date.now() - 1;
-    }
+    this.expiresAt.set(key, Date.now() - 1);
   }
 
   public clearZset(key: string) {
@@ -546,6 +720,8 @@ export class MockRedisClient {
   }
 
   public getList(key: string) {
+    this.sweep(key);
+
     return [...(this.lists.get(key) ?? [])];
   }
 }

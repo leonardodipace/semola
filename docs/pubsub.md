@@ -51,6 +51,24 @@ Messages are JSON-serialized. Payloads that fail to parse are dropped. Handler e
 
 Multiple handlers can share one channel; Redis unsubscribe runs when the last handler is removed.
 
+## Async iteration
+
+Use the `PubSub` instance as an async iterable. Each iterator buffers messages and removes its handler when the loop exits.
+
+```typescript
+for await (const message of events) {
+  console.log(message.userId, message.action);
+}
+```
+
+Use `listen({ signal })` when an `AbortSignal` should stop iteration, including a pending wait:
+
+```typescript
+for await (const message of events.listen({ signal: request.signal })) {
+  console.log(message);
+}
+```
+
 ## Examples
 
 ### Example: Fan-out notifications
@@ -87,6 +105,28 @@ if (!events.isActive()) {
 }
 ```
 
+### Example: Async iteration with abort
+
+```typescript
+const controller = new AbortController();
+
+const consume = (async () => {
+  for await (const message of events.listen({ signal: controller.signal })) {
+    console.log(message.userId, message.action);
+
+    if (message.action === "logout") {
+      controller.abort();
+    }
+  }
+})();
+
+await events.publish({ userId: "123", action: "login" });
+await events.publish({ userId: "123", action: "logout" });
+await consume;
+```
+
+Or iterate without a signal: `for await (const message of events) { ... }`.
+
 ## Reference
 
 | Option | Meaning |
@@ -101,5 +141,7 @@ if (!events.isActive()) {
 | --- | --- |
 | `publish(message)` | Publish a JSON message |
 | `subscribe(handler)` | Add a handler; returns unsubscribe fn |
+| `listen({ signal? })` | Consume buffered messages as an async iterator |
+| `[Symbol.asyncIterator]()` | Iterate messages with `for await` |
 | `unsubscribe()` | Remove all handlers / Redis subscription |
 | `isActive()` | Whether the Redis subscription is live |

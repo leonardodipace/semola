@@ -69,7 +69,12 @@ export const listWorkflows = async (
     cursor = next;
 
     for (const key of keys) {
-      const id = key.split(":meta:")[1];
+      const marker = ":meta:";
+      const index = key.lastIndexOf(marker);
+
+      if (index === -1) continue;
+
+      const id = key.slice(index + marker.length);
 
       if (!id) continue;
 
@@ -81,7 +86,9 @@ export const listWorkflows = async (
         );
       }
 
-      if (!meta?.name) continue;
+      if (!meta) continue;
+      if (Object.keys(meta).length === 0) continue;
+      if (!meta.name) continue;
       if (!meta.status) continue;
       if (names && !names.has(meta.name)) continue;
       if (statuses && !statuses.has(meta.status as WorkflowStatus)) continue;
@@ -223,42 +230,70 @@ export const defineWorkflow = <TInput, TResult = void>(
 
   const resume = async (executionId: string) => {
     const meta = await requireMeta(store, executionId);
+    const view = parseHistory(await store.loadHistory(executionId));
+    let hasResume = false;
+
+    for (const event of view.events) {
+      if (event.type !== "WorkflowResumed") continue;
+
+      hasResume = true;
+      break;
+    }
 
     if (meta.status !== "failed") {
-      throw new WorkflowStoreError(
-        `Workflow execution ${executionId} is ${meta.status}, only failed executions can be resumed`,
-      );
+      if (meta.status !== "pending") {
+        throw new WorkflowStoreError(
+          `Workflow execution ${executionId} is ${meta.status}, only failed executions can be resumed`,
+        );
+      }
+
+      if (view.terminal?.kind !== "failed") {
+        if (!hasResume) {
+          throw new WorkflowStoreError(
+            `Workflow execution ${executionId} is ${meta.status}, only failed executions can be resumed`,
+          );
+        }
+      }
+    }
+
+    // Persist keys, but stay inactive until resume events exist.
+    const persisted = await store.persistExecution(executionId);
+
+    if (!persisted) {
+      throw new NotFoundError(`Workflow execution ${executionId} not found`);
     }
 
     const now = Date.now();
-    const view = parseHistory(await store.loadHistory(executionId));
-    const retryEvents = [];
 
-    for (const [stepId, state] of view.steps) {
-      if (state.status !== "failed") continue;
+    // A prior resume may already be in history. Append only if this
+    // failure is not yet resumed (`parseHistory` still has terminal failed).
+    if (view.terminal?.kind === "failed") {
+      const retryEvents = [];
 
-      retryEvents.push({
-        type: "StepScheduled" as const,
-        stepId,
-        stepName: state.stepName,
-        attempt: 1,
-        timestamp: now,
+      for (const [stepId, state] of view.steps) {
+        if (state.status !== "failed") continue;
+
+        retryEvents.push({
+          type: "StepScheduled" as const,
+          stepId,
+          stepName: state.stepName,
+          attempt: 1,
+          timestamp: now,
+        });
+      }
+
+      await store.appendEvents({
+        executionId,
+        events: [
+          {
+            type: "WorkflowResumed",
+            timestamp: now,
+          },
+          ...retryEvents,
+        ],
       });
     }
 
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowResumed",
-          timestamp: now,
-        },
-        ...retryEvents,
-      ],
-    });
-
-    // Atomic pending + active: crash between flip and markActive would orphan
-    // (pending but reclaim-blind).
     await store.updateStatusAndMarkActive({
       executionId,
       status: "pending",

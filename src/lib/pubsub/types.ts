@@ -8,3 +8,7 @@ export type MessageHandler<T> = (
   message: T,
   channel: string,
 ) => void | Promise<void>;
+
+export type ListenOptions = {
+  signal?: AbortSignal;
+};
