@@ -1,3 +1,4 @@
+import { EventEmitter, on } from "node:events";
 import { mightThrow, mightThrowSync } from "../errors/index.js";
 import {
   PublishError,
@@ -5,7 +6,7 @@ import {
   SubscribeError,
   UnsubscribeError,
 } from "./errors.js";
-import type { MessageHandler, PubSubOptions } from "./types.js";
+import type { ListenOptions, MessageHandler, PubSubOptions } from "./types.js";
 
 export class PubSub<T extends Record<string, unknown>> {
   private options: PubSubOptions;
@@ -107,39 +108,67 @@ export class PubSub<T extends Record<string, unknown>> {
     return count;
   }
 
-  public listen({ signal }: { signal?: AbortSignal } = {}) {
-    let unsubscribeHandler: (() => Promise<void>) | undefined;
+  public listen(options: ListenOptions = {}): AsyncIterableIterator<T> {
+    const { signal } = options;
+
+    // on() throws synchronously for a signal that already aborted
+    if (signal?.aborted) {
+      return (async function* (): AsyncGenerator<T> {})();
+    }
+
+    const emitter = new EventEmitter();
+
+    const subscription = mightThrow(
+      this.subscribe((message) => {
+        emitter.emit("message", message);
+      }),
+    );
+
+    const events = on(emitter, "message", { signal });
+
+    let stopped = false;
 
     const stop = async () => {
-      const pending = unsubscribeHandler;
+      if (!stopped) {
+        stopped = true;
 
-      unsubscribeHandler = undefined;
+        const [, unsubscribeHandler] = await subscription;
 
-      await pending?.();
+        await unsubscribeHandler?.();
+      }
+
+      return {
+        value: undefined,
+        done: true as const,
+      };
     };
 
-    return new ReadableStream<T>({
-      start: async (controller) => {
-        unsubscribeHandler = await this.subscribe((message) =>
-          controller.enqueue(message),
-        );
-
-        const close = async () => {
-          controller.close();
-
-          await stop();
-        };
-
-        if (signal?.aborted) {
-          return close();
-        }
-
-        signal?.addEventListener("abort", close, {
-          once: true,
-        });
+    return {
+      [Symbol.asyncIterator]() {
+        return this;
       },
-      cancel: stop,
-    }).values();
+      next: async () => {
+        const [subscribeError] = await subscription;
+
+        if (subscribeError) throw subscribeError;
+
+        // An aborted signal rejects the pending read; both end iteration
+        const [abortError, result] = await mightThrow(events.next());
+
+        if (abortError) return stop();
+        if (result.done) return stop();
+
+        return {
+          value: result.value[0] as T,
+          done: false,
+        };
+      },
+      return: async () => {
+        await events.return?.();
+
+        return stop();
+      },
+    };
   }
 
   public [Symbol.asyncIterator]() {

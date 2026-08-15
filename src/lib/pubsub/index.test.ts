@@ -283,6 +283,103 @@ describe("PubSub", () => {
       expect(pubsub.isActive()).toBe(false);
     });
 
+    test("should unsubscribe when return wins the subscribe race", async () => {
+      const redis = createMockRedis();
+      const pubsub = new PubSub<{ message: string }>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
+
+      redis.blockNextSubscribe();
+
+      const iterator = pubsub.listen();
+      const pending = iterator.next();
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const returned = iterator.return?.() ?? Promise.resolve();
+
+      redis.unblockNextSubscribe();
+
+      await returned;
+
+      expect(await pending).toEqual({ value: undefined, done: true });
+
+      expect(redis.getSubscribeCallCount("test")).toBe(1);
+      expect(redis.getUnsubscribeCallCount("test")).toBe(1);
+      expect(pubsub.isActive()).toBe(false);
+    });
+
+    test("should end immediately when the signal is already aborted", async () => {
+      const redis = createMockRedis();
+      const pubsub = new PubSub<{ message: string }>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
+
+      const controller = new AbortController();
+
+      controller.abort();
+
+      const iterator = pubsub.listen({ signal: controller.signal });
+
+      expect(await iterator.next()).toEqual({ value: undefined, done: true });
+      expect(redis.getSubscribeCallCount("test")).toBe(0);
+      expect(pubsub.isActive()).toBe(false);
+    });
+
+    test("should surface subscribe errors through async iteration", async () => {
+      const redis = createMockRedis();
+      const pubsub = new PubSub<{ message: string }>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
+
+      redis.setShouldFail(true);
+
+      const iterator = pubsub.listen();
+
+      await expect(iterator.next()).rejects.toMatchObject({
+        name: "SubscribeError",
+        message: "Unable to subscribe to test",
+      });
+    });
+
+    test("should ignore abort after the iterator returns", async () => {
+      const redis = createMockRedis();
+      const pubsub = new PubSub<{ message: string }>({
+        subscriber: redis,
+        publisher: redis,
+        channel: "test",
+      });
+
+      const controller = new AbortController();
+      const rejections: unknown[] = [];
+      const onUnhandled = (reason: unknown) => {
+        rejections.push(reason);
+      };
+
+      process.on("unhandledRejection", onUnhandled);
+
+      const iterator = pubsub.listen({ signal: controller.signal });
+
+      await pubsub.publish({ message: "one" });
+      await iterator.next();
+      await iterator.return?.();
+
+      controller.abort();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      process.off("unhandledRejection", onUnhandled);
+
+      expect(rejections).toEqual([]);
+      expect(pubsub.isActive()).toBe(false);
+    });
+
     test("should return handler-level unsubscribe function", async () => {
       const redis = createMockRedis();
       const pubsub = new PubSub<{ message: string }>({
