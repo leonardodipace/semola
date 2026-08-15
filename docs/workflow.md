@@ -6,7 +6,7 @@ description: Durable multi-step jobs on Redis with resumable steps
 Durable workflows on Redis. Event history, deterministic replay, inline steps, multi-replica leases, and automatic orphan recovery.
 Workflows run multi-step processes that survive restarts. Each named `step` caches its result in Redis, so a resume skips work that already succeeded.
 
-Needs a `Bun.RedisClient`. Workflow names must be unique in the process. Execution IDs must be unique across all workflows sharing a Redis database.
+Needs a `Bun.RedisClient`. Workflow names must be unique in the process. Execution IDs must be unique per workflow name (Redis keys are `workflow:{name}:…`).
 
 ## Import
 
@@ -205,7 +205,7 @@ defineWorkflow({
 });
 ```
 
-This caps active executions globally and per environment, so one environment cannot consume every slot.
+This caps active executions globally and per environment at the same `concurrency` value. One environment can still fill every global slot; other keys then wait on the global cap. `partitionBy` does not reserve capacity for other keys.
 
 `partitionKey` on `start` overrides `partitionBy` when both are present. Empty keys throw. The resolved key is stored on execution meta so `resume` keeps the original partition.
 

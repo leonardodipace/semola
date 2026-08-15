@@ -111,12 +111,11 @@ const stop = await events.subscribe(async (message) => {
 
 ### Check subscription state
 
-`isActive()` prevents creating a duplicate Redis subscription when one is already live.
+`isActive()` is true when at least one handler is registered and the Redis subscription is live. `subscribe()` already skips a second Redis `SUBSCRIBE` while active; calling it again still adds the handler.
 
 ```typescript
-if (!events.isActive()) {
-  await events.subscribe(handler);
-}
+await events.subscribe(handler);
+events.isActive(); // true
 ```
 
 ### Async iteration with abort

@@ -32,7 +32,7 @@ const user = await users.get("1");
 await users.delete("1");
 ```
 
-`get` throws if the key is missing. `ttl` can be a number or `(key, value) => number`. Omit it (or pass `null` / `undefined`) for no expiry.
+`get` throws if the key is missing. `ttl` can be a number or `(key, value) => number`. Omit it (or pass `undefined`) for no expiry.
 
 ## Soft-disable
 

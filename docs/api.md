@@ -59,7 +59,7 @@ api.defineRoute({
   method: "POST",
   request: {
     body: z.object({ title: z.string(), body: z.string() }),
-    query: z.object({ draft: z.boolean().optional() }),
+    query: z.object({ draft: z.stringbool().optional() }),
     headers: z.object({ "x-request-id": z.string().optional() }),
   },
   response: {
@@ -73,7 +73,7 @@ api.defineRoute({
 });
 ```
 
-Invalid input becomes a 400. Toggle validation with `new Api({ validation: false })` or `{ validation: { input: true, output: false } }`.
+Invalid input becomes a 400. Query and header values are always strings; use schema coercion such as Zod's `z.stringbool()` when you want a boolean (`?draft=true` → `true`). Toggle validation with `new Api({ validation: false })` or `{ validation: { input: true, output: false } }`.
 
 ### Route context
 
@@ -107,12 +107,14 @@ const auth = new Middleware({
 api.defineRoute({
   path: "/me",
   method: "GET",
-  middlewares: [auth],
+  middlewares: [auth] as const,
   handler: async (c) => {
     return c.json(200, { userId: c.get("userId") });
   },
 });
 ```
+
+Pass middleware arrays as `as const` so `c.get` is typed from those extensions. Without it, `middlewares: [auth]` infers `Middleware[]` and `c.get("userId")` is `never`.
 
 Pass middleware on the API (`new Api({ middlewares: [...] })`), a group, or a single route.
 Execution order is API middleware, outer-to-inner group middleware, route middleware, then the route handler. Any middleware that returns a `Response` stops the chain.
@@ -197,7 +199,7 @@ const auth = new Middleware({
 api.defineRoute({
   path: "/me",
   method: "GET",
-  middlewares: [auth],
+  middlewares: [auth] as const,
   response: {
     200: z.object({ userId: z.string() }),
   },

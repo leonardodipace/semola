@@ -24,7 +24,7 @@ import {
 
 ## Quick start
 
-This defines a typed table, opens an in-memory SQLite client, inserts one user, then finds it by email.
+This defines a typed table, opens an in-memory SQLite client, creates the table, inserts one user, then finds it by email.
 
 ```typescript
 const users = defineTable("users", {
@@ -38,6 +38,14 @@ const db = createOrm({
   url: ":memory:",
   tables: { users },
 });
+
+await db.$raw.unsafe(`
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE
+  )
+`);
 
 await db.users.create({
   data: {
@@ -152,7 +160,7 @@ await db.$raw.unsafe(`CREATE TABLE IF NOT EXISTS users (...)`);
 
 Hooks receive a context and may return patched options:
 
-The global hook trims user names before insert, then the table hook logs the created row.
+The table hook trims user names before insert, then logs the created row. Global hooks are generic over every table, so column-specific work belongs on `hooks.tables.<name>`.
 
 ```typescript
 const db = createOrm({
@@ -160,18 +168,20 @@ const db = createOrm({
   url: ":memory:",
   tables: { users },
   hooks: {
-    beforeCreate(ctx) {
-      return {
-        data: {
-          ...ctx.options.data,
-          name: ctx.options.data.name.trim(),
-        },
-      };
-    },
     tables: {
       users: {
+        beforeCreate(ctx) {
+          return {
+            data: {
+              ...ctx.options.data,
+              name: ctx.options.data.name.trim(),
+            },
+          };
+        },
         afterCreate(ctx) {
-          console.log("created", ctx.result.id);
+          if (ctx.result) {
+            console.log("created", ctx.result.id);
+          }
         },
       },
     },
@@ -201,7 +211,7 @@ const post = await db.posts.findFirst({
   include: { author: true },
 });
 
-console.log(post?.author.email);
+console.log(post?.author?.email);
 ```
 
 ### Compound where

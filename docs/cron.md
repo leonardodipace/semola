@@ -40,7 +40,7 @@ daily.stop();
 
 For typed schedule pieces:
 
-This builds a weekday-at-09:00 expression and gives it to an in-process job.
+This builds a Monday-Friday 09:00 expression and gives it to an in-process job.
 
 ```typescript
 import {
@@ -55,7 +55,10 @@ import {
 } from "semola/cron";
 
 const schedule = cronJobBuilder((b) =>
-  b.minute(number(0)).hour(number(9)).weekday(any()),
+  b
+    .minute(number(0))
+    .hour(number(9))
+    .weekday(range({ min: WeekDay.mon, max: WeekDay.fri })),
 );
 
 const job = new Cron({
@@ -82,7 +85,7 @@ const schedule = cronJobBuilder((b) =>
 
 ### Lifecycle
 
-`next()` returns the next fire time. `ref()` / `unref()` control whether the timer keeps the process alive. `getStatus()`, `getExpression()`, and `getJobName()` inspect the job. Disposing the instance (`Symbol.dispose`) calls `stop`.
+`next()` returns the next fire time, or `null` if there is no match. `ref()` / `unref()` control whether the timer keeps the process alive. `getStatus()`, `getExpression()`, and `getJobName()` inspect the job. Disposing the instance (`Symbol.dispose`) calls `stop`.
 
 ## OS crontab
 
@@ -131,7 +134,7 @@ cleanup.stop();
 
 ### Read the next run with `next()`
 
-`next()` parses the schedule and returns its next matching `Date`; pass a date or timestamp to calculate from another starting point.
+`next()` parses the schedule and returns its next matching `Date`, or `null` if there is no match (for example an impossible date). Pass a date or timestamp to calculate from another starting point.
 
 ```typescript
 const everyFiveMinutes = new Cron({
@@ -279,7 +282,7 @@ backup.getJobName(); // "nightly-backup"
 | --- | --- |
 | `run()` | Start the schedule |
 | `stop()` | Stop the schedule |
-| `next(from?)` | Next fire time |
+| `next(from?)` | Next fire time, or `null` if none |
 | `ref()` / `unref()` | Keep / release the process |
 | `getStatus()` / `getExpression()` / `getJobName()` | Inspect state |
 
@@ -299,7 +302,7 @@ Disposing a `Cron` with `Symbol.dispose` stops it.
 | --- | --- |
 | `run()` | Register the script with OS-level cron |
 | `stop()` | Remove the OS-level registration |
-| `next(from?)` | Next fire time |
+| `next(from?)` | Next fire time, or `null` if none |
 | `getExpression()` / `getJobName()` | Inspect configuration |
 
 ### Errors

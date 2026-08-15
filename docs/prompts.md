@@ -41,7 +41,7 @@ const proceed = await confirm({
 
 Shared options across prompts: `message`, optional `validate`, optional `transform`. Pass a second argument implementing `PromptRuntime` so prompts do not touch the real terminal.
 
-Selects take `choices` with `value`, and optional `label`, `hint`, `disabled`. Multiselect: space toggles, `a` selects all enabled.
+Selects take `choices` with `value`, and optional `label`, `hint`, `disabled`. Multiselect: space toggles, `a` toggles all enabled (second press clears them).
 
 ### Defaults
 

@@ -37,7 +37,7 @@ The first argument is a prefix shown on every line.
 
 Pass several providers to fan out:
 
-Each log call writes the same formatted entry to both the console and file.
+Each log call writes the same formatted entry to both the console and file. `FileProvider` treats the path as a template and inserts a counter before the extension (`./logs/worker.log` becomes `./logs/worker.0.log`; rotation writes `worker.1.log`, and so on).
 
 ```typescript
 const log = new Logger("worker", [
@@ -58,7 +58,7 @@ const log = new Logger("worker", [
 
 ### Console and file providers
 
-Info-and-higher entries go to the console, while the file provider writes and rotates `api.log`.
+Info-and-higher entries go to the console, while the file provider writes and rotates `api.0.log`.
 
 ```typescript
 const log = new Logger("api", [
@@ -155,7 +155,7 @@ class MemoryProvider extends LoggerProvider {
 | Export | Meaning |
 | --- | --- |
 | `ConsoleProvider` | Write to the console |
-| `FileProvider` | Write to a file (optional rotation) |
+| `FileProvider` | Write to a file (optional rotation). The path is a template: `api.log` becomes `api.0.log` |
 | `JSONFormatter` / `BaseFormatter` | Format log lines |
 
 Extend `AbstractLogger` or `LoggerProvider` if you need a custom sink. Most apps only need `Logger` + `ConsoleProvider`.

@@ -56,13 +56,13 @@ console.log(await callable());
   - `input: () => TRetryResult | Promise<TRetryResult>` (required) -  A synchronous or an asynchronous function you want retry `n` times
   - `maxRetries: number` (required) - Number of retries after the first failure. A successful `input` call will stop its execution. The number of retries must be a finite non-negative integer; if passed an invalid number, `createRetry()` will raise an `InvalidRetryError` error
   - `id?: string` (optional) - Retry's id. By default it's a randomly generated UUID
-  - `ignoreErrors?: ErrorClassType[]` (optional) - A list of exception classes and subclasses you want to ignore from retries. By default it's an empty list, meaning all exceptions are retried
-  - `retryErrors?: ErrorClassType[]` (optional) - A list of exception classes and subclasses reported as errors and must be retried. If an error is not in the `retryErrors` list, it is passed to `onError`, if present, or thrown; By default it's an empty list, meaning no exceptions are matched
-  - `backoff: BackoffOptions` (optional) - A configuration object for handling exponential backoff's parameters. Note that if any of these parameters are invalid, `createRetry()` will throw an `InvalidRetryError` error. All these parameters must be a finite non-negative number:
+  - `ignoreErrors?: ErrorClassType[]` (optional) - A list of error constructors to skip retries for. Matching uses exact constructor identity (`error.constructor === e`), not subclasses. Omit it or pass `[]` to ignore none (all errors are retried)
+  - `retryErrors?: ErrorClassType[]` (optional) - A list of error constructors that must be retried. Matching uses exact constructor identity, not subclasses. If an error's constructor is not in the list, it is passed to `onError`, if present, or thrown. Omit it or pass `[]` to retry every error
+  - `backoff: BackoffOptions` (optional) - A configuration object for handling exponential backoff's parameters. Note that if any of these parameters are invalid, `createRetry()` will throw an `InvalidRetryError` error. All these parameters must be a finite number greater than zero:
     - `baseDelay?: number` (optional) - Base delay in milliseconds. By default it's `1000ms`
     - `multiplier?: number` (optional) - Backoff multiplier. By default it's `2`
     - `maxDelay?: number` (optional) - Maximum delay in milliseconds. By default it's `60000ms` (1 minute)
-  - `onError?: (error: ErrorMetadataType<TRetryResult>) => void | Promise<void>` (optional) - Function called when an error is raised inside `input`, after all retries have been exhausted, with the final error passed in as the argument. If not provided, the instance re-raises that error. The `ErrorMetadataType<TRetryResult>` type contains the following properties:
+  - `onError?: (error: ErrorMetadataType<TRetryResult>) => void | Promise<void>` (optional) - Function called when `input` raises an error and retrying stops: retries exhausted, the error is in `ignoreErrors`, `retryOnError` returns false, or `retryErrors` is non-empty and does not include that constructor. If not provided, the instance re-raises that error. The `ErrorMetadataType<TRetryResult>` type contains the following properties:
     - `failedAt: number` - When the function failed, expressed in milliseconds
     - `error: Error | InvalidResultError<TRetryResult>` - Which error was fired inside `input` or which value caused the retry
     - `id: string` - Retry's id

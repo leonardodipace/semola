@@ -54,7 +54,7 @@ const [parseError, body] = await mightThrow(response.json());
 
 ### Sync
 
-`mightThrowSync()` catches a synchronous parse error, which this function maps to its own `ValidationError`.
+`mightThrowSync()` catches a synchronous throw and returns it on the error side of the tuple. It does not map the value; the caller does (here, `JSON.parse` failure is a `SyntaxError`).
 
 ```typescript
 const [error, value] = mightThrowSync(() => JSON.parse(input));

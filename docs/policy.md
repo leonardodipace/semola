@@ -8,7 +8,7 @@ Express authorization as small rules over an object. Forbid always wins over all
 ## Import
 
 ```typescript
-import { Policy, eq, and, or, has } from "semola/policy";
+import { Policy, eq, and, or, has, hasLength } from "semola/policy";
 ```
 
 ## Quick start
@@ -93,20 +93,7 @@ posts.allow({
 });
 ```
 
-For a one-off check on a field, any object with a `fn` that receives the field value works:
-
-This custom predicate only allows draft posts to be archived.
-
-```typescript
-posts.allow({
-  action: "archive",
-  conditions: {
-    status: {
-      fn: (status: Post["status"]) => status === "draft",
-    },
-  },
-});
-```
+Conditions must use these helpers. A plain `{ fn }` object does not type-check.
 
 ## Examples
 
@@ -181,17 +168,15 @@ posts.allow({
 });
 ```
 
-### Custom field predicate
+### Collection length
 
-The inline predicate allows publishing only when the post has at least one tag.
+The rule allows publishing only when the post has at least one tag.
 
 ```typescript
 posts.allow({
   action: "publish",
   conditions: {
-    tags: {
-      fn: (tags: string[]) => tags.length > 0,
-    },
+    tags: hasLength({ min: 1 }),
   },
 });
 ```
