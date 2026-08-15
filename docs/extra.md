@@ -28,11 +28,11 @@ import type {
 } from "semola/extra";
 ```
 
-### API
+## Quick start
 
-`
+```typescript
 createRetry<TRetryResult = void>(options: RetryOptions<TRetryResult>): () => Promise<RetryOutcomeType<TRetryResult>>
-`
+```
 
 `createRetry()` gives you the ability to create a retriable function, by specifying how many times it should retry the provided function.
 
@@ -95,9 +95,9 @@ An `InvalidResultError` is created when `input`'s return value need to be retrie
 
 If an error was thrown by `onFailedAttempt()`, `beforeRetry()`, `afterRetry()` or `onError()` function, `callable` will re-throw the original error.
 
-### Examples
+## Examples
 
-**Save something inside a file**
+### Save something inside a file
 
 The callable retries a failed write up to three times, reports the final failure through `onError`, and returns the byte count on success.
 
@@ -120,7 +120,7 @@ if (outcome.ok) {
 }
 ```
 
-**Stop at a specific error**
+### Stop at a specific error
 
 `retryOnError` stops retrying when the report is missing, so that error is thrown immediately.
 
@@ -157,7 +157,7 @@ try {
 }
 ```
 
-**Log every attempt**
+### Log every attempt
 
 `onFailedAttempt` receives the attempt number and calculated jitter delay after each failed call.
 
@@ -181,7 +181,7 @@ const callable = createRetry({
 });
 ```
 
-**Call a function with arguments**
+### Call a function with arguments
 
 The `input` closure captures arguments while the returned callable keeps a zero-argument API.
 
@@ -195,7 +195,7 @@ const callable = createRetry({
 await callable();
 ```
 
-**Retry over a small set of errors**
+### Retry over a small set of errors
 
 In this example, only `ConnectionTimeOutError` is retried, while `InvalidArgumentError` and `CommandNotFoundError` are ignored. If either of these errors is thrown inside `runCommand()`, `callable()` will re-throw it.
 
@@ -231,7 +231,17 @@ const callable = createRetry({
 await callable();
 ```
 
+## Reference
 
-### Credits
+| Export | Meaning |
+| --- | --- |
+| `createRetry(options)` | Create a zero-argument async retry callable |
+| `InvalidRetryError` | Invalid retry count or backoff configuration |
+| `InvalidResultError` | Value selected for retry by `retryOnResult` |
+| `BASE_BACKOFF_DELAY` | Default base delay (`1000`) |
+| `BACKOFF_MULTIPLIER` | Default multiplier (`2`) |
+| `MAX_BACKOFF_DELAY` | Default delay cap (`60000`) |
+
+## Credits
 
 The retry module was hugely inspired by [Resilience4j](https://resilience4j.readme.io/docs/retry) and [p-ertry](https://github.com/sindresorhus/p-retry) packages.
