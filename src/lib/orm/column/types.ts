@@ -8,6 +8,8 @@ export type BaseColumn<
   sqlName: string;
   _meta: ColumnTypeState<TNullable, TPrimaryKey, TUnique, THasDefault>;
   _default?: () => TValue;
+  _dbDefault?: string;
+  sqlType?: "uuid";
   references?: {
     tableColumn?: () => { sqlName: string };
   };
@@ -125,6 +127,8 @@ type ColumnBuilderState<
   type: TType;
   _meta: ColumnTypeState<TNullable, TPrimaryKey, TUnique, THasDefault>;
   _default?: () => TValue;
+  _dbDefault?: string;
+  sqlType?: "uuid";
   enumValues?: readonly TValue[];
   references?: {
     tableColumn?: () => { sqlName: string };
@@ -207,6 +211,16 @@ export type ColumnBuilder<
   default: (
     value: () => TValue,
   ) => SetHasDefault<TType, TNullable, TPrimaryKey, TUnique, TValue>;
+  dbDefault: (
+    expression: string,
+  ) => ColumnBuilder<
+    TType,
+    TNullable,
+    TPrimaryKey,
+    TUnique,
+    THasDefault,
+    TValue
+  >;
   references: ((
     tableColumn: () => { sqlName: string },
   ) => ColumnBuilder<

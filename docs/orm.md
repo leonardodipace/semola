@@ -1,11 +1,59 @@
 ---
 title: ORM
-description: Typed tables and queries on Bun SQL (SQLite or Postgres)
+description: Typed tables, queries, and SQL migrations on Bun SQL (SQLite or Postgres)
 ---
 
 Define tables once, get typed create / find / update / delete helpers. Uses Bun's SQL client under the hood.
 
-You still create the physical schema yourself (migrations / `$raw`). The ORM does not auto-migrate.
+You still create the physical schema with migrations (or `$raw`). Define tables in app code, point `semola.config.ts` at that module, then generate and apply SQL migrations.
+
+## Migrations
+
+### Config
+
+```typescript
+// src/db.ts
+import { createOrm, defineTable, string, uuid } from "semola/orm";
+
+export const users = defineTable("users", {
+  id: uuid("id").primaryKey().notNull(),
+  name: string("name").notNull(),
+  email: string("email").notNull().unique(),
+});
+
+export const db = createOrm({
+  adapter: "sqlite",
+  url: "file:./dev.db",
+  tables: { users },
+});
+
+// semola.config.ts
+import { defineConfig } from "semola";
+
+export default defineConfig({
+  orm: {
+    schema: "./src/db.ts",
+    // optional; default "migrations"
+    migrationsDir: "migrations",
+  },
+});
+```
+
+`schema` must export the `createOrm()` client (default or named). The client exposes `$config` so the CLI can read `adapter`, `url`, and `tables`.
+
+### Commands
+
+```sh
+bunx semola orm migrations create "initialize_database"
+bunx semola orm migrations apply
+bunx semola orm migrations rollback
+```
+
+`create` diffs the current ORM tables against the latest applied schema stored in `_semola_migrations`, then writes `{timestamp}_{name}/up.sql` and `down.sql`. Apply pending migrations before creating another. `apply` runs pending ups in order; `rollback` runs only the last down.
+
+SQL defaults use `.dbDefault("...")` (emitted as `DEFAULT ...`). `.default(fn)` stays application-side only.
+
+Dialects differ (SQLite vs Postgres types). History and schema snapshots live in `_semola_migrations` — not JSON files in the migrations folder.
 
 ## Import
 
@@ -24,7 +72,7 @@ import {
 
 ## Quick start
 
-This defines a typed table, opens an in-memory SQLite client, creates the table, inserts one user, then finds it by email.
+This defines a typed table, opens a SQLite client, and uses the table API. Create the physical schema with migrations (see above) or `$raw`.
 
 ```typescript
 const users = defineTable("users", {
@@ -38,14 +86,6 @@ const db = createOrm({
   url: ":memory:",
   tables: { users },
 });
-
-await db.$raw.unsafe(`
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    email TEXT NOT NULL UNIQUE
-  )
-`);
 
 await db.users.create({
   data: {
@@ -66,7 +106,7 @@ const user = await db.users.findFirst({
 
 `string`, `number`, `boolean`, `uuid`, `date`, `json`, `jsonb`, `enumType`.
 
-Chain `.primaryKey()`, `.notNull()`, `.nullable()`, `.unique()`, `.default(fn)`, `.references(() => other.columns.col)`. Columns start nullable until you mark otherwise.
+Chain `.primaryKey()`, `.notNull()`, `.nullable()`, `.unique()`, `.default(fn)`, `.dbDefault("sql")`, `.references(() => other.columns.col)`. Columns start nullable until you mark otherwise. `.default(fn)` fills values in the app; `.dbDefault("sql")` is for migration DDL only.
 
 ### Relations
 
@@ -310,17 +350,7 @@ await db.$transaction(async (tx) => {
 
 ### Schema via `$raw`
 
-`$raw` exposes Bun's SQL client for schema operations or queries outside the typed table API.
-
-```typescript
-await db.$raw.unsafe(`
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    email TEXT NOT NULL UNIQUE
-  )
-`);
-```
+`$raw` exposes Bun's SQL client for ad-hoc SQL. Prefer `bunx semola orm migrations` for schema changes.
 
 ## Reference
 

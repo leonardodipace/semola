@@ -1,0 +1,55 @@
+import type { Adapter } from "../dialect/types.js";
+import type { Table } from "../table/types.js";
+
+export type ColumnSnapshot = {
+  name: string;
+  type: string;
+  sqlType?: "uuid";
+  isNullable: boolean;
+  isPrimaryKey: boolean;
+  isUnique: boolean;
+  dbDefault?: string;
+  enumValues?: string[];
+  references?: {
+    table: string;
+    column: string;
+  };
+};
+
+export type TableSnapshot = {
+  name: string;
+  columns: Record<string, ColumnSnapshot>;
+};
+
+export type SchemaSnapshot = {
+  tables: Record<string, TableSnapshot>;
+};
+
+export type MigrationOp =
+  | { kind: "createTable"; table: TableSnapshot }
+  | { kind: "dropTable"; table: TableSnapshot }
+  | { kind: "addColumn"; table: string; column: ColumnSnapshot }
+  | { kind: "dropColumn"; table: string; column: ColumnSnapshot }
+  | {
+      kind: "alterColumn";
+      table: string;
+      from: ColumnSnapshot;
+      to: ColumnSnapshot;
+    }
+  | {
+      kind: "recreateTable";
+      from: TableSnapshot;
+      to: TableSnapshot;
+    };
+
+export type OrmConfig = {
+  adapter: Adapter;
+  url: string;
+  tables: Record<string, Table>;
+};
+
+export type LoadedConfig = {
+  schemaPath: string;
+  migrationsDir: string;
+  orm: OrmConfig;
+};

@@ -32,6 +32,11 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
     return {
       ...tableClients,
       $raw: this.$raw,
+      $config: {
+        adapter: this.options.adapter,
+        url: this.options.url,
+        tables: this.options.tables,
+      },
       $transaction: transaction,
     };
   }

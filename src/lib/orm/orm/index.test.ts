@@ -151,6 +151,8 @@ describe("relation helpers", () => {
     expect(typeof orm.users.findFirst).toBe("function");
     expect(typeof orm.users.findUnique).toBe("function");
     expect(orm.$raw).toBeDefined();
+    expect(orm.$config.adapter).toBe("sqlite");
+    expect(orm.$config.tables.users).toBe(usersTable);
 
     await orm.$raw.close();
   });

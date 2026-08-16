@@ -8,6 +8,7 @@ export {
   string,
   uuid,
 } from "./column/index.js";
+export { MigrationError, OrmError } from "./errors.js";
 export { createOrm, many, one } from "./orm/index.js";
 export type {
   CreateData,

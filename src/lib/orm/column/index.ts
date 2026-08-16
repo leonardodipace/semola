@@ -19,6 +19,8 @@ type ColumnBuilderState<
     hasDefault: THasDefault;
   };
   _default?: () => TValue;
+  _dbDefault?: string;
+  sqlType?: "uuid";
   enumValues?: readonly TValue[];
   references?: {
     tableColumn: () => { sqlName: string };
@@ -188,6 +190,20 @@ const createColumnBuilder = <
     });
   };
 
+  const dbDefault: ColumnBuilder<
+    TType,
+    TNullable,
+    TPrimaryKey,
+    TUnique,
+    THasDefault,
+    TValue
+  >["dbDefault"] = (expression) => {
+    return createColumnBuilder({
+      ...column,
+      _dbDefault: expression,
+    });
+  };
+
   const referencesBuilder = (tableColumn: () => { sqlName: string }) => {
     return createColumnBuilder<
       TType,
@@ -222,6 +238,7 @@ const createColumnBuilder = <
     nullable,
     unique,
     default: defaultHandler,
+    dbDefault,
     references,
   };
 };
@@ -254,7 +271,14 @@ export const string = (sqlName: string): ColumnBuilder<"string"> => {
 };
 
 export const uuid = (sqlName: string): ColumnBuilder<"string"> => {
-  return string(sqlName);
+  const column = createBaseColumn(sqlName, "string");
+
+  return createColumnBuilder({
+    sqlName: column.sqlName,
+    type: column.type,
+    _meta: column._meta,
+    sqlType: "uuid",
+  });
 };
 
 export const number = (sqlName: string): ColumnBuilder<"number"> => {

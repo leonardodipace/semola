@@ -2,6 +2,8 @@ import { defineConfig } from "tsdown";
 
 export default defineConfig({
   entry: {
+    index: "src/index.ts",
+    "cli/index": "src/cli/index.ts",
     "lib/errors/index": "src/lib/errors/index.ts",
     "lib/cache/index": "src/lib/cache/index.ts",
     "lib/i18n/index": "src/lib/i18n/index.ts",

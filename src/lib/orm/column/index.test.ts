@@ -76,10 +76,17 @@ describe("ORM column builders", () => {
     expect(typeof idColumn.primaryKey).toBe("function");
     expect(idColumn._meta.isNullable).toBe(false);
     expect(idColumn._meta.isPrimaryKey).toBe(true);
+    expect(idColumn.sqlType).toBe("uuid");
     expect(typeof emailColumn.unique).toBe("function");
     expect(createdAtColumn._meta.hasDefault).toBeTrue();
     expect(statusColumn._meta.hasDefault).toBeTrue();
     expect(statusColumn._default?.()).toBe("active");
+  });
+
+  test("supports dbDefault for SQL defaults", () => {
+    const col = string("role").notNull().dbDefault("'user'");
+
+    expect(col._dbDefault).toBe("'user'");
   });
 
   test("does not reopen primary key columns via nullable()", () => {
