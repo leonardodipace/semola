@@ -401,12 +401,12 @@ bun pm version <major|minor|patch>
 git push
 ```
 
-**Beta** (`beta` dist-tag + GitHub Pre-release). Any version with a `-` suffix (e.g. `0.7.0-beta.1`) uses this path:
+**Beta** (`beta` dist-tag + GitHub Pre-release). Any version with a `-` suffix (e.g. `0.7.0-beta.0`) uses this path:
 
 ```bash
-bun pm version preminor --preid beta   # first beta of next minor
-bun pm version prerelease --preid beta # later betas
+bun pm version preminor --preid beta   # first beta of next minor (0.6.6 → 0.7.0-beta.0)
+bun pm version prerelease --preid beta # later betas (0.7.0-beta.0 → 0.7.0-beta.1)
 git push
 ```
 
-Install a beta with `bun add semola@beta`. Promote to stable by bumping to a clean version (no suffix), e.g. `bun pm version 0.7.0`. Stable GitHub release notes cover everything since the last stable tag (betas included).
+Install a beta with `bun add semola@beta`. Promote to stable with a clean version (no suffix), e.g. `bun pm version 0.7.0`. That moves npm `latest`; the `beta` dist-tag stays on the last prerelease until the next beta. Stable GitHub release notes cover everything since the last stable tag (betas included).

@@ -42,7 +42,7 @@ jobs:
             echo "tag=latest" >> "$GITHUB_OUTPUT"
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
             # Stable notes roll up everything since last non-prerelease tag
-            PREV=$(git tag -l 'v*' --sort=-v:refname | grep -Ev -- '-' | head -n1 || true)
+            PREV=$(git tag -l 'v*' --sort=-v:refname | grep -Ev -- '-' | grep -vx "v$VERSION" | head -n1 || true)
             if [ -n "$PREV" ]; then
               echo "previous_tag=$PREV" >> "$GITHUB_OUTPUT"
             fi
