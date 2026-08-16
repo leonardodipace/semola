@@ -392,8 +392,21 @@ bun check
 
 ## 📝 Publishing
 
-This package uses GitHub Actions for automated publishing. To release:
+Pushing a new `package.json` version to `main` publishes to npm (with provenance) and creates a GitHub Release.
 
-1. Bump version: `bun pm version <major|minor|patch>`
-2. Create a GitHub release with a new tag (e.g., `v0.4.0`)
-3. The GitHub Action automatically publishes to npm with provenance
+**Stable** (`latest`):
+
+```bash
+bun pm version <major|minor|patch>
+git push
+```
+
+**Beta** (`beta` dist-tag + GitHub Pre-release). Any version with a `-` suffix (e.g. `0.7.0-beta.1`) uses this path:
+
+```bash
+bun pm version preminor --preid beta   # first beta of next minor
+bun pm version prerelease --preid beta # later betas
+git push
+```
+
+Install a beta with `bun add semola@beta`. Promote to stable by bumping to a clean version (no suffix), e.g. `bun pm version 0.7.0`. Stable GitHub release notes cover everything since the last stable tag (betas included).
