@@ -2,12 +2,13 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { SemolaConfig } from "../../config.js";
-import { mightThrow } from "../../errors/index.js";
+import { mightThrow, mightThrowSync } from "../../errors/index.js";
 import { MigrationError } from "../errors.js";
 import type { Table } from "../table/types.js";
+import type { MigrationDialect } from "./dialect.js";
 import { diffSchemas, invertOps } from "./diff.js";
 import { emptySchema, snapshotSchema } from "./snapshot.js";
-import { decodeSchemaHeader, renderMigrationSql } from "./sql.js";
+import { decodeSchemaHeader, getMigrationDialect } from "./sql.js";
 import type { LoadedConfig, OrmConfig, SchemaSnapshot } from "./types.js";
 
 const HISTORY_TABLE = "_semola_migrations";
@@ -24,7 +25,7 @@ const isOrmClient = (value: unknown) => {
   return true;
 };
 
-export const resolveOrmFromModule = (mod: Record<string, unknown>) => {
+const resolveOrmFromModule = (mod: Record<string, unknown>) => {
   const candidates = [mod.default, ...Object.values(mod)];
 
   for (const value of candidates) {
@@ -38,17 +39,32 @@ export const resolveOrmFromModule = (mod: Record<string, unknown>) => {
   );
 };
 
-const placeholders = (
-  adapter: LoadedConfig["orm"]["adapter"],
-  count: number,
-) => {
-  if (adapter === "postgres") {
-    return Array.from({ length: count }, (_, index) => `$${index + 1}`).join(
-      ", ",
-    );
+const parseSchema = (raw: string, label: string): SchemaSnapshot => {
+  const [error, schema] = mightThrowSync(() => {
+    return JSON.parse(raw) as SchemaSnapshot;
+  });
+
+  if (error) {
+    throw new MigrationError(`Invalid ${label}: ${error.message}`);
   }
 
-  return Array.from({ length: count }, () => "?").join(", ");
+  return schema;
+};
+
+const withConnection = async <T>(
+  config: LoadedConfig,
+  fn: (sql: Bun.SQL, dialect: MigrationDialect) => Promise<T>,
+) => {
+  const dialect = getMigrationDialect(config.orm.adapter);
+  const sql = new Bun.SQL(config.orm.url, { adapter: config.orm.adapter });
+
+  try {
+    await dialect.prepareConnection(sql);
+
+    return await fn(sql, dialect);
+  } finally {
+    await sql.close();
+  }
 };
 
 export const loadConfig = async (
@@ -84,11 +100,15 @@ export const loadConfig = async (
 
   const client = resolveOrmFromModule(schemaMod as Record<string, unknown>);
 
-  return {
-    schemaPath,
-    migrationsDir: resolve(cwd, config.orm.migrationsDir ?? "migrations"),
-    orm: client.$config,
-  };
+  try {
+    return {
+      schemaPath,
+      migrationsDir: resolve(cwd, config.orm.migrationsDir ?? "migrations"),
+      orm: client.$config,
+    };
+  } finally {
+    await client.$raw.close();
+  }
 };
 
 const ensureHistoryTable = async (sql: Bun.SQL) => {
@@ -107,9 +127,7 @@ const listMigrationDirs = async (migrationsDir: string) => {
   );
 
   if (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-
-    if (code === "ENOENT") {
+    if ("code" in error && error.code === "ENOENT") {
       return [];
     }
 
@@ -139,7 +157,7 @@ const latestSchema = (rows: Array<{ schema: string }>): SchemaSnapshot => {
     return emptySchema();
   }
 
-  return JSON.parse(last.schema) as SchemaSnapshot;
+  return parseSchema(last.schema, "migration snapshot");
 };
 
 const slugify = (name: string) => {
@@ -175,9 +193,8 @@ export const createMigration = async (input: {
   config: LoadedConfig;
 }) => {
   const { name, config } = input;
-  const sql = new Bun.SQL(config.orm.url, { adapter: config.orm.adapter });
 
-  try {
+  return withConnection(config, async (sql, dialect) => {
     const applied = await readApplied(sql);
     const dirs = await listMigrationDirs(config.migrationsDir);
     const appliedNames = new Set(applied.map((row) => row.name));
@@ -191,7 +208,7 @@ export const createMigration = async (input: {
 
     const from = latestSchema(applied);
     const to = snapshotSchema(config.orm.tables as Record<string, Table>);
-    const ops = diffSchemas(from, to, config.orm.adapter);
+    const ops = diffSchemas(from, to, dialect.name);
 
     if (ops.length === 0) {
       throw new MigrationError("No schema changes to migrate");
@@ -199,17 +216,15 @@ export const createMigration = async (input: {
 
     const folderName = `${timestamp()}_${slugify(name)}`;
     const folderPath = join(config.migrationsDir, folderName);
-    const upSql = renderMigrationSql(config.orm.adapter, ops, to);
-    const downSql = renderMigrationSql(config.orm.adapter, invertOps(ops));
+    const upSql = dialect.render(ops, to);
+    const downSql = dialect.render(invertOps(ops));
 
     await mkdir(folderPath, { recursive: true });
     await writeFile(join(folderPath, "up.sql"), upSql);
     await writeFile(join(folderPath, "down.sql"), downSql);
 
     return folderName;
-  } finally {
-    await sql.close();
-  }
+  });
 };
 
 const splitStatements = (sqlText: string) => {
@@ -245,9 +260,7 @@ const runSqlFile = async (sql: Bun.SQL, filePath: string) => {
 };
 
 export const applyMigrations = async (config: LoadedConfig) => {
-  const sql = new Bun.SQL(config.orm.url, { adapter: config.orm.adapter });
-
-  try {
+  return withConnection(config, async (sql, dialect) => {
     const applied = await readApplied(sql);
     const appliedNames = new Set(applied.map((row) => row.name));
     const dirs = await listMigrationDirs(config.migrationsDir);
@@ -258,7 +271,7 @@ export const applyMigrations = async (config: LoadedConfig) => {
     }
 
     const appliedNamesList: string[] = [];
-    const insertPh = placeholders(config.orm.adapter, 3);
+    const insertPh = dialect.placeholders(3);
 
     for (const name of pending) {
       const upPath = join(config.migrationsDir, name, "up.sql");
@@ -266,13 +279,16 @@ export const applyMigrations = async (config: LoadedConfig) => {
       await sql.begin(async (tx) => {
         const upText = await runSqlFile(tx, upPath);
         const headerSchema = decodeSchemaHeader(upText);
-        const schema =
-          headerSchema ??
-          snapshotSchema(config.orm.tables as Record<string, Table>);
+
+        if (!headerSchema) {
+          throw new MigrationError(
+            `Migration ${name} is missing a schema header`,
+          );
+        }
 
         await tx.unsafe(
           `INSERT INTO ${HISTORY_TABLE} (name, applied_at, schema) VALUES (${insertPh})`,
-          [name, new Date().toISOString(), JSON.stringify(schema)],
+          [name, new Date().toISOString(), JSON.stringify(headerSchema)],
         );
       });
 
@@ -280,15 +296,11 @@ export const applyMigrations = async (config: LoadedConfig) => {
     }
 
     return appliedNamesList;
-  } finally {
-    await sql.close();
-  }
+  });
 };
 
 export const rollbackMigration = async (config: LoadedConfig) => {
-  const sql = new Bun.SQL(config.orm.url, { adapter: config.orm.adapter });
-
-  try {
+  return withConnection(config, async (sql, dialect) => {
     const applied = await readApplied(sql);
     const last = applied[applied.length - 1];
 
@@ -297,7 +309,7 @@ export const rollbackMigration = async (config: LoadedConfig) => {
     }
 
     const downPath = join(config.migrationsDir, last.name, "down.sql");
-    const deletePh = placeholders(config.orm.adapter, 1);
+    const deletePh = dialect.placeholders(1);
 
     await sql.begin(async (tx) => {
       await runSqlFile(tx, downPath);
@@ -307,7 +319,5 @@ export const rollbackMigration = async (config: LoadedConfig) => {
     });
 
     return last.name;
-  } finally {
-    await sql.close();
-  }
+  });
 };

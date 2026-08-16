@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import packageJson from "../../package.json" with { type: "json" };
 import { CLI } from "../lib/cli/index.js";
+import { mightThrow } from "../lib/errors/index.js";
 import { MigrationError } from "../lib/orm/errors.js";
 import {
   applyMigrations,
@@ -78,16 +79,16 @@ const run = async () => {
       console.log(`Rolled back ${name}`);
     });
 
-  try {
-    await program.parse();
-  } catch (error) {
-    if (error instanceof MigrationError) {
-      console.error(error.message);
-      process.exit(1);
-    }
+  const [error] = await mightThrow(program.parse());
 
-    throw error;
+  if (!error) return;
+
+  if (error instanceof MigrationError) {
+    console.error(error.message);
+    process.exit(1);
   }
+
+  throw error;
 };
 
 run().catch((error) => {

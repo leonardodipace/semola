@@ -1,37 +1,65 @@
 import type { Adapter } from "../dialect/types.js";
-import type { ColumnSnapshot, MigrationOp, SchemaSnapshot } from "./types.js";
+import { getMigrationDialect } from "./sql.js";
+import type {
+  ColumnSnapshot,
+  MigrationOp,
+  SchemaSnapshot,
+  TableSnapshot,
+} from "./types.js";
 
 const columnsEqual = (a: ColumnSnapshot, b: ColumnSnapshot) => {
   return JSON.stringify(a) === JSON.stringify(b);
 };
 
-const sqliteNeedsRecreate = (from: ColumnSnapshot, to: ColumnSnapshot) => {
-  if (from.type !== to.type) return true;
-  if (from.sqlType !== to.sqlType) return true;
-  if (from.isNullable !== to.isNullable) return true;
-  if (from.isPrimaryKey !== to.isPrimaryKey) return true;
-  if (from.isUnique !== to.isUnique) return true;
-  if (from.dbDefault !== to.dbDefault) return true;
-  if (JSON.stringify(from.enumValues) !== JSON.stringify(to.enumValues)) {
-    return true;
-  }
-  if (JSON.stringify(from.references) !== JSON.stringify(to.references)) {
-    return true;
+const diffTable = (
+  name: string,
+  fromTable: TableSnapshot,
+  toTable: TableSnapshot,
+): MigrationOp[] => {
+  const tableOps: MigrationOp[] = [];
+
+  for (const columnName of Object.keys(toTable.columns)) {
+    const next = toTable.columns[columnName];
+    const prev = fromTable.columns[columnName];
+
+    if (!next) continue;
+
+    if (!prev) {
+      tableOps.push({ kind: "addColumn", table: name, column: next });
+      continue;
+    }
+
+    if (columnsEqual(prev, next)) continue;
+
+    tableOps.push({
+      kind: "alterColumn",
+      table: name,
+      from: prev,
+      to: next,
+    });
   }
 
-  return false;
+  for (const columnName of Object.keys(fromTable.columns)) {
+    if (toTable.columns[columnName]) continue;
+
+    const column = fromTable.columns[columnName];
+
+    if (!column) continue;
+
+    tableOps.push({
+      kind: "dropColumn",
+      table: name,
+      column,
+    });
+  }
+
+  return tableOps;
 };
 
-export const diffSchemas = (
-  from: SchemaSnapshot,
-  to: SchemaSnapshot,
-  adapter: Adapter,
-): MigrationOp[] => {
+const createdTables = (from: SchemaSnapshot, to: SchemaSnapshot) => {
   const ops: MigrationOp[] = [];
-  const fromNames = Object.keys(from.tables);
-  const toNames = Object.keys(to.tables);
 
-  for (const name of toNames) {
+  for (const name of Object.keys(to.tables)) {
     const table = to.tables[name];
 
     if (!table) continue;
@@ -40,7 +68,13 @@ export const diffSchemas = (
     ops.push({ kind: "createTable", table });
   }
 
-  for (const name of fromNames) {
+  return ops;
+};
+
+const droppedTables = (from: SchemaSnapshot, to: SchemaSnapshot) => {
+  const ops: MigrationOp[] = [];
+
+  for (const name of Object.keys(from.tables)) {
     const table = from.tables[name];
 
     if (!table) continue;
@@ -49,68 +83,30 @@ export const diffSchemas = (
     ops.push({ kind: "dropTable", table });
   }
 
-  for (const name of toNames) {
+  return ops;
+};
+
+export const diffSchemas = (
+  from: SchemaSnapshot,
+  to: SchemaSnapshot,
+  adapter: Adapter,
+): MigrationOp[] => {
+  const dialect = getMigrationDialect(adapter);
+  const ops: MigrationOp[] = [
+    ...createdTables(from, to),
+    ...droppedTables(from, to),
+  ];
+
+  for (const name of Object.keys(to.tables)) {
     const fromTable = from.tables[name];
     const toTable = to.tables[name];
 
     if (!fromTable) continue;
     if (!toTable) continue;
 
-    const tableOps: MigrationOp[] = [];
+    const tableOps = diffTable(name, fromTable, toTable);
 
-    for (const columnName of Object.keys(toTable.columns)) {
-      const next = toTable.columns[columnName];
-      const prev = fromTable.columns[columnName];
-
-      if (!next) continue;
-
-      if (!prev) {
-        tableOps.push({ kind: "addColumn", table: name, column: next });
-        continue;
-      }
-
-      if (columnsEqual(prev, next)) continue;
-
-      tableOps.push({
-        kind: "alterColumn",
-        table: name,
-        from: prev,
-        to: next,
-      });
-    }
-
-    for (const columnName of Object.keys(fromTable.columns)) {
-      if (toTable.columns[columnName]) continue;
-
-      const column = fromTable.columns[columnName];
-
-      if (!column) continue;
-
-      tableOps.push({
-        kind: "dropColumn",
-        table: name,
-        column,
-      });
-    }
-
-    if (adapter === "sqlite") {
-      const needsRecreate = tableOps.some((op) => {
-        if (op.kind !== "alterColumn") return false;
-
-        return sqliteNeedsRecreate(op.from, op.to);
-      });
-
-      if (needsRecreate) {
-        ops.push({
-          kind: "recreateTable",
-          from: fromTable,
-          to: toTable,
-        });
-        continue;
-      }
-    }
-
-    ops.push(...tableOps);
+    ops.push(...dialect.foldTableOps(fromTable, toTable, tableOps));
   }
 
   return ops;

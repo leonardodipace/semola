@@ -49,11 +49,11 @@ bunx semola orm migrations apply
 bunx semola orm migrations rollback
 ```
 
-`create` diffs the current ORM tables against the latest applied schema stored in `_semola_migrations`, then writes `{timestamp}_{name}/up.sql` and `down.sql`. Apply pending migrations before creating another. `apply` runs pending ups in order; `rollback` runs only the last down.
+`create` diffs the current ORM tables against the latest applied schema stored in `_semola_migrations`, then writes `{timestamp}_{name}/up.sql` and `down.sql`. Apply pending migrations before creating another. `apply` runs pending ups in order; `rollback` runs only the last down. Each `up.sql` starts with a `-- semola-schema:` header; `apply` refuses files that omit it.
 
-SQL defaults use `.dbDefault("...")` (emitted as `DEFAULT ...`). `.default(fn)` stays application-side only.
+SQL defaults use `.dbDefault("...")` (emitted as `DEFAULT ...`). `.default(fn)` stays application-side only. SQLite cannot `ADD COLUMN ... NOT NULL` without a default - use `.dbDefault(...)` or a nullable column. Other SQLite column changes rebuild the table and `INSERT` shared columns so existing rows survive. Renames are drop + add.
 
-Dialects differ (SQLite vs Postgres types). History and schema snapshots live in `_semola_migrations` — not JSON files in the migrations folder.
+Dialects differ (SQLite vs Postgres types). History and schema snapshots live in `_semola_migrations`, not JSON files in the migrations folder.
 
 ## Import
 

@@ -88,7 +88,3 @@ export const snapshotSchema = (
 export const emptySchema = (): SchemaSnapshot => {
   return { tables: {} };
 };
-
-export const schemasEqual = (a: SchemaSnapshot, b: SchemaSnapshot) => {
-  return JSON.stringify(a) === JSON.stringify(b);
-};

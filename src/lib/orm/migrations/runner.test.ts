@@ -156,4 +156,72 @@ export default defineConfig({
       MigrationError,
     );
   });
+
+  test("sqlite recreate copies existing rows", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: project.users },
+    });
+
+    await db.users.create({
+      data: { id: "1", name: "Ada", email: "ada@example.com" },
+    });
+
+    const nextUsers = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull().dbDefault("'anon'"),
+      email: string("email").notNull().unique(),
+    });
+    const nextConfig = {
+      ...config,
+      orm: {
+        ...config.orm,
+        tables: { users: nextUsers },
+      },
+    };
+    const folder = await createMigration({
+      name: "name_default",
+      config: nextConfig,
+    });
+    const up = await Bun.file(
+      join(project.migrationsDir, folder, "up.sql"),
+    ).text();
+
+    expect(up).toContain("INSERT INTO");
+
+    await applyMigrations(nextConfig);
+
+    const user = await db.users.findFirst({
+      where: { email: "ada@example.com" },
+    });
+
+    expect(user?.name).toBe("Ada");
+
+    await db.$raw.close();
+  });
+
+  test("rejects apply when the schema header is missing", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+    const folder = join(project.migrationsDir, "20240101000000_broken");
+
+    await mkdir(folder);
+    await writeFile(
+      join(folder, "up.sql"),
+      'CREATE TABLE "users" (id TEXT);\n',
+    );
+
+    await expect(applyMigrations(config)).rejects.toThrow(
+      "missing a schema header",
+    );
+  });
 });
