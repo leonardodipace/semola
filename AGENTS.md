@@ -117,6 +117,8 @@ bun test src/lib/api             # run tests for a specific module
 bun test --watch                 # watch mode
 bun run build                    # build package
 bun pm version <major|minor|patch>   # bump version for publishing
+bun pm version preminor --preid beta    # first beta of next minor (npm tag beta)
+bun pm version prerelease --preid beta  # later betas (npm tag beta)
 bunx fallow audit --base main --format json --quiet 2>/dev/null || true   # changed-code audit
 ```
 
