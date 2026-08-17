@@ -1,7 +1,57 @@
 import { POSTGRES_SPEC } from "../dialect/postgres.js";
 import { quoteIdentifier } from "../utils.js";
 import { MigrationDialect } from "./dialect.js";
-import type { ColumnSnapshot } from "./types.js";
+import type {
+  ColumnSnapshot,
+  MigrationOp,
+  SchemaSnapshot,
+  TableSnapshot,
+} from "./types.js";
+
+const pkNames = (table: TableSnapshot) => {
+  return Object.values(table.columns)
+    .filter((column) => column.isPrimaryKey)
+    .map((column) => column.name);
+};
+
+const typeOrKeyChanged = (from: ColumnSnapshot, to: ColumnSnapshot) => {
+  if (from.type !== to.type) return true;
+  if (from.sqlType !== to.sqlType) return true;
+  if (from.isPrimaryKey !== to.isPrimaryKey) return true;
+  if (from.isUnique !== to.isUnique) return true;
+
+  return false;
+};
+
+const refsEqual = (
+  a: ColumnSnapshot["references"],
+  b: ColumnSnapshot["references"],
+) => {
+  if (a?.table !== b?.table) return false;
+  if (a?.column !== b?.column) return false;
+
+  return true;
+};
+
+const inboundForeignKeys = (
+  schema: SchemaSnapshot,
+  targetTable: string,
+  targetColumn: string,
+) => {
+  const found: Array<{ table: string; column: ColumnSnapshot }> = [];
+
+  for (const table of Object.values(schema.tables)) {
+    for (const column of Object.values(table.columns)) {
+      if (!column.references) continue;
+      if (column.references.table !== targetTable) continue;
+      if (column.references.column !== targetColumn) continue;
+
+      found.push({ table: table.name, column });
+    }
+  }
+
+  return found;
+};
 
 export class PostgresMigrationDialect extends MigrationDialect {
   public readonly name = "postgres" as const;
@@ -24,6 +74,117 @@ export class PostgresMigrationDialect extends MigrationDialect {
     await sql.unsafe(
       "SELECT pg_advisory_xact_lock(hashtext('_semola_migrations'))",
     );
+  }
+
+  protected override deferCircularForeignKeys() {
+    return true;
+  }
+
+  public override expandOps(
+    from: SchemaSnapshot,
+    to: SchemaSnapshot,
+    ops: MigrationOp[],
+  ) {
+    const drops: MigrationOp[] = [];
+    const adds: MigrationOp[] = [];
+    const pkDrops: MigrationOp[] = [];
+    const pkAdds: MigrationOp[] = [];
+    const seenDrop = new Set<string>();
+    const seenAdd = new Set<string>();
+
+    const queueDrop = (table: string, column: ColumnSnapshot) => {
+      if (!column.references) return;
+
+      const key = `${table}.${column.name}`;
+
+      if (seenDrop.has(key)) return;
+
+      seenDrop.add(key);
+      drops.push({ kind: "dropForeignKey", table, column });
+    };
+
+    const queueAdd = (table: string, column: ColumnSnapshot) => {
+      if (!column.references) return;
+
+      const target = to.tables[column.references.table];
+
+      if (!target) return;
+      if (!target.columns[column.references.column]) return;
+
+      const key = `${table}.${column.name}`;
+
+      if (seenAdd.has(key)) return;
+
+      seenAdd.add(key);
+      adds.push({ kind: "addForeignKey", table, column });
+    };
+
+    const queueInbound = (targetTable: string, targetColumn: string) => {
+      for (const inbound of inboundForeignKeys(
+        from,
+        targetTable,
+        targetColumn,
+      )) {
+        queueDrop(inbound.table, inbound.column);
+
+        const next = to.tables[inbound.table]?.columns[inbound.column.name];
+
+        if (next) queueAdd(inbound.table, next);
+      }
+    };
+
+    for (const op of ops) {
+      if (op.kind === "alterColumn") {
+        if (typeOrKeyChanged(op.from, op.to)) {
+          queueDrop(op.table, op.from);
+          queueAdd(op.table, op.to);
+          queueInbound(op.table, op.from.name);
+        }
+
+        if (!refsEqual(op.from.references, op.to.references)) {
+          queueDrop(op.table, op.from);
+          queueAdd(op.table, op.to);
+        }
+
+        continue;
+      }
+
+      if (op.kind === "dropColumn") {
+        queueInbound(op.table, op.column.name);
+      }
+    }
+
+    for (const name of Object.keys(to.tables)) {
+      const fromTable = from.tables[name];
+      const toTable = to.tables[name];
+
+      if (!fromTable) continue;
+      if (!toTable) continue;
+      if (
+        ops.some((op) => {
+          if (op.kind !== "recreateTable") return false;
+
+          return op.to.name === name;
+        })
+      ) {
+        continue;
+      }
+
+      const fromPk = pkNames(fromTable);
+      const toPk = pkNames(toTable);
+
+      if (fromPk.join("\0") === toPk.join("\0")) continue;
+
+      if (fromPk.length) {
+        pkDrops.push({ kind: "dropPrimaryKey", table: name });
+      }
+
+      if (toPk.length) {
+        pkAdds.push({ kind: "addPrimaryKey", table: name, columns: toPk });
+      }
+    }
+
+    return [...drops, ...pkDrops, ...ops, ...pkAdds, ...adds];
   }
 
   protected override renderAlterColumn(
@@ -57,10 +218,6 @@ export class PostgresMigrationDialect extends MigrationDialect {
       alterColumn(`TYPE ${sqlType} USING CAST(${columnId} AS ${sqlType})`);
     }
 
-    if (from.isPrimaryKey && !to.isPrimaryKey) {
-      this.pushPrimaryKeyChange(statements, table, tableId, columnId, from, to);
-    }
-
     this.pushUniqueChange(statements, table, tableId, columnId, from, to);
 
     if (from.isNullable !== to.isNullable) {
@@ -79,11 +236,6 @@ export class PostgresMigrationDialect extends MigrationDialect {
       }
     }
 
-    if (!from.isPrimaryKey && to.isPrimaryKey) {
-      this.pushPrimaryKeyChange(statements, table, tableId, columnId, from, to);
-    }
-
-    this.pushForeignKeyChange(statements, table, tableId, columnId, from, to);
     this.pushEnumCheckChange(statements, table, tableId, from, to);
 
     if (statements.length === 0) {
@@ -120,51 +272,6 @@ export class PostgresMigrationDialect extends MigrationDialect {
     statements.push(
       `ALTER TABLE ${tableId} DROP CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_key`)};`,
     );
-  }
-
-  private pushPrimaryKeyChange(
-    statements: string[],
-    table: string,
-    tableId: string,
-    columnId: string,
-    from: ColumnSnapshot,
-    to: ColumnSnapshot,
-  ) {
-    if (from.isPrimaryKey === to.isPrimaryKey) return;
-
-    if (to.isPrimaryKey) {
-      statements.push(
-        `ALTER TABLE ${tableId} ADD CONSTRAINT ${quoteIdentifier(`${table}_pkey`)} PRIMARY KEY (${columnId});`,
-      );
-      return;
-    }
-
-    statements.push(
-      `ALTER TABLE ${tableId} DROP CONSTRAINT ${quoteIdentifier(`${table}_pkey`)};`,
-    );
-  }
-
-  private pushForeignKeyChange(
-    statements: string[],
-    table: string,
-    tableId: string,
-    columnId: string,
-    from: ColumnSnapshot,
-    to: ColumnSnapshot,
-  ) {
-    if (this.jsonEqual(from.references, to.references)) return;
-
-    if (from.references) {
-      statements.push(
-        `ALTER TABLE ${tableId} DROP CONSTRAINT ${quoteIdentifier(`${table}_${from.name}_fkey`)};`,
-      );
-    }
-
-    if (to.references) {
-      statements.push(
-        `ALTER TABLE ${tableId} ADD CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_fkey`)} FOREIGN KEY (${columnId}) REFERENCES ${quoteIdentifier(to.references.table)} (${quoteIdentifier(to.references.column)});`,
-      );
-    }
   }
 
   private pushEnumCheckChange(

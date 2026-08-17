@@ -21,10 +21,35 @@ const notNullAddWarning = (table: string, column: ColumnSnapshot) => {
   return `-- warning: ADD COLUMN "${table}"."${column.name}" NOT NULL without default fails if the table has rows`;
 };
 
+const isConstantDefault = (value?: string) => {
+  if (value === undefined) return false;
+  if (value === "TRUE") return true;
+  if (value === "FALSE") return true;
+  if (value.startsWith("'")) return true;
+
+  return /^-?\d+(\.\d+)?$/.test(value);
+};
+
+const uniqueAddWarning = (table: string, column: ColumnSnapshot) => {
+  if (!column.isUnique) {
+    if (!column.isPrimaryKey) return;
+  }
+
+  if (!isConstantDefault(column.dbDefault)) return;
+
+  return `-- warning: ADD COLUMN "${table}"."${column.name}" unique/primary key with a constant default fails if the table has more than one row`;
+};
+
+const addColumnWarnings = (table: string, column: ColumnSnapshot) => {
+  return [notNullAddWarning(table, column), uniqueAddWarning(table, column)];
+};
+
 const dataLossWarnings = (ops: MigrationOp[]) => {
   const warnings: string[] = [];
   const dropped = new Map<string, string[]>();
   const added = new Map<string, string[]>();
+  const droppedTables: string[] = [];
+  const createdTables: string[] = [];
 
   const record = (
     map: Map<string, string[]>,
@@ -35,6 +60,16 @@ const dataLossWarnings = (ops: MigrationOp[]) => {
   };
 
   for (const op of ops) {
+    if (op.kind === "dropTable") {
+      droppedTables.push(op.table.name);
+      continue;
+    }
+
+    if (op.kind === "createTable") {
+      createdTables.push(op.table.name);
+      continue;
+    }
+
     if (op.kind === "dropColumn") {
       record(dropped, op.table, op.column.name);
       continue;
@@ -43,9 +78,9 @@ const dataLossWarnings = (ops: MigrationOp[]) => {
     if (op.kind === "addColumn") {
       record(added, op.table, op.column.name);
 
-      const warning = notNullAddWarning(op.table, op.column);
-
-      if (warning) warnings.push(warning);
+      for (const warning of addColumnWarnings(op.table, op.column)) {
+        if (warning) warnings.push(warning);
+      }
 
       continue;
     }
@@ -63,9 +98,17 @@ const dataLossWarnings = (ops: MigrationOp[]) => {
     for (const column of Object.values(op.to.columns)) {
       if (op.from.columns[column.name]) continue;
 
-      const addWarning = notNullAddWarning(op.to.name, column);
+      for (const addWarning of addColumnWarnings(op.to.name, column)) {
+        if (addWarning) warnings.push(addWarning);
+      }
+    }
+  }
 
-      if (addWarning) warnings.push(addWarning);
+  if (droppedTables.length) {
+    if (createdTables.length) {
+      warnings.push(
+        `-- warning: drops table(s) ${droppedTables.join(", ")} and creates ${createdTables.join(", ")}; table renames are drop+create and do not copy data`,
+      );
     }
   }
 
@@ -127,6 +170,14 @@ export abstract class MigrationDialect {
     ];
   }
 
+  public expandOps(
+    _from: SchemaSnapshot,
+    _to: SchemaSnapshot,
+    ops: MigrationOp[],
+  ) {
+    return ops;
+  }
+
   public render(ops: MigrationOp[], schemaHeader?: SchemaSnapshot) {
     const ordered = this.orderOps(ops);
     const warnings = dataLossWarnings(ordered);
@@ -141,6 +192,10 @@ export abstract class MigrationDialect {
   }
 
   protected shouldRecreate(_tableOps: MigrationOp[]) {
+    return false;
+  }
+
+  protected deferCircularForeignKeys() {
     return false;
   }
 
@@ -237,7 +292,73 @@ export abstract class MigrationDialect {
   }
 
   private renderAddColumn(table: string, column: ColumnSnapshot) {
-    return `ALTER TABLE ${quoteIdentifier(table)} ADD COLUMN ${this.renderColumnDef(table, column)};`;
+    return `ALTER TABLE ${quoteIdentifier(table)} ADD COLUMN ${this.renderColumnDef(table, column, false)};`;
+  }
+
+  private renderDropForeignKey(table: string, column: ColumnSnapshot) {
+    return `ALTER TABLE ${quoteIdentifier(table)} DROP CONSTRAINT ${quoteIdentifier(`${table}_${column.name}_fkey`)};`;
+  }
+
+  private renderAddForeignKey(table: string, column: ColumnSnapshot) {
+    if (!column.references) {
+      throw new MigrationError(
+        `Cannot add foreign key ${table}.${column.name} without a target`,
+      );
+    }
+
+    return `ALTER TABLE ${quoteIdentifier(table)} ADD CONSTRAINT ${quoteIdentifier(`${table}_${column.name}_fkey`)} FOREIGN KEY (${quoteIdentifier(column.name)}) REFERENCES ${quoteIdentifier(column.references.table)} (${quoteIdentifier(column.references.column)});`;
+  }
+
+  private renderDropPrimaryKey(table: string) {
+    return `ALTER TABLE ${quoteIdentifier(table)} DROP CONSTRAINT ${quoteIdentifier(`${table}_pkey`)};`;
+  }
+
+  private renderAddPrimaryKey(table: string, columns: string[]) {
+    const cols = columns.map(quoteIdentifier).join(", ");
+
+    return `ALTER TABLE ${quoteIdentifier(table)} ADD CONSTRAINT ${quoteIdentifier(`${table}_pkey`)} PRIMARY KEY (${cols});`;
+  }
+
+  private withoutForeignKeys(table: TableSnapshot) {
+    const columns: Record<string, ColumnSnapshot> = {};
+
+    for (const column of Object.values(table.columns)) {
+      const { references: _references, ...rest } = column;
+
+      columns[column.name] = rest;
+    }
+
+    return { name: table.name, columns };
+  }
+
+  private foreignKeysOf(tables: TableSnapshot[]) {
+    const ops: MigrationOp[] = [];
+
+    for (const table of tables) {
+      for (const column of Object.values(table.columns)) {
+        if (!column.references) continue;
+
+        ops.push({ kind: "addForeignKey", table: table.name, column });
+      }
+    }
+
+    return ops;
+  }
+
+  private foreignKeysBetween(tables: TableSnapshot[]) {
+    const names = new Set(tables.map((table) => table.name));
+    const ops: MigrationOp[] = [];
+
+    for (const table of tables) {
+      for (const column of Object.values(table.columns)) {
+        if (!column.references) continue;
+        if (!names.has(column.references.table)) continue;
+
+        ops.push({ kind: "dropForeignKey", table: table.name, column });
+      }
+    }
+
+    return ops;
   }
 
   private renderDropColumn(table: string, column: ColumnSnapshot) {
@@ -278,6 +399,14 @@ export abstract class MigrationDialect {
         return this.renderAlterColumn(op.table, op.from, op.to);
       case "recreateTable":
         return this.renderRecreateTable(op.from, op.to);
+      case "dropForeignKey":
+        return this.renderDropForeignKey(op.table, op.column);
+      case "addForeignKey":
+        return this.renderAddForeignKey(op.table, op.column);
+      case "dropPrimaryKey":
+        return this.renderDropPrimaryKey(op.table);
+      case "addPrimaryKey":
+        return this.renderAddPrimaryKey(op.table, op.columns);
     }
   }
 
@@ -286,12 +415,14 @@ export abstract class MigrationDialect {
     const visiting = new Set<string>();
     const visited = new Set<string>();
     const ordered: TableSnapshot[] = [];
+    let cycle = false;
 
     const visit = (name: string) => {
       if (visited.has(name)) return;
 
       if (visiting.has(name)) {
-        throw new MigrationError(`Circular foreign key involving ${name}`);
+        cycle = true;
+        return;
       }
 
       visiting.add(name);
@@ -317,18 +448,31 @@ export abstract class MigrationDialect {
       visit(table.name);
     }
 
-    return ordered;
+    if (cycle) {
+      return { ordered: tables, cycle: true };
+    }
+
+    return { ordered, cycle: false };
   }
 
   private orderOps(ops: MigrationOp[]) {
+    const dropForeignKeys: MigrationOp[] = [];
     const dropColumns: MigrationOp[] = [];
     const dropTables: TableSnapshot[] = [];
     const createTables: TableSnapshot[] = [];
     const recreates: MigrationOp[] = [];
     const addColumns: MigrationOp[] = [];
-    const alters: MigrationOp[] = [];
+    const dropPrimaryKeys: MigrationOp[] = [];
+    const addPrimaryKeys: MigrationOp[] = [];
+    const addForeignKeys: MigrationOp[] = [];
+    const otherAlters: MigrationOp[] = [];
 
     for (const op of ops) {
+      if (op.kind === "dropForeignKey") {
+        dropForeignKeys.push(op);
+        continue;
+      }
+
       if (op.kind === "dropColumn") {
         dropColumns.push(op);
         continue;
@@ -354,54 +498,71 @@ export abstract class MigrationDialect {
         continue;
       }
 
-      alters.push(op);
-    }
-
-    const sortedDrops = this.sortTables(dropTables)
-      .reverse()
-      .map((table) => {
-        return { kind: "dropTable" as const, table };
-      });
-
-    const sortedCreates = this.sortTables(createTables).map((table) => {
-      return { kind: "createTable" as const, table };
-    });
-
-    const dropPrimaryKeys: MigrationOp[] = [];
-    const addPrimaryKeys: MigrationOp[] = [];
-    const otherAlters: MigrationOp[] = [];
-
-    for (const op of alters) {
-      if (
-        op.kind === "alterColumn" &&
-        op.from.isPrimaryKey &&
-        !op.to.isPrimaryKey
-      ) {
+      if (op.kind === "dropPrimaryKey") {
         dropPrimaryKeys.push(op);
         continue;
       }
 
-      if (
-        op.kind === "alterColumn" &&
-        !op.from.isPrimaryKey &&
-        op.to.isPrimaryKey
-      ) {
+      if (op.kind === "addPrimaryKey") {
         addPrimaryKeys.push(op);
+        continue;
+      }
+
+      if (op.kind === "addForeignKey") {
+        addForeignKeys.push(op);
         continue;
       }
 
       otherAlters.push(op);
     }
 
+    const sortedDrops = this.sortTables(dropTables);
+    const sortedCreates = this.sortTables(createTables);
+    const createOps = sortedCreates.ordered.map((table) => {
+      return { kind: "createTable" as const, table };
+    });
+    const dropOps = [...sortedDrops.ordered].reverse().map((table) => {
+      return { kind: "dropTable" as const, table };
+    });
+    const cycleForeignKeys: MigrationOp[] = [];
+    const cycleDropForeignKeys: MigrationOp[] = [];
+
+    if (this.deferCircularForeignKeys()) {
+      if (sortedCreates.cycle) {
+        for (let index = 0; index < createOps.length; index++) {
+          const op = createOps[index];
+
+          if (!op) continue;
+
+          createOps[index] = {
+            kind: "createTable",
+            table: this.withoutForeignKeys(op.table),
+          };
+        }
+
+        cycleForeignKeys.push(...this.foreignKeysOf(sortedCreates.ordered));
+      }
+
+      if (sortedDrops.cycle) {
+        cycleDropForeignKeys.push(
+          ...this.foreignKeysBetween(sortedDrops.ordered),
+        );
+      }
+    }
+
     return [
+      ...cycleDropForeignKeys,
+      ...dropForeignKeys,
       ...dropColumns,
-      ...sortedCreates,
+      ...createOps,
       ...dropPrimaryKeys,
       ...otherAlters,
-      ...addPrimaryKeys,
       ...recreates,
-      ...sortedDrops,
+      ...dropOps,
       ...addColumns,
+      ...addPrimaryKeys,
+      ...addForeignKeys,
+      ...cycleForeignKeys,
     ];
   }
 }

@@ -146,5 +146,5 @@ export const diffSchemas = (
     ops.push(...dialect.foldTableOps(fromTable, toTable, tableOps));
   }
 
-  return ops;
+  return dialect.expandOps(from, to, ops);
 };

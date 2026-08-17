@@ -41,7 +41,11 @@ export type MigrationOp =
       kind: "recreateTable";
       from: TableSnapshot;
       to: TableSnapshot;
-    };
+    }
+  | { kind: "dropForeignKey"; table: string; column: ColumnSnapshot }
+  | { kind: "addForeignKey"; table: string; column: ColumnSnapshot }
+  | { kind: "dropPrimaryKey"; table: string }
+  | { kind: "addPrimaryKey"; table: string; columns: string[] };
 
 export type OrmConfig = {
   adapter: Adapter;

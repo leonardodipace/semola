@@ -134,6 +134,36 @@ export default defineConfig({
     await db.$raw.close();
   });
 
+  test("createMigration resolves the real url from the tables object", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const tables = { users: project.users };
+    const client = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables,
+    });
+
+    await client.$raw.close();
+
+    const fakeUrl = join(project.root, "missing.db");
+
+    await createMigration({
+      name: "initialize_database",
+      config: {
+        schemaPath: join(project.root, "db.ts"),
+        migrationsDir: project.migrationsDir,
+        orm: {
+          adapter: "sqlite",
+          url: fakeUrl,
+          tables,
+        },
+      },
+    });
+
+    expect(await Bun.file(fakeUrl).exists()).toBe(false);
+  });
+
   test("fails create when pending migrations exist", async () => {
     const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
     const project = await setupProject(dbFile);
@@ -378,4 +408,102 @@ SELECT $tag$c;d$tag$;
       "SELECT $tag$c;d$tag$",
     ]);
   });
+
+  test.skipIf(!process.env.POSTGRES_URL)(
+    "postgres apply and rollback survive an fk type change",
+    async () => {
+      const url = process.env.POSTGRES_URL;
+
+      if (!url) return;
+
+      const root = await mkdtemp(join(tmpdir(), "semola-pg-"));
+      dirs.push(root);
+
+      const schemaPath = join(root, "db.ts");
+      const configPath = join(root, "semola.config.ts");
+      const migrationsDir = join(root, "migrations");
+      const ormIndex = JSON.stringify(join(import.meta.dir, "../index.ts"));
+      const configIndex = JSON.stringify(
+        join(import.meta.dir, "../../config.ts"),
+      );
+
+      await writeFile(
+        schemaPath,
+        `
+import { createOrm, defineTable, string, uuid } from ${ormIndex};
+
+const authors = defineTable("mig_authors", {
+  id: uuid("id").primaryKey().notNull(),
+});
+const posts = defineTable("mig_posts", {
+  id: uuid("id").primaryKey().notNull(),
+  authorId: uuid("author_id").notNull().references(() => authors.columns.id),
+});
+
+export const db = createOrm({
+  adapter: "postgres",
+  url: ${JSON.stringify(url)},
+  tables: { authors, posts },
+});
+`,
+      );
+      await writeFile(
+        configPath,
+        `
+import { defineConfig } from ${configIndex};
+
+export default defineConfig({
+  orm: {
+    schema: "./db.ts",
+    migrationsDir: "./migrations",
+  },
+});
+`,
+      );
+      await mkdir(migrationsDir, { recursive: true });
+
+      const config = await loadConfig(root);
+
+      await createMigration({ name: "init", config });
+      await applyMigrations(config);
+
+      await writeFile(
+        schemaPath,
+        `
+import { createOrm, defineTable, string, uuid } from ${ormIndex};
+
+const authors = defineTable("mig_authors", {
+  id: string("id").primaryKey().notNull(),
+});
+const posts = defineTable("mig_posts", {
+  id: uuid("id").primaryKey().notNull(),
+  authorId: string("author_id").notNull().references(() => authors.columns.id),
+});
+
+export const db = createOrm({
+  adapter: "postgres",
+  url: ${JSON.stringify(url)},
+  tables: { authors, posts },
+});
+`,
+      );
+
+      const next = await loadConfig(root);
+
+      await createMigration({ name: "widen_ids", config: next });
+      const applied = await applyMigrations(next);
+
+      expect(applied).toHaveLength(1);
+
+      await rollbackMigration(next);
+      await rollbackMigration(config);
+
+      const sql = new Bun.SQL(url, { adapter: "postgres" });
+
+      await sql.unsafe("DROP TABLE IF EXISTS mig_posts");
+      await sql.unsafe("DROP TABLE IF EXISTS mig_authors");
+      await sql.unsafe("DROP TABLE IF EXISTS _semola_migrations");
+      await sql.close();
+    },
+  );
 });

@@ -293,7 +293,7 @@ describe("orm migrations snapshot/diff/sql", () => {
     expect(dropAuthorsAt).toBeGreaterThan(recreateAt);
   });
 
-  test("postgres add-column primary key includes PRIMARY KEY", () => {
+  test("postgres add-column primary key adds the constraint after the column", () => {
     const before = defineTable("users", {
       email: string("email").notNull().unique(),
     });
@@ -312,9 +312,14 @@ describe("orm migrations snapshot/diff/sql", () => {
         "postgres",
       ),
     );
+    const addColumnAt = sql.indexOf("ADD COLUMN");
+    const addPkAt = sql.indexOf('ADD CONSTRAINT "users_pkey" PRIMARY KEY');
 
     expect(sql).toContain("ADD COLUMN");
-    expect(sql).toContain('CONSTRAINT "users_pkey" PRIMARY KEY');
+    expect(sql).not.toContain(
+      'ADD COLUMN "id" UUID CONSTRAINT "users_pkey" PRIMARY KEY',
+    );
+    expect(addPkAt).toBeGreaterThan(addColumnAt);
   });
 
   test("postgres drops primary key before dropping NOT NULL", () => {
@@ -421,7 +426,7 @@ describe("orm migrations snapshot/diff/sql", () => {
     expect(sql).toContain('REFERENCES "nodes" ("id")');
   });
 
-  test("throws on circular foreign keys between tables", () => {
+  test("postgres creates circular foreign keys after both tables exist", () => {
     let b = defineTable("b", {
       id: uuid("id").primaryKey().notNull(),
     });
@@ -433,13 +438,128 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       aId: uuid("a_id").references(() => a.columns.id),
     });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(emptySchema(), snapshotSchema({ a, b }), "postgres"),
+    );
+    const createAAt = sql.indexOf('CREATE TABLE "a"');
+    const createBAt = sql.indexOf('CREATE TABLE "b"');
+    const addAFkAt = sql.indexOf('ADD CONSTRAINT "a_b_id_fkey"');
+    const addBFkAt = sql.indexOf('ADD CONSTRAINT "b_a_id_fkey"');
 
-    expect(() =>
-      renderMigrationSql(
+    expect(sql).not.toContain("Circular foreign key");
+    expect(createAAt).toBeGreaterThanOrEqual(0);
+    expect(createBAt).toBeGreaterThanOrEqual(0);
+    expect(addAFkAt).toBeGreaterThan(createAAt);
+    expect(addAFkAt).toBeGreaterThan(createBAt);
+    expect(addBFkAt).toBeGreaterThan(createAAt);
+    expect(addBFkAt).toBeGreaterThan(createBAt);
+    expect(sql.slice(0, Math.min(addAFkAt, addBFkAt))).not.toContain(
+      "REFERENCES",
+    );
+  });
+
+  test("postgres drops inbound foreign keys before altering a referenced column type", () => {
+    const authors = defineTable("authors", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const posts = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: uuid("author_id").references(() => authors.columns.id),
+    });
+    const authorsAfter = defineTable("authors", {
+      id: string("id").primaryKey().notNull(),
+    });
+    const postsAfter = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: string("author_id").references(() => authorsAfter.columns.id),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ authors, posts }),
+        snapshotSchema({ authors: authorsAfter, posts: postsAfter }),
         "postgres",
-        diffSchemas(emptySchema(), snapshotSchema({ a, b }), "postgres"),
       ),
-    ).toThrow("Circular foreign key");
+    );
+    const dropFkAt = sql.indexOf('DROP CONSTRAINT "posts_author_id_fkey"');
+    const alterTypeAt = sql.indexOf("TYPE TEXT");
+    const addFkAt = sql.indexOf('ADD CONSTRAINT "posts_author_id_fkey"');
+
+    expect(dropFkAt).toBeGreaterThanOrEqual(0);
+    expect(alterTypeAt).toBeGreaterThan(dropFkAt);
+    expect(addFkAt).toBeGreaterThan(alterTypeAt);
+  });
+
+  test("postgres rebuilds a composite primary key as a table constraint", () => {
+    const before = defineTable("members", {
+      orgId: uuid("org_id").primaryKey().notNull(),
+      userId: uuid("user_id").notNull(),
+    });
+    const after = defineTable("members", {
+      orgId: uuid("org_id").primaryKey().notNull(),
+      userId: uuid("user_id").primaryKey().notNull(),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ members: before }),
+        snapshotSchema({ members: after }),
+        "postgres",
+      ),
+    );
+
+    expect(sql).toContain('DROP CONSTRAINT "members_pkey"');
+    expect(sql).toContain(
+      'ADD CONSTRAINT "members_pkey" PRIMARY KEY ("org_id", "user_id")',
+    );
+    expect(sql).not.toContain('PRIMARY KEY ("user_id")');
+    expect(sql.indexOf("DROP CONSTRAINT")).toBeLessThan(
+      sql.indexOf("ADD CONSTRAINT"),
+    );
+  });
+
+  test("warns when a table is dropped and another is created", () => {
+    const users = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const people = defineTable("people", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const sql = renderMigrationSql(
+      "sqlite",
+      diffSchemas(
+        snapshotSchema({ users }),
+        snapshotSchema({ people }),
+        "sqlite",
+      ),
+    );
+
+    expect(sql).toContain(
+      "-- warning: drops table(s) users and creates people; table renames are drop+create and do not copy data",
+    );
+  });
+
+  test("warns when adding a unique column with a constant default", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").notNull().unique().dbDefault("x"),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "postgres",
+      ),
+    );
+
+    expect(sql).toContain(
+      "unique/primary key with a constant default fails if the table has more than one row",
+    );
   });
 
   test("warns when down SQL re-adds a NOT NULL column without a default", () => {

@@ -317,10 +317,20 @@ SQLite has additional safeguards:
 - Foreign keys are enabled on the first ORM query.
 - Safe column additions and drops run in place. Unsupported alterations rebuild the table and copy shared columns so existing rows survive.
 - A rename is generated as a drop and add, with a warning in the SQL.
+- Dropping one table and creating another also warns: table renames do not copy data.
+- Adding a unique or primary-key column with a constant default warns; it fails when the table has more than one row.
 - A down migration that restores a `NOT NULL` column without a default warns and fails when rows exist.
 - Apply and rollback run `PRAGMA foreign_key_check` before commit.
 
-Generated column types differ between SQLite and Postgres. Migration apply and rollback are integration-tested on SQLite today.
+Postgres-specific SQL:
+
+- Type and key changes on a referenced column drop inbound foreign keys, alter, then re-add them.
+- Primary key membership is emitted as `DROP`/`ADD CONSTRAINT table_pkey`, including composite keys.
+- Circular foreign keys create both tables, then `ALTER TABLE ... ADD CONSTRAINT`.
+
+`$config.url` redacts credentials. Migration helpers still connect: they resolve the real URL from the same `tables` object passed to `createOrm()`. Prefer `loadConfig()`, or pass that `tables` reference through `LoadedConfig`.
+
+Generated column types differ between SQLite and Postgres. Migration apply and rollback are integration-tested on SQLite. Postgres apply/rollback of an FK type change runs when `POSTGRES_URL` is set.
 
 ### Apply from application code
 
@@ -477,7 +487,7 @@ await db.$transaction(async (tx) => {
 | `db.<table>` | Typed table client |
 | `db.$raw` | Underlying `Bun.SQL` |
 | `db.$transaction(cb)` | Run work in a transaction |
-| `db.$config` | Adapter, redacted URL, and tables (used by migrations) |
+| `db.$config` | Adapter, redacted URL, and tables. Migrations resolve the real URL from `tables`. |
 
 ### Migration helpers
 

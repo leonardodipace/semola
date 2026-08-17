@@ -12,6 +12,7 @@ import type { Column } from "../column/types.js";
 import { defineTable } from "../table/index.js";
 import type { Table } from "../table/types.js";
 import { createOrm, many, one } from "./index.js";
+import { getOrmConnectionUrl } from "./orm.js";
 
 const usersTable = defineTable("users", {
   id: uuid("id").primaryKey().notNull(),
@@ -171,6 +172,9 @@ describe("relation helpers", () => {
     expect(orm.$config.url).not.toContain("secret");
     expect(orm.$config.url).not.toContain("user");
     expect(orm.$config.url).toContain("localhost");
+    expect(getOrmConnectionUrl(orm.$config.tables)).toBe(
+      "postgres://user:secret@localhost:5432/app",
+    );
 
     await orm.$raw.close();
   });

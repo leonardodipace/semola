@@ -57,7 +57,8 @@ const withConnection = async <T>(
   fn: (sql: Bun.SQL, dialect: MigrationDialect) => Promise<T>,
 ) => {
   const dialect = getMigrationDialect(config.orm.adapter);
-  const sql = new Bun.SQL(config.orm.url, { adapter: config.orm.adapter });
+  const url = getOrmConnectionUrl(config.orm.tables) ?? config.orm.url;
+  const sql = new Bun.SQL(url, { adapter: config.orm.adapter });
 
   try {
     await dialect.prepareConnection(sql);
