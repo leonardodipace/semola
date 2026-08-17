@@ -1,6 +1,23 @@
+import { MigrationError } from "../errors.js";
 import type { Column, ColumnBuilder, ColumnRuntimeValueMap } from "./types.js";
 
 type ColumnType = Column["type"];
+
+const sqlLiteral = (value: string | number | boolean) => {
+  if (typeof value === "boolean") {
+    return value ? "TRUE" : "FALSE";
+  }
+
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new MigrationError("dbDefault number must be finite");
+    }
+
+    return String(value);
+  }
+
+  return `'${value.replaceAll("'", "''")}'`;
+};
 
 type ColumnBuilderState<
   TType extends ColumnType,
@@ -197,10 +214,25 @@ const createColumnBuilder = <
     TUnique,
     THasDefault,
     TValue
-  >["dbDefault"] = (expression) => {
+  >["dbDefault"] = (value, options) => {
+    if (options?.as === "sql") {
+      const sql = String(value).trim();
+
+      if (!sql) {
+        throw new MigrationError(
+          `Column ${column.sqlName} has an empty dbDefault`,
+        );
+      }
+
+      return createColumnBuilder({
+        ...column,
+        _dbDefault: sql,
+      });
+    }
+
     return createColumnBuilder({
       ...column,
-      _dbDefault: expression,
+      _dbDefault: sqlLiteral(value),
     });
   };
 

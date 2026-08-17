@@ -9,7 +9,7 @@ describe("orm migrations snapshot/diff/sql", () => {
   test("snapshots tables and columns", () => {
     const users = defineTable("users", {
       id: uuid("id").primaryKey().notNull(),
-      email: string("email").notNull().unique().dbDefault("'x'"),
+      email: string("email").notNull().unique().dbDefault("x"),
     });
 
     const snapshot = snapshotSchema({ users });
@@ -112,7 +112,7 @@ describe("orm migrations snapshot/diff/sql", () => {
     });
     const afterUsers = defineTable("users", {
       id: uuid("id").primaryKey().notNull(),
-      age: string("age").notNull().dbDefault("0"),
+      age: string("age").notNull().dbDefault(0),
     });
 
     const ops = diffSchemas(
@@ -222,7 +222,7 @@ describe("orm migrations snapshot/diff/sql", () => {
     });
     const postsAfter = defineTable("posts", {
       id: uuid("id").primaryKey().notNull(),
-      title: string("title").notNull().dbDefault("''"),
+      title: string("title").notNull().dbDefault(""),
     });
     const sql = renderMigrationSql(
       "sqlite",
@@ -432,18 +432,55 @@ describe("orm migrations snapshot/diff/sql", () => {
     );
   });
 
-  test("throws for a bare dbDefault string", () => {
-    const users = defineTable("users", {
+  test("quotes JS dbDefault values and passes as: sql through", () => {
+    const quoted = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      role: string("role").notNull().dbDefault("'anon'", { as: "sql" }),
+    });
+    const bare = defineTable("users", {
       id: uuid("id").primaryKey().notNull(),
       role: string("role").notNull().dbDefault("anon"),
     });
+    const apostrophe = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      role: string("role").notNull().dbDefault("it's"),
+    });
+    const generated = defineTable("users", {
+      id: uuid("id").primaryKey().notNull().dbDefault("gen_random_uuid()", {
+        as: "sql",
+      }),
+    });
 
-    expect(() =>
-      renderMigrationSql(
-        "sqlite",
-        diffSchemas(emptySchema(), snapshotSchema({ users }), "sqlite"),
+    expect(
+      snapshotSchema({ users: quoted }).tables.users?.columns.role?.dbDefault,
+    ).toBe("'anon'");
+    expect(
+      snapshotSchema({ users: bare }).tables.users?.columns.role?.dbDefault,
+    ).toBe("'anon'");
+    expect(
+      snapshotSchema({ users: apostrophe }).tables.users?.columns.role
+        ?.dbDefault,
+    ).toBe("'it''s'");
+    expect(
+      snapshotSchema({ users: generated }).tables.users?.columns.id?.dbDefault,
+    ).toBe("gen_random_uuid()");
+
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ users: generated }),
+        "postgres",
       ),
-    ).toThrow("dbDefault must be SQL");
+    );
+
+    expect(sql).toContain("DEFAULT gen_random_uuid()");
+  });
+
+  test("throws for an empty SQL dbDefault", () => {
+    expect(() => string("role").dbDefault("  ", { as: "sql" })).toThrow(
+      "empty dbDefault",
+    );
   });
 
   test("warns when a table drops and adds columns", () => {

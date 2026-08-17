@@ -178,7 +178,7 @@ export default defineConfig({
 
     const nextUsers = defineTable("users", {
       id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull().dbDefault("'anon'"),
+      name: string("name").notNull().dbDefault("anon"),
       email: string("email").notNull().unique(),
     });
     const nextConfig = {
@@ -253,7 +253,7 @@ export default defineConfig({
       id: uuid("id").primaryKey().notNull(),
       name: string("name").notNull(),
       email: string("email").notNull().unique(),
-      note: string("note").notNull().dbDefault("'a;b'"),
+      note: string("note").notNull().dbDefault("a;b"),
     });
     const nextConfig = {
       ...config,
@@ -297,7 +297,7 @@ export default defineConfig({
       id: uuid("id").primaryKey().notNull(),
       name: string("name").notNull(),
       email: string("email").notNull().unique(),
-      note: string("note").notNull().dbDefault("'it''s'"),
+      note: string("note").notNull().dbDefault("it's"),
     });
     const nextConfig = {
       ...config,

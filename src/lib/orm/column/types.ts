@@ -212,7 +212,8 @@ export type ColumnBuilder<
     value: () => TValue,
   ) => SetHasDefault<TType, TNullable, TPrimaryKey, TUnique, TValue>;
   dbDefault: (
-    expression: string,
+    value: string | number | boolean,
+    options?: { as?: "value" | "sql" },
   ) => ColumnBuilder<
     TType,
     TNullable,

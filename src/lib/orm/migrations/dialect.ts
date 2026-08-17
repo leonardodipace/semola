@@ -7,32 +7,6 @@ import type {
   TableSnapshot,
 } from "./types.js";
 
-const KNOWN_DB_DEFAULTS = new Set([
-  "NULL",
-  "TRUE",
-  "FALSE",
-  "CURRENT_TIME",
-  "CURRENT_DATE",
-  "CURRENT_TIMESTAMP",
-]);
-
-const assertDbDefault = (expression: string, column: string) => {
-  const trimmed = expression.trim();
-
-  if (!trimmed) {
-    throw new MigrationError(`Column ${column} has an empty dbDefault`);
-  }
-
-  if (/^['"0-9(+-]/.test(trimmed)) return;
-  if (KNOWN_DB_DEFAULTS.has(trimmed.toUpperCase())) return;
-  if (/^[A-Za-z_][\w$]*\(/.test(trimmed)) return;
-  if (trimmed.includes("::")) return;
-
-  throw new MigrationError(
-    `Column ${column} dbDefault must be SQL (string literals need quotes: "'value'")`,
-  );
-};
-
 const renameWarning = (table: string, dropped: string[], added: string[]) => {
   if (!dropped.length) return;
   if (!added.length) return;
@@ -206,7 +180,6 @@ export abstract class MigrationDialect {
     }
 
     if (column.dbDefault !== undefined) {
-      assertDbDefault(column.dbDefault, `${table}.${column.name}`);
       parts.push(`DEFAULT ${column.dbDefault}`);
     }
 

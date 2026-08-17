@@ -84,9 +84,14 @@ describe("ORM column builders", () => {
   });
 
   test("supports dbDefault for SQL defaults", () => {
-    const col = string("role").notNull().dbDefault("'user'");
+    const col = string("role").notNull().dbDefault("user");
 
     expect(col._dbDefault).toBe("'user'");
+    expect(
+      string("role").dbDefault("gen_random_uuid()", { as: "sql" })._dbDefault,
+    ).toBe("gen_random_uuid()");
+    expect(number("count").dbDefault(0)._dbDefault).toBe("0");
+    expect(boolean("ok").dbDefault(true)._dbDefault).toBe("TRUE");
   });
 
   test("does not reopen primary key columns via nullable()", () => {
