@@ -1,18 +1,7 @@
 import { POSTGRES_SPEC } from "../dialect/postgres.js";
 import { quoteIdentifier } from "../utils.js";
 import { MigrationDialect } from "./dialect.js";
-import type {
-  ColumnSnapshot,
-  MigrationOp,
-  SchemaSnapshot,
-  TableSnapshot,
-} from "./types.js";
-
-const pkNames = (table: TableSnapshot) => {
-  return Object.values(table.columns)
-    .filter((column) => column.isPrimaryKey)
-    .map((column) => column.name);
-};
+import type { ColumnSnapshot, MigrationOp, SchemaSnapshot } from "./types.js";
 
 const typeOrKeyChanged = (from: ColumnSnapshot, to: ColumnSnapshot) => {
   if (from.type !== to.type) return true;
@@ -87,8 +76,6 @@ export class PostgresMigrationDialect extends MigrationDialect {
   ) {
     const drops: MigrationOp[] = [];
     const adds: MigrationOp[] = [];
-    const pkDrops: MigrationOp[] = [];
-    const pkAdds: MigrationOp[] = [];
     const seenDrop = new Set<string>();
     const seenAdd = new Set<string>();
 
@@ -133,58 +120,31 @@ export class PostgresMigrationDialect extends MigrationDialect {
       }
     };
 
-    for (const op of ops) {
-      if (op.kind === "alterColumn") {
-        if (typeOrKeyChanged(op.from, op.to)) {
-          queueDrop(op.table, op.from);
-          queueAdd(op.table, op.to);
-          queueInbound(op.table, op.from.name);
+    for (const [tableName, fromTable] of Object.entries(from.tables)) {
+      const toTable = to.tables[tableName];
+
+      for (const fromCol of Object.values(fromTable.columns)) {
+        const toCol = toTable?.columns[fromCol.name];
+
+        if (!toCol) {
+          queueInbound(tableName, fromCol.name);
+          continue;
         }
 
-        if (!refsEqual(op.from.references, op.to.references)) {
-          queueDrop(op.table, op.from);
-          queueAdd(op.table, op.to);
+        if (typeOrKeyChanged(fromCol, toCol)) {
+          queueDrop(tableName, fromCol);
+          queueAdd(tableName, toCol);
+          queueInbound(tableName, fromCol.name);
         }
 
-        continue;
-      }
-
-      if (op.kind === "dropColumn") {
-        queueInbound(op.table, op.column.name);
+        if (!refsEqual(fromCol.references, toCol.references)) {
+          queueDrop(tableName, fromCol);
+          queueAdd(tableName, toCol);
+        }
       }
     }
 
-    for (const name of Object.keys(to.tables)) {
-      const fromTable = from.tables[name];
-      const toTable = to.tables[name];
-
-      if (!fromTable) continue;
-      if (!toTable) continue;
-      if (
-        ops.some((op) => {
-          if (op.kind !== "recreateTable") return false;
-
-          return op.to.name === name;
-        })
-      ) {
-        continue;
-      }
-
-      const fromPk = pkNames(fromTable);
-      const toPk = pkNames(toTable);
-
-      if (fromPk.join("\0") === toPk.join("\0")) continue;
-
-      if (fromPk.length) {
-        pkDrops.push({ kind: "dropPrimaryKey", table: name });
-      }
-
-      if (toPk.length) {
-        pkAdds.push({ kind: "addPrimaryKey", table: name, columns: toPk });
-      }
-    }
-
-    return [...drops, ...pkDrops, ...ops, ...pkAdds, ...adds];
+    return [...drops, ...ops, ...adds];
   }
 
   protected override renderAlterColumn(
@@ -195,12 +155,12 @@ export class PostgresMigrationDialect extends MigrationDialect {
     const statements: string[] = [];
     const tableId = quoteIdentifier(table);
     const columnId = quoteIdentifier(to.name);
+    const typeChanged = from.type !== to.type || from.sqlType !== to.sqlType;
     const alterColumn = (action: string) => {
       statements.push(
         `ALTER TABLE ${tableId} ALTER COLUMN ${columnId} ${action};`,
       );
     };
-    const typeChanged = from.type !== to.type || from.sqlType !== to.sqlType;
 
     if (typeChanged) {
       if (from.dbDefault !== undefined) {
@@ -236,17 +196,13 @@ export class PostgresMigrationDialect extends MigrationDialect {
       }
     }
 
-    this.pushEnumCheckChange(statements, table, tableId, from, to);
+    this.pushEnumCheckChange(statements, table, tableId, from, to, typeChanged);
 
     if (statements.length === 0) {
-      return `-- no-op alter for ${table}.${to.name}`;
+      return "";
     }
 
     return statements.join("\n");
-  }
-
-  private jsonEqual(a: unknown, b: unknown) {
-    return JSON.stringify(a) === JSON.stringify(b);
   }
 
   private pushUniqueChange(
@@ -280,9 +236,10 @@ export class PostgresMigrationDialect extends MigrationDialect {
     tableId: string,
     from: ColumnSnapshot,
     to: ColumnSnapshot,
+    typeChanged: boolean,
   ) {
-    const typeChanged = from.type !== to.type || from.sqlType !== to.sqlType;
-    const enumChanged = !this.jsonEqual(from.enumValues, to.enumValues);
+    const enumChanged =
+      JSON.stringify(from.enumValues) !== JSON.stringify(to.enumValues);
 
     if (!typeChanged) {
       if (!enumChanged) return;
@@ -294,13 +251,14 @@ export class PostgresMigrationDialect extends MigrationDialect {
       }
     }
 
-    const checkName = quoteIdentifier(`${table}_${to.name}_check`);
     const check = this.enumCheckSql(to);
 
     if (check) {
-      statements.push(
-        `ALTER TABLE ${tableId} ADD CONSTRAINT ${checkName} ${check};`,
-      );
+      if (typeChanged || enumChanged) {
+        statements.push(
+          `ALTER TABLE ${tableId} ADD CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_check`)} ${check};`,
+        );
+      }
     }
   }
 }

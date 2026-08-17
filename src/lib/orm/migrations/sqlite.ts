@@ -46,27 +46,8 @@ export class SqliteMigrationDialect extends MigrationDialect {
 
     if (violations.length === 0) return;
 
-    const details = violations
-      .map((row) => {
-        if (row && typeof row === "object" && "table" in row) {
-          const record = row as {
-            table: unknown;
-            rowid: unknown;
-            parent: unknown;
-            fkid: unknown;
-          };
-
-          return `${record.table} rowid=${record.rowid} parent=${record.parent} fkid=${record.fkid}`;
-        }
-
-        const tuple = row as unknown[];
-
-        return `${tuple[0]} rowid=${tuple[1]} parent=${tuple[2]} fkid=${tuple[3]}`;
-      })
-      .join("; ");
-
     throw new MigrationError(
-      `Foreign key check failed (${violations.length} violation(s)): ${details}`,
+      `Foreign key check failed (${violations.length} violation(s)): ${violations.map((row) => JSON.stringify(row)).join("; ")}`,
     );
   }
 

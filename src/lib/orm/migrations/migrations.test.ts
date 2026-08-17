@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { enumType, number, string, uuid } from "../column/index.js";
+import {
+  boolean,
+  date,
+  enumType,
+  json,
+  jsonb,
+  number,
+  string,
+  uuid,
+} from "../column/index.js";
 import { defineTable } from "../table/index.js";
 import { diffSchemas } from "./diff.js";
 import { emptySchema, snapshotSchema } from "./snapshot.js";
@@ -809,5 +818,178 @@ describe("orm migrations snapshot/diff/sql", () => {
       // @ts-expect-error - testing runtime guard for values outside the Adapter type
       renderMigrationSql(adapter, []),
     ).toThrow("Unsupported adapter: mysql");
+  });
+
+  test("renders json, jsonb, boolean, and date types", () => {
+    const events = defineTable("events", {
+      id: uuid("id").primaryKey().notNull(),
+      ok: boolean("ok").notNull(),
+      at: date("at").notNull(),
+      meta: json("meta"),
+      extra: jsonb("extra"),
+    });
+    const sqlite = renderMigrationSql(
+      "sqlite",
+      diffSchemas(emptySchema(), snapshotSchema({ events }), "sqlite"),
+    );
+    const postgres = renderMigrationSql(
+      "postgres",
+      diffSchemas(emptySchema(), snapshotSchema({ events }), "postgres"),
+    );
+
+    expect(sqlite).toContain('"ok" INTEGER NOT NULL');
+    expect(sqlite).toContain('"at" TEXT NOT NULL');
+    expect(sqlite).toContain('"meta" TEXT');
+    expect(sqlite).toContain('"extra" TEXT');
+    expect(postgres).toContain('"ok" BOOLEAN NOT NULL');
+    expect(postgres).toContain('"at" TIMESTAMP NOT NULL');
+    expect(postgres).toContain('"meta" JSON');
+    expect(postgres).toContain('"extra" JSONB');
+  });
+
+  test("sqlite adds a column with a default in place", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      role: string("role").notNull().dbDefault("member"),
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ users: before }),
+      snapshotSchema({ users: after }),
+      "sqlite",
+    );
+    const sql = renderMigrationSql("sqlite", ops);
+
+    expect(ops[0]?.kind).toBe("addColumn");
+    expect(sql).toContain("ADD COLUMN \"role\" TEXT NOT NULL DEFAULT 'member'");
+    expect(sql).not.toContain("users__semola_tmp");
+  });
+
+  test("postgres reference-only changes emit foreign key ops, not ALTER COLUMN", () => {
+    const authors = defineTable("authors", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const postsBefore = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: uuid("author_id"),
+    });
+    const postsAfter = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: uuid("author_id").references(() => authors.columns.id),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ authors, posts: postsBefore }),
+        snapshotSchema({ authors, posts: postsAfter }),
+        "postgres",
+      ),
+    );
+
+    expect(sql).toContain('ADD CONSTRAINT "posts_author_id_fkey"');
+    expect(sql).not.toContain("ALTER COLUMN");
+    expect(sql).not.toContain("no-op alter");
+  });
+
+  test("postgres drops and sets defaults without a type change", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      role: string("role").notNull().dbDefault("a"),
+    });
+    const dropped = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      role: string("role").notNull(),
+    });
+    const replaced = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      role: string("role").notNull().dbDefault("b"),
+    });
+
+    expect(
+      renderMigrationSql(
+        "postgres",
+        diffSchemas(
+          snapshotSchema({ users: before }),
+          snapshotSchema({ users: dropped }),
+          "postgres",
+        ),
+      ),
+    ).toContain('ALTER COLUMN "role" DROP DEFAULT');
+    expect(
+      renderMigrationSql(
+        "postgres",
+        diffSchemas(
+          snapshotSchema({ users: dropped }),
+          snapshotSchema({ users: replaced }),
+          "postgres",
+        ),
+      ),
+    ).toContain("SET DEFAULT 'b'");
+  });
+
+  test("postgres toggles nullability and unique constraints", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email"),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").notNull().unique(),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "postgres",
+      ),
+    );
+
+    expect(sql).toContain('ALTER COLUMN "email" SET NOT NULL');
+    expect(sql).toContain('ADD CONSTRAINT "users_email_key" UNIQUE');
+  });
+
+  test("throws when adding a foreign key without a target", () => {
+    expect(() =>
+      renderMigrationSql("postgres", [
+        {
+          kind: "addForeignKey",
+          table: "posts",
+          column: {
+            name: "author_id",
+            type: "string",
+            isNullable: true,
+            isPrimaryKey: false,
+            isUnique: false,
+          },
+        },
+      ]),
+    ).toThrow("without a target");
+  });
+
+  test("sqlite recreates when dropping the last shared column set still copies remaining columns", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      bio: string("bio"),
+      email: string("email").notNull().unique(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      bio: string("bio"),
+    });
+    const sql = renderMigrationSql(
+      "sqlite",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "sqlite",
+      ),
+    );
+
+    expect(sql).toContain(
+      'INSERT INTO "users__semola_tmp" ("id", "bio") SELECT "id", "bio" FROM "users"',
+    );
   });
 });

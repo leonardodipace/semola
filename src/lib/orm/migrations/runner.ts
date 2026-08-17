@@ -13,6 +13,7 @@ import { decodeSchemaHeader, getMigrationDialect } from "./sql.js";
 import type { LoadedConfig, OrmConfig, SchemaSnapshot } from "./types.js";
 
 const HISTORY_TABLE = "_semola_migrations";
+const DOLLAR_TAG = /^(\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)/;
 
 const isOrmClient = (value: unknown) => {
   if (!value) return false;
@@ -57,8 +58,7 @@ const withConnection = async <T>(
   fn: (sql: Bun.SQL, dialect: MigrationDialect) => Promise<T>,
 ) => {
   const dialect = getMigrationDialect(config.orm.adapter);
-  const url = getOrmConnectionUrl(config.orm.tables) ?? config.orm.url;
-  const sql = new Bun.SQL(url, { adapter: config.orm.adapter });
+  const sql = new Bun.SQL(config.orm.url, { adapter: config.orm.adapter });
 
   try {
     await dialect.prepareConnection(sql);
@@ -101,12 +101,14 @@ export const loadConfig = async (
   }
 
   const client = resolveOrmFromModule(schemaMod as Record<string, unknown>);
+  const url = getOrmConnectionUrl(client) ?? client.$config.url;
   const result = {
     schemaPath,
     migrationsDir: resolve(cwd, config.orm.migrationsDir ?? "migrations"),
     orm: {
-      ...client.$config,
-      url: getOrmConnectionUrl(client) ?? client.$config.url,
+      adapter: client.$config.adapter,
+      url,
+      tables: client.$config.tables,
     },
   };
 
@@ -153,12 +155,6 @@ const assertHistoryMatchesFiles = (
     const actual = applied[index]?.name;
 
     if (expected === actual) continue;
-
-    if (!actual) {
-      throw new MigrationError(
-        `Migration history is missing ${expected} (files and _semola_migrations are out of order)`,
-      );
-    }
 
     if (!expected) {
       throw new MigrationError(
@@ -275,10 +271,10 @@ export const createMigration = async (input: {
   });
 };
 
-const closeQuote = (text: string, start: number, quote: string) => {
-  for (let index = start + 1; index < text.length; index++) {
-    if (text[index] !== quote) continue;
-    if (text[index + 1] === quote) {
+const skipQuoted = (source: string, start: number, quote: string) => {
+  for (let index = start + 1; index < source.length; index++) {
+    if (source[index] !== quote) continue;
+    if (source[index + 1] === quote) {
       index += 1;
       continue;
     }
@@ -286,112 +282,18 @@ const closeQuote = (text: string, start: number, quote: string) => {
     return index;
   }
 
-  return text.length - 1;
-};
-
-const takeUntil = (text: string, start: number, end: number) => {
-  return {
-    chunk: text.slice(start, end + 1),
-    next: end,
-  };
-};
-
-const takeQuoted = (text: string, start: number) => {
-  return takeUntil(text, start, closeQuote(text, start, text[start] ?? ""));
-};
-
-const takeLineComment = (text: string, start: number) => {
-  const newline = text.indexOf("\n", start);
-  const end = newline === -1 ? text.length : newline;
-
-  return takeUntil(text, start, end - 1);
-};
-
-const takeBlockComment = (text: string, start: number) => {
-  const end = text.indexOf("*/", start + 2);
-
-  if (end === -1) {
-    return takeUntil(text, start, text.length - 1);
-  }
-
-  return takeUntil(text, start, end + 1);
-};
-
-const takeDollarQuote = (text: string, start: number) => {
-  let tagEnd = start + 1;
-
-  if (text[tagEnd] === "$") {
-    tagEnd += 1;
-  } else {
-    if (!/[A-Za-z_]/.test(text[tagEnd] ?? "")) {
-      return undefined;
-    }
-
-    tagEnd += 1;
-
-    while (/[A-Za-z0-9_]/.test(text[tagEnd] ?? "")) {
-      tagEnd += 1;
-    }
-
-    if (text[tagEnd] !== "$") {
-      return undefined;
-    }
-
-    tagEnd += 1;
-  }
-
-  const tag = text.slice(start, tagEnd);
-  const close = text.indexOf(tag, tagEnd);
-
-  if (close === -1) {
-    return takeUntil(text, start, text.length - 1);
-  }
-
-  return takeUntil(text, start, close + tag.length - 1);
+  return source.length - 1;
 };
 
 const isSqlStatement = (text: string) => {
-  return (
-    text
-      .split("\n")
-      .filter((line) => !line.trim().startsWith("--"))
-      .join("\n")
-      .trim().length > 0
-  );
-};
+  return text.split("\n").some((line) => {
+    const trimmed = line.trim();
 
-const takeSpecial = (source: string, index: number) => {
-  const char = source[index] ?? "";
-  const next = source[index + 1] ?? "";
+    if (!trimmed) return false;
+    if (trimmed.startsWith("--")) return false;
 
-  if (char === "'" || char === '"') {
-    return takeQuoted(source, index);
-  }
-
-  if (char === "-" && next === "-") {
-    return takeLineComment(source, index);
-  }
-
-  if (char === "/" && next === "*") {
-    return takeBlockComment(source, index);
-  }
-
-  if (char === "$") {
-    return takeDollarQuote(source, index);
-  }
-
-  return undefined;
-};
-
-const flushStatement = (current: string, statements: string[]) => {
-  const trimmed = current.trim();
-
-  if (!trimmed) return "";
-  if (!isSqlStatement(trimmed)) return "";
-
-  statements.push(trimmed);
-
-  return "";
+    return true;
+  });
 };
 
 export const splitStatements = (sqlText: string) => {
@@ -402,24 +304,64 @@ export const splitStatements = (sqlText: string) => {
   const statements: string[] = [];
   let current = "";
 
+  const flush = () => {
+    const trimmed = current.trim();
+    current = "";
+
+    if (!trimmed) return;
+    if (!isSqlStatement(trimmed)) return;
+
+    statements.push(trimmed);
+  };
+
   for (let index = 0; index < source.length; index++) {
-    const taken = takeSpecial(source, index);
+    const char = source[index] ?? "";
+    const next = source[index + 1] ?? "";
 
-    if (taken) {
-      current += taken.chunk;
-      index = taken.next;
+    if (char === "'" || char === '"') {
+      const end = skipQuoted(source, index, char);
+      current += source.slice(index, end + 1);
+      index = end;
       continue;
     }
 
-    if (source[index] === ";") {
-      current = flushStatement(current, statements);
+    if (char === "-" && next === "-") {
+      const newline = source.indexOf("\n", index);
+      const end = newline === -1 ? source.length - 1 : newline - 1;
+      current += source.slice(index, end + 1);
+      index = end;
       continue;
     }
 
-    current += source[index] ?? "";
+    if (char === "/" && next === "*") {
+      const close = source.indexOf("*/", index + 2);
+      const end = close === -1 ? source.length - 1 : close + 1;
+      current += source.slice(index, end + 1);
+      index = end;
+      continue;
+    }
+
+    if (char === "$") {
+      const tag = source.slice(index).match(DOLLAR_TAG)?.[1];
+
+      if (tag) {
+        const close = source.indexOf(tag, index + tag.length);
+        const end = close === -1 ? source.length - 1 : close + tag.length - 1;
+        current += source.slice(index, end + 1);
+        index = end;
+        continue;
+      }
+    }
+
+    if (char === ";") {
+      flush();
+      continue;
+    }
+
+    current += char;
   }
 
-  flushStatement(current, statements);
+  flush();
 
   return statements;
 };
@@ -455,7 +397,7 @@ const runSqlFile = async (
     await sql.unsafe(statement);
   }
 
-  return { text, headerSchema };
+  return headerSchema;
 };
 
 export const applyMigrations = async (config: LoadedConfig) => {
@@ -476,7 +418,7 @@ export const applyMigrations = async (config: LoadedConfig) => {
       await dialect.beginMigration(sql, async (tx) => {
         await dialect.lockMigrations(tx);
 
-        const { headerSchema } = await runSqlFile(
+        const headerSchema = await runSqlFile(
           tx,
           upPath,
           `Migration ${name}`,

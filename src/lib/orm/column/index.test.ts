@@ -93,7 +93,16 @@ describe("ORM column builders", () => {
     ).toBe("gen_random_uuid()");
     expect(number("count").dbDefault(0)._dbDefault).toBe("0");
     expect(boolean("ok").dbDefault(true)._dbDefault).toBe("TRUE");
+    expect(boolean("ok").dbDefault(false)._dbDefault).toBe("FALSE");
+    expect(
+      date("created_at").dbDefault(new Date("2020-01-01T00:00:00.000Z"))
+        ._dbDefault,
+    ).toBe("'2020-01-01T00:00:00.000Z'");
+    expect(json("meta").dbDefault({ a: 1 })._dbDefault).toBe("'{\"a\":1}'");
     expect(() => number("count").dbDefault(Number.NaN)).toThrow(
+      "dbDefault number must be finite",
+    );
+    expect(() => number("count").dbDefault(Number.POSITIVE_INFINITY)).toThrow(
       "dbDefault number must be finite",
     );
   });

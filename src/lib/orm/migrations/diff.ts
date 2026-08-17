@@ -16,20 +16,17 @@ const columnsEqual = (a: ColumnSnapshot, b: ColumnSnapshot) => {
   if (a.isPrimaryKey !== b.isPrimaryKey) return false;
   if (a.isUnique !== b.isUnique) return false;
   if (a.dbDefault !== b.dbDefault) return false;
-  if (a.enumValues?.length !== b.enumValues?.length) return false;
-
-  if (a.enumValues) {
-    if (b.enumValues) {
-      for (let index = 0; index < a.enumValues.length; index++) {
-        if (a.enumValues[index] !== b.enumValues[index]) return false;
-      }
-    }
+  if (JSON.stringify(a.enumValues) !== JSON.stringify(b.enumValues)) {
+    return false;
   }
 
-  if (a.references?.table !== b.references?.table) return false;
-  if (a.references?.column !== b.references?.column) return false;
-
   return true;
+};
+
+const pkNames = (table: TableSnapshot) => {
+  return Object.values(table.columns)
+    .filter((column) => column.isPrimaryKey)
+    .map((column) => column.name);
 };
 
 const assertAddableColumn = (table: string, column: ColumnSnapshot) => {
@@ -41,54 +38,26 @@ const assertAddableColumn = (table: string, column: ColumnSnapshot) => {
   );
 };
 
-const diffTable = (
+const pkOps = (
   name: string,
   fromTable: TableSnapshot,
   toTable: TableSnapshot,
-  strictAddColumn: boolean,
 ) => {
-  const tableOps: MigrationOp[] = [];
+  const fromPk = pkNames(fromTable);
+  const toPk = pkNames(toTable);
+  const ops: MigrationOp[] = [];
 
-  for (const columnName of Object.keys(toTable.columns)) {
-    const next = toTable.columns[columnName];
-    const prev = fromTable.columns[columnName];
+  if (fromPk.join("\0") === toPk.join("\0")) return ops;
 
-    if (!next) continue;
-
-    if (!prev) {
-      if (strictAddColumn) {
-        assertAddableColumn(name, next);
-      }
-
-      tableOps.push({ kind: "addColumn", table: name, column: next });
-      continue;
-    }
-
-    if (columnsEqual(prev, next)) continue;
-
-    tableOps.push({
-      kind: "alterColumn",
-      table: name,
-      from: prev,
-      to: next,
-    });
+  if (fromPk.length) {
+    ops.push({ kind: "dropPrimaryKey", table: name });
   }
 
-  for (const columnName of Object.keys(fromTable.columns)) {
-    if (toTable.columns[columnName]) continue;
-
-    const column = fromTable.columns[columnName];
-
-    if (!column) continue;
-
-    tableOps.push({
-      kind: "dropColumn",
-      table: name,
-      column,
-    });
+  if (toPk.length) {
+    ops.push({ kind: "addPrimaryKey", table: name, columns: toPk });
   }
 
-  return tableOps;
+  return ops;
 };
 
 const createdTables = (from: SchemaSnapshot, to: SchemaSnapshot) => {
@@ -119,6 +88,58 @@ const droppedTables = (from: SchemaSnapshot, to: SchemaSnapshot) => {
   }
 
   return ops;
+};
+
+const diffTable = (
+  name: string,
+  fromTable: TableSnapshot,
+  toTable: TableSnapshot,
+  strictAddColumn: boolean,
+) => {
+  const tableOps: MigrationOp[] = [];
+
+  for (const columnName of Object.keys(toTable.columns)) {
+    const next = toTable.columns[columnName];
+    const prev = fromTable.columns[columnName];
+
+    if (!next) continue;
+
+    if (!prev) {
+      if (strictAddColumn) {
+        assertAddableColumn(name, next);
+      }
+
+      tableOps.push({ kind: "addColumn", table: name, column: next });
+      continue;
+    }
+
+    if (!columnsEqual(prev, next)) {
+      tableOps.push({
+        kind: "alterColumn",
+        table: name,
+        from: prev,
+        to: next,
+      });
+    }
+  }
+
+  for (const columnName of Object.keys(fromTable.columns)) {
+    if (toTable.columns[columnName]) continue;
+
+    const column = fromTable.columns[columnName];
+
+    if (!column) continue;
+
+    tableOps.push({
+      kind: "dropColumn",
+      table: name,
+      column,
+    });
+  }
+
+  tableOps.push(...pkOps(name, fromTable, toTable));
+
+  return tableOps;
 };
 
 export const diffSchemas = (

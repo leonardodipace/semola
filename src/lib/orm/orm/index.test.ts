@@ -172,7 +172,7 @@ describe("relation helpers", () => {
     expect(orm.$config.url).not.toContain("secret");
     expect(orm.$config.url).not.toContain("user");
     expect(orm.$config.url).toContain("localhost");
-    expect(getOrmConnectionUrl(orm.$config.tables)).toBe(
+    expect(getOrmConnectionUrl(orm)).toBe(
       "postgres://user:secret@localhost:5432/app",
     );
 

@@ -64,7 +64,6 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
     };
 
     connectionUrls.set(client, this.options.url);
-    connectionUrls.set(this.options.tables, this.options.url);
 
     return client;
   }

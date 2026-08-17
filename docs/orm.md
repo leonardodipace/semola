@@ -328,7 +328,7 @@ Postgres-specific SQL:
 - Primary key membership is emitted as `DROP`/`ADD CONSTRAINT table_pkey`, including composite keys.
 - Circular foreign keys create both tables, then `ALTER TABLE ... ADD CONSTRAINT`.
 
-`$config.url` redacts credentials. Migration helpers still connect: they resolve the real URL from the same `tables` object passed to `createOrm()`. Prefer `loadConfig()`, or pass that `tables` reference through `LoadedConfig`.
+`$config.url` redacts credentials. `loadConfig()` reads the real URL from the ORM client before opening its own connection.
 
 Generated column types differ between SQLite and Postgres. Migration apply and rollback are integration-tested on SQLite. Postgres apply/rollback of an FK type change runs when `POSTGRES_URL` is set.
 
@@ -487,7 +487,7 @@ await db.$transaction(async (tx) => {
 | `db.<table>` | Typed table client |
 | `db.$raw` | Underlying `Bun.SQL` |
 | `db.$transaction(cb)` | Run work in a transaction |
-| `db.$config` | Adapter, redacted URL, and tables. Migrations resolve the real URL from `tables`. |
+| `db.$config` | Adapter, redacted URL, and tables |
 
 ### Migration helpers
 

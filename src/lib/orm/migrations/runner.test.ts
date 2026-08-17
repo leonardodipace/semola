@@ -134,34 +134,13 @@ export default defineConfig({
     await db.$raw.close();
   });
 
-  test("createMigration resolves the real url from the tables object", async () => {
+  test("loadConfig uses the real database url, not the redacted $config url", async () => {
     const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
     const project = await setupProject(dbFile);
-    const tables = { users: project.users };
-    const client = createOrm({
-      adapter: "sqlite",
-      url: dbFile,
-      tables,
-    });
+    const config = await loadConfig(project.root);
 
-    await client.$raw.close();
-
-    const fakeUrl = join(project.root, "missing.db");
-
-    await createMigration({
-      name: "initialize_database",
-      config: {
-        schemaPath: join(project.root, "db.ts"),
-        migrationsDir: project.migrationsDir,
-        orm: {
-          adapter: "sqlite",
-          url: fakeUrl,
-          tables,
-        },
-      },
-    });
-
-    expect(await Bun.file(fakeUrl).exists()).toBe(false);
+    expect(config.orm.url).toBe(dbFile);
+    expect(config.orm.adapter).toBe("sqlite");
   });
 
   test("fails create when pending migrations exist", async () => {
@@ -407,6 +386,201 @@ SELECT $tag$c;d$tag$;
       "/* keep ; here */\nSELECT $$a;b$$",
       "SELECT $tag$c;d$tag$",
     ]);
+  });
+
+  test("splitStatements keeps doubled quotes and strips the schema header", () => {
+    expect(
+      splitStatements(`-- semola-schema:{"tables":{}}
+INSERT INTO t VALUES ('it''s');
+SELECT "weird;name";
+`),
+    ).toEqual(["INSERT INTO t VALUES ('it''s')", `SELECT "weird;name"`]);
+  });
+
+  test("splitStatements ignores comment-only input", () => {
+    expect(splitStatements("-- warning: hi\n-- still a comment\n")).toEqual([]);
+  });
+
+  test("apply is a no-op when nothing is pending", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    expect(await applyMigrations(config)).toEqual([]);
+  });
+
+  test("rollback fails when no migrations are applied", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await expect(rollbackMigration(config)).rejects.toThrow(
+      "No migrations to rollback",
+    );
+  });
+
+  test("rejects an empty migration name", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await expect(createMigration({ name: "???", config })).rejects.toThrow(
+      "Invalid migration name",
+    );
+  });
+
+  test("loadConfig fails when semola.config.ts is missing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+    dirs.push(root);
+
+    await expect(loadConfig(root)).rejects.toThrow(
+      "Could not load semola.config.ts",
+    );
+  });
+
+  test("loadConfig fails when the schema module has no ORM client", async () => {
+    const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+    dirs.push(root);
+
+    await writeFile(join(root, "db.ts"), "export const nope = 1;\n");
+    await writeFile(
+      join(root, "semola.config.ts"),
+      `
+import { defineConfig } from ${JSON.stringify(join(import.meta.dir, "../../config.ts"))};
+
+export default defineConfig({
+  orm: { schema: "./db.ts" },
+});
+`,
+    );
+
+    await expect(loadConfig(root)).rejects.toThrow(
+      "Schema module must export a createOrm() client",
+    );
+  });
+
+  test("rejects apply when an applied migration folder is missing", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+    const folder = await createMigration({ name: "first", config });
+
+    await applyMigrations(config);
+    await rm(join(project.migrationsDir, folder), {
+      recursive: true,
+      force: true,
+    });
+
+    await expect(applyMigrations(config)).rejects.toThrow(
+      "missing from the migrations directory",
+    );
+  });
+
+  test("rejects rollback when down.sql is missing", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+    const folder = await createMigration({ name: "first", config });
+
+    await applyMigrations(config);
+    await rm(join(project.migrationsDir, folder, "down.sql"));
+
+    await expect(rollbackMigration(config)).rejects.toThrow("Could not read");
+  });
+
+  test("applies multiple pending migrations in folder order", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+    const first = join(project.migrationsDir, "20240101000000000_first");
+    const second = join(project.migrationsDir, "20240102000000000_second");
+    const header = `-- semola-schema:${JSON.stringify({ tables: {} })}`;
+
+    await mkdir(first);
+    await mkdir(second);
+    await writeFile(join(first, "up.sql"), `${header}\nSELECT 1;\n`);
+    await writeFile(join(second, "up.sql"), `${header}\nSELECT 1;\n`);
+
+    expect(await applyMigrations(config)).toEqual([
+      "20240101000000000_first",
+      "20240102000000000_second",
+    ]);
+  });
+
+  test("apply fails sqlite foreign key checks before commit", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const authors = defineTable("authors", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const posts = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: uuid("author_id")
+        .notNull()
+        .references(() => authors.columns.id),
+    });
+    const schemaPath = join(project.root, "db.ts");
+
+    await writeFile(
+      schemaPath,
+      `
+import { createOrm, defineTable, uuid } from ${JSON.stringify(join(import.meta.dir, "../index.ts"))};
+
+const authors = defineTable("authors", {
+  id: uuid("id").primaryKey().notNull(),
+});
+const posts = defineTable("posts", {
+  id: uuid("id").primaryKey().notNull(),
+  authorId: uuid("author_id").notNull().references(() => authors.columns.id),
+});
+
+export const db = createOrm({
+  adapter: "sqlite",
+  url: ${JSON.stringify(dbFile)},
+  tables: { authors, posts },
+});
+`,
+    );
+
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "init", config });
+    await applyMigrations(config);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { authors, posts },
+    });
+
+    await db.authors.create({ data: { id: "a1" } });
+    await db.posts.create({ data: { id: "p1", authorId: "a1" } });
+    await db.$raw.close();
+
+    const folder = join(project.migrationsDir, "99999999999999999_drop_parent");
+    await mkdir(folder);
+    await writeFile(
+      join(folder, "up.sql"),
+      `-- semola-schema:${JSON.stringify({ tables: {} })}\nDROP TABLE "authors";\n`,
+    );
+
+    await expect(applyMigrations(config)).rejects.toThrow(
+      "Foreign key check failed",
+    );
+
+    const check = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { authors, posts },
+    });
+    const author = await check.authors.findFirst({ where: { id: "a1" } });
+
+    expect(author?.id).toBe("a1");
+
+    await check.$raw.close();
   });
 
   test.skipIf(!process.env.POSTGRES_URL)(

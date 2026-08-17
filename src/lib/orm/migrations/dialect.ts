@@ -40,8 +40,16 @@ const uniqueAddWarning = (table: string, column: ColumnSnapshot) => {
   return `-- warning: ADD COLUMN "${table}"."${column.name}" unique/primary key with a constant default fails if the table has more than one row`;
 };
 
-const addColumnWarnings = (table: string, column: ColumnSnapshot) => {
-  return [notNullAddWarning(table, column), uniqueAddWarning(table, column)];
+const pushAddColumnWarnings = (
+  warnings: string[],
+  table: string,
+  column: ColumnSnapshot,
+) => {
+  const notNull = notNullAddWarning(table, column);
+  const unique = uniqueAddWarning(table, column);
+
+  if (notNull) warnings.push(notNull);
+  if (unique) warnings.push(unique);
 };
 
 const dataLossWarnings = (ops: MigrationOp[]) => {
@@ -56,7 +64,14 @@ const dataLossWarnings = (ops: MigrationOp[]) => {
     table: string,
     column: string,
   ) => {
-    map.set(table, [...(map.get(table) ?? []), column]);
+    const columns = map.get(table);
+
+    if (columns) {
+      columns.push(column);
+      return;
+    }
+
+    map.set(table, [column]);
   };
 
   for (const op of ops) {
@@ -77,11 +92,7 @@ const dataLossWarnings = (ops: MigrationOp[]) => {
 
     if (op.kind === "addColumn") {
       record(added, op.table, op.column.name);
-
-      for (const warning of addColumnWarnings(op.table, op.column)) {
-        if (warning) warnings.push(warning);
-      }
-
+      pushAddColumnWarnings(warnings, op.table, op.column);
       continue;
     }
 
@@ -98,9 +109,7 @@ const dataLossWarnings = (ops: MigrationOp[]) => {
     for (const column of Object.values(op.to.columns)) {
       if (op.from.columns[column.name]) continue;
 
-      for (const addWarning of addColumnWarnings(op.to.name, column)) {
-        if (addWarning) warnings.push(addWarning);
-      }
+      pushAddColumnWarnings(warnings, op.to.name, column);
     }
   }
 
@@ -182,7 +191,10 @@ export abstract class MigrationDialect {
     const ordered = this.orderOps(ops);
     const warnings = dataLossWarnings(ordered);
     const warningBlock = warnings.length ? `${warnings.join("\n")}\n\n` : "";
-    const body = ordered.map((op) => this.renderOp(op)).join("\n\n");
+    const body = ordered
+      .map((op) => this.renderOp(op))
+      .filter((sql) => sql.length > 0)
+      .join("\n\n");
 
     if (!schemaHeader) {
       return `${warningBlock}${body}\n`;
@@ -456,68 +468,54 @@ export abstract class MigrationDialect {
   }
 
   private orderOps(ops: MigrationOp[]) {
+    const creates: TableSnapshot[] = [];
+    const drops: TableSnapshot[] = [];
     const dropForeignKeys: MigrationOp[] = [];
     const dropColumns: MigrationOp[] = [];
-    const dropTables: TableSnapshot[] = [];
-    const createTables: TableSnapshot[] = [];
+    const dropPrimaryKeys: MigrationOp[] = [];
+    const alterColumns: MigrationOp[] = [];
     const recreates: MigrationOp[] = [];
     const addColumns: MigrationOp[] = [];
-    const dropPrimaryKeys: MigrationOp[] = [];
     const addPrimaryKeys: MigrationOp[] = [];
     const addForeignKeys: MigrationOp[] = [];
-    const otherAlters: MigrationOp[] = [];
 
     for (const op of ops) {
-      if (op.kind === "dropForeignKey") {
-        dropForeignKeys.push(op);
-        continue;
+      switch (op.kind) {
+        case "createTable":
+          creates.push(op.table);
+          break;
+        case "dropTable":
+          drops.push(op.table);
+          break;
+        case "dropForeignKey":
+          dropForeignKeys.push(op);
+          break;
+        case "dropColumn":
+          dropColumns.push(op);
+          break;
+        case "dropPrimaryKey":
+          dropPrimaryKeys.push(op);
+          break;
+        case "alterColumn":
+          alterColumns.push(op);
+          break;
+        case "recreateTable":
+          recreates.push(op);
+          break;
+        case "addColumn":
+          addColumns.push(op);
+          break;
+        case "addPrimaryKey":
+          addPrimaryKeys.push(op);
+          break;
+        case "addForeignKey":
+          addForeignKeys.push(op);
+          break;
       }
-
-      if (op.kind === "dropColumn") {
-        dropColumns.push(op);
-        continue;
-      }
-
-      if (op.kind === "dropTable") {
-        dropTables.push(op.table);
-        continue;
-      }
-
-      if (op.kind === "createTable") {
-        createTables.push(op.table);
-        continue;
-      }
-
-      if (op.kind === "recreateTable") {
-        recreates.push(op);
-        continue;
-      }
-
-      if (op.kind === "addColumn") {
-        addColumns.push(op);
-        continue;
-      }
-
-      if (op.kind === "dropPrimaryKey") {
-        dropPrimaryKeys.push(op);
-        continue;
-      }
-
-      if (op.kind === "addPrimaryKey") {
-        addPrimaryKeys.push(op);
-        continue;
-      }
-
-      if (op.kind === "addForeignKey") {
-        addForeignKeys.push(op);
-        continue;
-      }
-
-      otherAlters.push(op);
     }
 
-    const sortedDrops = this.sortTables(dropTables);
-    const sortedCreates = this.sortTables(createTables);
+    const sortedCreates = this.sortTables(creates);
+    const sortedDrops = this.sortTables(drops);
     const createOps = sortedCreates.ordered.map((table) => {
       return { kind: "createTable" as const, table };
     });
@@ -556,7 +554,7 @@ export abstract class MigrationDialect {
       ...dropColumns,
       ...createOps,
       ...dropPrimaryKeys,
-      ...otherAlters,
+      ...alterColumns,
       ...recreates,
       ...dropOps,
       ...addColumns,

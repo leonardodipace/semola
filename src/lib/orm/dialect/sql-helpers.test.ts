@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { json } from "../column/index.js";
+import { json, string } from "../column/index.js";
 import { defineTable } from "../table/index.js";
 import { PlaceholderGenerator } from "./placeholder.js";
 import {
+  bindCreateValue,
   buildSetClauses,
   resolveCreateValue,
   serializeColumnValue,
@@ -71,5 +72,22 @@ describe("sql-helpers", () => {
         { ok: true },
       ),
     ).toBe('{"ok":true}');
+  });
+
+  test("bindCreateValue inlines dbDefault SQL and binds provided values", () => {
+    const role = string("role").notNull().dbDefault("member");
+    const params: unknown[] = [];
+    let index = 0;
+    const nextPlaceholder = () => {
+      index += 1;
+      return `$${index}`;
+    };
+
+    expect(bindCreateValue(role, undefined, nextPlaceholder, params)).toBe(
+      "'member'",
+    );
+    expect(params).toEqual([]);
+    expect(bindCreateValue(role, "admin", nextPlaceholder, params)).toBe("$1");
+    expect(params).toEqual(["admin"]);
   });
 });
