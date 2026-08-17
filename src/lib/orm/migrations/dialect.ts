@@ -1,3 +1,4 @@
+import { MigrationError } from "../errors.js";
 import { quoteIdentifier } from "../utils.js";
 import type {
   ColumnSnapshot,
@@ -5,6 +6,83 @@ import type {
   SchemaSnapshot,
   TableSnapshot,
 } from "./types.js";
+
+const KNOWN_DB_DEFAULTS = new Set([
+  "NULL",
+  "TRUE",
+  "FALSE",
+  "CURRENT_TIME",
+  "CURRENT_DATE",
+  "CURRENT_TIMESTAMP",
+]);
+
+const assertDbDefault = (expression: string, column: string) => {
+  const trimmed = expression.trim();
+
+  if (!trimmed) {
+    throw new MigrationError(`Column ${column} has an empty dbDefault`);
+  }
+
+  if (/^['"0-9(+-]/.test(trimmed)) return;
+  if (KNOWN_DB_DEFAULTS.has(trimmed.toUpperCase())) return;
+  if (/^[A-Za-z_][\w$]*\(/.test(trimmed)) return;
+  if (trimmed.includes("::")) return;
+
+  throw new MigrationError(
+    `Column ${column} dbDefault must be SQL (string literals need quotes: "'value'")`,
+  );
+};
+
+const renameWarning = (table: string, dropped: string[], added: string[]) => {
+  if (!dropped.length) return;
+  if (!added.length) return;
+
+  return `-- warning: "${table}" drops ${dropped.join(", ")} and adds ${added.join(", ")}; renames are drop+add and do not copy data`;
+};
+
+const dataLossWarnings = (ops: MigrationOp[]) => {
+  const warnings: string[] = [];
+  const dropped = new Map<string, string[]>();
+  const added = new Map<string, string[]>();
+
+  const record = (
+    map: Map<string, string[]>,
+    table: string,
+    column: string,
+  ) => {
+    map.set(table, [...(map.get(table) ?? []), column]);
+  };
+
+  for (const op of ops) {
+    if (op.kind === "dropColumn") {
+      record(dropped, op.table, op.column.name);
+      continue;
+    }
+
+    if (op.kind === "addColumn") {
+      record(added, op.table, op.column.name);
+      continue;
+    }
+
+    if (op.kind !== "recreateTable") continue;
+
+    const warning = renameWarning(
+      op.to.name,
+      Object.keys(op.from.columns).filter((name) => !op.to.columns[name]),
+      Object.keys(op.to.columns).filter((name) => !op.from.columns[name]),
+    );
+
+    if (warning) warnings.push(warning);
+  }
+
+  for (const [table, droppedCols] of dropped) {
+    const warning = renameWarning(table, droppedCols, added.get(table) ?? []);
+
+    if (warning) warnings.push(warning);
+  }
+
+  return warnings;
+};
 
 export abstract class MigrationDialect {
   public abstract readonly name: "sqlite" | "postgres";
@@ -49,13 +127,15 @@ export abstract class MigrationDialect {
 
   public render(ops: MigrationOp[], schemaHeader?: SchemaSnapshot) {
     const ordered = this.orderOps(ops);
+    const warnings = dataLossWarnings(ordered);
+    const warningBlock = warnings.length ? `${warnings.join("\n")}\n\n` : "";
     const body = ordered.map((op) => this.renderOp(op)).join("\n\n");
 
     if (!schemaHeader) {
-      return `${body}\n`;
+      return `${warningBlock}${body}\n`;
     }
 
-    return `-- semola-schema:${JSON.stringify(schemaHeader)}\n\n${body}\n`;
+    return `-- semola-schema:${JSON.stringify(schemaHeader)}\n\n${warningBlock}${body}\n`;
   }
 
   protected shouldRecreate(_tableOps: MigrationOp[]) {
@@ -80,11 +160,15 @@ export abstract class MigrationDialect {
     return `CHECK (${quoteIdentifier(column.name)} IN (${list}))`;
   }
 
-  private renderColumnDef(column: ColumnSnapshot, forCreateTable: boolean) {
+  private renderColumnDef(
+    table: string,
+    column: ColumnSnapshot,
+    forCreateTable: boolean,
+  ) {
     const parts: string[] = [this.sqlTypeFor(column)];
 
     if (column.isPrimaryKey && forCreateTable) {
-      parts.push("PRIMARY KEY");
+      parts.push(`CONSTRAINT ${quoteIdentifier(`${table}_pkey`)} PRIMARY KEY`);
     }
 
     if (!column.isNullable) {
@@ -92,22 +176,27 @@ export abstract class MigrationDialect {
     }
 
     if (column.isUnique && !column.isPrimaryKey) {
-      parts.push("UNIQUE");
+      parts.push(
+        `CONSTRAINT ${quoteIdentifier(`${table}_${column.name}_key`)} UNIQUE`,
+      );
     }
 
     if (column.dbDefault !== undefined) {
+      assertDbDefault(column.dbDefault, `${table}.${column.name}`);
       parts.push(`DEFAULT ${column.dbDefault}`);
     }
 
     const check = this.enumCheckSql(column);
 
     if (check) {
-      parts.push(check);
+      parts.push(
+        `CONSTRAINT ${quoteIdentifier(`${table}_${column.name}_check`)} ${check}`,
+      );
     }
 
     if (column.references) {
       parts.push(
-        `REFERENCES ${quoteIdentifier(column.references.table)} (${quoteIdentifier(column.references.column)})`,
+        `CONSTRAINT ${quoteIdentifier(`${table}_${column.name}_fkey`)} REFERENCES ${quoteIdentifier(column.references.table)} (${quoteIdentifier(column.references.column)})`,
       );
     }
 
@@ -116,7 +205,7 @@ export abstract class MigrationDialect {
 
   private renderCreateTable(table: TableSnapshot) {
     const lines = Object.values(table.columns).map((column) => {
-      return `    ${this.renderColumnDef(column, true)}`;
+      return `    ${this.renderColumnDef(table.name, column, true)}`;
     });
 
     return `CREATE TABLE ${quoteIdentifier(table.name)} (\n${lines.join(",\n")}\n);`;
@@ -127,7 +216,7 @@ export abstract class MigrationDialect {
   }
 
   private renderAddColumn(table: string, column: ColumnSnapshot) {
-    return `ALTER TABLE ${quoteIdentifier(table)} ADD COLUMN ${this.renderColumnDef(column, false)};`;
+    return `ALTER TABLE ${quoteIdentifier(table)} ADD COLUMN ${this.renderColumnDef(table, column, false)};`;
   }
 
   private renderDropColumn(table: string, column: ColumnSnapshot) {

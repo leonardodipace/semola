@@ -15,7 +15,7 @@ export const getMigrationDialect = (adapter: Adapter): MigrationDialect => {
     case "postgres":
       return new PostgresMigrationDialect();
     default:
-      throw new Error(`Unsupported adapter: ${adapter}`);
+      throw new MigrationError(`Unsupported adapter: ${adapter}`);
   }
 };
 

@@ -1,4 +1,5 @@
 import type { Column } from "../column/types.js";
+import { MigrationError } from "../errors.js";
 import type { Table } from "../table/types.js";
 import type { ColumnSnapshot, SchemaSnapshot, TableSnapshot } from "./types.js";
 
@@ -22,6 +23,7 @@ const findReferencedColumn = (
 
 const snapshotColumn = (
   column: Column,
+  tableName: string,
   tables: Record<string, Table>,
 ): ColumnSnapshot => {
   const snapshot: ColumnSnapshot = {
@@ -49,9 +51,13 @@ const snapshotColumn = (
   if (getReferenced) {
     const referenced = findReferencedColumn(tables, getReferenced());
 
-    if (referenced) {
-      snapshot.references = referenced;
+    if (!referenced) {
+      throw new MigrationError(
+        `Column ${tableName}.${column.sqlName} references a column that is not in createOrm({ tables })`,
+      );
     }
+
+    snapshot.references = referenced;
   }
 
   return snapshot;
@@ -64,7 +70,7 @@ const snapshotTable = (
   const columns: Record<string, ColumnSnapshot> = {};
 
   for (const column of Object.values(table.columns)) {
-    columns[column.sqlName] = snapshotColumn(column, tables);
+    columns[column.sqlName] = snapshotColumn(column, table.sqlName, tables);
   }
 
   return {

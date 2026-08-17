@@ -223,5 +223,139 @@ export default defineConfig({
     await expect(applyMigrations(config)).rejects.toThrow(
       "missing a schema header",
     );
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: project.users },
+    });
+    const tables = [
+      ...(await db.$raw.unsafe(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'`,
+      )),
+    ];
+
+    expect(tables).toHaveLength(0);
+
+    await db.$raw.close();
+  });
+
+  test("applies defaults that contain semicolons", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const nextUsers = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+      email: string("email").notNull().unique(),
+      note: string("note").notNull().dbDefault("'a;b'"),
+    });
+    const nextConfig = {
+      ...config,
+      orm: {
+        ...config.orm,
+        tables: { users: nextUsers },
+      },
+    };
+
+    await createMigration({ name: "note_default", config: nextConfig });
+    await applyMigrations(nextConfig);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: nextUsers },
+    });
+
+    await db.$raw.unsafe(
+      `INSERT INTO users (id, name, email) VALUES ('1', 'Ada', 'ada@example.com')`,
+    );
+
+    const user = await db.users.findFirst({
+      where: { email: "ada@example.com" },
+    });
+
+    expect(user?.note).toBe("a;b");
+
+    await db.$raw.close();
+  });
+
+  test("applies defaults with escaped quotes and comment semicolons", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const nextUsers = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+      email: string("email").notNull().unique(),
+      note: string("note").notNull().dbDefault("'it''s'"),
+    });
+    const nextConfig = {
+      ...config,
+      orm: {
+        ...config.orm,
+        tables: { users: nextUsers },
+      },
+    };
+    const folder = await createMigration({
+      name: "escaped_quote",
+      config: nextConfig,
+    });
+    const upPath = join(project.migrationsDir, folder, "up.sql");
+    const up = await Bun.file(upPath).text();
+
+    await writeFile(upPath, up.replace("\n\n", "\n-- keep ; in comments\n\n"));
+    await applyMigrations(nextConfig);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: nextUsers },
+    });
+
+    await db.$raw.unsafe(
+      `INSERT INTO users (id, name, email) VALUES ('1', 'Ada', 'ada@example.com')`,
+    );
+
+    const user = await db.users.findFirst({
+      where: { email: "ada@example.com" },
+    });
+
+    expect(user?.note).toBe("it's");
+
+    await db.$raw.close();
+  });
+
+  test("rejects apply when history does not match files", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+    await mkdir(join(project.migrationsDir, "00000000000000_gap"));
+
+    await expect(applyMigrations(config)).rejects.toThrow(
+      "does not match files",
+    );
+  });
+
+  test("rejects apply when up.sql is missing", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+    const folder = await createMigration({ name: "first", config });
+
+    await rm(join(project.migrationsDir, folder, "up.sql"));
+
+    await expect(applyMigrations(config)).rejects.toThrow("Could not read");
   });
 });

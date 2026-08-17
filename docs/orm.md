@@ -49,11 +49,20 @@ bunx semola orm migrations apply
 bunx semola orm migrations rollback
 ```
 
-`create` diffs the current ORM tables against the latest applied schema stored in `_semola_migrations`, then writes `{timestamp}_{name}/up.sql` and `down.sql`. Apply pending migrations before creating another. `apply` runs pending ups in order; `rollback` runs only the last down. Each `up.sql` starts with a `-- semola-schema:` header; `apply` refuses files that omit it.
+`create` diffs the current ORM tables against the latest applied schema stored in `_semola_migrations`, then writes `{timestamp}_{name}/up.sql` and `down.sql`. Apply pending migrations before creating another. `apply` runs pending ups in order; `rollback` runs only the last down. Each `up.sql` starts with a `-- semola-schema:` header; `apply` refuses files that omit it (before running SQL). Applied rows in `_semola_migrations` must match the leading folders on disk - a gap or extra applied row fails.
 
-SQL defaults use `.dbDefault("...")` (emitted as `DEFAULT ...`). `.default(fn)` stays application-side only. SQLite cannot `ADD COLUMN ... NOT NULL` without a default - use `.dbDefault(...)` or a nullable column. Other SQLite column changes rebuild the table and `INSERT` shared columns so existing rows survive. Renames are drop + add.
+SQL defaults use `.dbDefault("'anon'")` (raw SQL, so strings need quotes). `.default(fn)` stays application-side only. Adding a `NOT NULL` column requires `.dbDefault(...)` or a nullable column. Other SQLite column changes rebuild the table and `INSERT` shared columns so existing rows survive. Renames are drop + add (a warning is written into the SQL).
 
-Dialects differ (SQLite vs Postgres types). History and schema snapshots live in `_semola_migrations`, not JSON files in the migrations folder.
+Dialects differ (SQLite vs Postgres types). History and schema snapshots live in `_semola_migrations`, not JSON files in the migrations folder. SQLite connections enable `PRAGMA foreign_keys = ON` on the first ORM query.
+
+You can also apply from app code:
+
+```typescript
+import { applyMigrations, loadConfig } from "semola/orm";
+
+const config = await loadConfig();
+await applyMigrations(config);
+```
 
 ## Import
 
@@ -67,6 +76,8 @@ import {
   boolean,
   one,
   many,
+  applyMigrations,
+  loadConfig,
 } from "semola/orm";
 ```
 
@@ -106,7 +117,7 @@ const user = await db.users.findFirst({
 
 `string`, `number`, `boolean`, `uuid`, `date`, `json`, `jsonb`, `enumType`.
 
-Chain `.primaryKey()`, `.notNull()`, `.nullable()`, `.unique()`, `.default(fn)`, `.dbDefault("sql")`, `.references(() => other.columns.col)`. Columns start nullable until you mark otherwise. `.default(fn)` fills values in the app; `.dbDefault("sql")` is for migration DDL only.
+Chain `.primaryKey()`, `.notNull()`, `.nullable()`, `.unique()`, `.default(fn)`, `.dbDefault("'user'")`, `.references(() => other.columns.col)`. Columns start nullable until you mark otherwise. `.default(fn)` fills values in the app; `.dbDefault("sql")` is raw SQL for migration DDL (`"'user'"`, `0`, `now()`). `.references()` targets must be tables passed to `createOrm({ tables })`.
 
 ### Relations
 

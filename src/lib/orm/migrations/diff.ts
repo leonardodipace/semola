@@ -1,4 +1,5 @@
 import type { Adapter } from "../dialect/types.js";
+import { MigrationError } from "../errors.js";
 import { getMigrationDialect } from "./sql.js";
 import type {
   ColumnSnapshot,
@@ -9,6 +10,15 @@ import type {
 
 const columnsEqual = (a: ColumnSnapshot, b: ColumnSnapshot) => {
   return JSON.stringify(a) === JSON.stringify(b);
+};
+
+const assertAddableColumn = (table: string, column: ColumnSnapshot) => {
+  if (column.isNullable) return;
+  if (column.dbDefault !== undefined) return;
+
+  throw new MigrationError(
+    `Cannot add NOT NULL column ${table}.${column.name} without .dbDefault(...)`,
+  );
 };
 
 const diffTable = (
@@ -25,6 +35,7 @@ const diffTable = (
     if (!next) continue;
 
     if (!prev) {
+      assertAddableColumn(name, next);
       tableOps.push({ kind: "addColumn", table: name, column: next });
       continue;
     }

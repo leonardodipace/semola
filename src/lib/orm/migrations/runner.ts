@@ -81,7 +81,7 @@ export const loadConfig = async (
 
   const config = (mod.default ?? mod) as SemolaConfig;
 
-  if (!config?.orm?.schema) {
+  if (!config.orm?.schema) {
     throw new MigrationError(
       "semola.config.ts must default-export defineConfig({ orm: { schema } })",
     );
@@ -140,6 +140,34 @@ const listMigrationDirs = async (migrationsDir: string) => {
     .sort();
 };
 
+const assertHistoryMatchesFiles = (
+  dirs: string[],
+  applied: Array<{ name: string }>,
+) => {
+  for (let index = 0; index < applied.length; index++) {
+    const expected = dirs[index];
+    const actual = applied[index]?.name;
+
+    if (expected === actual) continue;
+
+    if (!actual) {
+      throw new MigrationError(
+        `Migration history is missing ${expected} (files and _semola_migrations are out of order)`,
+      );
+    }
+
+    if (!expected) {
+      throw new MigrationError(
+        `Applied migration ${actual} is missing from the migrations directory`,
+      );
+    }
+
+    throw new MigrationError(
+      `Migration history does not match files: expected ${expected} at position ${index}, found ${actual}`,
+    );
+  }
+};
+
 const readApplied = async (sql: Bun.SQL) => {
   await ensureHistoryTable(sql);
 
@@ -185,7 +213,23 @@ const timestamp = () => {
     pad(now.getUTCHours()),
     pad(now.getUTCMinutes()),
     pad(now.getUTCSeconds()),
+    String(now.getUTCMilliseconds()).padStart(3, "0"),
   ].join("");
+};
+
+const loadHistory = async (sql: Bun.SQL, migrationsDir: string) => {
+  const applied = await readApplied(sql);
+  const dirs = await listMigrationDirs(migrationsDir);
+
+  assertHistoryMatchesFiles(dirs, applied);
+
+  return { applied, dirs };
+};
+
+const pendingDirs = (applied: Array<{ name: string }>, dirs: string[]) => {
+  const appliedNames = new Set(applied.map((row) => row.name));
+
+  return dirs.filter((dir) => !appliedNames.has(dir));
 };
 
 export const createMigration = async (input: {
@@ -195,10 +239,8 @@ export const createMigration = async (input: {
   const { name, config } = input;
 
   return withConnection(config, async (sql, dialect) => {
-    const applied = await readApplied(sql);
-    const dirs = await listMigrationDirs(config.migrationsDir);
-    const appliedNames = new Set(applied.map((row) => row.name));
-    const pending = dirs.filter((dir) => !appliedNames.has(dir));
+    const { applied, dirs } = await loadHistory(sql, config.migrationsDir);
+    const pending = pendingDirs(applied, dirs);
 
     if (pending.length > 0) {
       throw new MigrationError(
@@ -227,29 +269,130 @@ export const createMigration = async (input: {
   });
 };
 
+const closeQuote = (text: string, start: number, quote: string) => {
+  for (let index = start + 1; index < text.length; index++) {
+    if (text[index] !== quote) continue;
+    if (text[index + 1] === quote) {
+      index += 1;
+      continue;
+    }
+
+    return index;
+  }
+
+  return text.length - 1;
+};
+
+const takeUntil = (text: string, start: number, end: number) => {
+  return {
+    chunk: text.slice(start, end + 1),
+    next: end,
+  };
+};
+
+const takeQuoted = (text: string, start: number) => {
+  return takeUntil(text, start, closeQuote(text, start, text[start] ?? ""));
+};
+
+const takeLineComment = (text: string, start: number) => {
+  const newline = text.indexOf("\n", start);
+  const end = newline === -1 ? text.length : newline;
+
+  return takeUntil(text, start, end - 1);
+};
+
+const isSqlStatement = (text: string) => {
+  return (
+    text
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("--"))
+      .join("\n")
+      .trim().length > 0
+  );
+};
+
+const takeSpecial = (source: string, index: number) => {
+  const char = source[index] ?? "";
+  const next = source[index + 1] ?? "";
+
+  if (char === "'" || char === '"') {
+    return takeQuoted(source, index);
+  }
+
+  if (char === "-" && next === "-") {
+    return takeLineComment(source, index);
+  }
+
+  return undefined;
+};
+
+const flushStatement = (current: string, statements: string[]) => {
+  const trimmed = current.trim();
+
+  if (!trimmed) return "";
+  if (!isSqlStatement(trimmed)) return "";
+
+  statements.push(trimmed);
+
+  return "";
+};
+
 const splitStatements = (sqlText: string) => {
-  const withoutHeader = sqlText.startsWith("-- semola-schema:")
+  const source = sqlText.startsWith("-- semola-schema:")
     ? sqlText.slice(sqlText.indexOf("\n") + 1)
     : sqlText;
 
-  return withoutHeader
-    .split(";")
-    .map((part) => part.trim())
-    .filter((part) => {
-      if (!part) return false;
+  const statements: string[] = [];
+  let current = "";
 
-      const withoutComments = part
-        .split("\n")
-        .filter((line) => !line.trim().startsWith("--"))
-        .join("\n")
-        .trim();
+  for (let index = 0; index < source.length; index++) {
+    const taken = takeSpecial(source, index);
 
-      return withoutComments.length > 0;
-    });
+    if (taken) {
+      current += taken.chunk;
+      index = taken.next;
+      continue;
+    }
+
+    if (source[index] === ";") {
+      current = flushStatement(current, statements);
+      continue;
+    }
+
+    current += source[index] ?? "";
+  }
+
+  flushStatement(current, statements);
+
+  return statements;
 };
 
-const runSqlFile = async (sql: Bun.SQL, filePath: string) => {
-  const text = await readFile(filePath, "utf8");
+const readSqlFile = async (filePath: string, label: string) => {
+  const [error, text] = await mightThrow(readFile(filePath, "utf8"));
+
+  if (error) {
+    throw new MigrationError(`Could not read ${label}: ${error.message}`);
+  }
+
+  return text;
+};
+
+const runSqlFile = async (
+  sql: Bun.SQL,
+  filePath: string,
+  label: string,
+  requireHeader: boolean,
+) => {
+  const text = await readSqlFile(filePath, label);
+
+  if (requireHeader) {
+    const headerSchema = decodeSchemaHeader(text);
+
+    if (!headerSchema) {
+      throw new MigrationError(`${label} is missing a schema header`);
+    }
+  }
+
   const statements = splitStatements(text);
 
   for (const statement of statements) {
@@ -261,10 +404,8 @@ const runSqlFile = async (sql: Bun.SQL, filePath: string) => {
 
 export const applyMigrations = async (config: LoadedConfig) => {
   return withConnection(config, async (sql, dialect) => {
-    const applied = await readApplied(sql);
-    const appliedNames = new Set(applied.map((row) => row.name));
-    const dirs = await listMigrationDirs(config.migrationsDir);
-    const pending = dirs.filter((dir) => !appliedNames.has(dir));
+    const { applied, dirs } = await loadHistory(sql, config.migrationsDir);
+    const pending = pendingDirs(applied, dirs);
 
     if (pending.length === 0) {
       return [];
@@ -277,7 +418,7 @@ export const applyMigrations = async (config: LoadedConfig) => {
       const upPath = join(config.migrationsDir, name, "up.sql");
 
       await sql.begin(async (tx) => {
-        const upText = await runSqlFile(tx, upPath);
+        const upText = await runSqlFile(tx, upPath, `Migration ${name}`, true);
         const headerSchema = decodeSchemaHeader(upText);
 
         if (!headerSchema) {
@@ -301,7 +442,7 @@ export const applyMigrations = async (config: LoadedConfig) => {
 
 export const rollbackMigration = async (config: LoadedConfig) => {
   return withConnection(config, async (sql, dialect) => {
-    const applied = await readApplied(sql);
+    const { applied } = await loadHistory(sql, config.migrationsDir);
     const last = applied[applied.length - 1];
 
     if (!last) {
@@ -312,7 +453,7 @@ export const rollbackMigration = async (config: LoadedConfig) => {
     const deletePh = dialect.placeholders(1);
 
     await sql.begin(async (tx) => {
-      await runSqlFile(tx, downPath);
+      await runSqlFile(tx, downPath, `Migration ${last.name} down.sql`, false);
       await tx.unsafe(`DELETE FROM ${HISTORY_TABLE} WHERE name = ${deletePh}`, [
         last.name,
       ]);

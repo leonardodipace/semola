@@ -1,5 +1,5 @@
 export type SemolaConfig = {
-  orm: {
+  orm?: {
     schema: string;
     migrationsDir?: string;
   };

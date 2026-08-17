@@ -35,7 +35,9 @@ export class PostgresMigrationDialect extends MigrationDialect {
     };
 
     if (from.type !== to.type || from.sqlType !== to.sqlType) {
-      alterColumn(`TYPE ${this.sqlTypeFor(to)}`);
+      const sqlType = this.sqlTypeFor(to);
+
+      alterColumn(`TYPE ${sqlType} USING CAST(${columnId} AS ${sqlType})`);
     }
 
     if (from.isNullable !== to.isNullable) {

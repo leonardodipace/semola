@@ -1364,10 +1364,6 @@ describe("many to many relation", () => {
       },
     });
 
-    // Define tables and releations
-
-    await orm.$raw`PRAGMA foreign_keys = ON;`;
-    await orm.$raw`PRAGMA foreign_keys;`;
     await orm.$raw`
         CREATE TABLE students (
             id TEXT PRIMARY KEY NOT NULL,
@@ -1441,6 +1437,12 @@ describe("many to many relation", () => {
         { examId: "E3", studentId: "S3" },
       ],
     });
+
+    await expect(
+      orm.studentsToExams.create({
+        data: { examId: "E1", studentId: "missing" },
+      }),
+    ).rejects.toThrow();
 
     // Read data
 
