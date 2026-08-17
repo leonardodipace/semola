@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { string, uuid } from "../column/index.js";
 import { MigrationError } from "../errors.js";
 import { createOrm } from "../orm/index.js";
@@ -26,6 +26,7 @@ describe("orm migrations runner", () => {
   const setupProject = async (dbPath: string) => {
     const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
     dirs.push(root);
+    dirs.push(dirname(dbPath));
 
     const users = defineTable("users", {
       id: uuid("id").primaryKey().notNull(),

@@ -1,9 +1,10 @@
+import type { Column } from "../column/types.js";
 import type { Adapter } from "../dialect/types.js";
 import type { Table } from "../table/types.js";
 
 export type ColumnSnapshot = {
   name: string;
-  type: string;
+  type: Column["type"];
   sqlType?: "uuid";
   isNullable: boolean;
   isPrimaryKey: boolean;

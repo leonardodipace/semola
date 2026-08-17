@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { mightThrow } from "../../errors/index.js";
 import {
   boolean,
   date,
@@ -152,7 +153,24 @@ describe("relation helpers", () => {
     expect(typeof orm.users.findUnique).toBe("function");
     expect(orm.$raw).toBeDefined();
     expect(orm.$config.adapter).toBe("sqlite");
+    expect(orm.$config.url).toBe(":memory:");
     expect(orm.$config.tables.users).toBe(usersTable);
+
+    await orm.$raw.close();
+  });
+
+  test("redacts credentials from the public $config url", async () => {
+    const orm = createOrm({
+      adapter: "postgres",
+      url: "postgres://user:secret@localhost:5432/app",
+      tables: {
+        users: usersTable,
+      },
+    });
+
+    expect(orm.$config.url).not.toContain("secret");
+    expect(orm.$config.url).not.toContain("user");
+    expect(orm.$config.url).toContain("localhost");
 
     await orm.$raw.close();
   });
@@ -181,13 +199,15 @@ describe("relation helpers", () => {
       );
     `;
 
-    await expect(
+    const [error] = await mightThrow(
       orm.$transaction(async (tx) => {
         await tx.posts.create({
           data: { id: "p1", authorId: "missing" },
         });
       }),
-    ).rejects.toThrow();
+    );
+
+    expect(error).toBeTruthy();
 
     await orm.$raw.close();
   });
@@ -469,6 +489,38 @@ describe("relation helpers", () => {
       id: "user-1",
       name: "John",
       email: "john@example.com",
+    });
+
+    await orm.$raw.close();
+  });
+
+  test("create omits unspecified dbDefault columns and persists decimal numbers", async () => {
+    const table = defineTable("items", {
+      id: number("id").primaryKey().notNull(),
+      name: string("name").notNull().dbDefault("anon"),
+      price: number("price").notNull(),
+    });
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { items: table },
+    });
+
+    await orm.$raw.unsafe(
+      "CREATE TABLE items (id INTEGER PRIMARY KEY NOT NULL, name TEXT NOT NULL DEFAULT 'anon', price REAL NOT NULL)",
+    );
+
+    const created = await orm.items.create({
+      data: {
+        id: 1,
+        price: 1.5,
+      },
+    });
+
+    expect(created).toEqual({
+      id: 1,
+      name: "anon",
+      price: 1.5,
     });
 
     await orm.$raw.close();
@@ -1473,11 +1525,13 @@ describe("many to many relation", () => {
       ],
     });
 
-    await expect(
+    const [error] = await mightThrow(
       orm.studentsToExams.create({
         data: { examId: "E1", studentId: "missing" },
       }),
-    ).rejects.toThrow();
+    );
+
+    expect(error).toBeTruthy();
 
     // Read data
 

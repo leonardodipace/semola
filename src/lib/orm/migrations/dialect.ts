@@ -80,7 +80,7 @@ const dataLossWarnings = (ops: MigrationOp[]) => {
 
 export abstract class MigrationDialect {
   public abstract readonly name: "sqlite" | "postgres";
-  protected abstract readonly sqlTypes: Record<string, string>;
+  protected abstract readonly sqlTypes: Record<ColumnSnapshot["type"], string>;
   protected abstract readonly uuidType: string;
 
   public abstract formatPlaceholder(index: number): string;
@@ -88,6 +88,12 @@ export abstract class MigrationDialect {
   public async prepareConnection(_sql: Bun.SQL) {}
 
   public async assertForeignKeys(_sql: Bun.SQL) {}
+
+  public async lockMigrations(_sql: Bun.SQL) {}
+
+  public beginMigration<T>(sql: Bun.SQL, fn: (tx: Bun.SQL) => Promise<T>) {
+    return sql.begin(fn);
+  }
 
   public placeholders(count: number) {
     return Array.from({ length: count }, (_, index) => {
@@ -100,7 +106,7 @@ export abstract class MigrationDialect {
       return this.uuidType;
     }
 
-    return this.sqlTypes[column.type] ?? "TEXT";
+    return this.sqlTypes[column.type];
   }
 
   public foldTableOps(
@@ -142,7 +148,7 @@ export abstract class MigrationDialect {
     table: string,
     _from: ColumnSnapshot,
     to: ColumnSnapshot,
-  ) {
+  ): string {
     throw new MigrationError(
       `${this.name} cannot ALTER COLUMN ${table}.${to.name}`,
     );
@@ -158,11 +164,19 @@ export abstract class MigrationDialect {
     return `CHECK (${quoteIdentifier(column.name)} IN (${list}))`;
   }
 
-  private renderColumnDef(table: string, column: ColumnSnapshot) {
+  private renderColumnDef(
+    table: string,
+    column: ColumnSnapshot,
+    inlinePrimaryKey = true,
+  ) {
     const parts: string[] = [this.sqlTypeFor(column)];
 
     if (column.isPrimaryKey) {
-      parts.push(`CONSTRAINT ${quoteIdentifier(`${table}_pkey`)} PRIMARY KEY`);
+      if (inlinePrimaryKey) {
+        parts.push(
+          `CONSTRAINT ${quoteIdentifier(`${table}_pkey`)} PRIMARY KEY`,
+        );
+      }
     }
 
     if (!column.isNullable) {
@@ -197,9 +211,23 @@ export abstract class MigrationDialect {
   }
 
   private renderCreateTable(table: TableSnapshot) {
-    const lines = Object.values(table.columns).map((column) => {
-      return `    ${this.renderColumnDef(table.name, column)}`;
+    const pkColumns = Object.values(table.columns).filter((column) => {
+      return column.isPrimaryKey;
     });
+    const compositePk = pkColumns.length > 1;
+    const lines = Object.values(table.columns).map((column) => {
+      return `    ${this.renderColumnDef(table.name, column, !compositePk)}`;
+    });
+
+    if (compositePk) {
+      const cols = pkColumns
+        .map((column) => quoteIdentifier(column.name))
+        .join(", ");
+
+      lines.push(
+        `    CONSTRAINT ${quoteIdentifier(`${table.name}_pkey`)} PRIMARY KEY (${cols})`,
+      );
+    }
 
     return `CREATE TABLE ${quoteIdentifier(table.name)} (\n${lines.join(",\n")}\n);`;
   }
@@ -236,7 +264,7 @@ export abstract class MigrationDialect {
     return lines.join("\n");
   }
 
-  private renderOp(op: MigrationOp) {
+  private renderOp(op: MigrationOp): string {
     switch (op.kind) {
       case "createTable":
         return this.renderCreateTable(op.table);

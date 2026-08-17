@@ -17,9 +17,8 @@ import { includeBuilder } from "./include-builder.js";
 import { PlaceholderGenerator } from "./placeholder.js";
 import { selectClauseBuilder } from "./select-clause.js";
 import {
+  bindCreateValue,
   buildSetClauses,
-  resolveCreateValue,
-  serializeColumnValue,
   validateFindUniqueWhere,
 } from "./sql-helpers.js";
 import type {
@@ -123,11 +122,10 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
     const params: unknown[] = [];
 
     for (const [jsKey, column] of Object.entries(this.table.columns)) {
-      const value = resolveCreateValue(column, provided.get(jsKey));
-
       sqlNames.push(quoteIdentifier(column.sqlName));
-      valuePlaceholders.push(nextPlaceholder());
-      params.push(serializeColumnValue(column, value));
+      valuePlaceholders.push(
+        bindCreateValue(column, provided.get(jsKey), nextPlaceholder, params),
+      );
     }
 
     const columns = selectClauseBuilder.buildColumns(
@@ -223,9 +221,9 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
       const placeholdersForRow: string[] = [];
 
       for (const [jsKey, column] of columnEntries) {
-        const value = resolveCreateValue(column, rowRecord[jsKey]);
-        placeholdersForRow.push(nextPlaceholder());
-        params.push(serializeColumnValue(column, value));
+        placeholdersForRow.push(
+          bindCreateValue(column, rowRecord[jsKey], nextPlaceholder, params),
+        );
       }
 
       rowPlaceholders.push(`(${placeholdersForRow.join(", ")})`);

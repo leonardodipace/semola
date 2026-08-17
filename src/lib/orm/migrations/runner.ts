@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import type { SemolaConfig } from "../../config.js";
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
 import { MigrationError } from "../errors.js";
+import { getOrmConnectionUrl } from "../orm/orm.js";
 import type { Table } from "../table/types.js";
 import type { MigrationDialect } from "./dialect.js";
 import { diffSchemas } from "./diff.js";
@@ -99,16 +100,18 @@ export const loadConfig = async (
   }
 
   const client = resolveOrmFromModule(schemaMod as Record<string, unknown>);
+  const result = {
+    schemaPath,
+    migrationsDir: resolve(cwd, config.orm.migrationsDir ?? "migrations"),
+    orm: {
+      ...client.$config,
+      url: getOrmConnectionUrl(client) ?? client.$config.url,
+    },
+  };
 
-  try {
-    return {
-      schemaPath,
-      migrationsDir: resolve(cwd, config.orm.migrationsDir ?? "migrations"),
-      orm: client.$config,
-    };
-  } finally {
-    await client.$raw.close();
-  }
+  await client.$raw.close();
+
+  return result;
 };
 
 const ensureHistoryTable = async (sql: Bun.SQL) => {
@@ -437,10 +440,9 @@ const runSqlFile = async (
   requireHeader: boolean,
 ) => {
   const text = await readSqlFile(filePath, label);
+  const headerSchema = decodeSchemaHeader(text);
 
   if (requireHeader) {
-    const headerSchema = decodeSchemaHeader(text);
-
     if (!headerSchema) {
       throw new MigrationError(`${label} is missing a schema header`);
     }
@@ -452,7 +454,7 @@ const runSqlFile = async (
     await sql.unsafe(statement);
   }
 
-  return text;
+  return { text, headerSchema };
 };
 
 export const applyMigrations = async (config: LoadedConfig) => {
@@ -470,15 +472,15 @@ export const applyMigrations = async (config: LoadedConfig) => {
     for (const name of pending) {
       const upPath = join(config.migrationsDir, name, "up.sql");
 
-      await sql.begin(async (tx) => {
-        const upText = await runSqlFile(tx, upPath, `Migration ${name}`, true);
-        const headerSchema = decodeSchemaHeader(upText);
+      await dialect.beginMigration(sql, async (tx) => {
+        await dialect.lockMigrations(tx);
 
-        if (!headerSchema) {
-          throw new MigrationError(
-            `Migration ${name} is missing a schema header`,
-          );
-        }
+        const { headerSchema } = await runSqlFile(
+          tx,
+          upPath,
+          `Migration ${name}`,
+          true,
+        );
 
         await dialect.assertForeignKeys(tx);
 
@@ -507,7 +509,8 @@ export const rollbackMigration = async (config: LoadedConfig) => {
     const downPath = join(config.migrationsDir, last.name, "down.sql");
     const deletePh = dialect.placeholders(1);
 
-    await sql.begin(async (tx) => {
+    await dialect.beginMigration(sql, async (tx) => {
+      await dialect.lockMigrations(tx);
       await runSqlFile(tx, downPath, `Migration ${last.name} down.sql`, false);
       await dialect.assertForeignKeys(tx);
       await tx.unsafe(`DELETE FROM ${HISTORY_TABLE} WHERE name = ${deletePh}`, [

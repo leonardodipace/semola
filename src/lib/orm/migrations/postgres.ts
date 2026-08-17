@@ -20,6 +20,12 @@ export class PostgresMigrationDialect extends MigrationDialect {
     return POSTGRES_SPEC.formatPlaceholder(index);
   }
 
+  public override async lockMigrations(sql: Bun.SQL) {
+    await sql.unsafe(
+      "SELECT pg_advisory_xact_lock(hashtext('_semola_migrations'))",
+    );
+  }
+
   protected override renderAlterColumn(
     table: string,
     from: ColumnSnapshot,
@@ -33,8 +39,19 @@ export class PostgresMigrationDialect extends MigrationDialect {
         `ALTER TABLE ${tableId} ALTER COLUMN ${columnId} ${action};`,
       );
     };
+    const typeChanged = from.type !== to.type || from.sqlType !== to.sqlType;
 
-    if (from.type !== to.type || from.sqlType !== to.sqlType) {
+    if (typeChanged) {
+      if (from.dbDefault !== undefined) {
+        alterColumn("DROP DEFAULT");
+      }
+
+      if (from.enumValues?.length) {
+        statements.push(
+          `ALTER TABLE ${tableId} DROP CONSTRAINT ${quoteIdentifier(`${table}_${from.name}_check`)};`,
+        );
+      }
+
       const sqlType = this.sqlTypeFor(to);
 
       alterColumn(`TYPE ${sqlType} USING CAST(${columnId} AS ${sqlType})`);
@@ -50,7 +67,11 @@ export class PostgresMigrationDialect extends MigrationDialect {
       alterColumn(to.isNullable ? "DROP NOT NULL" : "SET NOT NULL");
     }
 
-    if (from.dbDefault !== to.dbDefault) {
+    if (typeChanged) {
+      if (to.dbDefault !== undefined) {
+        alterColumn(`SET DEFAULT ${to.dbDefault}`);
+      }
+    } else if (from.dbDefault !== to.dbDefault) {
       if (to.dbDefault === undefined) {
         alterColumn("DROP DEFAULT");
       } else {
@@ -90,7 +111,9 @@ export class PostgresMigrationDialect extends MigrationDialect {
     if (fromUnique === toUnique) return;
 
     if (toUnique) {
-      statements.push(`ALTER TABLE ${tableId} ADD UNIQUE (${columnId});`);
+      statements.push(
+        `ALTER TABLE ${tableId} ADD CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_key`)} UNIQUE (${columnId});`,
+      );
       return;
     }
 
@@ -110,7 +133,9 @@ export class PostgresMigrationDialect extends MigrationDialect {
     if (from.isPrimaryKey === to.isPrimaryKey) return;
 
     if (to.isPrimaryKey) {
-      statements.push(`ALTER TABLE ${tableId} ADD PRIMARY KEY (${columnId});`);
+      statements.push(
+        `ALTER TABLE ${tableId} ADD CONSTRAINT ${quoteIdentifier(`${table}_pkey`)} PRIMARY KEY (${columnId});`,
+      );
       return;
     }
 
@@ -137,7 +162,7 @@ export class PostgresMigrationDialect extends MigrationDialect {
 
     if (to.references) {
       statements.push(
-        `ALTER TABLE ${tableId} ADD FOREIGN KEY (${columnId}) REFERENCES ${quoteIdentifier(to.references.table)} (${quoteIdentifier(to.references.column)});`,
+        `ALTER TABLE ${tableId} ADD CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_fkey`)} FOREIGN KEY (${columnId}) REFERENCES ${quoteIdentifier(to.references.table)} (${quoteIdentifier(to.references.column)});`,
       );
     }
   }
@@ -149,14 +174,20 @@ export class PostgresMigrationDialect extends MigrationDialect {
     from: ColumnSnapshot,
     to: ColumnSnapshot,
   ) {
-    if (this.jsonEqual(from.enumValues, to.enumValues)) return;
+    const typeChanged = from.type !== to.type || from.sqlType !== to.sqlType;
+    const enumChanged = !this.jsonEqual(from.enumValues, to.enumValues);
 
-    const checkName = quoteIdentifier(`${table}_${to.name}_check`);
+    if (!typeChanged) {
+      if (!enumChanged) return;
 
-    if (from.enumValues?.length) {
-      statements.push(`ALTER TABLE ${tableId} DROP CONSTRAINT ${checkName};`);
+      if (from.enumValues?.length) {
+        statements.push(
+          `ALTER TABLE ${tableId} DROP CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_check`)};`,
+        );
+      }
     }
 
+    const checkName = quoteIdentifier(`${table}_${to.name}_check`);
     const check = this.enumCheckSql(to);
 
     if (check) {

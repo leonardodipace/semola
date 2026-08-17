@@ -9,7 +9,27 @@ import type {
 } from "./types.js";
 
 const columnsEqual = (a: ColumnSnapshot, b: ColumnSnapshot) => {
-  return JSON.stringify(a) === JSON.stringify(b);
+  if (a.name !== b.name) return false;
+  if (a.type !== b.type) return false;
+  if (a.sqlType !== b.sqlType) return false;
+  if (a.isNullable !== b.isNullable) return false;
+  if (a.isPrimaryKey !== b.isPrimaryKey) return false;
+  if (a.isUnique !== b.isUnique) return false;
+  if (a.dbDefault !== b.dbDefault) return false;
+  if (a.enumValues?.length !== b.enumValues?.length) return false;
+
+  if (a.enumValues) {
+    if (b.enumValues) {
+      for (let index = 0; index < a.enumValues.length; index++) {
+        if (a.enumValues[index] !== b.enumValues[index]) return false;
+      }
+    }
+  }
+
+  if (a.references?.table !== b.references?.table) return false;
+  if (a.references?.column !== b.references?.column) return false;
+
+  return true;
 };
 
 const assertAddableColumn = (table: string, column: ColumnSnapshot) => {
@@ -26,7 +46,7 @@ const diffTable = (
   fromTable: TableSnapshot,
   toTable: TableSnapshot,
   strictAddColumn: boolean,
-): MigrationOp[] => {
+) => {
   const tableOps: MigrationOp[] = [];
 
   for (const columnName of Object.keys(toTable.columns)) {
@@ -106,7 +126,7 @@ export const diffSchemas = (
   to: SchemaSnapshot,
   adapter: Adapter,
   options?: { strictAddColumn?: boolean },
-): MigrationOp[] => {
+) => {
   const dialect = getMigrationDialect(adapter);
   const strictAddColumn = options?.strictAddColumn ?? true;
   const ops: MigrationOp[] = [

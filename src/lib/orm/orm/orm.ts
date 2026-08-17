@@ -1,3 +1,4 @@
+import { mightThrowSync } from "../../errors/index.js";
 import { enableSqliteForeignKeys } from "../dialect/sqlite.js";
 import type { Table } from "../table/types.js";
 import { pickGlobalHooks } from "./hook-runner.js";
@@ -14,6 +15,28 @@ import type {
   TransactionClient,
 } from "./types.js";
 
+const connectionUrls = new WeakMap<object, string>();
+
+const redactDatabaseUrl = (url: string) => {
+  if (!url.includes("://")) return url;
+
+  const [error, parsed] = mightThrowSync(() => new URL(url));
+
+  if (error) return url;
+  if (!parsed.username) {
+    if (!parsed.password) return url;
+  }
+
+  parsed.username = "";
+  parsed.password = "";
+
+  return parsed.href;
+};
+
+export const getOrmConnectionUrl = (client: object) => {
+  return connectionUrls.get(client);
+};
+
 export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
   public readonly $raw: Bun.SQL;
   private options: CreateOrmOptions<T, R>;
@@ -29,17 +52,20 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
   public buildClient(): OrmClient<T, R> {
     const tableClients = this.buildTableClients(this.$raw);
     const transaction = this.buildTransaction();
-
-    return {
+    const client = {
       ...tableClients,
       $raw: this.$raw,
       $config: {
         adapter: this.options.adapter,
-        url: this.options.url,
+        url: redactDatabaseUrl(this.options.url),
         tables: this.options.tables,
       },
       $transaction: transaction,
     };
+
+    connectionUrls.set(client, this.options.url);
+
+    return client;
   }
 
   private buildTableClients(sql: Bun.SQL): OrmTableClients<T, R> {

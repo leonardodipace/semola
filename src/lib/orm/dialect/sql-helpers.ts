@@ -26,6 +26,31 @@ export const resolveCreateValue = (column: Column, provided: unknown) => {
   return null;
 };
 
+export const bindCreateValue = (
+  column: Column,
+  provided: unknown,
+  nextPlaceholder: () => string,
+  params: unknown[],
+) => {
+  if (provided !== undefined) {
+    params.push(serializeColumnValue(column, provided));
+    return nextPlaceholder();
+  }
+
+  if (column._default) {
+    params.push(serializeColumnValue(column, column._default()));
+    return nextPlaceholder();
+  }
+
+  if (column._dbDefault !== undefined) {
+    return column._dbDefault;
+  }
+
+  params.push(serializeColumnValue(column, null));
+
+  return nextPlaceholder();
+};
+
 export const validateFindUniqueWhere = (
   table: Table,
   where: Record<string, unknown>,

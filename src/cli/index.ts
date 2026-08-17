@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import packageJson from "../../package.json" with { type: "json" };
+import { readFileSync } from "node:fs";
 import { CLI } from "../lib/cli/index.js";
 import { mightThrow } from "../lib/errors/index.js";
 import { MigrationError } from "../lib/orm/errors.js";
@@ -10,10 +10,18 @@ import {
   rollbackMigration,
 } from "../lib/orm/migrations/index.js";
 
+const packageJson = JSON.parse(
+  readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+) as { version: string };
+
 const stringArg = {
   "~standard": {
     version: 1 as const,
     vendor: "semola",
+    types: {
+      input: "" as string,
+      output: "" as string,
+    },
     validate: (value: unknown) => {
       if (typeof value !== "string") {
         return { issues: [{ message: "expected string" }] };
@@ -45,7 +53,7 @@ const run = async () => {
     .action(async (args) => {
       const config = await loadConfig();
       const folder = await createMigration({
-        name: args.name as string,
+        name: args.name,
         config,
       });
 

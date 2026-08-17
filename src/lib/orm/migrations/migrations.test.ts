@@ -108,14 +108,14 @@ describe("orm migrations snapshot/diff/sql", () => {
     ).toThrow("Cannot add NOT NULL column users.name without .dbDefault");
   });
 
-  test("sqlite recreates table on column type change and copies rows", () => {
+  test("sqlite recreates table on column default change and copies rows", () => {
     const before = defineTable("users", {
       id: uuid("id").primaryKey().notNull(),
       age: string("age").notNull(),
     });
     const afterUsers = defineTable("users", {
       id: uuid("id").primaryKey().notNull(),
-      age: string("age").notNull().dbDefault(0),
+      age: string("age").notNull().dbDefault("0"),
     });
 
     const ops = diffSchemas(
@@ -131,6 +131,57 @@ describe("orm migrations snapshot/diff/sql", () => {
     );
     expect(sql).toContain('DROP TABLE "users"');
     expect(sql).toContain('RENAME TO "users"');
+  });
+
+  test("emits a table-level primary key for composite keys", () => {
+    const members = defineTable("members", {
+      orgId: uuid("org_id").primaryKey().notNull(),
+      userId: uuid("user_id").primaryKey().notNull(),
+    });
+    const sql = renderMigrationSql(
+      "sqlite",
+      diffSchemas(emptySchema(), snapshotSchema({ members }), "sqlite"),
+    );
+
+    expect(sql).toContain(
+      'CONSTRAINT "members_pkey" PRIMARY KEY ("org_id", "user_id")',
+    );
+    expect(sql).not.toContain(
+      '"org_id" TEXT CONSTRAINT "members_pkey" PRIMARY KEY',
+    );
+  });
+
+  test("sqlite maps integer primary keys to INTEGER and other numbers to REAL", () => {
+    const items = defineTable("items", {
+      id: number("id").primaryKey().notNull(),
+      price: number("price").notNull(),
+    });
+    const sql = renderMigrationSql(
+      "sqlite",
+      diffSchemas(emptySchema(), snapshotSchema({ items }), "sqlite"),
+    );
+
+    expect(sql).toContain(
+      '"id" INTEGER CONSTRAINT "items_pkey" PRIMARY KEY NOT NULL',
+    );
+    expect(sql).toContain('"price" REAL NOT NULL');
+  });
+
+  test("sqlite recreates the table when dropping a unique or primary key column", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").notNull().unique(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ users: before }),
+      snapshotSchema({ users: after }),
+      "sqlite",
+    );
+
+    expect(ops[0]?.kind).toBe("recreateTable");
   });
 
   test("orders create table before add-column foreign keys", () => {
@@ -210,7 +261,7 @@ describe("orm migrations snapshot/diff/sql", () => {
     );
 
     expect(sql.indexOf('CREATE TABLE "authors"')).toBeLessThan(
-      sql.indexOf("ADD FOREIGN KEY"),
+      sql.indexOf('ADD CONSTRAINT "posts_author_id_fkey"'),
     );
   });
 
@@ -307,7 +358,7 @@ describe("orm migrations snapshot/diff/sql", () => {
     );
 
     expect(sql.indexOf('DROP CONSTRAINT "users_pkey"')).toBeLessThan(
-      sql.indexOf("ADD PRIMARY KEY"),
+      sql.indexOf('ADD CONSTRAINT "users_pkey" PRIMARY KEY'),
     );
   });
 
@@ -328,9 +379,9 @@ describe("orm migrations snapshot/diff/sql", () => {
     );
 
     expect(sql).toContain('DROP CONSTRAINT "users_id_key"');
-    expect(sql).toContain("ADD PRIMARY KEY");
+    expect(sql).toContain('ADD CONSTRAINT "users_pkey" PRIMARY KEY');
     expect(sql.indexOf("DROP CONSTRAINT")).toBeLessThan(
-      sql.indexOf("ADD PRIMARY KEY"),
+      sql.indexOf('ADD CONSTRAINT "users_pkey" PRIMARY KEY'),
     );
   });
 
@@ -350,7 +401,7 @@ describe("orm migrations snapshot/diff/sql", () => {
       ),
     );
 
-    expect(sql).toContain("ADD UNIQUE");
+    expect(sql).toContain('ADD CONSTRAINT "users_id_key" UNIQUE');
     expect(sql).toContain('DROP CONSTRAINT "users_pkey"');
   });
 
@@ -460,6 +511,51 @@ describe("orm migrations snapshot/diff/sql", () => {
 
     expect(sql).toContain(
       'ALTER COLUMN "age" TYPE DOUBLE PRECISION USING CAST("age" AS DOUBLE PRECISION)',
+    );
+  });
+
+  test("postgres drops defaults before TYPE then sets the new default", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      age: string("age").notNull().dbDefault("0"),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      age: number("age").notNull().dbDefault(1),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "postgres",
+      ),
+    );
+
+    expect(sql.indexOf("DROP DEFAULT")).toBeLessThan(sql.indexOf("TYPE "));
+    expect(sql.indexOf("TYPE ")).toBeLessThan(sql.indexOf("SET DEFAULT"));
+  });
+
+  test("postgres drops enum checks before TYPE", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      status: enumType("status", ["draft", "live"]).notNull(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      status: number("status").notNull(),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "postgres",
+      ),
+    );
+
+    expect(sql.indexOf('DROP CONSTRAINT "users_status_check"')).toBeLessThan(
+      sql.indexOf("TYPE "),
     );
   });
 

@@ -83,15 +83,19 @@ describe("ORM column builders", () => {
     expect(statusColumn._default?.()).toBe("active");
   });
 
-  test("supports dbDefault for SQL defaults", () => {
+  test("supports dbDefault for all supported value types", () => {
     const col = string("role").notNull().dbDefault("user");
 
     expect(col._dbDefault).toBe("'user'");
+    expect(col._meta.hasDefault).toBe(true);
     expect(
       string("role").dbDefault("gen_random_uuid()", { as: "sql" })._dbDefault,
     ).toBe("gen_random_uuid()");
     expect(number("count").dbDefault(0)._dbDefault).toBe("0");
     expect(boolean("ok").dbDefault(true)._dbDefault).toBe("TRUE");
+    expect(() => number("count").dbDefault(Number.NaN)).toThrow(
+      "dbDefault number must be finite",
+    );
   });
 
   test("does not reopen primary key columns via nullable()", () => {

@@ -3,13 +3,13 @@ title: ORM
 description: Typed tables, queries, and SQL migrations on Bun SQL (SQLite or Postgres)
 ---
 
-Define tables once, get typed create / find / update / delete helpers. Uses Bun's SQL client under the hood.
+Define tables once, then use typed create, find, update, and delete helpers. Semola uses Bun's SQL client and supports SQLite and Postgres.
 
-You still create the physical schema with migrations (or `$raw`). Define tables in app code, point `semola.config.ts` at that module, then generate and apply SQL migrations.
+## Quick start
 
-## Migrations
+Use a persistent database URL. Migration commands open their own connection, so `:memory:` does not survive from `create` to `apply`.
 
-### Config
+### 1. Define a table and client
 
 ```typescript
 // src/db.ts
@@ -26,77 +26,40 @@ export const db = createOrm({
   url: "file:./dev.db",
   tables: { users },
 });
+```
 
+`defineTable()` describes row types and the database schema. `createOrm()` creates a typed client, but does not create the physical table.
+
+### 2. Initialize the database
+
+Point Semola's CLI at the module that exports your ORM client:
+
+```typescript
 // semola.config.ts
 import { defineConfig } from "semola";
 
 export default defineConfig({
   orm: {
     schema: "./src/db.ts",
-    // optional; default "migrations"
-    migrationsDir: "migrations",
   },
 });
 ```
 
-`schema` must export the `createOrm()` client (default or named). The client exposes `$config` so the CLI can read `adapter`, `url`, and `tables`.
-
-### Commands
+Create SQL from the table definition, review it, then apply it:
 
 ```sh
 bunx semola orm migrations create "initialize_database"
 bunx semola orm migrations apply
-bunx semola orm migrations rollback
 ```
 
-`create` diffs the current ORM tables against the latest applied schema stored in `_semola_migrations`, then writes `{timestamp}_{name}/up.sql` and `down.sql`. Apply pending migrations before creating another. `apply` runs pending ups in order; `rollback` runs only the last down. Each `up.sql` starts with a `-- semola-schema:` header; `apply` refuses files that omit it (before running SQL). Applied rows in `_semola_migrations` must match the leading folders on disk - a gap or extra applied row fails.
+For later schema changes, edit the table definitions and run both commands again. See [Migrations](#migrations) for defaults, rollbacks, and generated SQL behavior.
 
-SQL defaults use `.dbDefault("anon")` (JS values become SQL literals) or `.dbDefault("gen_random_uuid()", { as: "sql" })` (raw SQL: functions, `CURRENT_TIMESTAMP`, casts). `.default(fn)` stays application-side only. Adding a `NOT NULL` column requires `.dbDefault(...)` or a nullable column. Other SQLite column changes rebuild the table and `INSERT` shared columns so existing rows survive. Renames are drop + add (a warning is written into the SQL). Down SQL that re-adds a `NOT NULL` column without a default warns and fails if the table has rows. SQLite apply/rollback runs `PRAGMA foreign_key_check` before commit.
+### 3. Use the typed client
 
-Dialects differ (SQLite vs Postgres types). History and schema snapshots live in `_semola_migrations`, not JSON files in the migrations folder. SQLite connections enable `PRAGMA foreign_keys = ON` on the first ORM query.
-
-You can also apply from app code:
+After migrations are applied, import the client anywhere in your app:
 
 ```typescript
-import { applyMigrations, loadConfig } from "semola/orm";
-
-const config = await loadConfig();
-await applyMigrations(config);
-```
-
-## Import
-
-```typescript
-import {
-  createOrm,
-  defineTable,
-  string,
-  uuid,
-  number,
-  boolean,
-  one,
-  many,
-  applyMigrations,
-  loadConfig,
-} from "semola/orm";
-```
-
-## Quick start
-
-This defines a typed table, opens a SQLite client, and uses the table API. Create the physical schema with migrations (see above) or `$raw`.
-
-```typescript
-const users = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
-  name: string("name").notNull(),
-  email: string("email").notNull().unique(),
-});
-
-const db = createOrm({
-  adapter: "sqlite", // or "postgres"
-  url: ":memory:",
-  tables: { users },
-});
+import { db } from "./db.js";
 
 await db.users.create({
   data: {
@@ -111,13 +74,38 @@ const user = await db.users.findFirst({
 });
 ```
 
+TypeScript infers the accepted data, filters, and returned row from the table definition.
+
 ## Tables and columns
 
 ### Column builders
 
 `string`, `number`, `boolean`, `uuid`, `date`, `json`, `jsonb`, `enumType`.
 
-Chain `.primaryKey()`, `.notNull()`, `.nullable()`, `.unique()`, `.default(fn)`, `.dbDefault("user")`, `.dbDefault("now()", { as: "sql" })`, `.references(() => other.columns.col)`. Columns start nullable until you mark otherwise. `.default(fn)` fills values in the app; `.dbDefault("user")` / `.dbDefault(0)` / `.dbDefault(true)` become SQL literals; `.dbDefault("gen_random_uuid()", { as: "sql" })` is raw SQL. `.references()` targets must be tables passed to `createOrm({ tables })`.
+Chain `.primaryKey()`, `.notNull()`, `.nullable()`, `.unique()`, `.default(fn)`, `.dbDefault("user")`, `.dbDefault("now()", { as: "sql" })`, `.references(() => other.columns.col)`. Columns start nullable until you mark otherwise.
+
+`.default(fn)` fills values when the ORM creates a row. `.dbDefault("user")` / `.dbDefault(0)` / `.dbDefault(true)` become SQL literals in generated migrations. `.dbDefault("gen_random_uuid()", { as: "sql" })` is raw SQL.
+
+`.references()` targets must be tables passed to `createOrm({ tables })`. Invalid references are reported when you generate a migration.
+
+### Defaults at create time
+
+`.default()` and `.dbDefault()` solve different problems:
+
+- `.default(fn)` makes a field optional in typed `create()` and supplies its value in application code.
+- `.dbDefault(...)` makes a field optional in typed `create()`. Omitted values are left to the database default instead of binding `null`.
+
+```typescript
+const users = defineTable("users", {
+  id: uuid("id").primaryKey().default(() => crypto.randomUUID()),
+  role: string("role").notNull().dbDefault("member"),
+  createdAt: date("created_at")
+    .notNull()
+    .dbDefault("CURRENT_TIMESTAMP", { as: "sql" }),
+});
+```
+
+Use `.dbDefault()` when adding a `NOT NULL` column to an existing table. Literal strings, numbers, and booleans are escaped as SQL values. `{ as: "sql" }` is for trusted SQL expressions such as functions, casts, and `CURRENT_TIMESTAMP`.
 
 ### Relations
 
@@ -134,7 +122,7 @@ const posts = defineTable("posts", {
 
 const db = createOrm({
   adapter: "sqlite",
-  url: ":memory:",
+  url: "file:./dev.db",
   tables: { users, posts },
   relations: {
     users: {
@@ -202,21 +190,21 @@ await db.$transaction(async (tx) => {
   await tx.posts.create({ data: { /* ... */ } });
 });
 
-await db.$raw.unsafe(`CREATE TABLE IF NOT EXISTS users (...)`);
+await db.$raw.unsafe(`SELECT 1`);
 ```
 
 `$raw` is the underlying `Bun.SQL` instance. Inside a transaction, `tx` exposes the same table clients plus `$raw`.
 
 ## Hooks
 
-Hooks receive a context and may return patched options:
+Before-hooks receive a context and may return patched options. After-hooks and read hooks receive context only.
 
 The table hook trims user names before insert, then logs the created row. Global hooks are generic over every table, so column-specific work belongs on `hooks.tables.<name>`.
 
 ```typescript
 const db = createOrm({
   adapter: "sqlite",
-  url: ":memory:",
+  url: "file:./dev.db",
   tables: { users },
   hooks: {
     tables: {
@@ -239,6 +227,85 @@ const db = createOrm({
   },
 });
 ```
+
+## Migrations
+
+`createOrm()` never changes the physical database schema. Semola migrations compare your table definitions with the last applied schema and generate SQL for your configured adapter.
+
+### Configuration
+
+The root `semola.config.ts` file needs:
+
+- `schema`: path to a module that exports a `createOrm()` client, either as a default or named export
+- `migrationsDir`: optional output directory, relative to the project root; defaults to `migrations`
+
+```typescript
+import { defineConfig } from "semola";
+
+export default defineConfig({
+  orm: {
+    schema: "./src/db.ts",
+    migrationsDir: "migrations",
+  },
+});
+```
+
+The CLI reads the client's adapter, URL, and tables. Run migration commands from the directory containing `semola.config.ts`.
+
+### Commands
+
+```sh
+# Generate up.sql and down.sql from table changes
+bunx semola orm migrations create "add_user_roles"
+
+# Apply every pending migration in order
+bunx semola orm migrations apply
+
+# Roll back only the latest applied migration
+bunx semola orm migrations rollback
+```
+
+Apply pending migrations before creating another one. `create` fails when there are no schema changes. The first `create` or `apply` also ensures the `_semola_migrations` history table exists.
+
+Each generated migration has this layout:
+
+```text
+migrations/
+  20260817090000000_add_user_roles/
+    up.sql
+    down.sql
+```
+
+Review generated SQL before applying it, especially warnings about destructive changes. Each pending migration commits in its own transaction.
+
+### History and safety
+
+Semola stores applied migration names and schema snapshots in the `_semola_migrations` database table. Migration directories must remain an exact ordered prefix of that history. Missing, reordered, or extra applied entries fail before new SQL runs.
+
+Every generated `up.sql` contains a `-- semola-schema:` header. Keep it intact: `apply` uses it as the next schema snapshot and rejects migrations without it.
+
+SQLite has additional safeguards:
+
+- Foreign keys are enabled on the first ORM query.
+- Safe column additions and drops run in place. Unsupported alterations rebuild the table and copy shared columns so existing rows survive.
+- A rename is generated as a drop and add, with a warning in the SQL.
+- A down migration that restores a `NOT NULL` column without a default warns and fails when rows exist.
+- Apply and rollback run `PRAGMA foreign_key_check` before commit.
+
+Generated column types differ between SQLite and Postgres. Migration apply and rollback are integration-tested on SQLite today.
+
+### Apply from application code
+
+Run migrations in a dedicated startup step, not from the same module you import as `db`:
+
+```typescript
+import { applyMigrations, loadConfig } from "semola/orm";
+
+const config = await loadConfig();
+await applyMigrations(config);
+```
+
+`loadConfig()` imports your schema module and closes its ORM client after reading `$config`. If that module is also your app's `db` export, the shared client can be left closed. Prefer the CLI, or keep migrations in a separate entry file.
 
 ## Examples
 
@@ -370,7 +437,7 @@ await db.$transaction(async (tx) => {
 | Option | Meaning |
 | --- | --- |
 | `adapter` | `"sqlite"` or `"postgres"` |
-| `url` | Connection URL (e.g. `":memory:"`) |
+| `url` | Connection URL (e.g. `"file:./dev.db"`) |
 | `tables` | Map of `defineTable` results |
 | `relations` | Optional `one` / `many` map |
 | `hooks` | Global and per-table lifecycle hooks |
@@ -382,3 +449,13 @@ await db.$transaction(async (tx) => {
 | `db.<table>` | Typed table client |
 | `db.$raw` | Underlying `Bun.SQL` |
 | `db.$transaction(cb)` | Run work in a transaction |
+| `db.$config` | Adapter, redacted URL, and tables (used by migrations) |
+
+### Migration helpers
+
+| Export | Meaning |
+| --- | --- |
+| `loadConfig()` | Load `semola.config.ts` and resolve the ORM client |
+| `createMigration({ name, config })` | Generate `up.sql` / `down.sql` from schema diff |
+| `applyMigrations(config)` | Apply pending migrations |
+| `rollbackMigration(config)` | Roll back the latest migration |

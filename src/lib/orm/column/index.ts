@@ -1,9 +1,11 @@
 import { MigrationError } from "../errors.js";
-import type { Column, ColumnBuilder, ColumnRuntimeValueMap } from "./types.js";
+import type {
+  ColumnBuilder,
+  ColumnRuntimeValueMap,
+  ColumnType,
+} from "./types.js";
 
-type ColumnType = Column["type"];
-
-const sqlLiteral = (value: string | number | boolean) => {
+const sqlLiteral = (value: unknown) => {
   if (typeof value === "boolean") {
     return value ? "TRUE" : "FALSE";
   }
@@ -16,7 +18,15 @@ const sqlLiteral = (value: string | number | boolean) => {
     return String(value);
   }
 
-  return `'${value.replaceAll("'", "''")}'`;
+  if (value instanceof Date) {
+    return `'${value.toISOString()}'`;
+  }
+
+  if (typeof value === "string") {
+    return `'${value.replaceAll("'", "''")}'`;
+  }
+
+  return `'${JSON.stringify(value).replaceAll("'", "''")}'`;
 };
 
 type ColumnBuilderState<
@@ -207,14 +217,10 @@ const createColumnBuilder = <
     });
   };
 
-  const dbDefault: ColumnBuilder<
-    TType,
-    TNullable,
-    TPrimaryKey,
-    TUnique,
-    THasDefault,
-    TValue
-  >["dbDefault"] = (value, options) => {
+  const dbDefault = ((
+    value: TValue | string,
+    options?: { as?: "value" | "sql" },
+  ) => {
     if (options?.as === "sql") {
       const sql = String(value).trim();
 
@@ -224,17 +230,46 @@ const createColumnBuilder = <
         );
       }
 
-      return createColumnBuilder({
+      return createColumnBuilder<
+        TType,
+        TNullable,
+        TPrimaryKey,
+        TUnique,
+        true,
+        TValue
+      >({
         ...column,
+        _meta: {
+          ...column._meta,
+          hasDefault: true,
+        },
         _dbDefault: sql,
       });
     }
 
-    return createColumnBuilder({
+    return createColumnBuilder<
+      TType,
+      TNullable,
+      TPrimaryKey,
+      TUnique,
+      true,
+      TValue
+    >({
       ...column,
+      _meta: {
+        ...column._meta,
+        hasDefault: true,
+      },
       _dbDefault: sqlLiteral(value),
     });
-  };
+  }) as ColumnBuilder<
+    TType,
+    TNullable,
+    TPrimaryKey,
+    TUnique,
+    THasDefault,
+    TValue
+  >["dbDefault"];
 
   const referencesBuilder = (tableColumn: () => { sqlName: string }) => {
     return createColumnBuilder<

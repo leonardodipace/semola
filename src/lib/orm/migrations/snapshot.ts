@@ -1,7 +1,7 @@
 import type { Column } from "../column/types.js";
 import { MigrationError } from "../errors.js";
 import type { Table } from "../table/types.js";
-import type { ColumnSnapshot, SchemaSnapshot, TableSnapshot } from "./types.js";
+import type { ColumnSnapshot, TableSnapshot } from "./types.js";
 
 const findReferencedColumn = (
   tables: Record<string, Table>,
@@ -25,7 +25,7 @@ const snapshotColumn = (
   column: Column,
   tableName: string,
   tables: Record<string, Table>,
-): ColumnSnapshot => {
+) => {
   const snapshot: ColumnSnapshot = {
     name: column.sqlName,
     type: column.type,
@@ -46,10 +46,11 @@ const snapshotColumn = (
     snapshot.enumValues = [...column.enumValues];
   }
 
-  const getReferenced = column.references?.tableColumn;
-
-  if (getReferenced) {
-    const referenced = findReferencedColumn(tables, getReferenced());
+  if (column.references?.tableColumn) {
+    const referenced = findReferencedColumn(
+      tables,
+      column.references.tableColumn(),
+    );
 
     if (!referenced) {
       throw new MigrationError(
@@ -63,10 +64,7 @@ const snapshotColumn = (
   return snapshot;
 };
 
-const snapshotTable = (
-  table: Table,
-  tables: Record<string, Table>,
-): TableSnapshot => {
+const snapshotTable = (table: Table, tables: Record<string, Table>) => {
   const columns: Record<string, ColumnSnapshot> = {};
 
   for (const column of Object.values(table.columns)) {
@@ -79,9 +77,7 @@ const snapshotTable = (
   };
 };
 
-export const snapshotSchema = (
-  tables: Record<string, Table>,
-): SchemaSnapshot => {
+export const snapshotSchema = (tables: Record<string, Table>) => {
   const result: Record<string, TableSnapshot> = {};
 
   for (const table of Object.values(tables)) {
@@ -91,6 +87,6 @@ export const snapshotSchema = (
   return { tables: result };
 };
 
-export const emptySchema = (): SchemaSnapshot => {
+export const emptySchema = () => {
   return { tables: {} };
 };
