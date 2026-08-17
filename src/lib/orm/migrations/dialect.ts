@@ -158,14 +158,10 @@ export abstract class MigrationDialect {
     return `CHECK (${quoteIdentifier(column.name)} IN (${list}))`;
   }
 
-  private renderColumnDef(
-    table: string,
-    column: ColumnSnapshot,
-    forCreateTable: boolean,
-  ) {
+  private renderColumnDef(table: string, column: ColumnSnapshot) {
     const parts: string[] = [this.sqlTypeFor(column)];
 
-    if (column.isPrimaryKey && forCreateTable) {
+    if (column.isPrimaryKey) {
       parts.push(`CONSTRAINT ${quoteIdentifier(`${table}_pkey`)} PRIMARY KEY`);
     }
 
@@ -202,7 +198,7 @@ export abstract class MigrationDialect {
 
   private renderCreateTable(table: TableSnapshot) {
     const lines = Object.values(table.columns).map((column) => {
-      return `    ${this.renderColumnDef(table.name, column, true)}`;
+      return `    ${this.renderColumnDef(table.name, column)}`;
     });
 
     return `CREATE TABLE ${quoteIdentifier(table.name)} (\n${lines.join(",\n")}\n);`;
@@ -213,7 +209,7 @@ export abstract class MigrationDialect {
   }
 
   private renderAddColumn(table: string, column: ColumnSnapshot) {
-    return `ALTER TABLE ${quoteIdentifier(table)} ADD COLUMN ${this.renderColumnDef(table, column, false)};`;
+    return `ALTER TABLE ${quoteIdentifier(table)} ADD COLUMN ${this.renderColumnDef(table, column)};`;
   }
 
   private renderDropColumn(table: string, column: ColumnSnapshot) {
@@ -343,10 +339,38 @@ export abstract class MigrationDialect {
       return { kind: "createTable" as const, table };
     });
 
+    const dropPrimaryKeys: MigrationOp[] = [];
+    const addPrimaryKeys: MigrationOp[] = [];
+    const otherAlters: MigrationOp[] = [];
+
+    for (const op of alters) {
+      if (
+        op.kind === "alterColumn" &&
+        op.from.isPrimaryKey &&
+        !op.to.isPrimaryKey
+      ) {
+        dropPrimaryKeys.push(op);
+        continue;
+      }
+
+      if (
+        op.kind === "alterColumn" &&
+        !op.from.isPrimaryKey &&
+        op.to.isPrimaryKey
+      ) {
+        addPrimaryKeys.push(op);
+        continue;
+      }
+
+      otherAlters.push(op);
+    }
+
     return [
       ...dropColumns,
       ...sortedCreates,
-      ...alters,
+      ...dropPrimaryKeys,
+      ...otherAlters,
+      ...addPrimaryKeys,
       ...recreates,
       ...sortedDrops,
       ...addColumns,

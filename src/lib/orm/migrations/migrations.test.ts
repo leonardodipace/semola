@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { enumType, number, string, uuid } from "../column/index.js";
 import { defineTable } from "../table/index.js";
-import { diffSchemas, invertOps } from "./diff.js";
+import { diffSchemas } from "./diff.js";
 import { emptySchema, snapshotSchema } from "./snapshot.js";
 import { decodeSchemaHeader, renderMigrationSql } from "./sql.js";
 
@@ -41,7 +41,10 @@ describe("orm migrations snapshot/diff/sql", () => {
     );
     expect(sql).toContain("-- semola-schema:");
 
-    const down = renderMigrationSql("sqlite", invertOps(ops));
+    const down = renderMigrationSql(
+      "sqlite",
+      diffSchemas(to, emptySchema(), "sqlite", { strictAddColumn: false }),
+    );
 
     expect(down).toContain('DROP TABLE "users"');
   });
@@ -239,6 +242,75 @@ describe("orm migrations snapshot/diff/sql", () => {
     expect(dropAuthorsAt).toBeGreaterThan(recreateAt);
   });
 
+  test("postgres add-column primary key includes PRIMARY KEY", () => {
+    const before = defineTable("users", {
+      email: string("email").notNull().unique(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id")
+        .primaryKey()
+        .notNull()
+        .dbDefault("gen_random_uuid()", { as: "sql" }),
+      email: string("email").notNull().unique(),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "postgres",
+      ),
+    );
+
+    expect(sql).toContain("ADD COLUMN");
+    expect(sql).toContain('CONSTRAINT "users_pkey" PRIMARY KEY');
+  });
+
+  test("postgres drops primary key before dropping NOT NULL", () => {
+    const before = defineTable("users", {
+      id: string("id").primaryKey().notNull(),
+    });
+    const after = defineTable("users", {
+      id: string("id"),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "postgres",
+      ),
+    );
+
+    expect(sql.indexOf("DROP CONSTRAINT")).toBeGreaterThanOrEqual(0);
+    expect(sql.indexOf("DROP CONSTRAINT")).toBeLessThan(
+      sql.indexOf("DROP NOT NULL"),
+    );
+  });
+
+  test("postgres drops the old primary key before adding a new one", () => {
+    const before = defineTable("users", {
+      email: string("email").notNull().unique(),
+      id: string("id").primaryKey().notNull(),
+    });
+    const after = defineTable("users", {
+      email: string("email").primaryKey().notNull(),
+      id: string("id").notNull(),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "postgres",
+      ),
+    );
+
+    expect(sql.indexOf('DROP CONSTRAINT "users_pkey"')).toBeLessThan(
+      sql.indexOf("ADD PRIMARY KEY"),
+    );
+  });
+
   test("postgres unique to primary key drops the unique constraint", () => {
     const before = defineTable("users", {
       id: string("id").notNull().unique(),
@@ -395,6 +467,13 @@ describe("orm migrations snapshot/diff/sql", () => {
     expect(() => decodeSchemaHeader("-- semola-schema:{nope")).toThrow(
       "Invalid schema header",
     );
+  });
+
+  test("decodeSchemaHeader accepts CRLF line endings", () => {
+    const schema = { tables: {} };
+    const header = `-- semola-schema:${JSON.stringify(schema)}\r\n`;
+
+    expect(decodeSchemaHeader(header)).toEqual(schema);
   });
 
   test("snapshots foreign keys", () => {

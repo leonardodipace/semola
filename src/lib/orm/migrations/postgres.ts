@@ -40,6 +40,12 @@ export class PostgresMigrationDialect extends MigrationDialect {
       alterColumn(`TYPE ${sqlType} USING CAST(${columnId} AS ${sqlType})`);
     }
 
+    if (from.isPrimaryKey && !to.isPrimaryKey) {
+      this.pushPrimaryKeyChange(statements, table, tableId, columnId, from, to);
+    }
+
+    this.pushUniqueChange(statements, table, tableId, columnId, from, to);
+
     if (from.isNullable !== to.isNullable) {
       alterColumn(to.isNullable ? "DROP NOT NULL" : "SET NOT NULL");
     }
@@ -52,8 +58,10 @@ export class PostgresMigrationDialect extends MigrationDialect {
       }
     }
 
-    this.pushUniqueChange(statements, table, tableId, columnId, from, to);
-    this.pushPrimaryKeyChange(statements, table, tableId, columnId, from, to);
+    if (!from.isPrimaryKey && to.isPrimaryKey) {
+      this.pushPrimaryKeyChange(statements, table, tableId, columnId, from, to);
+    }
+
     this.pushForeignKeyChange(statements, table, tableId, columnId, from, to);
     this.pushEnumCheckChange(statements, table, tableId, from, to);
 

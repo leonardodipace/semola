@@ -20,7 +20,7 @@ export const getMigrationDialect = (adapter: Adapter): MigrationDialect => {
 };
 
 export const decodeSchemaHeader = (sql: string) => {
-  const firstLine = sql.split("\n")[0] ?? "";
+  const firstLine = (sql.split("\n")[0] ?? "").trimEnd();
 
   if (!firstLine.startsWith(SCHEMA_HEADER_PREFIX)) {
     return undefined;
