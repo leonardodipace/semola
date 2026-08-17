@@ -78,26 +78,12 @@ TypeScript infers the accepted data, filters, and returned row from the table de
 
 ## Tables and columns
 
-### Column builders
-
-`string`, `number`, `boolean`, `uuid`, `date`, `json`, `jsonb`, `enumType`.
-
-Chain `.primaryKey()`, `.notNull()`, `.nullable()`, `.unique()`, `.default(fn)`, `.dbDefault("user")`, `.dbDefault("now()", { as: "sql" })`, `.references(() => other.columns.col)`. Columns start nullable until you mark otherwise.
-
-`.default(fn)` fills values when the ORM creates a row. `.dbDefault("user")` / `.dbDefault(0)` / `.dbDefault(true)` become SQL literals in generated migrations. `.dbDefault("gen_random_uuid()", { as: "sql" })` is raw SQL.
-
-`.references()` targets must be tables passed to `createOrm({ tables })`. Invalid references are reported when you generate a migration.
-
-### Defaults at create time
-
-`.default()` and `.dbDefault()` solve different problems:
-
-- `.default(fn)` makes a field optional in typed `create()` and supplies its value in application code.
-- `.dbDefault(...)` makes a field optional in typed `create()`. Omitted values are left to the database default instead of binding `null`.
+Columns start nullable. Chain modifiers to tighten them.
 
 ```typescript
 const users = defineTable("users", {
   id: uuid("id").primaryKey().default(() => crypto.randomUUID()),
+  email: string("email").notNull().unique(),
   role: string("role").notNull().dbDefault("member"),
   createdAt: date("created_at")
     .notNull()
@@ -105,7 +91,39 @@ const users = defineTable("users", {
 });
 ```
 
-Use `.dbDefault()` when adding a `NOT NULL` column to an existing table. Literal strings, numbers, and booleans are escaped as SQL values. `{ as: "sql" }` is for trusted SQL expressions such as functions, casts, and `CURRENT_TIMESTAMP`.
+### Types
+
+| Builder | JS type |
+| --- | --- |
+| `string` | `string` |
+| `number` | `number` |
+| `boolean` | `boolean` |
+| `uuid` | `string` |
+| `date` | `Date` |
+| `json`, `jsonb` | `unknown` (pass a generic to narrow) |
+| `enumType` | union of the listed strings |
+
+### Modifiers
+
+| Method | Meaning |
+| --- | --- |
+| `.primaryKey()` | Primary key (also not-null) |
+| `.notNull()` | Required |
+| `.nullable()` | Optional |
+| `.unique()` | Unique constraint |
+| `.default(fn)` | App fills the value on `create()` |
+| `.dbDefault(value)` | SQL literal default (`"user"`, `0`, `true`) |
+| `.dbDefault(sql, { as: "sql" })` | Raw SQL default (`now()`, `gen_random_uuid()`) |
+| `.references(() => col)` | Foreign key |
+
+`.references()` targets must be tables passed to `createOrm({ tables })`. Invalid keys fail when you generate a migration.
+
+| | `.default(fn)` | `.dbDefault(...)` |
+| --- | --- | --- |
+| Who fills it | App, on `create()` | Database |
+| Omitted insert | Runs `fn` | Uses the SQL default (not `null`) |
+
+Use `.dbDefault()` when adding a `NOT NULL` column. `{ as: "sql" }` is for trusted SQL such as functions, casts, and `CURRENT_TIMESTAMP`.
 
 ### Relations
 
@@ -176,9 +194,19 @@ await db.posts.deleteMany({
 
 ### Filters and shaping
 
-`where` supports column operators and `$and` / `$or` / `$not`. Relation filters use `every` / `some` / `none`. Pass `select` to shape returned fields. `$skipHooks` bypasses hooks for that call.
+| Option | Meaning |
+| --- | --- |
+| `where` | Column operators, plus `$and` / `$or` / `$not`. Relations: `every` / `some` / `none` |
+| `select` | Fields to return |
+| `include` | Related rows |
+| `$skipHooks` | Skip hooks for this call |
 
-Table methods: `findMany`, `findFirst`, `findUnique`, `create`, `createMany`, `update`, `updateMany`, `delete`, `deleteMany`.
+| Method | Meaning |
+| --- | --- |
+| `findMany` / `findFirst` / `findUnique` | Read |
+| `create` / `createMany` | Insert |
+| `update` / `updateMany` | Patch |
+| `delete` / `deleteMany` | Remove |
 
 ## Transactions and raw SQL
 
