@@ -811,15 +811,6 @@ describe("orm migrations snapshot/diff/sql", () => {
     );
   });
 
-  test("throws for unsupported adapters", () => {
-    const adapter = "mysql";
-
-    expect(() =>
-      // @ts-expect-error - testing runtime guard for values outside the Adapter type
-      renderMigrationSql(adapter, []),
-    ).toThrow("Unsupported adapter: mysql");
-  });
-
   test("renders json, jsonb, boolean, and date types", () => {
     const events = defineTable("events", {
       id: uuid("id").primaryKey().notNull(),

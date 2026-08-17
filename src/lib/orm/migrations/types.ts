@@ -54,7 +54,6 @@ export type OrmConfig = {
 };
 
 export type LoadedConfig = {
-  schemaPath: string;
   migrationsDir: string;
   orm: OrmConfig;
 };

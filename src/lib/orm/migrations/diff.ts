@@ -1,6 +1,6 @@
 import type { Adapter } from "../dialect/types.js";
 import { MigrationError } from "../errors.js";
-import { getMigrationDialect } from "./sql.js";
+import { getMigrationDialect } from "./dialect/index.js";
 import type {
   ColumnSnapshot,
   MigrationOp,

@@ -1,7 +1,7 @@
-import { POSTGRES_SPEC } from "../dialect/postgres.js";
-import { quoteIdentifier } from "../utils.js";
+import { POSTGRES_SPEC } from "../../dialect/postgres.js";
+import { quoteIdentifier } from "../../utils.js";
+import type { ColumnSnapshot, MigrationOp, SchemaSnapshot } from "../types.js";
 import { MigrationDialect } from "./dialect.js";
-import type { ColumnSnapshot, MigrationOp, SchemaSnapshot } from "./types.js";
 
 const typeOrKeyChanged = (from: ColumnSnapshot, to: ColumnSnapshot) => {
   if (from.type !== to.type) return true;
@@ -254,11 +254,9 @@ export class PostgresMigrationDialect extends MigrationDialect {
     const check = this.enumCheckSql(to);
 
     if (check) {
-      if (typeChanged || enumChanged) {
-        statements.push(
-          `ALTER TABLE ${tableId} ADD CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_check`)} ${check};`,
-        );
-      }
+      statements.push(
+        `ALTER TABLE ${tableId} ADD CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_check`)} ${check};`,
+      );
     }
   }
 }

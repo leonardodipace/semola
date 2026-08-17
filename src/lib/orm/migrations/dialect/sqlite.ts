@@ -1,7 +1,7 @@
-import { SQLITE_SPEC } from "../dialect/sqlite.js";
-import { MigrationError } from "../errors.js";
+import { SQLITE_SPEC } from "../../dialect/sqlite.js";
+import { MigrationError } from "../../errors.js";
+import type { ColumnSnapshot, MigrationOp } from "../types.js";
 import { MigrationDialect } from "./dialect.js";
-import type { ColumnSnapshot, MigrationOp } from "./types.js";
 
 export class SqliteMigrationDialect extends MigrationDialect {
   public readonly name = "sqlite" as const;
@@ -58,18 +58,17 @@ export class SqliteMigrationDialect extends MigrationDialect {
   }
 
   private canApplyInPlace(op: MigrationOp) {
-    if (op.kind === "dropColumn") {
-      if (op.column.isPrimaryKey) return false;
-      if (op.column.isUnique) return false;
-
-      return true;
+    if (op.kind !== "dropColumn") {
+      if (op.kind !== "addColumn") return false;
     }
 
-    if (op.kind !== "addColumn") return false;
     if (op.column.isPrimaryKey) return false;
     if (op.column.isUnique) return false;
-    if (!op.column.isNullable && op.column.dbDefault === undefined) {
-      return false;
+
+    if (op.kind === "addColumn") {
+      if (!op.column.isNullable && op.column.dbDefault === undefined) {
+        return false;
+      }
     }
 
     return true;

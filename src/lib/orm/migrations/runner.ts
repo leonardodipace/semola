@@ -5,15 +5,14 @@ import type { SemolaConfig } from "../../config.js";
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
 import { MigrationError } from "../errors.js";
 import { getOrmConnectionUrl } from "../orm/orm.js";
-import type { Table } from "../table/types.js";
-import type { MigrationDialect } from "./dialect.js";
+import type { MigrationDialect } from "./dialect/index.js";
+import { getMigrationDialect } from "./dialect/index.js";
 import { diffSchemas } from "./diff.js";
 import { emptySchema, snapshotSchema } from "./snapshot.js";
-import { decodeSchemaHeader, getMigrationDialect } from "./sql.js";
+import { decodeSchemaHeader, splitStatements } from "./sql.js";
 import type { LoadedConfig, OrmConfig, SchemaSnapshot } from "./types.js";
 
 const HISTORY_TABLE = "_semola_migrations";
-const DOLLAR_TAG = /^(\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)/;
 
 const isOrmClient = (value: unknown) => {
   if (!value) return false;
@@ -102,8 +101,10 @@ export const loadConfig = async (
 
   const client = resolveOrmFromModule(schemaMod as Record<string, unknown>);
   const url = getOrmConnectionUrl(client) ?? client.$config.url;
-  const result = {
-    schemaPath,
+
+  await client.$raw.close();
+
+  return {
     migrationsDir: resolve(cwd, config.orm.migrationsDir ?? "migrations"),
     orm: {
       adapter: client.$config.adapter,
@@ -111,10 +112,6 @@ export const loadConfig = async (
       tables: client.$config.tables,
     },
   };
-
-  await client.$raw.close();
-
-  return result;
 };
 
 const ensureHistoryTable = async (sql: Bun.SQL) => {
@@ -249,7 +246,7 @@ export const createMigration = async (input: {
     }
 
     const from = latestSchema(applied);
-    const to = snapshotSchema(config.orm.tables as Record<string, Table>);
+    const to = snapshotSchema(config.orm.tables);
     const ops = diffSchemas(from, to, dialect.name);
 
     if (ops.length === 0) {
@@ -269,101 +266,6 @@ export const createMigration = async (input: {
 
     return folderName;
   });
-};
-
-const skipQuoted = (source: string, start: number, quote: string) => {
-  for (let index = start + 1; index < source.length; index++) {
-    if (source[index] !== quote) continue;
-    if (source[index + 1] === quote) {
-      index += 1;
-      continue;
-    }
-
-    return index;
-  }
-
-  return source.length - 1;
-};
-
-const isSqlStatement = (text: string) => {
-  return text.split("\n").some((line) => {
-    const trimmed = line.trim();
-
-    if (!trimmed) return false;
-    if (trimmed.startsWith("--")) return false;
-
-    return true;
-  });
-};
-
-export const splitStatements = (sqlText: string) => {
-  const source = sqlText.startsWith("-- semola-schema:")
-    ? sqlText.slice(sqlText.indexOf("\n") + 1)
-    : sqlText;
-
-  const statements: string[] = [];
-  let current = "";
-
-  const flush = () => {
-    const trimmed = current.trim();
-    current = "";
-
-    if (!trimmed) return;
-    if (!isSqlStatement(trimmed)) return;
-
-    statements.push(trimmed);
-  };
-
-  for (let index = 0; index < source.length; index++) {
-    const char = source[index] ?? "";
-    const next = source[index + 1] ?? "";
-
-    if (char === "'" || char === '"') {
-      const end = skipQuoted(source, index, char);
-      current += source.slice(index, end + 1);
-      index = end;
-      continue;
-    }
-
-    if (char === "-" && next === "-") {
-      const newline = source.indexOf("\n", index);
-      const end = newline === -1 ? source.length - 1 : newline - 1;
-      current += source.slice(index, end + 1);
-      index = end;
-      continue;
-    }
-
-    if (char === "/" && next === "*") {
-      const close = source.indexOf("*/", index + 2);
-      const end = close === -1 ? source.length - 1 : close + 1;
-      current += source.slice(index, end + 1);
-      index = end;
-      continue;
-    }
-
-    if (char === "$") {
-      const tag = source.slice(index).match(DOLLAR_TAG)?.[1];
-
-      if (tag) {
-        const close = source.indexOf(tag, index + tag.length);
-        const end = close === -1 ? source.length - 1 : close + tag.length - 1;
-        current += source.slice(index, end + 1);
-        index = end;
-        continue;
-      }
-    }
-
-    if (char === ";") {
-      flush();
-      continue;
-    }
-
-    current += char;
-  }
-
-  flush();
-
-  return statements;
 };
 
 const readSqlFile = async (filePath: string, label: string) => {

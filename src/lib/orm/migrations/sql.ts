@@ -1,23 +1,10 @@
 import { mightThrowSync } from "../../errors/index.js";
 import type { Adapter } from "../dialect/types.js";
 import { MigrationError } from "../errors.js";
-import type { MigrationDialect } from "./dialect.js";
-import { PostgresMigrationDialect } from "./postgres.js";
-import { SqliteMigrationDialect } from "./sqlite.js";
+import { getMigrationDialect, SCHEMA_HEADER_PREFIX } from "./dialect/index.js";
 import type { MigrationOp, SchemaSnapshot } from "./types.js";
 
-const SCHEMA_HEADER_PREFIX = "-- semola-schema:";
-
-export const getMigrationDialect = (adapter: Adapter): MigrationDialect => {
-  switch (adapter) {
-    case "sqlite":
-      return new SqliteMigrationDialect();
-    case "postgres":
-      return new PostgresMigrationDialect();
-    default:
-      throw new MigrationError(`Unsupported adapter: ${adapter}`);
-  }
-};
+const DOLLAR_TAG = /^(\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)/;
 
 export const decodeSchemaHeader = (sql: string) => {
   const firstLine = (sql.split("\n")[0] ?? "").trimEnd();
@@ -37,6 +24,101 @@ export const decodeSchemaHeader = (sql: string) => {
   }
 
   return schema;
+};
+
+const skipQuoted = (source: string, start: number, quote: string) => {
+  for (let index = start + 1; index < source.length; index++) {
+    if (source[index] !== quote) continue;
+    if (source[index + 1] === quote) {
+      index += 1;
+      continue;
+    }
+
+    return index;
+  }
+
+  return source.length - 1;
+};
+
+const isSqlStatement = (text: string) => {
+  return text.split("\n").some((line) => {
+    const trimmed = line.trim();
+
+    if (!trimmed) return false;
+    if (trimmed.startsWith("--")) return false;
+
+    return true;
+  });
+};
+
+export const splitStatements = (sqlText: string) => {
+  const source = sqlText.startsWith(SCHEMA_HEADER_PREFIX)
+    ? sqlText.slice(sqlText.indexOf("\n") + 1)
+    : sqlText;
+
+  const statements: string[] = [];
+  let current = "";
+
+  const flush = () => {
+    const trimmed = current.trim();
+    current = "";
+
+    if (!trimmed) return;
+    if (!isSqlStatement(trimmed)) return;
+
+    statements.push(trimmed);
+  };
+
+  for (let index = 0; index < source.length; index++) {
+    const char = source[index] ?? "";
+    const next = source[index + 1] ?? "";
+
+    if (char === "'" || char === '"') {
+      const end = skipQuoted(source, index, char);
+      current += source.slice(index, end + 1);
+      index = end;
+      continue;
+    }
+
+    if (char === "-" && next === "-") {
+      const newline = source.indexOf("\n", index);
+      const end = newline === -1 ? source.length - 1 : newline - 1;
+      current += source.slice(index, end + 1);
+      index = end;
+      continue;
+    }
+
+    if (char === "/" && next === "*") {
+      const close = source.indexOf("*/", index + 2);
+      const end = close === -1 ? source.length - 1 : close + 1;
+      current += source.slice(index, end + 1);
+      index = end;
+      continue;
+    }
+
+    if (char === "$") {
+      const tag = source.slice(index).match(DOLLAR_TAG)?.[1];
+
+      if (tag) {
+        const close = source.indexOf(tag, index + tag.length);
+        const end = close === -1 ? source.length - 1 : close + tag.length - 1;
+        current += source.slice(index, end + 1);
+        index = end;
+        continue;
+      }
+    }
+
+    if (char === ";") {
+      flush();
+      continue;
+    }
+
+    current += char;
+  }
+
+  flush();
+
+  return statements;
 };
 
 export const renderMigrationSql = (

@@ -12,7 +12,7 @@ import {
   loadConfig,
   rollbackMigration,
 } from "./index.js";
-import { splitStatements } from "./runner.js";
+import { splitStatements } from "./sql.js";
 
 describe("orm migrations runner", () => {
   const dirs: string[] = [];

@@ -1,11 +1,13 @@
-import { MigrationError } from "../errors.js";
-import { quoteIdentifier } from "../utils.js";
+import { MigrationError } from "../../errors.js";
+import { quoteIdentifier } from "../../utils.js";
 import type {
   ColumnSnapshot,
   MigrationOp,
   SchemaSnapshot,
   TableSnapshot,
-} from "./types.js";
+} from "../types.js";
+
+export const SCHEMA_HEADER_PREFIX = "-- semola-schema:";
 
 const renameWarning = (table: string, dropped: string[], added: string[]) => {
   if (!dropped.length) return;
@@ -200,7 +202,7 @@ export abstract class MigrationDialect {
       return `${warningBlock}${body}\n`;
     }
 
-    return `-- semola-schema:${JSON.stringify(schemaHeader)}\n\n${warningBlock}${body}\n`;
+    return `${SCHEMA_HEADER_PREFIX}${JSON.stringify(schemaHeader)}\n\n${warningBlock}${body}\n`;
   }
 
   protected shouldRecreate(_tableOps: MigrationOp[]) {
@@ -516,37 +518,24 @@ export abstract class MigrationDialect {
 
     const sortedCreates = this.sortTables(creates);
     const sortedDrops = this.sortTables(drops);
+    const deferCycles = this.deferCircularForeignKeys();
+    const stripCreateFks = deferCycles && sortedCreates.cycle;
     const createOps = sortedCreates.ordered.map((table) => {
-      return { kind: "createTable" as const, table };
+      return {
+        kind: "createTable" as const,
+        table: stripCreateFks ? this.withoutForeignKeys(table) : table,
+      };
     });
     const dropOps = [...sortedDrops.ordered].reverse().map((table) => {
       return { kind: "dropTable" as const, table };
     });
-    const cycleForeignKeys: MigrationOp[] = [];
-    const cycleDropForeignKeys: MigrationOp[] = [];
-
-    if (this.deferCircularForeignKeys()) {
-      if (sortedCreates.cycle) {
-        for (let index = 0; index < createOps.length; index++) {
-          const op = createOps[index];
-
-          if (!op) continue;
-
-          createOps[index] = {
-            kind: "createTable",
-            table: this.withoutForeignKeys(op.table),
-          };
-        }
-
-        cycleForeignKeys.push(...this.foreignKeysOf(sortedCreates.ordered));
-      }
-
-      if (sortedDrops.cycle) {
-        cycleDropForeignKeys.push(
-          ...this.foreignKeysBetween(sortedDrops.ordered),
-        );
-      }
-    }
+    const cycleForeignKeys = stripCreateFks
+      ? this.foreignKeysOf(sortedCreates.ordered)
+      : [];
+    const cycleDropForeignKeys =
+      deferCycles && sortedDrops.cycle
+        ? this.foreignKeysBetween(sortedDrops.ordered)
+        : [];
 
     return [
       ...cycleDropForeignKeys,
