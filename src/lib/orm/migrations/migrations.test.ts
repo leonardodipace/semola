@@ -158,6 +158,190 @@ describe("orm migrations snapshot/diff/sql", () => {
     );
   });
 
+  test("postgres drops foreign keys before dropping referenced tables", () => {
+    const authors = defineTable("authors", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const postsBefore = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: uuid("author_id").references(() => authors.columns.id),
+    });
+    const postsAfter = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: uuid("author_id"),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ authors, posts: postsBefore }),
+        snapshotSchema({ posts: postsAfter }),
+        "postgres",
+      ),
+    );
+    const dropFkAt = sql.indexOf("DROP CONSTRAINT");
+    const dropAuthorsAt = sql.indexOf('DROP TABLE "authors"');
+
+    expect(dropFkAt).toBeGreaterThanOrEqual(0);
+    expect(dropAuthorsAt).toBeGreaterThan(dropFkAt);
+  });
+
+  test("postgres creates referenced table before adding a foreign key", () => {
+    const postsBefore = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: uuid("author_id"),
+    });
+    const authors = defineTable("authors", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const postsAfter = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: uuid("author_id").references(() => authors.columns.id),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ posts: postsBefore }),
+        snapshotSchema({ authors, posts: postsAfter }),
+        "postgres",
+      ),
+    );
+
+    expect(sql.indexOf('CREATE TABLE "authors"')).toBeLessThan(
+      sql.indexOf("ADD FOREIGN KEY"),
+    );
+  });
+
+  test("sqlite recreates a child table before dropping its parent", () => {
+    const authors = defineTable("authors", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const postsBefore = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: uuid("author_id").references(() => authors.columns.id),
+      title: string("title"),
+    });
+    const postsAfter = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      title: string("title").notNull().dbDefault("''"),
+    });
+    const sql = renderMigrationSql(
+      "sqlite",
+      diffSchemas(
+        snapshotSchema({ authors, posts: postsBefore }),
+        snapshotSchema({ posts: postsAfter }),
+        "sqlite",
+      ),
+    );
+    const recreateAt = sql.indexOf("posts__semola_tmp");
+    const dropAuthorsAt = sql.indexOf('DROP TABLE "authors"');
+
+    expect(recreateAt).toBeGreaterThanOrEqual(0);
+    expect(dropAuthorsAt).toBeGreaterThan(recreateAt);
+  });
+
+  test("postgres unique to primary key drops the unique constraint", () => {
+    const before = defineTable("users", {
+      id: string("id").notNull().unique(),
+    });
+    const after = defineTable("users", {
+      id: string("id").primaryKey().notNull(),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "postgres",
+      ),
+    );
+
+    expect(sql).toContain('DROP CONSTRAINT "users_id_key"');
+    expect(sql).toContain("ADD PRIMARY KEY");
+    expect(sql.indexOf("DROP CONSTRAINT")).toBeLessThan(
+      sql.indexOf("ADD PRIMARY KEY"),
+    );
+  });
+
+  test("postgres primary key to unique adds a unique constraint", () => {
+    const before = defineTable("users", {
+      id: string("id").primaryKey().notNull(),
+    });
+    const after = defineTable("users", {
+      id: string("id").notNull().unique(),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "postgres",
+      ),
+    );
+
+    expect(sql).toContain("ADD UNIQUE");
+    expect(sql).toContain('DROP CONSTRAINT "users_pkey"');
+  });
+
+  test("allows self-referential foreign keys", () => {
+    let nodes = defineTable("nodes", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    nodes = defineTable("nodes", {
+      id: uuid("id").primaryKey().notNull(),
+      parentId: uuid("parent_id").references(() => nodes.columns.id),
+    });
+    const sql = renderMigrationSql(
+      "sqlite",
+      diffSchemas(emptySchema(), snapshotSchema({ nodes }), "sqlite"),
+    );
+
+    expect(sql).toContain('REFERENCES "nodes" ("id")');
+  });
+
+  test("throws on circular foreign keys between tables", () => {
+    let b = defineTable("b", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const a = defineTable("a", {
+      id: uuid("id").primaryKey().notNull(),
+      bId: uuid("b_id").references(() => b.columns.id),
+    });
+    b = defineTable("b", {
+      id: uuid("id").primaryKey().notNull(),
+      aId: uuid("a_id").references(() => a.columns.id),
+    });
+
+    expect(() =>
+      renderMigrationSql(
+        "postgres",
+        diffSchemas(emptySchema(), snapshotSchema({ a, b }), "postgres"),
+      ),
+    ).toThrow("Circular foreign key");
+  });
+
+  test("warns when down SQL re-adds a NOT NULL column without a default", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const down = renderMigrationSql(
+      "sqlite",
+      diffSchemas(
+        snapshotSchema({ users: after }),
+        snapshotSchema({ users: before }),
+        "sqlite",
+        { strictAddColumn: false },
+      ),
+    );
+
+    expect(down).toContain(
+      'ADD COLUMN "users"."name" NOT NULL without default fails if the table has rows',
+    );
+  });
+
   test("updates postgres enum check constraints", () => {
     const before = defineTable("users", {
       id: uuid("id").primaryKey().notNull(),

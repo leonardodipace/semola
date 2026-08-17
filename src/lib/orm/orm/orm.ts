@@ -1,3 +1,4 @@
+import { enableSqliteForeignKeys } from "../dialect/sqlite.js";
 import type { Table } from "../table/types.js";
 import { pickGlobalHooks } from "./hook-runner.js";
 import { TableClientImpl } from "./table-client.js";
@@ -79,6 +80,10 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
     return async <TResult>(
       callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
     ): Promise<TResult> => {
+      if (this.options.adapter === "sqlite") {
+        await enableSqliteForeignKeys(this.$raw);
+      }
+
       return await this.$raw.begin(async (txSql) => {
         const txTableClients = this.buildTableClients(txSql);
         const txClient: TransactionClient<T, R> = {

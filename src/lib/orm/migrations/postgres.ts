@@ -76,11 +76,12 @@ export class PostgresMigrationDialect extends MigrationDialect {
     from: ColumnSnapshot,
     to: ColumnSnapshot,
   ) {
-    if (from.isUnique === to.isUnique) return;
-    if (to.isPrimaryKey) return;
-    if (from.isPrimaryKey) return;
+    const fromUnique = from.isUnique && !from.isPrimaryKey;
+    const toUnique = to.isUnique && !to.isPrimaryKey;
 
-    if (to.isUnique) {
+    if (fromUnique === toUnique) return;
+
+    if (toUnique) {
       statements.push(`ALTER TABLE ${tableId} ADD UNIQUE (${columnId});`);
       return;
     }

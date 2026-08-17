@@ -40,6 +40,13 @@ const renameWarning = (table: string, dropped: string[], added: string[]) => {
   return `-- warning: "${table}" drops ${dropped.join(", ")} and adds ${added.join(", ")}; renames are drop+add and do not copy data`;
 };
 
+const notNullAddWarning = (table: string, column: ColumnSnapshot) => {
+  if (column.isNullable) return;
+  if (column.dbDefault !== undefined) return;
+
+  return `-- warning: ADD COLUMN "${table}"."${column.name}" NOT NULL without default fails if the table has rows`;
+};
+
 const dataLossWarnings = (ops: MigrationOp[]) => {
   const warnings: string[] = [];
   const dropped = new Map<string, string[]>();
@@ -61,6 +68,11 @@ const dataLossWarnings = (ops: MigrationOp[]) => {
 
     if (op.kind === "addColumn") {
       record(added, op.table, op.column.name);
+
+      const warning = notNullAddWarning(op.table, op.column);
+
+      if (warning) warnings.push(warning);
+
       continue;
     }
 
@@ -73,6 +85,14 @@ const dataLossWarnings = (ops: MigrationOp[]) => {
     );
 
     if (warning) warnings.push(warning);
+
+    for (const column of Object.values(op.to.columns)) {
+      if (op.from.columns[column.name]) continue;
+
+      const addWarning = notNullAddWarning(op.to.name, column);
+
+      if (addWarning) warnings.push(addWarning);
+    }
   }
 
   for (const [table, droppedCols] of dropped) {
@@ -92,6 +112,8 @@ export abstract class MigrationDialect {
   public abstract formatPlaceholder(index: number): string;
 
   public async prepareConnection(_sql: Bun.SQL) {}
+
+  public async assertForeignKeys(_sql: Bun.SQL) {}
 
   public placeholders(count: number) {
     return Array.from({ length: count }, (_, index) => {
@@ -147,7 +169,9 @@ export abstract class MigrationDialect {
     _from: ColumnSnapshot,
     to: ColumnSnapshot,
   ) {
-    throw new Error(`${this.name} cannot ALTER COLUMN ${table}.${to.name}`);
+    throw new MigrationError(
+      `${this.name} cannot ALTER COLUMN ${table}.${to.name}`,
+    );
   }
 
   protected enumCheckSql(column: ColumnSnapshot) {
@@ -268,7 +292,10 @@ export abstract class MigrationDialect {
 
     const visit = (name: string) => {
       if (visited.has(name)) return;
-      if (visiting.has(name)) return;
+
+      if (visiting.has(name)) {
+        throw new MigrationError(`Circular foreign key involving ${name}`);
+      }
 
       visiting.add(name);
       const table = byName.get(name);
@@ -276,6 +303,7 @@ export abstract class MigrationDialect {
       if (table) {
         for (const column of Object.values(table.columns)) {
           if (!column.references) continue;
+          if (column.references.table === name) continue;
           if (!byName.has(column.references.table)) continue;
 
           visit(column.references.table);
@@ -344,11 +372,11 @@ export abstract class MigrationDialect {
 
     return [
       ...dropColumns,
-      ...sortedDrops,
       ...sortedCreates,
-      ...recreates,
-      ...addColumns,
       ...alters,
+      ...recreates,
+      ...sortedDrops,
+      ...addColumns,
     ];
   }
 }

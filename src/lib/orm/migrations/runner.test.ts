@@ -12,6 +12,7 @@ import {
   loadConfig,
   rollbackMigration,
 } from "./index.js";
+import { splitStatements } from "./runner.js";
 
 describe("orm migrations runner", () => {
   const dirs: string[] = [];
@@ -312,7 +313,10 @@ export default defineConfig({
     const upPath = join(project.migrationsDir, folder, "up.sql");
     const up = await Bun.file(upPath).text();
 
-    await writeFile(upPath, up.replace("\n\n", "\n-- keep ; in comments\n\n"));
+    await writeFile(
+      upPath,
+      up.replace("\n\n", "\n-- keep ; in comments\n/* also ; in blocks */\n\n"),
+    );
     await applyMigrations(nextConfig);
 
     const db = createOrm({
@@ -357,5 +361,20 @@ export default defineConfig({
     await rm(join(project.migrationsDir, folder, "up.sql"));
 
     await expect(applyMigrations(config)).rejects.toThrow("Could not read");
+  });
+
+  test("splitStatements keeps semicolons inside dollar quotes and block comments", () => {
+    expect(
+      splitStatements(`
+SELECT 1;
+/* keep ; here */
+SELECT $$a;b$$;
+SELECT $tag$c;d$tag$;
+`),
+    ).toEqual([
+      "SELECT 1",
+      "/* keep ; here */\nSELECT $$a;b$$",
+      "SELECT $tag$c;d$tag$",
+    ]);
   });
 });

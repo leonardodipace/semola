@@ -1,4 +1,5 @@
 import { SQLITE_SPEC } from "../dialect/sqlite.js";
+import { MigrationError } from "../errors.js";
 import { MigrationDialect } from "./dialect.js";
 import type { MigrationOp } from "./types.js";
 
@@ -21,6 +22,16 @@ export class SqliteMigrationDialect extends MigrationDialect {
 
   public override async prepareConnection(sql: Bun.SQL) {
     await sql.unsafe("PRAGMA foreign_keys = OFF");
+  }
+
+  public override async assertForeignKeys(sql: Bun.SQL) {
+    const violations = [...(await sql.unsafe("PRAGMA foreign_key_check"))];
+
+    if (violations.length === 0) return;
+
+    throw new MigrationError(
+      `Foreign key check failed (${violations.length} violation(s))`,
+    );
   }
 
   protected override shouldRecreate(tableOps: MigrationOp[]) {

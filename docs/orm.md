@@ -51,7 +51,7 @@ bunx semola orm migrations rollback
 
 `create` diffs the current ORM tables against the latest applied schema stored in `_semola_migrations`, then writes `{timestamp}_{name}/up.sql` and `down.sql`. Apply pending migrations before creating another. `apply` runs pending ups in order; `rollback` runs only the last down. Each `up.sql` starts with a `-- semola-schema:` header; `apply` refuses files that omit it (before running SQL). Applied rows in `_semola_migrations` must match the leading folders on disk - a gap or extra applied row fails.
 
-SQL defaults use `.dbDefault("'anon'")` (raw SQL, so strings need quotes). `.default(fn)` stays application-side only. Adding a `NOT NULL` column requires `.dbDefault(...)` or a nullable column. Other SQLite column changes rebuild the table and `INSERT` shared columns so existing rows survive. Renames are drop + add (a warning is written into the SQL).
+SQL defaults use `.dbDefault("'anon'")` (raw SQL, so strings need quotes). `.default(fn)` stays application-side only. Adding a `NOT NULL` column requires `.dbDefault(...)` or a nullable column. Other SQLite column changes rebuild the table and `INSERT` shared columns so existing rows survive. Renames are drop + add (a warning is written into the SQL). Down SQL that re-adds a `NOT NULL` column without a default warns and fails if the table has rows. SQLite apply/rollback runs `PRAGMA foreign_key_check` before commit.
 
 Dialects differ (SQLite vs Postgres types). History and schema snapshots live in `_semola_migrations`, not JSON files in the migrations folder. SQLite connections enable `PRAGMA foreign_keys = ON` on the first ORM query.
 

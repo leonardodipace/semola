@@ -6,7 +6,7 @@ import { mightThrow, mightThrowSync } from "../../errors/index.js";
 import { MigrationError } from "../errors.js";
 import type { Table } from "../table/types.js";
 import type { MigrationDialect } from "./dialect.js";
-import { diffSchemas, invertOps } from "./diff.js";
+import { diffSchemas } from "./diff.js";
 import { emptySchema, snapshotSchema } from "./snapshot.js";
 import { decodeSchemaHeader, getMigrationDialect } from "./sql.js";
 import type { LoadedConfig, OrmConfig, SchemaSnapshot } from "./types.js";
@@ -259,7 +259,9 @@ export const createMigration = async (input: {
     const folderName = `${timestamp()}_${slugify(name)}`;
     const folderPath = join(config.migrationsDir, folderName);
     const upSql = dialect.render(ops, to);
-    const downSql = dialect.render(invertOps(ops));
+    const downSql = dialect.render(
+      diffSchemas(to, from, dialect.name, { strictAddColumn: false }),
+    );
 
     await mkdir(folderPath, { recursive: true });
     await writeFile(join(folderPath, "up.sql"), upSql);
@@ -301,6 +303,49 @@ const takeLineComment = (text: string, start: number) => {
   return takeUntil(text, start, end - 1);
 };
 
+const takeBlockComment = (text: string, start: number) => {
+  const end = text.indexOf("*/", start + 2);
+
+  if (end === -1) {
+    return takeUntil(text, start, text.length - 1);
+  }
+
+  return takeUntil(text, start, end + 1);
+};
+
+const takeDollarQuote = (text: string, start: number) => {
+  let tagEnd = start + 1;
+
+  if (text[tagEnd] === "$") {
+    tagEnd += 1;
+  } else {
+    if (!/[A-Za-z_]/.test(text[tagEnd] ?? "")) {
+      return undefined;
+    }
+
+    tagEnd += 1;
+
+    while (/[A-Za-z0-9_]/.test(text[tagEnd] ?? "")) {
+      tagEnd += 1;
+    }
+
+    if (text[tagEnd] !== "$") {
+      return undefined;
+    }
+
+    tagEnd += 1;
+  }
+
+  const tag = text.slice(start, tagEnd);
+  const close = text.indexOf(tag, tagEnd);
+
+  if (close === -1) {
+    return takeUntil(text, start, text.length - 1);
+  }
+
+  return takeUntil(text, start, close + tag.length - 1);
+};
+
 const isSqlStatement = (text: string) => {
   return (
     text
@@ -323,6 +368,14 @@ const takeSpecial = (source: string, index: number) => {
     return takeLineComment(source, index);
   }
 
+  if (char === "/" && next === "*") {
+    return takeBlockComment(source, index);
+  }
+
+  if (char === "$") {
+    return takeDollarQuote(source, index);
+  }
+
   return undefined;
 };
 
@@ -337,7 +390,7 @@ const flushStatement = (current: string, statements: string[]) => {
   return "";
 };
 
-const splitStatements = (sqlText: string) => {
+export const splitStatements = (sqlText: string) => {
   const source = sqlText.startsWith("-- semola-schema:")
     ? sqlText.slice(sqlText.indexOf("\n") + 1)
     : sqlText;
@@ -427,6 +480,8 @@ export const applyMigrations = async (config: LoadedConfig) => {
           );
         }
 
+        await dialect.assertForeignKeys(tx);
+
         await tx.unsafe(
           `INSERT INTO ${HISTORY_TABLE} (name, applied_at, schema) VALUES (${insertPh})`,
           [name, new Date().toISOString(), JSON.stringify(headerSchema)],
@@ -454,6 +509,7 @@ export const rollbackMigration = async (config: LoadedConfig) => {
 
     await sql.begin(async (tx) => {
       await runSqlFile(tx, downPath, `Migration ${last.name} down.sql`, false);
+      await dialect.assertForeignKeys(tx);
       await tx.unsafe(`DELETE FROM ${HISTORY_TABLE} WHERE name = ${deletePh}`, [
         last.name,
       ]);

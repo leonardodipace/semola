@@ -157,6 +157,41 @@ describe("relation helpers", () => {
     await orm.$raw.close();
   });
 
+  test("enforces sqlite foreign keys on the first query inside a transaction", async () => {
+    const authors = defineTable("authors", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const posts = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: uuid("author_id")
+        .notNull()
+        .references(() => authors.columns.id),
+    });
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: { authors, posts },
+    });
+
+    await orm.$raw`
+      CREATE TABLE authors (id TEXT PRIMARY KEY NOT NULL);
+      CREATE TABLE posts (
+        id TEXT PRIMARY KEY NOT NULL,
+        author_id TEXT NOT NULL REFERENCES authors(id)
+      );
+    `;
+
+    await expect(
+      orm.$transaction(async (tx) => {
+        await tx.posts.create({
+          data: { id: "p1", authorId: "missing" },
+        });
+      }),
+    ).rejects.toThrow();
+
+    await orm.$raw.close();
+  });
+
   test("findUnique types only accept a single unique key", async () => {
     const orm = createOrm({
       adapter: "sqlite",

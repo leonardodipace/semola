@@ -25,6 +25,7 @@ const diffTable = (
   name: string,
   fromTable: TableSnapshot,
   toTable: TableSnapshot,
+  strictAddColumn: boolean,
 ): MigrationOp[] => {
   const tableOps: MigrationOp[] = [];
 
@@ -35,7 +36,10 @@ const diffTable = (
     if (!next) continue;
 
     if (!prev) {
-      assertAddableColumn(name, next);
+      if (strictAddColumn) {
+        assertAddableColumn(name, next);
+      }
+
       tableOps.push({ kind: "addColumn", table: name, column: next });
       continue;
     }
@@ -101,8 +105,10 @@ export const diffSchemas = (
   from: SchemaSnapshot,
   to: SchemaSnapshot,
   adapter: Adapter,
+  options?: { strictAddColumn?: boolean },
 ): MigrationOp[] => {
   const dialect = getMigrationDialect(adapter);
+  const strictAddColumn = options?.strictAddColumn ?? true;
   const ops: MigrationOp[] = [
     ...createdTables(from, to),
     ...droppedTables(from, to),
@@ -115,7 +121,7 @@ export const diffSchemas = (
     if (!fromTable) continue;
     if (!toTable) continue;
 
-    const tableOps = diffTable(name, fromTable, toTable);
+    const tableOps = diffTable(name, fromTable, toTable, strictAddColumn);
 
     ops.push(...dialect.foldTableOps(fromTable, toTable, tableOps));
   }
