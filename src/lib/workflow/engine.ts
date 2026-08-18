@@ -301,15 +301,9 @@ export class WorkflowEngine<TInput, TResult> {
     this.concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
 
     if (this.stepTimeout !== Infinity) {
-      if (!Number.isFinite(this.stepTimeout)) {
+      if (!(this.stepTimeout > 0)) {
         throw new WorkflowStoreError(
-          "timeout must be a non-negative finite number or Infinity",
-        );
-      }
-
-      if (this.stepTimeout < 0) {
-        throw new WorkflowStoreError(
-          "timeout must be a non-negative finite number or Infinity",
+          "timeout must be a positive finite number or Infinity",
         );
       }
     }

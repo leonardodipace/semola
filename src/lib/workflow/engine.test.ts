@@ -94,10 +94,14 @@ describe("WorkflowEngine", () => {
 
     expect(
       () => new WorkflowEngine({ ...base, timeout: Number.NaN }, store),
-    ).toThrow("timeout must be a non-negative finite number or Infinity");
+    ).toThrow("timeout must be a positive finite number or Infinity");
 
     expect(() => new WorkflowEngine({ ...base, timeout: -1 }, store)).toThrow(
-      "timeout must be a non-negative finite number or Infinity",
+      "timeout must be a positive finite number or Infinity",
+    );
+
+    expect(() => new WorkflowEngine({ ...base, timeout: 0 }, store)).toThrow(
+      "timeout must be a positive finite number or Infinity",
     );
 
     expect(
@@ -106,7 +110,7 @@ describe("WorkflowEngine", () => {
           { ...base, timeout: Number.NEGATIVE_INFINITY },
           store,
         ),
-    ).toThrow("timeout must be a non-negative finite number or Infinity");
+    ).toThrow("timeout must be a positive finite number or Infinity");
   });
 
   test("runs a queued execution to completion", async () => {
