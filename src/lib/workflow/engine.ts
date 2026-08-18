@@ -273,6 +273,7 @@ export class WorkflowEngine<TInput, TResult> {
   private readonly store: WorkflowStore;
   private readonly retries: number;
   private readonly lockTTL: number;
+  private readonly stepTimeout: number;
   private readonly retentionTTL: number;
   private readonly retentionMax: number | undefined;
   private readonly concurrency: number;
@@ -293,6 +294,8 @@ export class WorkflowEngine<TInput, TResult> {
     this.store = store;
     this.retries = options.retries ?? DEFAULT_RETRIES;
     this.lockTTL = options.lockTTL ?? DEFAULT_LOCK_TTL;
+    // ponytail: default matches lockTTL so a hang cannot outlive the lease
+    this.stepTimeout = options.timeout ?? this.lockTTL;
     this.retentionTTL = options.retentionTTL ?? DEFAULT_RETENTION_TTL;
     this.retentionMax = options.retentionMax;
     this.concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
@@ -818,17 +821,32 @@ export class WorkflowEngine<TInput, TResult> {
 
     const workflowInput = fromJson<TInput>(rawInput, "input");
 
-    const [stepError, stepResult] = await mightThrow(
-      Promise.resolve(
-        handler({
-          input: workflowInput,
-          signal: controller.signal,
-          fail: (message) => {
-            throw new NonRetryableStepError(message);
-          },
-        }),
-      ),
+    const handlerPromise = Promise.resolve(
+      handler({
+        input: workflowInput,
+        signal: controller.signal,
+        fail: (message) => {
+          throw new NonRetryableStepError(message);
+        },
+      }),
     );
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const [stepError, stepResult] = await mightThrow(
+      Number.isFinite(this.stepTimeout)
+        ? Promise.race([
+            handlerPromise,
+            new Promise<never>((_, reject) => {
+              timeoutId = setTimeout(() => {
+                reject(new Error(`Step timed out after ${this.stepTimeout}ms`));
+              }, this.stepTimeout);
+            }),
+          ])
+        : handlerPromise,
+    );
+
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
 
     if (!(await this.ownsLease(executionId, token))) return false;
 

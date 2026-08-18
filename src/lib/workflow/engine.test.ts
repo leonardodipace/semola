@@ -150,6 +150,7 @@ describe("WorkflowEngine", () => {
         redis,
         pollInterval: 5,
         lockTTL: 60_000,
+        timeout: Infinity,
         handler: async ({ step }) => {
           await step("hang", async ({ signal }) => {
             started = true;
@@ -204,6 +205,7 @@ describe("WorkflowEngine", () => {
         redis,
         pollInterval: 5,
         lockTTL: 60_000,
+        timeout: Infinity,
         handler: async ({ step }) => {
           await step("hang", async ({ signal }) => {
             while (!signal.aborted) {

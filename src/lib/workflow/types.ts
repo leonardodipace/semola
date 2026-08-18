@@ -105,6 +105,7 @@ export type WorkflowOptions<TInput, TResult> = {
   retryBackoff?: WorkflowRetryBackoff;
   hooks?: WorkflowHooks<TInput, TResult>;
   lockTTL?: number;
+  timeout?: number;
   retentionTTL?: number;
   retentionMax?: number;
   concurrency?: number;

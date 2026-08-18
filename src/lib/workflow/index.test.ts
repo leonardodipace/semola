@@ -98,6 +98,7 @@ const expireLeases = (redis: MockRedisClient) => {
 const fast = {
   pollInterval: 5,
   lockTTL: 40,
+  timeout: Infinity,
   retryBackoff: { baseDelay: 5, multiplier: 2, maxDelay: 20 },
 };
 
@@ -549,6 +550,7 @@ describe("workflow", () => {
       redis,
       pollInterval: 5,
       lockTTL: 40,
+      timeout: Infinity,
       retries: 5,
       retryBackoff: { baseDelay: 30, multiplier: 2, maxDelay: 60 },
       handler: async ({ step }) => {
@@ -1432,6 +1434,30 @@ describe("workflow", () => {
     await stop(wf);
   });
 
+  test("hung step times out then fails", async () => {
+    const redis = createRedis();
+
+    const wf = defineWorkflow({
+      name: `hang-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      timeout: 20,
+      retries: 0,
+      handler: async ({ step }) => {
+        await step("hang", async () => {
+          await new Promise(() => {});
+        });
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    const execution = await waitStatus(wf, executionId, "failed");
+
+    expect(execution.error).toContain("timed out");
+
+    await stop(wf);
+  });
+
   test("resume failed execution", async () => {
     const redis = createRedis();
     let attempts = 0;
@@ -2195,6 +2221,7 @@ describe("workflow", () => {
         redis,
         pollInterval: 5,
         lockTTL: 40,
+        timeout: Infinity,
         retryBackoff: { baseDelay: 5, multiplier: 2, maxDelay: 20 },
         handler: async ({ step }) => {
           await step("flaky", async () => {
@@ -2615,6 +2642,7 @@ describe("workflow", () => {
         redis,
         pollInterval: 5,
         lockTTL: 40,
+        timeout: Infinity,
         retries: 3,
         hooks: {
           onRetry: (context) => {
