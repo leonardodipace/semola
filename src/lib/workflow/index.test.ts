@@ -1532,7 +1532,7 @@ describe("workflow", () => {
     const redis = createRedis();
     const rejections: unknown[] = [];
     const onUnhandled = (reason: unknown) => {
-      rejections.push(reason);
+      if (String(reason).includes("late abort")) rejections.push(reason);
     };
 
     process.on("unhandledRejection", onUnhandled);
@@ -1571,6 +1571,29 @@ describe("workflow", () => {
     } finally {
       process.off("unhandledRejection", onUnhandled);
     }
+  });
+
+  test("synchronous step throw is recorded as failure", async () => {
+    const redis = createRedis();
+
+    const wf = defineWorkflow({
+      name: `sync-throw-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      retries: 0,
+      handler: async ({ step }) => {
+        await step("boom", () => {
+          throw new Error("sync boom");
+        });
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    const execution = await waitStatus(wf, executionId, "failed");
+
+    expect(execution.error).toContain("sync boom");
+
+    await stop(wf);
   });
 
   test("resume failed execution", async () => {

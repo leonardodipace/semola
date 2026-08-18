@@ -837,35 +837,36 @@ export class WorkflowEngine<TInput, TResult> {
       controller.signal.addEventListener("abort", onCancel);
     }
 
-    const handlerPromise = Promise.resolve(
-      handler({
-        input: workflowInput,
-        signal: stepAbort.signal,
-        fail: (message) => {
-          throw new NonRetryableStepError(message);
-        },
-      }),
-    );
-
-    // ponytail: sink late rejects so Promise.race cannot crash the worker
-    void handlerPromise.catch(() => {});
-
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    let run = handlerPromise;
-
-    if (Number.isFinite(this.stepTimeout)) {
-      run = Promise.race([
-        handlerPromise,
-        new Promise<never>((_, reject) => {
-          timeoutId = setTimeout(() => {
-            reject(new Error(`Step timed out after ${this.stepTimeout}ms`));
-            stepAbort.abort();
-          }, this.stepTimeout);
-        }),
-      ]);
-    }
 
     try {
+      const handlerPromise = Promise.resolve().then(() =>
+        handler({
+          input: workflowInput,
+          signal: stepAbort.signal,
+          fail: (message) => {
+            throw new NonRetryableStepError(message);
+          },
+        }),
+      );
+
+      // ponytail: sink late rejects so Promise.race cannot crash the worker
+      void handlerPromise.catch(() => {});
+
+      let run = handlerPromise;
+
+      if (Number.isFinite(this.stepTimeout)) {
+        run = Promise.race([
+          handlerPromise,
+          new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => {
+              reject(new Error(`Step timed out after ${this.stepTimeout}ms`));
+              stepAbort.abort();
+            }, this.stepTimeout);
+          }),
+        ]);
+      }
+
       const [stepError, stepResult] = await mightThrow(run);
 
       if (!(await this.ownsLease(executionId, token))) return false;
