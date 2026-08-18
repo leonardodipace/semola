@@ -854,20 +854,21 @@ export class WorkflowEngine<TInput, TResult> {
     );
 
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let run = handlerPromise;
 
-    const [stepError, stepResult] = await mightThrow(
-      Number.isFinite(this.stepTimeout)
-        ? Promise.race([
-            handlerPromise,
-            new Promise<never>((_, reject) => {
-              timeoutId = setTimeout(() => {
-                stepAbort.abort();
-                reject(new Error(`Step timed out after ${this.stepTimeout}ms`));
-              }, this.stepTimeout);
-            }),
-          ])
-        : handlerPromise,
-    );
+    if (Number.isFinite(this.stepTimeout)) {
+      run = Promise.race([
+        handlerPromise,
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            stepAbort.abort();
+            reject(new Error(`Step timed out after ${this.stepTimeout}ms`));
+          }, this.stepTimeout);
+        }),
+      ]);
+    }
+
+    const [stepError, stepResult] = await mightThrow(run);
 
     if (timeoutId !== undefined) clearTimeout(timeoutId);
 
