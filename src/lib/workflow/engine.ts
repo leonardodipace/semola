@@ -853,6 +853,9 @@ export class WorkflowEngine<TInput, TResult> {
       }),
     );
 
+    // ponytail: sink late rejects so Promise.race cannot crash the worker
+    void handlerPromise.catch(() => {});
+
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     let run = handlerPromise;
 
@@ -861,97 +864,99 @@ export class WorkflowEngine<TInput, TResult> {
         handlerPromise,
         new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => {
-            stepAbort.abort();
             reject(new Error(`Step timed out after ${this.stepTimeout}ms`));
+            stepAbort.abort();
           }, this.stepTimeout);
         }),
       ]);
     }
 
-    const [stepError, stepResult] = await mightThrow(run);
+    try {
+      const [stepError, stepResult] = await mightThrow(run);
 
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
+      if (!(await this.ownsLease(executionId, token))) return false;
 
-    controller.signal.removeEventListener("abort", onCancel);
+      if (!stepError) {
+        const [serializeError, serialized] = mightThrowSync(() =>
+          toJson(stepResult, `step ${stepName}`),
+        );
 
-    if (!(await this.ownsLease(executionId, token))) return false;
+        if (serializeError) {
+          const view = parseHistory(await this.store.loadHistory(executionId));
 
-    if (!stepError) {
-      const [serializeError, serialized] = mightThrowSync(() =>
-        toJson(stepResult, `step ${stepName}`),
-      );
+          if (view.cancelRequested || controller.signal.aborted) {
+            await this.store.enqueue(executionId);
+            return false;
+          }
 
-      if (serializeError) {
+          return this.handleStepFailure({
+            executionId,
+            stepId,
+            stepName,
+            attempt,
+            rawInput,
+            partitionKey,
+            partitionSlot,
+            stepError: new NonRetryableStepError(
+              serializeError instanceof Error
+                ? serializeError.message
+                : "Unable to serialize step",
+            ),
+            view,
+            token,
+          });
+        }
+
+        const completed = await this.store.appendEvents({
+          executionId,
+          events: [
+            {
+              type: "StepCompleted",
+              stepId,
+              stepName,
+              result: serialized,
+              timestamp: Date.now(),
+            },
+          ],
+          leaseToken: token,
+        });
+
+        if (!completed) return false;
+
+        // Persist success before honor cancel so side effects are in history.
         const view = parseHistory(await this.store.loadHistory(executionId));
 
         if (view.cancelRequested || controller.signal.aborted) {
           await this.store.enqueue(executionId);
-          return false;
         }
 
-        return this.handleStepFailure({
-          executionId,
-          stepId,
-          stepName,
-          attempt,
-          rawInput,
-          partitionKey,
-          partitionSlot,
-          stepError: new NonRetryableStepError(
-            serializeError instanceof Error
-              ? serializeError.message
-              : "Unable to serialize step",
-          ),
-          view,
-          token,
-        });
+        return true;
       }
 
-      const completed = await this.store.appendEvents({
-        executionId,
-        events: [
-          {
-            type: "StepCompleted",
-            stepId,
-            stepName,
-            result: serialized,
-            timestamp: Date.now(),
-          },
-        ],
-        leaseToken: token,
-      });
-
-      if (!completed) return false;
-
-      // Persist success before honor cancel so side effects are in history.
       const view = parseHistory(await this.store.loadHistory(executionId));
 
       if (view.cancelRequested || controller.signal.aborted) {
         await this.store.enqueue(executionId);
+        return false;
       }
 
-      return true;
+      return this.handleStepFailure({
+        executionId,
+        stepId,
+        stepName,
+        attempt,
+        rawInput,
+        partitionKey,
+        partitionSlot,
+        stepError,
+        view,
+        token,
+      });
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+
+      controller.signal.removeEventListener("abort", onCancel);
     }
-
-    const view = parseHistory(await this.store.loadHistory(executionId));
-
-    if (view.cancelRequested || controller.signal.aborted) {
-      await this.store.enqueue(executionId);
-      return false;
-    }
-
-    return this.handleStepFailure({
-      executionId,
-      stepId,
-      stepName,
-      attempt,
-      rawInput,
-      partitionKey,
-      partitionSlot,
-      stepError,
-      view,
-      token,
-    });
   }
 
   private async handleStepFailure(input: HandleStepFailureInput) {

@@ -1489,8 +1489,88 @@ describe("workflow", () => {
 
     expect(sawAbort).toBe(true);
     expect(execution.status).toBe("failed");
+    expect(execution.error).toContain("timed out");
 
     await stop(wf);
+  });
+
+  test("timed-out step retries then succeeds", async () => {
+    const redis = createRedis();
+    let attempts = 0;
+
+    const wf = defineWorkflow({
+      name: `hang-retry-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      timeout: 20,
+      retries: 1,
+      handler: async ({ step }) => {
+        await step("flaky", async () => {
+          attempts++;
+
+          if (attempts === 1) {
+            await new Promise(() => {});
+          }
+
+          return "ok";
+        });
+
+        return "done";
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    const execution = await waitStatus(wf, executionId, "completed");
+
+    expect(execution.result).toBe("done");
+    expect(attempts).toBe(2);
+
+    await stop(wf);
+  });
+
+  test("timeout swallows late handler rejection", async () => {
+    const redis = createRedis();
+    const rejections: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      rejections.push(reason);
+    };
+
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      const wf = defineWorkflow({
+        name: `hang-late-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        timeout: 20,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("hang", async ({ signal }) => {
+            await new Promise<void>((_, reject) => {
+              signal.addEventListener(
+                "abort",
+                () => {
+                  queueMicrotask(() => reject(new Error("late abort")));
+                },
+                { once: true },
+              );
+            });
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      await advanceTimersByTimeAsync(20);
+
+      expect(execution.error).toContain("timed out");
+      expect(rejections).toEqual([]);
+
+      await stop(wf);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 
   test("resume failed execution", async () => {
