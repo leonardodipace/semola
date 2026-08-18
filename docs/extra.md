@@ -31,7 +31,7 @@ import type {
 
 ### Features
 
-- `createRetry()` gives you the ability to create a retriable function, by specifying how many times it should retry the provided function.
+`createRetry()` gives you the ability to create a retriable function, by specifying how many times it should retry the provided function.
 
 ## `createRetry()`
 
@@ -412,6 +412,8 @@ await callable();
 the `InvalidResultError` is created when the `input`'s provide a public attribute `data`, of type `TRetryResult`, containing the value that caused the retry; in this case the value will be `{ data: undefined }`.
 
 ## Reference
+
+### `createRetry()`
 
 | Export | Meaning |
 | --- | --- |
