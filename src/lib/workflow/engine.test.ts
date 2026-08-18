@@ -82,6 +82,33 @@ describe("WorkflowEngine", () => {
     jest.useRealTimers();
   });
 
+  test("rejects invalid timeout", () => {
+    const redis = createRedis();
+    const name = `engine-bad-timeout-${crypto.randomUUID()}`;
+    const store = new WorkflowStore(redis, name);
+    const base = {
+      name,
+      redis,
+      handler: async () => {},
+    };
+
+    expect(
+      () => new WorkflowEngine({ ...base, timeout: Number.NaN }, store),
+    ).toThrow("timeout must be a non-negative finite number or Infinity");
+
+    expect(() => new WorkflowEngine({ ...base, timeout: -1 }, store)).toThrow(
+      "timeout must be a non-negative finite number or Infinity",
+    );
+
+    expect(
+      () =>
+        new WorkflowEngine(
+          { ...base, timeout: Number.NEGATIVE_INFINITY },
+          store,
+        ),
+    ).toThrow("timeout must be a non-negative finite number or Infinity");
+  });
+
   test("runs a queued execution to completion", async () => {
     const redis = createRedis();
     const name = `engine-happy-${crypto.randomUUID()}`;

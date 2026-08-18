@@ -1458,6 +1458,41 @@ describe("workflow", () => {
     await stop(wf);
   });
 
+  test("timeout aborts the step signal without cancelling the execution", async () => {
+    const redis = createRedis();
+    let sawAbort = false;
+
+    const wf = defineWorkflow({
+      name: `hang-signal-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      timeout: 20,
+      retries: 0,
+      handler: async ({ step }) => {
+        await step("hang", async ({ signal }) => {
+          await new Promise<void>((_, reject) => {
+            signal.addEventListener(
+              "abort",
+              () => {
+                sawAbort = true;
+                reject(new Error("aborted"));
+              },
+              { once: true },
+            );
+          });
+        });
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    const execution = await waitStatus(wf, executionId, "failed");
+
+    expect(sawAbort).toBe(true);
+    expect(execution.status).toBe("failed");
+
+    await stop(wf);
+  });
+
   test("resume failed execution", async () => {
     const redis = createRedis();
     let attempts = 0;

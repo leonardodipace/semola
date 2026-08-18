@@ -300,6 +300,20 @@ export class WorkflowEngine<TInput, TResult> {
     this.retentionMax = options.retentionMax;
     this.concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
 
+    if (this.stepTimeout !== Infinity) {
+      if (!Number.isFinite(this.stepTimeout)) {
+        throw new WorkflowStoreError(
+          "timeout must be a non-negative finite number or Infinity",
+        );
+      }
+
+      if (this.stepTimeout < 0) {
+        throw new WorkflowStoreError(
+          "timeout must be a non-negative finite number or Infinity",
+        );
+      }
+    }
+
     if (!(this.retentionTTL >= 0)) {
       throw new WorkflowStoreError(
         "retentionTTL must be a non-negative number",
@@ -820,11 +834,19 @@ export class WorkflowEngine<TInput, TResult> {
     if (!started) return false;
 
     const workflowInput = fromJson<TInput>(rawInput, "input");
+    const stepAbort = new AbortController();
+    const onCancel = () => stepAbort.abort();
+
+    if (controller.signal.aborted) {
+      stepAbort.abort();
+    } else {
+      controller.signal.addEventListener("abort", onCancel);
+    }
 
     const handlerPromise = Promise.resolve(
       handler({
         input: workflowInput,
-        signal: controller.signal,
+        signal: stepAbort.signal,
         fail: (message) => {
           throw new NonRetryableStepError(message);
         },
@@ -839,6 +861,7 @@ export class WorkflowEngine<TInput, TResult> {
             handlerPromise,
             new Promise<never>((_, reject) => {
               timeoutId = setTimeout(() => {
+                stepAbort.abort();
                 reject(new Error(`Step timed out after ${this.stepTimeout}ms`));
               }, this.stepTimeout);
             }),
@@ -847,6 +870,8 @@ export class WorkflowEngine<TInput, TResult> {
     );
 
     if (timeoutId !== undefined) clearTimeout(timeoutId);
+
+    controller.signal.removeEventListener("abort", onCancel);
 
     if (!(await this.ownsLease(executionId, token))) return false;
 
