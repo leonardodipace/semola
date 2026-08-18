@@ -1345,6 +1345,93 @@ describe("workflow", () => {
     await stop(wf);
   });
 
+  test("reclaim drops immortal lease and continues", async () => {
+    const redis = createRedis();
+    const name = `immortal-lease-${crypto.randomUUID()}`;
+    const executionId = crypto.randomUUID();
+    const now = Date.now();
+    let runs = 0;
+
+    await redis.rpush(
+      `workflow:${name}:history:${executionId}`,
+      JSON.stringify({
+        type: "WorkflowStarted",
+        input: "{}",
+        partitionKey: "",
+        timestamp: now,
+      }),
+      JSON.stringify({
+        type: "StepScheduled",
+        stepId: "a0",
+        stepName: "only",
+        attempt: 1,
+        timestamp: now,
+      }),
+      JSON.stringify({
+        type: "StepStarted",
+        stepId: "a0",
+        attempt: 1,
+        timestamp: now,
+      }),
+    );
+
+    await redis.hset(
+      `workflow:${name}:meta:${executionId}`,
+      "name",
+      name,
+      "status",
+      "running",
+      "input",
+      "{}",
+      "result",
+      "",
+      "error",
+      "",
+      "createdAt",
+      String(now),
+      "updatedAt",
+      String(now),
+      "completedAt",
+      "",
+      "failedAt",
+      "",
+      "cancelledAt",
+      "",
+      "partitionKey",
+      "",
+      "partitionSlot",
+      "",
+      "concurrencySlot",
+      "",
+    );
+
+    await redis.sadd(`workflow:${name}:active`, executionId);
+    await redis.set(`workflow:${name}:lease:${executionId}`, "zombie");
+
+    expect(await redis.pttl(`workflow:${name}:lease:${executionId}`)).toBe(-1);
+
+    const wf = defineWorkflow({
+      name,
+      redis,
+      ...fast,
+      handler: async ({ step }) => {
+        await step("only", async () => {
+          runs++;
+          return "ok";
+        });
+
+        return "done";
+      },
+    });
+
+    const execution = await waitStatus(wf, executionId, "completed");
+
+    expect(execution.result).toBe("done");
+    expect(runs).toBe(1);
+
+    await stop(wf);
+  });
+
   test("resume failed execution", async () => {
     const redis = createRedis();
     let attempts = 0;

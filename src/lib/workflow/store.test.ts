@@ -137,7 +137,8 @@ describe("WorkflowStore", () => {
   });
 
   test("lease acquire extend release and ownership", async () => {
-    const store = new WorkflowStore(createRedis(), "store-lease");
+    const redis = createRedis();
+    const store = new WorkflowStore(redis, "store-lease");
     const executionId = "exec-4";
 
     expect(
@@ -147,6 +148,10 @@ describe("WorkflowStore", () => {
         ttlMs: 60_000,
       }),
     ).toBe(true);
+
+    expect(
+      await redis.pttl(keys.lease("store-lease", executionId)),
+    ).toBeGreaterThan(0);
 
     expect(
       await store.acquireLease({

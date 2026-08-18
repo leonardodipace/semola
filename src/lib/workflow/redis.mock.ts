@@ -9,6 +9,7 @@ import {
   RELEASE_IF_OWNER,
   RETAIN_IF_TERMINAL,
   SCHEDULE_TIMER_IF_ABSENT,
+  SET_NX_PX,
   TRIM_IF_MEMBER,
   UPDATE_META_AND_ACTIVE,
 } from "./store.js";
@@ -586,6 +587,10 @@ export class MockRedisClient {
 
       this.hsetSync(metaKey, argv.slice(1));
       return 1;
+    }
+
+    if (script === SET_NX_PX) {
+      return this.setSync(key, token, "PX", argv[1], "NX");
     }
 
     if (script === CLAIM_OR_REOWN_PARTITION) {

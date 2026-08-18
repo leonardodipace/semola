@@ -1223,7 +1223,15 @@ export class WorkflowEngine<TInput, TResult> {
         continue;
       }
 
-      if ((await this.store.getLease(executionId)) != null) continue;
+      const leasePttl = await this.store.getLeasePttl(executionId);
+
+      if (leasePttl >= 0) continue;
+
+      if (leasePttl === -1) {
+        const lease = await this.store.getLease(executionId);
+
+        if (lease) await this.store.releaseLease(executionId, lease);
+      }
 
       const reclaimToken = crypto.randomUUID();
       const acquired = await this.store.acquireLease({

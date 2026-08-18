@@ -67,7 +67,7 @@ Steps are **at-least-once**. `step` bodies must be idempotent; a crash mid-step 
 
 N Bun processes may register the same workflow `name` against the same Redis. Work is distributed via one task queue and per-execution leases (`lockTTL`).
 
-If a replica dies mid-run, lease expiry lets another replica (or the same process after restart) reclaim the execution. You do not need to call `resume()` for crash recovery; workers reclaim from Redis automatically.
+If a replica dies mid-run, lease expiry lets another replica (or the same process after restart) reclaim the execution. Reclaim also drops leases with no TTL (`PTTL -1`) so a bad `SET` cannot pin an execution forever. You do not need to call `resume()` for crash recovery; workers reclaim from Redis automatically.
 
 History and status writes are lease-fenced (Redis compare-and-append / compare-and-set against the lease token). A writer that loses the lease cannot append; the new owner continues from history. Client paths (`start` / cancel / resume) append without a lease.
 

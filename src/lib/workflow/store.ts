@@ -16,6 +16,9 @@ import type {
   WorkflowMeta,
 } from "./types.js";
 
+export const SET_NX_PX =
+  "return redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2], 'NX')";
+
 export const RELEASE_IF_OWNER =
   "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end";
 
@@ -355,13 +358,13 @@ export class WorkflowStore {
     const { executionId, token, ttlMs } = input;
 
     const [error, result] = await mightThrow(
-      this.redis.set(
+      this.redis.send("EVAL", [
+        SET_NX_PX,
+        "1",
         keys.lease(this.name, executionId),
         token,
-        "PX",
         String(ttlMs),
-        "NX",
-      ),
+      ]),
     );
 
     if (error) {
@@ -420,6 +423,20 @@ export class WorkflowStore {
     }
 
     return value;
+  }
+
+  public async getLeasePttl(executionId: string) {
+    const [error, result] = await mightThrow(
+      this.redis.send("PTTL", [keys.lease(this.name, executionId)]),
+    );
+
+    if (error) {
+      throw new WorkflowStoreError(
+        `Unable to read lease TTL for ${executionId}`,
+      );
+    }
+
+    return Number(result);
   }
 
   public async claimPartition(input: ClaimPartitionInput) {
