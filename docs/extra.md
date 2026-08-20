@@ -22,7 +22,6 @@ import type {
   ErrorMetadataType,
   HookContextType,
   OnFailedAttemptContextType,
-  RetryContext,
   RetryOnErrorContextType,
   RetryOptions,
   RetryOutcomeType,
@@ -62,7 +61,7 @@ const callable = createRetry({
 console.log(await callable())
 ```
 
-`createRetry()` returns an asynchronous function that wraps everything about retries, like **applying a delay** and **handling the retry lifecycle**. When calling `callable()`, the input function runs and, in case it fails, it retries again at most `maxRetries` times. By default, it throws the last occured error or, if `input` succedded, it returns `input`'s return value, like our list of todos.
+`createRetry()` returns an asynchronous function that wraps everything about retries, like **applying a delay** and **handling the retry lifecycle**. When calling `callable()` for the first time, the input function runs and, in case it fails, it will run again at most `maxRetries` times. By default, it throws the last occured error or, if `input` succedded, it returns `input`'s return value, like our list of todos.
 
 At each call of `callable()`, it's assigned a new unique UUID. You can also provide your own id with the `id` property:
 
@@ -422,14 +421,171 @@ In our case, this value will be `{ data: undefined }`.
 
 ### `createRetry()`
 
-| Export | Meaning |
+Create an asynchronous function that wraps all retry logic and state.
+
+**Syntaxt**
+
+```typescript
+createRetry<TRetryResult>(
+  options: RetryOptions<TRetryResult>
+): () => Promise<RetryOutcomeType<TRetryResult>>
+```
+
+**Generic Types**
+
+- `TRetryResult` - Type of `input`'s return value. By default it's `void`
+
+**Parameters**
+
+- `options: RetryOptions<TRetryResult>` - Configure which function should be retried, how many times it should be retried and how to handle retries' lifecycle 
+
+**Return value**
+
+An asynchronous functions. 
+
+If `onError` is set, this function returns an object of type `RetryOutcomeType<TRetryResult>` where, based on `input`'s state, it can be equals to: 
+- `{ ok: true; result: TRetryResult }` if `input` succedded, it contains `input`'s returned value; otherwise
+- `{ ok: false; }` if `input` failed
+
+If `onError` is not set, the returned fuction reject with the last occurred error.
+
+### Errors
+
+#### InvalidRetryError
+
+An `InvalidRetryError` is thrown when passing a negative or a non-finite number to `maxRetries`, `baseDelay`, `multiplier` or `maxDelay` properties.
+
+**Constructor**
+
+```typescript
+InvalidRetryError(message: string)
+```
+
+**Parameters**
+- `message: string` - Error message
+
+#### InvalidResultError 
+
+An `InvalidResultError` is thrown in case `input`'s return value is considered invalid.
+
+**Constructor**
+
+```typescript
+InvalidResultError<TRetryResult>(data: TRetryResult, message: string)
+```
+**Parameters**
+
+- `data: TRetryResult` - Value considered invalid
+- `message: string` - Error message
+
+**Generic Types**
+
+- `TRetryResult` - Type of `input`'s return value. By default it's `void`
+
+**Attributes**
+
+- `data: TRetryResult` - Invalid value returned by `input`
+
+
+### Constants
+
+| Constant | Description |
 | --- | --- |
-| `createRetry(options)` | Create an async retry function  |
-| `InvalidRetryError` | Raised when passing an invalid retry count or an invalid backoff configuration |
-| `InvalidResultError` | Value selected for retry by `retryOnResult` |
 | `BASE_BACKOFF_DELAY` | Default base delay equals to `1000`ms, or `1` second |
 | `BACKOFF_MULTIPLIER` | Default multiplier equals to `2` |
-| `MAX_BACKOFF_DELAY` | Default delay cap equals to `60000`ms, or `1` minute |
+| `MAX_BACKOFF_DELAY` | Default maximum delay equals to `60000`ms, or `1` minute |
+
+
+### Types
+
+#### RetryOptions
+
+A configuration object passed as input for `createRetry()`
+
+| Property | Type | Description | Required |
+| --- | --- | --- | --- |
+| `input` | `() => TRetryResult \| Promise<TRetryResult>` | Synchronous or asynchronous functions to retry | yes |
+| `maxRetries` | `number` | Number of retries | yes |
+| `id` | `string` | Retry id. By default, it's set to a unique UUID | `-` |
+| `ignoreErrors` | `ErrorClassType[]` | List of exception classes and subclasses to ignore and thus not retried. If not set, all exceptions are retried | `-` |
+| `retryErrors` | `ErrorClassType[]` | List of exception classes and subclasses to match and thus retried. If not set, all exceptions are retried | `-` |
+| `backoff` | `BackoffOptions` | Configure exponential backoff's parameters | `-` |
+| `onError` | `(error: ErrorMetadataType<TRetryResult>) => void \| Promise<void>` | If set, it catch the last occurred error | `-` |
+| `onFailedAttempt` | `(ctx: OnFailedAttemptContextType<TRetryResult>) => void \| Promise<void>` | If set, it's called on each failed attempt | `-` |
+| `retryOnResult` | `(result: TRetryResult) => boolean` | A function that returns `true` if `result` should be retried; otherwise it returns `false` | `-` |
+| `retryOnError` | `(ctx: RetryOnErrorContextType<TRetryResult>) => boolean` | A function that returns `true` if an error should be retried; otherwise it returns `false` | `-` |
+| `beforeRetry` | `(ctx: HookContextType<TRetryResult>) => void \| Promise<void>` | A function that runs before the current attempt is consumed | `-` |
+| `afterRetry` | `(ctx: HookContextType<TRetryResult>) => void \| Promise<void>;` | A function that runs after the current attempt was consumed | `-` |
+
+
+#### BackoffOptions
+
+A configuration object for exponential backoff's parameters
+
+| Property | Type | Description | Required |
+| --- | --- | --- | --- |
+| `baseDelay`  | `number` | base delay in millisecond | `-` |
+| `multiplier` | `number` | multiplicative factor | `-` |
+| `maxDelay` | `number` | delay's maximum value in milliseconds | `-` |
+
+#### ErrorMetadataType
+
+Type that group metadata relative to `onError` context
+
+| Property | Type | Description | Required |
+| --- | --- | --- | --- |
+|`error`| `Error \| InvalidResultError<TRetryResult>` |	Which error caused a retry | yes |
+|`failedAt`| `number` |	When the error occured, expressed in milliseconds | yes |
+|`id`| `string` |	Id assigned to `createRetry()`. By default it's a random UUID | yes |
+
+**Generic Types**
+
+- `TRetryResult` - Type of `input`'s return value. By default it's `void`
+
+#### HookContextType
+
+Type that group metadata relative to `beforeRetry` and `afterRetry` context.
+
+| Property | Type | Description | Required |
+| --- | --- | --- | --- |
+|`error`| `Error \| InvalidResultError<TRetryResult>` |	Which error caused a retry | yes |
+|`id`| `string` |	Id assigned to `createRetry()`. By default it's a random UUID | yes |
+|`retriesRemaining`| `number` |	How many retries remains before stopping | yes |
+|`attempt`| `number` |	Current attempt | yes |
+
+**Generic Types**
+
+- `TRetryResult` - Type of `input`'s return value. By default it's `void`
+
+#### OnFailedAttemptContextType
+
+Type that group metadata relative to `onFailedAttempt` context.
+
+| Property | Type | Description | Required |
+| --- | --- | --- | --- |
+| `error`  |  `Error \| InvalidResultError<TRetryResult>` | Which error caused a retry | yes |
+| `attempt`  | `number` | Current attempt | yes |
+| `retriesRemaining` | `number` | How many retries remains before stopping |  yes |
+| `nextRetryDelayMs` | `number` | Backoff delay, in milliseconds, before the next run, calculated with exponential backoff and Full Jitter. By default, this value is capped at `1` minute |  yes |
+| `id` | `string` | Id assigned to `createRetry()`. By default it's a random UUID  | yes |
+
+**Generic Types**
+
+- `TRetryResult` - Type of `input`'s return value. By default it's `void`
+
+#### RetryOnErrorContextType
+
+Type that group metadata relative to `retryOnError` context.
+
+| Property | Type | Description | Required |
+| --- | --- | --- | --- |
+| `error`|  `Error \| InvalidResultError<TRetryResult>` | Which error caused a retry | yes |
+| `id` | `string` | Id assigned to `createRetry()`. By default it's a random UUID  | yes |
+
+**Generic Types**
+
+- `TRetryResult` - Type of `input`'s return value. By default it's `void`
+
 
 ## Credits
 
