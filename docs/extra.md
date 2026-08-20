@@ -49,7 +49,7 @@ type Todo = {
 const callable = createRetry({
   maxRetries: 3,
   input: async () => {
-    const result = await fetch("localhost:3000/api/v1/todos", { method: "GET" })
+    const result = await fetch("http://localhost:3000/api/v1/todos", { method: "GET" })
     
     if (result.status === 429) {
       throw new Error("Slow down")
@@ -62,9 +62,9 @@ const callable = createRetry({
 console.log(await callable())
 ```
 
-`createRetry()` return an asynchronous functions that wraps everythink about retries, like **applying a delay** and **handling retry life cycle**. When calling `callable()`, the input function is executed at most `maxRetries` times. By default, it throws the last occured error or, if `input` succedded, it returns `input`'s return value, like our list of todos.
+`createRetry()` returns an asynchronous function that wraps everything about retries, like **applying a delay** and **handling the retry lifecycle**. When calling `callable()`, the input function runs and, in case it fails, it retries again at most `maxRetries` times. By default, it throws the last occured error or, if `input` succedded, it returns `input`'s return value, like our list of todos.
 
-By default, each time you create a function with `createRetry()`, we assign a unique UUID to it. You can use your own id with the `id` property:
+At each call of `callable()`, it's assigned a new unique UUID. You can also provide your own id with the `id` property:
 
 ```typescript
 import { createRetry } from "semola/extra"
@@ -145,7 +145,7 @@ When calling `callable()` we can see the following output:
 (after) attempt n. 3 remaining retries: 0
 ```
 
-Both `beforeRetry()` and `afterRetry()` has one parameter with the same property of `onFailedAttempt()`'s parameter, excluded `nextRetryDelayMs`. Attempts are consumed only when `onFailedAttempt()` is executed.
+Both `beforeRetry()` and `afterRetry()` has one parameter with the same property of `onFailedAttempt()`'s parameter, excluded `nextRetryDelayMs`. 
 
 You can also pass an asynchronous functions to `beforeRetry`, `afterRetry` and `onFailedAttempt` properties if you need to, for instance, save a report of the error inside a file or a database.
 
@@ -167,7 +167,7 @@ class RateLimitError extends Error {}
 const callable = createRetry({
   maxRetries: 3,
   input: async () => {
-    const result = await fetch("localhost:3000/api/v1/todos", { method: "GET" })
+    const result = await fetch("http://localhost:3000/api/v1/todos", { method: "GET" })
     
     if (result.status === 429) {
       throw new RateLimitError("Slow down")
@@ -205,7 +205,7 @@ class ServiceUnavailableError extends BaseServerError {}
 const callable = createRetry({
   maxRetries: 3,
   input: async () => {
-    const result = await fetch("localhost:3000/api/v1/todos", { method: "GET" })
+    const result = await fetch("http://localhost:3000/api/v1/todos", { method: "GET" })
     
     if (result.status === 503) {
       throw new ServiceUnavailableError("Oh no!")
@@ -227,9 +227,9 @@ const callable = createRetry({
 await callable()
 ```
 
-You can think of it like a subset or errors you want handle inside `createRetry()`'s context. If an error is not in the `retryErrors` list, `callable()` will throw that error. 
+You can think of it like a subset of errors you want handle inside `createRetry()`'s context. If an error is not in the `retryErrors` list, `callable()` will throw that error. 
 
-By default, it's an empty list meaning **no exceptions are matched**.
+By default, it's an empty list meaning **all exceptions are matched and retried**.
 
 
 ### Retry over errors
@@ -250,7 +250,7 @@ class RateLimitError extends Error {}
 const callable = createRetry({
   maxRetries: 3,
   input: async () => {
-    const result = await fetch("localhost:3000/api/v1/todos", { method: "GET" })
+    const result = await fetch("http://localhost:3000/api/v1/todos", { method: "GET" })
     
     if (result.status === 429) {
       throw new RateLimitError("Slow down")
@@ -289,7 +289,7 @@ type Todo = {
 const callable = createRetry({
   maxRetries: 3,
   input: async () => {
-    const result = await fetch("localhost:3000/api/v1/todos", { method: "GET" })
+    const result = await fetch("http://localhost:3000/api/v1/todos", { method: "GET" })
     if (result.status === 404) return { data: undefined }
     
     return await result.json() as { data: Todo[] }
@@ -316,9 +316,9 @@ Each delay is calculated based on the [exponential backoff with full jitter](htt
 
 | Parameter          | Default value | 
 |--------------------|---------------|
-| base               | `1000` ms |
-| max delay          | `1` minute |
-| backoff multiplier | `2` | 
+| `baseDelay`               | `1000` ms |
+| `maxDelay`          | `1` minute |
+| `multiplier` | `2` | 
 
 We can use the `backoff` property to configure custom values for each parameter:
 
@@ -338,9 +338,12 @@ const callable = createRetry({
 
 ### Handling errors
 
-By default, your `callable()` will throw the last occurring exception, in case it exhausted all the avaiable retries, or any other exception added inside the `ignoreErrors` list. In case you don't want this behaviour, you can use the `onError()` function, to intercept these errors and handle them without using a `try...catch`:
+By default, your `callable()` throws the last occurred exception, either because it exhausted all the available retries or because the exception was added inside the `ignoreErrors` list. In case you don't want this behaviour, you can use the `onError()` function to intercept these errors and handle them without a `try...catch`:
+
 
 ```typescript
+import { createRetry } from "semola/extra"
+
 type Todo = {
   title: string;
   description: string;
@@ -378,6 +381,8 @@ After printing the retry's id, the timestamp and the error's message, `callable(
 In case the `input` function failed because of an invalid result, reported by `retryOnResult()`, you can read which value caused the last occured error:
 
 ```typescript
+import { createRetry, InvalidResultError } from "semola/extra"
+
 type Todo = {
   title: string;
   description: string;
@@ -387,7 +392,7 @@ type Todo = {
 const callable = createRetry({
   maxRetries: 3,
   input: async () => {
-    const result = await fetch("localhost:3000/api/v1/todos", {
+    const result = await fetch("http://localhost:3000/api/v1/todos", {
       method: "GET",
     });
 
@@ -409,7 +414,9 @@ const callable = createRetry({
 
 await callable();
 ```
-the `InvalidResultError` is created when the `input`'s provide a public attribute `data`, of type `TRetryResult`, containing the value that caused the retry; in this case the value will be `{ data: undefined }`.
+the `InvalidResultError` is created when `input`'s return value is considered invalid and cannot be retried. It provides a public `data` attribute, of type `TRetryResult`, containing `input`'s return value, that caused the retry. 
+
+In our case, this value will be `{ data: undefined }`.
 
 ## Reference
 
