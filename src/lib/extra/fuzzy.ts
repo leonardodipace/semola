@@ -1,6 +1,27 @@
-import type { FuzzyOptions } from "./types.js";
+import type { FuzzyOptions, FuzzyResult } from "./types.js";
 
-export function fuzzySearch(options: FuzzyOptions) {}
+export const DEFAULT_TRESHOLD = 0.6;
+
+export function fuzzySearch(options: FuzzyOptions) {
+  if (!options.threshold) {
+    options.threshold = DEFAULT_TRESHOLD;
+  }
+
+  const { data, needle } = options;
+  if (data.length === 0) return [];
+
+  const result = [] as FuzzyResult[];
+
+  for (let index = 0; index < data.length; index++) {
+    const word = data[index];
+    if (!word) return [];
+
+    const distance = levenshteinDistance(word, needle);
+    result.push({ word, score: distance, index });
+  }
+
+  return result.sort((a, b) => a.score - b.score);
+}
 
 export function levenshteinDistance(firstWord: string, secondWord: string) {
   if (firstWord.length < secondWord.length) {

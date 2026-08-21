@@ -62,7 +62,13 @@ export type RetryContext = {
 };
 
 export type FuzzyOptions = {
-  data: string[] | Record<string, string>[];
+  data: string[];
   needle: string;
   threshold?: number;
+};
+
+export type FuzzyResult = {
+  word: string;
+  index: number;
+  score: number;
 };
