@@ -61,13 +61,19 @@ export type RetryContext = {
   error: Error;
 };
 
-export type FuzzyOptions = {
-  data: string[];
-  threshold?: number;
+type FuzzyKeyType<T> =
+  T extends Record<string, string> ? Array<keyof T> : undefined;
+
+type ToArray<Type> = Type extends unknown ? Type[] : never;
+
+export type FuzzyOptions<FuzzyType extends string | Record<string, string>> = {
+  readonly data: ToArray<FuzzyType>;
+  readonly threshold?: number;
+  readonly keys?: FuzzyKeyType<FuzzyType>;
 };
 
 export type FuzzyResult = {
-  word: string;
+  word: string | Record<string, string>;
   index: number;
   score: number;
 };
