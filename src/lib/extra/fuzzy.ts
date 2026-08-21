@@ -7,20 +7,24 @@ export function fuzzySearch(options: FuzzyOptions) {
     options.threshold = DEFAULT_TRESHOLD;
   }
 
-  const { data, needle } = options;
-  if (data.length === 0) return [];
+  const searchFn = (needle: string) => {
+    const { data } = options;
+    if (data.length === 0) return [];
 
-  const result = [] as FuzzyResult[];
+    const result = [] as FuzzyResult[];
 
-  for (let index = 0; index < data.length; index++) {
-    const word = data[index];
-    if (!word) return [];
+    for (let index = 0; index < data.length; index++) {
+      const word = data[index];
+      if (!word) return [];
 
-    const distance = levenshteinDistance(word, needle);
-    result.push({ word, score: distance, index });
-  }
+      const distance = levenshteinDistance(word, needle);
+      result.push({ word, score: distance, index });
+    }
 
-  return result.sort((a, b) => a.score - b.score);
+    return result.sort((a, b) => a.score - b.score);
+  };
+
+  return searchFn;
 }
 
 export function levenshteinDistance(firstWord: string, secondWord: string) {

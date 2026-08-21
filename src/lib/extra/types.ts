@@ -63,7 +63,6 @@ export type RetryContext = {
 
 export type FuzzyOptions = {
   data: string[];
-  needle: string;
   threshold?: number;
 };
 
