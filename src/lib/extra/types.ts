@@ -60,3 +60,9 @@ export type RetryOptions<TRetryResult> = {
 export type RetryContext = {
   error: Error;
 };
+
+export type FuzzyOptions = {
+  data: string[] | Record<string, string>[];
+  needle: string;
+  threshold?: number;
+};

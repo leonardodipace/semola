@@ -97,6 +97,7 @@ export function createRetry<TRetryResult = void>(
 }
 
 export { InvalidResultError, InvalidRetryError } from "./errors.js";
+export { fuzzySearch } from "./fuzzy.js";
 export {
   BACKOFF_MULTIPLIER,
   BASE_BACKOFF_DELAY,
@@ -105,6 +106,7 @@ export {
 export type {
   BackoffOptions,
   ErrorMetadataType,
+  FuzzyOptions,
   HookContextType,
   OnFailedAttemptContextType,
   RetryContext,
