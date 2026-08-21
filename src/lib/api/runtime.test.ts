@@ -87,7 +87,7 @@ describe("runtime", () => {
 
       expect(res.status).toBe(302);
       expect(res.headers.get("Authorization")).toBe("Bearer test");
-      expect(res.headers.get("Location")).toBe("https://example.com");
+      expect(res.headers.get("Location")).toBe("https://example.com/");
     });
 
     test("emptyValidated is frozen defaults", () => {
