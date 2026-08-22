@@ -304,13 +304,13 @@ migrations/
     down.sql
 ```
 
-Review generated SQL before applying it, especially warnings about destructive changes. Each pending migration commits in its own transaction.
+Review generated SQL before applying it, especially warnings about destructive changes. Each pending migration commits in its own transaction. Concurrent `apply` takes a lock (Postgres advisory lock; SQLite `IMMEDIATE` plus a short busy timeout) and re-checks history under that lock so the same migration is not applied twice. On SQLite a waiter may still fail with `SQLITE_BUSY`; history stays consistent either way.
 
 ### History and safety
 
 Semola stores applied migration names and schema snapshots in the `_semola_migrations` database table. Migration directories must remain an exact ordered prefix of that history. Missing, reordered, or extra applied entries fail before new SQL runs.
 
-Every generated `up.sql` contains a `-- semola-schema:` header. Keep it intact: `apply` uses it as the next schema snapshot and rejects migrations without it.
+Every generated `up.sql` contains a `-- semola-schema:` header. Keep it intact: `apply` uses it as the next schema snapshot and rejects migrations that omit it, carry an invalid snapshot, or include no SQL statements.
 
 SQLite has additional safeguards:
 
@@ -331,6 +331,15 @@ Postgres-specific SQL:
 `$config.url` redacts credentials. `loadConfig()` reads the real URL from the ORM client before opening its own connection.
 
 Generated column types differ between SQLite and Postgres. Migration apply and rollback are integration-tested on SQLite.
+
+### v1 limitations
+
+- Column and table renames are drop + add (data is not copied).
+- No migration squashing or baseline tooling beyond the history table.
+- Apply and rollback are integration-tested on SQLite; Postgres SQL is generated and unit-tested.
+- Zero-downtime / online schema changes are out of scope.
+- Same-process `loadConfig()` after rewriting schema files may see a cached module; the CLI starts a fresh process.
+
 
 ### Apply from application code
 

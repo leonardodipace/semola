@@ -251,6 +251,24 @@ export default defineConfig({
     await db.$raw.close();
   });
 
+  test("rejects apply when up.sql has a header but no SQL", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+    const folder = join(project.migrationsDir, "20240101000000_empty_body");
+
+    await mkdir(folder);
+    await writeFile(
+      join(folder, "up.sql"),
+      `-- semola-schema:${JSON.stringify({ tables: {} })}
+`,
+    );
+
+    await expect(applyMigrations(config)).rejects.toThrow(
+      "has no SQL statements to apply",
+    );
+  });
+
   test("applies defaults that contain semicolons", async () => {
     const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
     const project = await setupProject(dbFile);
@@ -864,6 +882,20 @@ export const db = createOrm({
     );
   });
 
+  test("rejects apply when the schema header is not a schema snapshot", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+    const folder = join(project.migrationsDir, "20240101000000000_bad_shape");
+
+    await mkdir(folder);
+    await writeFile(join(folder, "up.sql"), `-- semola-schema:[]\nSELECT 1;\n`);
+
+    await expect(applyMigrations(config)).rejects.toThrow(
+      "Invalid schema header",
+    );
+  });
+
   test("rejects apply when history order does not match file order", async () => {
     const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
     const project = await setupProject(dbFile);
@@ -1298,6 +1330,40 @@ SELECT 2;
 
     expect(history).toEqual([{ name: "20240101000000000_first" }]);
     expect(scratch).toHaveLength(1);
+
+    await db.$raw.close();
+  });
+
+  test("concurrent apply does not double-apply the same migration", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "init", config });
+
+    const results = await Promise.allSettled([
+      applyMigrations(config),
+      applyMigrations(config),
+    ]);
+    const appliedNames = results.flatMap((result) =>
+      result.status === "fulfilled" ? result.value : [],
+    );
+
+    expect(results.some((result) => result.status === "fulfilled")).toBe(true);
+    expect(new Set(appliedNames).size).toBe(appliedNames.length);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: project.users },
+    });
+    const history = [
+      ...(await db.$raw.unsafe(
+        `SELECT name FROM _semola_migrations ORDER BY name`,
+      )),
+    ];
+
+    expect(history).toHaveLength(1);
 
     await db.$raw.close();
   });

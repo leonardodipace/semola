@@ -6,6 +6,38 @@ import type { MigrationOp, SchemaSnapshot } from "./types.js";
 
 const DOLLAR_TAG = /^(\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)/;
 
+export const assertSchemaSnapshot = (value: unknown, label: string) => {
+  if (typeof value !== "object") {
+    throw new MigrationError(`Invalid ${label}: expected a schema object`);
+  }
+
+  if (value === null) {
+    throw new MigrationError(`Invalid ${label}: expected a schema object`);
+  }
+
+  if (Array.isArray(value)) {
+    throw new MigrationError(`Invalid ${label}: expected a schema object`);
+  }
+
+  if (!("tables" in value)) {
+    throw new MigrationError(`Invalid ${label}: missing tables`);
+  }
+
+  if (typeof value.tables !== "object") {
+    throw new MigrationError(`Invalid ${label}: missing tables`);
+  }
+
+  if (value.tables === null) {
+    throw new MigrationError(`Invalid ${label}: missing tables`);
+  }
+
+  if (Array.isArray(value.tables)) {
+    throw new MigrationError(`Invalid ${label}: missing tables`);
+  }
+
+  return value as SchemaSnapshot;
+};
+
 export const decodeSchemaHeader = (sql: string) => {
   const firstLine = (sql.split("\n")[0] ?? "").trimEnd();
 
@@ -13,17 +45,15 @@ export const decodeSchemaHeader = (sql: string) => {
     return undefined;
   }
 
-  const [error, schema] = mightThrowSync(() => {
-    return JSON.parse(
-      firstLine.slice(SCHEMA_HEADER_PREFIX.length),
-    ) as SchemaSnapshot;
+  const [error, parsed] = mightThrowSync(() => {
+    return JSON.parse(firstLine.slice(SCHEMA_HEADER_PREFIX.length)) as unknown;
   });
 
   if (error) {
     throw new MigrationError(`Invalid schema header: ${error.message}`);
   }
 
-  return schema;
+  return assertSchemaSnapshot(parsed, "schema header");
 };
 
 const skipQuoted = (source: string, start: number, quote: string) => {

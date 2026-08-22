@@ -724,6 +724,24 @@ describe("orm migrations snapshot/diff/sql", () => {
     );
   });
 
+  test("decodeSchemaHeader rejects non-object schema payloads", () => {
+    expect(() => decodeSchemaHeader("-- semola-schema:[]")).toThrow(
+      "Invalid schema header",
+    );
+    expect(() => decodeSchemaHeader("-- semola-schema:null")).toThrow(
+      "Invalid schema header",
+    );
+    expect(() => decodeSchemaHeader("-- semola-schema:1")).toThrow(
+      "Invalid schema header",
+    );
+    expect(() => decodeSchemaHeader("-- semola-schema:{}")).toThrow(
+      "Invalid schema header",
+    );
+    expect(() =>
+      decodeSchemaHeader('-- semola-schema:{"tables":null}'),
+    ).toThrow("Invalid schema header");
+  });
+
   test("decodeSchemaHeader accepts CRLF line endings", () => {
     const schema = { tables: {} };
     const header = `-- semola-schema:${JSON.stringify(schema)}\r\n`;

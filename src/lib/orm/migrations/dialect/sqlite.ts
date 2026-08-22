@@ -56,6 +56,7 @@ export class SqliteMigrationDialect extends MigrationDialect {
 
   public override async prepareConnection(sql: Bun.SQL) {
     await sql.unsafe("PRAGMA foreign_keys = OFF");
+    await sql.unsafe("PRAGMA busy_timeout = 250");
   }
 
   public override async assertForeignKeys(sql: Bun.SQL) {

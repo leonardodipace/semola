@@ -9,8 +9,12 @@ import type { MigrationDialect } from "./dialect/index.js";
 import { getMigrationDialect } from "./dialect/index.js";
 import { diffSchemas } from "./diff.js";
 import { emptySchema, snapshotSchema } from "./snapshot.js";
-import { decodeSchemaHeader, splitStatements } from "./sql.js";
-import type { LoadedConfig, OrmConfig, SchemaSnapshot } from "./types.js";
+import {
+  assertSchemaSnapshot,
+  decodeSchemaHeader,
+  splitStatements,
+} from "./sql.js";
+import type { LoadedConfig, OrmConfig } from "./types.js";
 
 const HISTORY_TABLE = "_semola_migrations";
 
@@ -41,15 +45,15 @@ const resolveOrmFromModule = (mod: Record<string, unknown>) => {
 };
 
 const parseSchema = (raw: string, label: string) => {
-  const [error, schema] = mightThrowSync(() => {
-    return JSON.parse(raw) as SchemaSnapshot;
+  const [error, parsed] = mightThrowSync(() => {
+    return JSON.parse(raw) as unknown;
   });
 
   if (error) {
     throw new MigrationError(`Invalid ${label}: ${error.message}`);
   }
 
-  return schema;
+  return assertSchemaSnapshot(parsed, label);
 };
 
 const importModule = async (filePath: string, label: string) => {
@@ -283,14 +287,17 @@ const runSqlFile = async (
 ) => {
   const text = await readSqlFile(filePath, label);
   const headerSchema = decodeSchemaHeader(text);
+  const statements = splitStatements(text);
 
   if (requireHeader) {
     if (!headerSchema) {
       throw new MigrationError(`${label} is missing a schema header`);
     }
-  }
 
-  const statements = splitStatements(text);
+    if (statements.length === 0) {
+      throw new MigrationError(`${label} has no SQL statements to apply`);
+    }
+  }
 
   for (const statement of statements) {
     await sql.unsafe(statement);
@@ -309,12 +316,27 @@ export const applyMigrations = async (config: LoadedConfig) => {
     }
 
     const insertPh = dialect.placeholders(3);
+    const appliedNames: string[] = [];
 
     for (const name of pending) {
       const upPath = join(config.migrationsDir, name, "up.sql");
 
       await dialect.beginMigration(sql, async (tx) => {
         await dialect.lockMigrations(tx);
+
+        const appliedNow = await readApplied(tx);
+
+        assertHistoryMatchesFiles(dirs, appliedNow);
+
+        if (appliedNow.some((row) => row.name === name)) {
+          return;
+        }
+
+        if (dirs[appliedNow.length] !== name) {
+          throw new MigrationError(
+            `Migration ${name} is not next to apply after lock`,
+          );
+        }
 
         const headerSchema = await runSqlFile(
           tx,
@@ -329,10 +351,12 @@ export const applyMigrations = async (config: LoadedConfig) => {
           `INSERT INTO ${HISTORY_TABLE} (name, applied_at, schema) VALUES (${insertPh})`,
           [name, new Date().toISOString(), JSON.stringify(headerSchema)],
         );
+
+        appliedNames.push(name);
       });
     }
 
-    return pending;
+    return appliedNames;
   });
 };
 
