@@ -6,10 +6,7 @@ import type {
   SchemaSnapshot,
 } from "./types.js";
 
-const pickRename = async (
-  question: RenameQuestion,
-  onRename: RenameHandler | undefined,
-) => {
+const ask = async (question: RenameQuestion, onRename?: RenameHandler) => {
   if (!onRename) {
     const dropped = question.dropped.join(", ");
 
@@ -26,9 +23,7 @@ const pickRename = async (
 
   const chosen = await onRename(question);
 
-  if (chosen === undefined) {
-    return;
-  }
+  if (chosen === undefined) return;
 
   if (!question.dropped.includes(chosen)) {
     throw new MigrationError(`Unknown rename source "${chosen}"`);
@@ -37,60 +32,15 @@ const pickRename = async (
   return chosen;
 };
 
-const rewriteTableName = (schema: SchemaSnapshot, from: string, to: string) => {
-  const table = schema.tables[from];
-
-  if (!table) {
-    throw new MigrationError(`Cannot rename missing table ${from}`);
-  }
-
-  delete schema.tables[from];
-  table.name = to;
-  schema.tables[to] = table;
-
-  for (const current of Object.values(schema.tables)) {
-    for (const column of Object.values(current.columns)) {
-      if (!column.references) continue;
-      if (column.references.table !== from) continue;
-
-      column.references.table = to;
-    }
-  }
-};
-
-const rewriteColumnName = (
+const patchRefs = (
   schema: SchemaSnapshot,
-  tableName: string,
-  from: string,
-  to: string,
+  patch: (ref: { table: string; column: string }) => void,
 ) => {
-  const table = schema.tables[tableName];
+  for (const table of Object.values(schema.tables)) {
+    for (const column of Object.values(table.columns)) {
+      if (!column.references) continue;
 
-  if (!table) {
-    throw new MigrationError(
-      `Cannot rename column on missing table ${tableName}`,
-    );
-  }
-
-  const column = table.columns[from];
-
-  if (!column) {
-    throw new MigrationError(
-      `Cannot rename missing column ${tableName}.${from}`,
-    );
-  }
-
-  delete table.columns[from];
-  column.name = to;
-  table.columns[to] = column;
-
-  for (const current of Object.values(schema.tables)) {
-    for (const col of Object.values(current.columns)) {
-      if (!col.references) continue;
-      if (col.references.table !== tableName) continue;
-      if (col.references.column !== from) continue;
-
-      col.references.column = to;
+      patch(column.references);
     }
   }
 };
@@ -102,18 +52,15 @@ export const resolveRenames = async (
 ) => {
   const schema = structuredClone(from);
   const ops: MigrationOp[] = [];
-  const droppedTables = Object.keys(schema.tables).filter((name) => {
+  const remainingTables = Object.keys(schema.tables).filter((name) => {
     return !to.tables[name];
   });
-  const createdTables = Object.keys(to.tables).filter((name) => {
-    return !schema.tables[name];
-  });
-  const remainingTables = [...droppedTables];
 
-  for (const created of createdTables) {
+  for (const created of Object.keys(to.tables)) {
+    if (schema.tables[created]) continue;
     if (remainingTables.length === 0) break;
 
-    const chosen = await pickRename(
+    const chosen = await ask(
       { kind: "table", created, dropped: remainingTables },
       onRename,
     );
@@ -121,7 +68,19 @@ export const resolveRenames = async (
     if (!chosen) continue;
 
     remainingTables.splice(remainingTables.indexOf(chosen), 1);
-    rewriteTableName(schema, chosen, created);
+
+    const table = schema.tables[chosen];
+
+    if (!table) continue;
+
+    delete schema.tables[chosen];
+    table.name = created;
+    schema.tables[created] = table;
+
+    patchRefs(schema, (ref) => {
+      if (ref.table === chosen) ref.table = created;
+    });
+
     ops.push({ kind: "renameTable", from: chosen, to: created });
   }
 
@@ -132,18 +91,15 @@ export const resolveRenames = async (
     if (!fromTable) continue;
     if (!toTable) continue;
 
-    const droppedCols = Object.keys(fromTable.columns).filter((name) => {
+    const remainingCols = Object.keys(fromTable.columns).filter((name) => {
       return !toTable.columns[name];
     });
-    const createdCols = Object.keys(toTable.columns).filter((name) => {
-      return !fromTable.columns[name];
-    });
-    const remainingCols = [...droppedCols];
 
-    for (const created of createdCols) {
+    for (const created of Object.keys(toTable.columns)) {
+      if (fromTable.columns[created]) continue;
       if (remainingCols.length === 0) break;
 
-      const chosen = await pickRename(
+      const chosen = await ask(
         {
           kind: "column",
           table: tableName,
@@ -156,7 +112,22 @@ export const resolveRenames = async (
       if (!chosen) continue;
 
       remainingCols.splice(remainingCols.indexOf(chosen), 1);
-      rewriteColumnName(schema, tableName, chosen, created);
+
+      const column = fromTable.columns[chosen];
+
+      if (!column) continue;
+
+      delete fromTable.columns[chosen];
+      column.name = created;
+      fromTable.columns[created] = column;
+
+      patchRefs(schema, (ref) => {
+        if (ref.table !== tableName) return;
+        if (ref.column !== chosen) return;
+
+        ref.column = created;
+      });
+
       ops.push({
         kind: "renameColumn",
         table: tableName,

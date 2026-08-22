@@ -10,6 +10,7 @@ import {
   loadConfig,
   rollbackMigration,
 } from "../lib/orm/migrations/index.js";
+import type { SelectChoice } from "../lib/prompts/index.js";
 import { select } from "../lib/prompts/index.js";
 
 const packageJson = JSON.parse(
@@ -41,40 +42,40 @@ const stringArg = {
 const CREATE = "";
 
 const promptRename = async (question: RenameQuestion) => {
-  const entity = question.kind === "table" ? "table" : "column";
-  const created =
-    question.kind === "table"
-      ? question.created
-      : `${question.table}.${question.created}`;
-  const [first, ...rest] = question.dropped;
+  if (question.dropped.length === 0) return;
 
-  if (!first) {
-    return;
+  let entity = "column";
+  let created = "";
+  let fromPrefix = "";
+
+  if (question.kind === "table") {
+    entity = "table";
+    created = question.created;
+  } else {
+    created = `${question.table}.${question.created}`;
+    fromPrefix = `${question.table}.`;
   }
 
-  const labelFor = (name: string) => {
-    const from = question.kind === "table" ? name : `${question.table}.${name}`;
+  const choices: SelectChoice<string>[] = [];
 
-    return `~ ${from} › ${created}`;
-  };
+  for (const name of question.dropped) {
+    choices.push({
+      value: name,
+      label: `~ ${fromPrefix}${name} › ${created}`,
+    });
+  }
+
+  choices.push({
+    value: CREATE,
+    label: `+ ${created} › create ${entity}`,
+  });
 
   const selected = await select({
     message: `Is ${created} ${entity} renamed or created from scratch?`,
-    choices: [
-      { value: first, label: labelFor(first) },
-      ...rest.map((name) => {
-        return { value: name, label: labelFor(name) };
-      }),
-      {
-        value: CREATE,
-        label: `+ ${created} › create ${entity}`,
-      },
-    ],
+    choices,
   });
 
-  if (selected === CREATE) {
-    return;
-  }
+  if (selected === CREATE) return;
 
   return selected;
 };

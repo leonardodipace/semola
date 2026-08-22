@@ -295,21 +295,19 @@ bunx semola orm migrations rollback
 
 Apply pending migrations before creating another one. `create` fails when there are no schema changes. The first `create` or `apply` also ensures the `_semola_migrations` history table exists.
 
-If `create` sees a dropped table or column alongside a new one, it asks whether that is a rename (emitting `ALTER TABLE ... RENAME`) or a create-from-scratch. The `semola` binary uses `semola/prompts` for that question. Programmatic `createMigration()` takes the same choice via `onRename`:
+If `create` sees a dropped table or column alongside a new one, it asks whether that is a rename (`ALTER TABLE ... RENAME`) or create-from-scratch. The `semola` binary prompts via `semola/prompts`. Programmatic callers pass `onRename` (return the dropped name, or `undefined` to create/drop). Omit it and `create` throws when a rename is possible.
 
 ```typescript
 await createMigration({
   name: "rename_users",
   config,
-  onRename: (question) => {
-    if (question.kind === "table" && question.created === "people") {
-      return "users";
-    }
+  onRename: (q) => {
+    if (q.kind === "table") return "users";
   },
 });
 ```
 
-Return the dropped name to rename, or `undefined` to create/drop. Omit `onRename` and `create` throws when a rename is possible. `semola/cli` stays non-interactive; only the `semola` binary prompts.
+`semola/cli` stays non-interactive; only the `semola` binary prompts.
 
 Each generated migration has this layout:
 

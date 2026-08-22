@@ -268,9 +268,11 @@ export const createMigration = async (input: {
       diffSchemas(to, renamed.from, dialect, { strictAddColumn: false }),
     );
     const downRenames = reverseRenameOps(renamed.ops);
-    const downSql = downRenames.length
-      ? `${downDiff}${dialect.render(downRenames)}`
-      : downDiff;
+    let downSql = downDiff;
+
+    if (downRenames.length > 0) {
+      downSql = `${downDiff}${dialect.render(downRenames)}`;
+    }
 
     await mkdir(folderPath, { recursive: true });
     await writeFile(join(folderPath, "up.sql"), upSql);
