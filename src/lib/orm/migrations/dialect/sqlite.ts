@@ -3,6 +3,16 @@ import { MigrationError } from "../../errors.js";
 import type { ColumnSnapshot, MigrationOp } from "../types.js";
 import { MigrationDialect } from "./dialect.js";
 
+const isConstantDefault = (value: string) => {
+  if (value === "TRUE") return true;
+  if (value === "FALSE") return true;
+  if (value === "NULL") return true;
+  if (/^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(value)) return true;
+  if (value.startsWith("'") && value.endsWith("'")) return true;
+
+  return false;
+};
+
 export class SqliteMigrationDialect extends MigrationDialect {
   public readonly name = "sqlite" as const;
   protected readonly uuidType = "TEXT";
@@ -68,8 +78,10 @@ export class SqliteMigrationDialect extends MigrationDialect {
     if (op.kind === "addColumn") {
       if (op.column.isPrimaryKey) return false;
       if (op.column.isUnique) return false;
-      if (!op.column.isNullable) {
-        if (op.column.dbDefault === undefined) return false;
+      if (op.column.dbDefault !== undefined) {
+        if (!isConstantDefault(op.column.dbDefault)) return false;
+      } else if (!op.column.isNullable) {
+        return false;
       }
 
       return true;

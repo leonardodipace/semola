@@ -888,6 +888,29 @@ describe("orm migrations snapshot/diff/sql", () => {
     expect(sql).not.toContain("users__semola_tmp");
   });
 
+  test("sqlite recreates the table when adding a column with a non-constant default", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      createdAt: string("created_at")
+        .notNull()
+        .dbDefault("CURRENT_TIMESTAMP", { as: "sql" }),
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ users: before }),
+      snapshotSchema({ users: after }),
+      "sqlite",
+    );
+    const sql = renderMigrationSql("sqlite", ops);
+
+    expect(ops[0]?.kind).toBe("recreateTable");
+    expect(sql).toContain("CURRENT_TIMESTAMP");
+    expect(sql).toContain("users__semola_tmp");
+    expect(sql).not.toContain("ADD COLUMN");
+  });
+
   test("postgres reference-only changes emit foreign key ops, not ALTER COLUMN", () => {
     const authors = defineTable("authors", {
       id: uuid("id").primaryKey().notNull(),
@@ -1686,7 +1709,7 @@ describe("orm migrations snapshot/diff/sql", () => {
     );
   });
 
-  test("postgres create table emits DROP/ADD CONSTRAINT style for composite pkeys", () => {
+  test("postgres create table emits a table-level constraint for composite primary keys", () => {
     const members = defineTable("members", {
       orgId: uuid("org_id").primaryKey().notNull(),
       userId: uuid("user_id").primaryKey().notNull(),
