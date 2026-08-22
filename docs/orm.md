@@ -330,7 +330,7 @@ Postgres-specific SQL:
 
 `$config.url` redacts credentials. `loadConfig()` reads the real URL from the ORM client before opening its own connection.
 
-Generated column types differ between SQLite and Postgres. Migration apply and rollback are integration-tested on SQLite. Postgres apply/rollback of an FK type change runs when `POSTGRES_URL` is set.
+Generated column types differ between SQLite and Postgres. Migration apply and rollback are integration-tested on SQLite.
 
 ### Apply from application code
 
