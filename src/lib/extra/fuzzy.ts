@@ -2,6 +2,35 @@ import type { FuzzyOptions, FuzzyResult } from "./types.js";
 
 export const DEFAULT_TRESHOLD = 0.6;
 
+type TransformationFnType = (word: string) => string;
+
+function foldCase(word: string) {
+  return word.toLowerCase();
+}
+
+function trasform(...transformFn: TransformationFnType[]) {
+  const applyFn = (word: string) => {
+    transformFn.forEach((fn) => {
+      word = fn(word);
+    });
+
+    return word;
+  };
+
+  return applyFn;
+}
+
+function createTrasformationList<
+  FuzzyType extends string | Record<string, string>,
+>(options: FuzzyOptions<FuzzyType>) {
+  const { caseSensitive } = options;
+  const trasformation: TransformationFnType[] = [];
+
+  if (!caseSensitive) trasformation.push(foldCase);
+
+  return trasformation;
+}
+
 export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
   options: FuzzyOptions<FuzzyType>,
 ) {
@@ -10,14 +39,18 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
     if (data.length === 0) return [];
 
     const result = [] as FuzzyResult[];
+    const trasformations = createTrasformationList<FuzzyType>(options);
+    const applyFn = trasform(...trasformations);
+    needle = applyFn(needle);
 
     for (let index = 0; index < data.length; index++) {
       const word = data[index];
       if (!word) return [];
 
       if (typeof word === "string") {
-        const distance = levenshteinDistance(word, needle);
+        const distance = levenshteinDistance(applyFn(word), needle);
         result.push({ word, score: distance, index });
+
         continue;
       }
 
@@ -30,7 +63,7 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
         const element = word[key];
         if (!element) return [];
 
-        const distance = levenshteinDistance(element, needle);
+        const distance = levenshteinDistance(applyFn(element), needle);
         result.push({ word, score: distance, index });
       }
     }

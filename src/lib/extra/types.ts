@@ -70,6 +70,7 @@ export type FuzzyOptions<FuzzyType extends string | Record<string, string>> = {
   readonly data: ToArray<FuzzyType>;
   readonly threshold?: number;
   readonly keys?: FuzzyKeyType<FuzzyType>;
+  caseSensitive?: boolean;
 };
 
 export type FuzzyResult = {

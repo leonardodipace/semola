@@ -62,4 +62,96 @@ describe("Fuzzy Search", () => {
     const resKey = searchKey("aple");
     expect(resKey).toHaveLength(0);
   });
+
+  describe("Case Sensitive", () => {
+    test("should support both capital and small letter when using plain strings as data", () => {
+      const search = fuzzySearch({
+        data: ["AppLe", "Watermelon", "LiMe", "PEACH"],
+        caseSensitive: true,
+      });
+
+      const res = search("Aple");
+      expect(res).toHaveLength(4);
+
+      const item: FuzzyResult = {
+        word: "AppLe",
+        score: 2,
+        index: 0,
+      };
+
+      expect(res[0]).toMatchObject(item);
+    });
+
+    test("should support both capital and small letter when using objects as data", () => {
+      const search = fuzzySearch({
+        data: [
+          { name: "AppLe", color: "red", size: "medium" },
+          { name: "Watermelon", color: "green", size: "large" },
+          { name: "LiMe", color: "lime", size: "small" },
+          { name: "PEACH", color: "pink", size: "medium" },
+        ],
+        keys: ["name"],
+        caseSensitive: true,
+      });
+
+      const res = search("Aple");
+      expect(res).toHaveLength(4);
+
+      const item: FuzzyResult = {
+        word: {
+          name: "AppLe",
+          color: "red",
+          size: "medium",
+        },
+        score: 2,
+        index: 0,
+      };
+
+      expect(res[0]).toMatchObject(item);
+    });
+
+    test("should fold cases when 'caseSensitive' is disabled over a list of strings", () => {
+      const search = fuzzySearch({
+        data: ["AppLe", "Watermelon", "LiMe", "PEACH"],
+      });
+
+      const res = search("Aple");
+      expect(res).toHaveLength(4);
+
+      const item: FuzzyResult = {
+        word: "AppLe",
+        score: 1,
+        index: 0,
+      };
+
+      expect(res[0]).toMatchObject(item);
+    });
+
+    test("should fold cases when 'caseSensitive' is disabled over a list objects", () => {
+      const search = fuzzySearch({
+        data: [
+          { name: "AppLe", color: "red", size: "medium" },
+          { name: "Watermelon", color: "green", size: "large" },
+          { name: "LiMe", color: "lime", size: "small" },
+          { name: "PEACH", color: "pink", size: "medium" },
+        ],
+        keys: ["name"],
+      });
+
+      const res = search("Aple");
+      expect(res).toHaveLength(4);
+
+      const item: FuzzyResult = {
+        word: {
+          name: "AppLe",
+          color: "red",
+          size: "medium",
+        },
+        score: 1,
+        index: 0,
+      };
+
+      expect(res[0]).toMatchObject(item);
+    });
+  });
 });
