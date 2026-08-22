@@ -72,6 +72,7 @@ export type FuzzyOptions<FuzzyType extends string | Record<string, string>> = {
   readonly keys?: FuzzyKeyType<FuzzyType>;
   caseSensitive?: boolean;
   ignorePunctuation?: boolean;
+  ignoreDiacritics?: boolean;
 };
 
 export type FuzzyResult = {

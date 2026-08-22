@@ -246,4 +246,96 @@ describe("Fuzzy Search", () => {
       expect(res[0]).toMatchObject(item);
     });
   });
+
+  describe("Diacritics", () => {
+    test("should ignore diacritics when using plain strings as data", () => {
+      const search = fuzzySearch({
+        data: ["àpplé", "wàtèrmélòn", "limé", "peàçh"],
+        ignoreDiacritics: true,
+      });
+
+      const res = search("wàtèrmelòn");
+      expect(res).toHaveLength(4);
+
+      const item: FuzzyResult = {
+        word: "wàtèrmélòn",
+        score: 0,
+        index: 1,
+      };
+
+      expect(res[0]).toMatchObject(item);
+    });
+
+    test("should ignore diacritics when using objects as data", () => {
+      const search = fuzzySearch({
+        data: [
+          { name: "àpplé", color: "red", size: "medium" },
+          { name: "wàtèrmélòn", color: "green", size: "large" },
+          { name: "limé", color: "lime", size: "small" },
+          { name: "peàçh", color: "pink", size: "medium" },
+        ],
+        keys: ["name"],
+        ignoreDiacritics: true,
+      });
+
+      const res = search("wàtèrmelòn");
+      expect(res).toHaveLength(4);
+
+      const item: FuzzyResult = {
+        word: {
+          name: "wàtèrmélòn",
+          color: "green",
+          size: "large",
+        },
+        score: 0,
+        index: 1,
+      };
+
+      expect(res[0]).toMatchObject(item);
+    });
+
+    test("should include diacritics when using plain strings as data", () => {
+      const search = fuzzySearch({
+        data: ["àpplé", "wàtèrmélòn", "limé", "peàçh"],
+      });
+
+      const res = search("wàtèrmelòn");
+      expect(res).toHaveLength(4);
+
+      const item: FuzzyResult = {
+        word: "wàtèrmélòn",
+        score: 1,
+        index: 1,
+      };
+
+      expect(res[0]).toMatchObject(item);
+    });
+
+    test("should incluide diacritics when using objects as data", () => {
+      const search = fuzzySearch({
+        data: [
+          { name: "àpplé", color: "red", size: "medium" },
+          { name: "wàtèrmélòn", color: "green", size: "large" },
+          { name: "limé", color: "lime", size: "small" },
+          { name: "peàçh", color: "pink", size: "medium" },
+        ],
+        keys: ["name"],
+      });
+
+      const res = search("wàtèrmelòn");
+      expect(res).toHaveLength(4);
+
+      const item: FuzzyResult = {
+        word: {
+          name: "wàtèrmélòn",
+          color: "green",
+          size: "large",
+        },
+        score: 1,
+        index: 1,
+      };
+
+      expect(res[0]).toMatchObject(item);
+    });
+  });
 });
