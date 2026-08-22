@@ -120,6 +120,10 @@ const dataLossWarnings = (ops: MigrationOp[]) => {
       warnings.push(
         `-- warning: drops table(s) ${droppedTables.join(", ")} and creates ${createdTables.join(", ")}; table renames are drop+create and do not copy data`,
       );
+    } else {
+      warnings.push(
+        `-- warning: drops table(s) ${droppedTables.join(", ")}; data in those tables will be lost`,
+      );
     }
   }
 

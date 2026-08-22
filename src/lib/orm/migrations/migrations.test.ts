@@ -269,9 +269,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       ),
     );
 
-    expect(sql.indexOf('CREATE TABLE "authors"')).toBeLessThan(
-      sql.indexOf('ADD CONSTRAINT "posts_author_id_fkey"'),
-    );
+    const createAuthorsAt = sql.indexOf('CREATE TABLE "authors"');
+    const addFkAt = sql.indexOf('ADD CONSTRAINT "posts_author_id_fkey"');
+
+    expect(createAuthorsAt).toBeGreaterThanOrEqual(0);
+    expect(addFkAt).toBeGreaterThan(createAuthorsAt);
   });
 
   test("sqlite recreates a child table before dropping its parent", () => {
@@ -328,6 +330,7 @@ describe("orm migrations snapshot/diff/sql", () => {
     expect(sql).not.toContain(
       'ADD COLUMN "id" UUID CONSTRAINT "users_pkey" PRIMARY KEY',
     );
+    expect(addColumnAt).toBeGreaterThanOrEqual(0);
     expect(addPkAt).toBeGreaterThan(addColumnAt);
   });
 
@@ -346,11 +349,11 @@ describe("orm migrations snapshot/diff/sql", () => {
         "postgres",
       ),
     );
+    const dropConstraintAt = sql.indexOf("DROP CONSTRAINT");
+    const dropNotNullAt = sql.indexOf("DROP NOT NULL");
 
-    expect(sql.indexOf("DROP CONSTRAINT")).toBeGreaterThanOrEqual(0);
-    expect(sql.indexOf("DROP CONSTRAINT")).toBeLessThan(
-      sql.indexOf("DROP NOT NULL"),
-    );
+    expect(dropConstraintAt).toBeGreaterThanOrEqual(0);
+    expect(dropNotNullAt).toBeGreaterThan(dropConstraintAt);
   });
 
   test("postgres drops the old primary key before adding a new one", () => {
@@ -370,10 +373,11 @@ describe("orm migrations snapshot/diff/sql", () => {
         "postgres",
       ),
     );
+    const dropPkAt = sql.indexOf('DROP CONSTRAINT "users_pkey"');
+    const addPkAt = sql.indexOf('ADD CONSTRAINT "users_pkey" PRIMARY KEY');
 
-    expect(sql.indexOf('DROP CONSTRAINT "users_pkey"')).toBeLessThan(
-      sql.indexOf('ADD CONSTRAINT "users_pkey" PRIMARY KEY'),
-    );
+    expect(dropPkAt).toBeGreaterThanOrEqual(0);
+    expect(addPkAt).toBeGreaterThan(dropPkAt);
   });
 
   test("postgres unique to primary key drops the unique constraint", () => {
@@ -391,12 +395,13 @@ describe("orm migrations snapshot/diff/sql", () => {
         "postgres",
       ),
     );
+    const dropUniqueAt = sql.indexOf("DROP CONSTRAINT");
+    const addPkAt = sql.indexOf('ADD CONSTRAINT "users_pkey" PRIMARY KEY');
 
     expect(sql).toContain('DROP CONSTRAINT "users_id_key"');
     expect(sql).toContain('ADD CONSTRAINT "users_pkey" PRIMARY KEY');
-    expect(sql.indexOf("DROP CONSTRAINT")).toBeLessThan(
-      sql.indexOf('ADD CONSTRAINT "users_pkey" PRIMARY KEY'),
-    );
+    expect(dropUniqueAt).toBeGreaterThanOrEqual(0);
+    expect(addPkAt).toBeGreaterThan(dropUniqueAt);
   });
 
   test("postgres primary key to unique adds a unique constraint", () => {
@@ -523,9 +528,12 @@ describe("orm migrations snapshot/diff/sql", () => {
       'ADD CONSTRAINT "members_pkey" PRIMARY KEY ("org_id", "user_id")',
     );
     expect(sql).not.toContain('PRIMARY KEY ("user_id")');
-    expect(sql.indexOf("DROP CONSTRAINT")).toBeLessThan(
-      sql.indexOf("ADD CONSTRAINT"),
-    );
+
+    const dropConstraintAt = sql.indexOf("DROP CONSTRAINT");
+    const addConstraintAt = sql.indexOf("ADD CONSTRAINT");
+
+    expect(dropConstraintAt).toBeGreaterThanOrEqual(0);
+    expect(addConstraintAt).toBeGreaterThan(dropConstraintAt);
   });
 
   test("warns when a table is dropped and another is created", () => {
@@ -546,6 +554,22 @@ describe("orm migrations snapshot/diff/sql", () => {
 
     expect(sql).toContain(
       "-- warning: drops table(s) users and creates people; table renames are drop+create and do not copy data",
+    );
+  });
+
+  test("warns when a table is dropped without a matching create", () => {
+    const users = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const sql = renderMigrationSql(
+      "sqlite",
+      diffSchemas(snapshotSchema({ users }), emptySchema(), "sqlite", {
+        strictAddColumn: false,
+      }),
+    );
+
+    expect(sql).toContain(
+      "-- warning: drops table(s) users; data in those tables will be lost",
     );
   });
 
@@ -661,8 +685,13 @@ describe("orm migrations snapshot/diff/sql", () => {
       ),
     );
 
-    expect(sql.indexOf("DROP DEFAULT")).toBeLessThan(sql.indexOf("TYPE "));
-    expect(sql.indexOf("TYPE ")).toBeLessThan(sql.indexOf("SET DEFAULT"));
+    const dropDefaultAt = sql.indexOf("DROP DEFAULT");
+    const typeAt = sql.indexOf("TYPE ");
+    const setDefaultAt = sql.indexOf("SET DEFAULT");
+
+    expect(dropDefaultAt).toBeGreaterThanOrEqual(0);
+    expect(typeAt).toBeGreaterThan(dropDefaultAt);
+    expect(setDefaultAt).toBeGreaterThan(typeAt);
   });
 
   test("postgres drops enum checks before TYPE", () => {
@@ -682,10 +711,11 @@ describe("orm migrations snapshot/diff/sql", () => {
         "postgres",
       ),
     );
+    const dropCheckAt = sql.indexOf('DROP CONSTRAINT "users_status_check"');
+    const typeAt = sql.indexOf("TYPE ");
 
-    expect(sql.indexOf('DROP CONSTRAINT "users_status_check"')).toBeLessThan(
-      sql.indexOf("TYPE "),
-    );
+    expect(dropCheckAt).toBeGreaterThanOrEqual(0);
+    expect(typeAt).toBeGreaterThan(dropCheckAt);
   });
 
   test("decodeSchemaHeader rejects invalid json", () => {
@@ -881,7 +911,30 @@ describe("orm migrations snapshot/diff/sql", () => {
 
     expect(sql).toContain('ADD CONSTRAINT "posts_author_id_fkey"');
     expect(sql).not.toContain("ALTER COLUMN");
-    expect(sql).not.toContain("no-op alter");
+  });
+
+  test("sqlite recreates table for reference-only foreign key changes", () => {
+    const authors = defineTable("authors", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const postsBefore = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: uuid("author_id"),
+    });
+    const postsAfter = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: uuid("author_id").references(() => authors.columns.id),
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ authors, posts: postsBefore }),
+      snapshotSchema({ authors, posts: postsAfter }),
+      "sqlite",
+    );
+    const sql = renderMigrationSql("sqlite", ops);
+
+    expect(ops.some((op) => op.kind === "recreateTable")).toBe(true);
+    expect(sql).toContain("posts__semola_tmp");
+    expect(sql).toContain('REFERENCES "authors" ("id")');
   });
 
   test("postgres drops and sets defaults without a type change", () => {
@@ -960,7 +1013,7 @@ describe("orm migrations snapshot/diff/sql", () => {
     ).toThrow("without a target");
   });
 
-  test("sqlite recreates when dropping the last shared column set still copies remaining columns", () => {
+  test("sqlite copies the remaining columns when it recreates a table to drop a unique column", () => {
     const before = defineTable("users", {
       id: uuid("id").primaryKey().notNull(),
       bio: string("bio"),

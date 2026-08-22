@@ -16,6 +16,8 @@ const columnsEqual = (a: ColumnSnapshot, b: ColumnSnapshot) => {
   if (a.isPrimaryKey !== b.isPrimaryKey) return false;
   if (a.isUnique !== b.isUnique) return false;
   if (a.dbDefault !== b.dbDefault) return false;
+  if (a.references?.table !== b.references?.table) return false;
+  if (a.references?.column !== b.references?.column) return false;
   if (JSON.stringify(a.enumValues) !== JSON.stringify(b.enumValues)) {
     return false;
   }

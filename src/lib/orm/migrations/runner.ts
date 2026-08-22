@@ -256,6 +256,11 @@ export const createMigration = async (input: {
     const folderName = `${timestamp()}_${slugify(name)}`;
     const folderPath = join(config.migrationsDir, folderName);
     const upSql = dialect.render(ops, to);
+
+    if (splitStatements(upSql).length === 0) {
+      throw new MigrationError("No schema changes to migrate");
+    }
+
     const downSql = dialect.render(
       diffSchemas(to, from, dialect.name, { strictAddColumn: false }),
     );

@@ -600,10 +600,12 @@ export const db = createOrm({
       const configIndex = JSON.stringify(
         join(import.meta.dir, "../../config.ts"),
       );
+      const sql = new Bun.SQL(url, { adapter: "postgres" });
 
-      await writeFile(
-        schemaPath,
-        `
+      try {
+        await writeFile(
+          schemaPath,
+          `
 import { createOrm, defineTable, string, uuid } from ${ormIndex};
 
 const authors = defineTable("mig_authors", {
@@ -620,10 +622,10 @@ export const db = createOrm({
   tables: { authors, posts },
 });
 `,
-      );
-      await writeFile(
-        configPath,
-        `
+        );
+        await writeFile(
+          configPath,
+          `
 import { defineConfig } from ${configIndex};
 
 export default defineConfig({
@@ -633,17 +635,17 @@ export default defineConfig({
   },
 });
 `,
-      );
-      await mkdir(migrationsDir, { recursive: true });
+        );
+        await mkdir(migrationsDir, { recursive: true });
 
-      const config = await loadConfig(root);
+        const config = await loadConfig(root);
 
-      await createMigration({ name: "init", config });
-      await applyMigrations(config);
+        await createMigration({ name: "init", config });
+        await applyMigrations(config);
 
-      await writeFile(
-        schemaPath,
-        `
+        await writeFile(
+          schemaPath,
+          `
 import { createOrm, defineTable, string, uuid } from ${ormIndex};
 
 const authors = defineTable("mig_authors", {
@@ -660,24 +662,23 @@ export const db = createOrm({
   tables: { authors, posts },
 });
 `,
-      );
+        );
 
-      const next = await loadConfig(root);
+        const next = await loadConfig(root);
 
-      await createMigration({ name: "widen_ids", config: next });
-      const applied = await applyMigrations(next);
+        await createMigration({ name: "widen_ids", config: next });
+        const applied = await applyMigrations(next);
 
-      expect(applied).toHaveLength(1);
+        expect(applied).toHaveLength(1);
 
-      await rollbackMigration(next);
-      await rollbackMigration(config);
-
-      const sql = new Bun.SQL(url, { adapter: "postgres" });
-
-      await sql.unsafe("DROP TABLE IF EXISTS mig_posts");
-      await sql.unsafe("DROP TABLE IF EXISTS mig_authors");
-      await sql.unsafe("DROP TABLE IF EXISTS _semola_migrations");
-      await sql.close();
+        await rollbackMigration(next);
+        await rollbackMigration(config);
+      } finally {
+        await sql.unsafe("DROP TABLE IF EXISTS mig_posts");
+        await sql.unsafe("DROP TABLE IF EXISTS mig_authors");
+        await sql.unsafe("DROP TABLE IF EXISTS _semola_migrations");
+        await sql.close();
+      }
     },
   );
 });

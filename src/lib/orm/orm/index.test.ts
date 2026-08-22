@@ -211,7 +211,7 @@ describe("relation helpers", () => {
       }),
     );
 
-    expect(error).toBeTruthy();
+    expect(error?.message).toContain("FOREIGN KEY");
 
     await orm.$raw.close();
   });
@@ -1535,7 +1535,7 @@ describe("many to many relation", () => {
       }),
     );
 
-    expect(error).toBeTruthy();
+    expect(error?.message).toContain("FOREIGN KEY");
 
     // Read data
 
