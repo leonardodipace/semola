@@ -1,0 +1,174 @@
+import type { ColumnSnapshot, MigrationOp, TableSnapshot } from "../types.js";
+
+const withoutForeignKeys = (table: TableSnapshot) => {
+  const columns: Record<string, ColumnSnapshot> = {};
+
+  for (const column of Object.values(table.columns)) {
+    const { references: _references, ...rest } = column;
+
+    columns[column.name] = rest;
+  }
+
+  return { name: table.name, columns };
+};
+
+const foreignKeysOf = (tables: TableSnapshot[]) => {
+  const ops: MigrationOp[] = [];
+
+  for (const table of tables) {
+    for (const column of Object.values(table.columns)) {
+      if (!column.references) continue;
+
+      ops.push({ kind: "addForeignKey", table: table.name, column });
+    }
+  }
+
+  return ops;
+};
+
+const foreignKeysBetween = (tables: TableSnapshot[]) => {
+  const names = new Set(tables.map((table) => table.name));
+  const ops: MigrationOp[] = [];
+
+  for (const table of tables) {
+    for (const column of Object.values(table.columns)) {
+      if (!column.references) continue;
+      if (!names.has(column.references.table)) continue;
+
+      ops.push({ kind: "dropForeignKey", table: table.name, column });
+    }
+  }
+
+  return ops;
+};
+
+const sortTables = (tables: TableSnapshot[]) => {
+  const byName = new Map(tables.map((table) => [table.name, table]));
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const ordered: TableSnapshot[] = [];
+  let cycle = false;
+
+  const visit = (name: string) => {
+    if (visited.has(name)) return;
+
+    if (visiting.has(name)) {
+      cycle = true;
+      return;
+    }
+
+    visiting.add(name);
+    const table = byName.get(name);
+
+    if (table) {
+      for (const column of Object.values(table.columns)) {
+        if (!column.references) continue;
+        if (column.references.table === name) continue;
+        if (!byName.has(column.references.table)) continue;
+
+        visit(column.references.table);
+      }
+
+      ordered.push(table);
+    }
+
+    visiting.delete(name);
+    visited.add(name);
+  };
+
+  for (const table of tables) {
+    visit(table.name);
+  }
+
+  if (cycle) {
+    return { ordered: tables, cycle: true };
+  }
+
+  return { ordered, cycle: false };
+};
+
+export const orderOps = (
+  ops: MigrationOp[],
+  deferCircularForeignKeys: boolean,
+) => {
+  const creates: TableSnapshot[] = [];
+  const drops: TableSnapshot[] = [];
+  const dropForeignKeys: MigrationOp[] = [];
+  const dropColumns: MigrationOp[] = [];
+  const dropPrimaryKeys: MigrationOp[] = [];
+  const alterColumns: MigrationOp[] = [];
+  const recreates: MigrationOp[] = [];
+  const addColumns: MigrationOp[] = [];
+  const addPrimaryKeys: MigrationOp[] = [];
+  const addForeignKeys: MigrationOp[] = [];
+
+  for (const op of ops) {
+    switch (op.kind) {
+      case "createTable":
+        creates.push(op.table);
+        break;
+      case "dropTable":
+        drops.push(op.table);
+        break;
+      case "dropForeignKey":
+        dropForeignKeys.push(op);
+        break;
+      case "dropColumn":
+        dropColumns.push(op);
+        break;
+      case "dropPrimaryKey":
+        dropPrimaryKeys.push(op);
+        break;
+      case "alterColumn":
+        alterColumns.push(op);
+        break;
+      case "recreateTable":
+        recreates.push(op);
+        break;
+      case "addColumn":
+        addColumns.push(op);
+        break;
+      case "addPrimaryKey":
+        addPrimaryKeys.push(op);
+        break;
+      case "addForeignKey":
+        addForeignKeys.push(op);
+        break;
+    }
+  }
+
+  const sortedCreates = sortTables(creates);
+  const sortedDrops = sortTables(drops);
+  const stripCreateFks = deferCircularForeignKeys && sortedCreates.cycle;
+  const createOps = sortedCreates.ordered.map((table) => {
+    return {
+      kind: "createTable" as const,
+      table: stripCreateFks ? withoutForeignKeys(table) : table,
+    };
+  });
+  const dropOps = [...sortedDrops.ordered].reverse().map((table) => {
+    return { kind: "dropTable" as const, table };
+  });
+  const cycleForeignKeys = stripCreateFks
+    ? foreignKeysOf(sortedCreates.ordered)
+    : [];
+  const cycleDropForeignKeys =
+    deferCircularForeignKeys && sortedDrops.cycle
+      ? foreignKeysBetween(sortedDrops.ordered)
+      : [];
+
+  return [
+    ...cycleDropForeignKeys,
+    ...dropForeignKeys,
+    ...dropColumns,
+    ...createOps,
+    ...dropPrimaryKeys,
+    ...alterColumns,
+    ...recreates,
+    ...dropOps,
+    ...addColumns,
+    ...addPrimaryKeys,
+    ...addForeignKeys,
+    ...cycleForeignKeys,
+  ];
+};
