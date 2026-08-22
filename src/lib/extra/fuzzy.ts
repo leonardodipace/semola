@@ -8,6 +8,12 @@ function foldCase(word: string) {
   return word.toLowerCase();
 }
 
+function removePunctuation(word: string) {
+  return word
+    .replace(/[!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~]/g, "") // remove punctuation symbols
+    .replace(/\s{2,}/g, " "); // remove extra spaces
+}
+
 function trasform(...transformFn: TransformationFnType[]) {
   const applyFn = (word: string) => {
     transformFn.forEach((fn) => {
@@ -23,10 +29,11 @@ function trasform(...transformFn: TransformationFnType[]) {
 function createTrasformationList<
   FuzzyType extends string | Record<string, string>,
 >(options: FuzzyOptions<FuzzyType>) {
-  const { caseSensitive } = options;
+  const { caseSensitive, ignorePunctuation } = options;
   const trasformation: TransformationFnType[] = [];
 
   if (!caseSensitive) trasformation.push(foldCase);
+  if (ignorePunctuation) trasformation.push(removePunctuation);
 
   return trasformation;
 }

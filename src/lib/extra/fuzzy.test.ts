@@ -154,4 +154,96 @@ describe("Fuzzy Search", () => {
       expect(res[0]).toMatchObject(item);
     });
   });
+
+  describe("Punctuation", () => {
+    test("should ignore punctuation symbols when using a list of strings", () => {
+      const search = fuzzySearch({
+        data: ["apple!", "wat%rmelon?", "l.ime.", "PE<A>CH"],
+        ignorePunctuation: true,
+      });
+
+      const res = search("ap/le");
+      expect(res).toHaveLength(4);
+
+      const item: FuzzyResult = {
+        word: "apple!",
+        score: 1,
+        index: 0,
+      };
+
+      expect(res[0]).toMatchObject(item);
+    });
+
+    test("should ignore punctuation symbols when using a list of objects", () => {
+      const search = fuzzySearch({
+        data: [
+          { name: "apple!", color: "red", size: "medium" },
+          { name: "water?melon", color: "green", size: "large" },
+          { name: "li//me", color: "lime", size: "small" },
+          { name: "<peach>", color: "pink", size: "medium" },
+        ],
+        keys: ["name"],
+        ignorePunctuation: true,
+      });
+
+      const res = search("pe;ch:");
+      expect(res).toHaveLength(4);
+
+      const item: FuzzyResult = {
+        word: {
+          name: "<peach>",
+          color: "pink",
+          size: "medium",
+        },
+        score: 1,
+        index: 3,
+      };
+
+      expect(res[0]).toMatchObject(item);
+    });
+
+    test("should include punctuation symbols when using a list of strings", () => {
+      const search = fuzzySearch({
+        data: ["apple!", "wat%rmelon?", "l.ime.", "PE<A>CH"],
+      });
+
+      const res = search("l!me.");
+      expect(res).toHaveLength(4);
+
+      const item: FuzzyResult = {
+        word: "l.ime.",
+        score: 2,
+        index: 2,
+      };
+
+      expect(res[0]).toMatchObject(item);
+    });
+
+    test("should include punctuation symbols when using a list of objects", () => {
+      const search = fuzzySearch({
+        data: [
+          { name: "apple!", color: "red", size: "medium" },
+          { name: "water?melon", color: "green", size: "large" },
+          { name: "li//me", color: "lime", size: "small" },
+          { name: "<peach>", color: "pink", size: "medium" },
+        ],
+        keys: ["name"],
+      });
+
+      const res = search("pe;ch:");
+      expect(res).toHaveLength(4);
+
+      const item: FuzzyResult = {
+        word: {
+          name: "<peach>",
+          color: "pink",
+          size: "medium",
+        },
+        score: 3,
+        index: 3,
+      };
+
+      expect(res[0]).toMatchObject(item);
+    });
+  });
 });
