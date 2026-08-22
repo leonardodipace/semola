@@ -1036,4 +1036,596 @@ describe("orm migrations snapshot/diff/sql", () => {
       'INSERT INTO "users__semola_tmp" ("id", "bio") SELECT "id", "bio" FROM "users"',
     );
   });
+
+  test("emptySchema has no tables", () => {
+    expect(emptySchema()).toEqual({ tables: {} });
+  });
+
+  test("identical schemas produce no ops", () => {
+    const users = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").notNull().unique(),
+    });
+    const snapshot = snapshotSchema({ users });
+
+    expect(diffSchemas(snapshot, snapshot, "sqlite")).toEqual([]);
+    expect(diffSchemas(snapshot, snapshot, "postgres")).toEqual([]);
+  });
+
+  test("renderMigrationSql with no ops still emits a schema header when given", () => {
+    const schema = emptySchema();
+    const sql = renderMigrationSql("sqlite", [], schema);
+
+    expect(sql).toContain("-- semola-schema:");
+    expect(decodeSchemaHeader(sql)).toEqual(schema);
+  });
+
+  test("snapshots enum values and nullability", () => {
+    const users = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      status: enumType("status", ["draft", "live"]),
+      bio: string("bio"),
+    });
+    const snapshot = snapshotSchema({ users });
+
+    expect(snapshot.tables.users?.columns.status?.type).toBe("enum");
+    expect(snapshot.tables.users?.columns.status?.enumValues).toEqual([
+      "draft",
+      "live",
+    ]);
+    expect(snapshot.tables.users?.columns.status?.isNullable).toBe(true);
+    expect(snapshot.tables.users?.columns.bio?.isNullable).toBe(true);
+    expect(snapshot.tables.users?.columns.id?.isNullable).toBe(false);
+  });
+
+  test("snapshots boolean, date, json, jsonb, and number column types", () => {
+    const events = defineTable("events", {
+      id: uuid("id").primaryKey().notNull(),
+      ok: boolean("ok").notNull(),
+      at: date("at").notNull(),
+      meta: json("meta"),
+      extra: jsonb("extra"),
+      score: number("score").notNull(),
+    });
+    const columns = snapshotSchema({ events }).tables.events?.columns;
+
+    expect(columns?.ok?.type).toBe("boolean");
+    expect(columns?.at?.type).toBe("date");
+    expect(columns?.meta?.type).toBe("json");
+    expect(columns?.extra?.type).toBe("jsonb");
+    expect(columns?.score?.type).toBe("number");
+  });
+
+  test("renders enum check constraints on create table", () => {
+    const users = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      status: enumType("status", ["draft", "live"]).notNull(),
+    });
+    const sqlite = renderMigrationSql(
+      "sqlite",
+      diffSchemas(emptySchema(), snapshotSchema({ users }), "sqlite"),
+    );
+    const postgres = renderMigrationSql(
+      "postgres",
+      diffSchemas(emptySchema(), snapshotSchema({ users }), "postgres"),
+    );
+
+    expect(sqlite).toContain('CONSTRAINT "users_status_check"');
+    expect(sqlite).toContain("'draft'");
+    expect(sqlite).toContain("'live'");
+    expect(postgres).toContain('CONSTRAINT "users_status_check"');
+    expect(postgres).toContain("'draft'");
+    expect(postgres).toContain("'live'");
+  });
+
+  test("narrowing an enum updates the check constraint", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      status: enumType("status", ["draft", "live", "archived"]).notNull(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      status: enumType("status", ["draft", "live"]).notNull(),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "postgres",
+      ),
+    );
+
+    expect(sql).toContain('DROP CONSTRAINT "users_status_check"');
+    expect(sql).toContain('ADD CONSTRAINT "users_status_check"');
+    expect(sql).toContain("'draft'");
+    expect(sql).toContain("'live'");
+    expect(sql).not.toContain("'archived'");
+  });
+
+  test("allows adding a NOT NULL column when a default is present", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull().dbDefault("anon"),
+    });
+
+    expect(() =>
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "sqlite",
+      ),
+    ).not.toThrow();
+    expect(() =>
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "postgres",
+      ),
+    ).not.toThrow();
+  });
+
+  test("sqlite drops a nullable column in place", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      bio: string("bio"),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ users: before }),
+      snapshotSchema({ users: after }),
+      "sqlite",
+    );
+    const sql = renderMigrationSql("sqlite", ops);
+
+    expect(ops).toEqual([
+      {
+        kind: "dropColumn",
+        table: "users",
+        column: expect.objectContaining({ name: "bio" }),
+      },
+    ]);
+    expect(sql).toContain('DROP COLUMN "bio"');
+    expect(sql).not.toContain("users__semola_tmp");
+  });
+
+  test("postgres drops a column in place", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      bio: string("bio"),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "postgres",
+      ),
+    );
+
+    expect(sql).toContain('DROP COLUMN "bio"');
+  });
+
+  test("sqlite recreates the table on type changes", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      age: string("age").notNull(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      age: number("age").notNull(),
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ users: before }),
+      snapshotSchema({ users: after }),
+      "sqlite",
+    );
+
+    expect(ops[0]?.kind).toBe("recreateTable");
+  });
+
+  test("sqlite recreates the table when toggling nullability", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email"),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").notNull().dbDefault(""),
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ users: before }),
+      snapshotSchema({ users: after }),
+      "sqlite",
+    );
+
+    expect(ops[0]?.kind).toBe("recreateTable");
+  });
+
+  test("sqlite recreates the table when adding a unique constraint", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").notNull(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").notNull().unique(),
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ users: before }),
+      snapshotSchema({ users: after }),
+      "sqlite",
+    );
+
+    expect(ops[0]?.kind).toBe("recreateTable");
+  });
+
+  test("postgres drops a unique constraint without altering the column type", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").notNull().unique(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").notNull(),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "postgres",
+      ),
+    );
+
+    expect(sql).toContain('DROP CONSTRAINT "users_email_key"');
+    expect(sql).not.toContain("ALTER COLUMN");
+  });
+
+  test("creates multiple tables without foreign keys in any stable order", () => {
+    const a = defineTable("a", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const b = defineTable("b", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const sql = renderMigrationSql(
+      "sqlite",
+      diffSchemas(emptySchema(), snapshotSchema({ a, b }), "sqlite"),
+    );
+
+    expect(sql).toContain('CREATE TABLE "a"');
+    expect(sql).toContain('CREATE TABLE "b"');
+  });
+
+  test("inline foreign keys appear on create table for both adapters", () => {
+    const users = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const posts = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: uuid("author_id")
+        .notNull()
+        .references(() => users.columns.id),
+    });
+    const sqlite = renderMigrationSql(
+      "sqlite",
+      diffSchemas(emptySchema(), snapshotSchema({ users, posts }), "sqlite"),
+    );
+    const postgres = renderMigrationSql(
+      "postgres",
+      diffSchemas(emptySchema(), snapshotSchema({ users, posts }), "postgres"),
+    );
+
+    expect(sqlite).toContain('REFERENCES "users" ("id")');
+    expect(postgres).toContain('REFERENCES "users" ("id")');
+  });
+
+  test("postgres SET NOT NULL comes before adding a unique constraint", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email"),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").notNull().unique(),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "postgres",
+      ),
+    );
+    const notNullAt = sql.indexOf("SET NOT NULL");
+    const uniqueAt = sql.indexOf('ADD CONSTRAINT "users_email_key" UNIQUE');
+
+    expect(notNullAt).toBeGreaterThanOrEqual(0);
+    expect(uniqueAt).toBeGreaterThan(notNullAt);
+  });
+
+  test("postgres DROP NOT NULL follows dropping a unique constraint", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").notNull().unique(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email"),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "postgres",
+      ),
+    );
+    const dropUniqueAt = sql.indexOf('DROP CONSTRAINT "users_email_key"');
+    const dropNotNullAt = sql.indexOf("DROP NOT NULL");
+
+    expect(dropUniqueAt).toBeGreaterThanOrEqual(0);
+    expect(dropNotNullAt).toBeGreaterThan(dropUniqueAt);
+  });
+
+  test("boolean and number dbDefaults render correctly", () => {
+    const flags = defineTable("flags", {
+      id: uuid("id").primaryKey().notNull(),
+      on: boolean("on").notNull().dbDefault(true),
+      score: number("score").notNull().dbDefault(0),
+    });
+    const sqlite = renderMigrationSql(
+      "sqlite",
+      diffSchemas(emptySchema(), snapshotSchema({ flags }), "sqlite"),
+    );
+    const postgres = renderMigrationSql(
+      "postgres",
+      diffSchemas(emptySchema(), snapshotSchema({ flags }), "postgres"),
+    );
+
+    expect(sqlite).toContain("DEFAULT 1");
+    expect(sqlite).toContain("DEFAULT 0");
+    expect(postgres).toContain("DEFAULT true");
+    expect(postgres).toContain("DEFAULT 0");
+  });
+
+  test("does not warn when a unique column uses a SQL expression default", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      token: string("token")
+        .notNull()
+        .unique()
+        .dbDefault("gen_random_uuid()", { as: "sql" }),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "postgres",
+      ),
+    );
+
+    expect(sql).not.toContain(
+      "unique/primary key with a constant default fails if the table has more than one row",
+    );
+  });
+
+  test("warns when adding a primary key column with a constant default", () => {
+    const before = defineTable("users", {
+      email: string("email").notNull().unique(),
+    });
+    const after = defineTable("users", {
+      id: string("id").primaryKey().notNull().dbDefault("fixed"),
+      email: string("email").notNull().unique(),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "postgres",
+      ),
+    );
+
+    expect(sql).toContain(
+      "unique/primary key with a constant default fails if the table has more than one row",
+    );
+  });
+
+  test("decodeSchemaHeader reads the header from a full migration file", () => {
+    const users = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const schema = snapshotSchema({ users });
+    const sql = renderMigrationSql(
+      "sqlite",
+      diffSchemas(emptySchema(), schema, "sqlite"),
+      schema,
+    );
+
+    expect(decodeSchemaHeader(sql)).toEqual(schema);
+  });
+
+  test("decodeSchemaHeader rejects a missing header", () => {
+    expect(() => decodeSchemaHeader('CREATE TABLE "users" (id TEXT);')).toThrow(
+      "Invalid schema header",
+    );
+  });
+
+  test("dropping a table emits dropTable and DROP TABLE SQL", () => {
+    const users = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ users }),
+      emptySchema(),
+      "sqlite",
+      { strictAddColumn: false },
+    );
+    const sql = renderMigrationSql("sqlite", ops);
+
+    expect(ops).toEqual([
+      {
+        kind: "dropTable",
+        table: expect.objectContaining({ name: "users" }),
+      },
+    ]);
+    expect(sql).toContain('DROP TABLE "users"');
+  });
+
+  test("up and down of a create table are inverses for sqlite", () => {
+    const users = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+    });
+    const to = snapshotSchema({ users });
+    const up = renderMigrationSql(
+      "sqlite",
+      diffSchemas(emptySchema(), to, "sqlite"),
+      to,
+    );
+    const down = renderMigrationSql(
+      "sqlite",
+      diffSchemas(to, emptySchema(), "sqlite", { strictAddColumn: false }),
+    );
+
+    expect(up).toContain('CREATE TABLE "users"');
+    expect(down).toContain('DROP TABLE "users"');
+    expect(up).toContain("-- semola-schema:");
+  });
+
+  test("sqlite recreate preserves shared columns when adding a unique column", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+      email: string("email").notNull(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+      email: string("email").notNull().unique(),
+    });
+    const sql = renderMigrationSql(
+      "sqlite",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "sqlite",
+      ),
+    );
+
+    expect(sql).toContain(
+      'INSERT INTO "users__semola_tmp" ("id", "name", "email") SELECT "id", "name", "email" FROM "users"',
+    );
+  });
+
+  test("postgres drops inbound FKs then the parent when the child keeps the column", () => {
+    const authors = defineTable("authors", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const postsBefore = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: uuid("author_id").references(() => authors.columns.id),
+    });
+    const postsAfter = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: uuid("author_id"),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ authors, posts: postsBefore }),
+        snapshotSchema({ posts: postsAfter }),
+        "postgres",
+      ),
+    );
+    const dropFkAt = sql.indexOf('DROP CONSTRAINT "posts_author_id_fkey"');
+    const dropAuthorsAt = sql.indexOf('DROP TABLE "authors"');
+
+    expect(dropFkAt).toBeGreaterThanOrEqual(0);
+    expect(dropAuthorsAt).toBeGreaterThan(dropFkAt);
+  });
+
+  test("quotes identifier-unsafe table and column names", () => {
+    const weird = defineTable("user data", {
+      id: uuid("user id").primaryKey().notNull(),
+    });
+    const sql = renderMigrationSql(
+      "sqlite",
+      diffSchemas(emptySchema(), snapshotSchema({ weird }), "sqlite"),
+    );
+
+    expect(sql).toContain('CREATE TABLE "user data"');
+    expect(sql).toContain('"user id"');
+  });
+
+  test("strictAddColumn false allows down paths that re-add NOT NULL without default", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+
+    expect(() =>
+      diffSchemas(
+        snapshotSchema({ users: after }),
+        snapshotSchema({ users: before }),
+        "sqlite",
+      ),
+    ).toThrow("Cannot add NOT NULL column");
+
+    expect(() =>
+      diffSchemas(
+        snapshotSchema({ users: after }),
+        snapshotSchema({ users: before }),
+        "sqlite",
+        { strictAddColumn: false },
+      ),
+    ).not.toThrow();
+  });
+
+  test("changing only a foreign key target emits drop and add foreign key on postgres", () => {
+    const authors = defineTable("authors", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const people = defineTable("people", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const postsBefore = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: uuid("author_id").references(() => authors.columns.id),
+    });
+    const postsAfter = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: uuid("author_id").references(() => people.columns.id),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ authors, people, posts: postsBefore }),
+        snapshotSchema({ authors, people, posts: postsAfter }),
+        "postgres",
+      ),
+    );
+
+    expect(sql).toContain('DROP CONSTRAINT "posts_author_id_fkey"');
+    expect(sql).toContain('ADD CONSTRAINT "posts_author_id_fkey"');
+    expect(sql).toContain('REFERENCES "people" ("id")');
+    expect(sql).not.toContain("ALTER COLUMN");
+  });
 });
