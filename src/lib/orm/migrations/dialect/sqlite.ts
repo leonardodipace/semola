@@ -20,6 +20,13 @@ export class SqliteMigrationDialect extends MigrationDialect {
     return SQLITE_SPEC.formatPlaceholder(index);
   }
 
+  protected override formatDefault(value: string) {
+    if (value === "TRUE") return "1";
+    if (value === "FALSE") return "0";
+
+    return value;
+  }
+
   public override sqlTypeFor(column: ColumnSnapshot) {
     if (column.type === "number") {
       if (column.isPrimaryKey) {

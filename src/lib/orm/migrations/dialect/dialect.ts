@@ -167,6 +167,10 @@ export abstract class MigrationDialect {
     return this.sqlTypes[column.type];
   }
 
+  protected formatDefault(value: string) {
+    return value;
+  }
+
   public foldTableOps(
     fromTable: TableSnapshot,
     toTable: TableSnapshot,
@@ -263,7 +267,7 @@ export abstract class MigrationDialect {
     }
 
     if (column.dbDefault !== undefined) {
-      parts.push(`DEFAULT ${column.dbDefault}`);
+      parts.push(`DEFAULT ${this.formatDefault(column.dbDefault)}`);
     }
 
     const check = this.enumCheckSql(column);

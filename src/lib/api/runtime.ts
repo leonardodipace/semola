@@ -49,7 +49,11 @@ export const html = (status: number, body: string) => {
 };
 
 export const redirect = (status: number, url: string) => {
-  return Response.redirect(url, status);
+  const headers = new Headers();
+
+  headers.set("Location", url);
+
+  return new Response(null, { status, headers });
 };
 
 export const badRequest = (message?: string) => {

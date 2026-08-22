@@ -1459,10 +1459,10 @@ describe("orm migrations snapshot/diff/sql", () => {
     expect(decodeSchemaHeader(sql)).toEqual(schema);
   });
 
-  test("decodeSchemaHeader rejects a missing header", () => {
-    expect(() => decodeSchemaHeader('CREATE TABLE "users" (id TEXT);')).toThrow(
-      "Invalid schema header",
-    );
+  test("decodeSchemaHeader returns undefined for a missing header", () => {
+    expect(
+      decodeSchemaHeader('CREATE TABLE "users" (id TEXT);'),
+    ).toBeUndefined();
   });
 
   test("dropping a table emits dropTable and DROP TABLE SQL", () => {

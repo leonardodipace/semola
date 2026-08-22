@@ -59,6 +59,13 @@ export class PostgresMigrationDialect extends MigrationDialect {
     return POSTGRES_SPEC.formatPlaceholder(index);
   }
 
+  protected override formatDefault(value: string) {
+    if (value === "TRUE") return "true";
+    if (value === "FALSE") return "false";
+
+    return value;
+  }
+
   public override async lockMigrations(sql: Bun.SQL) {
     await sql.unsafe(
       "SELECT pg_advisory_xact_lock(hashtext('_semola_migrations'))",
@@ -178,21 +185,39 @@ export class PostgresMigrationDialect extends MigrationDialect {
       alterColumn(`TYPE ${sqlType} USING CAST(${columnId} AS ${sqlType})`);
     }
 
-    this.pushUniqueChange(statements, table, tableId, columnId, from, to);
+    this.pushUniqueChange(
+      statements,
+      table,
+      tableId,
+      columnId,
+      from,
+      to,
+      "drop",
+    );
 
     if (from.isNullable !== to.isNullable) {
       alterColumn(to.isNullable ? "DROP NOT NULL" : "SET NOT NULL");
     }
 
+    this.pushUniqueChange(
+      statements,
+      table,
+      tableId,
+      columnId,
+      from,
+      to,
+      "add",
+    );
+
     if (typeChanged) {
       if (to.dbDefault !== undefined) {
-        alterColumn(`SET DEFAULT ${to.dbDefault}`);
+        alterColumn(`SET DEFAULT ${this.formatDefault(to.dbDefault)}`);
       }
     } else if (from.dbDefault !== to.dbDefault) {
       if (to.dbDefault === undefined) {
         alterColumn("DROP DEFAULT");
       } else {
-        alterColumn(`SET DEFAULT ${to.dbDefault}`);
+        alterColumn(`SET DEFAULT ${this.formatDefault(to.dbDefault)}`);
       }
     }
 
@@ -212,6 +237,7 @@ export class PostgresMigrationDialect extends MigrationDialect {
     columnId: string,
     from: ColumnSnapshot,
     to: ColumnSnapshot,
+    mode: "drop" | "add",
   ) {
     const fromUnique = from.isUnique && !from.isPrimaryKey;
     const toUnique = to.isUnique && !to.isPrimaryKey;
@@ -219,11 +245,15 @@ export class PostgresMigrationDialect extends MigrationDialect {
     if (fromUnique === toUnique) return;
 
     if (toUnique) {
+      if (mode !== "add") return;
+
       statements.push(
         `ALTER TABLE ${tableId} ADD CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_key`)} UNIQUE (${columnId});`,
       );
       return;
     }
+
+    if (mode !== "drop") return;
 
     statements.push(
       `ALTER TABLE ${tableId} DROP CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_key`)};`,

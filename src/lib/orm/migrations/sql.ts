@@ -82,9 +82,7 @@ export const splitStatements = (sqlText: string) => {
 
     if (char === "-" && next === "-") {
       const newline = source.indexOf("\n", index);
-      const end = newline === -1 ? source.length - 1 : newline - 1;
-      current += source.slice(index, end + 1);
-      index = end;
+      index = newline === -1 ? source.length - 1 : newline - 1;
       continue;
     }
 
