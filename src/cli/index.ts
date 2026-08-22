@@ -3,12 +3,14 @@ import { readFileSync } from "node:fs";
 import { CLI } from "../lib/cli/index.js";
 import { mightThrow } from "../lib/errors/index.js";
 import { MigrationError } from "../lib/orm/errors.js";
+import type { RenameQuestion } from "../lib/orm/migrations/index.js";
 import {
   applyMigrations,
   createMigration,
   loadConfig,
   rollbackMigration,
 } from "../lib/orm/migrations/index.js";
+import { select } from "../lib/prompts/index.js";
 
 const packageJson = JSON.parse(
   readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
@@ -36,6 +38,47 @@ const stringArg = {
   },
 };
 
+const CREATE = "";
+
+const promptRename = async (question: RenameQuestion) => {
+  const entity = question.kind === "table" ? "table" : "column";
+  const created =
+    question.kind === "table"
+      ? question.created
+      : `${question.table}.${question.created}`;
+  const [first, ...rest] = question.dropped;
+
+  if (!first) {
+    return;
+  }
+
+  const labelFor = (name: string) => {
+    const from = question.kind === "table" ? name : `${question.table}.${name}`;
+
+    return `~ ${from} › ${created}`;
+  };
+
+  const selected = await select({
+    message: `Is ${created} ${entity} renamed or created from scratch?`,
+    choices: [
+      { value: first, label: labelFor(first) },
+      ...rest.map((name) => {
+        return { value: name, label: labelFor(name) };
+      }),
+      {
+        value: CREATE,
+        label: `+ ${created} › create ${entity}`,
+      },
+    ],
+  });
+
+  if (selected === CREATE) {
+    return;
+  }
+
+  return selected;
+};
+
 const run = async () => {
   const program = new CLI({
     name: "semola",
@@ -55,6 +98,7 @@ const run = async () => {
       const folder = await createMigration({
         name: args.name,
         config,
+        onRename: promptRename,
       });
 
       console.log(`Created migration ${folder}`);

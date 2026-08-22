@@ -45,7 +45,26 @@ export type MigrationOp =
   | { kind: "dropForeignKey"; table: string; column: ColumnSnapshot }
   | { kind: "addForeignKey"; table: string; column: ColumnSnapshot }
   | { kind: "dropPrimaryKey"; table: string }
-  | { kind: "addPrimaryKey"; table: string; columns: string[] };
+  | { kind: "addPrimaryKey"; table: string; columns: string[] }
+  | { kind: "renameTable"; from: string; to: string }
+  | { kind: "renameColumn"; table: string; from: string; to: string };
+
+export type RenameQuestion =
+  | {
+      kind: "table";
+      created: string;
+      dropped: string[];
+    }
+  | {
+      kind: "column";
+      table: string;
+      created: string;
+      dropped: string[];
+    };
+
+export type RenameHandler = (
+  question: RenameQuestion,
+) => string | undefined | Promise<string | undefined>;
 
 export type OrmConfig = {
   adapter: Adapter;

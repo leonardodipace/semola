@@ -101,9 +101,14 @@ export const orderOps = (
   const addColumns: MigrationOp[] = [];
   const addPrimaryKeys: MigrationOp[] = [];
   const addForeignKeys: MigrationOp[] = [];
+  const renames: MigrationOp[] = [];
 
   for (const op of ops) {
     switch (op.kind) {
+      case "renameTable":
+      case "renameColumn":
+        renames.push(op);
+        break;
       case "createTable":
         creates.push(op.table);
         break;
@@ -158,6 +163,7 @@ export const orderOps = (
       : [];
 
   return [
+    ...renames,
     ...cycleDropForeignKeys,
     ...dropForeignKeys,
     ...dropColumns,

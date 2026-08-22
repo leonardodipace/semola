@@ -9,7 +9,11 @@ export {
   uuid,
 } from "./column/index.js";
 export { MigrationError, OrmError } from "./errors.js";
-export type { LoadedConfig } from "./migrations/index.js";
+export type {
+  LoadedConfig,
+  RenameHandler,
+  RenameQuestion,
+} from "./migrations/index.js";
 export {
   applyMigrations,
   createMigration,

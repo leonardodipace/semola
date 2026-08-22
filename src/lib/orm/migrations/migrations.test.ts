@@ -553,7 +553,7 @@ describe("orm migrations snapshot/diff/sql", () => {
     );
 
     expect(sql).toContain(
-      "-- warning: drops table(s) users and creates people; table renames are drop+create and do not copy data",
+      "-- warning: drops table(s) users and creates people; data in dropped tables will be lost",
     );
   });
 
@@ -854,9 +854,7 @@ describe("orm migrations snapshot/diff/sql", () => {
       ),
     );
 
-    expect(sql).toContain(
-      '-- warning: "users" drops bio and adds about; renames are drop+add and do not copy data',
-    );
+    expect(sql).toContain('-- warning: "users" drops bio and adds about');
   });
 
   test("renders json, jsonb, boolean, and date types", () => {
@@ -1978,9 +1976,7 @@ describe("orm migrations snapshot/diff/sql", () => {
       ),
     );
 
-    expect(sql).toContain(
-      '-- warning: "users" drops bio and adds about; renames are drop+add and do not copy data',
-    );
+    expect(sql).toContain('-- warning: "users" drops bio and adds about');
   });
 
   test("sqlite drops and recreates when removing a primary key column", () => {

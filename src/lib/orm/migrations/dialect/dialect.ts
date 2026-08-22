@@ -220,6 +220,14 @@ export abstract class MigrationDialect {
     return `ALTER TABLE ${quoteIdentifier(table)} DROP COLUMN ${quoteIdentifier(column.name)};`;
   }
 
+  private renderRenameTable(from: string, to: string) {
+    return `ALTER TABLE ${quoteIdentifier(from)} RENAME TO ${quoteIdentifier(to)};`;
+  }
+
+  private renderRenameColumn(table: string, from: string, to: string) {
+    return `ALTER TABLE ${quoteIdentifier(table)} RENAME COLUMN ${quoteIdentifier(from)} TO ${quoteIdentifier(to)};`;
+  }
+
   private renderRecreateTable(from: TableSnapshot, to: TableSnapshot) {
     const tmpName = `${to.name}__semola_tmp`;
     const shared = Object.keys(to.columns).filter((name) => from.columns[name]);
@@ -262,6 +270,10 @@ export abstract class MigrationDialect {
         return this.renderDropPrimaryKey(op.table);
       case "addPrimaryKey":
         return this.renderAddPrimaryKey(op.table, op.columns);
+      case "renameTable":
+        return this.renderRenameTable(op.from, op.to);
+      case "renameColumn":
+        return this.renderRenameColumn(op.table, op.from, op.to);
     }
   }
 }

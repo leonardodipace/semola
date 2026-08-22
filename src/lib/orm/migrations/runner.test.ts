@@ -23,10 +23,16 @@ describe("orm migrations runner", () => {
     }
   });
 
-  const setupProject = async (dbPath: string) => {
+  const setupProject = async (
+    dbUrl: string,
+    adapter: "sqlite" | "postgres" = "sqlite",
+  ) => {
     const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
     dirs.push(root);
-    dirs.push(dirname(dbPath));
+
+    if (adapter === "sqlite") {
+      dirs.push(dirname(dbUrl));
+    }
 
     const users = defineTable("users", {
       id: uuid("id").primaryKey().notNull(),
@@ -50,8 +56,8 @@ const users = defineTable("users", {
 });
 
 export const db = createOrm({
-  adapter: "sqlite",
-  url: ${JSON.stringify(dbPath)},
+  adapter: ${JSON.stringify(adapter)},
+  url: ${JSON.stringify(dbUrl)},
   tables: { users },
 });
 `,
@@ -77,7 +83,7 @@ export default defineConfig({
       root,
       users,
       migrationsDir,
-      dbPath,
+      dbPath: dbUrl,
     };
   };
 
@@ -2201,5 +2207,269 @@ export default defineConfig({
     expect(up).toContain(
       "unique/primary key with a constant default fails if the table has more than one row",
     );
+  });
+
+  test("renames a table without dropping rows", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const seed = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: project.users },
+    });
+
+    await seed.users.create({
+      data: { id: "1", name: "Ada", email: "ada@example.com" },
+    });
+    await seed.$raw.close();
+
+    const people = defineTable("people", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+      email: string("email").notNull().unique(),
+    });
+    const nextConfig = {
+      ...config,
+      orm: {
+        ...config.orm,
+        tables: { people },
+      },
+    };
+    const folder = await createMigration({
+      name: "rename_users",
+      config: nextConfig,
+      onRename: () => "users",
+    });
+    const up = await Bun.file(
+      join(project.migrationsDir, folder, "up.sql"),
+    ).text();
+    const down = await Bun.file(
+      join(project.migrationsDir, folder, "down.sql"),
+    ).text();
+
+    expect(up).toContain('ALTER TABLE "users" RENAME TO "people"');
+    expect(up).not.toContain("DROP TABLE");
+    expect(down).toContain('ALTER TABLE "people" RENAME TO "users"');
+
+    await applyMigrations(nextConfig);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { people },
+    });
+    const row = await db.people.findFirst({ where: { id: "1" } });
+
+    expect(row?.email).toBe("ada@example.com");
+
+    await rollbackMigration(nextConfig);
+    await db.$raw.close();
+
+    const restored = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: project.users },
+    });
+
+    expect((await restored.users.findFirst({ where: { id: "1" } }))?.name).toBe(
+      "Ada",
+    );
+
+    await restored.$raw.close();
+  });
+
+  test("renames a column without dropping values", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const seed = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: project.users },
+    });
+
+    await seed.users.create({
+      data: { id: "1", name: "Ada", email: "ada@example.com" },
+    });
+    await seed.$raw.close();
+
+    const nextUsers = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      fullName: string("fullName").notNull(),
+      email: string("email").notNull().unique(),
+    });
+    const nextConfig = {
+      ...config,
+      orm: {
+        ...config.orm,
+        tables: { users: nextUsers },
+      },
+    };
+    const folder = await createMigration({
+      name: "rename_name",
+      config: nextConfig,
+      onRename: () => "name",
+    });
+    const up = await Bun.file(
+      join(project.migrationsDir, folder, "up.sql"),
+    ).text();
+
+    expect(up).toContain(
+      'ALTER TABLE "users" RENAME COLUMN "name" TO "fullName"',
+    );
+
+    await applyMigrations(nextConfig);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: nextUsers },
+    });
+
+    expect((await db.users.findFirst({ where: { id: "1" } }))?.fullName).toBe(
+      "Ada",
+    );
+
+    await db.$raw.close();
+  });
+
+  test("createMigration throws on possible table rename without onRename", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const people = defineTable("people", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+      email: string("email").notNull().unique(),
+    });
+
+    await expect(
+      createMigration({
+        name: "people",
+        config: {
+          ...config,
+          orm: { ...config.orm, tables: { people } },
+        },
+      }),
+    ).rejects.toThrow("Possible table rename");
+  });
+
+  const postgresUrl = process.env.SEMOLA_POSTGRES_URL;
+
+  describe.skipIf(!postgresUrl)("postgres", () => {
+    const resetPostgres = async () => {
+      const sql = new Bun.SQL(postgresUrl as string, { adapter: "postgres" });
+
+      await sql.unsafe("DROP SCHEMA public CASCADE");
+      await sql.unsafe("CREATE SCHEMA public");
+      await sql.close();
+    };
+
+    test("create, apply, and rollback", async () => {
+      await resetPostgres();
+
+      const project = await setupProject(postgresUrl as string, "postgres");
+      const config = await loadConfig(project.root);
+      const folder = await createMigration({
+        name: "initialize_database",
+        config,
+      });
+      const applied = await applyMigrations(config);
+
+      expect(applied).toEqual([folder]);
+
+      const db = createOrm({
+        adapter: "postgres",
+        url: postgresUrl as string,
+        tables: { users: project.users },
+      });
+      const id = "11111111-1111-1111-1111-111111111111";
+
+      await db.users.create({
+        data: { id, name: "Ada", email: "ada@example.com" },
+      });
+
+      expect(
+        (await db.users.findFirst({ where: { email: "ada@example.com" } }))
+          ?.name,
+      ).toBe("Ada");
+
+      const rolled = await rollbackMigration(config);
+
+      expect(rolled).toBe(folder);
+
+      await expect(
+        db.users.findFirst({ where: { email: "ada@example.com" } }),
+      ).rejects.toThrow();
+
+      await db.$raw.close();
+    });
+
+    test("renames a table without dropping rows", async () => {
+      await resetPostgres();
+
+      const project = await setupProject(postgresUrl as string, "postgres");
+      const config = await loadConfig(project.root);
+
+      await createMigration({ name: "first", config });
+      await applyMigrations(config);
+
+      const id = "11111111-1111-1111-1111-111111111111";
+      const seed = createOrm({
+        adapter: "postgres",
+        url: postgresUrl as string,
+        tables: { users: project.users },
+      });
+
+      await seed.users.create({
+        data: { id, name: "Ada", email: "ada@example.com" },
+      });
+      await seed.$raw.close();
+
+      const people = defineTable("people", {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        email: string("email").notNull().unique(),
+      });
+      const nextConfig = {
+        ...config,
+        orm: {
+          ...config.orm,
+          tables: { people },
+        },
+      };
+
+      await createMigration({
+        name: "rename_users",
+        config: nextConfig,
+        onRename: () => "users",
+      });
+      await applyMigrations(nextConfig);
+
+      const db = createOrm({
+        adapter: "postgres",
+        url: postgresUrl as string,
+        tables: { people },
+      });
+
+      expect((await db.people.findFirst({ where: { id } }))?.email).toBe(
+        "ada@example.com",
+      );
+
+      await db.$raw.close();
+    });
   });
 });

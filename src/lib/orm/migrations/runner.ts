@@ -8,13 +8,14 @@ import { getOrmConnectionUrl } from "../orm/orm.js";
 import type { MigrationDialect } from "./dialect/index.js";
 import { getMigrationDialect } from "./dialect/index.js";
 import { diffSchemas } from "./diff.js";
+import { resolveRenames, reverseRenameOps } from "./renames.js";
 import { emptySchema, snapshotSchema } from "./snapshot.js";
 import {
   assertSchemaSnapshot,
   decodeSchemaHeader,
   splitStatements,
 } from "./sql.js";
-import type { LoadedConfig, OrmConfig } from "./types.js";
+import type { LoadedConfig, OrmConfig, RenameHandler } from "./types.js";
 
 const HISTORY_TABLE = "_semola_migrations";
 
@@ -228,6 +229,7 @@ const pendingDirs = (applied: Array<{ name: string }>, dirs: string[]) => {
 export const createMigration = async (input: {
   name: string;
   config: LoadedConfig;
+  onRename?: RenameHandler;
 }) => {
   const { name, config } = input;
 
@@ -241,9 +243,14 @@ export const createMigration = async (input: {
       );
     }
 
-    const from = latestSchema(applied);
     const to = snapshotSchema(config.orm.tables);
-    const ops = diffSchemas(from, to, dialect);
+    const renamed = await resolveRenames(
+      latestSchema(applied),
+      to,
+      input.onRename,
+    );
+    const diffOps = diffSchemas(renamed.from, to, dialect);
+    const ops = [...renamed.ops, ...diffOps];
 
     if (ops.length === 0) {
       throw new MigrationError("No schema changes to migrate");
@@ -257,9 +264,13 @@ export const createMigration = async (input: {
       throw new MigrationError("No schema changes to migrate");
     }
 
-    const downSql = dialect.render(
-      diffSchemas(to, from, dialect, { strictAddColumn: false }),
+    const downDiff = dialect.render(
+      diffSchemas(to, renamed.from, dialect, { strictAddColumn: false }),
     );
+    const downRenames = reverseRenameOps(renamed.ops);
+    const downSql = downRenames.length
+      ? `${downDiff}${dialect.render(downRenames)}`
+      : downDiff;
 
     await mkdir(folderPath, { recursive: true });
     await writeFile(join(folderPath, "up.sql"), upSql);

@@ -295,6 +295,22 @@ bunx semola orm migrations rollback
 
 Apply pending migrations before creating another one. `create` fails when there are no schema changes. The first `create` or `apply` also ensures the `_semola_migrations` history table exists.
 
+If `create` sees a dropped table or column alongside a new one, it asks whether that is a rename (emitting `ALTER TABLE ... RENAME`) or a create-from-scratch. The `semola` binary uses `semola/prompts` for that question. Programmatic `createMigration()` takes the same choice via `onRename`:
+
+```typescript
+await createMigration({
+  name: "rename_users",
+  config,
+  onRename: (question) => {
+    if (question.kind === "table" && question.created === "people") {
+      return "users";
+    }
+  },
+});
+```
+
+Return the dropped name to rename, or `undefined` to create/drop. Omit `onRename` and `create` throws when a rename is possible. `semola/cli` stays non-interactive; only the `semola` binary prompts.
+
 Each generated migration has this layout:
 
 ```text
@@ -316,8 +332,6 @@ SQLite has additional safeguards:
 
 - Foreign keys are enabled on the first ORM query.
 - Safe column additions and drops run in place. Unsupported alterations rebuild the table and copy shared columns so existing rows survive.
-- A rename is generated as a drop and add, with a warning in the SQL.
-- Dropping one table and creating another also warns: table renames do not copy data.
 - Adding a unique or primary-key column with a constant default warns; it fails when the table has more than one row.
 - A down migration that restores a `NOT NULL` column without a default warns and fails when rows exist.
 - Apply and rollback run `PRAGMA foreign_key_check` before commit.
@@ -330,16 +344,7 @@ Postgres-specific SQL:
 
 `$config.url` redacts credentials. `loadConfig()` reads the real URL from the ORM client before opening its own connection.
 
-Generated column types differ between SQLite and Postgres. Migration apply and rollback are integration-tested on SQLite.
-
-### v1 limitations
-
-- Column and table renames are drop + add (data is not copied).
-- No migration squashing or baseline tooling beyond the history table.
-- Apply and rollback are integration-tested on SQLite; Postgres SQL is generated and unit-tested.
-- Zero-downtime / online schema changes are out of scope.
-- Same-process `loadConfig()` after rewriting schema files may see a cached module; the CLI starts a fresh process.
-
+Generated column types differ between SQLite and Postgres. Migration apply and rollback are integration-tested on SQLite and Postgres (`SEMOLA_POSTGRES_URL` in CI).
 
 ### Apply from application code
 

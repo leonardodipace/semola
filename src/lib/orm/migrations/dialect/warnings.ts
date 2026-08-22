@@ -4,7 +4,7 @@ const renameWarning = (table: string, dropped: string[], added: string[]) => {
   if (!dropped.length) return;
   if (!added.length) return;
 
-  return `-- warning: "${table}" drops ${dropped.join(", ")} and adds ${added.join(", ")}; renames are drop+add and do not copy data`;
+  return `-- warning: "${table}" drops ${dropped.join(", ")} and adds ${added.join(", ")}`;
 };
 
 const isConstantDefault = (value?: string) => {
@@ -104,7 +104,7 @@ export const dataLossWarnings = (ops: MigrationOp[]) => {
   if (droppedTables.length) {
     if (createdTables.length) {
       warnings.push(
-        `-- warning: drops table(s) ${droppedTables.join(", ")} and creates ${createdTables.join(", ")}; table renames are drop+create and do not copy data`,
+        `-- warning: drops table(s) ${droppedTables.join(", ")} and creates ${createdTables.join(", ")}; data in dropped tables will be lost`,
       );
     } else {
       warnings.push(
