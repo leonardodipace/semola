@@ -12,7 +12,7 @@ import {
   loadConfig,
   rollbackMigration,
 } from "./index.js";
-import { splitStatements } from "./sql.js";
+import { decodeSchemaHeader, splitStatements } from "./sql.js";
 
 describe("orm migrations runner", () => {
   const dirs: string[] = [];
@@ -1299,5 +1299,940 @@ SELECT 2;
       "SELECT 1",
       "SELECT 2",
     ]);
+  });
+
+  test("creates the _semola_migrations history table on first create", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: project.users },
+    });
+    const tables = [
+      ...(await db.$raw.unsafe(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_semola_migrations'`,
+      )),
+    ];
+
+    expect(tables).toHaveLength(1);
+
+    await db.$raw.close();
+  });
+
+  test("history stores the applied schema snapshot from the up.sql header", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+    const folder = await createMigration({ name: "first", config });
+    const up = await Bun.file(
+      join(project.migrationsDir, folder, "up.sql"),
+    ).text();
+    const expected = decodeSchemaHeader(up);
+
+    await applyMigrations(config);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: project.users },
+    });
+    const rows = [
+      ...(await db.$raw.unsafe(`SELECT name, schema FROM _semola_migrations`)),
+    ];
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.name).toBe(folder);
+
+    const stored =
+      typeof rows[0]?.schema === "string"
+        ? JSON.parse(rows[0].schema)
+        : rows[0]?.schema;
+
+    expect(stored).toEqual(expected);
+
+    await db.$raw.close();
+  });
+
+  test("each pending migration commits in its own transaction", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+    const first = join(project.migrationsDir, "20240101000000000_first");
+    const second = join(project.migrationsDir, "20240102000000000_second");
+    const emptyHeader = `-- semola-schema:${JSON.stringify({ tables: {} })}`;
+
+    await mkdir(first);
+    await mkdir(second);
+    await writeFile(
+      join(first, "up.sql"),
+      `${emptyHeader}\nCREATE TABLE "scratch" ("id" TEXT);\n`,
+    );
+    await writeFile(
+      join(second, "up.sql"),
+      `${emptyHeader}\nSELECT * FROM definitely_missing;\n`,
+    );
+
+    await expect(applyMigrations(config)).rejects.toThrow();
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: project.users },
+    });
+    const history = [
+      ...(await db.$raw.unsafe(
+        `SELECT name FROM _semola_migrations ORDER BY name`,
+      )),
+    ];
+    const scratch = [
+      ...(await db.$raw.unsafe(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'scratch'`,
+      )),
+    ];
+
+    expect(history).toEqual([{ name: "20240101000000000_first" }]);
+    expect(scratch).toHaveLength(1);
+
+    await db.$raw.close();
+  });
+
+  test("unique constant default apply succeeds when the table has a single row", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: project.users },
+    });
+
+    await db.users.create({
+      data: { id: "1", name: "Ada", email: "ada@example.com" },
+    });
+    await db.$raw.close();
+
+    const nextUsers = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+      email: string("email").notNull().unique(),
+      role: string("role").notNull().unique().dbDefault("member"),
+    });
+    const nextConfig = {
+      ...config,
+      orm: {
+        ...config.orm,
+        tables: { users: nextUsers },
+      },
+    };
+
+    await createMigration({ name: "add_role", config: nextConfig });
+    await applyMigrations(nextConfig);
+
+    const check = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: nextUsers },
+    });
+    const user = await check.users.findFirst({ where: { id: "1" } });
+
+    expect(user?.role).toBe("member");
+
+    await check.$raw.close();
+  });
+
+  test("unique constant default apply succeeds when the table is empty", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const nextUsers = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+      email: string("email").notNull().unique(),
+      role: string("role").notNull().unique().dbDefault("member"),
+    });
+    const nextConfig = {
+      ...config,
+      orm: {
+        ...config.orm,
+        tables: { users: nextUsers },
+      },
+    };
+
+    await createMigration({ name: "add_role", config: nextConfig });
+    expect(await applyMigrations(nextConfig)).toHaveLength(1);
+
+    const check = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: nextUsers },
+    });
+    const cols = [
+      ...(await check.$raw.unsafe(`PRAGMA table_info("users")`)),
+    ].map((row) => row.name);
+
+    expect(cols).toContain("role");
+
+    await check.$raw.close();
+  });
+
+  test("rollback removes the latest history entry", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+    const folder = await createMigration({ name: "first", config });
+
+    await applyMigrations(config);
+    await rollbackMigration(config);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: project.users },
+    });
+    const history = [
+      ...(await db.$raw.unsafe(`SELECT name FROM _semola_migrations`)),
+    ];
+
+    expect(history).toEqual([]);
+    expect(folder).toContain("first");
+
+    await db.$raw.close();
+  });
+
+  test("rejects apply when history has an extra applied entry", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: project.users },
+    });
+    await db.$raw.unsafe(
+      `INSERT INTO _semola_migrations (name, applied_at, schema) SELECT '99999999999999999_extra', applied_at, schema FROM _semola_migrations LIMIT 1`,
+    );
+
+    await db.$raw.close();
+
+    await expect(applyMigrations(config)).rejects.toThrow(MigrationError);
+  });
+
+  test("failed rollback keeps the migration in history", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const withoutName = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").notNull().unique(),
+    });
+    const nextConfig = {
+      ...config,
+      orm: {
+        ...config.orm,
+        tables: { users: withoutName },
+      },
+    };
+    const folder = await createMigration({
+      name: "drop_name",
+      config: nextConfig,
+    });
+
+    await applyMigrations(nextConfig);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: withoutName },
+    });
+
+    await db.users.create({
+      data: { id: "1", email: "ada@example.com" },
+    });
+    await db.$raw.close();
+
+    await expect(rollbackMigration(nextConfig)).rejects.toThrow();
+
+    const check = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: withoutName },
+    });
+    const history = [
+      ...(await check.$raw.unsafe(
+        `SELECT name FROM _semola_migrations ORDER BY name`,
+      )),
+    ];
+
+    expect(history.map((row) => row.name)).toContain(folder);
+
+    await check.$raw.close();
+  });
+
+  test("create and apply throw MigrationError on documented failures", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+
+    await expect(
+      createMigration({ name: "second", config }),
+    ).rejects.toBeInstanceOf(MigrationError);
+
+    await applyMigrations(config);
+
+    await expect(
+      createMigration({ name: "noop", config }),
+    ).rejects.toBeInstanceOf(MigrationError);
+  });
+
+  test("second create diffs against the last applied schema snapshot", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const nextUsers = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+      email: string("email").notNull().unique(),
+      bio: string("bio"),
+    });
+    const nextConfig = {
+      ...config,
+      orm: {
+        ...config.orm,
+        tables: { users: nextUsers },
+      },
+    };
+    const folder = await createMigration({
+      name: "add_bio",
+      config: nextConfig,
+    });
+    const up = await Bun.file(
+      join(project.migrationsDir, folder, "up.sql"),
+    ).text();
+
+    expect(up).toContain('ADD COLUMN "bio"');
+    expect(up).not.toContain('CREATE TABLE "users"');
+  });
+
+  test("primary key constant default fails apply when the table has multiple rows", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+    dirs.push(root);
+    dirs.push(dirname(dbFile));
+
+    await writeFile(
+      join(root, "db.ts"),
+      `
+import { createOrm, defineTable, string } from ${JSON.stringify(join(import.meta.dir, "../index.ts"))};
+
+const users = defineTable("users", {
+  email: string("email").notNull().unique(),
+});
+
+export const db = createOrm({
+  adapter: "sqlite",
+  url: ${JSON.stringify(dbFile)},
+  tables: { users },
+});
+`,
+    );
+    await writeFile(
+      join(root, "semola.config.ts"),
+      `
+import { defineConfig } from ${JSON.stringify(join(import.meta.dir, "../../config.ts"))};
+
+export default defineConfig({
+  orm: {
+    schema: "./db.ts",
+    migrationsDir: "./migrations",
+  },
+});
+`,
+    );
+    await mkdir(join(root, "migrations"), { recursive: true });
+
+    const config = await loadConfig(root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const before = defineTable("users", {
+      email: string("email").notNull().unique(),
+    });
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: before },
+    });
+
+    await db.users.create({ data: { email: "ada@example.com" } });
+    await db.users.create({ data: { email: "grace@example.com" } });
+    await db.$raw.close();
+
+    const after = defineTable("users", {
+      id: string("id").primaryKey().notNull().dbDefault("fixed"),
+      email: string("email").notNull().unique(),
+    });
+    const nextConfig = {
+      ...config,
+      orm: {
+        ...config.orm,
+        tables: { users: after },
+      },
+    };
+
+    await createMigration({ name: "add_pk", config: nextConfig });
+
+    await expect(applyMigrations(nextConfig)).rejects.toThrow();
+  });
+
+  test("dropping a table end-to-end via create, apply, and rollback", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const authors = defineTable("authors", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const withAuthors = {
+      ...config,
+      orm: {
+        ...config.orm,
+        tables: { users: project.users, authors },
+      },
+    };
+    const addFolder = await createMigration({
+      name: "add_authors",
+      config: withAuthors,
+    });
+
+    await applyMigrations(withAuthors);
+
+    const withoutAuthors = {
+      ...config,
+      orm: {
+        ...config.orm,
+        tables: { users: project.users },
+      },
+    };
+    const dropFolder = await createMigration({
+      name: "drop_authors",
+      config: withoutAuthors,
+    });
+    const up = await Bun.file(
+      join(project.migrationsDir, dropFolder, "up.sql"),
+    ).text();
+
+    expect(up).toContain('DROP TABLE "authors"');
+    expect(up).toContain("-- warning:");
+
+    await applyMigrations(withoutAuthors);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: project.users },
+    });
+    const tables = [
+      ...(await db.$raw.unsafe(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'authors'`,
+      )),
+    ];
+
+    expect(tables).toHaveLength(0);
+
+    expect(await rollbackMigration(withoutAuthors)).toBe(dropFolder);
+
+    const restored = [
+      ...(await db.$raw.unsafe(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'authors'`,
+      )),
+    ];
+
+    expect(restored).toHaveLength(1);
+    expect(addFolder).toContain("add_authors");
+
+    await db.$raw.close();
+  });
+
+  test("stacked apply records every migration name in history order", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+    const first = await createMigration({ name: "first", config });
+
+    await applyMigrations(config);
+
+    const nextUsers = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+      email: string("email").notNull().unique(),
+      bio: string("bio"),
+    });
+    const nextConfig = {
+      ...config,
+      orm: {
+        ...config.orm,
+        tables: { users: nextUsers },
+      },
+    };
+    const second = await createMigration({
+      name: "add_bio",
+      config: nextConfig,
+    });
+
+    await applyMigrations(nextConfig);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: nextUsers },
+    });
+    const history = [
+      ...(await db.$raw.unsafe(
+        `SELECT name FROM _semola_migrations ORDER BY name`,
+      )),
+    ].map((row) => row.name);
+
+    expect(history).toEqual([first, second]);
+
+    await db.$raw.close();
+  });
+
+  test("latest history schema matches the latest up.sql header after stacked apply", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const nextUsers = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+      email: string("email").notNull().unique(),
+      bio: string("bio"),
+    });
+    const nextConfig = {
+      ...config,
+      orm: {
+        ...config.orm,
+        tables: { users: nextUsers },
+      },
+    };
+    const second = await createMigration({
+      name: "add_bio",
+      config: nextConfig,
+    });
+    const up = await Bun.file(
+      join(project.migrationsDir, second, "up.sql"),
+    ).text();
+    const expected = decodeSchemaHeader(up);
+
+    await applyMigrations(nextConfig);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: nextUsers },
+    });
+    const rows = [
+      ...(await db.$raw.unsafe(
+        `SELECT name, schema FROM _semola_migrations ORDER BY name DESC LIMIT 1`,
+      )),
+    ];
+
+    expect(rows[0]?.name).toBe(second);
+
+    const stored =
+      typeof rows[0]?.schema === "string"
+        ? JSON.parse(rows[0].schema)
+        : rows[0]?.schema;
+
+    expect(stored).toEqual(expected);
+    expect(stored?.tables?.users?.columns?.bio).toBeDefined();
+
+    await db.$raw.close();
+  });
+
+  test("createMigration fails with MigrationError when schema is unchanged", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    let error: unknown;
+
+    try {
+      await createMigration({ name: "noop", config });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(MigrationError);
+    expect((error as Error).message.toLowerCase()).toMatch(
+      /no schema|unchanged|no change/,
+    );
+  });
+
+  test("loadConfig defaults migrationsDir to migrations when omitted", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+    dirs.push(root);
+    dirs.push(dirname(dbFile));
+
+    await writeFile(
+      join(root, "db.ts"),
+      `
+import { createOrm, defineTable, uuid } from ${JSON.stringify(join(import.meta.dir, "../index.ts"))};
+
+const users = defineTable("users", {
+  id: uuid("id").primaryKey().notNull(),
+});
+
+export const db = createOrm({
+  adapter: "sqlite",
+  url: ${JSON.stringify(dbFile)},
+  tables: { users },
+});
+`,
+    );
+    await writeFile(
+      join(root, "semola.config.ts"),
+      `
+import { defineConfig } from ${JSON.stringify(join(import.meta.dir, "../../config.ts"))};
+
+export default defineConfig({
+  orm: { schema: "./db.ts" },
+});
+`,
+    );
+
+    const config = await loadConfig(root);
+
+    expect(config.migrationsDir).toBe(join(root, "migrations"));
+  });
+
+  test("rollback restores the previous history schema snapshot", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+    const first = await createMigration({ name: "first", config });
+    const firstUp = await Bun.file(
+      join(project.migrationsDir, first, "up.sql"),
+    ).text();
+    const firstSchema = decodeSchemaHeader(firstUp);
+
+    await applyMigrations(config);
+
+    const nextUsers = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+      email: string("email").notNull().unique(),
+      bio: string("bio"),
+    });
+    const nextConfig = {
+      ...config,
+      orm: {
+        ...config.orm,
+        tables: { users: nextUsers },
+      },
+    };
+
+    await createMigration({ name: "add_bio", config: nextConfig });
+    await applyMigrations(nextConfig);
+    await rollbackMigration(nextConfig);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: project.users },
+    });
+    const rows = [
+      ...(await db.$raw.unsafe(`SELECT name, schema FROM _semola_migrations`)),
+    ];
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.name).toBe(first);
+
+    const stored =
+      typeof rows[0]?.schema === "string"
+        ? JSON.parse(rows[0].schema)
+        : rows[0]?.schema;
+
+    expect(stored).toEqual(firstSchema);
+    expect(stored?.tables?.users?.columns?.bio).toBeUndefined();
+
+    await db.$raw.close();
+  });
+
+  test("createMigration creates the migrations directory when missing", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+    dirs.push(root);
+    dirs.push(dirname(dbFile));
+
+    await writeFile(
+      join(root, "db.ts"),
+      `
+import { createOrm, defineTable, uuid } from ${JSON.stringify(join(import.meta.dir, "../index.ts"))};
+
+const users = defineTable("users", {
+  id: uuid("id").primaryKey().notNull(),
+});
+
+export const db = createOrm({
+  adapter: "sqlite",
+  url: ${JSON.stringify(dbFile)},
+  tables: { users },
+});
+`,
+    );
+    await writeFile(
+      join(root, "semola.config.ts"),
+      `
+import { defineConfig } from ${JSON.stringify(join(import.meta.dir, "../../config.ts"))};
+
+export default defineConfig({
+  orm: {
+    schema: "./db.ts",
+    migrationsDir: "./migrations",
+  },
+});
+`,
+    );
+
+    const config = await loadConfig(root);
+    const folder = await createMigration({ name: "init", config });
+
+    expect(
+      await Bun.file(join(root, "migrations", folder, "up.sql")).exists(),
+    ).toBe(true);
+  });
+
+  test("dropping a nullable column end-to-end preserves existing rows", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const withBio = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+      email: string("email").notNull().unique(),
+      bio: string("bio"),
+    });
+    const withBioConfig = {
+      ...config,
+      orm: {
+        ...config.orm,
+        tables: { users: withBio },
+      },
+    };
+
+    await createMigration({ name: "add_bio", config: withBioConfig });
+    await applyMigrations(withBioConfig);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: withBio },
+    });
+
+    await db.users.create({
+      data: {
+        id: "1",
+        name: "Ada",
+        email: "ada@example.com",
+        bio: "hi",
+      },
+    });
+    await db.$raw.close();
+
+    await createMigration({ name: "drop_bio", config });
+    await applyMigrations(config);
+
+    const check = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: project.users },
+    });
+    const user = await check.users.findFirst({ where: { id: "1" } });
+    const cols = [
+      ...(await check.$raw.unsafe(`PRAGMA table_info("users")`)),
+    ].map((row) => row.name);
+
+    expect(user?.name).toBe("Ada");
+    expect(cols).not.toContain("bio");
+
+    await check.$raw.close();
+  });
+
+  test("rollback of the only migration leaves an empty history table", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+    await rollbackMigration(config);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: project.users },
+    });
+    const history = [
+      ...(await db.$raw.unsafe(`SELECT name FROM _semola_migrations`)),
+    ];
+    const tables = [
+      ...(await db.$raw.unsafe(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_semola_migrations'`,
+      )),
+    ];
+
+    expect(history).toEqual([]);
+    expect(tables).toHaveLength(1);
+
+    await db.$raw.close();
+  });
+
+  test("normalizes hyphenated migration names to snake_case", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+    const folder = await createMigration({
+      name: "add-user-roles",
+      config,
+    });
+
+    expect(folder).toMatch(/^\d{17}_add_user_roles$/);
+  });
+
+  test("generated down.sql does not include a schema header", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+    const folder = await createMigration({ name: "first", config });
+    const down = await Bun.file(
+      join(project.migrationsDir, folder, "down.sql"),
+    ).text();
+
+    expect(down).not.toContain("-- semola-schema:");
+  });
+
+  test("history rows record an applied_at timestamp", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: project.users },
+    });
+    const rows = [
+      ...(await db.$raw.unsafe(`SELECT applied_at FROM _semola_migrations`)),
+    ];
+
+    expect(rows).toHaveLength(1);
+    expect(typeof rows[0]?.applied_at).toBe("string");
+    expect(Number.isNaN(Date.parse(String(rows[0]?.applied_at)))).toBe(false);
+
+    await db.$raw.close();
+  });
+
+  test("failed pending migration can be fixed and re-applied", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const folder = join(project.migrationsDir, "99999999999999999_fixme");
+    const header = `-- semola-schema:${JSON.stringify({ tables: {} })}`;
+
+    await mkdir(folder);
+    await writeFile(
+      join(folder, "up.sql"),
+      `${header}\nSELECT * FROM definitely_missing;\n`,
+    );
+
+    await expect(applyMigrations(config)).rejects.toThrow();
+
+    await writeFile(join(folder, "up.sql"), `${header}\nSELECT 1;\n`);
+
+    expect(await applyMigrations(config)).toEqual(["99999999999999999_fixme"]);
+  });
+
+  test("createMigration warns in up.sql for unique constant defaults", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const nextUsers = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+      email: string("email").notNull().unique(),
+      role: string("role").notNull().unique().dbDefault("member"),
+    });
+    const nextConfig = {
+      ...config,
+      orm: {
+        ...config.orm,
+        tables: { users: nextUsers },
+      },
+    };
+    const folder = await createMigration({
+      name: "add_role",
+      config: nextConfig,
+    });
+    const up = await Bun.file(
+      join(project.migrationsDir, folder, "up.sql"),
+    ).text();
+
+    expect(up).toContain(
+      "unique/primary key with a constant default fails if the table has more than one row",
+    );
   });
 });
