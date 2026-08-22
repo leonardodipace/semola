@@ -1,5 +1,6 @@
 import type { Adapter } from "../dialect/types.js";
 import { MigrationError } from "../errors.js";
+import type { MigrationDialect } from "./dialect/index.js";
 import { getMigrationDialect } from "./dialect/index.js";
 import type {
   ColumnSnapshot,
@@ -147,10 +148,13 @@ const diffTable = (
 export const diffSchemas = (
   from: SchemaSnapshot,
   to: SchemaSnapshot,
-  adapter: Adapter,
+  dialectOrAdapter: MigrationDialect | Adapter,
   options?: { strictAddColumn?: boolean },
 ) => {
-  const dialect = getMigrationDialect(adapter);
+  const dialect =
+    typeof dialectOrAdapter === "string"
+      ? getMigrationDialect(dialectOrAdapter)
+      : dialectOrAdapter;
   const strictAddColumn = options?.strictAddColumn ?? true;
   const ops: MigrationOp[] = [
     ...createdTables(from, to),

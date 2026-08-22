@@ -16,13 +16,6 @@ const renameWarning = (table: string, dropped: string[], added: string[]) => {
   return `-- warning: "${table}" drops ${dropped.join(", ")} and adds ${added.join(", ")}; renames are drop+add and do not copy data`;
 };
 
-const notNullAddWarning = (table: string, column: ColumnSnapshot) => {
-  if (column.isNullable) return;
-  if (column.dbDefault !== undefined) return;
-
-  return `-- warning: ADD COLUMN "${table}"."${column.name}" NOT NULL without default fails if the table has rows`;
-};
-
 const isConstantDefault = (value?: string) => {
   if (value === undefined) return false;
   if (value === "TRUE") return true;
@@ -32,26 +25,28 @@ const isConstantDefault = (value?: string) => {
   return /^-?\d+(\.\d+)?$/.test(value);
 };
 
-const uniqueAddWarning = (table: string, column: ColumnSnapshot) => {
+const pushAddColumnWarnings = (
+  warnings: string[],
+  table: string,
+  column: ColumnSnapshot,
+) => {
+  if (!column.isNullable) {
+    if (column.dbDefault === undefined) {
+      warnings.push(
+        `-- warning: ADD COLUMN "${table}"."${column.name}" NOT NULL without default fails if the table has rows`,
+      );
+    }
+  }
+
   if (!column.isUnique) {
     if (!column.isPrimaryKey) return;
   }
 
   if (!isConstantDefault(column.dbDefault)) return;
 
-  return `-- warning: ADD COLUMN "${table}"."${column.name}" unique/primary key with a constant default fails if the table has more than one row`;
-};
-
-const pushAddColumnWarnings = (
-  warnings: string[],
-  table: string,
-  column: ColumnSnapshot,
-) => {
-  const notNull = notNullAddWarning(table, column);
-  const unique = uniqueAddWarning(table, column);
-
-  if (notNull) warnings.push(notNull);
-  if (unique) warnings.push(unique);
+  warnings.push(
+    `-- warning: ADD COLUMN "${table}"."${column.name}" unique/primary key with a constant default fails if the table has more than one row`,
+  );
 };
 
 const dataLossWarnings = (ops: MigrationOp[]) => {
@@ -141,7 +136,7 @@ export abstract class MigrationDialect {
   protected abstract readonly sqlTypes: Record<ColumnSnapshot["type"], string>;
   protected abstract readonly uuidType: string;
 
-  public abstract formatPlaceholder(index: number): string;
+  protected abstract formatPlaceholder(index: number): string;
 
   public async prepareConnection(_sql: Bun.SQL) {}
 
@@ -159,7 +154,7 @@ export abstract class MigrationDialect {
     }).join(", ");
   }
 
-  public sqlTypeFor(column: ColumnSnapshot) {
+  protected sqlTypeFor(column: ColumnSnapshot) {
     if (column.sqlType === "uuid") {
       return this.uuidType;
     }

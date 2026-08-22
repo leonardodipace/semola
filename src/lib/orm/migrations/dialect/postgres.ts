@@ -55,7 +55,7 @@ export class PostgresMigrationDialect extends MigrationDialect {
     jsonb: "JSONB",
   };
 
-  public formatPlaceholder(index: number) {
+  protected formatPlaceholder(index: number) {
     return POSTGRES_SPEC.formatPlaceholder(index);
   }
 
@@ -163,6 +163,8 @@ export class PostgresMigrationDialect extends MigrationDialect {
     const tableId = quoteIdentifier(table);
     const columnId = quoteIdentifier(to.name);
     const typeChanged = from.type !== to.type || from.sqlType !== to.sqlType;
+    const fromUnique = from.isUnique && !from.isPrimaryKey;
+    const toUnique = to.isUnique && !to.isPrimaryKey;
     const alterColumn = (action: string) => {
       statements.push(
         `ALTER TABLE ${tableId} ALTER COLUMN ${columnId} ${action};`,
@@ -185,29 +187,25 @@ export class PostgresMigrationDialect extends MigrationDialect {
       alterColumn(`TYPE ${sqlType} USING CAST(${columnId} AS ${sqlType})`);
     }
 
-    this.pushUniqueChange(
-      statements,
-      table,
-      tableId,
-      columnId,
-      from,
-      to,
-      "drop",
-    );
+    if (fromUnique) {
+      if (!toUnique) {
+        statements.push(
+          `ALTER TABLE ${tableId} DROP CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_key`)};`,
+        );
+      }
+    }
 
     if (from.isNullable !== to.isNullable) {
       alterColumn(to.isNullable ? "DROP NOT NULL" : "SET NOT NULL");
     }
 
-    this.pushUniqueChange(
-      statements,
-      table,
-      tableId,
-      columnId,
-      from,
-      to,
-      "add",
-    );
+    if (!fromUnique) {
+      if (toUnique) {
+        statements.push(
+          `ALTER TABLE ${tableId} ADD CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_key`)} UNIQUE (${columnId});`,
+        );
+      }
+    }
 
     if (typeChanged) {
       if (to.dbDefault !== undefined) {
@@ -221,72 +219,33 @@ export class PostgresMigrationDialect extends MigrationDialect {
       }
     }
 
-    this.pushEnumCheckChange(statements, table, tableId, from, to, typeChanged);
+    const enumChanged =
+      JSON.stringify(from.enumValues) !== JSON.stringify(to.enumValues);
+
+    if (!typeChanged) {
+      if (enumChanged) {
+        if (from.enumValues?.length) {
+          statements.push(
+            `ALTER TABLE ${tableId} DROP CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_check`)};`,
+          );
+        }
+      }
+    }
+
+    if (typeChanged || enumChanged) {
+      const check = this.enumCheckSql(to);
+
+      if (check) {
+        statements.push(
+          `ALTER TABLE ${tableId} ADD CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_check`)} ${check};`,
+        );
+      }
+    }
 
     if (statements.length === 0) {
       return "";
     }
 
     return statements.join("\n");
-  }
-
-  private pushUniqueChange(
-    statements: string[],
-    table: string,
-    tableId: string,
-    columnId: string,
-    from: ColumnSnapshot,
-    to: ColumnSnapshot,
-    mode: "drop" | "add",
-  ) {
-    const fromUnique = from.isUnique && !from.isPrimaryKey;
-    const toUnique = to.isUnique && !to.isPrimaryKey;
-
-    if (fromUnique === toUnique) return;
-
-    if (toUnique) {
-      if (mode !== "add") return;
-
-      statements.push(
-        `ALTER TABLE ${tableId} ADD CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_key`)} UNIQUE (${columnId});`,
-      );
-      return;
-    }
-
-    if (mode !== "drop") return;
-
-    statements.push(
-      `ALTER TABLE ${tableId} DROP CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_key`)};`,
-    );
-  }
-
-  private pushEnumCheckChange(
-    statements: string[],
-    table: string,
-    tableId: string,
-    from: ColumnSnapshot,
-    to: ColumnSnapshot,
-    typeChanged: boolean,
-  ) {
-    const enumChanged =
-      JSON.stringify(from.enumValues) !== JSON.stringify(to.enumValues);
-
-    if (!typeChanged) {
-      if (!enumChanged) return;
-
-      if (from.enumValues?.length) {
-        statements.push(
-          `ALTER TABLE ${tableId} DROP CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_check`)};`,
-        );
-      }
-    }
-
-    const check = this.enumCheckSql(to);
-
-    if (check) {
-      statements.push(
-        `ALTER TABLE ${tableId} ADD CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_check`)} ${check};`,
-      );
-    }
   }
 }

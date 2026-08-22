@@ -40,7 +40,7 @@ const resolveOrmFromModule = (mod: Record<string, unknown>) => {
   );
 };
 
-const parseSchema = (raw: string, label: string): SchemaSnapshot => {
+const parseSchema = (raw: string, label: string) => {
   const [error, schema] = mightThrowSync(() => {
     return JSON.parse(raw) as SchemaSnapshot;
   });
@@ -50,6 +50,16 @@ const parseSchema = (raw: string, label: string): SchemaSnapshot => {
   }
 
   return schema;
+};
+
+const importModule = async (filePath: string, label: string) => {
+  const [error, mod] = await mightThrow(import(pathToFileURL(filePath).href));
+
+  if (error) {
+    throw new MigrationError(`Could not load ${label}: ${error.message}`);
+  }
+
+  return mod;
 };
 
 const withConnection = async <T>(
@@ -68,18 +78,9 @@ const withConnection = async <T>(
   }
 };
 
-export const loadConfig = async (
-  cwd = process.cwd(),
-): Promise<LoadedConfig> => {
+export const loadConfig = async (cwd = process.cwd()) => {
   const configPath = resolve(cwd, "semola.config.ts");
-  const [error, mod] = await mightThrow(import(pathToFileURL(configPath).href));
-
-  if (error) {
-    throw new MigrationError(
-      `Could not load semola.config.ts: ${error.message}`,
-    );
-  }
-
+  const mod = await importModule(configPath, "semola.config.ts");
   const config = (mod.default ?? mod) as SemolaConfig;
 
   if (!config.orm?.schema) {
@@ -89,16 +90,7 @@ export const loadConfig = async (
   }
 
   const schemaPath = resolve(cwd, config.orm.schema);
-  const [schemaError, schemaMod] = await mightThrow(
-    import(pathToFileURL(schemaPath).href),
-  );
-
-  if (schemaError) {
-    throw new MigrationError(
-      `Could not load schema module: ${schemaError.message}`,
-    );
-  }
-
+  const schemaMod = await importModule(schemaPath, "schema module");
   const client = resolveOrmFromModule(schemaMod as Record<string, unknown>);
   const url = getOrmConnectionUrl(client) ?? client.$config.url;
 
@@ -175,7 +167,7 @@ const readApplied = async (sql: Bun.SQL) => {
   return rows;
 };
 
-const latestSchema = (rows: Array<{ schema: string }>): SchemaSnapshot => {
+const latestSchema = (rows: Array<{ schema: string }>) => {
   const last = rows[rows.length - 1];
 
   if (!last) {
@@ -247,7 +239,7 @@ export const createMigration = async (input: {
 
     const from = latestSchema(applied);
     const to = snapshotSchema(config.orm.tables);
-    const ops = diffSchemas(from, to, dialect.name);
+    const ops = diffSchemas(from, to, dialect);
 
     if (ops.length === 0) {
       throw new MigrationError("No schema changes to migrate");
@@ -262,7 +254,7 @@ export const createMigration = async (input: {
     }
 
     const downSql = dialect.render(
-      diffSchemas(to, from, dialect.name, { strictAddColumn: false }),
+      diffSchemas(to, from, dialect, { strictAddColumn: false }),
     );
 
     await mkdir(folderPath, { recursive: true });
@@ -316,7 +308,6 @@ export const applyMigrations = async (config: LoadedConfig) => {
       return [];
     }
 
-    const appliedNamesList: string[] = [];
     const insertPh = dialect.placeholders(3);
 
     for (const name of pending) {
@@ -339,11 +330,9 @@ export const applyMigrations = async (config: LoadedConfig) => {
           [name, new Date().toISOString(), JSON.stringify(headerSchema)],
         );
       });
-
-      appliedNamesList.push(name);
     }
 
-    return appliedNamesList;
+    return pending;
   });
 };
 

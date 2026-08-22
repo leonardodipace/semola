@@ -16,7 +16,7 @@ export class SqliteMigrationDialect extends MigrationDialect {
     jsonb: "TEXT",
   };
 
-  public formatPlaceholder(index: number) {
+  protected formatPlaceholder(index: number) {
     return SQLITE_SPEC.formatPlaceholder(index);
   }
 
@@ -27,7 +27,7 @@ export class SqliteMigrationDialect extends MigrationDialect {
     return value;
   }
 
-  public override sqlTypeFor(column: ColumnSnapshot) {
+  protected override sqlTypeFor(column: ColumnSnapshot) {
     if (column.type === "number") {
       if (column.isPrimaryKey) {
         return "INTEGER";
@@ -65,19 +65,23 @@ export class SqliteMigrationDialect extends MigrationDialect {
   }
 
   private canApplyInPlace(op: MigrationOp) {
-    if (op.kind !== "dropColumn") {
-      if (op.kind !== "addColumn") return false;
-    }
-
-    if (op.column.isPrimaryKey) return false;
-    if (op.column.isUnique) return false;
-
     if (op.kind === "addColumn") {
-      if (!op.column.isNullable && op.column.dbDefault === undefined) {
-        return false;
+      if (op.column.isPrimaryKey) return false;
+      if (op.column.isUnique) return false;
+      if (!op.column.isNullable) {
+        if (op.column.dbDefault === undefined) return false;
       }
+
+      return true;
     }
 
-    return true;
+    if (op.kind === "dropColumn") {
+      if (op.column.isPrimaryKey) return false;
+      if (op.column.isUnique) return false;
+
+      return true;
+    }
+
+    return false;
   }
 }
