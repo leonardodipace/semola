@@ -359,4 +359,32 @@ describe("Fuzzy Search", () => {
       expect(res[0]).toMatchObject(item);
     });
   });
+
+  describe("Multiple keys", () => {
+    test("should search over all the provided keys and give the best outcome", () => {
+      const search = fuzzySearch({
+        data: [
+          { name: "apple", color: "red", size: "medium" },
+          { name: "watermelon", color: "green", size: "large" },
+          { name: "lime", color: "lime", size: "small" },
+          { name: "peach", color: "pink", size: "medium" },
+        ],
+        keys: ["name", "size"],
+      });
+
+      const result = search("watermallon");
+      expect(result).toHaveLength(4);
+
+      const item: FuzzyResult = {
+        word: {
+          record: { name: "watermelon", color: "green", size: "large" },
+          key: "name",
+        },
+        score: 2,
+        index: 1,
+      };
+
+      expect(result[0]).toMatchObject(item);
+    });
+  });
 });
