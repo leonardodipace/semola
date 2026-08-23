@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { string, uuid } from "../column/index.js";
 import { defineTable } from "../table/index.js";
+import { getMigrationDialect } from "./dialect/index.js";
 import { diffSchemas } from "./diff.js";
 import { resolveRenames, reverseRenameOps } from "./renames.js";
 import { emptySchema, snapshotSchema } from "./snapshot.js";
-import { renderMigrationSql } from "./sql.js";
 
 describe("orm migration renames", () => {
   test("maps a table rename and emits ALTER TABLE RENAME", async () => {
@@ -17,19 +17,18 @@ describe("orm migration renames", () => {
     const from = snapshotSchema({ users });
     const to = snapshotSchema({ people });
     const renamed = await resolveRenames(from, to, () => "users");
-    const sql = renderMigrationSql("sqlite", [
+    const dialect = getMigrationDialect("sqlite");
+    const sql = dialect.render([
       ...renamed.ops,
-      ...diffSchemas(renamed.from, to, "sqlite"),
+      ...diffSchemas(renamed.from, to, dialect),
     ]);
 
-    expect(renamed.ops).toEqual([
-      {
-        kind: "renameTable",
-        from: "users",
-        to: "people",
-        constraints: [{ from: "users_pkey", to: "people_pkey" }],
-      },
-    ]);
+    expect(renamed.ops).toHaveLength(1);
+    expect(renamed.ops[0]).toMatchObject({
+      kind: "renameTable",
+      from: "users",
+      to: "people",
+    });
     expect(sql).toContain('ALTER TABLE "users" RENAME TO "people"');
     expect(sql).not.toContain("DROP TABLE");
   });
@@ -46,20 +45,19 @@ describe("orm migration renames", () => {
     const from = snapshotSchema({ users: before });
     const to = snapshotSchema({ users: after });
     const renamed = await resolveRenames(from, to, () => "bio");
-    const sql = renderMigrationSql("postgres", [
+    const dialect = getMigrationDialect("postgres");
+    const sql = dialect.render([
       ...renamed.ops,
-      ...diffSchemas(renamed.from, to, "postgres"),
+      ...diffSchemas(renamed.from, to, dialect),
     ]);
 
-    expect(renamed.ops).toEqual([
-      {
-        kind: "renameColumn",
-        table: "users",
-        from: "bio",
-        to: "about",
-        constraints: [],
-      },
-    ]);
+    expect(renamed.ops).toHaveLength(1);
+    expect(renamed.ops[0]).toMatchObject({
+      kind: "renameColumn",
+      table: "users",
+      from: "bio",
+      to: "about",
+    });
     expect(sql).toContain('ALTER TABLE "users" RENAME COLUMN "bio" TO "about"');
   });
 
@@ -79,9 +77,10 @@ describe("orm migration renames", () => {
 
       return "email";
     });
-    const sql = renderMigrationSql("postgres", [
+    const dialect = getMigrationDialect("postgres");
+    const sql = dialect.render([
       ...renamed.ops,
-      ...diffSchemas(renamed.from, to, "postgres"),
+      ...diffSchemas(renamed.from, to, dialect),
     ]);
 
     expect(sql).toContain(
@@ -118,7 +117,10 @@ describe("orm migration renames", () => {
     const from = snapshotSchema({ users });
     const to = snapshotSchema({ people });
     const renamed = await resolveRenames(from, to, () => undefined);
-    const ops = [...renamed.ops, ...diffSchemas(renamed.from, to, "sqlite")];
+    const ops = [
+      ...renamed.ops,
+      ...diffSchemas(renamed.from, to, getMigrationDialect("sqlite")),
+    ];
 
     expect(renamed.ops).toEqual([]);
     expect(ops.map((op) => op.kind).sort()).toEqual([
@@ -128,20 +130,36 @@ describe("orm migration renames", () => {
   });
 
   test("reverseRenameOps reverses rename order", () => {
+    const id = {
+      name: "id",
+      type: "string" as const,
+      sqlType: "uuid" as const,
+      isNullable: false,
+      isPrimaryKey: true,
+      isUnique: false,
+    };
+    const about = {
+      name: "about",
+      type: "string" as const,
+      isNullable: true,
+      isPrimaryKey: false,
+      isUnique: true,
+    };
+
     expect(
       reverseRenameOps([
         {
           kind: "renameTable",
           from: "users",
           to: "people",
-          constraints: [{ from: "users_pkey", to: "people_pkey" }],
+          columns: [id],
         },
         {
           kind: "renameColumn",
           table: "people",
           from: "bio",
           to: "about",
-          constraints: [{ from: "people_bio_key", to: "people_about_key" }],
+          column: about,
         },
       ]),
     ).toEqual([
@@ -150,13 +168,13 @@ describe("orm migration renames", () => {
         table: "people",
         from: "about",
         to: "bio",
-        constraints: [{ from: "people_about_key", to: "people_bio_key" }],
+        column: about,
       },
       {
         kind: "renameTable",
         from: "people",
         to: "users",
-        constraints: [{ from: "people_pkey", to: "users_pkey" }],
+        columns: [id],
       },
     ]);
   });

@@ -10,9 +10,10 @@ import {
   uuid,
 } from "../column/index.js";
 import { defineTable } from "../table/index.js";
+import { getMigrationDialect } from "./dialect/index.js";
 import { diffSchemas } from "./diff.js";
 import { emptySchema, snapshotSchema } from "./snapshot.js";
-import { assertSchemaSnapshot, renderMigrationSql } from "./sql.js";
+import { assertSchemaSnapshot } from "./sql.js";
 import type { SchemaSnapshot } from "./types.js";
 
 describe("orm migrations snapshot/diff/sql", () => {
@@ -37,8 +38,8 @@ describe("orm migrations snapshot/diff/sql", () => {
     });
 
     const to = snapshotSchema({ users });
-    const ops = diffSchemas(emptySchema(), to, "sqlite");
-    const sql = renderMigrationSql("sqlite", ops);
+    const ops = diffSchemas(emptySchema(), to, getMigrationDialect("sqlite"));
+    const sql = getMigrationDialect("sqlite").render(ops);
 
     expect(ops).toHaveLength(1);
     expect(ops[0]?.kind).toBe("createTable");
@@ -50,9 +51,10 @@ describe("orm migrations snapshot/diff/sql", () => {
       '"email" TEXT NOT NULL CONSTRAINT "users_email_key" UNIQUE',
     );
 
-    const down = renderMigrationSql(
-      "sqlite",
-      diffSchemas(to, emptySchema(), "sqlite", { strictAddColumn: false }),
+    const down = getMigrationDialect("sqlite").render(
+      diffSchemas(to, emptySchema(), getMigrationDialect("sqlite"), {
+        strictAddColumn: false,
+      }),
     );
 
     expect(down).toContain('DROP TABLE "users"');
@@ -65,8 +67,8 @@ describe("orm migrations snapshot/diff/sql", () => {
     });
 
     const to = snapshotSchema({ users });
-    const ops = diffSchemas(emptySchema(), to, "postgres");
-    const sql = renderMigrationSql("postgres", ops);
+    const ops = diffSchemas(emptySchema(), to, getMigrationDialect("postgres"));
+    const sql = getMigrationDialect("postgres").render(ops);
 
     expect(sql).toContain(
       '"id" UUID CONSTRAINT "users_pkey" PRIMARY KEY NOT NULL',
@@ -85,9 +87,9 @@ describe("orm migrations snapshot/diff/sql", () => {
     const ops = diffSchemas(
       snapshotSchema({ users: before }),
       snapshotSchema({ users: after }),
-      "sqlite",
+      getMigrationDialect("sqlite"),
     );
-    const sql = renderMigrationSql("sqlite", ops);
+    const sql = getMigrationDialect("sqlite").render(ops);
 
     expect(ops).toEqual([
       {
@@ -112,7 +114,7 @@ describe("orm migrations snapshot/diff/sql", () => {
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "sqlite",
+        getMigrationDialect("sqlite"),
       ),
     ).toThrow("Cannot add NOT NULL column users.name without .dbDefault");
   });
@@ -130,9 +132,9 @@ describe("orm migrations snapshot/diff/sql", () => {
     const ops = diffSchemas(
       snapshotSchema({ users: before }),
       snapshotSchema({ users: afterUsers }),
-      "sqlite",
+      getMigrationDialect("sqlite"),
     );
-    const sql = renderMigrationSql("sqlite", ops);
+    const sql = getMigrationDialect("sqlite").render(ops);
 
     expect(ops[0]?.kind).toBe("recreateTable");
     expect(sql).toContain(
@@ -147,9 +149,12 @@ describe("orm migrations snapshot/diff/sql", () => {
       orgId: uuid("org_id").primaryKey().notNull(),
       userId: uuid("user_id").primaryKey().notNull(),
     });
-    const sql = renderMigrationSql(
-      "sqlite",
-      diffSchemas(emptySchema(), snapshotSchema({ members }), "sqlite"),
+    const sql = getMigrationDialect("sqlite").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ members }),
+        getMigrationDialect("sqlite"),
+      ),
     );
 
     expect(sql).toContain(
@@ -165,9 +170,12 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: number("id").primaryKey().notNull(),
       price: number("price").notNull(),
     });
-    const sql = renderMigrationSql(
-      "sqlite",
-      diffSchemas(emptySchema(), snapshotSchema({ items }), "sqlite"),
+    const sql = getMigrationDialect("sqlite").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ items }),
+        getMigrationDialect("sqlite"),
+      ),
     );
 
     expect(sql).toContain(
@@ -187,7 +195,7 @@ describe("orm migrations snapshot/diff/sql", () => {
     const ops = diffSchemas(
       snapshotSchema({ users: before }),
       snapshotSchema({ users: after }),
-      "sqlite",
+      getMigrationDialect("sqlite"),
     );
 
     expect(ops[0]?.kind).toBe("recreateTable");
@@ -208,9 +216,9 @@ describe("orm migrations snapshot/diff/sql", () => {
     const ops = diffSchemas(
       snapshotSchema({ posts: postsBefore }),
       snapshotSchema({ authors, posts: postsAfter }),
-      "postgres",
+      getMigrationDialect("postgres"),
     );
-    const sql = renderMigrationSql("postgres", ops);
+    const sql = getMigrationDialect("postgres").render(ops);
     const createAt = sql.indexOf('CREATE TABLE "authors"');
     const addAt = sql.indexOf("ADD COLUMN");
 
@@ -233,12 +241,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       authorId: uuid("author_id"),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ authors, posts: postsBefore }),
         snapshotSchema({ posts: postsAfter }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
     const dropFkAt = sql.indexOf("DROP CONSTRAINT");
@@ -260,12 +267,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       authorId: uuid("author_id").references(() => authors.columns.id),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ posts: postsBefore }),
         snapshotSchema({ authors, posts: postsAfter }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -289,12 +295,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       title: string("title").notNull().dbDefault(""),
     });
-    const sql = renderMigrationSql(
-      "sqlite",
+    const sql = getMigrationDialect("sqlite").render(
       diffSchemas(
         snapshotSchema({ authors, posts: postsBefore }),
         snapshotSchema({ posts: postsAfter }),
-        "sqlite",
+        getMigrationDialect("sqlite"),
       ),
     );
     const recreateAt = sql.indexOf("posts__semola_tmp");
@@ -315,12 +320,11 @@ describe("orm migrations snapshot/diff/sql", () => {
         .dbDefault("gen_random_uuid()", { as: "sql" }),
       email: string("email").notNull().unique(),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
     const addColumnAt = sql.indexOf("ADD COLUMN");
@@ -341,12 +345,11 @@ describe("orm migrations snapshot/diff/sql", () => {
     const after = defineTable("users", {
       id: string("id"),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
     const dropConstraintAt = sql.indexOf("DROP CONSTRAINT");
@@ -365,12 +368,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       email: string("email").primaryKey().notNull(),
       id: string("id").notNull(),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
     const dropPkAt = sql.indexOf('DROP CONSTRAINT "users_pkey"');
@@ -387,12 +389,11 @@ describe("orm migrations snapshot/diff/sql", () => {
     const after = defineTable("users", {
       id: string("id").primaryKey().notNull(),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
     const dropUniqueAt = sql.indexOf("DROP CONSTRAINT");
@@ -411,12 +412,11 @@ describe("orm migrations snapshot/diff/sql", () => {
     const after = defineTable("users", {
       id: string("id").notNull().unique(),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -432,9 +432,12 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       parentId: uuid("parent_id").references(() => nodes.columns.id),
     });
-    const sql = renderMigrationSql(
-      "sqlite",
-      diffSchemas(emptySchema(), snapshotSchema({ nodes }), "sqlite"),
+    const sql = getMigrationDialect("sqlite").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ nodes }),
+        getMigrationDialect("sqlite"),
+      ),
     );
 
     expect(sql).toContain('REFERENCES "nodes" ("id")');
@@ -452,9 +455,12 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       aId: uuid("a_id").references(() => a.columns.id),
     });
-    const sql = renderMigrationSql(
-      "postgres",
-      diffSchemas(emptySchema(), snapshotSchema({ a, b }), "postgres"),
+    const sql = getMigrationDialect("postgres").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ a, b }),
+        getMigrationDialect("postgres"),
+      ),
     );
     const createAAt = sql.indexOf('CREATE TABLE "a"');
     const createBAt = sql.indexOf('CREATE TABLE "b"');
@@ -487,9 +493,12 @@ describe("orm migrations snapshot/diff/sql", () => {
     });
 
     expect(() =>
-      renderMigrationSql(
-        "sqlite",
-        diffSchemas(emptySchema(), snapshotSchema({ a, b }), "sqlite"),
+      getMigrationDialect("sqlite").render(
+        diffSchemas(
+          emptySchema(),
+          snapshotSchema({ a, b }),
+          getMigrationDialect("sqlite"),
+        ),
       ),
     ).toThrow("Circular foreign keys between new tables are not supported");
   });
@@ -509,12 +518,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       authorId: string("author_id").references(() => authorsAfter.columns.id),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ authors, posts }),
         snapshotSchema({ authors: authorsAfter, posts: postsAfter }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
     const dropFkAt = sql.indexOf('DROP CONSTRAINT "posts_author_id_fkey"');
@@ -535,12 +543,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       orgId: uuid("org_id").primaryKey().notNull(),
       userId: uuid("user_id").primaryKey().notNull(),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ members: before }),
         snapshotSchema({ members: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -565,12 +572,11 @@ describe("orm migrations snapshot/diff/sql", () => {
     const after = defineTable("members", {
       orgId: uuid("org_id").primaryKey().notNull(),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ members: before }),
         snapshotSchema({ members: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
     const dropPkAt = sql.indexOf('DROP CONSTRAINT "members_pkey"');
@@ -591,12 +597,11 @@ describe("orm migrations snapshot/diff/sql", () => {
     const people = defineTable("people", {
       id: uuid("id").primaryKey().notNull(),
     });
-    const sql = renderMigrationSql(
-      "sqlite",
+    const sql = getMigrationDialect("sqlite").render(
       diffSchemas(
         snapshotSchema({ users }),
         snapshotSchema({ people }),
-        "sqlite",
+        getMigrationDialect("sqlite"),
       ),
     );
 
@@ -609,11 +614,15 @@ describe("orm migrations snapshot/diff/sql", () => {
     const users = defineTable("users", {
       id: uuid("id").primaryKey().notNull(),
     });
-    const sql = renderMigrationSql(
-      "sqlite",
-      diffSchemas(snapshotSchema({ users }), emptySchema(), "sqlite", {
-        strictAddColumn: false,
-      }),
+    const sql = getMigrationDialect("sqlite").render(
+      diffSchemas(
+        snapshotSchema({ users }),
+        emptySchema(),
+        getMigrationDialect("sqlite"),
+        {
+          strictAddColumn: false,
+        },
+      ),
     );
 
     expect(sql).toContain(
@@ -629,12 +638,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       email: string("email").notNull().unique().dbDefault("x"),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -651,12 +659,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       score: number("score").notNull().unique().dbDefault("1e3", { as: "sql" }),
     });
-    const sql = renderMigrationSql(
-      "sqlite",
+    const sql = getMigrationDialect("sqlite").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "sqlite",
+        getMigrationDialect("sqlite"),
       ),
     );
 
@@ -675,12 +682,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       email: string("email").notNull(),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -699,12 +705,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       email: string("email").notNull().dbDefault(""),
     });
-    const sql = renderMigrationSql(
-      "sqlite",
+    const sql = getMigrationDialect("sqlite").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "sqlite",
+        getMigrationDialect("sqlite"),
       ),
     );
 
@@ -722,12 +727,11 @@ describe("orm migrations snapshot/diff/sql", () => {
     const after = defineTable("users", {
       id: uuid("id").primaryKey().notNull(),
     });
-    const down = renderMigrationSql(
-      "sqlite",
+    const down = getMigrationDialect("sqlite").render(
       diffSchemas(
         snapshotSchema({ users: after }),
         snapshotSchema({ users: before }),
-        "sqlite",
+        getMigrationDialect("sqlite"),
         { strictAddColumn: false },
       ),
     );
@@ -747,12 +751,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       status: enumType("status", ["draft", "live", "archived"]).notNull(),
     });
 
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -772,12 +775,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       age: number("age").notNull(),
     });
 
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -796,12 +798,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       age: number("age").notNull(),
     });
 
-    const sql = renderMigrationSql(
-      "sqlite",
+    const sql = getMigrationDialect("sqlite").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "sqlite",
+        getMigrationDialect("sqlite"),
       ),
     );
 
@@ -821,12 +822,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       age: number("age").notNull().dbDefault(1),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -848,12 +848,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       status: number("status").notNull(),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
     const dropCheckAt = sql.indexOf('DROP CONSTRAINT "users_status_check"');
@@ -1021,12 +1020,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       snapshotSchema({ users: generated }).tables.users?.columns.id?.dbDefault,
     ).toBe("gen_random_uuid()");
 
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         emptySchema(),
         snapshotSchema({ users: generated }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -1055,12 +1053,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       about: string("about"),
     });
 
-    const sql = renderMigrationSql(
-      "sqlite",
+    const sql = getMigrationDialect("sqlite").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "sqlite",
+        getMigrationDialect("sqlite"),
       ),
     );
 
@@ -1075,13 +1072,19 @@ describe("orm migrations snapshot/diff/sql", () => {
       meta: json("meta"),
       extra: jsonb("extra"),
     });
-    const sqlite = renderMigrationSql(
-      "sqlite",
-      diffSchemas(emptySchema(), snapshotSchema({ events }), "sqlite"),
+    const sqlite = getMigrationDialect("sqlite").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ events }),
+        getMigrationDialect("sqlite"),
+      ),
     );
-    const postgres = renderMigrationSql(
-      "postgres",
-      diffSchemas(emptySchema(), snapshotSchema({ events }), "postgres"),
+    const postgres = getMigrationDialect("postgres").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ events }),
+        getMigrationDialect("postgres"),
+      ),
     );
 
     expect(sqlite).toContain('"ok" INTEGER NOT NULL');
@@ -1105,9 +1108,9 @@ describe("orm migrations snapshot/diff/sql", () => {
     const ops = diffSchemas(
       snapshotSchema({ users: before }),
       snapshotSchema({ users: after }),
-      "sqlite",
+      getMigrationDialect("sqlite"),
     );
-    const sql = renderMigrationSql("sqlite", ops);
+    const sql = getMigrationDialect("sqlite").render(ops);
 
     expect(ops[0]?.kind).toBe("addColumn");
     expect(sql).toContain("ADD COLUMN \"role\" TEXT NOT NULL DEFAULT 'member'");
@@ -1127,9 +1130,9 @@ describe("orm migrations snapshot/diff/sql", () => {
     const ops = diffSchemas(
       snapshotSchema({ users: before }),
       snapshotSchema({ users: after }),
-      "sqlite",
+      getMigrationDialect("sqlite"),
     );
-    const sql = renderMigrationSql("sqlite", ops);
+    const sql = getMigrationDialect("sqlite").render(ops);
 
     expect(ops[0]?.kind).toBe("recreateTable");
     expect(sql).toContain("CURRENT_TIMESTAMP");
@@ -1149,12 +1152,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       authorId: uuid("author_id").references(() => authors.columns.id),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ authors, posts: postsBefore }),
         snapshotSchema({ authors, posts: postsAfter }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -1177,9 +1179,9 @@ describe("orm migrations snapshot/diff/sql", () => {
     const ops = diffSchemas(
       snapshotSchema({ authors, posts: postsBefore }),
       snapshotSchema({ authors, posts: postsAfter }),
-      "sqlite",
+      getMigrationDialect("sqlite"),
     );
-    const sql = renderMigrationSql("sqlite", ops);
+    const sql = getMigrationDialect("sqlite").render(ops);
 
     expect(ops.some((op) => op.kind === "recreateTable")).toBe(true);
     expect(sql).toContain("posts__semola_tmp");
@@ -1201,22 +1203,20 @@ describe("orm migrations snapshot/diff/sql", () => {
     });
 
     expect(
-      renderMigrationSql(
-        "postgres",
+      getMigrationDialect("postgres").render(
         diffSchemas(
           snapshotSchema({ users: before }),
           snapshotSchema({ users: dropped }),
-          "postgres",
+          getMigrationDialect("postgres"),
         ),
       ),
     ).toContain('ALTER COLUMN "role" DROP DEFAULT');
     expect(
-      renderMigrationSql(
-        "postgres",
+      getMigrationDialect("postgres").render(
         diffSchemas(
           snapshotSchema({ users: dropped }),
           snapshotSchema({ users: replaced }),
-          "postgres",
+          getMigrationDialect("postgres"),
         ),
       ),
     ).toContain("SET DEFAULT 'b'");
@@ -1231,12 +1231,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       email: string("email").notNull().unique(),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -1246,7 +1245,7 @@ describe("orm migrations snapshot/diff/sql", () => {
 
   test("throws when adding a foreign key without a target", () => {
     expect(() =>
-      renderMigrationSql("postgres", [
+      getMigrationDialect("postgres").render([
         {
           kind: "addForeignKey",
           table: "posts",
@@ -1272,12 +1271,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       bio: string("bio"),
     });
-    const sql = renderMigrationSql(
-      "sqlite",
+    const sql = getMigrationDialect("sqlite").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "sqlite",
+        getMigrationDialect("sqlite"),
       ),
     );
 
@@ -1297,8 +1295,12 @@ describe("orm migrations snapshot/diff/sql", () => {
     });
     const snapshot = snapshotSchema({ users });
 
-    expect(diffSchemas(snapshot, snapshot, "sqlite")).toEqual([]);
-    expect(diffSchemas(snapshot, snapshot, "postgres")).toEqual([]);
+    expect(
+      diffSchemas(snapshot, snapshot, getMigrationDialect("sqlite")),
+    ).toEqual([]);
+    expect(
+      diffSchemas(snapshot, snapshot, getMigrationDialect("postgres")),
+    ).toEqual([]);
   });
 
   test("snapshots enum values and nullability", () => {
@@ -1342,13 +1344,19 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       status: enumType("status", ["draft", "live"]).notNull(),
     });
-    const sqlite = renderMigrationSql(
-      "sqlite",
-      diffSchemas(emptySchema(), snapshotSchema({ users }), "sqlite"),
+    const sqlite = getMigrationDialect("sqlite").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ users }),
+        getMigrationDialect("sqlite"),
+      ),
     );
-    const postgres = renderMigrationSql(
-      "postgres",
-      diffSchemas(emptySchema(), snapshotSchema({ users }), "postgres"),
+    const postgres = getMigrationDialect("postgres").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ users }),
+        getMigrationDialect("postgres"),
+      ),
     );
 
     expect(sqlite).toContain('CONSTRAINT "users_status_check"');
@@ -1368,12 +1376,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       status: enumType("status", ["draft", "live"]).notNull(),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -1397,14 +1404,14 @@ describe("orm migrations snapshot/diff/sql", () => {
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "sqlite",
+        getMigrationDialect("sqlite"),
       ),
     ).not.toThrow();
     expect(() =>
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     ).not.toThrow();
   });
@@ -1420,9 +1427,9 @@ describe("orm migrations snapshot/diff/sql", () => {
     const ops = diffSchemas(
       snapshotSchema({ users: before }),
       snapshotSchema({ users: after }),
-      "sqlite",
+      getMigrationDialect("sqlite"),
     );
-    const sql = renderMigrationSql("sqlite", ops);
+    const sql = getMigrationDialect("sqlite").render(ops);
 
     expect(ops).toEqual([
       {
@@ -1443,12 +1450,11 @@ describe("orm migrations snapshot/diff/sql", () => {
     const after = defineTable("users", {
       id: uuid("id").primaryKey().notNull(),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -1467,7 +1473,7 @@ describe("orm migrations snapshot/diff/sql", () => {
     const ops = diffSchemas(
       snapshotSchema({ users: before }),
       snapshotSchema({ users: after }),
-      "sqlite",
+      getMigrationDialect("sqlite"),
     );
 
     expect(ops[0]?.kind).toBe("recreateTable");
@@ -1485,7 +1491,7 @@ describe("orm migrations snapshot/diff/sql", () => {
     const ops = diffSchemas(
       snapshotSchema({ users: before }),
       snapshotSchema({ users: after }),
-      "sqlite",
+      getMigrationDialect("sqlite"),
     );
 
     expect(ops[0]?.kind).toBe("recreateTable");
@@ -1503,7 +1509,7 @@ describe("orm migrations snapshot/diff/sql", () => {
     const ops = diffSchemas(
       snapshotSchema({ users: before }),
       snapshotSchema({ users: after }),
-      "sqlite",
+      getMigrationDialect("sqlite"),
     );
 
     expect(ops[0]?.kind).toBe("recreateTable");
@@ -1518,12 +1524,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       email: string("email").notNull(),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -1538,9 +1543,12 @@ describe("orm migrations snapshot/diff/sql", () => {
     const b = defineTable("b", {
       id: uuid("id").primaryKey().notNull(),
     });
-    const sql = renderMigrationSql(
-      "sqlite",
-      diffSchemas(emptySchema(), snapshotSchema({ a, b }), "sqlite"),
+    const sql = getMigrationDialect("sqlite").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ a, b }),
+        getMigrationDialect("sqlite"),
+      ),
     );
 
     expect(sql).toContain('CREATE TABLE "a"');
@@ -1557,13 +1565,19 @@ describe("orm migrations snapshot/diff/sql", () => {
         .notNull()
         .references(() => users.columns.id),
     });
-    const sqlite = renderMigrationSql(
-      "sqlite",
-      diffSchemas(emptySchema(), snapshotSchema({ users, posts }), "sqlite"),
+    const sqlite = getMigrationDialect("sqlite").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ users, posts }),
+        getMigrationDialect("sqlite"),
+      ),
     );
-    const postgres = renderMigrationSql(
-      "postgres",
-      diffSchemas(emptySchema(), snapshotSchema({ users, posts }), "postgres"),
+    const postgres = getMigrationDialect("postgres").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ users, posts }),
+        getMigrationDialect("postgres"),
+      ),
     );
 
     expect(sqlite).toContain('REFERENCES "users" ("id")');
@@ -1579,12 +1593,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       email: string("email").notNull().unique(),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
     const notNullAt = sql.indexOf("SET NOT NULL");
@@ -1603,12 +1616,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       email: string("email"),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
     const dropUniqueAt = sql.indexOf('DROP CONSTRAINT "users_email_key"');
@@ -1624,13 +1636,19 @@ describe("orm migrations snapshot/diff/sql", () => {
       on: boolean("on").notNull().dbDefault(true),
       score: number("score").notNull().dbDefault(0),
     });
-    const sqlite = renderMigrationSql(
-      "sqlite",
-      diffSchemas(emptySchema(), snapshotSchema({ flags }), "sqlite"),
+    const sqlite = getMigrationDialect("sqlite").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ flags }),
+        getMigrationDialect("sqlite"),
+      ),
     );
-    const postgres = renderMigrationSql(
-      "postgres",
-      diffSchemas(emptySchema(), snapshotSchema({ flags }), "postgres"),
+    const postgres = getMigrationDialect("postgres").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ flags }),
+        getMigrationDialect("postgres"),
+      ),
     );
 
     expect(sqlite).toContain("DEFAULT 1");
@@ -1650,12 +1668,11 @@ describe("orm migrations snapshot/diff/sql", () => {
         .unique()
         .dbDefault("gen_random_uuid()", { as: "sql" }),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -1672,12 +1689,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: string("id").primaryKey().notNull().dbDefault("fixed"),
       email: string("email").notNull().unique(),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -1693,10 +1709,10 @@ describe("orm migrations snapshot/diff/sql", () => {
     const ops = diffSchemas(
       snapshotSchema({ users }),
       emptySchema(),
-      "sqlite",
+      getMigrationDialect("sqlite"),
       { strictAddColumn: false },
     );
-    const sql = renderMigrationSql("sqlite", ops);
+    const sql = getMigrationDialect("sqlite").render(ops);
 
     expect(ops).toEqual([
       {
@@ -1713,13 +1729,13 @@ describe("orm migrations snapshot/diff/sql", () => {
       name: string("name").notNull(),
     });
     const to = snapshotSchema({ users });
-    const up = renderMigrationSql(
-      "sqlite",
-      diffSchemas(emptySchema(), to, "sqlite"),
+    const up = getMigrationDialect("sqlite").render(
+      diffSchemas(emptySchema(), to, getMigrationDialect("sqlite")),
     );
-    const down = renderMigrationSql(
-      "sqlite",
-      diffSchemas(to, emptySchema(), "sqlite", { strictAddColumn: false }),
+    const down = getMigrationDialect("sqlite").render(
+      diffSchemas(to, emptySchema(), getMigrationDialect("sqlite"), {
+        strictAddColumn: false,
+      }),
     );
 
     expect(up).toContain('CREATE TABLE "users"');
@@ -1737,12 +1753,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       name: string("name").notNull(),
       email: string("email").notNull().unique(),
     });
-    const sql = renderMigrationSql(
-      "sqlite",
+    const sql = getMigrationDialect("sqlite").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "sqlite",
+        getMigrationDialect("sqlite"),
       ),
     );
 
@@ -1763,12 +1778,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       authorId: uuid("author_id"),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ authors, posts: postsBefore }),
         snapshotSchema({ posts: postsAfter }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
     const dropFkAt = sql.indexOf('DROP CONSTRAINT "posts_author_id_fkey"');
@@ -1782,9 +1796,12 @@ describe("orm migrations snapshot/diff/sql", () => {
     const weird = defineTable("user data", {
       id: uuid("user id").primaryKey().notNull(),
     });
-    const sql = renderMigrationSql(
-      "sqlite",
-      diffSchemas(emptySchema(), snapshotSchema({ weird }), "sqlite"),
+    const sql = getMigrationDialect("sqlite").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ weird }),
+        getMigrationDialect("sqlite"),
+      ),
     );
 
     expect(sql).toContain('CREATE TABLE "user data"');
@@ -1804,7 +1821,7 @@ describe("orm migrations snapshot/diff/sql", () => {
       diffSchemas(
         snapshotSchema({ users: after }),
         snapshotSchema({ users: before }),
-        "sqlite",
+        getMigrationDialect("sqlite"),
       ),
     ).toThrow("Cannot add NOT NULL column");
 
@@ -1812,7 +1829,7 @@ describe("orm migrations snapshot/diff/sql", () => {
       diffSchemas(
         snapshotSchema({ users: after }),
         snapshotSchema({ users: before }),
-        "sqlite",
+        getMigrationDialect("sqlite"),
         { strictAddColumn: false },
       ),
     ).not.toThrow();
@@ -1833,12 +1850,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       authorId: uuid("author_id").references(() => people.columns.id),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ authors, people, posts: postsBefore }),
         snapshotSchema({ authors, people, posts: postsAfter }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -1857,9 +1873,12 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       price: number("price").notNull(),
     });
-    const sql = renderMigrationSql(
-      "postgres",
-      diffSchemas(emptySchema(), snapshotSchema({ items }), "postgres"),
+    const sql = getMigrationDialect("postgres").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ items }),
+        getMigrationDialect("postgres"),
+      ),
     );
 
     expect(sql).toContain('"price" DOUBLE PRECISION NOT NULL');
@@ -1870,13 +1889,19 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       on: boolean("on").notNull().dbDefault(false),
     });
-    const sqlite = renderMigrationSql(
-      "sqlite",
-      diffSchemas(emptySchema(), snapshotSchema({ flags }), "sqlite"),
+    const sqlite = getMigrationDialect("sqlite").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ flags }),
+        getMigrationDialect("sqlite"),
+      ),
     );
-    const postgres = renderMigrationSql(
-      "postgres",
-      diffSchemas(emptySchema(), snapshotSchema({ flags }), "postgres"),
+    const postgres = getMigrationDialect("postgres").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ flags }),
+        getMigrationDialect("postgres"),
+      ),
     );
 
     expect(sqlite).toContain("DEFAULT 0");
@@ -1891,12 +1916,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       email: string("email").notNull().unique().dbDefault("x"),
     });
-    const sql = renderMigrationSql(
-      "sqlite",
+    const sql = getMigrationDialect("sqlite").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "sqlite",
+        getMigrationDialect("sqlite"),
       ),
     );
 
@@ -1910,9 +1934,12 @@ describe("orm migrations snapshot/diff/sql", () => {
       orgId: uuid("org_id").primaryKey().notNull(),
       userId: uuid("user_id").primaryKey().notNull(),
     });
-    const sql = renderMigrationSql(
-      "postgres",
-      diffSchemas(emptySchema(), snapshotSchema({ members }), "postgres"),
+    const sql = getMigrationDialect("postgres").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ members }),
+        getMigrationDialect("postgres"),
+      ),
     );
 
     expect(sql).toContain(
@@ -1927,11 +1954,15 @@ describe("orm migrations snapshot/diff/sql", () => {
     const b = defineTable("b", {
       id: uuid("id").primaryKey().notNull(),
     });
-    const sql = renderMigrationSql(
-      "sqlite",
-      diffSchemas(snapshotSchema({ a, b }), emptySchema(), "sqlite", {
-        strictAddColumn: false,
-      }),
+    const sql = getMigrationDialect("sqlite").render(
+      diffSchemas(
+        snapshotSchema({ a, b }),
+        emptySchema(),
+        getMigrationDialect("sqlite"),
+        {
+          strictAddColumn: false,
+        },
+      ),
     );
 
     expect(sql).toContain("-- warning: drops table(s)");
@@ -1944,9 +1975,12 @@ describe("orm migrations snapshot/diff/sql", () => {
     const users = defineTable("users", {
       id: uuid("id").primaryKey().notNull(),
     });
-    const sql = renderMigrationSql(
-      "postgres",
-      diffSchemas(emptySchema(), snapshotSchema({ users }), "postgres"),
+    const sql = getMigrationDialect("postgres").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ users }),
+        getMigrationDialect("postgres"),
+      ),
     );
 
     expect(sql).toContain(
@@ -1966,7 +2000,7 @@ describe("orm migrations snapshot/diff/sql", () => {
     const ops = diffSchemas(
       snapshotSchema({ users: before }),
       snapshotSchema({ users: after }),
-      "sqlite",
+      getMigrationDialect("sqlite"),
     );
 
     expect(ops[0]?.kind).toBe("recreateTable");
@@ -1978,13 +2012,13 @@ describe("orm migrations snapshot/diff/sql", () => {
       name: string("name").notNull(),
     });
     const to = snapshotSchema({ users });
-    const up = renderMigrationSql(
-      "postgres",
-      diffSchemas(emptySchema(), to, "postgres"),
+    const up = getMigrationDialect("postgres").render(
+      diffSchemas(emptySchema(), to, getMigrationDialect("postgres")),
     );
-    const down = renderMigrationSql(
-      "postgres",
-      diffSchemas(to, emptySchema(), "postgres", { strictAddColumn: false }),
+    const down = getMigrationDialect("postgres").render(
+      diffSchemas(to, emptySchema(), getMigrationDialect("postgres"), {
+        strictAddColumn: false,
+      }),
     );
 
     expect(up).toContain('CREATE TABLE "users"');
@@ -2015,12 +2049,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       authorId: uuid("author_id"),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ authors, posts: postsBefore }),
         snapshotSchema({ authors, posts: postsAfter }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -2043,12 +2076,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       authorId: uuid("author_id"),
       title: string("title"),
     });
-    const sql = renderMigrationSql(
-      "sqlite",
+    const sql = getMigrationDialect("sqlite").render(
       diffSchemas(
         snapshotSchema({ authors, posts: postsBefore }),
         snapshotSchema({ authors, posts: postsAfter }),
-        "sqlite",
+        getMigrationDialect("sqlite"),
       ),
     );
 
@@ -2072,7 +2104,7 @@ describe("orm migrations snapshot/diff/sql", () => {
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     ).toThrow("Cannot add NOT NULL column users.name without .dbDefault");
   });
@@ -2089,7 +2121,7 @@ describe("orm migrations snapshot/diff/sql", () => {
     const ops = diffSchemas(
       snapshotSchema({ users: before }),
       snapshotSchema({ users: after }),
-      "sqlite",
+      getMigrationDialect("sqlite"),
     );
 
     expect(ops[0]?.kind).toBe("recreateTable");
@@ -2099,9 +2131,12 @@ describe("orm migrations snapshot/diff/sql", () => {
     const items = defineTable("items", {
       id: number("id").primaryKey().notNull(),
     });
-    const sql = renderMigrationSql(
-      "postgres",
-      diffSchemas(emptySchema(), snapshotSchema({ items }), "postgres"),
+    const sql = getMigrationDialect("postgres").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ items }),
+        getMigrationDialect("postgres"),
+      ),
     );
 
     expect(sql).toContain(
@@ -2119,9 +2154,12 @@ describe("orm migrations snapshot/diff/sql", () => {
         .notNull()
         .references(() => users.columns.id),
     });
-    const sql = renderMigrationSql(
-      "sqlite",
-      diffSchemas(emptySchema(), snapshotSchema({ posts, users }), "sqlite"),
+    const sql = getMigrationDialect("sqlite").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ posts, users }),
+        getMigrationDialect("sqlite"),
+      ),
     );
     const usersAt = sql.indexOf('CREATE TABLE "users"');
     const postsAt = sql.indexOf('CREATE TABLE "posts"');
@@ -2139,12 +2177,11 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       about: string("about"),
     });
-    const sql = renderMigrationSql(
-      "postgres",
+    const sql = getMigrationDialect("postgres").render(
       diffSchemas(
         snapshotSchema({ users: before }),
         snapshotSchema({ users: after }),
-        "postgres",
+        getMigrationDialect("postgres"),
       ),
     );
 
@@ -2162,9 +2199,9 @@ describe("orm migrations snapshot/diff/sql", () => {
     const ops = diffSchemas(
       snapshotSchema({ users: before }),
       snapshotSchema({ users: after }),
-      "sqlite",
+      getMigrationDialect("sqlite"),
     );
-    const sql = renderMigrationSql("sqlite", ops);
+    const sql = getMigrationDialect("sqlite").render(ops);
 
     expect(ops.some((op) => op.kind === "recreateTable")).toBe(true);
     expect(sql).toContain("users__semola_tmp");
@@ -2186,7 +2223,7 @@ describe("orm migrations snapshot/diff/sql", () => {
     const ops = diffSchemas(
       snapshotSchema({ users }),
       snapshotSchema({ people }),
-      "sqlite",
+      getMigrationDialect("sqlite"),
     );
 
     expect(ops.map((op) => op.kind).sort()).toEqual([

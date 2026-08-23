@@ -75,7 +75,15 @@ export class PostgresMigrationDialect extends MigrationDialect {
     return true;
   }
 
-  public override expandOps(
+  public override normalizeOps(
+    from: SchemaSnapshot,
+    to: SchemaSnapshot,
+    ops: MigrationOp[],
+  ) {
+    return this.expandForeignKeys(from, to, super.normalizeOps(from, to, ops));
+  }
+
+  private expandForeignKeys(
     from: SchemaSnapshot,
     to: SchemaSnapshot,
     ops: MigrationOp[],
@@ -153,6 +161,67 @@ export class PostgresMigrationDialect extends MigrationDialect {
     return [...drops, ...ops, ...adds];
   }
 
+  private columnConstraintRenames(
+    fromTable: string,
+    toTable: string,
+    fromColumn: string,
+    toColumn: string,
+    column: ColumnSnapshot,
+  ) {
+    const constraints: Array<{ from: string; to: string }> = [];
+
+    if (column.isUnique) {
+      if (!column.isPrimaryKey) {
+        constraints.push({
+          from: `${fromTable}_${fromColumn}_key`,
+          to: `${toTable}_${toColumn}_key`,
+        });
+      }
+    }
+
+    if (column.enumValues?.length) {
+      constraints.push({
+        from: `${fromTable}_${fromColumn}_check`,
+        to: `${toTable}_${toColumn}_check`,
+      });
+    }
+
+    if (column.references) {
+      constraints.push({
+        from: `${fromTable}_${fromColumn}_fkey`,
+        to: `${toTable}_${toColumn}_fkey`,
+      });
+    }
+
+    return constraints;
+  }
+
+  private tableConstraintRenames(
+    from: string,
+    to: string,
+    columns: ColumnSnapshot[],
+  ) {
+    const constraints: Array<{ from: string; to: string }> = [];
+
+    if (columns.some((column) => column.isPrimaryKey)) {
+      constraints.push({ from: `${from}_pkey`, to: `${to}_pkey` });
+    }
+
+    for (const column of columns) {
+      constraints.push(
+        ...this.columnConstraintRenames(
+          from,
+          to,
+          column.name,
+          column.name,
+          column,
+        ),
+      );
+    }
+
+    return constraints;
+  }
+
   private renderConstraintRenames(
     table: string,
     constraints: Array<{ from: string; to: string }>,
@@ -167,7 +236,10 @@ export class PostgresMigrationDialect extends MigrationDialect {
   ) {
     return [
       `ALTER TABLE ${quoteIdentifier(op.from)} RENAME TO ${quoteIdentifier(op.to)};`,
-      ...this.renderConstraintRenames(op.to, op.constraints),
+      ...this.renderConstraintRenames(
+        op.to,
+        this.tableConstraintRenames(op.from, op.to, op.columns),
+      ),
     ].join("\n");
   }
 
@@ -176,7 +248,16 @@ export class PostgresMigrationDialect extends MigrationDialect {
   ) {
     return [
       `ALTER TABLE ${quoteIdentifier(op.table)} RENAME COLUMN ${quoteIdentifier(op.from)} TO ${quoteIdentifier(op.to)};`,
-      ...this.renderConstraintRenames(op.table, op.constraints),
+      ...this.renderConstraintRenames(
+        op.table,
+        this.columnConstraintRenames(
+          op.table,
+          op.table,
+          op.from,
+          op.to,
+          op.column,
+        ),
+      ),
     ].join("\n");
   }
 

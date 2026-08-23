@@ -280,40 +280,32 @@ const timestamp = () => {
   ].join("");
 };
 
+const validateHistory = async (
+  applied: HistoryRow[],
+  dirs: string[],
+  migrationsDir: string,
+) => {
+  assertHistoryMatchesFiles(dirs, applied);
+  await assertUpChecksums(migrationsDir, applied);
+};
+
 const loadHistory = async (sql: Bun.SQL, migrationsDir: string) => {
   const applied = await readApplied(sql);
   const dirs = await listMigrationDirs(migrationsDir);
 
-  assertHistoryMatchesFiles(dirs, applied);
-  await assertUpChecksums(migrationsDir, applied);
+  await validateHistory(applied, dirs, migrationsDir);
 
   return { applied, dirs };
 };
 
-const lockedHistory = async (
+const withMigrationLock = async <T>(
   tx: Bun.SQL,
   dialect: MigrationDialect,
-  migrationsDir: string,
+  fn: () => Promise<T>,
 ) => {
   await dialect.lockMigrations(tx);
 
-  return loadHistory(tx, migrationsDir);
-};
-
-const readLockedApplied = async (
-  tx: Bun.SQL,
-  dialect: MigrationDialect,
-  migrationsDir: string,
-  dirs: string[],
-) => {
-  await dialect.lockMigrations(tx);
-
-  const applied = await readApplied(tx);
-
-  assertHistoryMatchesFiles(dirs, applied);
-  await assertUpChecksums(migrationsDir, applied);
-
-  return applied;
+  return fn();
 };
 
 const pendingDirs = (applied: Array<{ name: string }>, dirs: string[]) => {
@@ -427,11 +419,9 @@ export const createMigration = async (input: {
 
   const baseline = await withConnection(config, async (sql, dialect) => {
     return dialect.beginMigration(sql, async (tx) => {
-      const { applied, dirs } = await lockedHistory(
-        tx,
-        dialect,
-        config.migrationsDir,
-      );
+      const { applied, dirs } = await withMigrationLock(tx, dialect, () => {
+        return loadHistory(tx, config.migrationsDir);
+      });
       const pending = pendingDirs(applied, dirs);
 
       if (pending.length > 0) {
@@ -478,10 +468,18 @@ export const createMigration = async (input: {
 
   return withConnection(config, async (sql, dialect) => {
     return dialect.beginMigration(sql, async (tx) => {
-      const { applied, dirs } = await lockedHistory(
+      // Name lists only - full checksum scan already ran on the baseline pass.
+      const { applied, dirs } = await withMigrationLock(
         tx,
         dialect,
-        config.migrationsDir,
+        async () => {
+          const applied = await readApplied(tx);
+          const dirs = await listMigrationDirs(config.migrationsDir);
+
+          assertHistoryMatchesFiles(dirs, applied);
+
+          return { applied, dirs };
+        },
       );
 
       assertCreateBaselineUnchanged(baseline, dirs, applied);
@@ -528,12 +526,13 @@ export const applyMigrations = async (config: LoadedConfig) => {
       const upPath = join(folderPath, "up.sql");
 
       await dialect.beginMigration(sql, async (tx) => {
-        const appliedNow = await readLockedApplied(
-          tx,
-          dialect,
-          config.migrationsDir,
-          dirs,
-        );
+        const appliedNow = await withMigrationLock(tx, dialect, async () => {
+          const applied = await readApplied(tx);
+
+          await validateHistory(applied, dirs, config.migrationsDir);
+
+          return applied;
+        });
 
         if (appliedNow.some((row) => row.name === name)) {
           return;
@@ -578,12 +577,13 @@ export const rollbackMigration = async (config: LoadedConfig) => {
     let rolledBack: string | undefined;
 
     await dialect.beginMigration(sql, async (tx) => {
-      const appliedNow = await readLockedApplied(
-        tx,
-        dialect,
-        config.migrationsDir,
-        dirs,
-      );
+      const appliedNow = await withMigrationLock(tx, dialect, async () => {
+        const applied = await readApplied(tx);
+
+        await validateHistory(applied, dirs, config.migrationsDir);
+
+        return applied;
+      });
 
       if (!appliedNow.some((row) => row.name === intended.name)) {
         throw new MigrationError(

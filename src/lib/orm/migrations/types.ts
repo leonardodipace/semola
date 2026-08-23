@@ -50,14 +50,14 @@ export type MigrationOp =
       kind: "renameTable";
       from: string;
       to: string;
-      constraints: Array<{ from: string; to: string }>;
+      columns: ColumnSnapshot[];
     }
   | {
       kind: "renameColumn";
       table: string;
       from: string;
       to: string;
-      constraints: Array<{ from: string; to: string }>;
+      column: ColumnSnapshot;
     };
 
 export type RenameQuestion =

@@ -1,12 +1,5 @@
-import type { Adapter } from "../dialect/types.js";
 import { MigrationError } from "../errors.js";
-import { getMigrationDialect } from "./dialect/index.js";
-import type {
-  ColumnSnapshot,
-  MigrationOp,
-  SchemaSnapshot,
-  TableSnapshot,
-} from "./types.js";
+import type { ColumnSnapshot, SchemaSnapshot, TableSnapshot } from "./types.js";
 
 const DOLLAR_TAG = /^(\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)/;
 
@@ -310,8 +303,4 @@ export const splitStatements = (sqlText: string) => {
   flush();
 
   return statements;
-};
-
-export const renderMigrationSql = (adapter: Adapter, ops: MigrationOp[]) => {
-  return getMigrationDialect(adapter).render(ops);
 };

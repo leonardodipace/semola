@@ -44,7 +44,7 @@ export abstract class MigrationDialect {
     return value;
   }
 
-  public foldTableOps(
+  protected foldTableOps(
     fromTable: TableSnapshot,
     toTable: TableSnapshot,
     tableOps: MigrationOp[],
@@ -62,12 +62,76 @@ export abstract class MigrationDialect {
     ];
   }
 
-  public expandOps(
-    _from: SchemaSnapshot,
-    _to: SchemaSnapshot,
+  protected foldOpsByTable(
+    from: SchemaSnapshot,
+    to: SchemaSnapshot,
     ops: MigrationOp[],
   ) {
-    return ops;
+    const folded: MigrationOp[] = [];
+    let currentTable: string | undefined;
+    let buffer: MigrationOp[] = [];
+
+    const flush = () => {
+      if (!currentTable) return;
+
+      const fromTable = from.tables[currentTable];
+      const toTable = to.tables[currentTable];
+
+      if (fromTable && toTable) {
+        folded.push(...this.foldTableOps(fromTable, toTable, buffer));
+      } else {
+        folded.push(...buffer);
+      }
+
+      buffer = [];
+      currentTable = undefined;
+    };
+
+    for (const op of ops) {
+      if (op.kind === "createTable") {
+        flush();
+        folded.push(op);
+        continue;
+      }
+
+      if (op.kind === "dropTable") {
+        flush();
+        folded.push(op);
+        continue;
+      }
+
+      const table = this.opTableName(op);
+
+      if (table !== currentTable) {
+        flush();
+        currentTable = table;
+      }
+
+      buffer.push(op);
+    }
+
+    flush();
+
+    return folded;
+  }
+
+  private opTableName(op: MigrationOp) {
+    if (op.kind === "createTable") return op.table.name;
+    if (op.kind === "dropTable") return op.table.name;
+    if (op.kind === "recreateTable") return op.to.name;
+    if (op.kind === "renameTable") return op.to;
+    if (op.kind === "addPrimaryKey") return op.table;
+    if (op.kind === "dropPrimaryKey") return op.table;
+
+    return op.table;
+  }
+
+  public normalizeOps(
+    from: SchemaSnapshot,
+    to: SchemaSnapshot,
+    ops: MigrationOp[],
+  ) {
+    return this.foldOpsByTable(from, to, ops);
   }
 
   public render(ops: MigrationOp[]) {

@@ -1,6 +1,5 @@
 import { MigrationError } from "../errors.js";
 import type {
-  ColumnSnapshot,
   MigrationOp,
   RenameHandler,
   RenameQuestion,
@@ -46,69 +45,6 @@ const patchRefs = (
   }
 };
 
-const columnConstraints = (
-  fromTable: string,
-  toTable: string,
-  fromColumn: string,
-  toColumn: string,
-  column: ColumnSnapshot,
-) => {
-  const constraints: Array<{ from: string; to: string }> = [];
-
-  if (column.isUnique) {
-    if (!column.isPrimaryKey) {
-      constraints.push({
-        from: `${fromTable}_${fromColumn}_key`,
-        to: `${toTable}_${toColumn}_key`,
-      });
-    }
-  }
-
-  if (column.enumValues?.length) {
-    constraints.push({
-      from: `${fromTable}_${fromColumn}_check`,
-      to: `${toTable}_${toColumn}_check`,
-    });
-  }
-
-  if (column.references) {
-    constraints.push({
-      from: `${fromTable}_${fromColumn}_fkey`,
-      to: `${toTable}_${toColumn}_fkey`,
-    });
-  }
-
-  return constraints;
-};
-
-const tableConstraints = (
-  from: string,
-  to: string,
-  columns: ColumnSnapshot[],
-) => {
-  const constraints: Array<{ from: string; to: string }> = [];
-
-  if (columns.some((column) => column.isPrimaryKey)) {
-    constraints.push({ from: `${from}_pkey`, to: `${to}_pkey` });
-  }
-
-  for (const column of columns) {
-    constraints.push(
-      ...columnConstraints(from, to, column.name, column.name, column),
-    );
-  }
-
-  return constraints;
-};
-
-const reverseConstraints = (
-  constraints: Array<{ from: string; to: string }>,
-) => {
-  return constraints.map((constraint) => {
-    return { from: constraint.to, to: constraint.from };
-  });
-};
-
 export const resolveRenames = async (
   from: SchemaSnapshot,
   to: SchemaSnapshot,
@@ -151,7 +87,9 @@ export const resolveRenames = async (
       kind: "renameTable",
       from: chosen,
       to: created,
-      constraints: tableConstraints(chosen, created, columns),
+      columns: columns.map((column) => {
+        return { ...column };
+      }),
     });
   }
 
@@ -188,14 +126,6 @@ export const resolveRenames = async (
 
       if (!column) continue;
 
-      const constraints = columnConstraints(
-        tableName,
-        tableName,
-        chosen,
-        created,
-        column,
-      );
-
       delete fromTable.columns[chosen];
       column.name = created;
       fromTable.columns[created] = column;
@@ -212,7 +142,7 @@ export const resolveRenames = async (
         table: tableName,
         from: chosen,
         to: created,
-        constraints,
+        column: { ...column },
       });
     }
   }
@@ -227,7 +157,7 @@ export const reverseRenameOps = (ops: MigrationOp[]) => {
         kind: "renameTable" as const,
         from: op.to,
         to: op.from,
-        constraints: reverseConstraints(op.constraints),
+        columns: op.columns,
       };
     }
 
@@ -237,7 +167,7 @@ export const reverseRenameOps = (ops: MigrationOp[]) => {
         table: op.table,
         from: op.to,
         to: op.from,
-        constraints: reverseConstraints(op.constraints),
+        column: op.column,
       };
     }
 
