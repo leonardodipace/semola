@@ -472,6 +472,27 @@ describe("orm migrations snapshot/diff/sql", () => {
     );
   });
 
+  test("sqlite rejects circular foreign keys between new tables", () => {
+    let b = defineTable("b", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const a = defineTable("a", {
+      id: uuid("id").primaryKey().notNull(),
+      bId: uuid("b_id").references(() => b.columns.id),
+    });
+    b = defineTable("b", {
+      id: uuid("id").primaryKey().notNull(),
+      aId: uuid("a_id").references(() => a.columns.id),
+    });
+
+    expect(() =>
+      renderMigrationSql(
+        "sqlite",
+        diffSchemas(emptySchema(), snapshotSchema({ a, b }), "sqlite"),
+      ),
+    ).toThrow("Circular foreign keys between new tables are not supported");
+  });
+
   test("postgres drops inbound foreign keys before altering a referenced column type", () => {
     const authors = defineTable("authors", {
       id: uuid("id").primaryKey().notNull(),
@@ -733,11 +754,52 @@ describe("orm migrations snapshot/diff/sql", () => {
     expect(() => assertSchemaSnapshot({ tables: null }, "schema.json")).toThrow(
       "Invalid schema.json",
     );
+    expect(() =>
+      assertSchemaSnapshot({ tables: { users: 1 } }, "schema.json"),
+    ).toThrow("Invalid schema.json");
+    expect(() =>
+      assertSchemaSnapshot(
+        { tables: { users: { name: "users", columns: { id: 1 } } } },
+        "schema.json",
+      ),
+    ).toThrow("Invalid schema.json");
+    expect(() =>
+      assertSchemaSnapshot(
+        {
+          tables: {
+            users: {
+              name: "people",
+              columns: {},
+            },
+          },
+        },
+        "schema.json",
+      ),
+    ).toThrow("does not match name");
   });
 
   test("assertSchemaSnapshot accepts a schema object", () => {
-    const schema = { tables: {} };
+    const schema = {
+      tables: {
+        users: {
+          name: "users",
+          columns: {
+            id: {
+              name: "id",
+              type: "string" as const,
+              isNullable: false,
+              isPrimaryKey: true,
+              isUnique: false,
+              sqlType: "uuid" as const,
+            },
+          },
+        },
+      },
+    };
 
+    expect(assertSchemaSnapshot({ tables: {} }, "schema.json")).toEqual({
+      tables: {},
+    });
     expect(assertSchemaSnapshot(schema, "schema.json")).toEqual(schema);
   });
 

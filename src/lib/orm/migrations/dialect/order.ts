@@ -1,3 +1,4 @@
+import { MigrationError } from "../../errors.js";
 import type { ColumnSnapshot, MigrationOp, TableSnapshot } from "../types.js";
 
 const withoutForeignKeys = (table: TableSnapshot) => {
@@ -144,6 +145,13 @@ export const orderOps = (
 
   const sortedCreates = sortTables(creates);
   const sortedDrops = sortTables(drops);
+
+  if (sortedCreates.cycle && !deferCircularForeignKeys) {
+    throw new MigrationError(
+      "Circular foreign keys between new tables are not supported on this adapter; create one side without a reference first, then add the foreign key in a later migration",
+    );
+  }
+
   const stripCreateFks = deferCircularForeignKeys && sortedCreates.cycle;
   const createOps = sortedCreates.ordered.map((table) => {
     return {

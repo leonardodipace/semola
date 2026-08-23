@@ -432,6 +432,23 @@ export default defineConfig({
     await expect(rollbackMigration(config)).rejects.toThrow("Could not read");
   });
 
+  test("rejects rollback when down.sql has no SQL", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+    const folder = await createMigration({ name: "first", config });
+
+    await applyMigrations(config);
+    await writeFile(
+      join(project.migrationsDir, folder, "down.sql"),
+      "-- warning only\n",
+    );
+
+    await expect(rollbackMigration(config)).rejects.toThrow(
+      "has no SQL statements to apply",
+    );
+  });
+
   test("applies multiple pending migrations in folder order", async () => {
     const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
     const project = await setupProject(dbFile);
@@ -1292,6 +1309,47 @@ export const db = createOrm({
     ];
 
     expect(history).toHaveLength(1);
+
+    await db.$raw.close();
+  });
+
+  test("concurrent rollback does not run the same down.sql twice", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+    const folder = await createMigration({ name: "init", config });
+
+    await applyMigrations(config);
+
+    const results = await Promise.allSettled([
+      rollbackMigration(config),
+      rollbackMigration(config),
+    ]);
+    const rolled = results.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
+    );
+
+    expect(results.some((result) => result.status === "fulfilled")).toBe(true);
+    expect(rolled.every((name) => name === folder)).toBe(true);
+
+    const db = createOrm({
+      adapter: "sqlite",
+      url: dbFile,
+      tables: { users: project.users },
+    });
+    const history = [
+      ...(await db.$raw.unsafe(
+        `SELECT name FROM _semola_migrations ORDER BY name`,
+      )),
+    ];
+    const tables = [
+      ...(await db.$raw.unsafe(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'`,
+      )),
+    ];
+
+    expect(history).toHaveLength(0);
+    expect(tables).toHaveLength(0);
 
     await db.$raw.close();
   });

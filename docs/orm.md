@@ -319,13 +319,17 @@ migrations/
     schema.json
 ```
 
-Review generated SQL before applying it, especially warnings about destructive changes. Each pending migration commits in its own transaction. Concurrent `apply` takes a lock (Postgres advisory lock; SQLite `IMMEDIATE` plus a short busy timeout) and re-checks history under that lock so the same migration is not applied twice. On SQLite a waiter may still fail with `SQLITE_BUSY`; history stays consistent either way.
+Review generated SQL before applying it, especially warnings about destructive changes. Each pending migration commits in its own transaction. Concurrent `apply` and `rollback` take a lock (Postgres advisory lock; SQLite `IMMEDIATE` plus a short busy timeout) and re-check history under that lock so the same migration is not applied or rolled back twice. On SQLite a waiter may still fail with `SQLITE_BUSY`; history stays consistent either way.
 
 ### History and safety
 
 Semola stores applied migration names and schema snapshots in the `_semola_migrations` database table. Migration directories must remain an exact ordered prefix of that history. Missing, reordered, or extra applied entries fail before new SQL runs.
 
-Every generated migration folder includes a `schema.json` snapshot. Keep it intact: `apply` uses it as the next schema snapshot and rejects migrations that omit it, carry an invalid snapshot, or include no SQL statements in `up.sql`.
+The history snapshot is the source of truth for the next `create`, not live database introspection. Keep generated SQL and `schema.json` in sync with Semola-managed schema changes. Hand-edited databases or empty/hand-written `down.sql` files can drift without Semola noticing until apply or the next create fails.
+
+Every generated migration folder includes a `schema.json` snapshot. Keep it intact: `apply` uses it as the next schema snapshot and rejects migrations that omit it, carry an invalid snapshot, or include no SQL statements in `up.sql`. Rollback rejects empty or comment-only `down.sql`. Concurrent `apply` and `rollback` take the same lock and re-check history under that lock so the same migration is not applied or rolled back twice.
+
+`create` and `apply` need a live database connection (to read or write history). There is no separate status command; `apply` returns applied names (or logs "No pending migrations"), and `create` fails when nothing changed or pending folders exist.
 
 SQLite has additional safeguards:
 
@@ -334,6 +338,7 @@ SQLite has additional safeguards:
 - Adding a unique or primary-key column with a constant default warns; it fails when the table has more than one row.
 - A down migration that restores a `NOT NULL` column without a default warns and fails when rows exist.
 - Apply and rollback run `PRAGMA foreign_key_check` before commit.
+- Circular foreign keys between brand-new tables are rejected; create one side without the reference first, then add the foreign key in a later migration.
 
 Postgres-specific SQL:
 
@@ -341,6 +346,8 @@ Postgres-specific SQL:
 - Primary key membership is emitted as `DROP`/`ADD CONSTRAINT table_pkey`, including composite keys.
 - Circular foreign keys create both tables, then `ALTER TABLE ... ADD CONSTRAINT`.
 - Table and column renames also rename Semola-managed constraints (`_pkey`, `_key`, `_check`, `_fkey`) so later alters still find them.
+
+Not generated in v1: secondary indexes, foreign-key `ON DELETE` / `ON UPDATE` actions, or custom Postgres `USING` expressions for type changes (casts only).
 
 `$config.url` redacts credentials. `loadConfig()` reads the real URL from the ORM client before opening its own connection.
 

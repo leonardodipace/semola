@@ -271,6 +271,10 @@ export const createMigration = async (input: {
       downSql = `${downDiff}${dialect.render(downRenames)}`;
     }
 
+    if (splitStatements(downSql).length === 0) {
+      throw new MigrationError("Generated down.sql has no SQL statements");
+    }
+
     await mkdir(folderPath, { recursive: true });
     await writeFile(join(folderPath, "up.sql"), upSql);
     await writeFile(join(folderPath, "down.sql"), downSql);
@@ -293,18 +297,11 @@ const readSqlFile = async (filePath: string, label: string) => {
   return text;
 };
 
-const runSqlFile = async (
-  sql: Bun.SQL,
-  filePath: string,
-  label: string,
-  allowEmpty = false,
-) => {
+const runSqlFile = async (sql: Bun.SQL, filePath: string, label: string) => {
   const text = await readSqlFile(filePath, label);
   const statements = splitStatements(text);
 
   if (statements.length === 0) {
-    if (allowEmpty) return;
-
     throw new MigrationError(`${label} has no SQL statements to apply`);
   }
 
@@ -375,25 +372,51 @@ export const applyMigrations = async (config: LoadedConfig) => {
 
 export const rollbackMigration = async (config: LoadedConfig) => {
   return withConnection(config, async (sql, dialect) => {
-    const { applied } = await loadHistory(sql, config.migrationsDir);
-    const last = applied[applied.length - 1];
+    const { applied, dirs } = await loadHistory(sql, config.migrationsDir);
+    const intended = applied[applied.length - 1];
 
-    if (!last) {
+    if (!intended) {
       throw new MigrationError("No migrations to rollback");
     }
 
-    const downPath = join(config.migrationsDir, last.name, "down.sql");
     const deletePh = dialect.placeholders(1);
+    let rolledBack: string | undefined;
 
     await dialect.beginMigration(sql, async (tx) => {
       await dialect.lockMigrations(tx);
-      await runSqlFile(tx, downPath, `Migration ${last.name} down.sql`, true);
+
+      const appliedNow = await readApplied(tx);
+
+      assertHistoryMatchesFiles(dirs, appliedNow);
+
+      if (!appliedNow.some((row) => row.name === intended.name)) {
+        rolledBack = intended.name;
+        return;
+      }
+
+      const last = appliedNow[appliedNow.length - 1];
+
+      if (last?.name !== intended.name) {
+        throw new MigrationError(
+          `Migration ${intended.name} is not the latest after lock`,
+        );
+      }
+
+      const downPath = join(config.migrationsDir, last.name, "down.sql");
+
+      await runSqlFile(tx, downPath, `Migration ${last.name} down.sql`);
       await dialect.assertForeignKeys(tx);
       await tx.unsafe(`DELETE FROM ${HISTORY_TABLE} WHERE name = ${deletePh}`, [
         last.name,
       ]);
+
+      rolledBack = last.name;
     });
 
-    return last.name;
+    if (!rolledBack) {
+      throw new MigrationError("No migrations to rollback");
+    }
+
+    return rolledBack;
   });
 };

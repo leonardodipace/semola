@@ -1,40 +1,238 @@
 import type { Adapter } from "../dialect/types.js";
 import { MigrationError } from "../errors.js";
 import { getMigrationDialect } from "./dialect/index.js";
-import type { MigrationOp, SchemaSnapshot } from "./types.js";
+import type {
+  ColumnSnapshot,
+  MigrationOp,
+  SchemaSnapshot,
+  TableSnapshot,
+} from "./types.js";
 
 const DOLLAR_TAG = /^(\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)/;
 
+const COLUMN_TYPES = new Set([
+  "string",
+  "enum",
+  "number",
+  "boolean",
+  "date",
+  "json",
+  "jsonb",
+]);
+
+const isPlainObject = (value: unknown) => {
+  if (typeof value !== "object") return false;
+  if (value === null) return false;
+  if (Array.isArray(value)) return false;
+
+  return true;
+};
+
+const asRecord = (value: unknown) => {
+  return value as Record<string, unknown>;
+};
+
+const assertColumnSnapshot = (
+  value: unknown,
+  label: string,
+  tableName: string,
+  columnKey: string,
+) => {
+  if (!isPlainObject(value)) {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableName} column ${columnKey} must be an object`,
+    );
+  }
+
+  const column = asRecord(value);
+
+  if (typeof column.name !== "string") {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableName} column ${columnKey} missing name`,
+    );
+  }
+
+  if (!column.name) {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableName} column ${columnKey} missing name`,
+    );
+  }
+
+  if (column.name !== columnKey) {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableName} column key ${columnKey} does not match name ${column.name}`,
+    );
+  }
+
+  if (typeof column.type !== "string") {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableName} column ${columnKey} has unknown type`,
+    );
+  }
+
+  if (!COLUMN_TYPES.has(column.type)) {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableName} column ${columnKey} has unknown type`,
+    );
+  }
+
+  if (typeof column.isNullable !== "boolean") {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableName} column ${columnKey} missing isNullable`,
+    );
+  }
+
+  if (typeof column.isPrimaryKey !== "boolean") {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableName} column ${columnKey} missing isPrimaryKey`,
+    );
+  }
+
+  if (typeof column.isUnique !== "boolean") {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableName} column ${columnKey} missing isUnique`,
+    );
+  }
+
+  if (column.sqlType !== undefined && column.sqlType !== "uuid") {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableName} column ${columnKey} has unknown sqlType`,
+    );
+  }
+
+  if (column.dbDefault !== undefined && typeof column.dbDefault !== "string") {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableName} column ${columnKey} has invalid dbDefault`,
+    );
+  }
+
+  if (column.enumValues !== undefined) {
+    if (!Array.isArray(column.enumValues)) {
+      throw new MigrationError(
+        `Invalid ${label}: table ${tableName} column ${columnKey} has invalid enumValues`,
+      );
+    }
+
+    if (column.enumValues.some((entry) => typeof entry !== "string")) {
+      throw new MigrationError(
+        `Invalid ${label}: table ${tableName} column ${columnKey} has invalid enumValues`,
+      );
+    }
+  }
+
+  if (column.references !== undefined) {
+    if (!isPlainObject(column.references)) {
+      throw new MigrationError(
+        `Invalid ${label}: table ${tableName} column ${columnKey} has invalid references`,
+      );
+    }
+
+    const references = asRecord(column.references);
+
+    if (typeof references.table !== "string") {
+      throw new MigrationError(
+        `Invalid ${label}: table ${tableName} column ${columnKey} has invalid references`,
+      );
+    }
+
+    if (!references.table) {
+      throw new MigrationError(
+        `Invalid ${label}: table ${tableName} column ${columnKey} has invalid references`,
+      );
+    }
+
+    if (typeof references.column !== "string") {
+      throw new MigrationError(
+        `Invalid ${label}: table ${tableName} column ${columnKey} has invalid references`,
+      );
+    }
+
+    if (!references.column) {
+      throw new MigrationError(
+        `Invalid ${label}: table ${tableName} column ${columnKey} has invalid references`,
+      );
+    }
+  }
+
+  return value as ColumnSnapshot;
+};
+
+const assertTableSnapshot = (
+  value: unknown,
+  label: string,
+  tableKey: string,
+) => {
+  if (!isPlainObject(value)) {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableKey} must be an object`,
+    );
+  }
+
+  const table = asRecord(value);
+
+  if (typeof table.name !== "string") {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableKey} missing name`,
+    );
+  }
+
+  if (!table.name) {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableKey} missing name`,
+    );
+  }
+
+  if (table.name !== tableKey) {
+    throw new MigrationError(
+      `Invalid ${label}: table key ${tableKey} does not match name ${table.name}`,
+    );
+  }
+
+  if (!isPlainObject(table.columns)) {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableKey} missing columns`,
+    );
+  }
+
+  const columns: Record<string, ColumnSnapshot> = {};
+
+  for (const [columnKey, column] of Object.entries(asRecord(table.columns))) {
+    columns[columnKey] = assertColumnSnapshot(
+      column,
+      label,
+      tableKey,
+      columnKey,
+    );
+  }
+
+  return {
+    name: table.name,
+    columns,
+  } satisfies TableSnapshot;
+};
+
 export const assertSchemaSnapshot = (value: unknown, label: string) => {
-  if (typeof value !== "object") {
+  if (!isPlainObject(value)) {
     throw new MigrationError(`Invalid ${label}: expected a schema object`);
   }
 
-  if (value === null) {
-    throw new MigrationError(`Invalid ${label}: expected a schema object`);
-  }
+  const record = asRecord(value);
 
-  if (Array.isArray(value)) {
-    throw new MigrationError(`Invalid ${label}: expected a schema object`);
-  }
-
-  if (!("tables" in value)) {
+  if (!("tables" in record)) {
     throw new MigrationError(`Invalid ${label}: missing tables`);
   }
 
-  if (typeof value.tables !== "object") {
+  if (!isPlainObject(record.tables)) {
     throw new MigrationError(`Invalid ${label}: missing tables`);
   }
 
-  if (value.tables === null) {
-    throw new MigrationError(`Invalid ${label}: missing tables`);
+  const tables: Record<string, TableSnapshot> = {};
+
+  for (const [tableKey, table] of Object.entries(asRecord(record.tables))) {
+    tables[tableKey] = assertTableSnapshot(table, label, tableKey);
   }
 
-  if (Array.isArray(value.tables)) {
-    throw new MigrationError(`Invalid ${label}: missing tables`);
-  }
-
-  return value as SchemaSnapshot;
+  return { tables } satisfies SchemaSnapshot;
 };
 
 const skipQuoted = (source: string, start: number, quote: string) => {
