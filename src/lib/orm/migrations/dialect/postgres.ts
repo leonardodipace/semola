@@ -191,9 +191,24 @@ export class PostgresMigrationDialect extends MigrationDialect {
     const typeChanged = from.type !== to.type || from.sqlType !== to.sqlType;
     const fromUnique = from.isUnique && !from.isPrimaryKey;
     const toUnique = to.isUnique && !to.isPrimaryKey;
+    const enumChanged =
+      JSON.stringify(from.enumValues) !== JSON.stringify(to.enumValues);
+
     const alterColumn = (action: string) => {
       statements.push(
         `ALTER TABLE ${tableId} ALTER COLUMN ${columnId} ${action};`,
+      );
+    };
+
+    const dropConstraint = (name: string) => {
+      statements.push(
+        `ALTER TABLE ${tableId} DROP CONSTRAINT ${quoteIdentifier(name)};`,
+      );
+    };
+
+    const addConstraint = (name: string, body: string) => {
+      statements.push(
+        `ALTER TABLE ${tableId} ADD CONSTRAINT ${quoteIdentifier(name)} ${body};`,
       );
     };
 
@@ -203,9 +218,7 @@ export class PostgresMigrationDialect extends MigrationDialect {
       }
 
       if (from.enumValues?.length) {
-        statements.push(
-          `ALTER TABLE ${tableId} DROP CONSTRAINT ${quoteIdentifier(`${table}_${from.name}_check`)};`,
-        );
+        dropConstraint(`${table}_${from.name}_check`);
       }
 
       const sqlType = this.sqlTypeFor(to);
@@ -215,9 +228,7 @@ export class PostgresMigrationDialect extends MigrationDialect {
 
     if (fromUnique) {
       if (!toUnique) {
-        statements.push(
-          `ALTER TABLE ${tableId} DROP CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_key`)};`,
-        );
+        dropConstraint(`${table}_${to.name}_key`);
       }
     }
 
@@ -227,9 +238,7 @@ export class PostgresMigrationDialect extends MigrationDialect {
 
     if (!fromUnique) {
       if (toUnique) {
-        statements.push(
-          `ALTER TABLE ${tableId} ADD CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_key`)} UNIQUE (${columnId});`,
-        );
+        addConstraint(`${table}_${to.name}_key`, `UNIQUE (${columnId})`);
       }
     }
 
@@ -245,15 +254,10 @@ export class PostgresMigrationDialect extends MigrationDialect {
       }
     }
 
-    const enumChanged =
-      JSON.stringify(from.enumValues) !== JSON.stringify(to.enumValues);
-
     if (!typeChanged) {
       if (enumChanged) {
         if (from.enumValues?.length) {
-          statements.push(
-            `ALTER TABLE ${tableId} DROP CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_check`)};`,
-          );
+          dropConstraint(`${table}_${to.name}_check`);
         }
       }
     }
@@ -262,9 +266,7 @@ export class PostgresMigrationDialect extends MigrationDialect {
       const check = this.enumCheckSql(to);
 
       if (check) {
-        statements.push(
-          `ALTER TABLE ${tableId} ADD CONSTRAINT ${quoteIdentifier(`${table}_${to.name}_check`)} ${check};`,
-        );
+        addConstraint(`${table}_${to.name}_check`, check);
       }
     }
 

@@ -75,20 +75,6 @@ const CREATE = "";
 const promptRename = async (question: RenameQuestion) => {
   if (question.dropped.length === 0) return;
 
-  if (!isInteractive()) {
-    const dropped = question.dropped.join(", ");
-
-    if (question.kind === "table") {
-      throw new MigrationError(
-        `Possible table rename: dropped ${dropped}, created ${question.created}. Re-run create in a TTY or pass onRename`,
-      );
-    }
-
-    throw new MigrationError(
-      `Possible column rename on ${question.table}: dropped ${dropped}, created ${question.created}. Re-run create in a TTY or pass onRename`,
-    );
-  }
-
   let entity = "column";
   let created = "";
   let fromPrefix = "";

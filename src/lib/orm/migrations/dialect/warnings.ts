@@ -41,6 +41,10 @@ const pushAddColumnWarnings = (
   );
 };
 
+const notNullWarning = (label: string) => {
+  return `-- warning: ${label} fails if existing rows contain NULL`;
+};
+
 export const hasDestructiveOps = (ops: MigrationOp[]) => {
   for (const op of ops) {
     if (op.kind === "dropTable") return true;
@@ -104,7 +108,9 @@ export const dataLossWarnings = (ops: MigrationOp[]) => {
       if (op.from.isNullable) {
         if (!op.to.isNullable) {
           warnings.push(
-            `-- warning: ALTER COLUMN "${op.table}"."${op.to.name}" SET NOT NULL fails if existing rows contain NULL`,
+            notNullWarning(
+              `ALTER COLUMN "${op.table}"."${op.to.name}" SET NOT NULL`,
+            ),
           );
         }
       }
@@ -133,7 +139,9 @@ export const dataLossWarnings = (ops: MigrationOp[]) => {
       if (previous.isNullable) {
         if (!column.isNullable) {
           warnings.push(
-            `-- warning: recreate "${op.to.name}"."${column.name}" as NOT NULL fails if existing rows contain NULL`,
+            notNullWarning(
+              `recreate "${op.to.name}"."${column.name}" as NOT NULL`,
+            ),
           );
         }
       }

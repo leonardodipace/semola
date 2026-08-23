@@ -284,6 +284,32 @@ const loadHistory = async (sql: Bun.SQL, migrationsDir: string) => {
   return { applied, dirs };
 };
 
+const lockedHistory = async (
+  tx: Bun.SQL,
+  dialect: MigrationDialect,
+  migrationsDir: string,
+) => {
+  await dialect.lockMigrations(tx);
+
+  return loadHistory(tx, migrationsDir);
+};
+
+const readLockedApplied = async (
+  tx: Bun.SQL,
+  dialect: MigrationDialect,
+  migrationsDir: string,
+  dirs: string[],
+) => {
+  await dialect.lockMigrations(tx);
+
+  const applied = await readApplied(tx);
+
+  assertHistoryMatchesFiles(dirs, applied);
+  await assertUpChecksums(migrationsDir, applied);
+
+  return applied;
+};
+
 const pendingDirs = (applied: Array<{ name: string }>, dirs: string[]) => {
   const appliedNames = new Set(applied.map((row) => row.name));
 
@@ -291,6 +317,18 @@ const pendingDirs = (applied: Array<{ name: string }>, dirs: string[]) => {
 };
 
 const namesKey = (names: string[]) => names.join("\0");
+
+const runSqlText = async (sql: Bun.SQL, text: string, label: string) => {
+  const statements = splitStatements(text);
+
+  if (statements.length === 0) {
+    throw new MigrationError(`${label} has no SQL statements to apply`);
+  }
+
+  for (const statement of statements) {
+    await sql.unsafe(statement);
+  }
+};
 
 export const createMigration = async (input: {
   name: string;
@@ -303,9 +341,11 @@ export const createMigration = async (input: {
 
   const baseline = await withConnection(config, async (sql, dialect) => {
     return dialect.beginMigration(sql, async (tx) => {
-      await dialect.lockMigrations(tx);
-
-      const { applied, dirs } = await loadHistory(tx, config.migrationsDir);
+      const { applied, dirs } = await lockedHistory(
+        tx,
+        dialect,
+        config.migrationsDir,
+      );
       const pending = pendingDirs(applied, dirs);
 
       if (pending.length > 0) {
@@ -368,9 +408,11 @@ export const createMigration = async (input: {
 
   return withConnection(config, async (sql, dialect) => {
     return dialect.beginMigration(sql, async (tx) => {
-      await dialect.lockMigrations(tx);
-
-      const { applied, dirs } = await loadHistory(tx, config.migrationsDir);
+      const { applied, dirs } = await lockedHistory(
+        tx,
+        dialect,
+        config.migrationsDir,
+      );
 
       if (namesKey(dirs) !== namesKey(baseline.dirs)) {
         throw new MigrationError(
@@ -411,16 +453,7 @@ export const createMigration = async (input: {
 };
 
 const runSqlFile = async (sql: Bun.SQL, filePath: string, label: string) => {
-  const text = await readSqlFile(filePath, label);
-  const statements = splitStatements(text);
-
-  if (statements.length === 0) {
-    throw new MigrationError(`${label} has no SQL statements to apply`);
-  }
-
-  for (const statement of statements) {
-    await sql.unsafe(statement);
-  }
+  await runSqlText(sql, await readSqlFile(filePath, label), label);
 };
 
 const readMigrationSchema = async (folderPath: string, name: string) => {
@@ -449,12 +482,12 @@ export const applyMigrations = async (config: LoadedConfig) => {
       const upPath = join(folderPath, "up.sql");
 
       await dialect.beginMigration(sql, async (tx) => {
-        await dialect.lockMigrations(tx);
-
-        const appliedNow = await readApplied(tx);
-
-        assertHistoryMatchesFiles(dirs, appliedNow);
-        await assertUpChecksums(config.migrationsDir, appliedNow);
+        const appliedNow = await readLockedApplied(
+          tx,
+          dialect,
+          config.migrationsDir,
+          dirs,
+        );
 
         if (appliedNow.some((row) => row.name === name)) {
           return;
@@ -469,18 +502,8 @@ export const applyMigrations = async (config: LoadedConfig) => {
         const schema = await readMigrationSchema(folderPath, name);
         const upSql = await readSqlFile(upPath, `Migration ${name}`);
         const checksum = hashUpSql(upSql);
-        const statements = splitStatements(upSql);
 
-        if (statements.length === 0) {
-          throw new MigrationError(
-            `Migration ${name} has no SQL statements to apply`,
-          );
-        }
-
-        for (const statement of statements) {
-          await tx.unsafe(statement);
-        }
-
+        await runSqlText(tx, upSql, `Migration ${name}`);
         await dialect.assertForeignKeys(tx);
 
         await tx.unsafe(
@@ -509,12 +532,12 @@ export const rollbackMigration = async (config: LoadedConfig) => {
     let rolledBack: string | undefined;
 
     await dialect.beginMigration(sql, async (tx) => {
-      await dialect.lockMigrations(tx);
-
-      const appliedNow = await readApplied(tx);
-
-      assertHistoryMatchesFiles(dirs, appliedNow);
-      await assertUpChecksums(config.migrationsDir, appliedNow);
+      const appliedNow = await readLockedApplied(
+        tx,
+        dialect,
+        config.migrationsDir,
+        dirs,
+      );
 
       if (!appliedNow.some((row) => row.name === intended.name)) {
         throw new MigrationError(
