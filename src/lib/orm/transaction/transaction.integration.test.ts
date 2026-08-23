@@ -226,30 +226,31 @@ for (const live of integrationAdapters()) {
       await orm.$raw.close();
     });
 
-    test("rejects nested transactions started from the root client", async () => {
-      if (live.adapter !== "sqlite") return;
+    test.skipIf(live.adapter !== "sqlite")(
+      "rejects nested transactions started from the root client",
+      async () => {
+        const orm = await open();
 
-      const orm = await open();
+        await expect(
+          orm.$transaction(async (tx) => {
+            await tx.users.create({
+              data: {
+                id: userId,
+                name: "Alice",
+                email: "alice@example.com",
+              },
+            });
 
-      await expect(
-        orm.$transaction(async (tx) => {
-          await tx.users.create({
-            data: {
-              id: userId,
-              name: "Alice",
-              email: "alice@example.com",
-            },
-          });
+            await orm.$transaction(async () => {
+              return undefined;
+            });
+          }),
+        ).rejects.toThrow("cannot start a transaction within a transaction");
 
-          await orm.$transaction(async () => {
-            return undefined;
-          });
-        }),
-      ).rejects.toThrow("cannot start a transaction within a transaction");
+        expect(await orm.users.findMany()).toHaveLength(0);
 
-      expect(await orm.users.findMany()).toHaveLength(0);
-
-      await orm.$raw.close();
-    });
+        await orm.$raw.close();
+      },
+    );
   });
 }
