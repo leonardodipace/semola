@@ -56,18 +56,21 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
     const applyFn = trasform(...trasformations);
     needle = applyFn(needle);
 
-    for (let index = 0; index < data.length; index++) {
-      const word = data[index];
+    for (let dataIdx = 0; dataIdx < data.length; dataIdx++) {
+      const word = data[dataIdx];
       if (!word) return [];
 
       if (typeof word === "string") {
         const distance = levenshteinDistance(applyFn(word), needle);
-        result.push({ word, score: distance, index });
+        result.push({ word, score: distance, index: dataIdx });
 
         continue;
       }
 
       if (!keys) return [];
+
+      let minCost = Number.POSITIVE_INFINITY;
+      let minCostKey = "";
 
       for (let kIdx = 0; kIdx < keys.length; kIdx++) {
         const key = keys[kIdx];
@@ -77,8 +80,20 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
         if (!element) return [];
 
         const distance = levenshteinDistance(applyFn(element), needle);
-        result.push({ word, score: distance, index });
+        if (distance < minCost) {
+          minCost = distance;
+          minCostKey = key;
+        }
       }
+
+      result.push({
+        word: {
+          record: word,
+          key: minCostKey,
+        },
+        score: minCost,
+        index: dataIdx,
+      });
     }
 
     return result.sort((a, b) => a.score - b.score);

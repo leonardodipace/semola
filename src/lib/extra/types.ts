@@ -76,7 +76,7 @@ export type FuzzyOptions<FuzzyType extends string | Record<string, string>> = {
 };
 
 export type FuzzyResult = {
-  word: string | Record<string, string>;
+  word: string | { record: Record<string, string>; key: string };
   index: number;
   score: number;
 };
