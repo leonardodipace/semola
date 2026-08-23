@@ -29,10 +29,12 @@ export class SqliteMigrationDialect extends MigrationDialect {
   }
 
   protected override sqlTypeFor(column: ColumnSnapshot) {
-    if (column.type === "number") {
-      if (column.isPrimaryKey) {
-        return "INTEGER";
-      }
+    if (column.type !== "number") {
+      return super.sqlTypeFor(column);
+    }
+
+    if (column.isPrimaryKey) {
+      return "INTEGER";
     }
 
     return super.sqlTypeFor(column);
@@ -68,24 +70,32 @@ export class SqliteMigrationDialect extends MigrationDialect {
 
   private canApplyInPlace(op: MigrationOp) {
     if (op.kind === "addColumn") {
-      if (op.column.isPrimaryKey) return false;
-      if (op.column.isUnique) return false;
-      if (op.column.dbDefault !== undefined) {
-        if (!isConstantDefault(op.column.dbDefault)) return false;
-      } else if (!op.column.isNullable) {
-        return false;
-      }
-
-      return true;
+      return this.canAddColumnInPlace(op.column);
     }
 
     if (op.kind === "dropColumn") {
-      if (op.column.isPrimaryKey) return false;
-      if (op.column.isUnique) return false;
-
-      return true;
+      return this.canDropColumnInPlace(op.column);
     }
 
     return false;
+  }
+
+  private canAddColumnInPlace(column: ColumnSnapshot) {
+    if (column.isPrimaryKey) return false;
+    if (column.isUnique) return false;
+
+    if (column.dbDefault !== undefined) {
+      return isConstantDefault(column.dbDefault);
+    }
+
+    // SQLite ADD COLUMN without DEFAULT requires a nullable column.
+    return column.isNullable;
+  }
+
+  private canDropColumnInPlace(column: ColumnSnapshot) {
+    if (column.isPrimaryKey) return false;
+    if (column.isUnique) return false;
+
+    return true;
   }
 }

@@ -180,6 +180,24 @@ export class PostgresMigrationDialect extends MigrationDialect {
     ].join("\n");
   }
 
+  private columnTypeChanged(from: ColumnSnapshot, to: ColumnSnapshot) {
+    if (from.type !== to.type) return true;
+    if (from.sqlType !== to.sqlType) return true;
+
+    return false;
+  }
+
+  private hasStandaloneUnique(column: ColumnSnapshot) {
+    if (!column.isUnique) return false;
+    if (column.isPrimaryKey) return false;
+
+    return true;
+  }
+
+  private enumValuesChanged(from: ColumnSnapshot, to: ColumnSnapshot) {
+    return JSON.stringify(from.enumValues) !== JSON.stringify(to.enumValues);
+  }
+
   protected override renderAlterColumn(
     table: string,
     from: ColumnSnapshot,
@@ -188,11 +206,10 @@ export class PostgresMigrationDialect extends MigrationDialect {
     const statements: string[] = [];
     const tableId = quoteIdentifier(table);
     const columnId = quoteIdentifier(to.name);
-    const typeChanged = from.type !== to.type || from.sqlType !== to.sqlType;
-    const fromUnique = from.isUnique && !from.isPrimaryKey;
-    const toUnique = to.isUnique && !to.isPrimaryKey;
-    const enumChanged =
-      JSON.stringify(from.enumValues) !== JSON.stringify(to.enumValues);
+    const typeChanged = this.columnTypeChanged(from, to);
+    const fromUnique = this.hasStandaloneUnique(from);
+    const toUnique = this.hasStandaloneUnique(to);
+    const enumChanged = this.enumValuesChanged(from, to);
 
     const alterColumn = (action: string) => {
       statements.push(
@@ -233,7 +250,11 @@ export class PostgresMigrationDialect extends MigrationDialect {
     }
 
     if (from.isNullable !== to.isNullable) {
-      alterColumn(to.isNullable ? "DROP NOT NULL" : "SET NOT NULL");
+      if (to.isNullable) {
+        alterColumn("DROP NOT NULL");
+      } else {
+        alterColumn("SET NOT NULL");
+      }
     }
 
     if (!fromUnique) {
@@ -246,12 +267,8 @@ export class PostgresMigrationDialect extends MigrationDialect {
       if (to.dbDefault !== undefined) {
         alterColumn(`SET DEFAULT ${this.formatDefault(to.dbDefault)}`);
       }
-    } else if (from.dbDefault !== to.dbDefault) {
-      if (to.dbDefault === undefined) {
-        alterColumn("DROP DEFAULT");
-      } else {
-        alterColumn(`SET DEFAULT ${this.formatDefault(to.dbDefault)}`);
-      }
+    } else {
+      this.syncDefaultWithoutTypeChange(from, to, alterColumn);
     }
 
     if (!typeChanged) {
@@ -275,5 +292,20 @@ export class PostgresMigrationDialect extends MigrationDialect {
     }
 
     return statements.join("\n");
+  }
+
+  private syncDefaultWithoutTypeChange(
+    from: ColumnSnapshot,
+    to: ColumnSnapshot,
+    alterColumn: (action: string) => void,
+  ) {
+    if (from.dbDefault === to.dbDefault) return;
+
+    if (to.dbDefault === undefined) {
+      alterColumn("DROP DEFAULT");
+      return;
+    }
+
+    alterColumn(`SET DEFAULT ${this.formatDefault(to.dbDefault)}`);
   }
 }

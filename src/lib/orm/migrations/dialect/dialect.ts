@@ -129,10 +129,12 @@ export abstract class MigrationDialect {
       parts.push("NOT NULL");
     }
 
-    if (column.isUnique && !column.isPrimaryKey) {
-      parts.push(
-        `CONSTRAINT ${quoteIdentifier(`${constraintTable}_${column.name}_key`)} UNIQUE`,
-      );
+    if (column.isUnique) {
+      if (!column.isPrimaryKey) {
+        parts.push(
+          `CONSTRAINT ${quoteIdentifier(`${constraintTable}_${column.name}_key`)} UNIQUE`,
+        );
+      }
     }
 
     if (column.dbDefault !== undefined) {
@@ -231,6 +233,10 @@ export abstract class MigrationDialect {
     return `ALTER TABLE ${quoteIdentifier(op.table)} RENAME COLUMN ${quoteIdentifier(op.from)} TO ${quoteIdentifier(op.to)};`;
   }
 
+  private castSelectColumn(quoted: string, column: ColumnSnapshot) {
+    return `CAST(${quoted} AS ${this.sqlTypeFor(column)})`;
+  }
+
   private renderSelectCopy(
     from: TableSnapshot,
     to: TableSnapshot,
@@ -242,13 +248,16 @@ export abstract class MigrationDialect {
 
     if (!fromColumn) return quoted;
     if (!toColumn) return quoted;
-    if (fromColumn.type === toColumn.type) {
-      if (fromColumn.sqlType === toColumn.sqlType) {
-        return quoted;
-      }
+
+    if (fromColumn.type !== toColumn.type) {
+      return this.castSelectColumn(quoted, toColumn);
     }
 
-    return `CAST(${quoted} AS ${this.sqlTypeFor(toColumn)})`;
+    if (fromColumn.sqlType !== toColumn.sqlType) {
+      return this.castSelectColumn(quoted, toColumn);
+    }
+
+    return quoted;
   }
 
   private renderRecreateTable(from: TableSnapshot, to: TableSnapshot) {

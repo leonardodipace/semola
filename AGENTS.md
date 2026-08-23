@@ -52,9 +52,19 @@ Modules live in `src/lib/<name>/` and export via `semola/<name>`. Discover the c
 
 ## Code Style
 
+### Clarity over compression
+
+Code should read like English. Prefer clarity over clever density.
+
+- Prefer **named functions/methods whose names state intent** over inlined checks, nested ternaries, or compressed one-liners (`assertDestructiveAllowed`, `canAddColumnInPlace`, `writeMigrationFolder`).
+- Prefer **pure imperative code**: early returns, blank lines between steps, separate `if`s for unrelated conditions. Avoid ternaries and `&&` / `||` chains for control flow.
+- **More lines are fine** when they make the story clearer. Do not shrink for shrink's sake ("deslop" that only compresses and hurts readability is wrong).
+- Cut dead paths, duplicate branches, and clever indirection. Do not invent abstractions "for later."
+- Keep helpers that already clarify intent (e.g. `requireBoolean`, `nonEmptyString`, `mightThrow`). Do **not** inline those back to "simplify."
+
 ### Simplicity
 
-- Write minimal code, no over-engineering.
+- Write minimal code, no over-engineering (ponytail: fewest files, shortest *working* diff - not shortest unreadable line).
 - Keep code breathing with blank lines between logical blocks.
 - Explicit `if` statements over ternaries for complex logic.
 - Blank lines between if-statement groups, const definitions, and return statements inside functions.
@@ -75,12 +85,22 @@ if (!(value instanceof Error)) return;
 if (value.code === "ENOENT") return;
 ```
 
-Same for early returns - no `||` combining unrelated conditions:
+Same for early returns - no `||` / `&&` combining unrelated conditions:
 
 ```typescript
 // bad: if (a || b) return;
 // good: if (a) return; if (b) return;
+
+// bad: if (column.isUnique && !column.isPrimaryKey) { ... }
+// good:
+if (column.isUnique) {
+  if (!column.isPrimaryKey) {
+    // ...
+  }
+}
 ```
+
+Related conditions that express one intent may stay together when a named helper or clear name makes that intent obvious (`isUniqueOrPrimary`).
 
 ### Error handling
 
@@ -92,6 +112,13 @@ if (error) throw new FetchError(error.message);
 ```
 
 Thrown values are always `Error` instances (library errors extend `Error`). Use `error.message` directly - never `instanceof Error` guards or ternaries when reading the message in code or docs.
+
+### Dialect / adapter separation
+
+When a module supports multiple adapters (or dialects), keep an **adapter-driven** design: a shared base plus per-adapter subclasses (or equivalent strategy objects).
+
+- Adapter-specific behavior belongs on the adapter/dialect (override methods), **not** `if (adapter === "…")` (or equivalent) scattered through generic helpers.
+- Do not collapse adapters into shared functions full of adapter branches.
 
 ### TypeScript edge cases
 
@@ -120,6 +147,10 @@ bun pm version <major|minor|patch>   # bump version for publishing
 bun pm version preminor --preid beta    # first beta of next minor (npm tag beta)
 bun pm version prerelease --preid beta  # later betas (npm tag beta)
 bunx fallow audit --base main --format json --quiet 2>/dev/null || true   # changed-code audit
+# Postgres integration (when SEMOLA_POSTGRES_URL is set):
+#   docker run -d --name semola-pg-test -e POSTGRES_USER=semola -e POSTGRES_PASSWORD=semola \
+#     -e POSTGRES_DB=semola -p 5432:5432 postgres:16-alpine
+#   SEMOLA_POSTGRES_URL=postgres://semola:semola@localhost:5432/semola bun test src/lib/orm
 ```
 
 ## Documentation

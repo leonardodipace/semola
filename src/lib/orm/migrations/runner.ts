@@ -20,7 +20,13 @@ import { diffSchemas } from "./diff.js";
 import { resolveRenames, reverseRenameOps } from "./renames.js";
 import { emptySchema, snapshotSchema } from "./snapshot.js";
 import { assertSchemaSnapshot, splitStatements } from "./sql.js";
-import type { LoadedConfig, OrmConfig, RenameHandler } from "./types.js";
+import type {
+  LoadedConfig,
+  MigrationOp,
+  OrmConfig,
+  RenameHandler,
+  SchemaSnapshot,
+} from "./types.js";
 
 const HISTORY_TABLE = "_semola_migrations";
 const SCHEMA_FILE = "schema.json";
@@ -318,6 +324,26 @@ const pendingDirs = (applied: Array<{ name: string }>, dirs: string[]) => {
 
 const namesKey = (names: string[]) => names.join("\0");
 
+const assertCreateBaselineUnchanged = (
+  baseline: { dirs: string[]; appliedNames: string[] },
+  dirs: string[],
+  applied: Array<{ name: string }>,
+) => {
+  if (namesKey(dirs) !== namesKey(baseline.dirs)) {
+    throw new MigrationError(
+      "Migrations directory changed while creating; retry create",
+    );
+  }
+
+  const appliedNames = applied.map((row) => row.name);
+
+  if (namesKey(appliedNames) !== namesKey(baseline.appliedNames)) {
+    throw new MigrationError(
+      "Migration history changed while creating; retry create",
+    );
+  }
+};
+
 const runSqlText = async (sql: Bun.SQL, text: string, label: string) => {
   const statements = splitStatements(text);
 
@@ -327,6 +353,66 @@ const runSqlText = async (sql: Bun.SQL, text: string, label: string) => {
 
   for (const statement of statements) {
     await sql.unsafe(statement);
+  }
+};
+
+const assertDestructiveAllowed = async (input: {
+  allowDestructive?: boolean;
+  onDestructive?: () => boolean | Promise<boolean>;
+}) => {
+  if (input.allowDestructive) return;
+
+  if (input.onDestructive) {
+    const allowed = await input.onDestructive();
+
+    if (allowed) return;
+  }
+
+  throw new MigrationError(
+    "Destructive schema changes require allowDestructive: true or onDestructive confirmation",
+  );
+};
+
+const renderDownSql = (
+  dialect: MigrationDialect,
+  from: SchemaSnapshot,
+  to: SchemaSnapshot,
+  renameOps: MigrationOp[],
+) => {
+  const downDiff = dialect.render(
+    diffSchemas(to, from, dialect, { strictAddColumn: false }),
+  );
+  const downRenames = reverseRenameOps(renameOps);
+
+  if (downRenames.length === 0) {
+    return downDiff;
+  }
+
+  return `${downDiff}${dialect.render(downRenames)}`;
+};
+
+const writeMigrationFolder = async (input: {
+  folderPath: string;
+  upSql: string;
+  downSql: string;
+  schema: unknown;
+}) => {
+  const tempPath = `${input.folderPath}.tmp`;
+
+  await rm(tempPath, { recursive: true, force: true });
+  await mkdir(tempPath, { recursive: true });
+
+  try {
+    await writeFile(join(tempPath, "up.sql"), input.upSql);
+    await writeFile(join(tempPath, "down.sql"), input.downSql);
+    await writeFile(
+      join(tempPath, SCHEMA_FILE),
+      `${JSON.stringify(input.schema, null, 2)}\n`,
+    );
+    await rename(tempPath, input.folderPath);
+  } catch (error) {
+    await rm(tempPath, { recursive: true, force: true });
+    throw error;
   }
 };
 
@@ -373,15 +459,7 @@ export const createMigration = async (input: {
   }
 
   if (hasDestructiveOps(ops)) {
-    if (!input.allowDestructive) {
-      const allowed = input.onDestructive ? await input.onDestructive() : false;
-
-      if (!allowed) {
-        throw new MigrationError(
-          "Destructive schema changes require allowDestructive: true or onDestructive confirmation",
-        );
-      }
-    }
+    await assertDestructiveAllowed(input);
   }
 
   const folderName = `${timestamp()}_${slugify(name)}`;
@@ -392,15 +470,7 @@ export const createMigration = async (input: {
     throw new MigrationError("No schema changes to migrate");
   }
 
-  const downDiff = dialect.render(
-    diffSchemas(to, renamed.from, dialect, { strictAddColumn: false }),
-  );
-  const downRenames = reverseRenameOps(renamed.ops);
-  let downSql = downDiff;
-
-  if (downRenames.length > 0) {
-    downSql = `${downDiff}${dialect.render(downRenames)}`;
-  }
+  const downSql = renderDownSql(dialect, renamed.from, to, renamed.ops);
 
   if (splitStatements(downSql).length === 0) {
     throw new MigrationError("Generated down.sql has no SQL statements");
@@ -414,38 +484,14 @@ export const createMigration = async (input: {
         config.migrationsDir,
       );
 
-      if (namesKey(dirs) !== namesKey(baseline.dirs)) {
-        throw new MigrationError(
-          "Migrations directory changed while creating; retry create",
-        );
-      }
+      assertCreateBaselineUnchanged(baseline, dirs, applied);
 
-      if (
-        namesKey(applied.map((row) => row.name)) !==
-        namesKey(baseline.appliedNames)
-      ) {
-        throw new MigrationError(
-          "Migration history changed while creating; retry create",
-        );
-      }
-
-      const tempPath = `${folderPath}.tmp`;
-
-      await rm(tempPath, { recursive: true, force: true });
-      await mkdir(tempPath, { recursive: true });
-
-      try {
-        await writeFile(join(tempPath, "up.sql"), upSql);
-        await writeFile(join(tempPath, "down.sql"), downSql);
-        await writeFile(
-          join(tempPath, SCHEMA_FILE),
-          `${JSON.stringify(to, null, 2)}\n`,
-        );
-        await rename(tempPath, folderPath);
-      } catch (error) {
-        await rm(tempPath, { recursive: true, force: true });
-        throw error;
-      }
+      await writeMigrationFolder({
+        folderPath,
+        upSql,
+        downSql,
+        schema: to,
+      });
 
       return folderName;
     });

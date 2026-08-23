@@ -30,10 +30,9 @@ const pushAddColumnWarnings = (
     }
   }
 
-  if (!column.isUnique) {
-    if (!column.isPrimaryKey) return;
-  }
+  const isUniqueOrPrimary = column.isUnique || column.isPrimaryKey;
 
+  if (!isUniqueOrPrimary) return;
   if (!isConstantDefault(column.dbDefault)) return;
 
   warnings.push(
