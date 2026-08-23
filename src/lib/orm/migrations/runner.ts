@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { SemolaConfig } from "../../config.js";
@@ -136,6 +143,10 @@ const ensureHistoryTable = async (sql: Bun.SQL) => {
 
   if (message.includes("duplicate column")) return;
   if (message.includes("already exists")) return;
+
+  throw new MigrationError(
+    `Could not update ${HISTORY_TABLE}: ${error.message}`,
+  );
 };
 
 const listMigrationDirs = async (migrationsDir: string) => {
@@ -376,13 +387,23 @@ export const createMigration = async (input: {
         );
       }
 
-      await mkdir(folderPath, { recursive: true });
-      await writeFile(join(folderPath, "up.sql"), upSql);
-      await writeFile(join(folderPath, "down.sql"), downSql);
-      await writeFile(
-        join(folderPath, SCHEMA_FILE),
-        `${JSON.stringify(to, null, 2)}\n`,
-      );
+      const tempPath = `${folderPath}.tmp`;
+
+      await rm(tempPath, { recursive: true, force: true });
+      await mkdir(tempPath, { recursive: true });
+
+      try {
+        await writeFile(join(tempPath, "up.sql"), upSql);
+        await writeFile(join(tempPath, "down.sql"), downSql);
+        await writeFile(
+          join(tempPath, SCHEMA_FILE),
+          `${JSON.stringify(to, null, 2)}\n`,
+        );
+        await rename(tempPath, folderPath);
+      } catch (error) {
+        await rm(tempPath, { recursive: true, force: true });
+        throw error;
+      }
 
       return folderName;
     });

@@ -643,6 +643,77 @@ describe("orm migrations snapshot/diff/sql", () => {
     );
   });
 
+  test("warns when adding a unique column with a scientific-notation default", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      score: number("score").notNull().unique().dbDefault("1e3", { as: "sql" }),
+    });
+    const sql = renderMigrationSql(
+      "sqlite",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "sqlite",
+      ),
+    );
+
+    expect(sql).toContain("ADD COLUMN");
+    expect(sql).toContain(
+      "unique/primary key with a constant default fails if the table has more than one row",
+    );
+  });
+
+  test("warns when postgres sets NOT NULL on an existing column", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email"),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").notNull(),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "postgres",
+      ),
+    );
+
+    expect(sql).toContain('ALTER COLUMN "email" SET NOT NULL');
+    expect(sql).toContain(
+      'ALTER COLUMN "users"."email" SET NOT NULL fails if existing rows contain NULL',
+    );
+  });
+
+  test("warns when sqlite recreates a table to tighten nullability", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email"),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").notNull().dbDefault(""),
+    });
+    const sql = renderMigrationSql(
+      "sqlite",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "sqlite",
+      ),
+    );
+
+    expect(sql).toContain("CREATE TABLE");
+    expect(sql).toContain(
+      'recreate "users"."email" as NOT NULL fails if existing rows contain NULL',
+    );
+  });
+
   test("warns when down SQL re-adds a NOT NULL column without a default", () => {
     const before = defineTable("users", {
       id: uuid("id").primaryKey().notNull(),

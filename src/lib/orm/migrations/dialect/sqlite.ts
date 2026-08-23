@@ -2,16 +2,7 @@ import { SQLITE_SPEC } from "../../dialect/sqlite.js";
 import { MigrationError } from "../../errors.js";
 import type { ColumnSnapshot, MigrationOp } from "../types.js";
 import { MigrationDialect } from "./dialect.js";
-
-const isConstantDefault = (value: string) => {
-  if (value === "TRUE") return true;
-  if (value === "FALSE") return true;
-  if (value === "NULL") return true;
-  if (/^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(value)) return true;
-  if (value.startsWith("'") && value.endsWith("'")) return true;
-
-  return false;
-};
+import { isConstantDefault } from "./warnings.js";
 
 export class SqliteMigrationDialect extends MigrationDialect {
   public readonly name = "sqlite" as const;

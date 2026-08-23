@@ -13,12 +13,12 @@ const ask = async (question: RenameQuestion, onRename?: RenameHandler) => {
 
     if (question.kind === "table") {
       throw new MigrationError(
-        `Possible table rename: dropped ${dropped}, created ${question.created}. Run bunx semola orm migrations create`,
+        `Possible table rename: dropped ${dropped}, created ${question.created}. Re-run create in a TTY or pass onRename`,
       );
     }
 
     throw new MigrationError(
-      `Possible column rename on ${question.table}: dropped ${dropped}, created ${question.created}. Run bunx semola orm migrations create`,
+      `Possible column rename on ${question.table}: dropped ${dropped}, created ${question.created}. Re-run create in a TTY or pass onRename`,
     );
   }
 

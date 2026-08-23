@@ -10,6 +10,7 @@ import {
   rollbackMigration,
 } from "../lib/orm/migrations/runner.js";
 import type { RenameQuestion } from "../lib/orm/migrations/types.js";
+import { PromptEnvironmentError } from "../lib/prompts/errors.js";
 import type { SelectChoice } from "../lib/prompts/index.js";
 import { confirm, select } from "../lib/prompts/index.js";
 
@@ -39,10 +40,54 @@ const stringArg = {
   },
 };
 
+const booleanFlag = {
+  "~standard": {
+    version: 1 as const,
+    vendor: "semola",
+    types: {
+      input: false as boolean,
+      output: false as boolean,
+    },
+    validate: (value: unknown) => {
+      if (value === undefined) {
+        return { value: false };
+      }
+
+      if (value === true) {
+        return { value: true };
+      }
+
+      if (value === false) {
+        return { value: false };
+      }
+
+      return { issues: [{ message: "expected boolean" }] };
+    },
+  },
+};
+
+const isInteractive = () => {
+  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+};
+
 const CREATE = "";
 
 const promptRename = async (question: RenameQuestion) => {
   if (question.dropped.length === 0) return;
+
+  if (!isInteractive()) {
+    const dropped = question.dropped.join(", ");
+
+    if (question.kind === "table") {
+      throw new MigrationError(
+        `Possible table rename: dropped ${dropped}, created ${question.created}. Re-run create in a TTY or pass onRename`,
+      );
+    }
+
+    throw new MigrationError(
+      `Possible column rename on ${question.table}: dropped ${dropped}, created ${question.created}. Re-run create in a TTY or pass onRename`,
+    );
+  }
 
   let entity = "column";
   let created = "";
@@ -81,6 +126,12 @@ const promptRename = async (question: RenameQuestion) => {
 };
 
 const promptDestructive = async () => {
+  if (!isInteractive()) {
+    throw new MigrationError(
+      "Destructive schema changes require --allow-destructive when not running in a TTY",
+    );
+  }
+
   return confirm({
     message: "This migration drops tables or columns. Continue?",
     defaultValue: false,
@@ -101,13 +152,17 @@ const run = async () => {
       description: "Generate a migration from schema changes",
     })
     .argument("name", { schema: stringArg })
-    .action(async (args) => {
+    .option("allow-destructive", { schema: booleanFlag })
+    .action(async (args, options) => {
       const config = await loadConfig();
+      const allowDestructive = Boolean(options["allow-destructive"]);
       const folder = await createMigration({
         name: args.name,
         config,
-        onRename: promptRename,
-        onDestructive: promptDestructive,
+        onRename: isInteractive() ? promptRename : undefined,
+        allowDestructive,
+        onDestructive:
+          allowDestructive || !isInteractive() ? undefined : promptDestructive,
       });
 
       console.log(`Created migration ${folder}`);
@@ -145,6 +200,11 @@ const run = async () => {
   if (!error) return;
 
   if (error instanceof MigrationError) {
+    console.error(error.message);
+    process.exit(1);
+  }
+
+  if (error instanceof PromptEnvironmentError) {
     console.error(error.message);
     process.exit(1);
   }

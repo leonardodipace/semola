@@ -7,13 +7,14 @@ const renameWarning = (table: string, dropped: string[], added: string[]) => {
   return `-- warning: "${table}" drops ${dropped.join(", ")} and adds ${added.join(", ")}`;
 };
 
-const isConstantDefault = (value?: string) => {
+export const isConstantDefault = (value?: string) => {
   if (value === undefined) return false;
   if (value === "TRUE") return true;
   if (value === "FALSE") return true;
-  if (value.startsWith("'")) return true;
+  if (value === "NULL") return true;
+  if (value.startsWith("'") && value.endsWith("'")) return true;
 
-  return /^-?\d+(\.\d+)?$/.test(value);
+  return /^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(value);
 };
 
 const pushAddColumnWarnings = (
@@ -99,6 +100,18 @@ export const dataLossWarnings = (ops: MigrationOp[]) => {
       continue;
     }
 
+    if (op.kind === "alterColumn") {
+      if (op.from.isNullable) {
+        if (!op.to.isNullable) {
+          warnings.push(
+            `-- warning: ALTER COLUMN "${op.table}"."${op.to.name}" SET NOT NULL fails if existing rows contain NULL`,
+          );
+        }
+      }
+
+      continue;
+    }
+
     if (op.kind !== "recreateTable") continue;
 
     const warning = renameWarning(
@@ -110,9 +123,20 @@ export const dataLossWarnings = (ops: MigrationOp[]) => {
     if (warning) warnings.push(warning);
 
     for (const column of Object.values(op.to.columns)) {
-      if (op.from.columns[column.name]) continue;
+      const previous = op.from.columns[column.name];
 
-      pushAddColumnWarnings(warnings, op.to.name, column);
+      if (!previous) {
+        pushAddColumnWarnings(warnings, op.to.name, column);
+        continue;
+      }
+
+      if (previous.isNullable) {
+        if (!column.isNullable) {
+          warnings.push(
+            `-- warning: recreate "${op.to.name}"."${column.name}" as NOT NULL fails if existing rows contain NULL`,
+          );
+        }
+      }
     }
   }
 
