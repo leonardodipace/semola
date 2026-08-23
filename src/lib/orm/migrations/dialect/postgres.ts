@@ -67,9 +67,8 @@ export class PostgresMigrationDialect extends MigrationDialect {
   }
 
   public override async lockMigrations(sql: Bun.SQL) {
-    await sql.unsafe(
-      "SELECT pg_advisory_xact_lock(hashtext('_semola_migrations'))",
-    );
+    // Fixed key pair reserved for Semola migrations (avoids hashtext collisions).
+    await sql.unsafe("SELECT pg_advisory_xact_lock(872314055, 1)");
   }
 
   protected override deferCircularForeignKeys() {

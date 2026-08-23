@@ -111,7 +111,7 @@ export abstract class MigrationDialect {
   }
 
   private renderColumnDef(
-    table: string,
+    constraintTable: string,
     column: ColumnSnapshot,
     inlinePrimaryKey = true,
   ) {
@@ -120,7 +120,7 @@ export abstract class MigrationDialect {
     if (column.isPrimaryKey) {
       if (inlinePrimaryKey) {
         parts.push(
-          `CONSTRAINT ${quoteIdentifier(`${table}_pkey`)} PRIMARY KEY`,
+          `CONSTRAINT ${quoteIdentifier(`${constraintTable}_pkey`)} PRIMARY KEY`,
         );
       }
     }
@@ -131,7 +131,7 @@ export abstract class MigrationDialect {
 
     if (column.isUnique && !column.isPrimaryKey) {
       parts.push(
-        `CONSTRAINT ${quoteIdentifier(`${table}_${column.name}_key`)} UNIQUE`,
+        `CONSTRAINT ${quoteIdentifier(`${constraintTable}_${column.name}_key`)} UNIQUE`,
       );
     }
 
@@ -143,26 +143,31 @@ export abstract class MigrationDialect {
 
     if (check) {
       parts.push(
-        `CONSTRAINT ${quoteIdentifier(`${table}_${column.name}_check`)} ${check}`,
+        `CONSTRAINT ${quoteIdentifier(`${constraintTable}_${column.name}_check`)} ${check}`,
       );
     }
 
     if (column.references) {
       parts.push(
-        `CONSTRAINT ${quoteIdentifier(`${table}_${column.name}_fkey`)} REFERENCES ${quoteIdentifier(column.references.table)} (${quoteIdentifier(column.references.column)})`,
+        `CONSTRAINT ${quoteIdentifier(`${constraintTable}_${column.name}_fkey`)} REFERENCES ${quoteIdentifier(column.references.table)} (${quoteIdentifier(column.references.column)})`,
       );
     }
 
     return `${quoteIdentifier(column.name)} ${parts.join(" ")}`;
   }
 
-  private renderCreateTable(table: TableSnapshot) {
+  private renderCreateTable(
+    table: TableSnapshot,
+    options?: { asName?: string },
+  ) {
+    const tableName = options?.asName ?? table.name;
+    const constraintTable = table.name;
     const pkColumns = Object.values(table.columns).filter((column) => {
       return column.isPrimaryKey;
     });
     const compositePk = pkColumns.length > 1;
     const lines = Object.values(table.columns).map((column) => {
-      return `    ${this.renderColumnDef(table.name, column, !compositePk)}`;
+      return `    ${this.renderColumnDef(constraintTable, column, !compositePk)}`;
     });
 
     if (compositePk) {
@@ -171,11 +176,11 @@ export abstract class MigrationDialect {
         .join(", ");
 
       lines.push(
-        `    CONSTRAINT ${quoteIdentifier(`${table.name}_pkey`)} PRIMARY KEY (${cols})`,
+        `    CONSTRAINT ${quoteIdentifier(`${constraintTable}_pkey`)} PRIMARY KEY (${cols})`,
       );
     }
 
-    return `CREATE TABLE ${quoteIdentifier(table.name)} (\n${lines.join(",\n")}\n);`;
+    return `CREATE TABLE ${quoteIdentifier(tableName)} (\n${lines.join(",\n")}\n);`;
   }
 
   private renderDropTable(table: TableSnapshot) {
@@ -226,15 +231,38 @@ export abstract class MigrationDialect {
     return `ALTER TABLE ${quoteIdentifier(op.table)} RENAME COLUMN ${quoteIdentifier(op.from)} TO ${quoteIdentifier(op.to)};`;
   }
 
+  private renderSelectCopy(
+    from: TableSnapshot,
+    to: TableSnapshot,
+    name: string,
+  ) {
+    const quoted = quoteIdentifier(name);
+    const fromColumn = from.columns[name];
+    const toColumn = to.columns[name];
+
+    if (!fromColumn) return quoted;
+    if (!toColumn) return quoted;
+    if (fromColumn.type === toColumn.type) {
+      if (fromColumn.sqlType === toColumn.sqlType) {
+        return quoted;
+      }
+    }
+
+    return `CAST(${quoted} AS ${this.sqlTypeFor(toColumn)})`;
+  }
+
   private renderRecreateTable(from: TableSnapshot, to: TableSnapshot) {
     const tmpName = `${to.name}__semola_tmp`;
     const shared = Object.keys(to.columns).filter((name) => from.columns[name]);
     const cols = shared.map(quoteIdentifier).join(", ");
-    const lines = [this.renderCreateTable({ ...to, name: tmpName })];
+    const selectCols = shared
+      .map((name) => this.renderSelectCopy(from, to, name))
+      .join(", ");
+    const lines = [this.renderCreateTable(to, { asName: tmpName })];
 
     if (shared.length > 0) {
       lines.push(
-        `INSERT INTO ${quoteIdentifier(tmpName)} (${cols}) SELECT ${cols} FROM ${quoteIdentifier(from.name)};`,
+        `INSERT INTO ${quoteIdentifier(tmpName)} (${cols}) SELECT ${selectCols} FROM ${quoteIdentifier(from.name)};`,
       );
     }
 

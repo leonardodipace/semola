@@ -1,4 +1,4 @@
-import { MigrationError } from "../errors.js";
+import { OrmError } from "../errors.js";
 import type {
   ColumnBuilder,
   ColumnRuntimeValueMap,
@@ -12,7 +12,7 @@ const sqlLiteral = (value: unknown) => {
 
   if (typeof value === "number") {
     if (!Number.isFinite(value)) {
-      throw new MigrationError("dbDefault number must be finite");
+      throw new OrmError("dbDefault number must be finite");
     }
 
     return String(value);
@@ -225,8 +225,24 @@ const createColumnBuilder = <
       const sql = String(value).trim();
 
       if (!sql) {
-        throw new MigrationError(
-          `Column ${column.sqlName} has an empty dbDefault`,
+        throw new OrmError(`Column ${column.sqlName} has an empty dbDefault`);
+      }
+
+      if (sql.includes(";")) {
+        throw new OrmError(
+          `Column ${column.sqlName} dbDefault SQL must be a single expression (no ";")`,
+        );
+      }
+
+      if (sql.includes("--")) {
+        throw new OrmError(
+          `Column ${column.sqlName} dbDefault SQL cannot contain "--" comments`,
+        );
+      }
+
+      if (sql.includes("/*")) {
+        throw new OrmError(
+          `Column ${column.sqlName} dbDefault SQL cannot contain "/*" comments`,
         );
       }
 

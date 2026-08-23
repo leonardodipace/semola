@@ -8,18 +8,7 @@ export {
   string,
   uuid,
 } from "./column/index.js";
-export { MigrationError, OrmError } from "./errors.js";
-export type {
-  LoadedConfig,
-  RenameHandler,
-  RenameQuestion,
-} from "./migrations/index.js";
-export {
-  applyMigrations,
-  createMigration,
-  loadConfig,
-  rollbackMigration,
-} from "./migrations/index.js";
+export { OrmError } from "./errors.js";
 export { createOrm, many, one } from "./orm/index.js";
 export type {
   CreateData,

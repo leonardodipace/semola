@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -7,6 +8,7 @@ import { MigrationError } from "../errors.js";
 import { getOrmConnectionUrl } from "../orm/orm.js";
 import type { MigrationDialect } from "./dialect/index.js";
 import { getMigrationDialect } from "./dialect/index.js";
+import { hasDestructiveOps } from "./dialect/warnings.js";
 import { diffSchemas } from "./diff.js";
 import { resolveRenames, reverseRenameOps } from "./renames.js";
 import { emptySchema, snapshotSchema } from "./snapshot.js";
@@ -15,6 +17,12 @@ import type { LoadedConfig, OrmConfig, RenameHandler } from "./types.js";
 
 const HISTORY_TABLE = "_semola_migrations";
 const SCHEMA_FILE = "schema.json";
+
+type HistoryRow = {
+  name: string;
+  schema: string;
+  upChecksum: string | null;
+};
 
 const isOrmClient = (value: unknown) => {
   if (!value) return false;
@@ -113,9 +121,21 @@ const ensureHistoryTable = async (sql: Bun.SQL) => {
     CREATE TABLE IF NOT EXISTS ${HISTORY_TABLE} (
       name TEXT PRIMARY KEY NOT NULL,
       applied_at TEXT NOT NULL,
-      schema TEXT NOT NULL
+      schema TEXT NOT NULL,
+      up_checksum TEXT
     )
   `);
+
+  const [error] = await mightThrow(
+    sql.unsafe(`ALTER TABLE ${HISTORY_TABLE} ADD COLUMN up_checksum TEXT`),
+  );
+
+  if (!error) return;
+
+  const message = error.message.toLowerCase();
+
+  if (message.includes("duplicate column")) return;
+  if (message.includes("already exists")) return;
 };
 
 const listMigrationDirs = async (migrationsDir: string) => {
@@ -159,14 +179,49 @@ const assertHistoryMatchesFiles = (
   }
 };
 
+const hashUpSql = (text: string) => {
+  return createHash("sha256").update(text).digest("hex");
+};
+
+const readSqlFile = async (filePath: string, label: string) => {
+  const [error, text] = await mightThrow(readFile(filePath, "utf8"));
+
+  if (error) {
+    throw new MigrationError(`Could not read ${label}: ${error.message}`);
+  }
+
+  return text;
+};
+
 const readApplied = async (sql: Bun.SQL) => {
   await ensureHistoryTable(sql);
 
   const rows = (await sql.unsafe(
-    `SELECT name, schema FROM ${HISTORY_TABLE} ORDER BY name ASC`,
-  )) as Array<{ name: string; schema: string }>;
+    `SELECT name, schema, up_checksum AS "upChecksum" FROM ${HISTORY_TABLE} ORDER BY name ASC`,
+  )) as HistoryRow[];
 
   return rows;
+};
+
+const assertUpChecksums = async (
+  migrationsDir: string,
+  applied: HistoryRow[],
+) => {
+  for (const row of applied) {
+    if (!row.upChecksum) continue;
+
+    const text = await readSqlFile(
+      join(migrationsDir, row.name, "up.sql"),
+      `Migration ${row.name} up.sql`,
+    );
+    const checksum = hashUpSql(text);
+
+    if (checksum === row.upChecksum) continue;
+
+    throw new MigrationError(
+      `Migration ${row.name} up.sql does not match the checksum recorded at apply time`,
+    );
+  }
 };
 
 const latestSchema = (rows: Array<{ schema: string }>) => {
@@ -213,6 +268,7 @@ const loadHistory = async (sql: Bun.SQL, migrationsDir: string) => {
   const dirs = await listMigrationDirs(migrationsDir);
 
   assertHistoryMatchesFiles(dirs, applied);
+  await assertUpChecksums(migrationsDir, applied);
 
   return { applied, dirs };
 };
@@ -223,78 +279,114 @@ const pendingDirs = (applied: Array<{ name: string }>, dirs: string[]) => {
   return dirs.filter((dir) => !appliedNames.has(dir));
 };
 
+const namesKey = (names: string[]) => names.join("\0");
+
 export const createMigration = async (input: {
   name: string;
   config: LoadedConfig;
   onRename?: RenameHandler;
+  allowDestructive?: boolean;
+  onDestructive?: () => boolean | Promise<boolean>;
 }) => {
   const { name, config } = input;
 
-  return withConnection(config, async (sql, dialect) => {
-    const { applied, dirs } = await loadHistory(sql, config.migrationsDir);
-    const pending = pendingDirs(applied, dirs);
+  const baseline = await withConnection(config, async (sql, dialect) => {
+    return dialect.beginMigration(sql, async (tx) => {
+      await dialect.lockMigrations(tx);
 
-    if (pending.length > 0) {
-      throw new MigrationError(
-        `Apply pending migrations before creating a new one: ${pending.join(", ")}`,
-      );
-    }
+      const { applied, dirs } = await loadHistory(tx, config.migrationsDir);
+      const pending = pendingDirs(applied, dirs);
 
-    const to = snapshotSchema(config.orm.tables);
-    const renamed = await resolveRenames(
-      latestSchema(applied),
-      to,
-      input.onRename,
-    );
-    const diffOps = diffSchemas(renamed.from, to, dialect);
-    const ops = [...renamed.ops, ...diffOps];
+      if (pending.length > 0) {
+        throw new MigrationError(
+          `Apply pending migrations before creating a new one: ${pending.join(", ")}`,
+        );
+      }
 
-    if (ops.length === 0) {
-      throw new MigrationError("No schema changes to migrate");
-    }
-
-    const folderName = `${timestamp()}_${slugify(name)}`;
-    const folderPath = join(config.migrationsDir, folderName);
-    const upSql = dialect.render(ops);
-
-    if (splitStatements(upSql).length === 0) {
-      throw new MigrationError("No schema changes to migrate");
-    }
-
-    const downDiff = dialect.render(
-      diffSchemas(to, renamed.from, dialect, { strictAddColumn: false }),
-    );
-    const downRenames = reverseRenameOps(renamed.ops);
-    let downSql = downDiff;
-
-    if (downRenames.length > 0) {
-      downSql = `${downDiff}${dialect.render(downRenames)}`;
-    }
-
-    if (splitStatements(downSql).length === 0) {
-      throw new MigrationError("Generated down.sql has no SQL statements");
-    }
-
-    await mkdir(folderPath, { recursive: true });
-    await writeFile(join(folderPath, "up.sql"), upSql);
-    await writeFile(join(folderPath, "down.sql"), downSql);
-    await writeFile(
-      join(folderPath, SCHEMA_FILE),
-      `${JSON.stringify(to, null, 2)}\n`,
-    );
-
-    return folderName;
+      return {
+        fromSchema: latestSchema(applied),
+        dirs,
+        appliedNames: applied.map((row) => row.name),
+      };
+    });
   });
-};
 
-const readSqlFile = async (filePath: string, label: string) => {
-  const [error, text] = await mightThrow(readFile(filePath, "utf8"));
+  const dialect = getMigrationDialect(config.orm.adapter);
+  const to = snapshotSchema(config.orm.tables);
+  const renamed = await resolveRenames(baseline.fromSchema, to, input.onRename);
+  const diffOps = diffSchemas(renamed.from, to, dialect);
+  const ops = [...renamed.ops, ...diffOps];
 
-  if (error) {
-    throw new MigrationError(`Could not read ${label}: ${error.message}`);
+  if (ops.length === 0) {
+    throw new MigrationError("No schema changes to migrate");
   }
 
-  return text;
+  if (hasDestructiveOps(ops)) {
+    if (!input.allowDestructive) {
+      const allowed = input.onDestructive ? await input.onDestructive() : false;
+
+      if (!allowed) {
+        throw new MigrationError(
+          "Destructive schema changes require allowDestructive: true or onDestructive confirmation",
+        );
+      }
+    }
+  }
+
+  const folderName = `${timestamp()}_${slugify(name)}`;
+  const folderPath = join(config.migrationsDir, folderName);
+  const upSql = dialect.render(ops);
+
+  if (splitStatements(upSql).length === 0) {
+    throw new MigrationError("No schema changes to migrate");
+  }
+
+  const downDiff = dialect.render(
+    diffSchemas(to, renamed.from, dialect, { strictAddColumn: false }),
+  );
+  const downRenames = reverseRenameOps(renamed.ops);
+  let downSql = downDiff;
+
+  if (downRenames.length > 0) {
+    downSql = `${downDiff}${dialect.render(downRenames)}`;
+  }
+
+  if (splitStatements(downSql).length === 0) {
+    throw new MigrationError("Generated down.sql has no SQL statements");
+  }
+
+  return withConnection(config, async (sql, dialect) => {
+    return dialect.beginMigration(sql, async (tx) => {
+      await dialect.lockMigrations(tx);
+
+      const { applied, dirs } = await loadHistory(tx, config.migrationsDir);
+
+      if (namesKey(dirs) !== namesKey(baseline.dirs)) {
+        throw new MigrationError(
+          "Migrations directory changed while creating; retry create",
+        );
+      }
+
+      if (
+        namesKey(applied.map((row) => row.name)) !==
+        namesKey(baseline.appliedNames)
+      ) {
+        throw new MigrationError(
+          "Migration history changed while creating; retry create",
+        );
+      }
+
+      await mkdir(folderPath, { recursive: true });
+      await writeFile(join(folderPath, "up.sql"), upSql);
+      await writeFile(join(folderPath, "down.sql"), downSql);
+      await writeFile(
+        join(folderPath, SCHEMA_FILE),
+        `${JSON.stringify(to, null, 2)}\n`,
+      );
+
+      return folderName;
+    });
+  });
 };
 
 const runSqlFile = async (sql: Bun.SQL, filePath: string, label: string) => {
@@ -328,7 +420,7 @@ export const applyMigrations = async (config: LoadedConfig) => {
       return [];
     }
 
-    const insertPh = dialect.placeholders(3);
+    const insertPh = dialect.placeholders(4);
     const appliedNames: string[] = [];
 
     for (const name of pending) {
@@ -341,6 +433,7 @@ export const applyMigrations = async (config: LoadedConfig) => {
         const appliedNow = await readApplied(tx);
 
         assertHistoryMatchesFiles(dirs, appliedNow);
+        await assertUpChecksums(config.migrationsDir, appliedNow);
 
         if (appliedNow.some((row) => row.name === name)) {
           return;
@@ -353,13 +446,25 @@ export const applyMigrations = async (config: LoadedConfig) => {
         }
 
         const schema = await readMigrationSchema(folderPath, name);
+        const upSql = await readSqlFile(upPath, `Migration ${name}`);
+        const checksum = hashUpSql(upSql);
+        const statements = splitStatements(upSql);
 
-        await runSqlFile(tx, upPath, `Migration ${name}`);
+        if (statements.length === 0) {
+          throw new MigrationError(
+            `Migration ${name} has no SQL statements to apply`,
+          );
+        }
+
+        for (const statement of statements) {
+          await tx.unsafe(statement);
+        }
+
         await dialect.assertForeignKeys(tx);
 
         await tx.unsafe(
-          `INSERT INTO ${HISTORY_TABLE} (name, applied_at, schema) VALUES (${insertPh})`,
-          [name, new Date().toISOString(), JSON.stringify(schema)],
+          `INSERT INTO ${HISTORY_TABLE} (name, applied_at, schema, up_checksum) VALUES (${insertPh})`,
+          [name, new Date().toISOString(), JSON.stringify(schema), checksum],
         );
 
         appliedNames.push(name);
@@ -388,10 +493,12 @@ export const rollbackMigration = async (config: LoadedConfig) => {
       const appliedNow = await readApplied(tx);
 
       assertHistoryMatchesFiles(dirs, appliedNow);
+      await assertUpChecksums(config.migrationsDir, appliedNow);
 
       if (!appliedNow.some((row) => row.name === intended.name)) {
-        rolledBack = intended.name;
-        return;
+        throw new MigrationError(
+          `Migration ${intended.name} is no longer applied (already rolled back)`,
+        );
       }
 
       const last = appliedNow[appliedNow.length - 1];

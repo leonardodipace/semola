@@ -715,6 +715,32 @@ describe("orm migrations snapshot/diff/sql", () => {
     );
   });
 
+  test("sqlite recreate casts columns when types change", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      age: string("age").notNull(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      age: number("age").notNull(),
+    });
+
+    const sql = renderMigrationSql(
+      "sqlite",
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        "sqlite",
+      ),
+    );
+
+    expect(sql).toContain(
+      'INSERT INTO "users__semola_tmp" ("id", "age") SELECT "id", CAST("age" AS REAL) FROM "users"',
+    );
+    expect(sql).toContain('CONSTRAINT "users_pkey"');
+    expect(sql).not.toContain("users__semola_tmp_pkey");
+  });
+
   test("postgres drops defaults before TYPE then sets the new default", () => {
     const before = defineTable("users", {
       id: uuid("id").primaryKey().notNull(),
@@ -940,6 +966,12 @@ describe("orm migrations snapshot/diff/sql", () => {
     expect(() => string("role").dbDefault("  ", { as: "sql" })).toThrow(
       "empty dbDefault",
     );
+  });
+
+  test("rejects multi-statement SQL dbDefault before render", () => {
+    expect(() =>
+      string("role").dbDefault("1; SELECT 1", { as: "sql" }),
+    ).toThrow('single expression (no ";")');
   });
 
   test("warns when a table drops and adds columns", () => {

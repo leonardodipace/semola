@@ -105,6 +105,15 @@ describe("ORM column builders", () => {
     expect(() => number("count").dbDefault(Number.POSITIVE_INFINITY)).toThrow(
       "dbDefault number must be finite",
     );
+    expect(() =>
+      string("role").dbDefault("1; DROP TABLE users", { as: "sql" }),
+    ).toThrow('single expression (no ";")');
+    expect(() =>
+      string("role").dbDefault("now() -- hi", { as: "sql" }),
+    ).toThrow('cannot contain "--"');
+    expect(() =>
+      string("role").dbDefault("now() /* x */", { as: "sql" }),
+    ).toThrow('cannot contain "/*"');
   });
 
   test("does not reopen primary key columns via nullable()", () => {

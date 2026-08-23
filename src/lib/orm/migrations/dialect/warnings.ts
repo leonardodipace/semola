@@ -40,6 +40,21 @@ const pushAddColumnWarnings = (
   );
 };
 
+export const hasDestructiveOps = (ops: MigrationOp[]) => {
+  for (const op of ops) {
+    if (op.kind === "dropTable") return true;
+    if (op.kind === "dropColumn") return true;
+
+    if (op.kind === "recreateTable") {
+      for (const name of Object.keys(op.from.columns)) {
+        if (!op.to.columns[name]) return true;
+      }
+    }
+  }
+
+  return false;
+};
+
 export const dataLossWarnings = (ops: MigrationOp[]) => {
   const warnings: string[] = [];
   const dropped = new Map<string, string[]>();

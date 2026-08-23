@@ -3,15 +3,15 @@ import { readFileSync } from "node:fs";
 import { CLI } from "../lib/cli/index.js";
 import { mightThrow } from "../lib/errors/index.js";
 import { MigrationError } from "../lib/orm/errors.js";
-import type { RenameQuestion } from "../lib/orm/migrations/index.js";
 import {
   applyMigrations,
   createMigration,
   loadConfig,
   rollbackMigration,
-} from "../lib/orm/migrations/index.js";
+} from "../lib/orm/migrations/runner.js";
+import type { RenameQuestion } from "../lib/orm/migrations/types.js";
 import type { SelectChoice } from "../lib/prompts/index.js";
-import { select } from "../lib/prompts/index.js";
+import { confirm, select } from "../lib/prompts/index.js";
 
 const packageJson = JSON.parse(
   readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
@@ -80,6 +80,13 @@ const promptRename = async (question: RenameQuestion) => {
   return selected;
 };
 
+const promptDestructive = async () => {
+  return confirm({
+    message: "This migration drops tables or columns. Continue?",
+    defaultValue: false,
+  });
+};
+
 const run = async () => {
   const program = new CLI({
     name: "semola",
@@ -100,6 +107,7 @@ const run = async () => {
         name: args.name,
         config,
         onRename: promptRename,
+        onDestructive: promptDestructive,
       });
 
       console.log(`Created migration ${folder}`);

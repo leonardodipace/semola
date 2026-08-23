@@ -17,7 +17,7 @@ import {
   createMigration,
   loadConfig,
   rollbackMigration,
-} from "./index.js";
+} from "./runner.js";
 import { createMigrationProject } from "./test-project.js";
 
 describe("sqlite migrations integration", () => {
@@ -1069,7 +1069,11 @@ export default defineConfig({});
       },
     };
 
-    await createMigration({ name: "drop_name", config: nextConfig });
+    await createMigration({
+      name: "drop_name",
+      config: nextConfig,
+      allowDestructive: true,
+    });
     await applyMigrations(nextConfig);
 
     const db = createOrm({
@@ -1338,7 +1342,7 @@ export const db = createOrm({
     for (const result of rejected) {
       if (result.status !== "rejected") continue;
 
-      expect(String(result.reason)).toMatch(/locked|BUSY/i);
+      expect(String(result.reason)).toMatch(/locked|BUSY|already rolled back/i);
     }
 
     const db = createOrm({
@@ -1518,6 +1522,7 @@ export const db = createOrm({
     const folder = await createMigration({
       name: "drop_name",
       config: nextConfig,
+      allowDestructive: true,
     });
 
     await applyMigrations(nextConfig);
@@ -1709,6 +1714,7 @@ export default defineConfig({
     const dropFolder = await createMigration({
       name: "drop_authors",
       config: withoutAuthors,
+      allowDestructive: true,
     });
     const up = await Bun.file(
       join(project.migrationsDir, dropFolder, "up.sql"),
@@ -2042,7 +2048,7 @@ export default defineConfig({
     });
     await db.$raw.close();
 
-    await createMigration({ name: "drop_bio", config });
+    await createMigration({ name: "drop_bio", config, allowDestructive: true });
     await applyMigrations(config);
 
     const check = createOrm({
@@ -2356,6 +2362,45 @@ export default defineConfig({
       }),
     ).rejects.toThrow("Possible table rename");
   });
+
+  test("createMigration requires allowDestructive for drops", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+
+    await createMigration({ name: "first", config });
+    await applyMigrations(config);
+
+    const withoutEmail = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+    });
+
+    await expect(
+      createMigration({
+        name: "drop_email",
+        config: {
+          ...config,
+          orm: { ...config.orm, tables: { users: withoutEmail } },
+        },
+      }),
+    ).rejects.toThrow("allowDestructive");
+  });
+
+  test("rejects apply when an applied up.sql checksum drifts", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+    const folder = await createMigration({ name: "first", config });
+
+    await applyMigrations(config);
+    await Bun.write(
+      join(project.migrationsDir, folder, "up.sql"),
+      "SELECT 1;\n",
+    );
+
+    await expect(applyMigrations(config)).rejects.toThrow("checksum");
+  });
 });
 
 if (SEMOLA_POSTGRES_URL) {
@@ -2501,7 +2546,11 @@ if (SEMOLA_POSTGRES_URL) {
         orm: { ...renamed.orm, tables: { people: withoutUnique } },
       };
 
-      await createMigration({ name: "drop_email_unique", config: next });
+      await createMigration({
+        name: "drop_email_unique",
+        config: next,
+        allowDestructive: true,
+      });
       await applyMigrations(next);
 
       const db = openDb({ people: withoutUnique });
@@ -2646,7 +2695,11 @@ if (SEMOLA_POSTGRES_URL) {
       });
       await db.$raw.close();
 
-      await createMigration({ name: "drop_bio", config });
+      await createMigration({
+        name: "drop_bio",
+        config,
+        allowDestructive: true,
+      });
       await applyMigrations(config);
 
       const check = openDb({ users: project.users });
@@ -2701,6 +2754,7 @@ if (SEMOLA_POSTGRES_URL) {
       const dropFolder = await createMigration({
         name: "drop_authors",
         config: withoutAuthors,
+        allowDestructive: true,
       });
 
       await applyMigrations(withoutAuthors);
