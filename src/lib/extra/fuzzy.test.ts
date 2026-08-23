@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { fuzzySearch, retriveKeys } from "./fuzzy.js";
+import {
+  foldCase,
+  fuzzySearch,
+  removeDiacritics,
+  removePunctuation,
+  retriveKeys,
+  trasform,
+} from "./fuzzy.js";
 import type { FuzzyResult } from "./types.js";
 
 describe("Fuzzy Search", () => {
@@ -73,6 +80,50 @@ describe("Fuzzy Search", () => {
 
     const resKey = searchKey("aple");
     expect(resKey).toHaveLength(0);
+  });
+
+  describe("Word Normalization", () => {
+    test("should fold to lower case", () => {
+      const applyFn = trasform(foldCase);
+      const w = applyFn("The Quick Brown Fox Jumps Over The LAZY Dog");
+      expect(w).toBe("the quick brown fox jumps over the lazy dog");
+    });
+
+    test("should remove punctuation symbols", () => {
+      const applyFn = trasform(removePunctuation);
+      const w = applyFn(
+        "Th...e Quick(?) Brown F;ox, Jumps Ove//r The L#AZY Dog!",
+      );
+
+      expect(w).toBe("The Quick Brown Fox Jumps Over The LAZY Dog");
+    });
+
+    test("should remove diacritics", () => {
+      const applyFn = trasform(removeDiacritics);
+
+      expect(applyFn("é")).toBe("e");
+      expect(applyFn("è")).toBe("e");
+      expect(applyFn("à")).toBe("a");
+      expect(applyFn("ç")).toBe("c");
+      expect(applyFn("ù")).toBe("u");
+      expect(applyFn("ò")).toBe("o");
+    });
+
+    test("should remove from entire words", () => {
+      const applyFn = trasform(removeDiacritics);
+
+      expect(applyFn("wàtèrmélòn")).toBe("watermelon");
+      expect(applyFn("çàrròt")).toBe("carrot");
+    });
+
+    test("should compound changes", () => {
+      const applyFn = trasform(removeDiacritics, foldCase, removePunctuation);
+
+      const initial = "Th...è Quiçk(?) Brown F;ox, Jùmps Ove//r The L#àZY Dog!";
+      const final = "the quick brown fox jumps over the lazy dog";
+
+      expect(applyFn(initial)).toBe(final);
+    });
   });
 
   describe("Case Sensitive", () => {

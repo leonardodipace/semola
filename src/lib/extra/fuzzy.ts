@@ -4,22 +4,22 @@ export const DEFAULT_TRESHOLD = 0.6;
 
 type TransformationFnType = (word: string) => string;
 
-function foldCase(word: string) {
+export function foldCase(word: string) {
   return word.toLowerCase();
 }
 
-function removePunctuation(word: string) {
+export function removePunctuation(word: string) {
   return word
     .replace(/[!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~]/g, "") // remove punctuation symbols
     .replace(/\s{2,}/g, " "); // remove extra spaces
 }
 
-function removeDiacritics(word: string) {
+export function removeDiacritics(word: string) {
   // remove all Unicode's code points that corrisponds to a diacritic
   return word.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
-function trasform(...transformFn: TransformationFnType[]) {
+export function trasform(...transformFn: TransformationFnType[]) {
   const applyFn = (word: string) => {
     transformFn.forEach((fn) => {
       word = fn(word);
@@ -31,7 +31,7 @@ function trasform(...transformFn: TransformationFnType[]) {
   return applyFn;
 }
 
-function createTrasformationList<
+export function createTrasformationList<
   FuzzyType extends string | Record<string, string>,
 >(options: FuzzyOptions<FuzzyType>) {
   const { caseSensitive, ignorePunctuation, ignoreDiacritics } = options;
