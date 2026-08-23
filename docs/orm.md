@@ -342,7 +342,7 @@ Postgres-specific SQL:
 
 `$config.url` redacts credentials. `loadConfig()` reads the real URL from the ORM client before opening its own connection.
 
-Generated column types differ between SQLite and Postgres. Migration apply and rollback are integration-tested on SQLite and Postgres (`SEMOLA_POSTGRES_URL` in CI).
+Generated column types differ between SQLite and Postgres.
 
 ### Apply from application code
 
