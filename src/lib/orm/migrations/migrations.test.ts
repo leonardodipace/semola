@@ -13,6 +13,7 @@ import { defineTable } from "../table/index.js";
 import { diffSchemas } from "./diff.js";
 import { emptySchema, snapshotSchema } from "./snapshot.js";
 import { assertSchemaSnapshot, renderMigrationSql } from "./sql.js";
+import type { SchemaSnapshot } from "./types.js";
 
 describe("orm migrations snapshot/diff/sql", () => {
   test("snapshots tables and columns", () => {
@@ -556,6 +557,33 @@ describe("orm migrations snapshot/diff/sql", () => {
     expect(addConstraintAt).toBeGreaterThan(dropConstraintAt);
   });
 
+  test("postgres drops primary key before dropping a composite key column", () => {
+    const before = defineTable("members", {
+      orgId: uuid("org_id").primaryKey().notNull(),
+      userId: uuid("user_id").primaryKey().notNull(),
+    });
+    const after = defineTable("members", {
+      orgId: uuid("org_id").primaryKey().notNull(),
+    });
+    const sql = renderMigrationSql(
+      "postgres",
+      diffSchemas(
+        snapshotSchema({ members: before }),
+        snapshotSchema({ members: after }),
+        "postgres",
+      ),
+    );
+    const dropPkAt = sql.indexOf('DROP CONSTRAINT "members_pkey"');
+    const dropColumnAt = sql.indexOf('DROP COLUMN "user_id"');
+    const addPkAt = sql.indexOf(
+      'ADD CONSTRAINT "members_pkey" PRIMARY KEY ("org_id")',
+    );
+
+    expect(dropPkAt).toBeGreaterThanOrEqual(0);
+    expect(dropColumnAt).toBeGreaterThan(dropPkAt);
+    expect(addPkAt).toBeGreaterThan(dropColumnAt);
+  });
+
   test("warns when a table is dropped and another is created", () => {
     const users = defineTable("users", {
       id: uuid("id").primaryKey().notNull(),
@@ -786,21 +814,46 @@ describe("orm migrations snapshot/diff/sql", () => {
           columns: {
             id: {
               name: "id",
-              type: "string" as const,
+              type: "string",
               isNullable: false,
               isPrimaryKey: true,
               isUnique: false,
-              sqlType: "uuid" as const,
+              sqlType: "uuid",
             },
           },
         },
       },
-    };
+    } satisfies SchemaSnapshot;
 
     expect(assertSchemaSnapshot({ tables: {} }, "schema.json")).toEqual({
       tables: {},
     });
     expect(assertSchemaSnapshot(schema, "schema.json")).toEqual(schema);
+  });
+
+  test("assertSchemaSnapshot rejects dangling foreign-key targets", () => {
+    expect(() =>
+      assertSchemaSnapshot(
+        {
+          tables: {
+            posts: {
+              name: "posts",
+              columns: {
+                authorId: {
+                  name: "authorId",
+                  type: "string",
+                  isNullable: true,
+                  isPrimaryKey: false,
+                  isUnique: false,
+                  references: { table: "users", column: "id" },
+                },
+              },
+            },
+          },
+        },
+        "schema.json",
+      ),
+    ).toThrow("references missing table users");
   });
 
   test("snapshots foreign keys", () => {

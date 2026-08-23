@@ -325,7 +325,7 @@ Review generated SQL before applying it, especially warnings about destructive c
 
 Semola stores applied migration names and schema snapshots in the `_semola_migrations` database table. Migration directories must remain an exact ordered prefix of that history. Missing, reordered, or extra applied entries fail before new SQL runs.
 
-The history snapshot is the source of truth for the next `create`, not live database introspection. Keep generated SQL and `schema.json` in sync with Semola-managed schema changes. Hand-edited databases or empty/hand-written `down.sql` files can drift without Semola noticing until apply or the next create fails.
+The history snapshot is the source of truth for the next `create`, not live database introspection. Keep generated SQL and `schema.json` in sync with Semola-managed schema changes. Hand-edited databases can drift from migration history. Rollback rejects empty or comment-only `down.sql`, but it cannot verify that hand-written rollback SQL matches `schema.json`.
 
 Every generated migration folder includes a `schema.json` snapshot. Keep it intact: `apply` uses it as the next schema snapshot and rejects migrations that omit it, carry an invalid snapshot, or include no SQL statements in `up.sql`. Rollback rejects empty or comment-only `down.sql`. Concurrent `apply` and `rollback` take the same lock and re-check history under that lock so the same migration is not applied or rolled back twice.
 

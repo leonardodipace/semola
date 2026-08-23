@@ -232,6 +232,26 @@ export const assertSchemaSnapshot = (value: unknown, label: string) => {
     tables[tableKey] = assertTableSnapshot(table, label, tableKey);
   }
 
+  for (const table of Object.values(tables)) {
+    for (const column of Object.values(table.columns)) {
+      if (!column.references) continue;
+
+      const target = tables[column.references.table];
+
+      if (!target) {
+        throw new MigrationError(
+          `Invalid ${label}: ${table.name}.${column.name} references missing table ${column.references.table}`,
+        );
+      }
+
+      if (!target.columns[column.references.column]) {
+        throw new MigrationError(
+          `Invalid ${label}: ${table.name}.${column.name} references missing column ${column.references.table}.${column.references.column}`,
+        );
+      }
+    }
+  }
+
   return { tables } satisfies SchemaSnapshot;
 };
 

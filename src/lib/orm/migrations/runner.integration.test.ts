@@ -1325,12 +1325,21 @@ export const db = createOrm({
       rollbackMigration(config),
       rollbackMigration(config),
     ]);
-    const rolled = results.flatMap((result) =>
-      result.status === "fulfilled" ? [result.value] : [],
-    );
+    const fulfilled = results.filter((result) => result.status === "fulfilled");
+    const rejected = results.filter((result) => result.status === "rejected");
 
-    expect(results.some((result) => result.status === "fulfilled")).toBe(true);
-    expect(rolled.every((name) => name === folder)).toBe(true);
+    expect(fulfilled.length).toBeGreaterThanOrEqual(1);
+    expect(
+      fulfilled.every(
+        (result) => result.status === "fulfilled" && result.value === folder,
+      ),
+    ).toBe(true);
+
+    for (const result of rejected) {
+      if (result.status !== "rejected") continue;
+
+      expect(String(result.reason)).toMatch(/locked|BUSY/i);
+    }
 
     const db = createOrm({
       adapter: "sqlite",
