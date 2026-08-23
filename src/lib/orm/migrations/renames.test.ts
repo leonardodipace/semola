@@ -23,7 +23,12 @@ describe("orm migration renames", () => {
     ]);
 
     expect(renamed.ops).toEqual([
-      { kind: "renameTable", from: "users", to: "people" },
+      {
+        kind: "renameTable",
+        from: "users",
+        to: "people",
+        constraints: [{ from: "users_pkey", to: "people_pkey" }],
+      },
     ]);
     expect(sql).toContain('ALTER TABLE "users" RENAME TO "people"');
     expect(sql).not.toContain("DROP TABLE");
@@ -47,9 +52,47 @@ describe("orm migration renames", () => {
     ]);
 
     expect(renamed.ops).toEqual([
-      { kind: "renameColumn", table: "users", from: "bio", to: "about" },
+      {
+        kind: "renameColumn",
+        table: "users",
+        from: "bio",
+        to: "about",
+        constraints: [],
+      },
     ]);
     expect(sql).toContain('ALTER TABLE "users" RENAME COLUMN "bio" TO "about"');
+  });
+
+  test("postgres renames constraints with table and column renames", async () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").notNull().unique(),
+    });
+    const after = defineTable("accounts", {
+      id: uuid("id").primaryKey().notNull(),
+      emailAddress: string("emailAddress").notNull().unique(),
+    });
+    const from = snapshotSchema({ users: before });
+    const to = snapshotSchema({ accounts: after });
+    const renamed = await resolveRenames(from, to, (question) => {
+      if (question.kind === "table") return "users";
+
+      return "email";
+    });
+    const sql = renderMigrationSql("postgres", [
+      ...renamed.ops,
+      ...diffSchemas(renamed.from, to, "postgres"),
+    ]);
+
+    expect(sql).toContain(
+      'ALTER TABLE "accounts" RENAME CONSTRAINT "users_pkey" TO "accounts_pkey"',
+    );
+    expect(sql).toContain(
+      'ALTER TABLE "accounts" RENAME CONSTRAINT "users_email_key" TO "accounts_email_key"',
+    );
+    expect(sql).toContain(
+      'ALTER TABLE "accounts" RENAME CONSTRAINT "accounts_email_key" TO "accounts_emailAddress_key"',
+    );
   });
 
   test("throws without onRename when drop and create overlap", async () => {
@@ -87,12 +130,34 @@ describe("orm migration renames", () => {
   test("reverseRenameOps reverses rename order", () => {
     expect(
       reverseRenameOps([
-        { kind: "renameTable", from: "users", to: "people" },
-        { kind: "renameColumn", table: "people", from: "bio", to: "about" },
+        {
+          kind: "renameTable",
+          from: "users",
+          to: "people",
+          constraints: [{ from: "users_pkey", to: "people_pkey" }],
+        },
+        {
+          kind: "renameColumn",
+          table: "people",
+          from: "bio",
+          to: "about",
+          constraints: [{ from: "people_bio_key", to: "people_about_key" }],
+        },
       ]),
     ).toEqual([
-      { kind: "renameColumn", table: "people", from: "about", to: "bio" },
-      { kind: "renameTable", from: "people", to: "users" },
+      {
+        kind: "renameColumn",
+        table: "people",
+        from: "about",
+        to: "bio",
+        constraints: [{ from: "people_about_key", to: "people_bio_key" }],
+      },
+      {
+        kind: "renameTable",
+        from: "people",
+        to: "users",
+        constraints: [{ from: "people_pkey", to: "users_pkey" }],
+      },
     ]);
   });
 

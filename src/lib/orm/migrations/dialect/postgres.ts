@@ -154,6 +154,33 @@ export class PostgresMigrationDialect extends MigrationDialect {
     return [...drops, ...ops, ...adds];
   }
 
+  private renderConstraintRenames(
+    table: string,
+    constraints: Array<{ from: string; to: string }>,
+  ) {
+    return constraints.map((constraint) => {
+      return `ALTER TABLE ${quoteIdentifier(table)} RENAME CONSTRAINT ${quoteIdentifier(constraint.from)} TO ${quoteIdentifier(constraint.to)};`;
+    });
+  }
+
+  protected override renderRenameTable(
+    op: Extract<MigrationOp, { kind: "renameTable" }>,
+  ) {
+    return [
+      `ALTER TABLE ${quoteIdentifier(op.from)} RENAME TO ${quoteIdentifier(op.to)};`,
+      ...this.renderConstraintRenames(op.to, op.constraints),
+    ].join("\n");
+  }
+
+  protected override renderRenameColumn(
+    op: Extract<MigrationOp, { kind: "renameColumn" }>,
+  ) {
+    return [
+      `ALTER TABLE ${quoteIdentifier(op.table)} RENAME COLUMN ${quoteIdentifier(op.from)} TO ${quoteIdentifier(op.to)};`,
+      ...this.renderConstraintRenames(op.table, op.constraints),
+    ].join("\n");
+  }
+
   protected override renderAlterColumn(
     table: string,
     from: ColumnSnapshot,

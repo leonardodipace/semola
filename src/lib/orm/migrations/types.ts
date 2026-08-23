@@ -46,8 +46,19 @@ export type MigrationOp =
   | { kind: "addForeignKey"; table: string; column: ColumnSnapshot }
   | { kind: "dropPrimaryKey"; table: string }
   | { kind: "addPrimaryKey"; table: string; columns: string[] }
-  | { kind: "renameTable"; from: string; to: string }
-  | { kind: "renameColumn"; table: string; from: string; to: string };
+  | {
+      kind: "renameTable";
+      from: string;
+      to: string;
+      constraints: Array<{ from: string; to: string }>;
+    }
+  | {
+      kind: "renameColumn";
+      table: string;
+      from: string;
+      to: string;
+      constraints: Array<{ from: string; to: string }>;
+    };
 
 export type RenameQuestion =
   | {

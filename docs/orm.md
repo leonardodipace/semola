@@ -339,6 +339,7 @@ Postgres-specific SQL:
 - Type and key changes on a referenced column drop inbound foreign keys, alter, then re-add them.
 - Primary key membership is emitted as `DROP`/`ADD CONSTRAINT table_pkey`, including composite keys.
 - Circular foreign keys create both tables, then `ALTER TABLE ... ADD CONSTRAINT`.
+- Table and column renames also rename Semola-managed constraints (`_pkey`, `_key`, `_check`, `_fkey`) so later alters still find them.
 
 `$config.url` redacts credentials. `loadConfig()` reads the real URL from the ORM client before opening its own connection.
 

@@ -1,5 +1,6 @@
 import { MigrationError } from "../errors.js";
 import type {
+  ColumnSnapshot,
   MigrationOp,
   RenameHandler,
   RenameQuestion,
@@ -45,6 +46,69 @@ const patchRefs = (
   }
 };
 
+const columnConstraints = (
+  fromTable: string,
+  toTable: string,
+  fromColumn: string,
+  toColumn: string,
+  column: ColumnSnapshot,
+) => {
+  const constraints: Array<{ from: string; to: string }> = [];
+
+  if (column.isUnique) {
+    if (!column.isPrimaryKey) {
+      constraints.push({
+        from: `${fromTable}_${fromColumn}_key`,
+        to: `${toTable}_${toColumn}_key`,
+      });
+    }
+  }
+
+  if (column.enumValues?.length) {
+    constraints.push({
+      from: `${fromTable}_${fromColumn}_check`,
+      to: `${toTable}_${toColumn}_check`,
+    });
+  }
+
+  if (column.references) {
+    constraints.push({
+      from: `${fromTable}_${fromColumn}_fkey`,
+      to: `${toTable}_${toColumn}_fkey`,
+    });
+  }
+
+  return constraints;
+};
+
+const tableConstraints = (
+  from: string,
+  to: string,
+  columns: ColumnSnapshot[],
+) => {
+  const constraints: Array<{ from: string; to: string }> = [];
+
+  if (columns.some((column) => column.isPrimaryKey)) {
+    constraints.push({ from: `${from}_pkey`, to: `${to}_pkey` });
+  }
+
+  for (const column of columns) {
+    constraints.push(
+      ...columnConstraints(from, to, column.name, column.name, column),
+    );
+  }
+
+  return constraints;
+};
+
+const reverseConstraints = (
+  constraints: Array<{ from: string; to: string }>,
+) => {
+  return constraints.map((constraint) => {
+    return { from: constraint.to, to: constraint.from };
+  });
+};
+
 export const resolveRenames = async (
   from: SchemaSnapshot,
   to: SchemaSnapshot,
@@ -73,6 +137,8 @@ export const resolveRenames = async (
 
     if (!table) continue;
 
+    const columns = Object.values(table.columns);
+
     delete schema.tables[chosen];
     table.name = created;
     schema.tables[created] = table;
@@ -81,7 +147,12 @@ export const resolveRenames = async (
       if (ref.table === chosen) ref.table = created;
     });
 
-    ops.push({ kind: "renameTable", from: chosen, to: created });
+    ops.push({
+      kind: "renameTable",
+      from: chosen,
+      to: created,
+      constraints: tableConstraints(chosen, created, columns),
+    });
   }
 
   for (const tableName of Object.keys(to.tables)) {
@@ -117,6 +188,14 @@ export const resolveRenames = async (
 
       if (!column) continue;
 
+      const constraints = columnConstraints(
+        tableName,
+        tableName,
+        chosen,
+        created,
+        column,
+      );
+
       delete fromTable.columns[chosen];
       column.name = created;
       fromTable.columns[created] = column;
@@ -133,6 +212,7 @@ export const resolveRenames = async (
         table: tableName,
         from: chosen,
         to: created,
+        constraints,
       });
     }
   }
@@ -143,7 +223,12 @@ export const resolveRenames = async (
 export const reverseRenameOps = (ops: MigrationOp[]) => {
   return [...ops].reverse().map((op) => {
     if (op.kind === "renameTable") {
-      return { kind: "renameTable" as const, from: op.to, to: op.from };
+      return {
+        kind: "renameTable" as const,
+        from: op.to,
+        to: op.from,
+        constraints: reverseConstraints(op.constraints),
+      };
     }
 
     if (op.kind === "renameColumn") {
@@ -152,6 +237,7 @@ export const reverseRenameOps = (ops: MigrationOp[]) => {
         table: op.table,
         from: op.to,
         to: op.from,
+        constraints: reverseConstraints(op.constraints),
       };
     }
 

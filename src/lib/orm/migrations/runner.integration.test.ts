@@ -2379,6 +2379,62 @@ if (SEMOLA_POSTGRES_URL) {
       await db.$raw.close();
     });
 
+    test("renames constraints so later unique drops still apply", async () => {
+      await resetDb();
+
+      const project = await setupProject();
+      const config = await loadConfig(project.root);
+
+      await createMigration({ name: "first", config });
+      await applyMigrations(config);
+
+      const people = defineTable("people", {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        email: string("email").notNull().unique(),
+      });
+      const renamed = {
+        ...config,
+        orm: { ...config.orm, tables: { people } },
+      };
+
+      await createMigration({
+        name: "rename_users",
+        config: renamed,
+        onRename: () => "users",
+      });
+      await applyMigrations(renamed);
+
+      const withoutUnique = defineTable("people", {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        email: string("email").notNull(),
+      });
+      const next = {
+        ...renamed,
+        orm: { ...renamed.orm, tables: { people: withoutUnique } },
+      };
+
+      await createMigration({ name: "drop_email_unique", config: next });
+      await applyMigrations(next);
+
+      const db = openDb({ people: withoutUnique });
+
+      await db.people.create({
+        data: { id, name: "Ada", email: "same@example.com" },
+      });
+      await db.people.create({
+        data: { id: id2, name: "Grace", email: "same@example.com" },
+      });
+
+      expect(
+        (await db.people.findMany({ where: { email: "same@example.com" } }))
+          .length,
+      ).toBe(2);
+
+      await db.$raw.close();
+    });
+
     test("adding a column end-to-end via create and apply", async () => {
       await resetDb();
 

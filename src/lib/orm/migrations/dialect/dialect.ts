@@ -220,12 +220,16 @@ export abstract class MigrationDialect {
     return `ALTER TABLE ${quoteIdentifier(table)} DROP COLUMN ${quoteIdentifier(column.name)};`;
   }
 
-  private renderRenameTable(from: string, to: string) {
-    return `ALTER TABLE ${quoteIdentifier(from)} RENAME TO ${quoteIdentifier(to)};`;
+  protected renderRenameTable(
+    op: Extract<MigrationOp, { kind: "renameTable" }>,
+  ) {
+    return `ALTER TABLE ${quoteIdentifier(op.from)} RENAME TO ${quoteIdentifier(op.to)};`;
   }
 
-  private renderRenameColumn(table: string, from: string, to: string) {
-    return `ALTER TABLE ${quoteIdentifier(table)} RENAME COLUMN ${quoteIdentifier(from)} TO ${quoteIdentifier(to)};`;
+  protected renderRenameColumn(
+    op: Extract<MigrationOp, { kind: "renameColumn" }>,
+  ) {
+    return `ALTER TABLE ${quoteIdentifier(op.table)} RENAME COLUMN ${quoteIdentifier(op.from)} TO ${quoteIdentifier(op.to)};`;
   }
 
   private renderRecreateTable(from: TableSnapshot, to: TableSnapshot) {
@@ -271,9 +275,9 @@ export abstract class MigrationDialect {
       case "addPrimaryKey":
         return this.renderAddPrimaryKey(op.table, op.columns);
       case "renameTable":
-        return this.renderRenameTable(op.from, op.to);
+        return this.renderRenameTable(op);
       case "renameColumn":
-        return this.renderRenameColumn(op.table, op.from, op.to);
+        return this.renderRenameColumn(op);
     }
   }
 }
