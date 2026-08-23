@@ -36,9 +36,12 @@ describe("Fuzzy Search", () => {
 
     const item: FuzzyResult = {
       word: {
-        name: "apple",
-        color: "red",
-        size: "medium",
+        record: {
+          name: "apple",
+          color: "red",
+          size: "medium",
+        },
+        key: "name",
       },
       score: 1,
       index: 0,
@@ -99,9 +102,12 @@ describe("Fuzzy Search", () => {
 
       const item: FuzzyResult = {
         word: {
-          name: "AppLe",
-          color: "red",
-          size: "medium",
+          record: {
+            name: "AppLe",
+            color: "red",
+            size: "medium",
+          },
+          key: "name",
         },
         score: 2,
         index: 0,
@@ -143,9 +149,12 @@ describe("Fuzzy Search", () => {
 
       const item: FuzzyResult = {
         word: {
-          name: "AppLe",
-          color: "red",
-          size: "medium",
+          record: {
+            name: "AppLe",
+            color: "red",
+            size: "medium",
+          },
+          key: "name",
         },
         score: 1,
         index: 0,
@@ -191,9 +200,12 @@ describe("Fuzzy Search", () => {
 
       const item: FuzzyResult = {
         word: {
-          name: "<peach>",
-          color: "pink",
-          size: "medium",
+          record: {
+            name: "<peach>",
+            color: "pink",
+            size: "medium",
+          },
+          key: "name",
         },
         score: 1,
         index: 3,
@@ -235,9 +247,12 @@ describe("Fuzzy Search", () => {
 
       const item: FuzzyResult = {
         word: {
-          name: "<peach>",
-          color: "pink",
-          size: "medium",
+          record: {
+            name: "<peach>",
+            color: "pink",
+            size: "medium",
+          },
+          key: "name",
         },
         score: 3,
         index: 3,
@@ -283,9 +298,12 @@ describe("Fuzzy Search", () => {
 
       const item: FuzzyResult = {
         word: {
-          name: "wàtèrmélòn",
-          color: "green",
-          size: "large",
+          record: {
+            name: "wàtèrmélòn",
+            color: "green",
+            size: "large",
+          },
+          key: "name",
         },
         score: 0,
         index: 1,
@@ -327,9 +345,12 @@ describe("Fuzzy Search", () => {
 
       const item: FuzzyResult = {
         word: {
-          name: "wàtèrmélòn",
-          color: "green",
-          size: "large",
+          record: {
+            name: "wàtèrmélòn",
+            color: "green",
+            size: "large",
+          },
+          key: "name",
         },
         score: 1,
         index: 1,
