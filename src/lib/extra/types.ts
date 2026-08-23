@@ -64,7 +64,9 @@ export type RetryContext = {
 type FuzzyKeyType<T> =
   T extends Record<string, string> ? Array<keyof T> : undefined;
 
-type ToArray<Type> = Type extends unknown ? Type[] : never;
+type ToArray<Type> = Type extends string | Record<string, string>
+  ? Type[]
+  : never;
 
 export type FuzzyOptions<FuzzyType extends string | Record<string, string>> = {
   readonly data: ToArray<FuzzyType>;
