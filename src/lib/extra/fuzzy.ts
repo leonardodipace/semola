@@ -1,4 +1,4 @@
-import type { FuzzyOptions, FuzzyResult } from "./types.js";
+import type { FuzzyKeyType, FuzzyOptions, FuzzyResult } from "./types.js";
 
 export const DEFAULT_TRESHOLD = 0.6;
 
@@ -44,6 +44,16 @@ function createTrasformationList<
   return trasformation;
 }
 
+export function retriveKeys<FuzzyType extends string | Record<string, string>>(
+  keys: FuzzyKeyType<FuzzyType>,
+  item: FuzzyType | undefined,
+) {
+  if (keys && keys.length > 0) return keys;
+  if (!item || typeof item === "string") return [] as string[];
+
+  return Object.keys(item);
+}
+
 export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
   options: FuzzyOptions<FuzzyType>,
 ) {
@@ -51,7 +61,8 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
     const { data, keys } = options;
     if (data.length === 0) return [];
 
-    const result = [] as FuzzyResult[];
+    const result: FuzzyResult[] = [];
+    const actualKeys = retriveKeys(keys, data[0]);
     const trasformations = createTrasformationList<FuzzyType>(options);
     const applyFn = trasform(...trasformations);
     needle = applyFn(needle);
@@ -67,13 +78,11 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
         continue;
       }
 
-      if (!keys) return [];
-
       let minCost = Number.POSITIVE_INFINITY;
       let minCostKey = "";
 
-      for (let kIdx = 0; kIdx < keys.length; kIdx++) {
-        const key = keys[kIdx];
+      for (let kIdx = 0; kIdx < actualKeys.length; kIdx++) {
+        const key = actualKeys[kIdx];
         if (!key) return [];
 
         const element = word[key];

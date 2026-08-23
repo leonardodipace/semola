@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fuzzySearch } from "./fuzzy.js";
+import { fuzzySearch, retriveKeys } from "./fuzzy.js";
 import type { FuzzyResult } from "./types.js";
 
 describe("Fuzzy Search", () => {
@@ -394,6 +394,48 @@ describe("Fuzzy Search", () => {
       };
 
       expect(result[0]).toMatchObject(item);
+    });
+
+    test("should retrive all keys when the 'keys' property was not provided", () => {
+      const data = [
+        { name: "apple", color: "red", size: "medium" },
+        { name: "watermelon", color: "green", size: "large" },
+        { name: "lime", color: "lime", size: "small" },
+        { name: "peach", color: "pink", size: "medium" },
+      ];
+
+      const keys = retriveKeys([], data[0]);
+      expect(keys).toHaveLength(3);
+
+      expect(keys[0]).toBe("name");
+      expect(keys[1]).toBe("color");
+      expect(keys[2]).toBe("size");
+    });
+
+    test("should retrive only the provided keys", () => {
+      const data = [
+        { name: "apple", color: "red", size: "medium" },
+        { name: "watermelon", color: "green", size: "large" },
+        { name: "lime", color: "lime", size: "small" },
+        { name: "peach", color: "pink", size: "medium" },
+      ];
+
+      const keys = retriveKeys(["color"], data[0]);
+      expect(keys).toHaveLength(1);
+
+      expect(keys[0]).toBe("color");
+    });
+
+    test("should return an empty list of keys when passing a list of strings instead of objects", () => {
+      const data = ["red", "green", "blue"];
+
+      const keys = retriveKeys(undefined, data[0]);
+      expect(keys).toHaveLength(0);
+    });
+
+    test("should return an empty list of keys when passing 'undefined' as your data point", () => {
+      expect(retriveKeys(undefined, undefined)).toHaveLength(0);
+      expect(retriveKeys([], undefined)).toHaveLength(0);
     });
   });
 });

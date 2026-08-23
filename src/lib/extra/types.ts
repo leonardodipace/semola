@@ -61,7 +61,7 @@ export type RetryContext = {
   error: Error;
 };
 
-type FuzzyKeyType<T> =
+export type FuzzyKeyType<T> =
   T extends Record<string, string> ? Array<keyof T> : undefined;
 
 type ToArray<Type> = Type extends string | Record<string, string>
