@@ -142,14 +142,24 @@ const run = async () => {
     .action(async (args, options) => {
       const config = await loadConfig();
       const allowDestructive = Boolean(options["allow-destructive"]);
-      const folder = await createMigration({
+      const interactive = isInteractive();
+      const input: Parameters<typeof createMigration>[0] = {
         name: args.name,
         config,
-        onRename: isInteractive() ? promptRename : undefined,
         allowDestructive,
-        onDestructive:
-          allowDestructive || !isInteractive() ? undefined : promptDestructive,
-      });
+      };
+
+      if (interactive) {
+        input.onRename = promptRename;
+      }
+
+      if (!allowDestructive) {
+        if (interactive) {
+          input.onDestructive = promptDestructive;
+        }
+      }
+
+      const folder = await createMigration(input);
 
       console.log(`Created migration ${folder}`);
     });

@@ -25,11 +25,7 @@ const asRecord = (value: unknown) => {
   return value as Record<string, unknown>;
 };
 
-const nonEmptyString = (
-  value: unknown,
-  label: string,
-  detail: string,
-): string => {
+const nonEmptyString = (value: unknown, label: string, detail: string) => {
   if (typeof value !== "string") {
     throw new MigrationError(`Invalid ${label}: ${detail}`);
   }

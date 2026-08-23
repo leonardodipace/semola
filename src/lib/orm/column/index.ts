@@ -6,6 +6,14 @@ import type {
 } from "./types.js";
 
 const sqlLiteral = (value: unknown) => {
+  if (value === null) {
+    return "NULL";
+  }
+
+  if (value === undefined) {
+    throw new OrmError("dbDefault cannot be undefined");
+  }
+
   if (typeof value === "boolean") {
     return value ? "TRUE" : "FALSE";
   }

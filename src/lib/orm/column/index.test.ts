@@ -99,6 +99,10 @@ describe("ORM column builders", () => {
         ._dbDefault,
     ).toBe("'2020-01-01T00:00:00.000Z'");
     expect(json("meta").dbDefault({ a: 1 })._dbDefault).toBe("'{\"a\":1}'");
+    expect(json("meta").dbDefault(null)._dbDefault).toBe("NULL");
+    expect(() => json("meta").dbDefault(undefined as never)).toThrow(
+      "dbDefault cannot be undefined",
+    );
     expect(() => number("count").dbDefault(Number.NaN)).toThrow(
       "dbDefault number must be finite",
     );

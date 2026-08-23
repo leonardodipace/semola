@@ -268,6 +268,7 @@ bunx semola orm migrations rollback
 - Review `up.sql` / `down.sql` before `apply`, especially drop and `NOT NULL` warnings.
 - Ambiguous drop+add asks whether it is a rename or create-from-scratch (TTY). Non-TTY create fails on ambiguous renames.
 - Destructive drops ask for confirmation (TTY) or `--allow-destructive`.
+- Rollback rejects an empty or comment-only `down.sql`.
 - Do not hand-edit applied migration files; keep folders in order. Apply stores an `up.sql` checksum and rejects drift.
 
 Each migration folder looks like:

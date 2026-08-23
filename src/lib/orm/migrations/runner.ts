@@ -394,7 +394,7 @@ const writeMigrationFolder = async (input: {
   await rm(tempPath, { recursive: true, force: true });
   await mkdir(tempPath, { recursive: true });
 
-  try {
+  const writeTempMigrationFiles = async () => {
     await writeFile(join(tempPath, "up.sql"), input.upSql);
     await writeFile(join(tempPath, "down.sql"), input.downSql);
     await writeFile(
@@ -402,7 +402,11 @@ const writeMigrationFolder = async (input: {
       `${JSON.stringify(input.schema, null, 2)}\n`,
     );
     await rename(tempPath, input.folderPath);
-  } catch (error) {
+  };
+
+  const [error] = await mightThrow(writeTempMigrationFiles());
+
+  if (error) {
     await rm(tempPath, { recursive: true, force: true });
     throw error;
   }

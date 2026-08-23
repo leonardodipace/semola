@@ -659,15 +659,14 @@ describe("orm migrations snapshot/diff/sql", () => {
       id: uuid("id").primaryKey().notNull(),
       score: number("score").notNull().unique().dbDefault("1e3", { as: "sql" }),
     });
-    const sql = getMigrationDialect("sqlite").render(
-      diffSchemas(
-        snapshotSchema({ users: before }),
-        snapshotSchema({ users: after }),
-        getMigrationDialect("sqlite"),
-      ),
+    const ops = diffSchemas(
+      snapshotSchema({ users: before }),
+      snapshotSchema({ users: after }),
+      getMigrationDialect("sqlite"),
     );
+    const sql = getMigrationDialect("sqlite").render(ops);
 
-    expect(sql).toContain("ADD COLUMN");
+    expect(ops[0]?.kind).toBe("recreateTable");
     expect(sql).toContain(
       "unique/primary key with a constant default fails if the table has more than one row",
     );
