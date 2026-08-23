@@ -79,6 +79,32 @@ const importModule = async (filePath: string, label: string) => {
   return mod;
 };
 
+const ensureHistoryTable = async (sql: Bun.SQL) => {
+  await sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS ${HISTORY_TABLE} (
+      name TEXT PRIMARY KEY NOT NULL,
+      applied_at TEXT NOT NULL,
+      schema TEXT NOT NULL,
+      up_checksum TEXT
+    )
+  `);
+
+  const [error] = await mightThrow(
+    sql.unsafe(`ALTER TABLE ${HISTORY_TABLE} ADD COLUMN up_checksum TEXT`),
+  );
+
+  if (!error) return;
+
+  const message = error.message.toLowerCase();
+
+  if (message.includes("duplicate column")) return;
+  if (message.includes("already exists")) return;
+
+  throw new MigrationError(
+    `Could not update ${HISTORY_TABLE}: ${error.message}`,
+  );
+};
+
 const withConnection = async <T>(
   config: LoadedConfig,
   fn: (sql: Bun.SQL, dialect: MigrationDialect) => Promise<T>,
@@ -88,6 +114,8 @@ const withConnection = async <T>(
 
   try {
     await dialect.prepareConnection(sql);
+    // Outside tx: failed ALTER aborts Postgres transactions.
+    await ensureHistoryTable(sql);
 
     return await fn(sql, dialect);
   } finally {
@@ -121,32 +149,6 @@ export const loadConfig = async (cwd = process.cwd()) => {
       tables: client.$config.tables,
     },
   };
-};
-
-const ensureHistoryTable = async (sql: Bun.SQL) => {
-  await sql.unsafe(`
-    CREATE TABLE IF NOT EXISTS ${HISTORY_TABLE} (
-      name TEXT PRIMARY KEY NOT NULL,
-      applied_at TEXT NOT NULL,
-      schema TEXT NOT NULL,
-      up_checksum TEXT
-    )
-  `);
-
-  const [error] = await mightThrow(
-    sql.unsafe(`ALTER TABLE ${HISTORY_TABLE} ADD COLUMN up_checksum TEXT`),
-  );
-
-  if (!error) return;
-
-  const message = error.message.toLowerCase();
-
-  if (message.includes("duplicate column")) return;
-  if (message.includes("already exists")) return;
-
-  throw new MigrationError(
-    `Could not update ${HISTORY_TABLE}: ${error.message}`,
-  );
 };
 
 const listMigrationDirs = async (migrationsDir: string) => {
@@ -205,8 +207,6 @@ const readSqlFile = async (filePath: string, label: string) => {
 };
 
 const readApplied = async (sql: Bun.SQL) => {
-  await ensureHistoryTable(sql);
-
   const rows = (await sql.unsafe(
     `SELECT name, schema, up_checksum AS "upChecksum" FROM ${HISTORY_TABLE} ORDER BY name ASC`,
   )) as HistoryRow[];
