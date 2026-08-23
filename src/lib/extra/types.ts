@@ -70,9 +70,9 @@ export type FuzzyOptions<FuzzyType extends string | Record<string, string>> = {
   readonly data: ToArray<FuzzyType>;
   readonly threshold?: number;
   readonly keys?: FuzzyKeyType<FuzzyType>;
-  caseSensitive?: boolean;
-  ignorePunctuation?: boolean;
-  ignoreDiacritics?: boolean;
+  readonly caseSensitive?: boolean;
+  readonly ignorePunctuation?: boolean;
+  readonly ignoreDiacritics?: boolean;
 };
 
 export type FuzzyResult = {
