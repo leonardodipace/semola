@@ -20,6 +20,15 @@ describe("Fuzzy Search", () => {
     expect(res[0]).toMatchObject(item);
   });
 
+  test("should return an empty list in case input data is an empty list", () => {
+    const search = fuzzySearch({
+      data: [] as string[],
+    });
+
+    const res = search("aple");
+    expect(res).toHaveLength(0);
+  });
+
   test("should return a list of results with 'apple' in the first position when using keys", () => {
     const search = fuzzySearch({
       data: [
