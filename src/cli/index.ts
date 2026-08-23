@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { readFileSync } from "node:fs";
+import packageJson from "../../package.json" with { type: "json" };
 import { CLI } from "../lib/cli/index.js";
 import { mightThrow } from "../lib/errors/index.js";
 import { MigrationError } from "../lib/orm/errors.js";
@@ -13,10 +13,6 @@ import type { RenameQuestion } from "../lib/orm/migrations/types.js";
 import { PromptEnvironmentError } from "../lib/prompts/errors.js";
 import type { SelectChoice } from "../lib/prompts/index.js";
 import { confirm, select } from "../lib/prompts/index.js";
-
-const packageJson = JSON.parse(
-  readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
-) as { version: string };
 
 const stringArg = {
   "~standard": {
