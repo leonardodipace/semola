@@ -12,7 +12,7 @@ import {
 import { defineTable } from "../table/index.js";
 import { diffSchemas } from "./diff.js";
 import { emptySchema, snapshotSchema } from "./snapshot.js";
-import { decodeSchemaHeader, renderMigrationSql } from "./sql.js";
+import { assertSchemaSnapshot, renderMigrationSql } from "./sql.js";
 
 describe("orm migrations snapshot/diff/sql", () => {
   test("snapshots tables and columns", () => {
@@ -37,7 +37,7 @@ describe("orm migrations snapshot/diff/sql", () => {
 
     const to = snapshotSchema({ users });
     const ops = diffSchemas(emptySchema(), to, "sqlite");
-    const sql = renderMigrationSql("sqlite", ops, to);
+    const sql = renderMigrationSql("sqlite", ops);
 
     expect(ops).toHaveLength(1);
     expect(ops[0]?.kind).toBe("createTable");
@@ -48,7 +48,6 @@ describe("orm migrations snapshot/diff/sql", () => {
     expect(sql).toContain(
       '"email" TEXT NOT NULL CONSTRAINT "users_email_key" UNIQUE',
     );
-    expect(sql).toContain("-- semola-schema:");
 
     const down = renderMigrationSql(
       "sqlite",
@@ -718,35 +717,28 @@ describe("orm migrations snapshot/diff/sql", () => {
     expect(typeAt).toBeGreaterThan(dropCheckAt);
   });
 
-  test("decodeSchemaHeader rejects invalid json", () => {
-    expect(() => decodeSchemaHeader("-- semola-schema:{nope")).toThrow(
-      "Invalid schema header",
+  test("assertSchemaSnapshot rejects non-object payloads", () => {
+    expect(() => assertSchemaSnapshot([], "schema.json")).toThrow(
+      "Invalid schema.json",
+    );
+    expect(() => assertSchemaSnapshot(null, "schema.json")).toThrow(
+      "Invalid schema.json",
+    );
+    expect(() => assertSchemaSnapshot(1, "schema.json")).toThrow(
+      "Invalid schema.json",
+    );
+    expect(() => assertSchemaSnapshot({}, "schema.json")).toThrow(
+      "Invalid schema.json",
+    );
+    expect(() => assertSchemaSnapshot({ tables: null }, "schema.json")).toThrow(
+      "Invalid schema.json",
     );
   });
 
-  test("decodeSchemaHeader rejects non-object schema payloads", () => {
-    expect(() => decodeSchemaHeader("-- semola-schema:[]")).toThrow(
-      "Invalid schema header",
-    );
-    expect(() => decodeSchemaHeader("-- semola-schema:null")).toThrow(
-      "Invalid schema header",
-    );
-    expect(() => decodeSchemaHeader("-- semola-schema:1")).toThrow(
-      "Invalid schema header",
-    );
-    expect(() => decodeSchemaHeader("-- semola-schema:{}")).toThrow(
-      "Invalid schema header",
-    );
-    expect(() =>
-      decodeSchemaHeader('-- semola-schema:{"tables":null}'),
-    ).toThrow("Invalid schema header");
-  });
-
-  test("decodeSchemaHeader accepts CRLF line endings", () => {
+  test("assertSchemaSnapshot accepts a schema object", () => {
     const schema = { tables: {} };
-    const header = `-- semola-schema:${JSON.stringify(schema)}\r\n`;
 
-    expect(decodeSchemaHeader(header)).toEqual(schema);
+    expect(assertSchemaSnapshot(schema, "schema.json")).toEqual(schema);
   });
 
   test("snapshots foreign keys", () => {
@@ -1089,14 +1081,6 @@ describe("orm migrations snapshot/diff/sql", () => {
 
     expect(diffSchemas(snapshot, snapshot, "sqlite")).toEqual([]);
     expect(diffSchemas(snapshot, snapshot, "postgres")).toEqual([]);
-  });
-
-  test("renderMigrationSql with no ops still emits a schema header when given", () => {
-    const schema = emptySchema();
-    const sql = renderMigrationSql("sqlite", [], schema);
-
-    expect(sql).toContain("-- semola-schema:");
-    expect(decodeSchemaHeader(sql)).toEqual(schema);
   });
 
   test("snapshots enum values and nullability", () => {
@@ -1484,26 +1468,6 @@ describe("orm migrations snapshot/diff/sql", () => {
     );
   });
 
-  test("decodeSchemaHeader reads the header from a full migration file", () => {
-    const users = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-    });
-    const schema = snapshotSchema({ users });
-    const sql = renderMigrationSql(
-      "sqlite",
-      diffSchemas(emptySchema(), schema, "sqlite"),
-      schema,
-    );
-
-    expect(decodeSchemaHeader(sql)).toEqual(schema);
-  });
-
-  test("decodeSchemaHeader returns undefined for a missing header", () => {
-    expect(
-      decodeSchemaHeader('CREATE TABLE "users" (id TEXT);'),
-    ).toBeUndefined();
-  });
-
   test("dropping a table emits dropTable and DROP TABLE SQL", () => {
     const users = defineTable("users", {
       id: uuid("id").primaryKey().notNull(),
@@ -1534,7 +1498,6 @@ describe("orm migrations snapshot/diff/sql", () => {
     const up = renderMigrationSql(
       "sqlite",
       diffSchemas(emptySchema(), to, "sqlite"),
-      to,
     );
     const down = renderMigrationSql(
       "sqlite",
@@ -1543,7 +1506,6 @@ describe("orm migrations snapshot/diff/sql", () => {
 
     expect(up).toContain('CREATE TABLE "users"');
     expect(down).toContain('DROP TABLE "users"');
-    expect(up).toContain("-- semola-schema:");
   });
 
   test("sqlite recreate preserves shared columns when adding a unique column", () => {
@@ -1801,7 +1763,6 @@ describe("orm migrations snapshot/diff/sql", () => {
     const up = renderMigrationSql(
       "postgres",
       diffSchemas(emptySchema(), to, "postgres"),
-      to,
     );
     const down = renderMigrationSql(
       "postgres",
@@ -1810,7 +1771,6 @@ describe("orm migrations snapshot/diff/sql", () => {
 
     expect(up).toContain('CREATE TABLE "users"');
     expect(down).toContain('DROP TABLE "users"');
-    expect(up).toContain("-- semola-schema:");
   });
 
   test("snapshots sqlType uuid separately from type string", () => {
@@ -1879,12 +1839,6 @@ describe("orm migrations snapshot/diff/sql", () => {
       'INSERT INTO "posts__semola_tmp" ("id", "author_id", "title") SELECT "id", "author_id", "title" FROM "posts"',
     );
     expect(sql).not.toContain('REFERENCES "authors"');
-  });
-
-  test("no-op render without schema omits the schema header", () => {
-    const sql = renderMigrationSql("sqlite", []);
-
-    expect(sql).not.toContain("-- semola-schema:");
   });
 
   test("postgres refuses adding a NOT NULL column without a default", () => {

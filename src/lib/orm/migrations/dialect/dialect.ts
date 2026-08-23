@@ -9,8 +9,6 @@ import type {
 import { orderOps } from "./order.js";
 import { dataLossWarnings } from "./warnings.js";
 
-export const SCHEMA_HEADER_PREFIX = "-- semola-schema:";
-
 export abstract class MigrationDialect {
   public abstract readonly name: "sqlite" | "postgres";
   protected abstract readonly sqlTypes: Record<ColumnSnapshot["type"], string>;
@@ -72,7 +70,7 @@ export abstract class MigrationDialect {
     return ops;
   }
 
-  public render(ops: MigrationOp[], schemaHeader?: SchemaSnapshot) {
+  public render(ops: MigrationOp[]) {
     const ordered = orderOps(ops, this.deferCircularForeignKeys());
     const warnings = dataLossWarnings(ordered);
     const warningBlock = warnings.length ? `${warnings.join("\n")}\n\n` : "";
@@ -81,11 +79,7 @@ export abstract class MigrationDialect {
       .filter((sql) => sql.length > 0)
       .join("\n\n");
 
-    if (!schemaHeader) {
-      return `${warningBlock}${body}\n`;
-    }
-
-    return `${SCHEMA_HEADER_PREFIX}${JSON.stringify(schemaHeader)}\n\n${warningBlock}${body}\n`;
+    return `${warningBlock}${body}\n`;
   }
 
   protected shouldRecreate(_tableOps: MigrationOp[]) {

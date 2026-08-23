@@ -4,7 +4,6 @@ import { PostgresMigrationDialect } from "./postgres.js";
 import { SqliteMigrationDialect } from "./sqlite.js";
 
 export type { MigrationDialect } from "./dialect.js";
-export { SCHEMA_HEADER_PREFIX } from "./dialect.js";
 
 export const getMigrationDialect = (adapter: Adapter) => {
   switch (adapter) {

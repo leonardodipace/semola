@@ -18,7 +18,6 @@ import {
   loadConfig,
   rollbackMigration,
 } from "./index.js";
-import { decodeSchemaHeader } from "./sql.js";
 import { createMigrationProject } from "./test-project.js";
 
 describe("sqlite migrations integration", () => {
@@ -173,7 +172,7 @@ describe("sqlite migrations integration", () => {
     await db.$raw.close();
   });
 
-  test("rejects apply when the schema header is missing", async () => {
+  test("rejects apply when schema.json is missing", async () => {
     const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
     const project = await setupProject(dbFile);
     const config = await loadConfig(project.root);
@@ -185,9 +184,7 @@ describe("sqlite migrations integration", () => {
       'CREATE TABLE "users" (id TEXT);\n',
     );
 
-    await expect(applyMigrations(config)).rejects.toThrow(
-      "missing a schema header",
-    );
+    await expect(applyMigrations(config)).rejects.toThrow("Could not read");
 
     const db = createOrm({
       adapter: "sqlite",
@@ -205,17 +202,17 @@ describe("sqlite migrations integration", () => {
     await db.$raw.close();
   });
 
-  test("rejects apply when up.sql has a header but no SQL", async () => {
+  test("rejects apply when up.sql has no SQL", async () => {
     const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
     const project = await setupProject(dbFile);
     const config = await loadConfig(project.root);
     const folder = join(project.migrationsDir, "20240101000000_empty_body");
 
     await mkdir(folder);
+    await writeFile(join(folder, "up.sql"), "-- comment only\n");
     await writeFile(
-      join(folder, "up.sql"),
-      `-- semola-schema:${JSON.stringify({ tables: {} })}
-`,
+      join(folder, "schema.json"),
+      `${JSON.stringify({ tables: {} }, null, 2)}\n`,
     );
 
     await expect(applyMigrations(config)).rejects.toThrow(
@@ -441,12 +438,16 @@ export default defineConfig({
     const config = await loadConfig(project.root);
     const first = join(project.migrationsDir, "20240101000000000_first");
     const second = join(project.migrationsDir, "20240102000000000_second");
-    const header = `-- semola-schema:${JSON.stringify({ tables: {} })}`;
+    const schemaJson = `${JSON.stringify({ tables: {} }, null, 2)}\n`;
 
     await mkdir(first);
     await mkdir(second);
-    await writeFile(join(first, "up.sql"), `${header}\nSELECT 1;\n`);
-    await writeFile(join(second, "up.sql"), `${header}\nSELECT 1;\n`);
+    await writeFile(join(first, "up.sql"), `SELECT 1;\n`);
+
+    await writeFile(join(first, "schema.json"), schemaJson);
+    await writeFile(join(second, "up.sql"), `SELECT 1;\n`);
+
+    await writeFile(join(second, "schema.json"), schemaJson);
 
     expect(await applyMigrations(config)).toEqual([
       "20240101000000000_first",
@@ -506,9 +507,12 @@ export const db = createOrm({
 
     const folder = join(project.migrationsDir, "99999999999999999_drop_parent");
     await mkdir(folder);
+    await writeFile(join(folder, "up.sql"), `DROP TABLE "authors";\n`);
+
     await writeFile(
-      join(folder, "up.sql"),
-      `-- semola-schema:${JSON.stringify({ tables: {} })}\nDROP TABLE "authors";\n`,
+      join(folder, "schema.json"),
+
+      `${JSON.stringify({ tables: {} }, null, 2)}\n`,
     );
 
     await expect(applyMigrations(config)).rejects.toThrow(
@@ -545,7 +549,13 @@ export const db = createOrm({
       join(project.migrationsDir, folder, "down.sql"),
     ).text();
 
-    expect(up.startsWith("-- semola-schema:")).toBe(true);
+    expect(up).toContain('CREATE TABLE "users"');
+    expect(up).not.toContain("-- semola-schema:");
+    expect(
+      await Bun.file(
+        join(project.migrationsDir, folder, "schema.json"),
+      ).exists(),
+    ).toBe(true);
     expect(down).toContain('DROP TABLE "users"');
     expect(down).toContain("-- warning:");
   });
@@ -766,7 +776,13 @@ export const db = createOrm({
     await mkdir(folder);
     await writeFile(
       join(folder, "up.sql"),
-      `-- semola-schema:${JSON.stringify({ tables: {} })}\nSELECT * FROM definitely_missing;\n`,
+      `SELECT * FROM definitely_missing;\n`,
+    );
+
+    await writeFile(
+      join(folder, "schema.json"),
+
+      `${JSON.stringify({ tables: {} }, null, 2)}\n`,
     );
 
     await expect(applyMigrations(config)).rejects.toThrow();
@@ -791,35 +807,30 @@ export const db = createOrm({
     await db.$raw.close();
   });
 
-  test("rejects apply when the schema header JSON is invalid", async () => {
+  test("rejects apply when schema.json JSON is invalid", async () => {
     const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
     const project = await setupProject(dbFile);
     const config = await loadConfig(project.root);
     const folder = join(project.migrationsDir, "20240101000000000_bad_header");
 
     await mkdir(folder);
-    await writeFile(
-      join(folder, "up.sql"),
-      `-- semola-schema:{nope}\nSELECT 1;\n`,
-    );
+    await writeFile(join(folder, "up.sql"), "SELECT 1;\n");
+    await writeFile(join(folder, "schema.json"), "{nope}\n");
 
-    await expect(applyMigrations(config)).rejects.toThrow(
-      "Invalid schema header",
-    );
+    await expect(applyMigrations(config)).rejects.toThrow("Invalid Migration");
   });
 
-  test("rejects apply when the schema header is not a schema snapshot", async () => {
+  test("rejects apply when schema.json is not a schema snapshot", async () => {
     const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
     const project = await setupProject(dbFile);
     const config = await loadConfig(project.root);
     const folder = join(project.migrationsDir, "20240101000000000_bad_shape");
 
     await mkdir(folder);
-    await writeFile(join(folder, "up.sql"), `-- semola-schema:[]\nSELECT 1;\n`);
+    await writeFile(join(folder, "up.sql"), "SELECT 1;\n");
+    await writeFile(join(folder, "schema.json"), "[]\n");
 
-    await expect(applyMigrations(config)).rejects.toThrow(
-      "Invalid schema header",
-    );
+    await expect(applyMigrations(config)).rejects.toThrow("Invalid Migration");
   });
 
   test("rejects apply when history order does not match file order", async () => {
@@ -829,16 +840,22 @@ export const db = createOrm({
     const first = join(project.migrationsDir, "20240101000000000_first");
     const second = join(project.migrationsDir, "20240102000000000_second");
     const inserted = join(project.migrationsDir, "20240101500000000_inserted");
-    const header = `-- semola-schema:${JSON.stringify({ tables: {} })}`;
+    const schemaJson = `${JSON.stringify({ tables: {} }, null, 2)}\n`;
 
     await mkdir(first);
     await mkdir(second);
-    await writeFile(join(first, "up.sql"), `${header}\nSELECT 1;\n`);
-    await writeFile(join(second, "up.sql"), `${header}\nSELECT 1;\n`);
+    await writeFile(join(first, "up.sql"), `SELECT 1;\n`);
+
+    await writeFile(join(first, "schema.json"), schemaJson);
+    await writeFile(join(second, "up.sql"), `SELECT 1;\n`);
+
+    await writeFile(join(second, "schema.json"), schemaJson);
     await applyMigrations(config);
 
     await mkdir(inserted);
-    await writeFile(join(inserted, "up.sql"), `${header}\nSELECT 1;\n`);
+    await writeFile(join(inserted, "up.sql"), `SELECT 1;\n`);
+
+    await writeFile(join(inserted, "schema.json"), schemaJson);
 
     await expect(applyMigrations(config)).rejects.toThrow(
       "does not match files",
@@ -1167,15 +1184,14 @@ export const db = createOrm({
     await db.$raw.close();
   });
 
-  test("history stores the applied schema snapshot from the up.sql header", async () => {
+  test("history stores the applied schema snapshot from schema.json", async () => {
     const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
     const project = await setupProject(dbFile);
     const config = await loadConfig(project.root);
     const folder = await createMigration({ name: "first", config });
-    const up = await Bun.file(
-      join(project.migrationsDir, folder, "up.sql"),
-    ).text();
-    const expected = decodeSchemaHeader(up);
+    const expected = JSON.parse(
+      await Bun.file(join(project.migrationsDir, folder, "schema.json")).text(),
+    );
 
     await applyMigrations(config);
 
@@ -1207,18 +1223,20 @@ export const db = createOrm({
     const config = await loadConfig(project.root);
     const first = join(project.migrationsDir, "20240101000000000_first");
     const second = join(project.migrationsDir, "20240102000000000_second");
-    const emptyHeader = `-- semola-schema:${JSON.stringify({ tables: {} })}`;
+    const schemaJson = `${JSON.stringify({ tables: {} }, null, 2)}\n`;
 
     await mkdir(first);
     await mkdir(second);
     await writeFile(
       join(first, "up.sql"),
-      `${emptyHeader}\nCREATE TABLE "scratch" ("id" TEXT);\n`,
+      `CREATE TABLE "scratch" ("id" TEXT);\n`,
     );
+    await writeFile(join(first, "schema.json"), schemaJson);
     await writeFile(
       join(second, "up.sql"),
-      `${emptyHeader}\nSELECT * FROM definitely_missing;\n`,
+      `SELECT * FROM definitely_missing;\n`,
     );
+    await writeFile(join(second, "schema.json"), schemaJson);
 
     await expect(applyMigrations(config)).rejects.toThrow();
 
@@ -1705,7 +1723,7 @@ export default defineConfig({
     await db.$raw.close();
   });
 
-  test("latest history schema matches the latest up.sql header after stacked apply", async () => {
+  test("latest history schema matches the latest schema.json after stacked apply", async () => {
     const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
     const project = await setupProject(dbFile);
     const config = await loadConfig(project.root);
@@ -1730,10 +1748,9 @@ export default defineConfig({
       name: "add_bio",
       config: nextConfig,
     });
-    const up = await Bun.file(
-      join(project.migrationsDir, second, "up.sql"),
-    ).text();
-    const expected = decodeSchemaHeader(up);
+    const expected = JSON.parse(
+      await Bun.file(join(project.migrationsDir, second, "schema.json")).text(),
+    );
 
     await applyMigrations(nextConfig);
 
@@ -1826,10 +1843,9 @@ export default defineConfig({
     const project = await setupProject(dbFile);
     const config = await loadConfig(project.root);
     const first = await createMigration({ name: "first", config });
-    const firstUp = await Bun.file(
-      join(project.migrationsDir, first, "up.sql"),
-    ).text();
-    const firstSchema = decodeSchemaHeader(firstUp);
+    const firstSchema = JSON.parse(
+      await Bun.file(join(project.migrationsDir, first, "schema.json")).text(),
+    );
 
     await applyMigrations(config);
 
@@ -2019,16 +2035,16 @@ export default defineConfig({
     expect(folder).toMatch(/^\d{17}_add_user_roles$/);
   });
 
-  test("generated down.sql does not include a schema header", async () => {
+  test("generated up.sql does not include a schema header", async () => {
     const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
     const project = await setupProject(dbFile);
     const config = await loadConfig(project.root);
     const folder = await createMigration({ name: "first", config });
-    const down = await Bun.file(
-      join(project.migrationsDir, folder, "down.sql"),
+    const up = await Bun.file(
+      join(project.migrationsDir, folder, "up.sql"),
     ).text();
 
-    expect(down).not.toContain("-- semola-schema:");
+    expect(up).not.toContain("-- semola-schema:");
   });
 
   test("history rows record an applied_at timestamp", async () => {
@@ -2064,17 +2080,20 @@ export default defineConfig({
     await applyMigrations(config);
 
     const folder = join(project.migrationsDir, "99999999999999999_fixme");
-    const header = `-- semola-schema:${JSON.stringify({ tables: {} })}`;
+    const schemaJson = `${JSON.stringify({ tables: {} }, null, 2)}\n`;
 
     await mkdir(folder);
     await writeFile(
       join(folder, "up.sql"),
-      `${header}\nSELECT * FROM definitely_missing;\n`,
+      `SELECT * FROM definitely_missing;\n`,
     );
+    await writeFile(join(folder, "schema.json"), schemaJson);
 
     await expect(applyMigrations(config)).rejects.toThrow();
 
-    await writeFile(join(folder, "up.sql"), `${header}\nSELECT 1;\n`);
+    await writeFile(join(folder, "up.sql"), `SELECT 1;\n`);
+
+    await writeFile(join(folder, "schema.json"), schemaJson);
 
     expect(await applyMigrations(config)).toEqual(["99999999999999999_fixme"]);
   });
@@ -2745,7 +2764,13 @@ if (SEMOLA_POSTGRES_URL) {
       await mkdir(folder);
       await writeFile(
         join(folder, "up.sql"),
-        `-- semola-schema:${JSON.stringify({ tables: {} })}\nSELECT * FROM definitely_missing;\n`,
+        `SELECT * FROM definitely_missing;\n`,
+      );
+
+      await writeFile(
+        join(folder, "schema.json"),
+
+        `${JSON.stringify({ tables: {} }, null, 2)}\n`,
       );
 
       await expect(applyMigrations(config)).rejects.toThrow();

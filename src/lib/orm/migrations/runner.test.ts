@@ -17,9 +17,9 @@ SELECT $tag$c;d$tag$;
     ]);
   });
 
-  test("splitStatements keeps doubled quotes and strips the schema header", () => {
+  test("splitStatements keeps doubled quotes and ignores SQL comments", () => {
     expect(
-      splitStatements(`-- semola-schema:{"tables":{}}
+      splitStatements(`-- some comment
 INSERT INTO t VALUES ('it''s');
 SELECT "weird;name";
 `),

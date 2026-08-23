@@ -10,14 +10,11 @@ import { getMigrationDialect } from "./dialect/index.js";
 import { diffSchemas } from "./diff.js";
 import { resolveRenames, reverseRenameOps } from "./renames.js";
 import { emptySchema, snapshotSchema } from "./snapshot.js";
-import {
-  assertSchemaSnapshot,
-  decodeSchemaHeader,
-  splitStatements,
-} from "./sql.js";
+import { assertSchemaSnapshot, splitStatements } from "./sql.js";
 import type { LoadedConfig, OrmConfig, RenameHandler } from "./types.js";
 
 const HISTORY_TABLE = "_semola_migrations";
+const SCHEMA_FILE = "schema.json";
 
 const isOrmClient = (value: unknown) => {
   if (!value) return false;
@@ -258,7 +255,7 @@ export const createMigration = async (input: {
 
     const folderName = `${timestamp()}_${slugify(name)}`;
     const folderPath = join(config.migrationsDir, folderName);
-    const upSql = dialect.render(ops, to);
+    const upSql = dialect.render(ops);
 
     if (splitStatements(upSql).length === 0) {
       throw new MigrationError("No schema changes to migrate");
@@ -277,6 +274,10 @@ export const createMigration = async (input: {
     await mkdir(folderPath, { recursive: true });
     await writeFile(join(folderPath, "up.sql"), upSql);
     await writeFile(join(folderPath, "down.sql"), downSql);
+    await writeFile(
+      join(folderPath, SCHEMA_FILE),
+      `${JSON.stringify(to, null, 2)}\n`,
+    );
 
     return folderName;
   });
@@ -296,27 +297,29 @@ const runSqlFile = async (
   sql: Bun.SQL,
   filePath: string,
   label: string,
-  requireHeader: boolean,
+  allowEmpty = false,
 ) => {
   const text = await readSqlFile(filePath, label);
-  const headerSchema = decodeSchemaHeader(text);
   const statements = splitStatements(text);
 
-  if (requireHeader) {
-    if (!headerSchema) {
-      throw new MigrationError(`${label} is missing a schema header`);
-    }
+  if (statements.length === 0) {
+    if (allowEmpty) return;
 
-    if (statements.length === 0) {
-      throw new MigrationError(`${label} has no SQL statements to apply`);
-    }
+    throw new MigrationError(`${label} has no SQL statements to apply`);
   }
 
   for (const statement of statements) {
     await sql.unsafe(statement);
   }
+};
 
-  return headerSchema;
+const readMigrationSchema = async (folderPath: string, name: string) => {
+  const text = await readSqlFile(
+    join(folderPath, SCHEMA_FILE),
+    `Migration ${name} ${SCHEMA_FILE}`,
+  );
+
+  return parseSchema(text, `Migration ${name} ${SCHEMA_FILE}`);
 };
 
 export const applyMigrations = async (config: LoadedConfig) => {
@@ -332,7 +335,8 @@ export const applyMigrations = async (config: LoadedConfig) => {
     const appliedNames: string[] = [];
 
     for (const name of pending) {
-      const upPath = join(config.migrationsDir, name, "up.sql");
+      const folderPath = join(config.migrationsDir, name);
+      const upPath = join(folderPath, "up.sql");
 
       await dialect.beginMigration(sql, async (tx) => {
         await dialect.lockMigrations(tx);
@@ -351,18 +355,14 @@ export const applyMigrations = async (config: LoadedConfig) => {
           );
         }
 
-        const headerSchema = await runSqlFile(
-          tx,
-          upPath,
-          `Migration ${name}`,
-          true,
-        );
+        const schema = await readMigrationSchema(folderPath, name);
 
+        await runSqlFile(tx, upPath, `Migration ${name}`);
         await dialect.assertForeignKeys(tx);
 
         await tx.unsafe(
           `INSERT INTO ${HISTORY_TABLE} (name, applied_at, schema) VALUES (${insertPh})`,
-          [name, new Date().toISOString(), JSON.stringify(headerSchema)],
+          [name, new Date().toISOString(), JSON.stringify(schema)],
         );
 
         appliedNames.push(name);
@@ -387,7 +387,7 @@ export const rollbackMigration = async (config: LoadedConfig) => {
 
     await dialect.beginMigration(sql, async (tx) => {
       await dialect.lockMigrations(tx);
-      await runSqlFile(tx, downPath, `Migration ${last.name} down.sql`, false);
+      await runSqlFile(tx, downPath, `Migration ${last.name} down.sql`, true);
       await dialect.assertForeignKeys(tx);
       await tx.unsafe(`DELETE FROM ${HISTORY_TABLE} WHERE name = ${deletePh}`, [
         last.name,

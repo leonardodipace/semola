@@ -283,7 +283,7 @@ The CLI reads the client's adapter, URL, and tables. Run migration commands from
 ### Commands
 
 ```sh
-# Generate up.sql and down.sql from table changes
+# Generate up.sql, down.sql, and schema.json from table changes
 bunx semola orm migrations create "add_user_roles"
 
 # Apply every pending migration in order
@@ -316,6 +316,7 @@ migrations/
   20260817090000000_add_user_roles/
     up.sql
     down.sql
+    schema.json
 ```
 
 Review generated SQL before applying it, especially warnings about destructive changes. Each pending migration commits in its own transaction. Concurrent `apply` takes a lock (Postgres advisory lock; SQLite `IMMEDIATE` plus a short busy timeout) and re-checks history under that lock so the same migration is not applied twice. On SQLite a waiter may still fail with `SQLITE_BUSY`; history stays consistent either way.
@@ -324,7 +325,7 @@ Review generated SQL before applying it, especially warnings about destructive c
 
 Semola stores applied migration names and schema snapshots in the `_semola_migrations` database table. Migration directories must remain an exact ordered prefix of that history. Missing, reordered, or extra applied entries fail before new SQL runs.
 
-Every generated `up.sql` contains a `-- semola-schema:` header. Keep it intact: `apply` uses it as the next schema snapshot and rejects migrations that omit it, carry an invalid snapshot, or include no SQL statements.
+Every generated migration folder includes a `schema.json` snapshot. Keep it intact: `apply` uses it as the next schema snapshot and rejects migrations that omit it, carry an invalid snapshot, or include no SQL statements in `up.sql`.
 
 SQLite has additional safeguards:
 
@@ -507,6 +508,6 @@ await db.$transaction(async (tx) => {
 | Export | Meaning |
 | --- | --- |
 | `loadConfig()` | Load `semola.config.ts` and resolve the ORM client |
-| `createMigration({ name, config })` | Generate `up.sql` / `down.sql` from schema diff |
+| `createMigration({ name, config })` | Generate `up.sql` / `down.sql` / `schema.json` from schema diff |
 | `applyMigrations(config)` | Apply pending migrations |
 | `rollbackMigration(config)` | Roll back the latest migration |
