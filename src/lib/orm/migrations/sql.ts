@@ -264,13 +264,24 @@ export const splitStatements = (sqlText: string) => {
 
     if (char === "-" && next === "-") {
       const newline = sqlText.indexOf("\n", index);
-      index = newline === -1 ? sqlText.length - 1 : newline - 1;
+
+      if (newline === -1) {
+        index = sqlText.length - 1;
+      } else {
+        index = newline - 1;
+      }
+
       continue;
     }
 
     if (char === "/" && next === "*") {
       const close = sqlText.indexOf("*/", index + 2);
-      const end = close === -1 ? sqlText.length - 1 : close + 1;
+      let end = close + 1;
+
+      if (close === -1) {
+        end = sqlText.length - 1;
+      }
+
       current += sqlText.slice(index, end + 1);
       index = end;
       continue;
@@ -281,7 +292,12 @@ export const splitStatements = (sqlText: string) => {
 
       if (tag) {
         const close = sqlText.indexOf(tag, index + tag.length);
-        const end = close === -1 ? sqlText.length - 1 : close + tag.length - 1;
+        let end = close + tag.length - 1;
+
+        if (close === -1) {
+          end = sqlText.length - 1;
+        }
+
         current += sqlText.slice(index, end + 1);
         index = end;
         continue;

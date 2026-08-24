@@ -15,7 +15,11 @@ const sqlLiteral = (value: unknown) => {
   }
 
   if (typeof value === "boolean") {
-    return value ? "TRUE" : "FALSE";
+    if (value) {
+      return "TRUE";
+    }
+
+    return "FALSE";
   }
 
   if (typeof value === "number") {

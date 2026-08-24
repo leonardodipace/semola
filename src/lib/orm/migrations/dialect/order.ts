@@ -154,21 +154,34 @@ export const orderOps = (
 
   const stripCreateFks = deferCircularForeignKeys && sortedCreates.cycle;
   const createOps = sortedCreates.ordered.map((table) => {
+    let nextTable = table;
+
+    if (stripCreateFks) {
+      nextTable = withoutForeignKeys(table);
+    }
+
     return {
       kind: "createTable" as const,
-      table: stripCreateFks ? withoutForeignKeys(table) : table,
+      table: nextTable,
     };
   });
   const dropOps = [...sortedDrops.ordered].reverse().map((table) => {
     return { kind: "dropTable" as const, table };
   });
-  const cycleForeignKeys = stripCreateFks
-    ? foreignKeysOf(sortedCreates.ordered)
-    : [];
-  const cycleDropForeignKeys =
-    deferCircularForeignKeys && sortedDrops.cycle
-      ? foreignKeysBetween(sortedDrops.ordered)
-      : [];
+
+  let cycleForeignKeys: MigrationOp[] = [];
+
+  if (stripCreateFks) {
+    cycleForeignKeys = foreignKeysOf(sortedCreates.ordered);
+  }
+
+  let cycleDropForeignKeys: MigrationOp[] = [];
+
+  if (deferCircularForeignKeys) {
+    if (sortedDrops.cycle) {
+      cycleDropForeignKeys = foreignKeysBetween(sortedDrops.ordered);
+    }
+  }
 
   return [
     ...renames,

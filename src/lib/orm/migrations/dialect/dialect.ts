@@ -137,7 +137,12 @@ export abstract class MigrationDialect {
   public render(ops: MigrationOp[]) {
     const ordered = orderOps(ops, this.deferCircularForeignKeys());
     const warnings = dataLossWarnings(ordered);
-    const warningBlock = warnings.length ? `${warnings.join("\n")}\n\n` : "";
+    let warningBlock = "";
+
+    if (warnings.length > 0) {
+      warningBlock = `${warnings.join("\n")}\n\n`;
+    }
+
     const body = ordered
       .map((op) => this.renderOp(op))
       .filter((sql) => sql.length > 0)

@@ -85,6 +85,11 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
     table: T[K],
   ) {
     const tableRelations = this.getTableRelations(tableName);
+    let globalHooks: ReturnType<typeof pickGlobalHooks> | undefined;
+
+    if (this.options.hooks) {
+      globalHooks = pickGlobalHooks(this.options.hooks);
+    }
 
     this.tableRelationsMap.set(table, tableRelations);
     clients[tableName] = new TableClientImpl<T[K], TableRelationsFor<R, K>>({
@@ -95,9 +100,7 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
       // @ts-expect-error TableRelationsFor and NonNullable<R[K]> are equivalent here
       relations: tableRelations,
       tableRelationsMap: this.tableRelationsMap,
-      globalHooks: this.options.hooks
-        ? pickGlobalHooks(this.options.hooks)
-        : undefined,
+      globalHooks,
       tableHooks: this.options.hooks?.tables?.[tableName],
     });
   }

@@ -251,7 +251,11 @@ export class WhereBuilder<
     }
 
     const placeholders = operand.map(() => this.nextPlaceholder());
-    const keyword = op === "in" ? "IN" : "NOT IN";
+    let keyword = "NOT IN";
+
+    if (op === "in") {
+      keyword = "IN";
+    }
 
     this.clauses.push(`${sqlName} ${keyword} (${placeholders.join(", ")})`);
 
@@ -391,7 +395,11 @@ export class WhereBuilder<
       table: relationTable,
       where: input.where,
     });
-    const nestedCondition = nested.sql ? nested.sql : TRUE_WHERE_SQL;
+    let nestedCondition = TRUE_WHERE_SQL;
+
+    if (nested.sql) {
+      nestedCondition = nested.sql;
+    }
 
     this.params.push(...nested.params);
 
