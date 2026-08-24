@@ -36,53 +36,28 @@ const stringArg = {
   },
 };
 
-const booleanFlag = {
-  "~standard": {
-    version: 1 as const,
-    vendor: "semola",
-    types: {
-      input: false as boolean,
-      output: false as boolean,
-    },
-    validate: (value: unknown) => {
-      if (value === undefined) {
-        return { value: false };
-      }
-
-      if (value === true) {
-        return { value: true };
-      }
-
-      if (value === false) {
-        return { value: false };
-      }
-
-      return { issues: [{ message: "expected boolean" }] };
-    },
-  },
-};
-
-const isInteractive = () => {
-  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
-};
-
 const CREATE = "";
+
+const renamePromptLabels = (question: RenameQuestion) => {
+  if (question.kind === "table") {
+    return {
+      entity: "table",
+      created: question.created,
+      fromPrefix: "",
+    };
+  }
+
+  return {
+    entity: "column",
+    created: `${question.table}.${question.created}`,
+    fromPrefix: `${question.table}.`,
+  };
+};
 
 const promptRename = async (question: RenameQuestion) => {
   if (question.dropped.length === 0) return;
 
-  let entity = "column";
-  let created = "";
-  let fromPrefix = "";
-
-  if (question.kind === "table") {
-    entity = "table";
-    created = question.created;
-  } else {
-    created = `${question.table}.${question.created}`;
-    fromPrefix = `${question.table}.`;
-  }
-
+  const { entity, created, fromPrefix } = renamePromptLabels(question);
   const choices: SelectChoice<string>[] = [];
 
   for (const name of question.dropped) {
@@ -108,12 +83,6 @@ const promptRename = async (question: RenameQuestion) => {
 };
 
 const promptDestructive = async () => {
-  if (!isInteractive()) {
-    throw new MigrationError(
-      "Destructive schema changes require --allow-destructive when not running in a TTY",
-    );
-  }
-
   return confirm({
     message: "This migration drops tables or columns. Continue?",
     defaultValue: false,
@@ -134,28 +103,14 @@ const run = async () => {
       description: "Generate a migration from schema changes",
     })
     .argument("name", { schema: stringArg })
-    .option("allow-destructive", { schema: booleanFlag })
-    .action(async (args, options) => {
+    .action(async (args) => {
       const config = await loadConfig();
-      const allowDestructive = Boolean(options["allow-destructive"]);
-      const interactive = isInteractive();
-      const input: Parameters<typeof createMigration>[0] = {
+      const folder = await createMigration({
         name: args.name,
         config,
-        allowDestructive,
-      };
-
-      if (interactive) {
-        input.onRename = promptRename;
-      }
-
-      if (!allowDestructive) {
-        if (interactive) {
-          input.onDestructive = promptDestructive;
-        }
-      }
-
-      const folder = await createMigration(input);
+        onRename: promptRename,
+        onDestructive: promptDestructive,
+      });
 
       console.log(`Created migration ${folder}`);
     });
