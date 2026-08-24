@@ -52,7 +52,7 @@ describe("ORM column builders", () => {
 
     expect(col._meta.isNullable).toBe(false);
     expect(col._meta.hasDefault).toBe(true);
-    expect(col._default?.()).toEqual({ isActive: true });
+    expect(col._meta.default?.()).toEqual({ isActive: true });
   });
 
   test("set nullability and keep builders immutable", () => {
@@ -80,26 +80,29 @@ describe("ORM column builders", () => {
     expect(typeof emailColumn.unique).toBe("function");
     expect(createdAtColumn._meta.hasDefault).toBeTrue();
     expect(statusColumn._meta.hasDefault).toBeTrue();
-    expect(statusColumn._default?.()).toBe("active");
+    expect(statusColumn._meta.default?.()).toBe("active");
   });
 
   test("supports dbDefault for all supported value types", () => {
     const col = string("role").notNull().dbDefault("user");
 
-    expect(col._dbDefault).toBe("'user'");
+    expect(col._meta.dbDefault).toBe("'user'");
     expect(col._meta.hasDefault).toBe(true);
     expect(
-      string("role").dbDefault("gen_random_uuid()", { as: "sql" })._dbDefault,
+      string("role").dbDefault("gen_random_uuid()", { as: "sql" })._meta
+        .dbDefault,
     ).toBe("gen_random_uuid()");
-    expect(number("count").dbDefault(0)._dbDefault).toBe("0");
-    expect(boolean("ok").dbDefault(true)._dbDefault).toBe("TRUE");
-    expect(boolean("ok").dbDefault(false)._dbDefault).toBe("FALSE");
+    expect(number("count").dbDefault(0)._meta.dbDefault).toBe("0");
+    expect(boolean("ok").dbDefault(true)._meta.dbDefault).toBe("TRUE");
+    expect(boolean("ok").dbDefault(false)._meta.dbDefault).toBe("FALSE");
     expect(
-      date("created_at").dbDefault(new Date("2020-01-01T00:00:00.000Z"))
-        ._dbDefault,
+      date("created_at").dbDefault(new Date("2020-01-01T00:00:00.000Z"))._meta
+        .dbDefault,
     ).toBe("'2020-01-01T00:00:00.000Z'");
-    expect(json("meta").dbDefault({ a: 1 })._dbDefault).toBe("'{\"a\":1}'");
-    expect(json("meta").dbDefault(null)._dbDefault).toBe("NULL");
+    expect(json("meta").dbDefault({ a: 1 })._meta.dbDefault).toBe(
+      "'{\"a\":1}'",
+    );
+    expect(json("meta").dbDefault(null)._meta.dbDefault).toBe("NULL");
     expect(() => json("meta").dbDefault(undefined as never)).toThrow(
       "dbDefault cannot be undefined",
     );

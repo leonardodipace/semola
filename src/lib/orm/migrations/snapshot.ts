@@ -38,8 +38,8 @@ const snapshotColumn = (
     snapshot.sqlType = column.sqlType;
   }
 
-  if (column._dbDefault !== undefined) {
-    snapshot.dbDefault = column._dbDefault;
+  if (column._meta.dbDefault !== undefined) {
+    snapshot.dbDefault = column._meta.dbDefault;
   }
 
   if (column.type === "enum" && column.enumValues) {

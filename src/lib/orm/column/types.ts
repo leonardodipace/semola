@@ -6,9 +6,7 @@ export type BaseColumn<
   TValue = unknown,
 > = {
   sqlName: string;
-  _meta: ColumnTypeState<TNullable, TPrimaryKey, TUnique, THasDefault>;
-  _default?: () => TValue;
-  _dbDefault?: string;
+  _meta: ColumnTypeState<TNullable, TPrimaryKey, TUnique, THasDefault, TValue>;
   sqlType?: "uuid";
   references?: {
     tableColumn?: () => { sqlName: string };
@@ -20,11 +18,14 @@ type ColumnTypeState<
   TPrimaryKey extends boolean = boolean,
   TUnique extends boolean = boolean,
   THasDefault extends boolean = boolean,
+  TValue = unknown,
 > = {
   isNullable: TNullable;
   isPrimaryKey: TPrimaryKey;
   isUnique: TUnique;
   hasDefault: THasDefault;
+  default?: () => TValue;
+  dbDefault?: string;
 };
 
 export type ColumnRuntimeValueMap = {
@@ -125,9 +126,7 @@ type ColumnBuilderState<
 > = {
   sqlName: string;
   type: TType;
-  _meta: ColumnTypeState<TNullable, TPrimaryKey, TUnique, THasDefault>;
-  _default?: () => TValue;
-  _dbDefault?: string;
+  _meta: ColumnTypeState<TNullable, TPrimaryKey, TUnique, THasDefault, TValue>;
   sqlType?: "uuid";
   enumValues?: readonly TValue[];
   references?: {

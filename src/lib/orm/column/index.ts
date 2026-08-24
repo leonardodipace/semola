@@ -52,9 +52,9 @@ type ColumnBuilderState<
     isPrimaryKey: TPrimaryKey;
     isUnique: TUnique;
     hasDefault: THasDefault;
+    default?: () => TValue;
+    dbDefault?: string;
   };
-  _default?: () => TValue;
-  _dbDefault?: string;
   sqlType?: "uuid";
   enumValues?: readonly TValue[];
   references?: {
@@ -220,8 +220,8 @@ const createColumnBuilder = <
       _meta: {
         ...column._meta,
         hasDefault: true,
+        default: value,
       },
-      _default: value,
     });
   };
 
@@ -266,8 +266,8 @@ const createColumnBuilder = <
         _meta: {
           ...column._meta,
           hasDefault: true,
+          dbDefault: sql,
         },
-        _dbDefault: sql,
       });
     }
 
@@ -283,8 +283,8 @@ const createColumnBuilder = <
       _meta: {
         ...column._meta,
         hasDefault: true,
+        dbDefault: sqlLiteral(value),
       },
-      _dbDefault: sqlLiteral(value),
     });
   }) as ColumnBuilder<
     TType,
