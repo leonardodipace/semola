@@ -38,42 +38,60 @@ const stringArg = {
 
 const CREATE = "";
 
-const renamePromptLabels = (question: RenameQuestion) => {
+const renamePromptCopy = (question: RenameQuestion) => {
   if (question.kind === "table") {
+    const created = question.created;
+
     return {
-      entity: "table",
-      created: question.created,
-      fromPrefix: "",
+      message: `New table "${created}" was added and other tables were removed. What should happen?`,
+      renameLabel: (from: string) => {
+        return `Rename "${from}" → "${created}" (keeps existing rows)`;
+      },
+      createLabel: (dropped: string[]) => {
+        const removed = dropped.map((name) => `"${name}"`).join(", ");
+
+        return `Create "${created}" and drop ${removed} (deletes those tables' data)`;
+      },
     };
   }
 
+  const created = `${question.table}.${question.created}`;
+
   return {
-    entity: "column",
-    created: `${question.table}.${question.created}`,
-    fromPrefix: `${question.table}.`,
+    message: `New column "${created}" was added and other columns were removed. What should happen?`,
+    renameLabel: (from: string) => {
+      return `Rename "${question.table}.${from}" → "${created}" (keeps existing values)`;
+    },
+    createLabel: (dropped: string[]) => {
+      const removed = dropped
+        .map((name) => `"${question.table}.${name}"`)
+        .join(", ");
+
+      return `Create "${created}" and drop ${removed} (deletes those columns' values)`;
+    },
   };
 };
 
 const promptRename = async (question: RenameQuestion) => {
   if (question.dropped.length === 0) return;
 
-  const { entity, created, fromPrefix } = renamePromptLabels(question);
+  const copy = renamePromptCopy(question);
   const choices: SelectChoice<string>[] = [];
 
   for (const name of question.dropped) {
     choices.push({
       value: name,
-      label: `~ ${fromPrefix}${name} › ${created}`,
+      label: copy.renameLabel(name),
     });
   }
 
   choices.push({
     value: CREATE,
-    label: `+ ${created} › create ${entity}`,
+    label: copy.createLabel(question.dropped),
   });
 
   const selected = await select({
-    message: `Is ${created} ${entity} renamed or created from scratch?`,
+    message: copy.message,
     choices,
   });
 
