@@ -1070,6 +1070,109 @@ describe("workflow", () => {
     await stop(wf2);
   });
 
+  test("waiter + held/zombie slot does not unbounded-grow queue", async () => {
+    const redis = createRedis();
+    const name = `queue-bound-${crypto.randomUUID()}`;
+    const now = Date.now();
+
+    await redis.set(`workflow:${name}:partition:*:0`, "zombie");
+    await redis.hset(
+      `workflow:${name}:meta:zombie`,
+      "name",
+      name,
+      "status",
+      "failed",
+      "input",
+      "{}",
+      "result",
+      "",
+      "error",
+      "boom",
+      "createdAt",
+      String(now),
+      "updatedAt",
+      String(now),
+      "completedAt",
+      "",
+      "failedAt",
+      String(now),
+      "cancelledAt",
+      "",
+      "partitionKey",
+      "*",
+      "partitionSlot",
+      "",
+      "concurrencySlot",
+      "",
+    );
+    await redis.sadd(`workflow:${name}:active`, "zombie");
+
+    const assertQueueBounded = async (maxLen: number) => {
+      const queue = redis.getList(`workflow:${name}:queue`);
+
+      expect(queue.length).toBeLessThanOrEqual(maxLen);
+
+      const copies = new Map<string, number>();
+
+      for (const id of queue) {
+        copies.set(id, (copies.get(id) ?? 0) + 1);
+      }
+
+      for (const count of copies.values()) {
+        expect(count).toBe(1);
+      }
+    };
+
+    const wf = defineWorkflow({
+      name,
+      redis,
+      ...fast,
+      concurrency: 1,
+      lockTTL: 10_000,
+      retries: 0,
+      handler: async ({ executionId, sleep: durableSleep, step }) => {
+        if (executionId === "holder") {
+          await durableSleep(1500);
+        }
+
+        await step("work", async () => "ok");
+        return "done";
+      },
+    });
+
+    await wf.start({}, { executionId: "w1" });
+    await wf.start({}, { executionId: "w2" });
+
+    for (let i = 0; i < 20; i++) {
+      await sleep(20);
+      await assertQueueBounded(4);
+    }
+
+    await waitStatus(wf, "w1", "completed", 5000);
+    await waitStatus(wf, "w2", "completed", 5000);
+
+    expect(await redis.get(`workflow:${name}:partition:*:0`)).toBeNull();
+
+    await wf.start({}, { executionId: "holder" });
+    await waitFor(async () => {
+      return (await redis.get(`workflow:${name}:partition:*:0`)) === "holder";
+    });
+
+    await wf.start({}, { executionId: "w3" });
+    await wf.start({}, { executionId: "w4" });
+
+    for (let i = 0; i < 8; i++) {
+      await sleep(250);
+      await assertQueueBounded(4);
+    }
+
+    await waitStatus(wf, "holder", "completed", 5000);
+    await waitStatus(wf, "w3", "completed", 5000);
+    await waitStatus(wf, "w4", "completed", 5000);
+
+    await stop(wf);
+  });
+
   test("timer claim crash restored from history", async () => {
     const redis = createRedis();
     const name = `timer-claim-${crypto.randomUUID()}`;

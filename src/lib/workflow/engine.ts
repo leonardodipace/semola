@@ -1402,21 +1402,7 @@ export class WorkflowEngine<TInput, TResult> {
       keys.add(heldKey);
     }
 
-    await this.store.markInactive(executionId);
-    this.aborts.delete(executionId);
-
     for (const capacityKey of keys) {
-      const slot = held.get(capacityKey);
-
-      if (slot !== undefined) {
-        await this.store.releasePartition({
-          partitionKey: capacityKey,
-          slot,
-          executionId,
-        });
-        continue;
-      }
-
       await this.store.releaseOwnedPartitions({
         partitionKey: capacityKey,
         executionId,
@@ -1424,6 +1410,8 @@ export class WorkflowEngine<TInput, TResult> {
       });
     }
 
+    await this.store.markInactive(executionId);
+    this.aborts.delete(executionId);
     this.capacitySlots.delete(executionId);
   }
 
