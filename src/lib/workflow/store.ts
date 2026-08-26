@@ -37,6 +37,10 @@ export const UPDATE_META_AND_ACTIVE =
 export const SCHEDULE_TIMER_IF_ABSENT =
   "if redis.call('ZSCORE', KEYS[1], ARGV[2]) ~= false then return 0 end redis.call('ZADD', KEYS[1], ARGV[1], ARGV[2]) return 1";
 
+export const ENQUEUE_IF_ABSENT =
+  // ponytail: LPOS O(n) scan, queued SET if the queue is huge
+  "if redis.call('LPOS', KEYS[1], ARGV[1]) then return 0 end redis.call('LPUSH', KEYS[1], ARGV[1]) return 1";
+
 export const APPEND_IF_LEASE =
   "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end for i = 2, #ARGV do redis.call('RPUSH', KEYS[2], ARGV[i]) end return 1";
 
@@ -232,7 +236,12 @@ export class WorkflowStore {
 
   public async enqueue(executionId: string) {
     const [error] = await mightThrow(
-      this.redis.lpush(keys.queue(this.name), executionId),
+      this.redis.send("EVAL", [
+        ENQUEUE_IF_ABSENT,
+        "1",
+        keys.queue(this.name),
+        executionId,
+      ]),
     );
 
     if (error) {

@@ -136,6 +136,24 @@ describe("WorkflowStore", () => {
     expect(await store.dequeue()).toBeNull();
   });
 
+  test("enqueue skips when executionId is already queued", async () => {
+    const redis = createRedis();
+    const store = new WorkflowStore(redis, "store-queue-dedup");
+
+    await store.enqueue("a");
+    await store.enqueue("a");
+    await store.enqueue("b");
+    await store.enqueue("a");
+
+    expect(redis.getList(keys.queue("store-queue-dedup"))).toEqual(["b", "a"]);
+    expect(await store.dequeue()).toBe("a");
+    expect(await store.dequeue()).toBe("b");
+    expect(await store.dequeue()).toBeNull();
+
+    await store.enqueue("a");
+    expect(await store.dequeue()).toBe("a");
+  });
+
   test("lease acquire extend release and ownership", async () => {
     const store = new WorkflowStore(createRedis(), "store-lease");
     const executionId = "exec-4";
@@ -434,7 +452,7 @@ describe("WorkflowStore", () => {
     const redis = createRedis();
     const store = new WorkflowStore(redis, "store-enqueue-fail");
 
-    redis.failNext("lpush");
+    redis.failNext("send");
 
     await expect(store.enqueue("exec-z")).rejects.toMatchObject({
       name: "WorkflowStoreError",
