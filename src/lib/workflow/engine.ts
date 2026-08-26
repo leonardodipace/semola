@@ -461,8 +461,16 @@ export class WorkflowEngine<TInput, TResult> {
     return controller;
   }
 
+  private capacityKey(partitionKey: string) {
+    if (this.options.partitionBy) {
+      return partitionKey || GLOBAL_CAPACITY_KEY;
+    }
+
+    return GLOBAL_CAPACITY_KEY;
+  }
+
   private capacityTargets(partitionKey: string): CapacityTarget[] {
-    return [{ key: partitionKey, field: "partitionSlot" }];
+    return [{ key: this.capacityKey(partitionKey), field: "partitionSlot" }];
   }
 
   private parseSlot(raw: string | undefined) {
@@ -491,7 +499,9 @@ export class WorkflowEngine<TInput, TResult> {
     const partitionSlot = this.parseSlot(meta.partitionSlot);
 
     if (partitionSlot !== undefined) {
-      const key = partitionKey || meta.partitionKey || GLOBAL_CAPACITY_KEY;
+      const key = this.capacityKey(
+        partitionKey || meta.partitionKey || GLOBAL_CAPACITY_KEY,
+      );
       slots.set(key, partitionSlot);
     }
 
@@ -507,10 +517,9 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private resolvePartitionSlot(executionId: string, meta: WorkflowMeta | null) {
-    const partitionKey = meta?.partitionKey ?? "";
     const held = this.heldSlots(executionId, meta);
 
-    return held.get(partitionKey);
+    return held.get(this.capacityKey(meta?.partitionKey ?? ""));
   }
 
   private async ensureCapacity(input: EnsureCapacityInput) {
@@ -581,7 +590,7 @@ export class WorkflowEngine<TInput, TResult> {
     }
 
     persistHeld();
-    return held.get(partitionKey) ?? null;
+    return held.get(this.capacityKey(partitionKey)) ?? null;
   }
 
   private async runExecution(executionId: string, token: string) {
@@ -1331,7 +1340,7 @@ export class WorkflowEngine<TInput, TResult> {
         await this.clearExecutionLocalState({
           executionId,
           partitionKey: meta.partitionKey,
-          partitionSlot: held.get(meta.partitionKey),
+          partitionSlot: held.get(this.capacityKey(meta.partitionKey)),
         });
         continue;
       }

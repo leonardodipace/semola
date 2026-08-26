@@ -215,7 +215,7 @@ await deploy.start({ envId: "production" });
 await deploy.start({ envId: "staging" }, { partitionKey: "shared" });
 ```
 
-Different keys do not share the cap. Same key still serializes to `concurrency`.
+Different keys do not share the cap. Same-key executions are limited to `concurrency`.
 
 ### Keep terminal history
 
@@ -271,7 +271,7 @@ await onboard.stop();
 
 `start(input, { executionId?, partitionKey? })` - `partitionKey` overrides `partitionBy`. Custom `executionId` must be non-empty and must not contain `:`. Empty `partitionKey` throws.
 
-`partitionKey` on `start` overrides `partitionBy` when both are present. Empty keys throw. The resolved key is stored on execution meta so `resume` keeps the original partition.
+`partitionKey` on `start` overrides `partitionBy` when both are present. Without `partitionBy`, `partitionKey` is stored on meta but capacity stays on the global `*` pool. Empty keys throw. The resolved key is stored on execution meta so `resume` keeps the original partition.
 
 Failed steps retry with exponential backoff before the workflow is marked `failed`. Default `retries: 3` means 4 total attempts. `retries: 0` fails on the first error.
 

@@ -2723,6 +2723,87 @@ describe("workflow", () => {
       await stop(wf);
     });
 
+    test("partitionKey without partitionBy stays on global pool", async () => {
+      const redis = createRedis();
+      const name = `psk-global-${crypto.randomUUID()}`;
+      let concurrent = 0;
+      let maxConcurrent = 0;
+
+      const handler = async ({
+        step,
+      }: {
+        step: <T>(n: string, h: () => T | Promise<T>) => Promise<T>;
+      }) => {
+        await step("work", async () => {
+          concurrent++;
+          maxConcurrent = Math.max(maxConcurrent, concurrent);
+          await sleep(20);
+          concurrent--;
+          return true;
+        });
+
+        return true;
+      };
+
+      const store1 = new WorkflowStore(redis, name);
+      const store2 = new WorkflowStore(redis, name);
+      const engine1 = new WorkflowEngine(
+        { name, redis, ...fast, concurrency: 1, handler },
+        store1,
+      );
+      const engine2 = new WorkflowEngine(
+        { name, redis, ...fast, concurrency: 1, handler },
+        store2,
+      );
+
+      engine1.start();
+      engine2.start();
+
+      const start = async (executionId: string, partitionKey: string) => {
+        await store1.tryCreateMetaAndActive(executionId, {
+          name,
+          status: "pending",
+          input: "{}",
+          result: "",
+          error: "",
+          createdAt: String(Date.now()),
+          updatedAt: String(Date.now()),
+          completedAt: "",
+          failedAt: "",
+          cancelledAt: "",
+          partitionKey,
+          partitionSlot: "",
+          concurrencySlot: "",
+        });
+        await store1.appendEvents({
+          executionId,
+          events: [
+            {
+              type: "WorkflowStarted",
+              input: "{}",
+              partitionKey,
+              timestamp: Date.now(),
+            },
+          ],
+        });
+        await store1.enqueue(executionId);
+      };
+
+      await start("psk-a", "a");
+      await start("psk-b", "b");
+
+      await waitFor(async () => {
+        const a = await store1.getMeta("psk-a");
+        const b = await store1.getMeta("psk-b");
+        return a?.status === "completed" && b?.status === "completed";
+      });
+
+      expect(maxConcurrent).toBe(1);
+
+      await engine1.stop();
+      await engine2.stop();
+    });
+
     test("start partitionKey overrides partitionBy", async () => {
       const redis = createRedis();
       let maxConcurrent = 0;
