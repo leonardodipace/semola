@@ -360,14 +360,24 @@ export class WorkflowEngine<TInput, TResult> {
       }
 
       this.active++;
-      await mightThrow(
+
+      const run = mightThrow(
         this.withLease({
           executionId,
           work: (token) => this.runExecution(executionId, token),
           onBusy: () => this.store.enqueue(executionId),
         }),
-      );
-      this.active--;
+      ).finally(() => {
+        this.active--;
+      });
+
+      // ponytail: partitioned dequeue is not process-capped; Redis per-key slots gate work
+      if (this.options.partitionBy) {
+        void run;
+        continue;
+      }
+
+      await run;
     }
   }
 
@@ -452,14 +462,7 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private capacityTargets(partitionKey: string): CapacityTarget[] {
-    if (partitionKey === GLOBAL_CAPACITY_KEY) {
-      return [{ key: GLOBAL_CAPACITY_KEY, field: "partitionSlot" }];
-    }
-
-    return [
-      { key: GLOBAL_CAPACITY_KEY, field: "concurrencySlot" },
-      { key: partitionKey, field: "partitionSlot" },
-    ];
+    return [{ key: partitionKey, field: "partitionSlot" }];
   }
 
   private parseSlot(raw: string | undefined) {

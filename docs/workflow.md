@@ -198,7 +198,7 @@ const sync = defineWorkflow<{ accountId: string }, { synced: true }>({
 
 ### Limit concurrency by partition
 
-`partitionBy` adds a per-key cap alongside the global cap. Both use the same `concurrency` value. `partitionKey` on `start` overrides `partitionBy`; resume keeps the stored key.
+Without `partitionBy`, `concurrency` is global. With `partitionBy`, it is per key. `partitionKey` on `start` overrides `partitionBy`; resume keeps the stored key.
 
 ```typescript
 const deploy = defineWorkflow<{ envId: string }, void>({
@@ -215,7 +215,7 @@ await deploy.start({ envId: "production" });
 await deploy.start({ envId: "staging" }, { partitionKey: "shared" });
 ```
 
-One partition can still fill every global slot; `partitionBy` does not reserve slots for other keys.
+Different keys do not share the cap. Same key still serializes to `concurrency`.
 
 ### Keep terminal history
 
@@ -262,11 +262,11 @@ await onboard.stop();
 - **`retries`** - step retries before workflow fails (default: 3; `0` = fail on first error)
 - **`retryBackoff`** - `{ baseDelay, multiplier, maxDelay }` (defaults: 1000 / 2x / 30000)
 - **`hooks`** - `onStart`, `onRetry`, `onError`, `onComplete`, `onCancel` (see [Hooks](#hooks))
-- **`lockTTL`** - execution lease TTL in ms (default: 300000); also used as capacity slot TTL. While a process holds an execution, it refreshes that execution's capacity slots (global `*` and partition key if any) for the full lifetime (including `sleep` and retry backoff). After process death, the Redis slot remains owned until TTL; the next reclaim re-attaches via the same `executionId`. Differing replica `concurrency` values mean the effective cap is the max.
+- **`lockTTL`** - execution lease TTL in ms (default: 300000); also used as capacity slot TTL. While a process holds an execution, it refreshes that execution's capacity slot for the full lifetime (including `sleep` and retry backoff). After process death, the Redis slot remains owned until TTL; the next reclaim re-attaches via the same `executionId`. Differing replica `concurrency` values mean the effective cap is the max.
 - **`retentionTTL`** - how long terminal executions (`completed` / `failed` / `cancelled`) stay in Redis, in ms (default: 86400000, 24h). `Infinity` keeps them forever. Any other value must be a non-negative number. `0` unlinks immediately after terminal. Pending and running keys are never expired. Failed executions can be `resume`d only while they still exist. A background sweep also expires leftover terminal keys with no TTL.
 - **`retentionMax`** - optional cap on terminal executions per workflow name. Must be a positive integer. Oldest are `UNLINK`ed when the cap is exceeded. Works with or without a finite `retentionTTL`.
-- **`concurrency`** - max parallel instances across replicas (default: 1). Also the number of workflow pollers in this process. Without `partitionBy`, all executions share one Redis slot pool of size `concurrency` (key `*`). With `partitionBy`, both the global pool and the per-key pool apply (each size `concurrency`). If replicas disagree on `concurrency`, the effective cap is the max.
-- **`partitionBy`** - `(input) => string` for per-key concurrency across replicas. Empty keys throw. Cap applies for the whole execution, including durable waits. Does not replace the global `concurrency` cap - both apply. The key `*` is reserved for the global pool.
+- **`concurrency`** - max parallel instances across replicas (default: 1). Without `partitionBy`, all executions share one Redis slot pool of size `concurrency` (key `*`) and this process runs that many pollers. With `partitionBy`, each key has its own pool of size `concurrency` (no global cap). If replicas disagree on `concurrency`, the effective cap is the max.
+- **`partitionBy`** - `(input) => string` for per-key concurrency across replicas. Empty keys throw. Cap applies for the whole execution, including durable waits. Replaces the global `concurrency` cap. The key `*` is reserved for the unpartitioned pool.
 - **`pollInterval`** - idle poll backoff ms (default: 100)
 
 `start(input, { executionId?, partitionKey? })` - `partitionKey` overrides `partitionBy`. Custom `executionId` must be non-empty and must not contain `:`. Empty `partitionKey` throws.
@@ -301,7 +301,7 @@ Prefix: `workflow:`
 | `workflow:{name}:timer-dead` | unparseable timer payloads (dead letter) |
 | `workflow:{name}:active` | non-terminal execution ids (reclaimer) |
 | `workflow:{name}:terminal` | zset of terminal execution ids when `retentionMax` is set |
-| `workflow:{name}:partition:{key}:{slot}` | concurrency slots (`SET NX PX`, re-ownable by same execution). Key `*` is the global pool; `partitionBy` keys are additional per-key pools |
+| `workflow:{name}:partition:{key}:{slot}` | concurrency slots (`SET NX PX`, re-ownable by same execution). Key `*` is the unpartitioned pool; `partitionBy` keys are per-key pools |
 
 Terminal `meta` and `history` keys receive `PEXPIRE` from `retentionTTL` (or are `UNLINK`ed when the TTL has already elapsed). Leases and partition slots keep using `lockTTL`. `listWorkflows` skips empty SCAN hits (expired tombstones).
 

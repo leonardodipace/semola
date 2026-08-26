@@ -603,7 +603,7 @@ describe("workflow", () => {
     await stop(wf);
   });
 
-  test("global concurrency caps different partition keys", async () => {
+  test("partitionBy concurrency is per key not global", async () => {
     const redis = createRedis();
     let concurrent = 0;
     let maxConcurrent = 0;
@@ -633,7 +633,7 @@ describe("workflow", () => {
     await waitStatus(wf, "pg-a", "completed");
     await waitStatus(wf, "pg-b", "completed");
 
-    expect(maxConcurrent).toBe(1);
+    expect(maxConcurrent).toBe(2);
 
     await stop(wf);
   });
@@ -2795,7 +2795,7 @@ describe("workflow", () => {
         name: `po-${crypto.randomUUID()}`,
         redis,
         ...fast,
-        concurrency: 2,
+        concurrency: 1,
         partitionBy: (input) => input.envId,
         handler: async ({ step }) => {
           await step("work", async () => {
