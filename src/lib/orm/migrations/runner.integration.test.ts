@@ -2401,6 +2401,22 @@ export default defineConfig({
 
     await expect(applyMigrations(config)).rejects.toThrow("checksum");
   });
+
+  test("accepts CRLF line endings in an applied up.sql checksum", async () => {
+    const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
+    const project = await setupProject(dbFile);
+    const config = await loadConfig(project.root);
+    const folder = await createMigration({ name: "first", config });
+
+    await applyMigrations(config);
+
+    const upPath = join(project.migrationsDir, folder, "up.sql");
+    const upSql = await Bun.file(upPath).text();
+
+    await Bun.write(upPath, upSql.replaceAll("\n", "\r\n"));
+
+    expect(await applyMigrations(config)).toEqual([]);
+  });
 });
 
 if (SEMOLA_POSTGRES_URL) {

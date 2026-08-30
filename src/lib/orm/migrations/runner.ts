@@ -199,7 +199,9 @@ const assertHistoryMatchesFiles = (
 };
 
 const hashUpSql = (text: string) => {
-  return createHash("sha256").update(text).digest("hex");
+  return createHash("sha256")
+    .update(text.replaceAll("\r\n", "\n").replaceAll("\r", "\n"))
+    .digest("hex");
 };
 
 const readSqlFile = async (filePath: string, label: string) => {

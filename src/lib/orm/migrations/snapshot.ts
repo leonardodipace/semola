@@ -64,6 +64,30 @@ const snapshotColumn = (
   return snapshot;
 };
 
+const assertForeignKeyTypes = (tables: Record<string, TableSnapshot>) => {
+  for (const table of Object.values(tables)) {
+    for (const column of Object.values(table.columns)) {
+      if (!column.references) continue;
+
+      const target = tables[column.references.table];
+
+      if (!target) continue;
+
+      const referenced = target.columns[column.references.column];
+
+      if (!referenced) continue;
+
+      if (column.type === referenced.type) {
+        if (column.sqlType === referenced.sqlType) continue;
+      }
+
+      throw new MigrationError(
+        `Column ${table.name}.${column.name} type ${column.sqlType ?? column.type} does not match referenced ${column.references.table}.${column.references.column} type ${referenced.sqlType ?? referenced.type}`,
+      );
+    }
+  }
+};
+
 const snapshotTable = (table: Table, tables: Record<string, Table>) => {
   const columns: Record<string, ColumnSnapshot> = {};
 
@@ -83,6 +107,8 @@ export const snapshotSchema = (tables: Record<string, Table>) => {
   for (const table of Object.values(tables)) {
     result[table.sqlName] = snapshotTable(table, tables);
   }
+
+  assertForeignKeyTypes(result);
 
   return { tables: result };
 };

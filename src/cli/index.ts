@@ -47,10 +47,8 @@ const renamePromptCopy = (question: RenameQuestion) => {
       renameLabel: (from: string) => {
         return `Rename "${from}" → "${created}" (keeps existing rows)`;
       },
-      createLabel: (dropped: string[]) => {
-        const removed = dropped.map((name) => `"${name}"`).join(", ");
-
-        return `Create "${created}" and drop ${removed} (deletes those tables' data)`;
+      createLabel: () => {
+        return `Create "${created}" as a new table`;
       },
     };
   }
@@ -62,12 +60,8 @@ const renamePromptCopy = (question: RenameQuestion) => {
     renameLabel: (from: string) => {
       return `Rename "${question.table}.${from}" → "${created}" (keeps existing values)`;
     },
-    createLabel: (dropped: string[]) => {
-      const removed = dropped
-        .map((name) => `"${question.table}.${name}"`)
-        .join(", ");
-
-      return `Create "${created}" and drop ${removed} (deletes those columns' values)`;
+    createLabel: () => {
+      return `Create "${created}" as a new column`;
     },
   };
 };
@@ -87,7 +81,7 @@ const promptRename = async (question: RenameQuestion) => {
 
   choices.push({
     value: CREATE,
-    label: copy.createLabel(question.dropped),
+    label: copy.createLabel(),
   });
 
   const selected = await select({

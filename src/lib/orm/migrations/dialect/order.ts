@@ -1,7 +1,7 @@
 import { MigrationError } from "../../errors.js";
 import type { ColumnSnapshot, MigrationOp, TableSnapshot } from "../types.js";
 
-const withoutForeignKeys = (table: TableSnapshot) => {
+export const withoutForeignKeys = (table: TableSnapshot) => {
   const columns: Record<string, ColumnSnapshot> = {};
 
   for (const column of Object.values(table.columns)) {
@@ -13,7 +13,7 @@ const withoutForeignKeys = (table: TableSnapshot) => {
   return { name: table.name, columns };
 };
 
-const foreignKeysOf = (tables: TableSnapshot[]) => {
+export const foreignKeysOf = (tables: TableSnapshot[]) => {
   const ops: MigrationOp[] = [];
 
   for (const table of tables) {

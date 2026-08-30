@@ -44,6 +44,24 @@ const notNullWarning = (label: string) => {
   return `-- warning: ${label} fails if existing rows contain NULL`;
 };
 
+const enumCheckMayFail = (from: ColumnSnapshot, to: ColumnSnapshot) => {
+  if (!to.enumValues?.length) return false;
+
+  if (!from.enumValues?.length) return true;
+
+  const allowed = new Set(to.enumValues);
+
+  for (const value of from.enumValues) {
+    if (!allowed.has(value)) return true;
+  }
+
+  return false;
+};
+
+const enumCheckWarning = (label: string, column: ColumnSnapshot) => {
+  return `-- warning: ${label} enum CHECK fails if existing rows have values outside ${column.enumValues?.join(", ")}`;
+};
+
 export const hasDestructiveOps = (ops: MigrationOp[]) => {
   for (const op of ops) {
     if (op.kind === "dropTable") return true;
@@ -114,6 +132,12 @@ export const dataLossWarnings = (ops: MigrationOp[]) => {
         }
       }
 
+      if (enumCheckMayFail(op.from, op.to)) {
+        warnings.push(
+          enumCheckWarning(`ALTER COLUMN "${op.table}"."${op.to.name}"`, op.to),
+        );
+      }
+
       continue;
     }
 
@@ -143,6 +167,12 @@ export const dataLossWarnings = (ops: MigrationOp[]) => {
             ),
           );
         }
+      }
+
+      if (enumCheckMayFail(previous, column)) {
+        warnings.push(
+          enumCheckWarning(`recreate "${op.to.name}"."${column.name}"`, column),
+        );
       }
     }
   }

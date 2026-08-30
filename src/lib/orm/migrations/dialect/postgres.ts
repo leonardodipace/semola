@@ -2,6 +2,7 @@ import { POSTGRES_SPEC } from "../../dialect/postgres.js";
 import { quoteIdentifier } from "../../utils.js";
 import type { ColumnSnapshot, MigrationOp, SchemaSnapshot } from "../types.js";
 import { MigrationDialect } from "./dialect.js";
+import { foreignKeysOf, withoutForeignKeys } from "./order.js";
 
 const typeOrKeyChanged = (from: ColumnSnapshot, to: ColumnSnapshot) => {
   if (from.type !== to.type) return true;
@@ -80,7 +81,50 @@ export class PostgresMigrationDialect extends MigrationDialect {
     to: SchemaSnapshot,
     ops: MigrationOp[],
   ) {
-    return this.expandForeignKeys(from, to, super.normalizeOps(from, to, ops));
+    return this.expandForeignKeys(
+      from,
+      to,
+      this.deferInlineForeignKeys(super.normalizeOps(from, to, ops)),
+    );
+  }
+
+  private deferInlineForeignKeys(ops: MigrationOp[]) {
+    const rewritten: MigrationOp[] = [];
+    const deferred: MigrationOp[] = [];
+
+    for (const op of ops) {
+      if (op.kind === "createTable") {
+        deferred.push(...foreignKeysOf([op.table]));
+        rewritten.push({
+          kind: "createTable",
+          table: withoutForeignKeys(op.table),
+        });
+        continue;
+      }
+
+      if (op.kind === "addColumn") {
+        if (op.column.references) {
+          deferred.push({
+            kind: "addForeignKey",
+            table: op.table,
+            column: op.column,
+          });
+
+          const { references: _references, ...column } = op.column;
+
+          rewritten.push({
+            kind: "addColumn",
+            table: op.table,
+            column,
+          });
+          continue;
+        }
+      }
+
+      rewritten.push(op);
+    }
+
+    return [...rewritten, ...deferred];
   }
 
   private expandForeignKeys(

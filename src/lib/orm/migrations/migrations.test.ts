@@ -224,8 +224,9 @@ describe("orm migrations snapshot/diff/sql", () => {
 
     expect(createAt).toBeGreaterThanOrEqual(0);
     expect(addAt).toBeGreaterThan(createAt);
+    expect(sql.indexOf("ADD CONSTRAINT")).toBeGreaterThan(addAt);
     expect(sql).toContain(
-      'CONSTRAINT "posts_author_id_fkey" REFERENCES "authors" ("id")',
+      'ADD CONSTRAINT "posts_author_id_fkey" FOREIGN KEY ("author_id") REFERENCES "authors" ("id")',
     );
   });
 
@@ -280,6 +281,88 @@ describe("orm migrations snapshot/diff/sql", () => {
 
     expect(createAuthorsAt).toBeGreaterThanOrEqual(0);
     expect(addFkAt).toBeGreaterThan(createAuthorsAt);
+  });
+
+  test("postgres adds new-table foreign keys after parent column type changes", () => {
+    const authorsBefore = defineTable("authors", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const authorsAfter = defineTable("authors", {
+      id: string("id").primaryKey().notNull(),
+    });
+    const posts = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: string("author_id").references(() => authorsAfter.columns.id),
+    });
+    const sql = getMigrationDialect("postgres").render(
+      diffSchemas(
+        snapshotSchema({ authors: authorsBefore }),
+        snapshotSchema({ authors: authorsAfter, posts }),
+        getMigrationDialect("postgres"),
+      ),
+    );
+    const typeAt = sql.indexOf("TYPE TEXT");
+    const addFkAt = sql.indexOf('ADD CONSTRAINT "posts_author_id_fkey"');
+    const createPostsAt = sql.indexOf('CREATE TABLE "posts"');
+    const createPostsEnd = sql.indexOf(";", createPostsAt);
+
+    expect(typeAt).toBeGreaterThanOrEqual(0);
+    expect(addFkAt).toBeGreaterThan(typeAt);
+    expect(createPostsAt).toBeGreaterThanOrEqual(0);
+    expect(sql.slice(createPostsAt, createPostsEnd)).not.toContain(
+      "REFERENCES",
+    );
+  });
+
+  test("postgres adds new-table foreign keys after a new parent unique column exists", () => {
+    const usersBefore = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+    });
+    const usersAfter = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").notNull().unique().dbDefault("x"),
+    });
+    const posts = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      email: string("email").references(() => usersAfter.columns.email),
+    });
+    const sql = getMigrationDialect("postgres").render(
+      diffSchemas(
+        snapshotSchema({ users: usersBefore }),
+        snapshotSchema({ users: usersAfter, posts }),
+        getMigrationDialect("postgres"),
+      ),
+    );
+    const addColumnAt = sql.indexOf('ADD COLUMN "email"');
+    const addFkAt = sql.indexOf('ADD CONSTRAINT "posts_email_fkey"');
+
+    expect(addColumnAt).toBeGreaterThanOrEqual(0);
+    expect(addFkAt).toBeGreaterThan(addColumnAt);
+  });
+
+  test("postgres adds new-table foreign keys after unique-to-primary-key on the parent", () => {
+    const usersBefore = defineTable("users", {
+      id: string("id").notNull().unique(),
+    });
+    const usersAfter = defineTable("users", {
+      id: string("id").primaryKey().notNull(),
+    });
+    const posts = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: string("author_id").references(() => usersAfter.columns.id),
+    });
+    const sql = getMigrationDialect("postgres").render(
+      diffSchemas(
+        snapshotSchema({ users: usersBefore }),
+        snapshotSchema({ users: usersAfter, posts }),
+        getMigrationDialect("postgres"),
+      ),
+    );
+    const addPkAt = sql.indexOf('ADD CONSTRAINT "users_pkey"');
+    const addFkAt = sql.indexOf('ADD CONSTRAINT "posts_author_id_fkey"');
+
+    expect(addPkAt).toBeGreaterThanOrEqual(0);
+    expect(addFkAt).toBeGreaterThan(addPkAt);
   });
 
   test("sqlite recreates a child table before dropping its parent", () => {
@@ -762,6 +845,9 @@ describe("orm migrations snapshot/diff/sql", () => {
     expect(sql).toContain('ADD CONSTRAINT "users_status_check"');
     expect(sql).toContain("'archived'");
     expect(sql).not.toContain("ALTER COLUMN");
+    expect(sql).not.toContain(
+      "enum CHECK fails if existing rows have values outside",
+    );
   });
 
   test("postgres type changes use USING CAST", () => {
@@ -983,6 +1069,22 @@ describe("orm migrations snapshot/diff/sql", () => {
 
     expect(() => snapshotSchema({ posts })).toThrow(
       "not in createOrm({ tables })",
+    );
+  });
+
+  test("throws when a foreign key type does not match its target", () => {
+    const users = defineTable("users", {
+      id: string("id").primaryKey().notNull(),
+    });
+    const posts = defineTable("posts", {
+      id: uuid("id").primaryKey().notNull(),
+      authorId: uuid("author_id")
+        .notNull()
+        .references(() => users.columns.id),
+    });
+
+    expect(() => snapshotSchema({ users, posts })).toThrow(
+      "posts.author_id type uuid does not match referenced users.id type string",
     );
   });
 
@@ -1388,6 +1490,31 @@ describe("orm migrations snapshot/diff/sql", () => {
     expect(sql).toContain("'draft'");
     expect(sql).toContain("'live'");
     expect(sql).not.toContain("'archived'");
+    expect(sql).toContain(
+      'ALTER COLUMN "users"."status" enum CHECK fails if existing rows have values outside draft, live',
+    );
+  });
+
+  test("warns when a string column becomes an enum", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      status: string("status").notNull(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      status: enumType("status", ["draft", "live"]).notNull(),
+    });
+    const sql = getMigrationDialect("postgres").render(
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        getMigrationDialect("postgres"),
+      ),
+    );
+
+    expect(sql).toContain(
+      'ALTER COLUMN "users"."status" enum CHECK fails if existing rows have values outside draft, live',
+    );
   });
 
   test("allows adding a NOT NULL column when a default is present", () => {
@@ -2003,6 +2130,29 @@ describe("orm migrations snapshot/diff/sql", () => {
     );
 
     expect(ops[0]?.kind).toBe("recreateTable");
+  });
+
+  test("warns when sqlite recreates a table to narrow an enum", () => {
+    const before = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      status: enumType("status", ["draft", "live", "archived"]).notNull(),
+    });
+    const after = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      status: enumType("status", ["draft", "live"]).notNull(),
+    });
+    const sql = getMigrationDialect("sqlite").render(
+      diffSchemas(
+        snapshotSchema({ users: before }),
+        snapshotSchema({ users: after }),
+        getMigrationDialect("sqlite"),
+      ),
+    );
+
+    expect(sql).toContain("CREATE TABLE");
+    expect(sql).toContain(
+      'recreate "users"."status" enum CHECK fails if existing rows have values outside draft, live',
+    );
   });
 
   test("up and down of a create table are inverses for postgres", () => {
