@@ -87,3 +87,43 @@ export type LoadedConfig = {
   migrationsDir: string;
   orm: OrmConfig;
 };
+
+export type MigrationRenderHelpers = {
+  sqlTypeFor: (column: ColumnSnapshot) => string;
+  formatDefault: (value: string) => string;
+  enumCheckSql: (column: ColumnSnapshot) => string | undefined;
+};
+
+export type MigrationDialectSpec = {
+  name: Adapter;
+  sqlTypes: Record<ColumnSnapshot["type"], string>;
+  uuidType: string;
+  formatPlaceholder: (index: number) => string;
+  formatDefault: (value: string) => string;
+  deferCircularForeignKeys: boolean;
+  sqlTypeFor?: (column: ColumnSnapshot) => string | undefined;
+  normalizeOps?: (
+    from: SchemaSnapshot,
+    to: SchemaSnapshot,
+    ops: MigrationOp[],
+  ) => MigrationOp[];
+  renderAlterColumn?: (
+    table: string,
+    from: ColumnSnapshot,
+    to: ColumnSnapshot,
+    helpers: MigrationRenderHelpers,
+  ) => string;
+  renderRenameTable?: (
+    op: Extract<MigrationOp, { kind: "renameTable" }>,
+  ) => string;
+  renderRenameColumn?: (
+    op: Extract<MigrationOp, { kind: "renameColumn" }>,
+  ) => string;
+  prepareConnection?: (sql: Bun.SQL) => Promise<void>;
+  assertForeignKeys?: (sql: Bun.SQL) => Promise<void>;
+  lockMigrations?: (sql: Bun.SQL) => Promise<void>;
+  beginMigration?: <T>(
+    sql: Bun.SQL,
+    fn: (tx: Bun.SQL) => Promise<T>,
+  ) => Promise<T>;
+};

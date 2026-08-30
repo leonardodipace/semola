@@ -2,6 +2,7 @@ import { MigrationError } from "../../errors.js";
 import { quoteIdentifier } from "../../utils.js";
 import type {
   ColumnSnapshot,
+  MigrationDialectSpec,
   MigrationOp,
   SchemaSnapshot,
   TableSnapshot,
@@ -9,121 +10,49 @@ import type {
 import { orderOps } from "./order.js";
 import { dataLossWarnings } from "./warnings.js";
 
-export abstract class MigrationDialect {
-  public abstract readonly name: "sqlite" | "postgres";
-  protected abstract readonly sqlTypes: Record<ColumnSnapshot["type"], string>;
-  protected abstract readonly uuidType: string;
+const enumCheckSql = (column: ColumnSnapshot) => {
+  if (!column.enumValues?.length) return undefined;
 
-  protected abstract formatPlaceholder(index: number): string;
+  const list = column.enumValues
+    .map((value) => `'${value.replaceAll("'", "''")}'`)
+    .join(", ");
 
-  public async prepareConnection(_sql: Bun.SQL) {}
+  return `CHECK (${quoteIdentifier(column.name)} IN (${list}))`;
+};
 
-  public async assertForeignKeys(_sql: Bun.SQL) {}
+export class MigrationDialect {
+  public readonly name;
+  private spec: MigrationDialectSpec;
 
-  public async lockMigrations(_sql: Bun.SQL) {}
+  public constructor(spec: MigrationDialectSpec) {
+    this.spec = spec;
+    this.name = spec.name;
+  }
+
+  public async prepareConnection(sql: Bun.SQL) {
+    await this.spec.prepareConnection?.(sql);
+  }
+
+  public async assertForeignKeys(sql: Bun.SQL) {
+    await this.spec.assertForeignKeys?.(sql);
+  }
+
+  public async lockMigrations(sql: Bun.SQL) {
+    await this.spec.lockMigrations?.(sql);
+  }
 
   public beginMigration<T>(sql: Bun.SQL, fn: (tx: Bun.SQL) => Promise<T>) {
+    if (this.spec.beginMigration) {
+      return this.spec.beginMigration(sql, fn);
+    }
+
     return sql.begin(fn);
   }
 
   public placeholders(count: number) {
     return Array.from({ length: count }, (_, index) => {
-      return this.formatPlaceholder(index + 1);
+      return this.spec.formatPlaceholder(index + 1);
     }).join(", ");
-  }
-
-  protected sqlTypeFor(column: ColumnSnapshot) {
-    if (column.sqlType === "uuid") {
-      return this.uuidType;
-    }
-
-    return this.sqlTypes[column.type];
-  }
-
-  protected formatDefault(value: string) {
-    return value;
-  }
-
-  protected foldTableOps(
-    fromTable: TableSnapshot,
-    toTable: TableSnapshot,
-    tableOps: MigrationOp[],
-  ) {
-    if (!this.shouldRecreate(tableOps)) {
-      return tableOps;
-    }
-
-    return [
-      {
-        kind: "recreateTable" as const,
-        from: fromTable,
-        to: toTable,
-      },
-    ];
-  }
-
-  protected foldOpsByTable(
-    from: SchemaSnapshot,
-    to: SchemaSnapshot,
-    ops: MigrationOp[],
-  ) {
-    const folded: MigrationOp[] = [];
-    let currentTable: string | undefined;
-    let buffer: MigrationOp[] = [];
-
-    const flush = () => {
-      if (!currentTable) return;
-
-      const fromTable = from.tables[currentTable];
-      const toTable = to.tables[currentTable];
-
-      if (fromTable && toTable) {
-        folded.push(...this.foldTableOps(fromTable, toTable, buffer));
-      } else {
-        folded.push(...buffer);
-      }
-
-      buffer = [];
-      currentTable = undefined;
-    };
-
-    for (const op of ops) {
-      if (op.kind === "createTable") {
-        flush();
-        folded.push(op);
-        continue;
-      }
-
-      if (op.kind === "dropTable") {
-        flush();
-        folded.push(op);
-        continue;
-      }
-
-      const table = this.opTableName(op);
-
-      if (table !== currentTable) {
-        flush();
-        currentTable = table;
-      }
-
-      buffer.push(op);
-    }
-
-    flush();
-
-    return folded;
-  }
-
-  private opTableName(op: MigrationOp) {
-    if (op.kind === "createTable") return op.table.name;
-    if (op.kind === "dropTable") return op.table.name;
-    if (op.kind === "recreateTable") return op.to.name;
-    if (op.kind === "renameTable") return op.to;
-    if (op.kind === "addPrimaryKey") return op.table;
-    if (op.kind === "dropPrimaryKey") return op.table;
-
-    return op.table;
   }
 
   public normalizeOps(
@@ -131,11 +60,15 @@ export abstract class MigrationDialect {
     to: SchemaSnapshot,
     ops: MigrationOp[],
   ) {
-    return this.foldOpsByTable(from, to, ops);
+    if (!this.spec.normalizeOps) {
+      return ops;
+    }
+
+    return this.spec.normalizeOps(from, to, ops);
   }
 
   public render(ops: MigrationOp[]) {
-    const ordered = orderOps(ops, this.deferCircularForeignKeys());
+    const ordered = orderOps(ops, this.spec.deferCircularForeignKeys);
     const warnings = dataLossWarnings(ordered);
     let warningBlock = "";
 
@@ -151,32 +84,26 @@ export abstract class MigrationDialect {
     return `${warningBlock}${body}\n`;
   }
 
-  protected shouldRecreate(_tableOps: MigrationOp[]) {
-    return false;
+  private sqlTypeFor(column: ColumnSnapshot) {
+    const override = this.spec.sqlTypeFor?.(column);
+
+    if (override !== undefined) {
+      return override;
+    }
+
+    if (column.sqlType === "uuid") {
+      return this.spec.uuidType;
+    }
+
+    return this.spec.sqlTypes[column.type];
   }
 
-  protected deferCircularForeignKeys() {
-    return false;
-  }
-
-  protected renderAlterColumn(
-    table: string,
-    _from: ColumnSnapshot,
-    to: ColumnSnapshot,
-  ): string {
-    throw new MigrationError(
-      `${this.name} cannot ALTER COLUMN ${table}.${to.name}`,
-    );
-  }
-
-  protected enumCheckSql(column: ColumnSnapshot) {
-    if (!column.enumValues?.length) return undefined;
-
-    const list = column.enumValues
-      .map((value) => `'${value.replaceAll("'", "''")}'`)
-      .join(", ");
-
-    return `CHECK (${quoteIdentifier(column.name)} IN (${list}))`;
+  private renderHelpers() {
+    return {
+      sqlTypeFor: (column: ColumnSnapshot) => this.sqlTypeFor(column),
+      formatDefault: (value: string) => this.spec.formatDefault(value),
+      enumCheckSql,
+    };
   }
 
   private renderColumnDef(
@@ -207,10 +134,10 @@ export abstract class MigrationDialect {
     }
 
     if (column.dbDefault !== undefined) {
-      parts.push(`DEFAULT ${this.formatDefault(column.dbDefault)}`);
+      parts.push(`DEFAULT ${this.spec.formatDefault(column.dbDefault)}`);
     }
 
-    const check = this.enumCheckSql(column);
+    const check = enumCheckSql(column);
 
     if (check) {
       parts.push(
@@ -290,16 +217,36 @@ export abstract class MigrationDialect {
     return `ALTER TABLE ${quoteIdentifier(table)} DROP COLUMN ${quoteIdentifier(column.name)};`;
   }
 
-  protected renderRenameTable(
-    op: Extract<MigrationOp, { kind: "renameTable" }>,
-  ) {
+  private renderRenameTable(op: Extract<MigrationOp, { kind: "renameTable" }>) {
+    if (this.spec.renderRenameTable) {
+      return this.spec.renderRenameTable(op);
+    }
+
     return `ALTER TABLE ${quoteIdentifier(op.from)} RENAME TO ${quoteIdentifier(op.to)};`;
   }
 
-  protected renderRenameColumn(
+  private renderRenameColumn(
     op: Extract<MigrationOp, { kind: "renameColumn" }>,
   ) {
+    if (this.spec.renderRenameColumn) {
+      return this.spec.renderRenameColumn(op);
+    }
+
     return `ALTER TABLE ${quoteIdentifier(op.table)} RENAME COLUMN ${quoteIdentifier(op.from)} TO ${quoteIdentifier(op.to)};`;
+  }
+
+  private renderAlterColumn(
+    table: string,
+    from: ColumnSnapshot,
+    to: ColumnSnapshot,
+  ) {
+    if (!this.spec.renderAlterColumn) {
+      throw new MigrationError(
+        `${this.spec.name} cannot ALTER COLUMN ${table}.${to.name}`,
+      );
+    }
+
+    return this.spec.renderAlterColumn(table, from, to, this.renderHelpers());
   }
 
   private castSelectColumn(quoted: string, column: ColumnSnapshot) {

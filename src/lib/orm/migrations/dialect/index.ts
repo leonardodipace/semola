@@ -1,16 +1,17 @@
 import type { Adapter } from "../../dialect/types.js";
 import { MigrationError } from "../../errors.js";
-import { PostgresMigrationDialect } from "./postgres.js";
-import { SqliteMigrationDialect } from "./sqlite.js";
+import { MigrationDialect } from "./dialect.js";
+import { POSTGRES_MIGRATION_SPEC } from "./postgres.js";
+import { SQLITE_MIGRATION_SPEC } from "./sqlite.js";
 
 export type { MigrationDialect } from "./dialect.js";
 
 export const getMigrationDialect = (adapter: Adapter) => {
   switch (adapter) {
     case "sqlite":
-      return new SqliteMigrationDialect();
+      return new MigrationDialect(SQLITE_MIGRATION_SPEC);
     case "postgres":
-      return new PostgresMigrationDialect();
+      return new MigrationDialect(POSTGRES_MIGRATION_SPEC);
     default:
       throw new MigrationError(`Unsupported adapter: ${adapter}`);
   }

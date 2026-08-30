@@ -1,8 +1,23 @@
 import { POSTGRES_SPEC } from "../../dialect/postgres.js";
 import { quoteIdentifier } from "../../utils.js";
-import type { ColumnSnapshot, MigrationOp, SchemaSnapshot } from "../types.js";
-import { MigrationDialect } from "./dialect.js";
+import type {
+  ColumnSnapshot,
+  MigrationDialectSpec,
+  MigrationOp,
+  MigrationRenderHelpers,
+  SchemaSnapshot,
+} from "../types.js";
 import { foreignKeysOf, withoutForeignKeys } from "./order.js";
+
+const sqlTypes = {
+  string: "TEXT",
+  enum: "TEXT",
+  number: "DOUBLE PRECISION",
+  boolean: "BOOLEAN",
+  date: "TIMESTAMP",
+  json: "JSON",
+  jsonb: "JSONB",
+} as const;
 
 const typeOrKeyChanged = (from: ColumnSnapshot, to: ColumnSnapshot) => {
   if (from.type !== to.type) return true;
@@ -43,394 +58,368 @@ const inboundForeignKeys = (
   return found;
 };
 
-export class PostgresMigrationDialect extends MigrationDialect {
-  public readonly name = "postgres" as const;
-  protected readonly uuidType = "UUID";
-  protected readonly sqlTypes = {
-    string: "TEXT",
-    enum: "TEXT",
-    number: "DOUBLE PRECISION",
-    boolean: "BOOLEAN",
-    date: "TIMESTAMP",
-    json: "JSON",
-    jsonb: "JSONB",
-  };
+const formatDefault = (value: string) => {
+  if (value === "TRUE") return "true";
+  if (value === "FALSE") return "false";
 
-  protected formatPlaceholder(index: number) {
-    return POSTGRES_SPEC.formatPlaceholder(index);
-  }
+  return value;
+};
 
-  protected override formatDefault(value: string) {
-    if (value === "TRUE") return "true";
-    if (value === "FALSE") return "false";
+const lockMigrations = async (sql: Bun.SQL) => {
+  // Fixed key pair reserved for Semola migrations (avoids hashtext collisions).
+  await sql.unsafe("SELECT pg_advisory_xact_lock(872314055, 1)");
+};
 
-    return value;
-  }
+const deferInlineForeignKeys = (ops: MigrationOp[]) => {
+  const rewritten: MigrationOp[] = [];
+  const deferred: MigrationOp[] = [];
 
-  public override async lockMigrations(sql: Bun.SQL) {
-    // Fixed key pair reserved for Semola migrations (avoids hashtext collisions).
-    await sql.unsafe("SELECT pg_advisory_xact_lock(872314055, 1)");
-  }
+  for (const op of ops) {
+    if (op.kind === "createTable") {
+      deferred.push(...foreignKeysOf([op.table]));
+      rewritten.push({
+        kind: "createTable",
+        table: withoutForeignKeys(op.table),
+      });
+      continue;
+    }
 
-  protected override deferCircularForeignKeys() {
-    return true;
-  }
+    if (op.kind === "addColumn") {
+      if (op.column.references) {
+        deferred.push({
+          kind: "addForeignKey",
+          table: op.table,
+          column: op.column,
+        });
 
-  public override normalizeOps(
-    from: SchemaSnapshot,
-    to: SchemaSnapshot,
-    ops: MigrationOp[],
-  ) {
-    return this.expandForeignKeys(
-      from,
-      to,
-      this.deferInlineForeignKeys(super.normalizeOps(from, to, ops)),
-    );
-  }
+        const { references: _references, ...column } = op.column;
 
-  private deferInlineForeignKeys(ops: MigrationOp[]) {
-    const rewritten: MigrationOp[] = [];
-    const deferred: MigrationOp[] = [];
-
-    for (const op of ops) {
-      if (op.kind === "createTable") {
-        deferred.push(...foreignKeysOf([op.table]));
         rewritten.push({
-          kind: "createTable",
-          table: withoutForeignKeys(op.table),
+          kind: "addColumn",
+          table: op.table,
+          column,
         });
         continue;
       }
-
-      if (op.kind === "addColumn") {
-        if (op.column.references) {
-          deferred.push({
-            kind: "addForeignKey",
-            table: op.table,
-            column: op.column,
-          });
-
-          const { references: _references, ...column } = op.column;
-
-          rewritten.push({
-            kind: "addColumn",
-            table: op.table,
-            column,
-          });
-          continue;
-        }
-      }
-
-      rewritten.push(op);
     }
 
-    return [...rewritten, ...deferred];
+    rewritten.push(op);
   }
 
-  private expandForeignKeys(
-    from: SchemaSnapshot,
-    to: SchemaSnapshot,
-    ops: MigrationOp[],
-  ) {
-    const drops: MigrationOp[] = [];
-    const adds: MigrationOp[] = [];
-    const seenDrop = new Set<string>();
-    const seenAdd = new Set<string>();
+  return [...rewritten, ...deferred];
+};
 
-    const queueDrop = (table: string, column: ColumnSnapshot) => {
-      if (!column.references) return;
+const expandForeignKeys = (
+  from: SchemaSnapshot,
+  to: SchemaSnapshot,
+  ops: MigrationOp[],
+) => {
+  const drops: MigrationOp[] = [];
+  const adds: MigrationOp[] = [];
+  const seenDrop = new Set<string>();
+  const seenAdd = new Set<string>();
 
-      const key = `${table}.${column.name}`;
+  const queueDrop = (table: string, column: ColumnSnapshot) => {
+    if (!column.references) return;
 
-      if (seenDrop.has(key)) return;
+    const key = `${table}.${column.name}`;
 
-      seenDrop.add(key);
-      drops.push({ kind: "dropForeignKey", table, column });
-    };
+    if (seenDrop.has(key)) return;
 
-    const queueAdd = (table: string, column: ColumnSnapshot) => {
-      if (!column.references) return;
+    seenDrop.add(key);
+    drops.push({ kind: "dropForeignKey", table, column });
+  };
 
-      const target = to.tables[column.references.table];
+  const queueAdd = (table: string, column: ColumnSnapshot) => {
+    if (!column.references) return;
 
-      if (!target) return;
-      if (!target.columns[column.references.column]) return;
+    const target = to.tables[column.references.table];
 
-      const key = `${table}.${column.name}`;
+    if (!target) return;
+    if (!target.columns[column.references.column]) return;
 
-      if (seenAdd.has(key)) return;
+    const key = `${table}.${column.name}`;
 
-      seenAdd.add(key);
-      adds.push({ kind: "addForeignKey", table, column });
-    };
+    if (seenAdd.has(key)) return;
 
-    const queueInbound = (targetTable: string, targetColumn: string) => {
-      for (const inbound of inboundForeignKeys(
-        from,
-        targetTable,
-        targetColumn,
-      )) {
-        queueDrop(inbound.table, inbound.column);
+    seenAdd.add(key);
+    adds.push({ kind: "addForeignKey", table, column });
+  };
 
-        const next = to.tables[inbound.table]?.columns[inbound.column.name];
+  const queueInbound = (targetTable: string, targetColumn: string) => {
+    for (const inbound of inboundForeignKeys(from, targetTable, targetColumn)) {
+      queueDrop(inbound.table, inbound.column);
 
-        if (next) queueAdd(inbound.table, next);
+      const next = to.tables[inbound.table]?.columns[inbound.column.name];
+
+      if (next) queueAdd(inbound.table, next);
+    }
+  };
+
+  for (const [tableName, fromTable] of Object.entries(from.tables)) {
+    const toTable = to.tables[tableName];
+
+    for (const fromCol of Object.values(fromTable.columns)) {
+      const toCol = toTable?.columns[fromCol.name];
+
+      if (!toCol) {
+        queueInbound(tableName, fromCol.name);
+        continue;
       }
-    };
 
-    for (const [tableName, fromTable] of Object.entries(from.tables)) {
-      const toTable = to.tables[tableName];
+      if (typeOrKeyChanged(fromCol, toCol)) {
+        queueDrop(tableName, fromCol);
+        queueAdd(tableName, toCol);
+        queueInbound(tableName, fromCol.name);
+      }
 
-      for (const fromCol of Object.values(fromTable.columns)) {
-        const toCol = toTable?.columns[fromCol.name];
-
-        if (!toCol) {
-          queueInbound(tableName, fromCol.name);
-          continue;
-        }
-
-        if (typeOrKeyChanged(fromCol, toCol)) {
-          queueDrop(tableName, fromCol);
-          queueAdd(tableName, toCol);
-          queueInbound(tableName, fromCol.name);
-        }
-
-        if (!refsEqual(fromCol.references, toCol.references)) {
-          queueDrop(tableName, fromCol);
-          queueAdd(tableName, toCol);
-        }
+      if (!refsEqual(fromCol.references, toCol.references)) {
+        queueDrop(tableName, fromCol);
+        queueAdd(tableName, toCol);
       }
     }
-
-    return [...drops, ...ops, ...adds];
   }
 
-  private columnConstraintRenames(
-    fromTable: string,
-    toTable: string,
-    fromColumn: string,
-    toColumn: string,
-    column: ColumnSnapshot,
-  ) {
-    const constraints: Array<{ from: string; to: string }> = [];
+  return [...drops, ...ops, ...adds];
+};
 
-    if (column.isUnique) {
-      if (!column.isPrimaryKey) {
-        constraints.push({
-          from: `${fromTable}_${fromColumn}_key`,
-          to: `${toTable}_${toColumn}_key`,
-        });
-      }
-    }
+const normalizeOps = (
+  from: SchemaSnapshot,
+  to: SchemaSnapshot,
+  ops: MigrationOp[],
+) => {
+  return expandForeignKeys(from, to, deferInlineForeignKeys(ops));
+};
 
-    if (column.enumValues?.length) {
+const columnConstraintRenames = (
+  fromTable: string,
+  toTable: string,
+  fromColumn: string,
+  toColumn: string,
+  column: ColumnSnapshot,
+) => {
+  const constraints: Array<{ from: string; to: string }> = [];
+
+  if (column.isUnique) {
+    if (!column.isPrimaryKey) {
       constraints.push({
-        from: `${fromTable}_${fromColumn}_check`,
-        to: `${toTable}_${toColumn}_check`,
+        from: `${fromTable}_${fromColumn}_key`,
+        to: `${toTable}_${toColumn}_key`,
       });
     }
-
-    if (column.references) {
-      constraints.push({
-        from: `${fromTable}_${fromColumn}_fkey`,
-        to: `${toTable}_${toColumn}_fkey`,
-      });
-    }
-
-    return constraints;
   }
 
-  private tableConstraintRenames(
-    from: string,
-    to: string,
-    columns: ColumnSnapshot[],
-  ) {
-    const constraints: Array<{ from: string; to: string }> = [];
-
-    if (columns.some((column) => column.isPrimaryKey)) {
-      constraints.push({ from: `${from}_pkey`, to: `${to}_pkey` });
-    }
-
-    for (const column of columns) {
-      constraints.push(
-        ...this.columnConstraintRenames(
-          from,
-          to,
-          column.name,
-          column.name,
-          column,
-        ),
-      );
-    }
-
-    return constraints;
-  }
-
-  private renderConstraintRenames(
-    table: string,
-    constraints: Array<{ from: string; to: string }>,
-  ) {
-    return constraints.map((constraint) => {
-      return `ALTER TABLE ${quoteIdentifier(table)} RENAME CONSTRAINT ${quoteIdentifier(constraint.from)} TO ${quoteIdentifier(constraint.to)};`;
+  if (column.enumValues?.length) {
+    constraints.push({
+      from: `${fromTable}_${fromColumn}_check`,
+      to: `${toTable}_${toColumn}_check`,
     });
   }
 
-  protected override renderRenameTable(
-    op: Extract<MigrationOp, { kind: "renameTable" }>,
-  ) {
-    return [
-      `ALTER TABLE ${quoteIdentifier(op.from)} RENAME TO ${quoteIdentifier(op.to)};`,
-      ...this.renderConstraintRenames(
-        op.to,
-        this.tableConstraintRenames(op.from, op.to, op.columns),
-      ),
-    ].join("\n");
+  if (column.references) {
+    constraints.push({
+      from: `${fromTable}_${fromColumn}_fkey`,
+      to: `${toTable}_${toColumn}_fkey`,
+    });
   }
 
-  protected override renderRenameColumn(
-    op: Extract<MigrationOp, { kind: "renameColumn" }>,
-  ) {
-    return [
-      `ALTER TABLE ${quoteIdentifier(op.table)} RENAME COLUMN ${quoteIdentifier(op.from)} TO ${quoteIdentifier(op.to)};`,
-      ...this.renderConstraintRenames(
-        op.table,
-        this.columnConstraintRenames(
-          op.table,
-          op.table,
-          op.from,
-          op.to,
-          op.column,
-        ),
-      ),
-    ].join("\n");
+  return constraints;
+};
+
+const tableConstraintRenames = (
+  from: string,
+  to: string,
+  columns: ColumnSnapshot[],
+) => {
+  const constraints: Array<{ from: string; to: string }> = [];
+
+  if (columns.some((column) => column.isPrimaryKey)) {
+    constraints.push({ from: `${from}_pkey`, to: `${to}_pkey` });
   }
 
-  private columnTypeChanged(from: ColumnSnapshot, to: ColumnSnapshot) {
-    if (from.type !== to.type) return true;
-    if (from.sqlType !== to.sqlType) return true;
-
-    return false;
+  for (const column of columns) {
+    constraints.push(
+      ...columnConstraintRenames(from, to, column.name, column.name, column),
+    );
   }
 
-  private hasStandaloneUnique(column: ColumnSnapshot) {
-    if (!column.isUnique) return false;
-    if (column.isPrimaryKey) return false;
+  return constraints;
+};
 
-    return true;
+const renderConstraintRenames = (
+  table: string,
+  constraints: Array<{ from: string; to: string }>,
+) => {
+  return constraints.map((constraint) => {
+    return `ALTER TABLE ${quoteIdentifier(table)} RENAME CONSTRAINT ${quoteIdentifier(constraint.from)} TO ${quoteIdentifier(constraint.to)};`;
+  });
+};
+
+const renderRenameTable = (
+  op: Extract<MigrationOp, { kind: "renameTable" }>,
+) => {
+  return [
+    `ALTER TABLE ${quoteIdentifier(op.from)} RENAME TO ${quoteIdentifier(op.to)};`,
+    ...renderConstraintRenames(
+      op.to,
+      tableConstraintRenames(op.from, op.to, op.columns),
+    ),
+  ].join("\n");
+};
+
+const renderRenameColumn = (
+  op: Extract<MigrationOp, { kind: "renameColumn" }>,
+) => {
+  return [
+    `ALTER TABLE ${quoteIdentifier(op.table)} RENAME COLUMN ${quoteIdentifier(op.from)} TO ${quoteIdentifier(op.to)};`,
+    ...renderConstraintRenames(
+      op.table,
+      columnConstraintRenames(op.table, op.table, op.from, op.to, op.column),
+    ),
+  ].join("\n");
+};
+
+const columnTypeChanged = (from: ColumnSnapshot, to: ColumnSnapshot) => {
+  if (from.type !== to.type) return true;
+  if (from.sqlType !== to.sqlType) return true;
+
+  return false;
+};
+
+const hasStandaloneUnique = (column: ColumnSnapshot) => {
+  if (!column.isUnique) return false;
+  if (column.isPrimaryKey) return false;
+
+  return true;
+};
+
+const enumValuesChanged = (from: ColumnSnapshot, to: ColumnSnapshot) => {
+  return JSON.stringify(from.enumValues) !== JSON.stringify(to.enumValues);
+};
+
+const syncDefaultWithoutTypeChange = (
+  from: ColumnSnapshot,
+  to: ColumnSnapshot,
+  alterColumn: (action: string) => void,
+  formatDefaultValue: (value: string) => string,
+) => {
+  if (from.dbDefault === to.dbDefault) return;
+
+  if (to.dbDefault === undefined) {
+    alterColumn("DROP DEFAULT");
+    return;
   }
 
-  private enumValuesChanged(from: ColumnSnapshot, to: ColumnSnapshot) {
-    return JSON.stringify(from.enumValues) !== JSON.stringify(to.enumValues);
-  }
+  alterColumn(`SET DEFAULT ${formatDefaultValue(to.dbDefault)}`);
+};
 
-  protected override renderAlterColumn(
-    table: string,
-    from: ColumnSnapshot,
-    to: ColumnSnapshot,
-  ) {
-    const statements: string[] = [];
-    const tableId = quoteIdentifier(table);
-    const columnId = quoteIdentifier(to.name);
-    const typeChanged = this.columnTypeChanged(from, to);
-    const fromUnique = this.hasStandaloneUnique(from);
-    const toUnique = this.hasStandaloneUnique(to);
-    const enumChanged = this.enumValuesChanged(from, to);
+const renderAlterColumn = (
+  table: string,
+  from: ColumnSnapshot,
+  to: ColumnSnapshot,
+  helpers: MigrationRenderHelpers,
+) => {
+  const statements: string[] = [];
+  const tableId = quoteIdentifier(table);
+  const columnId = quoteIdentifier(to.name);
+  const typeChanged = columnTypeChanged(from, to);
+  const fromUnique = hasStandaloneUnique(from);
+  const toUnique = hasStandaloneUnique(to);
+  const enumChanged = enumValuesChanged(from, to);
 
-    const alterColumn = (action: string) => {
-      statements.push(
-        `ALTER TABLE ${tableId} ALTER COLUMN ${columnId} ${action};`,
-      );
-    };
+  const alterColumn = (action: string) => {
+    statements.push(
+      `ALTER TABLE ${tableId} ALTER COLUMN ${columnId} ${action};`,
+    );
+  };
 
-    const dropConstraint = (name: string) => {
-      statements.push(
-        `ALTER TABLE ${tableId} DROP CONSTRAINT ${quoteIdentifier(name)};`,
-      );
-    };
+  const dropConstraint = (name: string) => {
+    statements.push(
+      `ALTER TABLE ${tableId} DROP CONSTRAINT ${quoteIdentifier(name)};`,
+    );
+  };
 
-    const addConstraint = (name: string, body: string) => {
-      statements.push(
-        `ALTER TABLE ${tableId} ADD CONSTRAINT ${quoteIdentifier(name)} ${body};`,
-      );
-    };
+  const addConstraint = (name: string, body: string) => {
+    statements.push(
+      `ALTER TABLE ${tableId} ADD CONSTRAINT ${quoteIdentifier(name)} ${body};`,
+    );
+  };
 
-    if (typeChanged) {
-      if (from.dbDefault !== undefined) {
-        alterColumn("DROP DEFAULT");
-      }
-
-      if (from.enumValues?.length) {
-        dropConstraint(`${table}_${from.name}_check`);
-      }
-
-      const sqlType = this.sqlTypeFor(to);
-
-      alterColumn(`TYPE ${sqlType} USING CAST(${columnId} AS ${sqlType})`);
-    }
-
-    if (fromUnique) {
-      if (!toUnique) {
-        dropConstraint(`${table}_${to.name}_key`);
-      }
-    }
-
-    if (from.isNullable !== to.isNullable) {
-      if (to.isNullable) {
-        alterColumn("DROP NOT NULL");
-      } else {
-        alterColumn("SET NOT NULL");
-      }
-    }
-
-    if (!fromUnique) {
-      if (toUnique) {
-        addConstraint(`${table}_${to.name}_key`, `UNIQUE (${columnId})`);
-      }
-    }
-
-    if (typeChanged) {
-      if (to.dbDefault !== undefined) {
-        alterColumn(`SET DEFAULT ${this.formatDefault(to.dbDefault)}`);
-      }
-    } else {
-      this.syncDefaultWithoutTypeChange(from, to, alterColumn);
-    }
-
-    if (!typeChanged) {
-      if (enumChanged) {
-        if (from.enumValues?.length) {
-          dropConstraint(`${table}_${to.name}_check`);
-        }
-      }
-    }
-
-    if (typeChanged || enumChanged) {
-      const check = this.enumCheckSql(to);
-
-      if (check) {
-        addConstraint(`${table}_${to.name}_check`, check);
-      }
-    }
-
-    if (statements.length === 0) {
-      return "";
-    }
-
-    return statements.join("\n");
-  }
-
-  private syncDefaultWithoutTypeChange(
-    from: ColumnSnapshot,
-    to: ColumnSnapshot,
-    alterColumn: (action: string) => void,
-  ) {
-    if (from.dbDefault === to.dbDefault) return;
-
-    if (to.dbDefault === undefined) {
+  if (typeChanged) {
+    if (from.dbDefault !== undefined) {
       alterColumn("DROP DEFAULT");
-      return;
     }
 
-    alterColumn(`SET DEFAULT ${this.formatDefault(to.dbDefault)}`);
+    if (from.enumValues?.length) {
+      dropConstraint(`${table}_${from.name}_check`);
+    }
+
+    const sqlType = helpers.sqlTypeFor(to);
+
+    alterColumn(`TYPE ${sqlType} USING CAST(${columnId} AS ${sqlType})`);
   }
-}
+
+  if (fromUnique) {
+    if (!toUnique) {
+      dropConstraint(`${table}_${to.name}_key`);
+    }
+  }
+
+  if (from.isNullable !== to.isNullable) {
+    if (to.isNullable) {
+      alterColumn("DROP NOT NULL");
+    } else {
+      alterColumn("SET NOT NULL");
+    }
+  }
+
+  if (!fromUnique) {
+    if (toUnique) {
+      addConstraint(`${table}_${to.name}_key`, `UNIQUE (${columnId})`);
+    }
+  }
+
+  if (typeChanged) {
+    if (to.dbDefault !== undefined) {
+      alterColumn(`SET DEFAULT ${helpers.formatDefault(to.dbDefault)}`);
+    }
+  } else {
+    syncDefaultWithoutTypeChange(from, to, alterColumn, helpers.formatDefault);
+  }
+
+  if (!typeChanged) {
+    if (enumChanged) {
+      if (from.enumValues?.length) {
+        dropConstraint(`${table}_${to.name}_check`);
+      }
+    }
+  }
+
+  if (typeChanged || enumChanged) {
+    const check = helpers.enumCheckSql(to);
+
+    if (check) {
+      addConstraint(`${table}_${to.name}_check`, check);
+    }
+  }
+
+  if (statements.length === 0) {
+    return "";
+  }
+
+  return statements.join("\n");
+};
+
+export const POSTGRES_MIGRATION_SPEC: MigrationDialectSpec = {
+  name: "postgres",
+  uuidType: "UUID",
+  sqlTypes,
+  formatPlaceholder: POSTGRES_SPEC.formatPlaceholder,
+  formatDefault,
+  deferCircularForeignKeys: true,
+  normalizeOps,
+  renderAlterColumn,
+  renderRenameTable,
+  renderRenameColumn,
+  lockMigrations,
+};
