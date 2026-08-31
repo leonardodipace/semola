@@ -10,6 +10,22 @@ import {
   uuid,
 } from "./index.js";
 
+const jsonFromSqlLiteral = (sql: string | undefined) => {
+  if (sql === undefined) {
+    throw new Error("missing dbDefault");
+  }
+
+  if (!sql.startsWith("'")) {
+    throw new Error(`dbDefault is not a SQL string literal: ${sql}`);
+  }
+
+  if (!sql.endsWith("'")) {
+    throw new Error(`dbDefault is not a SQL string literal: ${sql}`);
+  }
+
+  return JSON.parse(sql.slice(1, -1).replaceAll("''", "'"));
+};
+
 describe("ORM column builders", () => {
   test("create the expected base column metadata", () => {
     const text = string("email");
@@ -103,6 +119,18 @@ describe("ORM column builders", () => {
       "'{\"a\":1}'",
     );
     expect(json("meta").dbDefault(null)._meta.dbDefault).toBe("NULL");
+    expect(
+      jsonFromSqlLiteral(json("meta").dbDefault("anon")._meta.dbDefault),
+    ).toBe("anon");
+    expect(
+      jsonFromSqlLiteral(jsonb("extra").dbDefault("anon")._meta.dbDefault),
+    ).toBe("anon");
+    expect(
+      jsonFromSqlLiteral(json("meta").dbDefault(true)._meta.dbDefault),
+    ).toBe(true);
+    expect(jsonFromSqlLiteral(json("meta").dbDefault(0)._meta.dbDefault)).toBe(
+      0,
+    );
     expect(() => json("meta").dbDefault(undefined as never)).toThrow(
       "dbDefault cannot be undefined",
     );

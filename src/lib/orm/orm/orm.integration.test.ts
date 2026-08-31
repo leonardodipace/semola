@@ -122,6 +122,47 @@ for (const live of integrationAdapters()) {
       await orm.$raw.close();
     });
 
+    test("json string dbDefault is stored as valid JSON", async () => {
+      await live.beforeEach?.();
+
+      const items = defineTable("items", {
+        id: uuid("id").primaryKey().notNull(),
+        label: json("label").notNull().dbDefault("anon"),
+      });
+      const defaultSql = items.columns.label?._meta.dbDefault;
+
+      if (!defaultSql) {
+        throw new Error("missing dbDefault");
+      }
+
+      expect(JSON.parse(defaultSql.slice(1, -1).replaceAll("''", "'"))).toBe(
+        "anon",
+      );
+
+      const sqlType = live.adapter === "postgres" ? "JSON" : "TEXT";
+      const orm = createOrm({
+        adapter: live.adapter,
+        url: live.url,
+        tables: { items },
+      });
+
+      await orm.$raw.unsafe(
+        `CREATE TABLE items (id TEXT PRIMARY KEY NOT NULL, label ${sqlType} NOT NULL DEFAULT ${defaultSql})`,
+      );
+
+      await orm.items.create({ data: { id } });
+
+      const selectSql =
+        live.adapter === "postgres"
+          ? "SELECT label::text AS label FROM items WHERE id = $1"
+          : "SELECT label FROM items WHERE id = ?";
+      const [stored] = await orm.$raw.unsafe(selectSql, [id]);
+
+      expect(JSON.parse(String(stored?.label))).toBe("anon");
+
+      await orm.$raw.close();
+    });
+
     test("relation includes and JSON columns", async () => {
       const orm = await open();
 

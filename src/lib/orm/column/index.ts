@@ -41,6 +41,30 @@ const sqlLiteral = (value: unknown) => {
   return `'${JSON.stringify(value).replaceAll("'", "''")}'`;
 };
 
+const sqlJsonLiteral = (value: unknown) => {
+  if (value === null) {
+    return "NULL";
+  }
+
+  if (value === undefined) {
+    throw new OrmError("dbDefault cannot be undefined");
+  }
+
+  return `'${JSON.stringify(value).replaceAll("'", "''")}'`;
+};
+
+const dbDefaultLiteral = (type: ColumnType, value: unknown) => {
+  if (type === "json") {
+    return sqlJsonLiteral(value);
+  }
+
+  if (type === "jsonb") {
+    return sqlJsonLiteral(value);
+  }
+
+  return sqlLiteral(value);
+};
+
 type ColumnBuilderState<
   TType extends ColumnType,
   TNullable extends boolean,
@@ -287,7 +311,7 @@ const createColumnBuilder = <
       _meta: {
         ...column._meta,
         hasDefault: true,
-        dbDefault: sqlLiteral(value),
+        dbDefault: dbDefaultLiteral(column.type, value),
       },
     });
   }) as ColumnBuilder<

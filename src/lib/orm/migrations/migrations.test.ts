@@ -1756,6 +1756,50 @@ describe("orm migrations snapshot/diff/sql", () => {
     expect(dropNotNullAt).toBeGreaterThan(dropUniqueAt);
   });
 
+  test("json scalar dbDefaults emit valid JSON for both adapters", () => {
+    const events = defineTable("events", {
+      id: uuid("id").primaryKey().notNull(),
+      label: json("label").notNull().dbDefault("anon"),
+      extra: jsonb("extra").notNull().dbDefault("anon"),
+    });
+    const sqlite = getMigrationDialect("sqlite").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ events }),
+        getMigrationDialect("sqlite"),
+      ),
+    );
+    const postgres = getMigrationDialect("postgres").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ events }),
+        getMigrationDialect("postgres"),
+      ),
+    );
+
+    expect(sqlite).toContain(`DEFAULT '"anon"'`);
+    expect(postgres).toContain(`DEFAULT '"anon"'`);
+
+    const snapshot = snapshotSchema({ events });
+    const labelDefault = snapshot.tables.events?.columns.label?.dbDefault;
+    const extraDefault = snapshot.tables.events?.columns.extra?.dbDefault;
+
+    if (!labelDefault) {
+      throw new Error("missing label dbDefault");
+    }
+
+    if (!extraDefault) {
+      throw new Error("missing extra dbDefault");
+    }
+
+    expect(JSON.parse(labelDefault.slice(1, -1).replaceAll("''", "'"))).toBe(
+      "anon",
+    );
+    expect(JSON.parse(extraDefault.slice(1, -1).replaceAll("''", "'"))).toBe(
+      "anon",
+    );
+  });
+
   test("boolean and number dbDefaults render correctly", () => {
     const flags = defineTable("flags", {
       id: uuid("id").primaryKey().notNull(),
