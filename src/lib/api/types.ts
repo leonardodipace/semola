@@ -50,13 +50,21 @@ type HasConcreteOutput<T> = [T] extends [never]
     ? false
     : true;
 
-export type StrictOutput<T, D> = [D] extends [T]
-  ? [T] extends [readonly (infer Item)[]]
-    ? D extends ReadonlyArray<infer DItem>
-      ? StrictOutput<Item, DItem>[]
-      : never
-    : D & Record<Exclude<keyof D, keyof T>, never>
-  : T;
+export type StrictOutput<T, D> = T extends unknown
+  ? [D] extends [T]
+    ? StrictOutputMatched<T, D>
+    : T
+  : never;
+
+type StrictOutputMatched<T, D> = [T] extends [readonly (infer Item)[]]
+  ? D extends ReadonlyArray<infer DItem>
+    ? StrictOutput<Item, DItem>[]
+    : never
+  : [T] extends [object]
+    ? {
+        [K in keyof D]: K extends keyof T ? StrictOutput<T[K], D[K]> : never;
+      }
+    : D;
 
 type JsonBodyConstraint<
   TRes extends ResponseSchema | undefined,
