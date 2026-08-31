@@ -488,6 +488,56 @@ describe("Api Core", () => {
     expect(body).toEqual({ name: "Alice" });
   });
 
+  test("should reject extra response keys in c.json at compile time", () => {
+    const PublicUserSchema = z.strictObject({
+      id: z.string(),
+      name: z.string(),
+      email: z.string(),
+    });
+
+    const dbUser = {
+      id: "1",
+      name: "Alice",
+      email: "a@b.com",
+      password: "secret",
+    };
+
+    const users = [dbUser];
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/user",
+      method: "GET",
+      response: { 200: PublicUserSchema },
+      handler: (c) => {
+        // @ts-expect-error password is not part of the declared response schema
+        return c.json(200, dbUser);
+      },
+    });
+
+    api.defineRoute({
+      path: "/users",
+      method: "GET",
+      response: { 200: PublicUserSchema.array() },
+      handler: (c) => {
+        // @ts-expect-error password is not part of the declared response schema
+        return c.json(200, [dbUser]);
+      },
+    });
+
+    api.defineRoute({
+      path: "/users-many",
+      method: "GET",
+      response: { 200: PublicUserSchema.array() },
+      handler: (c) => {
+        // @ts-expect-error password is not part of the declared response schema
+        return c.json(200, users);
+      },
+    });
+
+    expect(api).toBeDefined();
+  });
+
   test("should skip output validation when validation.output is false", async () => {
     const api = new Api({ validation: { output: false } });
     const responseSchema = z.object({ name: z.string() });

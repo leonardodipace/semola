@@ -44,6 +44,22 @@ export type InferInput<T extends StandardSchemaV1 | undefined> = SafeTypeAccess<
   "input"
 >;
 
+type RejectExtraKeys<T, D> = D & Record<Exclude<keyof D, keyof T>, never>;
+
+type StrictArray<TItem, D extends readonly unknown[]> = {
+  [I in keyof D]: RejectExtraKeys<TItem, D[I]>;
+};
+
+export type StrictOutput<T, D> = [T] extends [readonly unknown[]]
+  ? D extends readonly unknown[]
+    ? StrictArray<T[number], D>
+    : never
+  : [T] extends [object]
+    ? RejectExtraKeys<T, D>
+    : [D] extends [T]
+      ? D
+      : never;
+
 export type ExtractStatusCodes<T extends ResponseSchema> = keyof T & number;
 
 export type ExtractStatusCodesOrAny<T extends ResponseSchema | undefined> =
@@ -141,9 +157,11 @@ export type Context<
     cookies: InferOutput<TReq["cookies"]>;
     params: InferOutput<TReq["params"]>;
   };
-  json: <S extends ExtractStatusCodesOrAny<TRes>>(
+  json: <S extends ExtractStatusCodesOrAny<TRes>, const D>(
     status: S,
-    data: TRes extends ResponseSchema ? InferOutput<TRes[S]> : unknown,
+    data: TRes extends ResponseSchema
+      ? StrictOutput<InferOutput<TRes[S]>, D>
+      : unknown,
   ) => Response;
   text: (status: number, text: string) => Response;
   html: (status: number, html: string) => Response;
