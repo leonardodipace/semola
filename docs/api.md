@@ -77,7 +77,7 @@ Invalid input becomes a 400. Query and header values are always strings; use sch
 
 ### Strict `c.json` typing
 
-`c.json` rejects undeclared keys at compile time, including on nested objects and arrays, and including wider variables (for example a DB row with a `password` field). Pick or omit to the response shape before returning, or the type checker errors. Runtime output validation still runs separately unless you disable it.
+`c.json` rejects undeclared keys at compile time, including on nested objects, arrays, and union members, and including wider variables (for example a DB row with a `password` field). Discriminated-union member-specific keys stay valid. Pick or omit to the response shape before returning, or the type checker errors. Runtime output validation still runs separately unless you disable it.
 
 ### Route context
 
