@@ -44,17 +44,19 @@ export type InferInput<T extends StandardSchemaV1 | undefined> = SafeTypeAccess<
   "input"
 >;
 
-type RejectExtraKeys<T, D> = D & Record<Exclude<keyof D, keyof T>, never>;
+type RejectExtraKeys<T, D> = [D] extends [T]
+  ? D & Record<Exclude<keyof D, keyof T>, never>
+  : never;
 
 type StrictArray<TItem, D extends readonly unknown[]> = {
-  [I in keyof D]: RejectExtraKeys<TItem, D[I]>;
+  [I in keyof D]: StrictOutput<TItem, D[I]>;
 };
 
 export type StrictOutput<T, D> = [T] extends [readonly unknown[]]
   ? D extends readonly unknown[]
     ? StrictArray<T[number], D>
     : never
-  : [T] extends [object]
+  : T extends object
     ? RejectExtraKeys<T, D>
     : [D] extends [T]
       ? D
