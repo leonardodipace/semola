@@ -150,7 +150,9 @@ for (const live of integrationAdapters()) {
         `CREATE TABLE items (id TEXT PRIMARY KEY NOT NULL, label ${sqlType} NOT NULL DEFAULT ${defaultSql})`,
       );
 
-      await orm.items.create({ data: { id } });
+      const created = await orm.items.create({ data: { id } });
+
+      expect(created.label).toBe("anon");
 
       const selectSql =
         live.adapter === "postgres"

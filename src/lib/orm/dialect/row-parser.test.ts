@@ -37,6 +37,28 @@ describe("row-parser", () => {
     ]);
   });
 
+  test("leaves already-parsed JSON string scalars unchanged", () => {
+    const rows: Array<Record<string, unknown>> = [
+      {
+        id: "e-1",
+        payload: "anon",
+        meta: '"anon"',
+        published: true,
+      },
+    ];
+
+    rowParser.parseRows({ table: eventsTable, rows, descriptors: [] });
+
+    expect(rows).toEqual([
+      {
+        id: "e-1",
+        payload: "anon",
+        meta: "anon",
+        published: true,
+      },
+    ]);
+  });
+
   test("parses JSON include values and normalizes null hasMany values", () => {
     const descriptors = [
       { name: "posts", type: "hasMany", table: postsTable },
