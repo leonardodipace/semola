@@ -44,25 +44,38 @@ export type InferInput<T extends StandardSchemaV1 | undefined> = SafeTypeAccess<
   "input"
 >;
 
-type RejectExtraKeys<T, D> = [D] extends [T]
-  ? {
-      [K in keyof D]: K extends keyof T ? StrictOutput<T[K], D[K]> : never;
-    }
-  : never;
+type HasConcreteOutput<T> = [T] extends [never]
+  ? false
+  : unknown extends T
+    ? false
+    : true;
 
-type StrictArray<TItem, D extends readonly unknown[]> = {
-  [I in keyof D]: StrictOutput<TItem, D[I]>;
-};
+export type StrictOutput<T, D> = [D] extends [T]
+  ? [T] extends [readonly (infer Item)[]]
+    ? D extends ReadonlyArray<infer DItem>
+      ? StrictOutput<Item, DItem>[]
+      : never
+    : D & Record<Exclude<keyof D, keyof T>, never>
+  : T;
 
-export type StrictOutput<T, D> = [T] extends [readonly unknown[]]
-  ? D extends readonly unknown[]
-    ? StrictArray<T[number], D>
-    : never
-  : T extends object
-    ? RejectExtraKeys<T, D>
-    : [D] extends [T]
-      ? D
-      : never;
+type JsonBodyConstraint<
+  TRes extends ResponseSchema | undefined,
+  S extends ExtractStatusCodesOrAny<TRes>,
+> = TRes extends ResponseSchema
+  ? HasConcreteOutput<InferOutput<TRes[S]>> extends true
+    ? InferOutput<TRes[S]>
+    : unknown
+  : unknown;
+
+type JsonBody<
+  TRes extends ResponseSchema | undefined,
+  S extends ExtractStatusCodesOrAny<TRes>,
+  D,
+> = TRes extends ResponseSchema
+  ? HasConcreteOutput<InferOutput<TRes[S]>> extends true
+    ? StrictOutput<InferOutput<TRes[S]>, D>
+    : D
+  : D;
 
 export type ExtractStatusCodes<T extends ResponseSchema> = keyof T & number;
 
@@ -161,11 +174,12 @@ export type Context<
     cookies: InferOutput<TReq["cookies"]>;
     params: InferOutput<TReq["params"]>;
   };
-  json: <S extends ExtractStatusCodesOrAny<TRes>, const D>(
+  json: <
+    S extends ExtractStatusCodesOrAny<TRes>,
+    const D extends JsonBodyConstraint<TRes, S>,
+  >(
     status: S,
-    data: TRes extends ResponseSchema
-      ? StrictOutput<InferOutput<TRes[S]>, D>
-      : unknown,
+    data: JsonBody<TRes, S, D>,
   ) => Response;
   text: (status: number, text: string) => Response;
   html: (status: number, html: string) => Response;
