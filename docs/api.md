@@ -75,11 +75,15 @@ api.defineRoute({
 
 Invalid input becomes a 400. Query and header values are always strings; use schema coercion such as Zod's `z.stringbool()` when you want a boolean (`?draft=true` → `true`). Toggle validation with `new Api({ validation: false })` or `{ validation: { input: true, output: false } }`.
 
+### Strict `c.json` typing
+
+`c.json` rejects undeclared keys at compile time, including on nested objects and arrays, and including wider variables (for example a DB row with a `password` field). Pick or omit to the response shape before returning, or the type checker errors. Runtime output validation still runs separately unless you disable it.
+
 ### Route context
 
 - **`c.req`** - validated `params`, `query`, `body`, `headers`, `cookies`
 - **`c.raw`** - the underlying `Request`
-- **`c.json` / `c.text` / `c.html` / `c.redirect`** - typed responses
+- **`c.json` / `c.text` / `c.html` / `c.redirect`** - typed responses (`c.json` is strict against the declared response schema)
 - **`c.header(name, value)`** - set a header on the returned response
 - **`c.get(key)`** - values contributed by middleware
 

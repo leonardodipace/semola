@@ -489,10 +489,17 @@ describe("Api Core", () => {
   });
 
   test("should reject extra response keys in c.json at compile time", () => {
-    const PublicUserSchema = z.strictObject({
+    const PublicUserSchema = z.object({
       id: z.string(),
       name: z.string(),
       email: z.string(),
+    });
+
+    const NestedSchema = z.object({
+      user: z.object({
+        id: z.string(),
+        name: z.string(),
+      }),
     });
 
     const dbUser = {
@@ -532,6 +539,40 @@ describe("Api Core", () => {
       handler: (c) => {
         // @ts-expect-error password is not part of the declared response schema
         return c.json(200, users);
+      },
+    });
+
+    api.defineRoute({
+      path: "/nested",
+      method: "GET",
+      response: { 200: NestedSchema },
+      handler: (c) => {
+        return c.json(200, {
+          user: {
+            id: "1",
+            name: "Alice",
+            // @ts-expect-error nested password is not part of the declared response schema
+            password: "secret",
+          },
+        });
+      },
+    });
+
+    api.defineRoute({
+      path: "/nested-array",
+      method: "GET",
+      response: { 200: NestedSchema.array() },
+      handler: (c) => {
+        return c.json(200, [
+          {
+            user: {
+              id: "1",
+              name: "Alice",
+              // @ts-expect-error nested password is not part of the declared response schema
+              password: "secret",
+            },
+          },
+        ]);
       },
     });
 
