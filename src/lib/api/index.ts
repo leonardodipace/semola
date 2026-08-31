@@ -27,4 +27,5 @@ export type {
   SSEEvent,
   SSERouteConfig,
   SSERouteHandler,
+  StrictOutput,
 } from "./types.js";
