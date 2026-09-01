@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { string, uuid } from "../column/index.js";
 import { many } from "../orm/index.js";
+import { defineTable } from "../table/index.js";
 import { DialectQueryBuilder } from "./query-builder.js";
 import { SQLITE_SPEC } from "./sqlite.js";
 import {
@@ -95,6 +97,26 @@ describe("DialectQueryBuilder", () => {
       'INSERT INTO "events" ("id", "payload", "meta") VALUES (?, ?, ?) RETURNING "id" AS "id", "payload" AS "payload", "meta" AS "meta"',
     );
     expect(query.params).toEqual(["e-1", '{"tags":["a"]}', "[1,2]"]);
+  });
+
+  test("omits bound values for unspecified dbDefault columns", () => {
+    const table = defineTable("users", {
+      id: uuid("id").primaryKey().notNull(),
+      role: string("role").notNull().dbDefault("member"),
+    });
+    const builder = new DialectQueryBuilder({
+      spec: SQLITE_SPEC,
+      table,
+      relations: {},
+    });
+    const query = builder.buildCreate({
+      data: { id: "u-1" },
+    });
+
+    expect(query.statement).toBe(
+      'INSERT INTO "users" ("id", "role") VALUES (?, \'member\') RETURNING "id" AS "id", "role" AS "role"',
+    );
+    expect(query.params).toEqual(["u-1"]);
   });
 
   test("builds update and delete with include param order", () => {

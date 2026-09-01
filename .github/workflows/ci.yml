@@ -29,6 +29,22 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: semola
+          POSTGRES_PASSWORD: semola
+          POSTGRES_DB: semola
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U semola -d semola"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      SEMOLA_POSTGRES_URL: postgres://semola:semola@localhost:5432/semola
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

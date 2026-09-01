@@ -1,3 +1,4 @@
+import { mightThrowSync } from "../../errors/index.js";
 import type { Table } from "../table/types.js";
 import type {
   CoerceRelationItemsInput,
@@ -60,11 +61,7 @@ export class RowParser {
     for (const key of jsonKeys) {
       if (!(key in row)) continue;
 
-      const val = row[key];
-
-      if (typeof val !== "string") continue;
-
-      row[key] = JSON.parse(val);
+      row[key] = this.coerceJsonValue(row[key]);
     }
   }
 
@@ -166,6 +163,16 @@ export class RowParser {
     if (val === undefined) return val;
 
     return Boolean(val);
+  }
+
+  private coerceJsonValue(val: unknown) {
+    if (typeof val !== "string") return val;
+
+    const [error, parsed] = mightThrowSync(() => JSON.parse(val));
+
+    if (error) return val;
+
+    return parsed;
   }
 
   private getColumnKeysByType(table: Table): ColumnKeysByType {
