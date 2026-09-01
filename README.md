@@ -272,20 +272,18 @@ async function sendFriendRequest(req: FriendRequest) {
   await sender(req);
 }
 
-const callable = createRetry(
-  async () => {
+const callable = createRetry({
+  input: async () => {
     await sendFriendRequest({ from: "user1@gmail.com", to: "user2@gmail.com" });
   },
-  {
-    maxRetries: 3,
-    onFailedAttempt: () => {
-      console.log(`Resending the request`);
-    },
-    onError: ({ error }) => {
-      console.error(error.message);
-    },
+  maxRetries: 3,
+  onFailedAttempt: () => {
+    console.log(`Resending the request`);
   },
-);
+  onError: ({ error }) => {
+    console.error(error.message);
+  },
+});
 
 await callable();
 ```
