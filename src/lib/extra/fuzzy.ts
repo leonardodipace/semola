@@ -54,11 +54,34 @@ export function retriveKeys<FuzzyType extends string | Record<string, string>>(
   return Object.keys(item);
 }
 
+export function normalizeWeights(
+  dataAmount: number,
+  weights: number[] | undefined,
+) {
+  if (!weights || weights.length === 0) {
+    return Array.from({ length: dataAmount }, () => 1);
+  }
+
+  if (weights.length < dataAmount) {
+    const missingWeights = Array.from(
+      { length: dataAmount - weights.length },
+      () => 1,
+    );
+
+    weights.push(...missingWeights);
+  }
+
+  const sum = weights.reduce((acc, curr) => acc + curr);
+  const normalWeights = weights.map((w) => w / sum);
+
+  return normalWeights;
+}
+
 export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
   options: FuzzyOptions<FuzzyType>,
 ) {
   const searchFn = (needle: string) => {
-    const { data, keys } = options;
+    const { data, keys, weights } = options;
     if (data.length === 0) return [];
 
     const result: FuzzyResult[] = [];
@@ -105,7 +128,17 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
       });
     }
 
-    return result.sort((a, b) => a.score - b.score);
+    const normalizedW = normalizeWeights(data.length, weights);
+
+    return result
+      .map((v, rIdx) => {
+        const w = normalizedW[rIdx];
+        if (!w) return v;
+
+        v.score *= w;
+        return v;
+      })
+      .sort((a, b) => a.score - b.score);
   };
 
   return searchFn;

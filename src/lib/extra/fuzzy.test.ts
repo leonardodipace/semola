@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   foldCase,
   fuzzySearch,
+  normalizeWeights,
   removeDiacritics,
   removePunctuation,
   retriveKeys,
@@ -487,6 +488,59 @@ describe("Fuzzy Search", () => {
     test("should return an empty list of keys when passing 'undefined' as your data point", () => {
       expect(retriveKeys(undefined, undefined)).toHaveLength(0);
       expect(retriveKeys([], undefined)).toHaveLength(0);
+    });
+  });
+
+  describe("Weights normalization", () => {
+    const sumArr = (arr: number[]) => arr.reduce((acc, curr) => acc + curr);
+
+    test("should produce a list with default weights", () => {
+      const wFirst = normalizeWeights(3, undefined);
+      expect(wFirst).toHaveLength(3);
+
+      expect(wFirst[0]).toBe(1);
+      expect(wFirst[1]).toBe(1);
+      expect(wFirst[2]).toBe(1);
+
+      const wSecond = normalizeWeights(3, []);
+      expect(wSecond).toHaveLength(3);
+
+      expect(wSecond[0]).toBe(1);
+      expect(wSecond[1]).toBe(1);
+      expect(wSecond[2]).toBe(1);
+
+      expect(sumArr(wFirst)).toBe(3);
+      expect(sumArr(wSecond)).toBe(3);
+    });
+
+    test("should normalize all weights and their sum should be equals to 1", () => {
+      const original = [1, 3, 4];
+      const weights = normalizeWeights(original.length, original);
+      expect(weights).toHaveLength(original.length);
+
+      const normalSum = sumArr(weights);
+      expect(normalSum).toBeCloseTo(1);
+
+      const originalSum = sumArr(original);
+
+      expect(weights[0]).toBeCloseTo((original[0] ?? 1) / originalSum);
+      expect(weights[1]).toBeCloseTo((original[1] ?? 1) / originalSum);
+      expect(weights[2]).toBeCloseTo((original[2] ?? 1) / originalSum);
+    });
+
+    test("should handle missing weights as 1", () => {
+      const original = [4];
+      const weights = normalizeWeights(3, original);
+      expect(weights).toHaveLength(3);
+
+      const normalSum = sumArr(weights);
+      expect(normalSum).toBeCloseTo(1);
+
+      const originalSum = sumArr(original);
+
+      expect(weights[0]).toBeCloseTo((original[0] ?? 1) / originalSum);
+      expect(weights[1]).toBeCloseTo((original[1] ?? 1) / originalSum);
+      expect(weights[2]).toBeCloseTo((original[2] ?? 1) / originalSum);
     });
   });
 });
