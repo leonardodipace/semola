@@ -9,7 +9,7 @@ import type {
   ScheduleType,
 } from "./types.js";
 
-// How far back to probe next() when the gap trick cannot resolve the scheduled tick.
+// Fallback lookbacks when the gap trick cannot resolve the scheduled tick.
 const TICK_LOOKBACK_MS = [5_000, 60_000, 3_600_000] as const;
 const DEFAULT_LOCK_TTL = 300_000;
 
@@ -188,6 +188,7 @@ export class CronDistributed implements CronUtilitiesInterface {
 
     if (!upcoming) return null;
 
+    // Gap trick: next fire minus elapsed time to this fire's scheduled boundary.
     const probes = [
       now - (upcoming.getTime() - now),
       ...TICK_LOOKBACK_MS.map((lookback) => now - lookback),

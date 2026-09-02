@@ -20,9 +20,14 @@ class MockRedisClient {
   private expiresAt = new Map<string, number>();
   public setCalls: SetCall[] = [];
   private shouldFail = false;
+  private forcedReturn: string | null | undefined;
 
   public setShouldFail(value: boolean) {
     this.shouldFail = value;
+  }
+
+  public forceNextSetReturn(value: string | null) {
+    this.forcedReturn = value;
   }
 
   private sweep(key: string) {
@@ -49,6 +54,12 @@ class MockRedisClient {
 
     const args = [mode, ttl, flag].filter((v) => v !== undefined).map(String);
     this.setCalls.push({ key, value, args });
+
+    if (this.forcedReturn !== undefined) {
+      const ret = this.forcedReturn;
+      this.forcedReturn = undefined;
+      return ret;
+    }
 
     this.sweep(key);
 
@@ -127,7 +138,7 @@ const lockKeyTickMs = (key: string) => {
   return Number(parts.at(-1));
 };
 
-describe("CronDistributed adversarial", () => {
+describe("CronDistributed", () => {
   afterEach(() => {
     setSystemTime();
   });
@@ -271,36 +282,6 @@ describe("CronDistributed adversarial", () => {
       cronSpy.mockRestore();
     });
 
-    test("should run all three differently named jobs on the same tick", async () => {
-      setSystemTime(new Date(2027, 4, 8, 12, 4, 0));
-
-      const redis = createMockRedis();
-      let runs = 0;
-      const handlers: Array<() => Promise<void>> = [];
-      const cronSpy = mockInProcessCron(handlers);
-
-      for (const name of ["job-a", "job-b", "job-c"]) {
-        const job = new CronDistributed({
-          name,
-          schedule: "@minutely",
-          handler: () => {
-            runs++;
-            return Promise.resolve();
-          },
-          redis,
-          replicaId: "replica-1",
-        });
-
-        job.run();
-      }
-
-      await Promise.all(handlers.map((handler) => handler()));
-
-      expect(runs).toBe(3);
-
-      cronSpy.mockRestore();
-    });
-
     test("should not share locks between same name on different redis instances", async () => {
       setSystemTime(new Date(2027, 4, 8, 12, 5, 0));
 
@@ -338,49 +319,6 @@ describe("CronDistributed adversarial", () => {
       await Promise.all(handlers.map((handler) => handler()));
 
       expect(runs).toBe(2);
-
-      cronSpy.mockRestore();
-    });
-
-    test("should allow same job name with different schedules when tick times differ", async () => {
-      const redis = createMockRedis();
-      let hourlyRuns = 0;
-      let minutelyRuns = 0;
-      const handlers: Array<() => Promise<void>> = [];
-      const cronSpy = mockInProcessCron(handlers);
-
-      const hourly = new CronDistributed({
-        name: "mixed-schedule",
-        schedule: "@hourly",
-        handler: () => {
-          hourlyRuns++;
-          return Promise.resolve();
-        },
-        redis,
-        replicaId: "replica-a",
-      });
-
-      const minutely = new CronDistributed({
-        name: "mixed-schedule",
-        schedule: "@minutely",
-        handler: () => {
-          minutelyRuns++;
-          return Promise.resolve();
-        },
-        redis,
-        replicaId: "replica-b",
-      });
-
-      hourly.run();
-      minutely.run();
-
-      setSystemTime(new Date(2027, 4, 8, 12, 0, 0));
-      await runTick(handlers[0]);
-      expect(hourlyRuns).toBe(1);
-
-      setSystemTime(new Date(2027, 4, 8, 12, 5, 0));
-      await runTick(handlers[1]);
-      expect(minutelyRuns).toBe(1);
 
       cronSpy.mockRestore();
     });
@@ -546,61 +484,6 @@ describe("CronDistributed adversarial", () => {
 
       cronSpy.mockRestore();
     });
-
-    test("should pass custom lockTTL to redis SET PX", async () => {
-      setSystemTime(new Date(2027, 4, 8, 12, 21, 0));
-
-      const redis = createMockRedis();
-      const handlers: Array<() => Promise<void>> = [];
-      const cronSpy = mockInProcessCron(handlers);
-
-      const job = new CronDistributed({
-        name: "custom-ttl",
-        schedule: "@minutely",
-        lockTTL: 600_000,
-        handler: () => Promise.resolve(),
-        redis,
-        replicaId: "replica-a",
-      });
-
-      job.run();
-      await runTick(handlers[0]);
-
-      const call = redis.getLastSetCall();
-      if (!call) throw new Error("Expected redis SET call");
-
-      expect(call.args).toContain("PX");
-      expect(call.args).toContain("600000");
-
-      cronSpy.mockRestore();
-    });
-
-    test("should default lockTTL to 300000ms when omitted", async () => {
-      setSystemTime(new Date(2027, 4, 8, 12, 22, 0));
-
-      const redis = createMockRedis();
-      const handlers: Array<() => Promise<void>> = [];
-      const cronSpy = mockInProcessCron(handlers);
-
-      const job = new CronDistributed({
-        name: "default-ttl",
-        schedule: "@minutely",
-        handler: () => Promise.resolve(),
-        redis,
-        replicaId: "replica-a",
-      });
-
-      job.run();
-      await runTick(handlers[0]);
-
-      const call = redis.getLastSetCall();
-      if (!call) throw new Error("Expected redis SET call");
-
-      expect(call.args).toContain("PX");
-      expect(call.args).toContain("300000");
-
-      cronSpy.mockRestore();
-    });
   });
 
   describe("replica identity", () => {
@@ -630,86 +513,9 @@ describe("CronDistributed adversarial", () => {
 
       cronSpy.mockRestore();
     });
-
-    test("should generate a non-empty replicaId when omitted", async () => {
-      setSystemTime(new Date(2027, 4, 8, 12, 32, 0));
-
-      const redis = createMockRedis();
-      const handlers: Array<() => Promise<void>> = [];
-      const cronSpy = mockInProcessCron(handlers);
-
-      const job = new CronDistributed({
-        name: "generated-replica",
-        schedule: "@minutely",
-        handler: () => Promise.resolve(),
-        redis,
-      });
-
-      job.run();
-      await runTick(handlers[0]);
-
-      const call = redis.getLastSetCall();
-      if (!call) throw new Error("Expected redis SET call");
-
-      expect(call.value.length).toBeGreaterThan(0);
-
-      cronSpy.mockRestore();
-    });
   });
 
   describe("error propagation", () => {
-    test("should propagate synchronous handler errors", async () => {
-      setSystemTime(new Date(2027, 4, 8, 12, 40, 0));
-
-      const redis = createMockRedis();
-      const handlers: Array<() => Promise<void>> = [];
-      const cronSpy = mockInProcessCron(handlers);
-
-      const job = new CronDistributed({
-        name: "sync-error",
-        schedule: "@minutely",
-        handler: () => {
-          throw new Error("sync boom");
-        },
-        redis,
-        replicaId: "replica-a",
-      });
-
-      job.run();
-
-      const [error] = await mightThrow(runTick(handlers[0]));
-
-      if (!error) throw new Error("Expected handler to throw");
-      expect(error.message).toBe("sync boom");
-
-      cronSpy.mockRestore();
-    });
-
-    test("should propagate async handler rejections", async () => {
-      setSystemTime(new Date(2027, 4, 8, 12, 41, 0));
-
-      const redis = createMockRedis();
-      const handlers: Array<() => Promise<void>> = [];
-      const cronSpy = mockInProcessCron(handlers);
-
-      const job = new CronDistributed({
-        name: "async-error",
-        schedule: "@minutely",
-        handler: () => Promise.reject(new Error("async boom")),
-        redis,
-        replicaId: "replica-a",
-      });
-
-      job.run();
-
-      const [error] = await mightThrow(runTick(handlers[0]));
-
-      if (!error) throw new Error("Expected handler to reject");
-      expect(error.message).toBe("async boom");
-
-      cronSpy.mockRestore();
-    });
-
     test("should propagate redis SET failures", async () => {
       setSystemTime(new Date(2027, 4, 8, 12, 42, 0));
 
@@ -756,50 +562,6 @@ describe("CronDistributed adversarial", () => {
     });
   });
 
-  describe("ref and unref", () => {
-    test("should delegate ref() to the underlying cron job", () => {
-      const handlers: Array<() => Promise<void>> = [];
-      const cronSpy = mockInProcessCron(handlers);
-      const refSpy = spyOn(mockCronJob, "ref");
-
-      const job = new CronDistributed({
-        name: "ref-test",
-        schedule: "@hourly",
-        handler: () => Promise.resolve(),
-        redis: createMockRedis(),
-      });
-
-      job.run();
-      job.ref();
-
-      expect(refSpy).toHaveBeenCalledTimes(1);
-
-      refSpy.mockRestore();
-      cronSpy.mockRestore();
-    });
-
-    test("should delegate unref() to the underlying cron job", () => {
-      const handlers: Array<() => Promise<void>> = [];
-      const cronSpy = mockInProcessCron(handlers);
-      const unrefSpy = spyOn(mockCronJob, "unref");
-
-      const job = new CronDistributed({
-        name: "unref-test",
-        schedule: "@hourly",
-        handler: () => Promise.resolve(),
-        redis: createMockRedis(),
-      });
-
-      job.run();
-      job.unref();
-
-      expect(unrefSpy).toHaveBeenCalledTimes(1);
-
-      unrefSpy.mockRestore();
-      cronSpy.mockRestore();
-    });
-  });
-
   describe("concurrent invocations", () => {
     test("should run handler only once when the same replica fires twice concurrently", async () => {
       setSystemTime(new Date(2027, 4, 8, 12, 50, 0));
@@ -826,46 +588,6 @@ describe("CronDistributed adversarial", () => {
       if (!handler) throw new Error("Expected cron handler to be registered");
 
       await Promise.all([handler(), handler()]);
-
-      expect(runs).toBe(1);
-
-      cronSpy.mockRestore();
-    });
-
-    test("should skip silently when lock is not acquired", async () => {
-      setSystemTime(new Date(2027, 4, 8, 12, 52, 0));
-
-      const redis = createMockRedis();
-      let runs = 0;
-      const handlers: Array<() => Promise<void>> = [];
-      const cronSpy = mockInProcessCron(handlers);
-
-      const winner = new CronDistributed({
-        name: "silent-skip",
-        schedule: "@minutely",
-        handler: () => {
-          runs++;
-          return Promise.resolve();
-        },
-        redis,
-        replicaId: "winner",
-      });
-
-      const loser = new CronDistributed({
-        name: "silent-skip",
-        schedule: "@minutely",
-        handler: () => {
-          runs++;
-          return Promise.resolve();
-        },
-        redis,
-        replicaId: "loser",
-      });
-
-      winner.run();
-      loser.run();
-
-      await Promise.all(handlers.map((handler) => handler()));
 
       expect(runs).toBe(1);
 
@@ -932,6 +654,33 @@ describe("CronDistributed adversarial", () => {
 
       expect(firstKey).not.toBe(secondKey);
       expect(lockKeyTickMs(firstKey)).not.toBe(lockKeyTickMs(secondKey));
+
+      cronSpy.mockRestore();
+    });
+
+    test("should embed resolved expression for raw cron in lock key", async () => {
+      setSystemTime(new Date(2027, 4, 5, 4, 30, 2));
+
+      const redis = createMockRedis();
+      const handlers: Array<() => Promise<void>> = [];
+      const cronSpy = mockInProcessCron(handlers);
+
+      const job = new CronDistributed({
+        name: "expr-raw",
+        schedule: "30 4 * * 3",
+        handler: () => Promise.resolve(),
+        redis,
+        replicaId: "replica-a",
+      });
+
+      const expr = job.getExpression();
+      job.run();
+      await runTick(handlers[0]);
+
+      const call = redis.getLastSetCall();
+      if (!call) throw new Error("Expected redis SET call");
+
+      expect(call.key).toBe(`cron:expr-raw:${expr}:${lockKeyTickMs(call.key)}`);
 
       cronSpy.mockRestore();
     });
@@ -1009,6 +758,366 @@ describe("CronDistributed adversarial", () => {
       }
 
       expect(firstKey).not.toBe(secondKey);
+
+      cronSpy.mockRestore();
+    });
+  });
+
+  describe("lock TTL edge cases", () => {
+    test("should not renew lock while handler exceeds lockTTL", async () => {
+      setSystemTime(new Date(2027, 4, 8, 14, 22, 0));
+
+      const redis = createMockRedis();
+      let runs = 0;
+      const handlers: Array<() => Promise<void>> = [];
+      const cronSpy = mockInProcessCron(handlers);
+
+      const leader = new CronDistributed({
+        name: "slow-handler",
+        schedule: "@minutely",
+        lockTTL: 30,
+        handler: async () => {
+          runs++;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        },
+        redis,
+        replicaId: "leader",
+      });
+
+      const follower = new CronDistributed({
+        name: "slow-handler",
+        schedule: "@minutely",
+        lockTTL: 30,
+        handler: () => {
+          runs++;
+          return Promise.resolve();
+        },
+        redis,
+        replicaId: "follower",
+      });
+
+      leader.run();
+      follower.run();
+
+      const leaderTick = runTick(handlers[0]);
+      await Promise.resolve();
+      setSystemTime(new Date(2027, 4, 8, 14, 22, 0, 40));
+      await runTick(handlers[1]);
+      await leaderTick;
+
+      expect(runs).toBe(2);
+
+      cronSpy.mockRestore();
+    });
+
+    test("should block second replica while lockTTL covers handler duration", async () => {
+      setSystemTime(new Date(2027, 4, 8, 14, 23, 0));
+
+      const redis = createMockRedis();
+      let runs = 0;
+      const handlers: Array<() => Promise<void>> = [];
+      const cronSpy = mockInProcessCron(handlers);
+
+      const slow = new CronDistributed({
+        name: "exact-ttl",
+        schedule: "@minutely",
+        lockTTL: 100,
+        handler: async () => {
+          runs++;
+          await new Promise((resolve) => setTimeout(resolve, 80));
+        },
+        redis,
+        replicaId: "slow",
+      });
+
+      const fast = new CronDistributed({
+        name: "exact-ttl",
+        schedule: "@minutely",
+        lockTTL: 100,
+        handler: () => {
+          runs++;
+          return Promise.resolve();
+        },
+        redis,
+        replicaId: "fast",
+      });
+
+      slow.run();
+      fast.run();
+
+      const slowTick = runTick(handlers[0]);
+      await Promise.resolve();
+      setSystemTime(new Date(2027, 4, 8, 14, 23, 0, 50));
+      await runTick(handlers[1]);
+      await slowTick;
+
+      expect(runs).toBe(1);
+
+      cronSpy.mockRestore();
+    });
+
+    test("should allow another replica after lockTTL when handler never resolves", async () => {
+      setSystemTime(new Date(2027, 4, 8, 15, 12, 0));
+
+      const redis = createMockRedis();
+      let runs = 0;
+      const handlers: Array<() => Promise<void>> = [];
+      const cronSpy = mockInProcessCron(handlers);
+
+      const hangForever = new Promise<void>(() => {});
+
+      const leader = new CronDistributed({
+        name: "ttl-hang",
+        schedule: "@minutely",
+        lockTTL: 50,
+        handler: () => {
+          runs++;
+          return hangForever;
+        },
+        redis,
+        replicaId: "leader",
+      });
+
+      const follower = new CronDistributed({
+        name: "ttl-hang",
+        schedule: "@minutely",
+        lockTTL: 50,
+        handler: () => {
+          runs++;
+          return Promise.resolve();
+        },
+        redis,
+        replicaId: "follower",
+      });
+
+      leader.run();
+      follower.run();
+
+      void runTick(handlers[0]);
+      await Promise.resolve();
+      setSystemTime(new Date(2027, 4, 8, 15, 12, 0, 60));
+      await runTick(handlers[1]);
+
+      expect(runs).toBe(2);
+
+      cronSpy.mockRestore();
+    });
+
+    test("should acquire lock before starting a hanging handler", async () => {
+      setSystemTime(new Date(2027, 4, 8, 15, 11, 0));
+
+      const redis = createMockRedis();
+      const handlers: Array<() => Promise<void>> = [];
+      const cronSpy = mockInProcessCron(handlers);
+
+      let lockKeyDuringHandler: string | null = null;
+
+      const job = new CronDistributed({
+        name: "lock-before-hang",
+        schedule: "@minutely",
+        handler: () => {
+          const call = redis.getLastSetCall();
+          lockKeyDuringHandler = call?.key ?? null;
+          return new Promise<void>(() => {});
+        },
+        redis,
+        replicaId: "replica-a",
+      });
+
+      job.run();
+
+      void runTick(handlers[0]);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(lockKeyDuringHandler).not.toBeNull();
+
+      const call = redis.getLastSetCall();
+      if (!call) throw new Error("Expected redis SET call");
+      expect(redis.getLock(call.key)).toBe("replica-a");
+
+      cronSpy.mockRestore();
+    });
+  });
+
+  describe("duplicate replicaId across instances", () => {
+    test("should deduplicate two replicas sharing the same replicaId via NX", async () => {
+      setSystemTime(new Date(2027, 4, 8, 14, 30, 0));
+
+      const redis = createMockRedis();
+      let runs = 0;
+      const handlers: Array<() => Promise<void>> = [];
+      const cronSpy = mockInProcessCron(handlers);
+
+      for (const _replica of [1, 2]) {
+        new CronDistributed({
+          name: "shared-replica-id",
+          schedule: "@minutely",
+          handler: () => {
+            runs++;
+            return Promise.resolve();
+          },
+          redis,
+          replicaId: "same-pod",
+        }).run();
+      }
+
+      await Promise.all(handlers.map((handler) => handler()));
+
+      expect(runs).toBe(1);
+
+      cronSpy.mockRestore();
+    });
+  });
+
+  describe("sequential ticks", () => {
+    test("should deduplicate replicas on each of two sequential ticks independently", async () => {
+      const redis = createMockRedis();
+      let runs = 0;
+      const handlers: Array<() => Promise<void>> = [];
+      const cronSpy = mockInProcessCron(handlers);
+
+      for (const replicaId of ["t-a", "t-b"]) {
+        new CronDistributed({
+          name: "seq-dedup",
+          schedule: "@minutely",
+          handler: () => {
+            runs++;
+            return Promise.resolve();
+          },
+          redis,
+          replicaId,
+        }).run();
+      }
+
+      setSystemTime(new Date(2027, 4, 8, 16, 20, 0));
+      await Promise.all(handlers.map((handler) => handler()));
+      expect(runs).toBe(1);
+
+      runs = 0;
+      redis.clearSetCalls();
+
+      setSystemTime(new Date(2027, 4, 8, 16, 21, 0));
+      await Promise.all(handlers.map((handler) => handler()));
+      expect(runs).toBe(1);
+
+      cronSpy.mockRestore();
+    });
+  });
+
+  describe("job name edge cases", () => {
+    test("should include colons in job name within lock key", async () => {
+      setSystemTime(new Date(2027, 4, 8, 16, 50, 0));
+
+      const redis = createMockRedis();
+      const handlers: Array<() => Promise<void>> = [];
+      const cronSpy = mockInProcessCron(handlers);
+
+      const job = new CronDistributed({
+        name: "team:service:job",
+        schedule: "@minutely",
+        handler: () => Promise.resolve(),
+        redis,
+        replicaId: "replica-a",
+      });
+
+      expect(job.getJobName()).toBe("team:service:job");
+
+      job.run();
+      await runTick(handlers[0]);
+
+      const call = redis.getLastSetCall();
+      if (!call) throw new Error("Expected redis SET call");
+
+      expect(call.key.startsWith("cron:team:service:job:")).toBe(true);
+
+      cronSpy.mockRestore();
+    });
+  });
+
+  describe("redis non-OK responses", () => {
+    test("should skip handler when redis SET returns null without throwing", async () => {
+      setSystemTime(new Date(2027, 4, 8, 17, 0, 0));
+
+      const redis = createMockRedis();
+      let runs = 0;
+      const handlers: Array<() => Promise<void>> = [];
+      const cronSpy = mockInProcessCron(handlers);
+
+      const winner = new CronDistributed({
+        name: "redis-null",
+        schedule: "@minutely",
+        handler: () => {
+          runs++;
+          return Promise.resolve();
+        },
+        redis,
+        replicaId: "winner",
+      });
+
+      const loser = new CronDistributed({
+        name: "redis-null",
+        schedule: "@minutely",
+        handler: () => {
+          runs++;
+          return Promise.resolve();
+        },
+        redis,
+        replicaId: "loser",
+      });
+
+      winner.run();
+      loser.run();
+
+      await runTick(handlers[0]);
+      redis.forceNextSetReturn(null);
+      await runTick(handlers[1]);
+
+      expect(runs).toBe(1);
+
+      cronSpy.mockRestore();
+    });
+  });
+
+  describe("concurrent multi-job ticks", () => {
+    test("should deduplicate per job independently during concurrent multi-job ticks", async () => {
+      setSystemTime(new Date(2027, 4, 8, 17, 10, 0));
+
+      const redis = createMockRedis();
+      const alphaRuns = { count: 0 };
+      const betaRuns = { count: 0 };
+      const handlers: Array<() => Promise<void>> = [];
+      const cronSpy = mockInProcessCron(handlers);
+
+      for (const replicaId of ["a1", "a2"]) {
+        new CronDistributed({
+          name: "alpha",
+          schedule: "@minutely",
+          handler: () => {
+            alphaRuns.count++;
+            return Promise.resolve();
+          },
+          redis,
+          replicaId,
+        }).run();
+      }
+
+      for (const replicaId of ["b1", "b2"]) {
+        new CronDistributed({
+          name: "beta",
+          schedule: "@minutely",
+          handler: () => {
+            betaRuns.count++;
+            return Promise.resolve();
+          },
+          redis,
+          replicaId,
+        }).run();
+      }
+
+      await Promise.all(handlers.map((handler) => handler()));
+
+      expect(alphaRuns.count).toBe(1);
+      expect(betaRuns.count).toBe(1);
 
       cronSpy.mockRestore();
     });

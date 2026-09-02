@@ -143,7 +143,7 @@ const cleanup = new CronDistributed({
 });
 ```
 
-`CronDistributed` shares `run()`, `stop()`, `next()`, `ref()`, `unref()`, `getStatus()`, `getExpression()`, and `getJobName()` with `Cron`. Disposing the instance calls `stop()`.
+`CronDistributed` shares `run()`, `stop()`, `next()`, `ref()`, `unref()`, `getStatus()`, `getExpression()`, and `getJobName()` with `Cron`. Disposing the instance calls `stop()`. If the scheduled tick cannot be resolved at fire time, the handler is skipped.
 
 ## Examples
 
