@@ -100,9 +100,12 @@ describe("DialectQueryBuilder", () => {
   });
 
   test("omits bound values for unspecified dbDefault columns", () => {
-    const table = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      role: string("role").notNull().dbDefault("member"),
+    const table = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        role: string("role").notNull().dbDefault("member"),
+      },
     });
     const builder = new DialectQueryBuilder({
       spec: SQLITE_SPEC,

@@ -153,11 +153,14 @@ describe("where-builder", () => {
   });
 
   test("handles direct equality, null, JSON columns, and enum values", () => {
-    const eventsTable = defineTable("events", {
-      id: uuid("id").primaryKey().notNull(),
-      status: enumType("status", ["active", "inactive"]).notNull(),
-      payload: json("payload").notNull(),
-      meta: jsonb("meta").notNull(),
+    const eventsTable = defineTable({
+      sqlName: "events",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        status: enumType("status", ["active", "inactive"]).notNull(),
+        payload: json("payload").notNull(),
+        meta: jsonb("meta").notNull(),
+      },
     });
     const payload = [1, 2, 3];
     const meta = { type: "click" };
@@ -219,11 +222,14 @@ describe("where-builder", () => {
   });
 
   test("builds in and notIn for enum and json columns", () => {
-    const eventsTable = defineTable("events", {
-      id: uuid("id").primaryKey().notNull(),
-      status: enumType("status", ["active", "inactive"]).notNull(),
-      payload: json("payload").notNull(),
-      meta: jsonb("meta").notNull(),
+    const eventsTable = defineTable({
+      sqlName: "events",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        status: enumType("status", ["active", "inactive"]).notNull(),
+        payload: json("payload").notNull(),
+        meta: jsonb("meta").notNull(),
+      },
     });
     const payload = { type: "click" };
     const meta = { source: "web" };
@@ -316,9 +322,12 @@ describe("where-builder", () => {
   test("builds between operator with serialization", () => {
     const start = new Date("2025-01-01T00:00:00.000Z");
     const end = new Date("2025-12-31T23:59:59.999Z");
-    const scoresTable = defineTable("scores", {
-      id: uuid("id").primaryKey().notNull(),
-      score: number("score").notNull(),
+    const scoresTable = defineTable({
+      sqlName: "scores",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        score: number("score").notNull(),
+      },
     });
     const where = WhereBuilder.from({
       nextPlaceholder: new PlaceholderGenerator(SQLITE_SPEC).asFn(),
@@ -485,16 +494,22 @@ describe("where-builder", () => {
   });
 
   test("prefers column filters when a relation shares the same key", () => {
-    const itemsTable = defineTable("items", {
-      id: uuid("id").primaryKey().notNull(),
-      tags: json<string[]>("tags").notNull(),
+    const itemsTable = defineTable({
+      sqlName: "items",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        tags: json<string[]>("tags").notNull(),
+      },
     });
-    const tagsTable = defineTable("tags", {
-      id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull(),
-      itemId: uuid("item_id")
-        .notNull()
-        .references(() => itemsTable.columns.id),
+    const tagsTable = defineTable({
+      sqlName: "tags",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        itemId: uuid("item_id")
+          .notNull()
+          .references(() => itemsTable.columns.id),
+      },
     });
     const itemRelations = { tags: many(() => tagsTable) };
 

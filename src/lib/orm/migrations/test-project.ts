@@ -16,10 +16,13 @@ export const createMigrationProject = async (
     dirs.push(dirname(dbUrl));
   }
 
-  const users = defineTable("users", {
-    id: uuid("id").primaryKey().notNull(),
-    name: string("name").notNull(),
-    email: string("email").notNull().unique(),
+  const users = defineTable({
+    sqlName: "users",
+    columns: {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+      email: string("email").notNull().unique(),
+    },
   });
 
   const schemaPath = join(root, "db.ts");
@@ -31,10 +34,13 @@ export const createMigrationProject = async (
     `
 import { createOrm, defineTable, string, uuid } from ${JSON.stringify(join(import.meta.dir, "../index.ts"))};
 
-const users = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
-  name: string("name").notNull(),
-  email: string("email").notNull().unique(),
+const users = defineTable({
+  sqlName: "users",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    name: string("name").notNull(),
+    email: string("email").notNull().unique(),
+  },
 });
 
 export const db = createOrm({

@@ -67,8 +67,10 @@ describe("sql-helpers", () => {
     expect(resolveCreateValue(isActiveColumn, undefined)).toBe(true);
     expect(
       serializeColumnValue(
-        defineTable("events", { payload: json("payload").notNull() }).columns
-          .payload,
+        defineTable({
+          sqlName: "events",
+          columns: { payload: json("payload").notNull() },
+        }).columns.payload,
         { ok: true },
       ),
     ).toBe('{"ok":true}');

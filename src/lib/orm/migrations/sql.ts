@@ -1,4 +1,5 @@
 import { MigrationError } from "../errors.js";
+import type { IndexSnapshot } from "../indexes/types.js";
 import type { ColumnSnapshot, SchemaSnapshot, TableSnapshot } from "./types.js";
 
 const DOLLAR_TAG = /^(\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)/;
@@ -125,6 +126,77 @@ const assertColumnSnapshot = (
   return value as ColumnSnapshot;
 };
 
+const assertIndexSnapshot = (
+  value: unknown,
+  label: string,
+  tableName: string,
+  indexKey: string,
+) => {
+  if (!isPlainObject(value)) {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableName} index ${indexKey} must be an object`,
+    );
+  }
+
+  const index = asRecord(value);
+  const detail = `table ${tableName} index ${indexKey}`;
+  const name = nonEmptyString(index.name, label, `${detail} missing name`);
+
+  if (name !== indexKey) {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableName} index key ${indexKey} does not match name ${name}`,
+    );
+  }
+
+  const table = nonEmptyString(index.table, label, `${detail} missing table`);
+
+  if (table !== tableName) {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableName} index ${indexKey} references table ${table}`,
+    );
+  }
+
+  requireBoolean(index.unique, label, `${detail} missing unique`);
+  const unique = index.unique as boolean;
+
+  const columns = index.columns;
+
+  if (!Array.isArray(columns)) {
+    throw new MigrationError(`Invalid ${label}: ${detail} missing columns`);
+  }
+
+  if (columns.length === 0) {
+    throw new MigrationError(`Invalid ${label}: ${detail} requires columns`);
+  }
+
+  if (columns.some((entry) => typeof entry !== "string")) {
+    throw new MigrationError(`Invalid ${label}: ${detail} has invalid columns`);
+  }
+
+  if (index.where !== undefined) {
+    if (typeof index.where !== "string") {
+      throw new MigrationError(`Invalid ${label}: ${detail} has invalid where`);
+    }
+
+    if (!index.where) {
+      throw new MigrationError(`Invalid ${label}: ${detail} has invalid where`);
+    }
+  }
+
+  const snapshot: IndexSnapshot = {
+    name,
+    table,
+    columns: [...columns],
+    unique,
+  };
+
+  if (index.where !== undefined) {
+    snapshot.where = index.where;
+  }
+
+  return snapshot;
+};
+
 const assertTableSnapshot = (
   value: unknown,
   label: string,
@@ -166,9 +238,25 @@ const assertTableSnapshot = (
     );
   }
 
+  const indexes: Record<string, IndexSnapshot> = {};
+  const rawIndexes = table.indexes;
+
+  if (rawIndexes !== undefined) {
+    if (!isPlainObject(rawIndexes)) {
+      throw new MigrationError(
+        `Invalid ${label}: table ${tableKey} has invalid indexes`,
+      );
+    }
+
+    for (const [indexKey, index] of Object.entries(asRecord(rawIndexes))) {
+      indexes[indexKey] = assertIndexSnapshot(index, label, tableKey, indexKey);
+    }
+  }
+
   return {
     name,
     columns,
+    indexes,
   } satisfies TableSnapshot;
 };
 
@@ -205,6 +293,16 @@ export const assertSchemaSnapshot = (value: unknown, label: string) => {
         throw new MigrationError(
           `Invalid ${label}: ${table.name}.${column.name} references missing column ${column.references.table}.${column.references.column}`,
         );
+      }
+    }
+
+    for (const index of Object.values(table.indexes)) {
+      for (const columnName of index.columns) {
+        if (!table.columns[columnName]) {
+          throw new MigrationError(
+            `Invalid ${label}: ${table.name} index ${index.name} references missing column ${columnName}`,
+          );
+        }
       }
     }
   }

@@ -3,15 +3,21 @@ import { boolean, enumType, number, string, uuid } from "../column/index.js";
 import { defineTable } from "../table/index.js";
 import { createOrm, many, one } from "./index.js";
 
-const usersTable = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
-  name: string("name").notNull(),
-  email: string("email").notNull().unique(),
+const usersTable = defineTable({
+  sqlName: "users",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    name: string("name").notNull(),
+    email: string("email").notNull().unique(),
+  },
 });
 
-const postsTable = defineTable("posts", {
-  id: uuid("id").primaryKey().notNull(),
-  title: string("title").notNull(),
+const postsTable = defineTable({
+  sqlName: "posts",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    title: string("title").notNull(),
+  },
 });
 
 describe("relation helpers", () => {
@@ -31,9 +37,12 @@ describe("relation helpers", () => {
   });
 
   test("one() foreign key must be a column on the source table", async () => {
-    const profilesTable = defineTable("profiles", {
-      id: uuid("id").primaryKey().notNull(),
-      userId: uuid("user_id").notNull(),
+    const profilesTable = defineTable({
+      sqlName: "profiles",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        userId: uuid("user_id").notNull(),
+      },
     });
 
     const ormA = createOrm({
@@ -179,9 +188,12 @@ describe("relation helpers", () => {
   });
 
   test("enumType enforces literal values and equals-only where operators", async () => {
-    const table = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      status: enumType("status", ["active", "inactive"]).notNull(),
+    const table = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        status: enumType("status", ["active", "inactive"]).notNull(),
+      },
     });
 
     const orm = createOrm({
@@ -273,13 +285,16 @@ describe("relation helpers", () => {
   });
 
   test("create requires non-nullable fields without defaults", async () => {
-    const table = defineTable("users", {
-      id: uuid("id")
-        .primaryKey()
-        .notNull()
-        .default(() => "auto-id"),
-      name: string("name").notNull(),
-      nickname: string("nickname").nullable(),
+    const table = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id")
+          .primaryKey()
+          .notNull()
+          .default(() => "auto-id"),
+        name: string("name").notNull(),
+        nickname: string("nickname").nullable(),
+      },
     });
 
     const orm = createOrm({
@@ -322,18 +337,21 @@ describe("relation helpers", () => {
 });
 
 describe("relation where filters", () => {
-  const postsTable = defineTable("posts", {
-    id: uuid("id").primaryKey().notNull(),
-    title: string("title").notNull(),
-    published: boolean("published")
-      .notNull()
-      .default(() => false),
-    views: number("views")
-      .notNull()
-      .default(() => 0),
-    authorId: uuid("author_id")
-      .notNull()
-      .references(() => usersTable.columns.id),
+  const postsTable = defineTable({
+    sqlName: "posts",
+    columns: {
+      id: uuid("id").primaryKey().notNull(),
+      title: string("title").notNull(),
+      published: boolean("published")
+        .notNull()
+        .default(() => false),
+      views: number("views")
+        .notNull()
+        .default(() => 0),
+      authorId: uuid("author_id")
+        .notNull()
+        .references(() => usersTable.columns.id),
+    },
   });
 
   const createOrmWithPosts = () =>
@@ -404,13 +422,16 @@ describe("relation where filters", () => {
 });
 
 describe("nested include options", () => {
-  const authoredPostsTable = defineTable("posts", {
-    id: uuid("id").primaryKey().notNull(),
-    title: string("title").notNull(),
-    content: string("content").notNull(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => usersTable.columns.id),
+  const authoredPostsTable = defineTable({
+    sqlName: "posts",
+    columns: {
+      id: uuid("id").primaryKey().notNull(),
+      title: string("title").notNull(),
+      content: string("content").notNull(),
+      userId: uuid("user_id")
+        .notNull()
+        .references(() => usersTable.columns.id),
+    },
   });
 
   const createOrmWithPosts = () =>
@@ -424,22 +445,28 @@ describe("nested include options", () => {
     });
 
   const definePostWithAuthorTable = (sqlName: string) =>
-    defineTable(sqlName, {
-      id: uuid("id").primaryKey().notNull(),
-      title: string("title").notNull(),
-      userId: uuid("user_id")
-        .notNull()
-        .references(() => usersTable.columns.id),
+    defineTable({
+      sqlName,
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        title: string("title").notNull(),
+        userId: uuid("user_id")
+          .notNull()
+          .references(() => usersTable.columns.id),
+      },
     });
 
   const definePostWithAuthorAndContentTable = (sqlName: string) =>
-    defineTable(sqlName, {
-      id: uuid("id").primaryKey().notNull(),
-      title: string("title").notNull(),
-      content: string("content").notNull(),
-      userId: uuid("user_id")
-        .notNull()
-        .references(() => usersTable.columns.id),
+    defineTable({
+      sqlName,
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        title: string("title").notNull(),
+        content: string("content").notNull(),
+        userId: uuid("user_id")
+          .notNull()
+          .references(() => usersTable.columns.id),
+      },
     });
 
   const createOrmWithAuthorRelation = <

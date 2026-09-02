@@ -34,6 +34,7 @@ Run fallow with `bunx fallow` (no install or dev dependency needed). Example: `b
 - **Zero runtime dependencies** - do not add packages without strong reason.
 - **Imports** - use `.js` extensions in TypeScript imports (`from "./types.js"`).
 - **Module layout** - each package under `src/lib/<name>/` typically has `index.ts`, `types.ts`, `errors.ts`, and colocated `*.test.ts`.
+- **Types** - define types in `types.ts` and import them from there. Do not re-export types from other modules' `types.ts` or `index.ts`; consumers import from the defining file.
 - **Errors** - use `mightThrow` / `mightThrowSync` from `semola/errors`; define module-specific error classes in `errors.ts`.
 - **Validation** - Standard Schema in library code, not Zod-specific APIs.
 - **Build** - `tsdown` (not tsc for output).

@@ -175,11 +175,14 @@ cleanup.run();
 ```typescript
 import { createOrm, defineTable, json, string, uuid } from "semola/orm";
 
-const users = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
-  name: string("name").notNull(),
-  email: string("email").unique().notNull(),
-  metadata: json<{ plan: string }>("metadata"),
+const users = defineTable({
+  sqlName: "users",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    name: string("name").notNull(),
+    email: string("email").unique().notNull(),
+    metadata: json<{ plan: string }>("metadata"),
+  },
 });
 
 const db = createOrm({

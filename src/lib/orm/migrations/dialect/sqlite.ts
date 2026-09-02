@@ -64,6 +64,9 @@ const canApplyInPlace = (op: MigrationOp) => {
     return canDropColumnInPlace(op.column);
   }
 
+  if (op.kind === "createIndex") return true;
+  if (op.kind === "dropIndex") return true;
+
   return false;
 };
 
@@ -80,6 +83,8 @@ const opTableName = (op: MigrationOp) => {
   if (op.kind === "renameTable") return op.to;
   if (op.kind === "addPrimaryKey") return op.table;
   if (op.kind === "dropPrimaryKey") return op.table;
+  if (op.kind === "createIndex") return op.index.table;
+  if (op.kind === "dropIndex") return op.index.table;
 
   return op.table;
 };

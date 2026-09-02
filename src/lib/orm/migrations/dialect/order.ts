@@ -10,7 +10,7 @@ export const withoutForeignKeys = (table: TableSnapshot) => {
     columns[column.name] = rest;
   }
 
-  return { name: table.name, columns };
+  return { name: table.name, columns, indexes: table.indexes };
 };
 
 export const foreignKeysOf = (tables: TableSnapshot[]) => {
@@ -102,6 +102,8 @@ export const orderOps = (
   const addColumns: MigrationOp[] = [];
   const addPrimaryKeys: MigrationOp[] = [];
   const addForeignKeys: MigrationOp[] = [];
+  const createIndexes: MigrationOp[] = [];
+  const dropIndexes: MigrationOp[] = [];
   const renames: MigrationOp[] = [];
 
   for (const op of ops) {
@@ -139,6 +141,12 @@ export const orderOps = (
         break;
       case "addForeignKey":
         addForeignKeys.push(op);
+        break;
+      case "createIndex":
+        createIndexes.push(op);
+        break;
+      case "dropIndex":
+        dropIndexes.push(op);
         break;
     }
   }
@@ -187,9 +195,11 @@ export const orderOps = (
     ...renames,
     ...cycleDropForeignKeys,
     ...dropForeignKeys,
+    ...dropIndexes,
     ...dropPrimaryKeys,
     ...dropColumns,
     ...createOps,
+    ...createIndexes,
     ...alterColumns,
     ...recreates,
     ...dropOps,

@@ -2,27 +2,36 @@ import { boolean, date, json, jsonb, string, uuid } from "../column/index.js";
 import { defineTable } from "../table/index.js";
 import type { ReturningQuery } from "./types.js";
 
-export const usersTable = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
-  firstName: string("first_name").notNull(),
-  createdAt: date("created_at").notNull(),
-  isActive: boolean("is_active")
-    .notNull()
-    .default(() => true),
+export const usersTable = defineTable({
+  sqlName: "users",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    firstName: string("first_name").notNull(),
+    createdAt: date("created_at").notNull(),
+    isActive: boolean("is_active")
+      .notNull()
+      .default(() => true),
+  },
 });
 
-export const postsTable = defineTable("posts", {
-  id: uuid("id").primaryKey().notNull(),
-  title: string("title").notNull(),
-  authorId: uuid("author_id")
-    .notNull()
-    .references(() => usersTable.columns.id),
+export const postsTable = defineTable({
+  sqlName: "posts",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    title: string("title").notNull(),
+    authorId: uuid("author_id")
+      .notNull()
+      .references(() => usersTable.columns.id),
+  },
 });
 
-export const eventsTable = defineTable("events", {
-  id: uuid("id").primaryKey().notNull(),
-  payload: json("payload").notNull(),
-  meta: jsonb("meta").notNull(),
+export const eventsTable = defineTable({
+  sqlName: "events",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    payload: json("payload").notNull(),
+    meta: jsonb("meta").notNull(),
+  },
 });
 
 type UserPostMutationBuilder = {

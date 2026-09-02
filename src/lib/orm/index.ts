@@ -9,6 +9,7 @@ export {
   uuid,
 } from "./column/index.js";
 export { OrmError } from "./errors.js";
+export { index, uniqueIndex } from "./indexes/index.js";
 export { createOrm, many, one } from "./orm/index.js";
 export type {
   CreateData,

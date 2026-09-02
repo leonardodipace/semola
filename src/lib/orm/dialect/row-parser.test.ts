@@ -5,11 +5,14 @@ import { RowParser } from "./row-parser.js";
 import { postsTable, usersTable } from "./test-fixtures.js";
 import type { IncludeDescriptor } from "./types.js";
 
-const eventsTable = defineTable("events", {
-  id: uuid("id").primaryKey().notNull(),
-  payload: json("payload").notNull(),
-  meta: jsonb("meta").notNull(),
-  published: boolean("published").notNull(),
+const eventsTable = defineTable({
+  sqlName: "events",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    payload: json("payload").notNull(),
+    meta: jsonb("meta").notNull(),
+    published: boolean("published").notNull(),
+  },
 });
 
 const rowParser = new RowParser();

@@ -9,16 +9,22 @@ import {
 import { createOrm } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
 
-const usersTable = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
-  name: string("name").notNull(),
-  email: string("email").notNull().unique(),
+const usersTable = defineTable({
+  sqlName: "users",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    name: string("name").notNull(),
+    email: string("email").notNull().unique(),
+  },
 });
 
-const accountsTable = defineTable("accounts", {
-  id: uuid("id").primaryKey().notNull(),
-  userId: uuid("user_id").notNull(),
-  balance: string("balance").notNull(),
+const accountsTable = defineTable({
+  sqlName: "accounts",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    userId: uuid("user_id").notNull(),
+    balance: string("balance").notNull(),
+  },
 });
 
 const schemaSql = {
