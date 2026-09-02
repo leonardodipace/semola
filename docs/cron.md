@@ -3,12 +3,12 @@ title: Cron
 description: In-process and OS-level cron schedules on Bun
 ---
 
-Schedule work either in-process or through the operating system. `Cron` runs a handler inside the current Bun process. `CronOS` registers a script with Bun's OS-level cron helper so it runs independently of the current process.
+Schedule work either in-process or through the operating system. `Cron` runs a handler inside the current Bun process. `CronOS` registers a script with Bun's OS-level cron helper so it runs independently of the current process. `CronDistributed` runs an in-process handler like `Cron`, but uses Redis so only one replica executes each scheduled tick.
 
 ## Import
 
 ```typescript
-import { Cron, CronOS, cronJobBuilder, any, number } from "semola/cron";
+import { Cron, CronDistributed, CronOS, cronJobBuilder, any, number } from "semola/cron";
 ```
 
 ## Quick start
@@ -105,6 +105,45 @@ const job = new CronOS({
 await job.run();
 await job.stop();
 ```
+
+## Distributed cron
+
+In a multi-replica deployment, plain `Cron` runs the handler on every replica. `CronDistributed` wraps the same in-process schedule with a Redis lock keyed by job name, resolved expression, and tick, so only one replica runs each fire time.
+
+Each replica still schedules locally. When a tick fires, the replica that acquires `SET key NX PX` runs the handler; the others skip that tick.
+
+```typescript
+import { CronDistributed } from "semola/cron";
+
+const report = new CronDistributed({
+  name: "daily-report",
+  schedule: "@daily",
+  redis,
+  handler: async () => {
+    await sendReport();
+  },
+});
+
+report.run();
+```
+
+Use `replicaId` to identify the lock owner in Redis (defaults to a random UUID per instance). `lockTTL` (default five minutes) bounds how long the deduplication lock is held. The lock is acquired before `handler()` runs and is not renewed while the handler executes, so deduplication is at-most-once only while that Redis key remains valid. If a replica is delayed past `lockTTL`, another replica can acquire the same tick key and run the handler again. Lock keys use the resolved cron expression and scheduled tick time so replicas coordinate on the same key when they fire within about a minute of the boundary. Handlers should be idempotent.
+
+Use a unique `name` per job.
+
+```typescript
+const cleanup = new CronDistributed({
+  name: "cleanup",
+  schedule: "@hourly",
+  redis,
+  replicaId: process.env.REPLICA_ID,
+  handler: async () => {
+    await purgeStaleRows();
+  },
+});
+```
+
+`CronDistributed` shares `run()`, `stop()`, `next()`, `ref()`, `unref()`, `getStatus()`, `getExpression()`, and `getJobName()` with `Cron`. Disposing the instance calls `stop()`. If the scheduled tick cannot be resolved within about a minute of the boundary, the handler is skipped.
 
 ## Examples
 
@@ -304,6 +343,21 @@ Disposing a `Cron` with `Symbol.dispose` stops it.
 | `stop()` | Remove the OS-level registration |
 | `next(from?)` | Next fire time, or `null` if none |
 | `getExpression()` / `getJobName()` | Inspect configuration |
+
+### `CronDistributed` options
+
+| Option | Meaning |
+| --- | --- |
+| `name` | Job name (part of the Redis lock key) |
+| `schedule` | Alias, cron string, or builder result |
+| `handler` | Async or sync function |
+| `redis` | Redis client used for tick locks |
+| `replicaId?` | Value stored when this replica acquires the lock |
+| `lockTTL?` | Lock expiry in ms (default `300000`) |
+
+### `CronDistributed` methods
+
+Same as `Cron`: `run()`, `stop()`, `next(from?)`, `ref()` / `unref()`, `getStatus()`, `getExpression()`, `getJobName()`. Disposing with `Symbol.dispose` stops the job.
 
 ### Errors
 
