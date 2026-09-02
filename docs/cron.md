@@ -127,7 +127,7 @@ const report = new CronDistributed({
 report.run();
 ```
 
-Use `replicaId` to identify the lock owner in Redis (defaults to a random UUID per instance). `lockTTL` (default five minutes) bounds how long the deduplication lock is held. The lock is acquired before `handler()` runs and is not renewed while the handler executes, so deduplication is at-most-once only while that Redis key remains valid. If a replica is delayed past `lockTTL`, another replica can acquire the same tick key and run the handler again. Lock keys use the resolved cron expression and scheduled tick time so replicas coordinate on the same key even when they fire a few seconds apart. Handlers should be idempotent.
+Use `replicaId` to identify the lock owner in Redis (defaults to a random UUID per instance). `lockTTL` (default five minutes) bounds how long the deduplication lock is held. The lock is acquired before `handler()` runs and is not renewed while the handler executes, so deduplication is at-most-once only while that Redis key remains valid. If a replica is delayed past `lockTTL`, another replica can acquire the same tick key and run the handler again. Lock keys use the resolved cron expression and scheduled tick time so replicas coordinate on the same key when they fire within about a minute of the boundary. Handlers should be idempotent.
 
 Use a unique `name` per job.
 
@@ -143,7 +143,7 @@ const cleanup = new CronDistributed({
 });
 ```
 
-`CronDistributed` shares `run()`, `stop()`, `next()`, `ref()`, `unref()`, `getStatus()`, `getExpression()`, and `getJobName()` with `Cron`. Disposing the instance calls `stop()`. If the scheduled tick cannot be resolved at fire time, the handler is skipped.
+`CronDistributed` shares `run()`, `stop()`, `next()`, `ref()`, `unref()`, `getStatus()`, `getExpression()`, and `getJobName()` with `Cron`. Disposing the instance calls `stop()`. If the scheduled tick cannot be resolved within about a minute of the boundary, the handler is skipped.
 
 ## Examples
 

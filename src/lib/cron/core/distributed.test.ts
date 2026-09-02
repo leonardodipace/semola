@@ -190,7 +190,7 @@ describe("CronDistributed", () => {
     });
 
     test("should deduplicate replicas that fire after the one-second lookback window", async () => {
-      setSystemTime(new Date(2027, 4, 8, 12, 35, 2));
+      setSystemTime(new Date(2027, 4, 8, 12, 35, 0));
 
       const redis = createMockRedis();
       let runs = 0;
@@ -223,6 +223,7 @@ describe("CronDistributed", () => {
       delayed.run();
 
       await runTick(handlers[0]);
+      setSystemTime(new Date(2027, 4, 8, 12, 35, 2));
       await runTick(handlers[1]);
 
       expect(runs).toBe(1);

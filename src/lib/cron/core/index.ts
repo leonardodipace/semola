@@ -9,8 +9,8 @@ import type {
   ScheduleType,
 } from "./types.js";
 
-// Fallback lookbacks when the gap trick cannot resolve the scheduled tick.
-const TICK_LOOKBACK_MS = [5_000, 60_000, 3_600_000] as const;
+// Short lookbacks for replicas that fire seconds after the scheduled boundary.
+const TICK_LOOKBACK_MS = [5_000, 60_000] as const;
 const DEFAULT_LOCK_TTL = 300_000;
 
 const lockKey = (name: string, expr: string, tickMs: number) =>
