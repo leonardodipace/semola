@@ -178,7 +178,7 @@ const assertIndexSnapshot = (
       throw new MigrationError(`Invalid ${label}: ${detail} has invalid where`);
     }
 
-    if (!index.where) {
+    if (!index.where.trim()) {
       throw new MigrationError(`Invalid ${label}: ${detail} has invalid where`);
     }
   }
