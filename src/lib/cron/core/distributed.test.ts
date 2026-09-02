@@ -1,4 +1,11 @@
-import { describe, expect, setSystemTime, spyOn, test } from "bun:test";
+import {
+  afterEach,
+  describe,
+  expect,
+  setSystemTime,
+  spyOn,
+  test,
+} from "bun:test";
 import { CronDistributed } from "./index.js";
 
 type SetCall = {
@@ -120,6 +127,10 @@ const lockKeyTickMs = (key: string) => {
 };
 
 describe("CronDistributed adversarial", () => {
+  afterEach(() => {
+    setSystemTime();
+  });
+
   test("should expose job name and resolved expression", () => {
     const job = new CronDistributed({
       name: "daily-report",

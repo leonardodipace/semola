@@ -2536,7 +2536,7 @@ export default defineConfig({
 if (SEMOLA_POSTGRES_URL) {
   const url = SEMOLA_POSTGRES_URL;
 
-  describe.serial("postgres migrations integration", () => {
+  describe("postgres migrations integration", () => {
     const dirs: string[] = [];
     const id = PG_ID;
     const id2 = PG_ID_2;
