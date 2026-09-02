@@ -40,6 +40,23 @@ export const isRelationWrite = (value: unknown) => {
   return false;
 };
 
+const RELATION_WRITE_KEYS = new Set(["connect", "disconnect"]);
+
+const assertKnownRelationWriteKeys = (
+  relationName: string,
+  record: Record<string, unknown>,
+) => {
+  const unknownKeys = Object.keys(record).filter(
+    (key) => !RELATION_WRITE_KEYS.has(key),
+  );
+
+  if (!unknownKeys.length) return;
+
+  throw new Error(
+    `Relation write for ${relationName} has unknown operators: ${unknownKeys.join(", ")}`,
+  );
+};
+
 export const parseRelationWrite = (
   relationName: string,
   value: unknown,
@@ -51,6 +68,7 @@ export const parseRelationWrite = (
   }
 
   const record = value as Record<string, unknown>;
+  assertKnownRelationWriteKeys(relationName, record);
   const connect = record.connect;
   const disconnect = record.disconnect;
   const hasConnect = connect !== undefined;
