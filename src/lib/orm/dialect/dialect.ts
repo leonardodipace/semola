@@ -11,6 +11,12 @@ import type {
   UpdateOptions,
 } from "../orm/types.js";
 import type { Table } from "../table/types.js";
+import {
+  planHasManyRelationWrites,
+  planHasOneRelationWrites,
+  primaryKeyValueFromRow,
+  splitMutationData,
+} from "./mutation-relations.js";
 import { DialectQueryBuilder } from "./query-builder.js";
 import { RowParser } from "./row-parser.js";
 import { enableSqliteForeignKeys } from "./sqlite.js";
@@ -59,9 +65,73 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
     sql: Bun.SQL,
     options: TOptions,
   ) {
-    const query = this.builder.buildCreate(options);
+    const { columnData, relationWrites } = splitMutationData(
+      this.builder.table,
+      this.builder.relations,
+      options.data as Record<string, unknown>,
+    );
 
-    return this.executeOne(sql, query, "insert");
+    if (!relationWrites.length) {
+      const query = this.builder.buildCreate(options);
+
+      return this.executeOne(sql, query, "insert");
+    }
+
+    const run = async (txSql: Bun.SQL) => {
+      const hasOneData = await planHasOneRelationWrites({
+        sql: txSql,
+        spec: this.builder.spec,
+        parentTable: this.builder.table,
+        relations: this.builder.relations,
+        relationWrites,
+      });
+      const mergedData = { ...columnData, ...hasOneData };
+      const query = this.builder.buildCreate({
+        ...options,
+        data: mergedData,
+      } as TOptions);
+      const row = await this.executeOne(txSql, query, "insert");
+      const parentKey = primaryKeyValueFromRow(
+        this.builder.table,
+        row as Record<string, unknown>,
+      );
+      const deferredWrites = await planHasManyRelationWrites({
+        sql: txSql,
+        spec: this.builder.spec,
+        parentTable: this.builder.table,
+        relations: this.builder.relations,
+        relationWrites,
+        parentKey,
+      });
+
+      for (const write of deferredWrites) {
+        await write();
+      }
+
+      if (options.include) {
+        if (deferredWrites.length) {
+          const pkColumn = Object.entries(this.builder.table.columns).find(
+            ([, column]) => column._meta.isPrimaryKey,
+          )?.[0];
+
+          if (pkColumn) {
+            return this.findUnique(txSql, {
+              where: { [pkColumn]: parentKey },
+              select: options.select,
+              include: options.include,
+            } as FindUniqueOptions<T, R>);
+          }
+        }
+      }
+
+      return row;
+    };
+
+    if (this.name === "sqlite") {
+      await enableSqliteForeignKeys(sql);
+    }
+
+    return sql.begin(run);
   }
 
   public async createMany(sql: Bun.SQL, options: CreateManyOptions<T>) {
@@ -78,9 +148,86 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
     sql: Bun.SQL,
     options: TOptions,
   ) {
-    const query = this.builder.buildUpdate(options);
+    const { columnData, relationWrites } = splitMutationData(
+      this.builder.table,
+      this.builder.relations,
+      options.data as Record<string, unknown>,
+    );
 
-    return this.executeOne(sql, query, "update");
+    if (!relationWrites.length) {
+      const query = this.builder.buildUpdate(options);
+
+      return this.executeOne(sql, query, "update");
+    }
+
+    const run = async (txSql: Bun.SQL) => {
+      const hasOneData = await planHasOneRelationWrites({
+        sql: txSql,
+        spec: this.builder.spec,
+        parentTable: this.builder.table,
+        relations: this.builder.relations,
+        relationWrites,
+      });
+      const mergedData = { ...columnData, ...hasOneData };
+      const hasColumnUpdates = Object.keys(mergedData).length > 0;
+      let row: unknown;
+
+      if (hasColumnUpdates) {
+        const query = this.builder.buildUpdate({
+          ...options,
+          data: mergedData,
+        } as TOptions);
+        row = await this.executeOne(txSql, query, "update");
+      } else {
+        row = await this.findUnique(txSql, {
+          where: options.where,
+          select: options.select,
+          include: options.include,
+        } as FindUniqueOptions<T, R>);
+
+        if (!row) {
+          throw new Error(
+            `Record not found after update on table ${this.builder.table.sqlName}`,
+          );
+        }
+      }
+
+      const parentKey = primaryKeyValueFromRow(
+        this.builder.table,
+        row as Record<string, unknown>,
+        options.where as Record<string, unknown>,
+      );
+      const deferredWrites = await planHasManyRelationWrites({
+        sql: txSql,
+        spec: this.builder.spec,
+        parentTable: this.builder.table,
+        relations: this.builder.relations,
+        relationWrites,
+        parentKey,
+      });
+
+      for (const write of deferredWrites) {
+        await write();
+      }
+
+      if (options.include) {
+        if (deferredWrites.length) {
+          return this.findUnique(txSql, {
+            where: options.where,
+            select: options.select,
+            include: options.include,
+          } as FindUniqueOptions<T, R>);
+        }
+      }
+
+      return row;
+    };
+
+    if (this.name === "sqlite") {
+      await enableSqliteForeignKeys(sql);
+    }
+
+    return sql.begin(run);
   }
 
   public async updateMany(sql: Bun.SQL, options: UpdateManyOptions<T, R>) {
