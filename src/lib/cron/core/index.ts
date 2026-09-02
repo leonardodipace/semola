@@ -1,12 +1,19 @@
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
 import type {
   CronBaseOptions,
+  CronDistributedOptions,
   CronOptions,
   CronOSOptions,
   CronStatus,
   CronUtilitiesInterface,
   ScheduleType,
 } from "./types.js";
+
+const DEFAULT_LOCK_TTL = 300_000;
+// Look back one second so next() resolves the tick that just fired, not the following one.
+const TICK_LOOKBACK_MS = 1000;
+
+const lockKey = (name: string, tickMs: number) => `cron:${name}:${tickMs}`;
 
 const ALIASES: Record<ScheduleType, string> = {
   "@yearly": "0 0 1 1 *",
@@ -121,6 +128,78 @@ export class Cron implements CronUtilitiesInterface {
 
   public next(from?: Date | number) {
     return this.common.next(this.options, from);
+  }
+}
+
+export class CronDistributed implements CronUtilitiesInterface {
+  private cron: Cron;
+  private options: CronDistributedOptions;
+
+  public constructor(options: CronDistributedOptions) {
+    this.options = options;
+    this.cron = new Cron({
+      name: options.name,
+      schedule: options.schedule,
+      handler: () => this.runIfLeader(),
+    });
+  }
+
+  public [Symbol.dispose](): void {
+    this.stop();
+  }
+
+  public getStatus() {
+    return this.cron.getStatus();
+  }
+
+  public run() {
+    this.cron.run();
+  }
+
+  public stop() {
+    this.cron.stop();
+  }
+
+  public ref() {
+    this.cron.ref();
+  }
+
+  public unref() {
+    this.cron.unref();
+  }
+
+  public getExpression() {
+    return this.cron.getExpression();
+  }
+
+  public getJobName() {
+    return this.cron.getJobName();
+  }
+
+  public next(from?: Date | number) {
+    return this.cron.next(from);
+  }
+
+  private async runIfLeader() {
+    const tick = this.cron.next(Date.now() - TICK_LOOKBACK_MS);
+
+    if (!tick) return;
+
+    const key = lockKey(this.options.name, tick.getTime());
+    const replicaId = this.options.replicaId ?? crypto.randomUUID();
+    const lockTTL = this.options.lockTTL ?? DEFAULT_LOCK_TTL;
+
+    const acquired = await this.options.redis.set(
+      key,
+      replicaId,
+      "PX",
+      String(lockTTL),
+      "NX",
+    );
+
+    if (acquired !== "OK") return;
+
+    await this.options.handler();
   }
 }
 
