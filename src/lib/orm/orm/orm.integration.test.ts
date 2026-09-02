@@ -63,7 +63,9 @@ const schemaSql = {
 } as const;
 
 for (const live of integrationAdapters()) {
-  describe(`${live.adapter} orm integration`, () => {
+  const describeLive = live.adapter === "postgres" ? describe.serial : describe;
+
+  describeLive(`${live.adapter} orm integration`, () => {
     const ddl = schemaSql[live.adapter];
     const id = live.adapter === "postgres" ? PG_ID : "u1";
     const id2 = live.adapter === "postgres" ? PG_ID_2 : "u2";
