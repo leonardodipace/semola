@@ -184,7 +184,7 @@ const posts = defineTable({
 });
 ```
 
-`checks` is optional. Check names are required and must be unique across the schema. Use `.on(columns...)` to declare which columns the check depends on (for migrations when columns are dropped). `.where("...")` takes the raw SQL inside `CHECK (...)`.
+`checks` is optional. Check names are required and must be unique on each table (the same name on different tables is allowed). On Postgres, constraint names are unique per schema, so reusing a name across tables fails at migrate time. Use `.on(columns...)` to declare which columns the check depends on (for migrations when columns are dropped). `.where("...")` takes the raw SQL inside `CHECK (...)`.
 
 ### Indexes
 

@@ -234,6 +234,12 @@ const assertCheckSnapshot = (
     `${detail} missing expression`,
   );
 
+  if (!expression.trim()) {
+    throw new MigrationError(
+      `Invalid ${label}: ${detail} has invalid expression`,
+    );
+  }
+
   const columns = check.columns;
 
   if (!Array.isArray(columns)) {

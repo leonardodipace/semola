@@ -3826,6 +3826,61 @@ describe("orm migrations checks", () => {
     );
   });
 
+  test("sqlite adds check to existing table via recreateTable", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ posts: before }),
+      snapshotSchema({ posts: after }),
+      getMigrationDialect("sqlite"),
+    );
+    const sql = getMigrationDialect("sqlite").render(ops);
+
+    expect(ops).toEqual([
+      {
+        kind: "recreateTable",
+        from: expect.any(Object),
+        to: expect.any(Object),
+      },
+    ]);
+    expect(sql).toContain('CONSTRAINT "posts_age_check" CHECK (age > 21)');
+    expect(sql).not.toContain('ALTER TABLE "posts" ADD CONSTRAINT');
+  });
+
+  test("sqlite drops check from existing table via recreateTable", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ posts: before }),
+      snapshotSchema({ posts: after }),
+      getMigrationDialect("sqlite"),
+    );
+    const sql = getMigrationDialect("sqlite").render(ops);
+
+    expect(ops[0]?.kind).toBe("recreateTable");
+    expect(sql).toContain('CREATE TABLE "posts__semola_tmp"');
+    expect(sql).not.toContain('DROP CONSTRAINT "posts_age_check"');
+    expect(sql).not.toContain('CONSTRAINT "posts_age_check" CHECK');
+  });
+
   test("drops check from existing table", () => {
     const before = defineTable({
       sqlName: "posts",
@@ -4396,17 +4451,18 @@ describe("orm migrations checks", () => {
           .where("started_at IS NOT NULL"),
       ],
     });
-    const down = getMigrationDialect("sqlite").render(
-      diffSchemas(
-        snapshotSchema({ posts: after }),
-        snapshotSchema({ posts: before }),
-        getMigrationDialect("sqlite"),
-      ),
+    const downOps = diffSchemas(
+      snapshotSchema({ posts: after }),
+      snapshotSchema({ posts: before }),
+      getMigrationDialect("sqlite"),
     );
+    const down = getMigrationDialect("sqlite").render(downOps);
 
-    expect(down).toContain('DROP CONSTRAINT "posts_dates_check"');
+    expect(downOps[0]?.kind).toBe("recreateTable");
+    expect(down).toContain('CREATE TABLE "posts__semola_tmp"');
+    expect(down).not.toContain('DROP CONSTRAINT "posts_dates_check"');
     expect(down).toContain(
-      'ADD CONSTRAINT "posts_dates_check" CHECK (started_at IS NOT NULL)',
+      'CONSTRAINT "posts_dates_check" CHECK (started_at IS NOT NULL)',
     );
   });
 
@@ -4474,6 +4530,41 @@ describe("orm migrations checks", () => {
     expect(snapshot.tables.posts?.checks.posts_age_check?.expression).toBe(
       "  age   >   21  ",
     );
+  });
+
+  test("assertSchemaSnapshot rejects whitespace-only check expression", () => {
+    const checkName = "posts_age_check";
+
+    expect(() =>
+      assertSchemaSnapshot(
+        {
+          tables: {
+            posts: {
+              name: "posts",
+              columns: {
+                age: {
+                  name: "age",
+                  type: "number",
+                  isNullable: true,
+                  isPrimaryKey: false,
+                  isUnique: false,
+                },
+              },
+              indexes: {},
+              checks: {
+                [checkName]: {
+                  name: checkName,
+                  table: "posts",
+                  expression: "   ",
+                  columns: ["age"],
+                },
+              },
+            },
+          },
+        },
+        "schema.json",
+      ),
+    ).toThrow("has invalid expression");
   });
 
   test("assertSchemaSnapshot rejects check with empty columns array", () => {

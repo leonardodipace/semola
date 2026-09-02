@@ -132,24 +132,6 @@ const snapshotIndex = (index: Index, table: Table) => {
   return snapshot;
 };
 
-const assertUniqueCheckNames = (tables: Record<string, TableSnapshot>) => {
-  const seen = new Map<string, string>();
-
-  for (const table of Object.values(tables)) {
-    for (const check of Object.values(table.checks)) {
-      const existing = seen.get(check.name);
-
-      if (existing) {
-        throw new MigrationError(
-          `Duplicate check name ${check.name} on tables ${existing} and ${table.name}`,
-        );
-      }
-
-      seen.set(check.name, table.name);
-    }
-  }
-};
-
 const snapshotCheck = (check: Check, table: Table) => {
   const columnSqlNames = new Set(
     Object.values(table.columns).map((column) => column.sqlName),
@@ -262,7 +244,6 @@ export const snapshotSchema = (tables: Record<string, Table>) => {
 
   assertForeignKeyTypes(result);
   assertUniqueIndexNames(result);
-  assertUniqueCheckNames(result);
 
   return { tables: result };
 };

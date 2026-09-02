@@ -29,7 +29,7 @@ Task-triggered. Read this skill at the start of the loop and follow it through a
 
 ## The loop
 
-```
+```text
 1. Blind test subagent  →  writes tests from spec only
 2. Parent               →  fix failing tests (impl vs bad fixture)
 3. Deslop subagent      →  report only, no edits

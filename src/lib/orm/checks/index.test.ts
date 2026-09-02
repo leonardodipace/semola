@@ -92,7 +92,7 @@ describe("check builder with defineTable", () => {
     );
   });
 
-  test("rejects duplicate check names across tables in schema", () => {
+  test("allows duplicate check names across tables in schema", () => {
     const posts = defineTable({
       sqlName: "posts",
       columns: { age: number("age") },
@@ -108,7 +108,14 @@ describe("check builder with defineTable", () => {
       ],
     });
 
-    expect(() => snapshotSchema({ posts, pages })).toThrow("shared_check");
+    const snapshot = snapshotSchema({ posts, pages });
+
+    expect(snapshot.tables.posts?.checks.shared_check?.expression).toBe(
+      "age > 21",
+    );
+    expect(snapshot.tables.pages?.checks.shared_check?.expression).toBe(
+      "age > 18",
+    );
   });
 
   test("snapshot stores column sql names from on()", () => {

@@ -66,8 +66,8 @@ const canApplyInPlace = (op: MigrationOp) => {
 
   if (op.kind === "createIndex") return true;
   if (op.kind === "dropIndex") return true;
-  if (op.kind === "createCheck") return true;
-  if (op.kind === "dropCheck") return true;
+  if (op.kind === "createCheck") return false;
+  if (op.kind === "dropCheck") return false;
 
   return false;
 };
