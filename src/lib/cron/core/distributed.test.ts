@@ -874,7 +874,7 @@ describe("CronDistributed adversarial", () => {
   });
 
   describe("lock key format", () => {
-    test("should use cron:{name}:{tickMs} lock keys with SET NX PX", async () => {
+    test("should use cron:{name}:{expr}:{tickMs} lock keys with SET NX PX", async () => {
       setSystemTime(new Date(2027, 4, 8, 13, 0, 0));
 
       const redis = createMockRedis();
@@ -895,7 +895,7 @@ describe("CronDistributed adversarial", () => {
       const call = redis.getLastSetCall();
       if (!call) throw new Error("Expected redis SET call");
 
-      expect(call.key.startsWith("cron:lock-format:")).toBe(true);
+      expect(call.key.startsWith("cron:lock-format:* * * * *:")).toBe(true);
       expect(Number.isFinite(lockKeyTickMs(call.key))).toBe(true);
       expect(call.args).toContain("NX");
       expect(call.args).toContain("PX");
@@ -938,6 +938,49 @@ describe("CronDistributed adversarial", () => {
   });
 
   describe("long-interval schedules", () => {
+    test("should deduplicate @monthly replicas when slack fallback resolves the tick", async () => {
+      setSystemTime(new Date(2027, 4, 1, 0, 0, 2));
+
+      const redis = createMockRedis();
+      let runs = 0;
+      const handlers: Array<() => Promise<void>> = [];
+      const cronSpy = mockInProcessCron(handlers);
+
+      const replicas = ["replica-a", "replica-b"].map(
+        (replicaId) =>
+          new CronDistributed({
+            name: "monthly-slack",
+            schedule: "@monthly",
+            handler: () => {
+              runs++;
+              return Promise.resolve();
+            },
+            redis,
+            replicaId,
+          }),
+      );
+
+      for (const replica of replicas) {
+        replica.run();
+      }
+
+      await Promise.all(handlers.map((handler) => handler()));
+
+      expect(runs).toBe(1);
+
+      const firstKey = redis.setCalls[0]?.key;
+      const secondKey = redis.setCalls[1]?.key;
+
+      if (!firstKey || !secondKey) {
+        throw new Error("Expected lock keys for both replicas");
+      }
+
+      expect(firstKey).toBe(secondKey);
+      expect(firstKey.startsWith("cron:monthly-slack:0 0 1 * *:")).toBe(true);
+
+      cronSpy.mockRestore();
+    });
+
     test("should use different lock keys for @yearly ticks in different years", async () => {
       const redis = createMockRedis();
       const handlers: Array<() => Promise<void>> = [];

@@ -108,7 +108,7 @@ await job.stop();
 
 ## Distributed cron
 
-In a multi-replica deployment, plain `Cron` runs the handler on every replica. `CronDistributed` wraps the same in-process schedule with a Redis lock keyed by job name and tick, so only one replica runs each fire time.
+In a multi-replica deployment, plain `Cron` runs the handler on every replica. `CronDistributed` wraps the same in-process schedule with a Redis lock keyed by job name, resolved expression, and tick, so only one replica runs each fire time.
 
 Each replica still schedules locally. When a tick fires, the replica that acquires `SET key NX PX` runs the handler; the others skip that tick.
 
@@ -127,9 +127,9 @@ const report = new CronDistributed({
 report.run();
 ```
 
-Use `replicaId` to identify the lock owner in Redis (defaults to a random UUID). `lockTTL` (default five minutes) bounds how long the deduplication lock is held. The lock is acquired before `handler()` runs and is not renewed while the handler executes, so deduplication is at-most-once only while that Redis key remains valid. If a replica is delayed past `lockTTL`, another replica can acquire the same tick key and run the handler again. Lock keys are derived from the schedule boundary that triggered the tick, so delayed replicas still coordinate on the same key. Handlers should be idempotent.
+Use `replicaId` to identify the lock owner in Redis (defaults to a random UUID per instance). `lockTTL` (default five minutes) bounds how long the deduplication lock is held. The lock is acquired before `handler()` runs and is not renewed while the handler executes, so deduplication is at-most-once only while that Redis key remains valid. If a replica is delayed past `lockTTL`, another replica can acquire the same tick key and run the handler again. Lock keys use the resolved cron expression and scheduled tick time so replicas coordinate on the same key even when they fire a few seconds apart. Handlers should be idempotent.
 
-Use a unique `name` per job. Two jobs with the same `name` but different schedules are not deduplicated against each other unless their ticks align on the same wall-clock instant.
+Use a unique `name` per job.
 
 ```typescript
 const cleanup = new CronDistributed({
@@ -348,7 +348,7 @@ Disposing a `Cron` with `Symbol.dispose` stops it.
 
 | Option | Meaning |
 | --- | --- |
-| `name` | Job name (also used in the Redis lock key) |
+| `name` | Job name (part of the Redis lock key) |
 | `schedule` | Alias, cron string, or builder result |
 | `handler` | Async or sync function |
 | `redis` | Redis client used for tick locks |

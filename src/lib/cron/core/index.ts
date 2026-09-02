@@ -9,10 +9,12 @@ import type {
   ScheduleType,
 } from "./types.js";
 
+// How far back to probe next() when the gap trick cannot resolve the scheduled tick.
+const TICK_LOOKBACK_MS = [5_000, 60_000, 3_600_000] as const;
 const DEFAULT_LOCK_TTL = 300_000;
-const MAX_SCHEDULE_GAP_MS = 1464 * 24 * 60 * 60 * 1000;
 
-const lockKey = (name: string, tickMs: number) => `cron:${name}:${tickMs}`;
+const lockKey = (name: string, expr: string, tickMs: number) =>
+  `cron:${name}:${expr}:${tickMs}`;
 
 const ALIASES: Record<ScheduleType, string> = {
   "@yearly": "0 0 1 1 *",
@@ -45,49 +47,6 @@ class CommonCronUtilities {
     if (parseError) throw parseError;
 
     return nextMatch;
-  }
-
-  public currentScheduledTick(options: CronBaseOptions, from?: Date | number) {
-    const now = from === undefined ? Date.now() : Number(from);
-    const upcoming = this.next(options, now);
-
-    if (!upcoming) return null;
-
-    const gap = upcoming.getTime() - now;
-    const candidate = this.next(options, now - gap);
-
-    if (candidate) {
-      const candidateNext = this.next(options, candidate.getTime());
-
-      if (candidateNext && candidateNext.getTime() === upcoming.getTime()) {
-        return candidate;
-      }
-    }
-
-    return this.previousScheduledTick(options, upcoming);
-  }
-
-  private previousScheduledTick(options: CronBaseOptions, upcoming: Date) {
-    let lo = 1;
-    let hi = MAX_SCHEDULE_GAP_MS;
-
-    while (lo < hi) {
-      const mid = Math.floor((lo + hi) / 2);
-      const probe = this.next(options, upcoming.getTime() - mid);
-
-      if (probe && probe.getTime() < upcoming.getTime()) {
-        hi = mid;
-      } else {
-        lo = mid + 1;
-      }
-    }
-
-    const tick = this.next(options, upcoming.getTime() - lo);
-
-    if (!tick) return null;
-    if (tick.getTime() >= upcoming.getTime()) return null;
-
-    return tick;
   }
 }
 
@@ -171,18 +130,16 @@ export class Cron implements CronUtilitiesInterface {
   public next(from?: Date | number) {
     return this.common.next(this.options, from);
   }
-
-  public currentScheduledTick(from?: Date | number) {
-    return this.common.currentScheduledTick(this.options, from);
-  }
 }
 
 export class CronDistributed implements CronUtilitiesInterface {
   private cron: Cron;
   private options: CronDistributedOptions;
+  private replicaId: string;
 
   public constructor(options: CronDistributedOptions) {
     this.options = options;
+    this.replicaId = options.replicaId ?? crypto.randomUUID();
     this.cron = new Cron({
       name: options.name,
       schedule: options.schedule,
@@ -226,18 +183,44 @@ export class CronDistributed implements CronUtilitiesInterface {
     return this.cron.next(from);
   }
 
+  private scheduledTick(now = Date.now()) {
+    const upcoming = this.cron.next(now);
+
+    if (!upcoming) return null;
+
+    const probes = [
+      now - (upcoming.getTime() - now),
+      ...TICK_LOOKBACK_MS.map((lookback) => now - lookback),
+    ];
+
+    for (const probe of probes) {
+      const candidate = this.cron.next(probe);
+
+      if (!candidate) continue;
+
+      const after = this.cron.next(candidate.getTime());
+
+      if (after?.getTime() === upcoming.getTime()) return candidate;
+    }
+
+    return null;
+  }
+
   private async runIfLeader() {
-    const tick = this.cron.currentScheduledTick();
+    const tick = this.scheduledTick();
 
     if (!tick) return;
 
-    const key = lockKey(this.options.name, tick.getTime());
-    const replicaId = this.options.replicaId ?? crypto.randomUUID();
+    const key = lockKey(
+      this.options.name,
+      this.cron.getExpression(),
+      tick.getTime(),
+    );
     const lockTTL = this.options.lockTTL ?? DEFAULT_LOCK_TTL;
 
     const acquired = await this.options.redis.set(
       key,
-      replicaId,
+      this.replicaId,
       "PX",
       String(lockTTL),
       "NX",

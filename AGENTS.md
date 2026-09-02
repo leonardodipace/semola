@@ -115,6 +115,19 @@ if (error) throw new FetchError(error.message);
 
 Thrown values are always `Error` instances (library errors extend `Error`). Use `error.message` directly - never `instanceof Error` guards or ternaries when reading the message in code or docs.
 
+Do not wrap a call in `mightThrow` only to re-throw the same error unchanged - let it propagate:
+
+```typescript
+// bad
+const [error, data] = await mightThrow(fetch(url));
+if (error) throw error;
+
+// good
+const data = await fetch(url);
+```
+
+Use `mightThrow` when you transform the error, branch on it, or need a tuple without try-catch for control flow.
+
 ### Dialect / adapter separation
 
 When a module supports multiple adapters (or dialects), keep an **adapter-driven** design: a shared base plus per-adapter subclasses (or equivalent strategy objects).
