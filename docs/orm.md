@@ -15,10 +15,13 @@ Use a persistent database URL. Migration commands open their own connection, so 
 // src/db.ts
 import { createOrm, defineTable, string, uuid } from "semola/orm";
 
-export const users = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
-  name: string("name").notNull(),
-  email: string("email").notNull().unique(),
+export const users = defineTable({
+  sqlName: "users",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    name: string("name").notNull(),
+    email: string("email").notNull().unique(),
+  },
 });
 
 export const db = createOrm({
@@ -73,13 +76,16 @@ const user = await db.users.findFirst({
 Columns start nullable. Chain modifiers to tighten them.
 
 ```typescript
-const users = defineTable("users", {
-  id: uuid("id").primaryKey().default(() => crypto.randomUUID()),
-  email: string("email").notNull().unique(),
-  role: string("role").notNull().dbDefault("member"),
-  createdAt: date("created_at")
-    .notNull()
-    .dbDefault("CURRENT_TIMESTAMP", { as: "sql" }),
+const users = defineTable({
+  sqlName: "users",
+  columns: {
+    id: uuid("id").primaryKey().default(() => crypto.randomUUID()),
+    email: string("email").notNull().unique(),
+    role: string("role").notNull().dbDefault("member"),
+    createdAt: date("created_at")
+      .notNull()
+      .dbDefault("CURRENT_TIMESTAMP", { as: "sql" }),
+  },
 });
 ```
 
@@ -120,12 +126,15 @@ Use `.dbDefault()` when adding a `NOT NULL` column. `{ as: "sql" }` is for SQL e
 ### Relations
 
 ```typescript
-const posts = defineTable("posts", {
-  id: uuid("id").primaryKey().notNull(),
-  title: string("title").notNull(),
-  authorId: uuid("authorId")
-    .notNull()
-    .references(() => users.columns.id),
+const posts = defineTable({
+  sqlName: "posts",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    title: string("title").notNull(),
+    authorId: uuid("authorId")
+      .notNull()
+      .references(() => users.columns.id),
+  },
 });
 
 const db = createOrm({
@@ -144,6 +153,41 @@ const db = createOrm({
 ```
 
 `one(foreignKeyColumn, () => table)` uses the source table's FK column name. `many(() => table)` is the reverse side.
+
+### Indexes
+
+Define secondary indexes on the table config. Column `.unique()` emits a `UNIQUE` constraint on the column. `uniqueIndex()` emits a `CREATE UNIQUE INDEX` (useful for composite uniqueness).
+
+```typescript
+import {
+  date,
+  defineTable,
+  index,
+  string,
+  uniqueIndex,
+  uuid,
+} from "semola/orm";
+
+const posts = defineTable({
+  sqlName: "posts",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    authorId: uuid("author_id").notNull(),
+    slug: string("slug").notNull(),
+    createdAt: date("created_at").notNull(),
+    deletedAt: date("deleted_at").nullable(),
+  },
+  indexes: (columns) => [
+    index("posts_author_created_idx").on(columns.authorId, columns.createdAt),
+    uniqueIndex("posts_slug_idx").on(columns.slug),
+    index("posts_active_author_idx")
+      .on(columns.authorId)
+      .where("deleted_at IS NULL"),
+  ],
+});
+```
+
+`indexes` is optional. Index names are required and must be unique across the schema. Partial indexes use `.where("...")` with a raw SQL expression.
 
 ## Queries
 
@@ -281,7 +325,7 @@ migrations/
     schema.json
 ```
 
-Not generated in v1: secondary indexes, foreign-key `ON DELETE` / `ON UPDATE` actions, or custom Postgres `USING` expressions.
+Not yet supported: foreign-key `ON DELETE` / `ON UPDATE` actions, `CONCURRENTLY`, custom Postgres `USING` expressions, or expression indexes.
 
 ## Examples
 

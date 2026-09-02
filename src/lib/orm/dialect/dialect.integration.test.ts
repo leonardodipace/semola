@@ -6,10 +6,13 @@ import { defineTable } from "../table/index.js";
 import { getDialect } from "./index.js";
 import { postsTable, usersTable } from "./test-fixtures.js";
 
-const metaTable = defineTable("meta", {
-  id: uuid("id").primaryKey().notNull(),
-  payload: json("payload").notNull(),
-  settings: jsonb("settings").notNull(),
+const metaTable = defineTable({
+  sqlName: "meta",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    payload: json("payload").notNull(),
+    settings: jsonb("settings").notNull(),
+  },
 });
 
 const schemaSql = {

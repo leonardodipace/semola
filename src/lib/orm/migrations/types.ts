@@ -1,5 +1,6 @@
 import type { Column } from "../column/types.js";
 import type { Adapter } from "../dialect/types.js";
+import type { IndexSnapshot } from "../indexes/types.js";
 import type { Table } from "../table/types.js";
 
 export type ColumnSnapshot = {
@@ -20,6 +21,7 @@ export type ColumnSnapshot = {
 export type TableSnapshot = {
   name: string;
   columns: Record<string, ColumnSnapshot>;
+  indexes: Record<string, IndexSnapshot>;
 };
 
 export type SchemaSnapshot = {
@@ -58,7 +60,9 @@ export type MigrationOp =
       from: string;
       to: string;
       column: ColumnSnapshot;
-    };
+    }
+  | { kind: "createIndex"; index: IndexSnapshot }
+  | { kind: "dropIndex"; index: IndexSnapshot };
 
 export type RenameQuestion =
   | {

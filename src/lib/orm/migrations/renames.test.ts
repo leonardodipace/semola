@@ -8,11 +8,17 @@ import { emptySchema, snapshotSchema } from "./snapshot.js";
 
 describe("orm migration renames", () => {
   test("maps a table rename and emits ALTER TABLE RENAME", async () => {
-    const users = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
+    const users = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+      },
     });
-    const people = defineTable("people", {
-      id: uuid("id").primaryKey().notNull(),
+    const people = defineTable({
+      sqlName: "people",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+      },
     });
     const from = snapshotSchema({ users });
     const to = snapshotSchema({ people });
@@ -34,13 +40,19 @@ describe("orm migration renames", () => {
   });
 
   test("maps a column rename and emits RENAME COLUMN", async () => {
-    const before = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      bio: string("bio"),
+    const before = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        bio: string("bio"),
+      },
     });
-    const after = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      about: string("about"),
+    const after = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        about: string("about"),
+      },
     });
     const from = snapshotSchema({ users: before });
     const to = snapshotSchema({ users: after });
@@ -62,13 +74,19 @@ describe("orm migration renames", () => {
   });
 
   test("postgres renames constraints with table and column renames", async () => {
-    const before = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      email: string("email").notNull().unique(),
+    const before = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        email: string("email").notNull().unique(),
+      },
     });
-    const after = defineTable("accounts", {
-      id: uuid("id").primaryKey().notNull(),
-      emailAddress: string("emailAddress").notNull().unique(),
+    const after = defineTable({
+      sqlName: "accounts",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        emailAddress: string("emailAddress").notNull().unique(),
+      },
     });
     const from = snapshotSchema({ users: before });
     const to = snapshotSchema({ accounts: after });
@@ -95,11 +113,17 @@ describe("orm migration renames", () => {
   });
 
   test("throws without onRename when drop and create overlap", async () => {
-    const users = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
+    const users = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+      },
     });
-    const people = defineTable("people", {
-      id: uuid("id").primaryKey().notNull(),
+    const people = defineTable({
+      sqlName: "people",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+      },
     });
 
     await expect(
@@ -108,11 +132,17 @@ describe("orm migration renames", () => {
   });
 
   test("create-new leaves drop and create ops", async () => {
-    const users = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
+    const users = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+      },
     });
-    const people = defineTable("people", {
-      id: uuid("id").primaryKey().notNull(),
+    const people = defineTable({
+      sqlName: "people",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+      },
     });
     const from = snapshotSchema({ users });
     const to = snapshotSchema({ people });
@@ -180,8 +210,11 @@ describe("orm migration renames", () => {
   });
 
   test("does nothing when schemas only add a table", async () => {
-    const users = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
+    const users = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+      },
     });
     const renamed = await resolveRenames(
       emptySchema(),

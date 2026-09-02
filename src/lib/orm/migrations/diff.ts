@@ -1,4 +1,5 @@
 import { MigrationError } from "../errors.js";
+import type { IndexSnapshot } from "../indexes/types.js";
 import type { MigrationDialect } from "./dialect/index.js";
 import type {
   ColumnSnapshot,
@@ -20,6 +21,16 @@ const columnsEqual = (a: ColumnSnapshot, b: ColumnSnapshot) => {
   if (JSON.stringify(a.enumValues) !== JSON.stringify(b.enumValues)) {
     return false;
   }
+
+  return true;
+};
+
+const indexesEqual = (a: IndexSnapshot, b: IndexSnapshot) => {
+  if (a.name !== b.name) return false;
+  if (a.table !== b.table) return false;
+  if (a.unique !== b.unique) return false;
+  if (a.where !== b.where) return false;
+  if (a.columns.join("\0") !== b.columns.join("\0")) return false;
 
   return true;
 };
@@ -71,6 +82,10 @@ const createdTables = (from: SchemaSnapshot, to: SchemaSnapshot) => {
     if (from.tables[name]) continue;
 
     ops.push({ kind: "createTable", table });
+
+    for (const index of Object.values(table.indexes)) {
+      ops.push({ kind: "createIndex", index });
+    }
   }
 
   return ops;
@@ -85,7 +100,67 @@ const droppedTables = (from: SchemaSnapshot, to: SchemaSnapshot) => {
     if (!table) continue;
     if (to.tables[name]) continue;
 
+    for (const index of Object.values(table.indexes)) {
+      ops.push({ kind: "dropIndex", index });
+    }
+
     ops.push({ kind: "dropTable", table });
+  }
+
+  return ops;
+};
+
+const dropIndexesForColumn = (
+  columnName: string,
+  fromTable: TableSnapshot,
+  droppedIndexes: Set<string>,
+) => {
+  const ops: MigrationOp[] = [];
+
+  for (const index of Object.values(fromTable.indexes)) {
+    if (!index.columns.includes(columnName)) continue;
+    if (droppedIndexes.has(index.name)) continue;
+
+    droppedIndexes.add(index.name);
+    ops.push({ kind: "dropIndex", index });
+  }
+
+  return ops;
+};
+
+const diffIndexes = (
+  fromTable: TableSnapshot,
+  toTable: TableSnapshot,
+  droppedIndexes: Set<string>,
+) => {
+  const ops: MigrationOp[] = [];
+
+  for (const indexName of Object.keys(fromTable.indexes)) {
+    const fromIndex = fromTable.indexes[indexName];
+
+    if (!fromIndex) continue;
+    if (droppedIndexes.has(indexName)) continue;
+
+    const toIndex = toTable.indexes[indexName];
+
+    if (toIndex) {
+      if (indexesEqual(fromIndex, toIndex)) continue;
+    }
+
+    ops.push({ kind: "dropIndex", index: fromIndex });
+  }
+
+  for (const indexName of Object.keys(toTable.indexes)) {
+    const fromIndex = fromTable.indexes[indexName];
+    const toIndex = toTable.indexes[indexName];
+
+    if (!toIndex) continue;
+
+    if (fromIndex) {
+      if (indexesEqual(fromIndex, toIndex)) continue;
+    }
+
+    ops.push({ kind: "createIndex", index: toIndex });
   }
 
   return ops;
@@ -98,6 +173,7 @@ const diffTable = (
   strictAddColumn: boolean,
 ) => {
   const tableOps: MigrationOp[] = [];
+  const droppedIndexes = new Set<string>();
 
   for (const columnName of Object.keys(toTable.columns)) {
     const next = toTable.columns[columnName];
@@ -131,6 +207,9 @@ const diffTable = (
 
     if (!column) continue;
 
+    tableOps.push(
+      ...dropIndexesForColumn(columnName, fromTable, droppedIndexes),
+    );
     tableOps.push({
       kind: "dropColumn",
       table: name,
@@ -139,6 +218,7 @@ const diffTable = (
   }
 
   tableOps.push(...pkOps(name, fromTable, toTable));
+  tableOps.push(...diffIndexes(fromTable, toTable, droppedIndexes));
 
   return tableOps;
 };

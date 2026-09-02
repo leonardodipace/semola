@@ -139,10 +139,13 @@ describe("sqlite migrations integration", () => {
       data: { id: "1", name: "Ada", email: "ada@example.com" },
     });
 
-    const nextUsers = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull().dbDefault("anon"),
-      email: string("email").notNull().unique(),
+    const nextUsers = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull().dbDefault("anon"),
+        email: string("email").notNull().unique(),
+      },
     });
     const nextConfig = {
       ...config,
@@ -228,11 +231,14 @@ describe("sqlite migrations integration", () => {
     await createMigration({ name: "first", config });
     await applyMigrations(config);
 
-    const nextUsers = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull(),
-      email: string("email").notNull().unique(),
-      note: string("note").notNull().dbDefault("a;b"),
+    const nextUsers = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        email: string("email").notNull().unique(),
+        note: string("note").notNull().dbDefault("a;b"),
+      },
     });
     const nextConfig = {
       ...config,
@@ -272,11 +278,14 @@ describe("sqlite migrations integration", () => {
     await createMigration({ name: "first", config });
     await applyMigrations(config);
 
-    const nextUsers = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull(),
-      email: string("email").notNull().unique(),
-      note: string("note").notNull().dbDefault("it's"),
+    const nextUsers = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        email: string("email").notNull().unique(),
+        note: string("note").notNull().dbDefault("it's"),
+      },
     });
     const nextConfig = {
       ...config,
@@ -475,14 +484,20 @@ export default defineConfig({
   test("apply fails sqlite foreign key checks before commit", async () => {
     const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
     const project = await setupProject(dbFile);
-    const authors = defineTable("authors", {
-      id: uuid("id").primaryKey().notNull(),
+    const authors = defineTable({
+      sqlName: "authors",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+      },
     });
-    const posts = defineTable("posts", {
-      id: uuid("id").primaryKey().notNull(),
-      authorId: uuid("author_id")
-        .notNull()
-        .references(() => authors.columns.id),
+    const posts = defineTable({
+      sqlName: "posts",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        authorId: uuid("author_id")
+          .notNull()
+          .references(() => authors.columns.id),
+      },
     });
     const schemaPath = join(project.root, "db.ts");
 
@@ -491,12 +506,18 @@ export default defineConfig({
       `
 import { createOrm, defineTable, uuid } from ${JSON.stringify(join(import.meta.dir, "../index.ts"))};
 
-const authors = defineTable("authors", {
-  id: uuid("id").primaryKey().notNull(),
+const authors = defineTable({
+  sqlName: "authors",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+  },
 });
-const posts = defineTable("posts", {
-  id: uuid("id").primaryKey().notNull(),
-  authorId: uuid("author_id").notNull().references(() => authors.columns.id),
+const posts = defineTable({
+  sqlName: "posts",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    authorId: uuid("author_id").notNull().references(() => authors.columns.id),
+  },
 });
 
 export const db = createOrm({
@@ -699,11 +720,14 @@ export const db = createOrm({
     await createMigration({ name: "first", config });
     await applyMigrations(config);
 
-    const nextUsers = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull(),
-      email: string("email").notNull().unique(),
-      bio: string("bio"),
+    const nextUsers = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        email: string("email").notNull().unique(),
+        bio: string("bio"),
+      },
     });
     const nextConfig = {
       ...config,
@@ -744,11 +768,14 @@ export const db = createOrm({
     await createMigration({ name: "first", config });
     await applyMigrations(config);
 
-    const nextUsers = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull(),
-      email: string("email").notNull().unique(),
-      bio: string("bio"),
+    const nextUsers = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        email: string("email").notNull().unique(),
+        bio: string("bio"),
+      },
     });
     const nextConfig = {
       ...config,
@@ -901,9 +928,12 @@ export const db = createOrm({
       `
 import { createOrm, defineTable, string, uuid } from ${JSON.stringify(join(import.meta.dir, "../index.ts"))};
 
-const users = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
-  name: string("name").notNull(),
+const users = defineTable({
+  sqlName: "users",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    name: string("name").notNull(),
+  },
 });
 
 export default createOrm({
@@ -942,8 +972,11 @@ export default defineConfig({
       `
 import { createOrm, defineTable, uuid } from ${JSON.stringify(join(import.meta.dir, "../index.ts"))};
 
-const users = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
+const users = defineTable({
+  sqlName: "users",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+  },
 });
 
 export const db = createOrm({
@@ -1017,11 +1050,14 @@ export default defineConfig({});
     });
     await db.$raw.close();
 
-    const nextUsers = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull(),
-      email: string("email").notNull().unique(),
-      role: string("role").notNull().unique().dbDefault("member"),
+    const nextUsers = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        email: string("email").notNull().unique(),
+        role: string("role").notNull().unique().dbDefault("member"),
+      },
     });
     const nextConfig = {
       ...config,
@@ -1057,9 +1093,12 @@ export default defineConfig({});
     await createMigration({ name: "first", config });
     await applyMigrations(config);
 
-    const withoutName = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      email: string("email").notNull().unique(),
+    const withoutName = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        email: string("email").notNull().unique(),
+      },
     });
     const nextConfig = {
       ...config,
@@ -1093,14 +1132,20 @@ export default defineConfig({});
   test("rollback runs foreign key checks before commit", async () => {
     const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
     const project = await setupProject(dbFile);
-    const authors = defineTable("authors", {
-      id: uuid("id").primaryKey().notNull(),
+    const authors = defineTable({
+      sqlName: "authors",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+      },
     });
-    const posts = defineTable("posts", {
-      id: uuid("id").primaryKey().notNull(),
-      authorId: uuid("author_id")
-        .notNull()
-        .references(() => authors.columns.id),
+    const posts = defineTable({
+      sqlName: "posts",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        authorId: uuid("author_id")
+          .notNull()
+          .references(() => authors.columns.id),
+      },
     });
 
     await writeFile(
@@ -1108,12 +1153,18 @@ export default defineConfig({});
       `
 import { createOrm, defineTable, uuid } from ${JSON.stringify(join(import.meta.dir, "../index.ts"))};
 
-const authors = defineTable("authors", {
-  id: uuid("id").primaryKey().notNull(),
+const authors = defineTable({
+  sqlName: "authors",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+  },
 });
-const posts = defineTable("posts", {
-  id: uuid("id").primaryKey().notNull(),
-  authorId: uuid("author_id").notNull().references(() => authors.columns.id),
+const posts = defineTable({
+  sqlName: "posts",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    authorId: uuid("author_id").notNull().references(() => authors.columns.id),
+  },
 });
 
 export const db = createOrm({
@@ -1148,8 +1199,11 @@ export const db = createOrm({
           tables: {
             authors,
             posts,
-            tags: defineTable("tags", {
-              id: uuid("id").primaryKey().notNull(),
+            tags: defineTable({
+              sqlName: "tags",
+              columns: {
+                id: uuid("id").primaryKey().notNull(),
+              },
             }),
           },
         },
@@ -1163,8 +1217,11 @@ export const db = createOrm({
         tables: {
           authors,
           posts,
-          tags: defineTable("tags", {
-            id: uuid("id").primaryKey().notNull(),
+          tags: defineTable({
+            sqlName: "tags",
+            columns: {
+              id: uuid("id").primaryKey().notNull(),
+            },
           }),
         },
       },
@@ -1386,11 +1443,14 @@ export const db = createOrm({
     });
     await db.$raw.close();
 
-    const nextUsers = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull(),
-      email: string("email").notNull().unique(),
-      role: string("role").notNull().unique().dbDefault("member"),
+    const nextUsers = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        email: string("email").notNull().unique(),
+        role: string("role").notNull().unique().dbDefault("member"),
+      },
     });
     const nextConfig = {
       ...config,
@@ -1423,11 +1483,14 @@ export const db = createOrm({
     await createMigration({ name: "first", config });
     await applyMigrations(config);
 
-    const nextUsers = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull(),
-      email: string("email").notNull().unique(),
-      role: string("role").notNull().unique().dbDefault("member"),
+    const nextUsers = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        email: string("email").notNull().unique(),
+        role: string("role").notNull().unique().dbDefault("member"),
+      },
     });
     const nextConfig = {
       ...config,
@@ -1508,9 +1571,12 @@ export const db = createOrm({
     await createMigration({ name: "first", config });
     await applyMigrations(config);
 
-    const withoutName = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      email: string("email").notNull().unique(),
+    const withoutName = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        email: string("email").notNull().unique(),
+      },
     });
     const nextConfig = {
       ...config,
@@ -1582,11 +1648,14 @@ export const db = createOrm({
     await createMigration({ name: "first", config });
     await applyMigrations(config);
 
-    const nextUsers = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull(),
-      email: string("email").notNull().unique(),
-      bio: string("bio"),
+    const nextUsers = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        email: string("email").notNull().unique(),
+        bio: string("bio"),
+      },
     });
     const nextConfig = {
       ...config,
@@ -1618,8 +1687,11 @@ export const db = createOrm({
       `
 import { createOrm, defineTable, string } from ${JSON.stringify(join(import.meta.dir, "../index.ts"))};
 
-const users = defineTable("users", {
-  email: string("email").notNull().unique(),
+const users = defineTable({
+  sqlName: "users",
+  columns: {
+    email: string("email").notNull().unique(),
+  },
 });
 
 export const db = createOrm({
@@ -1649,8 +1721,11 @@ export default defineConfig({
     await createMigration({ name: "first", config });
     await applyMigrations(config);
 
-    const before = defineTable("users", {
-      email: string("email").notNull().unique(),
+    const before = defineTable({
+      sqlName: "users",
+      columns: {
+        email: string("email").notNull().unique(),
+      },
     });
     const db = createOrm({
       adapter: "sqlite",
@@ -1662,9 +1737,12 @@ export default defineConfig({
     await db.users.create({ data: { email: "grace@example.com" } });
     await db.$raw.close();
 
-    const after = defineTable("users", {
-      id: string("id").primaryKey().notNull().dbDefault("fixed"),
-      email: string("email").notNull().unique(),
+    const after = defineTable({
+      sqlName: "users",
+      columns: {
+        id: string("id").primaryKey().notNull().dbDefault("fixed"),
+        email: string("email").notNull().unique(),
+      },
     });
     const nextConfig = {
       ...config,
@@ -1687,8 +1765,11 @@ export default defineConfig({
     await createMigration({ name: "first", config });
     await applyMigrations(config);
 
-    const authors = defineTable("authors", {
-      id: uuid("id").primaryKey().notNull(),
+    const authors = defineTable({
+      sqlName: "authors",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+      },
     });
     const withAuthors = {
       ...config,
@@ -1760,11 +1841,14 @@ export default defineConfig({
 
     await applyMigrations(config);
 
-    const nextUsers = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull(),
-      email: string("email").notNull().unique(),
-      bio: string("bio"),
+    const nextUsers = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        email: string("email").notNull().unique(),
+        bio: string("bio"),
+      },
     });
     const nextConfig = {
       ...config,
@@ -1804,11 +1888,14 @@ export default defineConfig({
     await createMigration({ name: "first", config });
     await applyMigrations(config);
 
-    const nextUsers = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull(),
-      email: string("email").notNull().unique(),
-      bio: string("bio"),
+    const nextUsers = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        email: string("email").notNull().unique(),
+        bio: string("bio"),
+      },
     });
     const nextConfig = {
       ...config,
@@ -1884,8 +1971,11 @@ export default defineConfig({
       `
 import { createOrm, defineTable, uuid } from ${JSON.stringify(join(import.meta.dir, "../index.ts"))};
 
-const users = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
+const users = defineTable({
+  sqlName: "users",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+  },
 });
 
 export const db = createOrm({
@@ -1922,11 +2012,14 @@ export default defineConfig({
 
     await applyMigrations(config);
 
-    const nextUsers = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull(),
-      email: string("email").notNull().unique(),
-      bio: string("bio"),
+    const nextUsers = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        email: string("email").notNull().unique(),
+        bio: string("bio"),
+      },
     });
     const nextConfig = {
       ...config,
@@ -1974,8 +2067,11 @@ export default defineConfig({
       `
 import { createOrm, defineTable, uuid } from ${JSON.stringify(join(import.meta.dir, "../index.ts"))};
 
-const users = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
+const users = defineTable({
+  sqlName: "users",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+  },
 });
 
 export const db = createOrm({
@@ -2015,11 +2111,14 @@ export default defineConfig({
     await createMigration({ name: "first", config });
     await applyMigrations(config);
 
-    const withBio = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull(),
-      email: string("email").notNull().unique(),
-      bio: string("bio"),
+    const withBio = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        email: string("email").notNull().unique(),
+        bio: string("bio"),
+      },
     });
     const withBioConfig = {
       ...config,
@@ -2179,11 +2278,14 @@ export default defineConfig({
     await createMigration({ name: "first", config });
     await applyMigrations(config);
 
-    const nextUsers = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull(),
-      email: string("email").notNull().unique(),
-      role: string("role").notNull().unique().dbDefault("member"),
+    const nextUsers = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        email: string("email").notNull().unique(),
+        role: string("role").notNull().unique().dbDefault("member"),
+      },
     });
     const nextConfig = {
       ...config,
@@ -2224,10 +2326,13 @@ export default defineConfig({
     });
     await seed.$raw.close();
 
-    const people = defineTable("people", {
-      id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull(),
-      email: string("email").notNull().unique(),
+    const people = defineTable({
+      sqlName: "people",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        email: string("email").notNull().unique(),
+      },
     });
     const nextConfig = {
       ...config,
@@ -2298,10 +2403,13 @@ export default defineConfig({
     });
     await seed.$raw.close();
 
-    const nextUsers = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      fullName: string("fullName").notNull(),
-      email: string("email").notNull().unique(),
+    const nextUsers = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        fullName: string("fullName").notNull(),
+        email: string("email").notNull().unique(),
+      },
     });
     const nextConfig = {
       ...config,
@@ -2346,10 +2454,13 @@ export default defineConfig({
     await createMigration({ name: "first", config });
     await applyMigrations(config);
 
-    const people = defineTable("people", {
-      id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull(),
-      email: string("email").notNull().unique(),
+    const people = defineTable({
+      sqlName: "people",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+        email: string("email").notNull().unique(),
+      },
     });
 
     await expect(
@@ -2371,9 +2482,12 @@ export default defineConfig({
     await createMigration({ name: "first", config });
     await applyMigrations(config);
 
-    const withoutEmail = defineTable("users", {
-      id: uuid("id").primaryKey().notNull(),
-      name: string("name").notNull(),
+    const withoutEmail = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+      },
     });
 
     await expect(
@@ -2497,10 +2611,13 @@ if (SEMOLA_POSTGRES_URL) {
       });
       await seed.$raw.close();
 
-      const people = defineTable("people", {
-        id: uuid("id").primaryKey().notNull(),
-        name: string("name").notNull(),
-        email: string("email").notNull().unique(),
+      const people = defineTable({
+        sqlName: "people",
+        columns: {
+          id: uuid("id").primaryKey().notNull(),
+          name: string("name").notNull(),
+          email: string("email").notNull().unique(),
+        },
       });
       const nextConfig = {
         ...config,
@@ -2535,10 +2652,13 @@ if (SEMOLA_POSTGRES_URL) {
       await createMigration({ name: "first", config });
       await applyMigrations(config);
 
-      const people = defineTable("people", {
-        id: uuid("id").primaryKey().notNull(),
-        name: string("name").notNull(),
-        email: string("email").notNull().unique(),
+      const people = defineTable({
+        sqlName: "people",
+        columns: {
+          id: uuid("id").primaryKey().notNull(),
+          name: string("name").notNull(),
+          email: string("email").notNull().unique(),
+        },
       });
       const renamed = {
         ...config,
@@ -2552,10 +2672,13 @@ if (SEMOLA_POSTGRES_URL) {
       });
       await applyMigrations(renamed);
 
-      const withoutUnique = defineTable("people", {
-        id: uuid("id").primaryKey().notNull(),
-        name: string("name").notNull(),
-        email: string("email").notNull(),
+      const withoutUnique = defineTable({
+        sqlName: "people",
+        columns: {
+          id: uuid("id").primaryKey().notNull(),
+          name: string("name").notNull(),
+          email: string("email").notNull(),
+        },
       });
       const next = {
         ...renamed,
@@ -2595,11 +2718,14 @@ if (SEMOLA_POSTGRES_URL) {
       await createMigration({ name: "first", config });
       await applyMigrations(config);
 
-      const nextUsers = defineTable("users", {
-        id: uuid("id").primaryKey().notNull(),
-        name: string("name").notNull(),
-        email: string("email").notNull().unique(),
-        bio: string("bio"),
+      const nextUsers = defineTable({
+        sqlName: "users",
+        columns: {
+          id: uuid("id").primaryKey().notNull(),
+          name: string("name").notNull(),
+          email: string("email").notNull().unique(),
+          bio: string("bio"),
+        },
       });
       const nextConfig = {
         ...config,
@@ -2644,10 +2770,13 @@ if (SEMOLA_POSTGRES_URL) {
       });
       await seed.$raw.close();
 
-      const nextUsers = defineTable("users", {
-        id: uuid("id").primaryKey().notNull(),
-        fullName: string("fullName").notNull(),
-        email: string("email").notNull().unique(),
+      const nextUsers = defineTable({
+        sqlName: "users",
+        columns: {
+          id: uuid("id").primaryKey().notNull(),
+          fullName: string("fullName").notNull(),
+          email: string("email").notNull().unique(),
+        },
       });
       const nextConfig = {
         ...config,
@@ -2682,11 +2811,14 @@ if (SEMOLA_POSTGRES_URL) {
       await createMigration({ name: "first", config });
       await applyMigrations(config);
 
-      const withBio = defineTable("users", {
-        id: uuid("id").primaryKey().notNull(),
-        name: string("name").notNull(),
-        email: string("email").notNull().unique(),
-        bio: string("bio"),
+      const withBio = defineTable({
+        sqlName: "users",
+        columns: {
+          id: uuid("id").primaryKey().notNull(),
+          name: string("name").notNull(),
+          email: string("email").notNull().unique(),
+          bio: string("bio"),
+        },
       });
       const withBioConfig = {
         ...config,
@@ -2743,8 +2875,11 @@ if (SEMOLA_POSTGRES_URL) {
       await createMigration({ name: "first", config });
       await applyMigrations(config);
 
-      const authors = defineTable("authors", {
-        id: uuid("id").primaryKey().notNull(),
+      const authors = defineTable({
+        sqlName: "authors",
+        columns: {
+          id: uuid("id").primaryKey().notNull(),
+        },
       });
       const withAuthors = {
         ...config,
@@ -2811,12 +2946,15 @@ if (SEMOLA_POSTGRES_URL) {
       await createMigration({ name: "first", config });
       await applyMigrations(config);
 
-      const posts = defineTable("posts", {
-        id: uuid("id").primaryKey().notNull(),
-        title: string("title").notNull(),
-        authorId: uuid("author_id")
-          .notNull()
-          .references(() => project.users.columns.id),
+      const posts = defineTable({
+        sqlName: "posts",
+        columns: {
+          id: uuid("id").primaryKey().notNull(),
+          title: string("title").notNull(),
+          authorId: uuid("author_id")
+            .notNull()
+            .references(() => project.users.columns.id),
+        },
       });
       const nextConfig = {
         ...config,
@@ -2939,11 +3077,14 @@ if (SEMOLA_POSTGRES_URL) {
       await createMigration({ name: "first", config });
       await applyMigrations(config);
 
-      const nextUsers = defineTable("users", {
-        id: uuid("id").primaryKey().notNull(),
-        name: string("name").notNull(),
-        email: string("email").notNull().unique(),
-        bio: string("bio"),
+      const nextUsers = defineTable({
+        sqlName: "users",
+        columns: {
+          id: uuid("id").primaryKey().notNull(),
+          name: string("name").notNull(),
+          email: string("email").notNull().unique(),
+          bio: string("bio"),
+        },
       });
       const nextConfig = {
         ...config,

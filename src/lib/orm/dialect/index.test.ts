@@ -3,8 +3,11 @@ import { uuid } from "../column/index.js";
 import { defineTable } from "../table/index.js";
 import { getDialect } from "./index.js";
 
-const usersTable = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
+const usersTable = defineTable({
+  sqlName: "users",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+  },
 });
 
 describe("getDialect", () => {

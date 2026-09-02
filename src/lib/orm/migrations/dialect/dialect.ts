@@ -1,4 +1,5 @@
 import { MigrationError } from "../../errors.js";
+import type { IndexSnapshot } from "../../indexes/types.js";
 import { quoteIdentifier } from "../../utils.js";
 import type {
   ColumnSnapshot,
@@ -217,6 +218,22 @@ export class MigrationDialect {
     return `ALTER TABLE ${quoteIdentifier(table)} DROP COLUMN ${quoteIdentifier(column.name)};`;
   }
 
+  private renderCreateIndex(index: IndexSnapshot) {
+    const unique = index.unique ? "UNIQUE " : "";
+    const cols = index.columns.map(quoteIdentifier).join(", ");
+    let sql = `CREATE ${unique}INDEX ${quoteIdentifier(index.name)}\n  ON ${quoteIdentifier(index.table)} (${cols})`;
+
+    if (index.where !== undefined) {
+      sql += `\n  WHERE ${index.where}`;
+    }
+
+    return `${sql};`;
+  }
+
+  private renderDropIndex(index: IndexSnapshot) {
+    return `DROP INDEX ${quoteIdentifier(index.name)};`;
+  }
+
   private renderRenameTable(op: Extract<MigrationOp, { kind: "renameTable" }>) {
     if (this.spec.renderRenameTable) {
       return this.spec.renderRenameTable(op);
@@ -296,6 +313,10 @@ export class MigrationDialect {
       `ALTER TABLE ${quoteIdentifier(tmpName)} RENAME TO ${quoteIdentifier(to.name)};`,
     );
 
+    for (const index of Object.values(to.indexes)) {
+      lines.push(this.renderCreateIndex(index));
+    }
+
     return lines.join("\n");
   }
 
@@ -325,6 +346,10 @@ export class MigrationDialect {
         return this.renderRenameTable(op);
       case "renameColumn":
         return this.renderRenameColumn(op);
+      case "createIndex":
+        return this.renderCreateIndex(op.index);
+      case "dropIndex":
+        return this.renderDropIndex(op.index);
     }
   }
 }

@@ -1,5 +1,6 @@
 import type { Column } from "../column/types.js";
 import { MigrationError } from "../errors.js";
+import type { Index, IndexSnapshot } from "../indexes/types.js";
 import type { Table } from "../table/types.js";
 import type { ColumnSnapshot, TableSnapshot } from "./types.js";
 
@@ -88,6 +89,66 @@ const assertForeignKeyTypes = (tables: Record<string, TableSnapshot>) => {
   }
 };
 
+const snapshotIndex = (index: Index, table: Table) => {
+  const columnSqlNames = new Set(
+    Object.values(table.columns).map((column) => column.sqlName),
+  );
+  const columns: string[] = [];
+
+  for (const column of index.columns) {
+    if (!columnSqlNames.has(column.sqlName)) {
+      throw new MigrationError(
+        `Index ${index.sqlName} references column ${column.sqlName} which is not on table ${table.sqlName}`,
+      );
+    }
+
+    columns.push(column.sqlName);
+  }
+
+  if (columns.length === 0) {
+    throw new MigrationError(
+      `Index ${index.sqlName} on table ${table.sqlName} requires at least one column`,
+    );
+  }
+
+  const snapshot: IndexSnapshot = {
+    name: index.sqlName,
+    table: table.sqlName,
+    columns,
+    unique: index.unique,
+  };
+
+  if (index.where !== undefined) {
+    if (typeof index.where !== "string") {
+      throw new MigrationError(
+        `Index ${index.sqlName} on table ${table.sqlName} has invalid where clause`,
+      );
+    }
+
+    snapshot.where = index.where;
+  }
+
+  return snapshot;
+};
+
+const assertUniqueIndexNames = (tables: Record<string, TableSnapshot>) => {
+  const seen = new Map<string, string>();
+
+  for (const table of Object.values(tables)) {
+    for (const index of Object.values(table.indexes)) {
+      const existing = seen.get(index.name);
+
+      if (existing) {
+        throw new MigrationError(
+          `Duplicate index name ${index.name} on tables ${existing} and ${table.name}`,
+        );
+      }
+
+      seen.set(index.name, table.name);
+    }
+  }
+};
+
 const snapshotTable = (table: Table, tables: Record<string, Table>) => {
   const columns: Record<string, ColumnSnapshot> = {};
 
@@ -95,9 +156,24 @@ const snapshotTable = (table: Table, tables: Record<string, Table>) => {
     columns[column.sqlName] = snapshotColumn(column, table.sqlName, tables);
   }
 
+  const indexes: Record<string, IndexSnapshot> = {};
+
+  if (table.indexes) {
+    for (const index of table.indexes) {
+      if (indexes[index.sqlName]) {
+        throw new MigrationError(
+          `Duplicate index name ${index.sqlName} on table ${table.sqlName}`,
+        );
+      }
+
+      indexes[index.sqlName] = snapshotIndex(index, table);
+    }
+  }
+
   return {
     name: table.sqlName,
     columns,
+    indexes,
   };
 };
 
@@ -109,6 +185,7 @@ export const snapshotSchema = (tables: Record<string, Table>) => {
   }
 
   assertForeignKeyTypes(result);
+  assertUniqueIndexNames(result);
 
   return { tables: result };
 };

@@ -13,27 +13,36 @@ import type { Table } from "../table/types.js";
 import { createOrm, many, one } from "./index.js";
 import { getOrmConnectionUrl } from "./orm.js";
 
-const usersTable = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
-  name: string("name").notNull(),
-  email: string("email").notNull().unique(),
-  isActive: boolean("is_active")
-    .notNull()
-    .default(() => true),
-  createdAt: date("created_at").notNull(),
+const usersTable = defineTable({
+  sqlName: "users",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    name: string("name").notNull(),
+    email: string("email").notNull().unique(),
+    isActive: boolean("is_active")
+      .notNull()
+      .default(() => true),
+    createdAt: date("created_at").notNull(),
+  },
 });
 
-const postsTable = defineTable("posts", {
-  id: uuid("id").primaryKey().notNull(),
-  title: string("title").notNull(),
-  authorId: uuid("author_id")
-    .notNull()
-    .references(() => usersTable.columns.id),
+const postsTable = defineTable({
+  sqlName: "posts",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    title: string("title").notNull(),
+    authorId: uuid("author_id")
+      .notNull()
+      .references(() => usersTable.columns.id),
+  },
 });
 
-const metaTable = defineTable("meta", {
-  id: uuid("id").primaryKey().notNull(),
-  payload: json("payload").notNull(),
+const metaTable = defineTable({
+  sqlName: "meta",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    payload: json("payload").notNull(),
+  },
 });
 
 const schemaSql = {
@@ -125,9 +134,12 @@ for (const live of integrationAdapters()) {
     test("json string dbDefault is stored as valid JSON", async () => {
       await live.beforeEach?.();
 
-      const items = defineTable("items", {
-        id: uuid("id").primaryKey().notNull(),
-        label: json("label").notNull().dbDefault("anon"),
+      const items = defineTable({
+        sqlName: "items",
+        columns: {
+          id: uuid("id").primaryKey().notNull(),
+          label: json("label").notNull().dbDefault("anon"),
+        },
       });
       const defaultSql = items.columns.label?._meta.dbDefault;
 
@@ -252,15 +264,21 @@ for (const live of integrationAdapters()) {
 }
 
 describe("sqlite orm integration", () => {
-  const usersTable = defineTable("users", {
-    id: uuid("id").primaryKey().notNull(),
-    name: string("name").notNull(),
-    email: string("email").notNull().unique(),
+  const usersTable = defineTable({
+    sqlName: "users",
+    columns: {
+      id: uuid("id").primaryKey().notNull(),
+      name: string("name").notNull(),
+      email: string("email").notNull().unique(),
+    },
   });
 
-  const postsTable = defineTable("posts", {
-    id: uuid("id").primaryKey().notNull(),
-    title: string("title").notNull(),
+  const postsTable = defineTable({
+    sqlName: "posts",
+    columns: {
+      id: uuid("id").primaryKey().notNull(),
+      title: string("title").notNull(),
+    },
   });
 
   const createUsersOrm = () =>
@@ -318,15 +336,18 @@ describe("sqlite orm integration", () => {
     studentTable: TableWithId,
     examsTable: TableWithId,
   ) =>
-    defineTable("students_to_exams", {
-      studentId: uuid("student_id")
-        .primaryKey()
-        .notNull()
-        .references(() => studentTable.columns.id),
-      examId: uuid("exam_id")
-        .primaryKey()
-        .notNull()
-        .references(() => examsTable.columns.id),
+    defineTable({
+      sqlName: "students_to_exams",
+      columns: {
+        studentId: uuid("student_id")
+          .primaryKey()
+          .notNull()
+          .references(() => studentTable.columns.id),
+        examId: uuid("exam_id")
+          .primaryKey()
+          .notNull()
+          .references(() => examsTable.columns.id),
+      },
     });
 
   describe("relation helpers", () => {
@@ -370,14 +391,20 @@ describe("sqlite orm integration", () => {
     });
 
     test("enforces sqlite foreign keys on the first query inside a transaction", async () => {
-      const authors = defineTable("authors", {
-        id: uuid("id").primaryKey().notNull(),
+      const authors = defineTable({
+        sqlName: "authors",
+        columns: {
+          id: uuid("id").primaryKey().notNull(),
+        },
       });
-      const posts = defineTable("posts", {
-        id: uuid("id").primaryKey().notNull(),
-        authorId: uuid("author_id")
-          .notNull()
-          .references(() => authors.columns.id),
+      const posts = defineTable({
+        sqlName: "posts",
+        columns: {
+          id: uuid("id").primaryKey().notNull(),
+          authorId: uuid("author_id")
+            .notNull()
+            .references(() => authors.columns.id),
+        },
       });
       const orm = createOrm({
         adapter: "sqlite",
@@ -480,10 +507,13 @@ describe("sqlite orm integration", () => {
     });
 
     test("create omits unspecified dbDefault columns and persists decimal numbers", async () => {
-      const table = defineTable("items", {
-        id: number("id").primaryKey().notNull(),
-        name: string("name").notNull().dbDefault("anon"),
-        price: number("price").notNull(),
+      const table = defineTable({
+        sqlName: "items",
+        columns: {
+          id: number("id").primaryKey().notNull(),
+          name: string("name").notNull().dbDefault("anon"),
+          price: number("price").notNull(),
+        },
       });
       const orm = createOrm({
         adapter: "sqlite",
@@ -514,16 +544,19 @@ describe("sqlite orm integration", () => {
     test("create inserts a row, applies defaults, and returns it", async () => {
       const fixedDate = new Date("2025-06-01T00:00:00.000Z");
 
-      const table = defineTable("users", {
-        id: uuid("id")
-          .primaryKey()
-          .notNull()
-          .default(() => "generated-id"),
-        name: string("name").notNull(),
-        nickname: string("nickname").nullable(),
-        createdAt: date("created_at")
-          .notNull()
-          .default(() => fixedDate),
+      const table = defineTable({
+        sqlName: "users",
+        columns: {
+          id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .default(() => "generated-id"),
+          name: string("name").notNull(),
+          nickname: string("nickname").nullable(),
+          createdAt: date("created_at")
+            .notNull()
+            .default(() => fixedDate),
+        },
       });
 
       const orm = createOrm({
@@ -566,12 +599,15 @@ describe("sqlite orm integration", () => {
     });
 
     test("create allows overriding defaulted fields", async () => {
-      const table = defineTable("users", {
-        id: uuid("id")
-          .primaryKey()
-          .notNull()
-          .default(() => "auto-id"),
-        name: string("name").notNull(),
+      const table = defineTable({
+        sqlName: "users",
+        columns: {
+          id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .default(() => "auto-id"),
+          name: string("name").notNull(),
+        },
       });
 
       const orm = createOrm({
@@ -693,18 +729,21 @@ describe("sqlite orm integration", () => {
   });
 
   describe("relation where filters", () => {
-    const postsTable = defineTable("posts", {
-      id: uuid("id").primaryKey().notNull(),
-      title: string("title").notNull(),
-      published: boolean("published")
-        .notNull()
-        .default(() => false),
-      views: number("views")
-        .notNull()
-        .default(() => 0),
-      authorId: uuid("author_id")
-        .notNull()
-        .references(() => usersTable.columns.id),
+    const postsTable = defineTable({
+      sqlName: "posts",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        title: string("title").notNull(),
+        published: boolean("published")
+          .notNull()
+          .default(() => false),
+        views: number("views")
+          .notNull()
+          .default(() => 0),
+        authorId: uuid("author_id")
+          .notNull()
+          .references(() => usersTable.columns.id),
+      },
     });
 
     const createOrmWithPosts = () =>
@@ -836,13 +875,16 @@ describe("sqlite orm integration", () => {
   });
 
   describe("nested include options", () => {
-    const authoredPostsTable = defineTable("posts", {
-      id: uuid("id").primaryKey().notNull(),
-      title: string("title").notNull(),
-      content: string("content").notNull(),
-      userId: uuid("user_id")
-        .notNull()
-        .references(() => usersTable.columns.id),
+    const authoredPostsTable = defineTable({
+      sqlName: "posts",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        title: string("title").notNull(),
+        content: string("content").notNull(),
+        userId: uuid("user_id")
+          .notNull()
+          .references(() => usersTable.columns.id),
+      },
     });
 
     const createOrmWithPosts = () =>
@@ -856,22 +898,28 @@ describe("sqlite orm integration", () => {
       });
 
     const definePostWithAuthorTable = (sqlName: string) =>
-      defineTable(sqlName, {
-        id: uuid("id").primaryKey().notNull(),
-        title: string("title").notNull(),
-        userId: uuid("user_id")
-          .notNull()
-          .references(() => usersTable.columns.id),
+      defineTable({
+        sqlName,
+        columns: {
+          id: uuid("id").primaryKey().notNull(),
+          title: string("title").notNull(),
+          userId: uuid("user_id")
+            .notNull()
+            .references(() => usersTable.columns.id),
+        },
       });
 
     const definePostWithAuthorAndContentTable = (sqlName: string) =>
-      defineTable(sqlName, {
-        id: uuid("id").primaryKey().notNull(),
-        title: string("title").notNull(),
-        content: string("content").notNull(),
-        userId: uuid("user_id")
-          .notNull()
-          .references(() => usersTable.columns.id),
+      defineTable({
+        sqlName,
+        columns: {
+          id: uuid("id").primaryKey().notNull(),
+          title: string("title").notNull(),
+          content: string("content").notNull(),
+          userId: uuid("user_id")
+            .notNull()
+            .references(() => usersTable.columns.id),
+        },
       });
 
     const createOrmWithAuthorRelation = <
@@ -995,19 +1043,25 @@ describe("sqlite orm integration", () => {
     });
 
     test("deep bidirectional include matches runtime and inferred type", async () => {
-      const exampleUsersTable = defineTable("users", {
-        id: uuid("id").primaryKey().notNull().default(Bun.randomUUIDv7),
-        firstName: string("first_name").notNull(),
-        lastName: string("last_name").notNull(),
+      const exampleUsersTable = defineTable({
+        sqlName: "users",
+        columns: {
+          id: uuid("id").primaryKey().notNull().default(Bun.randomUUIDv7),
+          firstName: string("first_name").notNull(),
+          lastName: string("last_name").notNull(),
+        },
       });
 
-      const examplePostsTable = defineTable("posts", {
-        id: uuid("id").primaryKey().notNull().default(Bun.randomUUIDv7),
-        title: string("title").notNull(),
-        content: string("content").notNull(),
-        authorId: uuid("author_id")
-          .notNull()
-          .references(() => exampleUsersTable.columns.id),
+      const examplePostsTable = defineTable({
+        sqlName: "posts",
+        columns: {
+          id: uuid("id").primaryKey().notNull().default(Bun.randomUUIDv7),
+          title: string("title").notNull(),
+          content: string("content").notNull(),
+          authorId: uuid("author_id")
+            .notNull()
+            .references(() => exampleUsersTable.columns.id),
+        },
       });
 
       const orm = createOrm({
@@ -1114,27 +1168,33 @@ describe("sqlite orm integration", () => {
 
   describe("many to many relation", () => {
     test("should create a bi-directional relation", async () => {
-      const studentTable = defineTable("students", {
-        id: uuid("id").primaryKey().notNull().default(Bun.randomUUIDv7),
-        createdAt: date("created_at")
-          .notNull()
-          .default(() => new Date()),
-        updatedAt: date("updated_at")
-          .notNull()
-          .default(() => new Date()),
-        firstName: string("first_name").notNull(),
-        lastName: string("last_name").notNull(),
+      const studentTable = defineTable({
+        sqlName: "students",
+        columns: {
+          id: uuid("id").primaryKey().notNull().default(Bun.randomUUIDv7),
+          createdAt: date("created_at")
+            .notNull()
+            .default(() => new Date()),
+          updatedAt: date("updated_at")
+            .notNull()
+            .default(() => new Date()),
+          firstName: string("first_name").notNull(),
+          lastName: string("last_name").notNull(),
+        },
       });
 
-      const examsTable = defineTable("exams", {
-        id: uuid("id").primaryKey().notNull().default(Bun.randomUUIDv7),
-        createdAt: date("created_at")
-          .notNull()
-          .default(() => new Date()),
-        updatedAt: date("updated_at")
-          .notNull()
-          .default(() => new Date()),
-        name: string("name").notNull(),
+      const examsTable = defineTable({
+        sqlName: "exams",
+        columns: {
+          id: uuid("id").primaryKey().notNull().default(Bun.randomUUIDv7),
+          createdAt: date("created_at")
+            .notNull()
+            .default(() => new Date()),
+          updatedAt: date("updated_at")
+            .notNull()
+            .default(() => new Date()),
+          name: string("name").notNull(),
+        },
       });
 
       const studentsToExamsTable = defineStudentsToExamsTable(
@@ -1264,14 +1324,20 @@ describe("sqlite orm integration", () => {
     });
 
     test("relation name matching a table name does not cause a conflict", async () => {
-      const studentTable = defineTable("students", {
-        id: uuid("id").primaryKey().notNull(),
-        firstName: string("first_name").notNull(),
+      const studentTable = defineTable({
+        sqlName: "students",
+        columns: {
+          id: uuid("id").primaryKey().notNull(),
+          firstName: string("first_name").notNull(),
+        },
       });
 
-      const examsTable = defineTable("exams", {
-        id: uuid("id").primaryKey().notNull(),
-        name: string("name").notNull(),
+      const examsTable = defineTable({
+        sqlName: "exams",
+        columns: {
+          id: uuid("id").primaryKey().notNull(),
+          name: string("name").notNull(),
+        },
       });
 
       const studentsToExamsTable = defineStudentsToExamsTable(
