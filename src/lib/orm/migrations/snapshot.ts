@@ -1,3 +1,4 @@
+import type { Check, CheckSnapshot } from "../checks/types.js";
 import type { Column } from "../column/types.js";
 import { MigrationError } from "../errors.js";
 import type { Index, IndexSnapshot } from "../indexes/types.js";
@@ -131,6 +132,48 @@ const snapshotIndex = (index: Index, table: Table) => {
   return snapshot;
 };
 
+const snapshotCheck = (check: Check, table: Table) => {
+  const columnSqlNames = new Set(
+    Object.values(table.columns).map((column) => column.sqlName),
+  );
+  const columns: string[] = [];
+
+  for (const column of check.columns) {
+    if (!columnSqlNames.has(column.sqlName)) {
+      throw new MigrationError(
+        `Check ${check.sqlName} references column ${column.sqlName} which is not on table ${table.sqlName}`,
+      );
+    }
+
+    columns.push(column.sqlName);
+  }
+
+  if (columns.length === 0) {
+    throw new MigrationError(
+      `Check ${check.sqlName} on table ${table.sqlName} requires at least one column`,
+    );
+  }
+
+  if (typeof check.expression !== "string") {
+    throw new MigrationError(
+      `Check ${check.sqlName} on table ${table.sqlName} has invalid expression`,
+    );
+  }
+
+  if (!check.expression.trim()) {
+    throw new MigrationError(
+      `Check ${check.sqlName} on table ${table.sqlName} has invalid expression`,
+    );
+  }
+
+  return {
+    name: check.sqlName,
+    table: table.sqlName,
+    expression: check.expression,
+    columns,
+  } satisfies CheckSnapshot;
+};
+
 const assertUniqueIndexNames = (tables: Record<string, TableSnapshot>) => {
   const seen = new Map<string, string>();
 
@@ -170,10 +213,25 @@ const snapshotTable = (table: Table, tables: Record<string, Table>) => {
     }
   }
 
+  const checks: Record<string, CheckSnapshot> = {};
+
+  if (table.checks) {
+    for (const check of table.checks) {
+      if (checks[check.sqlName]) {
+        throw new MigrationError(
+          `Duplicate check name ${check.sqlName} on table ${table.sqlName}`,
+        );
+      }
+
+      checks[check.sqlName] = snapshotCheck(check, table);
+    }
+  }
+
   return {
     name: table.sqlName,
     columns,
     indexes,
+    checks,
   };
 };
 

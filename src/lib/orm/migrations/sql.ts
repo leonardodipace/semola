@@ -1,3 +1,4 @@
+import type { CheckSnapshot } from "../checks/types.js";
 import { MigrationError } from "../errors.js";
 import type { IndexSnapshot } from "../indexes/types.js";
 import type { ColumnSnapshot, SchemaSnapshot, TableSnapshot } from "./types.js";
@@ -197,6 +198,70 @@ const assertIndexSnapshot = (
   return snapshot;
 };
 
+const assertCheckSnapshot = (
+  value: unknown,
+  label: string,
+  tableName: string,
+  checkKey: string,
+) => {
+  if (!isPlainObject(value)) {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableName} check ${checkKey} must be an object`,
+    );
+  }
+
+  const check = asRecord(value);
+  const detail = `table ${tableName} check ${checkKey}`;
+  const name = nonEmptyString(check.name, label, `${detail} missing name`);
+
+  if (name !== checkKey) {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableName} check key ${checkKey} does not match name ${name}`,
+    );
+  }
+
+  const table = nonEmptyString(check.table, label, `${detail} missing table`);
+
+  if (table !== tableName) {
+    throw new MigrationError(
+      `Invalid ${label}: table ${tableName} check ${checkKey} references table ${table}`,
+    );
+  }
+
+  const expression = nonEmptyString(
+    check.expression,
+    label,
+    `${detail} missing expression`,
+  );
+
+  if (!expression.trim()) {
+    throw new MigrationError(
+      `Invalid ${label}: ${detail} has invalid expression`,
+    );
+  }
+
+  const columns = check.columns;
+
+  if (!Array.isArray(columns)) {
+    throw new MigrationError(`Invalid ${label}: ${detail} missing columns`);
+  }
+
+  if (columns.length === 0) {
+    throw new MigrationError(`Invalid ${label}: ${detail} requires columns`);
+  }
+
+  if (columns.some((entry) => typeof entry !== "string")) {
+    throw new MigrationError(`Invalid ${label}: ${detail} has invalid columns`);
+  }
+
+  return {
+    name,
+    table,
+    expression,
+    columns: [...columns],
+  } satisfies CheckSnapshot;
+};
+
 const assertTableSnapshot = (
   value: unknown,
   label: string,
@@ -253,10 +318,26 @@ const assertTableSnapshot = (
     }
   }
 
+  const checks: Record<string, CheckSnapshot> = {};
+  const rawChecks = table.checks;
+
+  if (rawChecks !== undefined) {
+    if (!isPlainObject(rawChecks)) {
+      throw new MigrationError(
+        `Invalid ${label}: table ${tableKey} has invalid checks`,
+      );
+    }
+
+    for (const [checkKey, check] of Object.entries(asRecord(rawChecks))) {
+      checks[checkKey] = assertCheckSnapshot(check, label, tableKey, checkKey);
+    }
+  }
+
   return {
     name,
     columns,
     indexes,
+    checks,
   } satisfies TableSnapshot;
 };
 
@@ -301,6 +382,16 @@ export const assertSchemaSnapshot = (value: unknown, label: string) => {
         if (!table.columns[columnName]) {
           throw new MigrationError(
             `Invalid ${label}: ${table.name} index ${index.name} references missing column ${columnName}`,
+          );
+        }
+      }
+    }
+
+    for (const check of Object.values(table.checks)) {
+      for (const columnName of check.columns) {
+        if (!table.columns[columnName]) {
+          throw new MigrationError(
+            `Invalid ${label}: ${table.name} check ${check.name} references missing column ${columnName}`,
           );
         }
       }

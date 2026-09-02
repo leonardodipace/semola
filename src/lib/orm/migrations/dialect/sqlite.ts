@@ -66,6 +66,8 @@ const canApplyInPlace = (op: MigrationOp) => {
 
   if (op.kind === "createIndex") return true;
   if (op.kind === "dropIndex") return true;
+  if (op.kind === "createCheck") return false;
+  if (op.kind === "dropCheck") return false;
 
   return false;
 };
@@ -85,6 +87,8 @@ const opTableName = (op: MigrationOp) => {
   if (op.kind === "dropPrimaryKey") return op.table;
   if (op.kind === "createIndex") return op.index.table;
   if (op.kind === "dropIndex") return op.index.table;
+  if (op.kind === "createCheck") return op.check.table;
+  if (op.kind === "dropCheck") return op.check.table;
 
   return op.table;
 };

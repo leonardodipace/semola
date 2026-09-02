@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { check } from "../checks/index.js";
 import {
   boolean,
   date,
@@ -1256,6 +1257,7 @@ describe("orm migrations snapshot/diff/sql", () => {
             },
           },
           indexes: {},
+          checks: {},
         },
       },
     } satisfies SchemaSnapshot;
@@ -1284,6 +1286,7 @@ describe("orm migrations snapshot/diff/sql", () => {
                 },
               },
               indexes: {},
+              checks: {},
             },
           },
         },
@@ -3628,6 +3631,7 @@ describe("orm migrations indexes", () => {
               unique: false,
             },
           },
+          checks: {},
         },
       },
     } satisfies SchemaSnapshot;
@@ -3658,6 +3662,7 @@ describe("orm migrations indexes", () => {
     );
 
     expect(normalized.tables.posts?.indexes).toEqual({});
+    expect(normalized.tables.posts?.checks).toEqual({});
     expect(normalized.tables.posts?.columns[authorId]?.name).toBe(authorId);
   });
 
@@ -3717,5 +3722,873 @@ describe("orm migrations indexes", () => {
     );
 
     expect(ops.filter((op) => op.kind === "createIndex")).toHaveLength(3);
+  });
+});
+
+describe("orm migrations checks", () => {
+  const postsColumns = {
+    id: uuid("id").primaryKey().notNull(),
+    authorId: uuid("author_id").notNull(),
+    age: number("age"),
+    startedAt: date("started_at").notNull(),
+    endedAt: date("ended_at").nullable(),
+  };
+
+  test("snapshots checks on tables", () => {
+    const posts = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+        check("posts_dates_check")
+          .on(columns.startedAt, columns.endedAt)
+          .where("started_at < ended_at"),
+      ],
+    });
+    const snapshot = snapshotSchema({ posts });
+    const checks = snapshot.tables.posts?.checks;
+
+    expect(Object.keys(checks ?? {})).toEqual([
+      "posts_age_check",
+      "posts_dates_check",
+    ]);
+    expect(checks?.posts_age_check).toEqual({
+      name: "posts_age_check",
+      table: "posts",
+      expression: "age > 21",
+      columns: ["age"],
+    });
+    expect(checks?.posts_dates_check?.columns).toEqual([
+      "started_at",
+      "ended_at",
+    ]);
+  });
+
+  test("tables without checks snapshot as empty object", () => {
+    const users = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+      },
+    });
+    const snapshot = snapshotSchema({ users });
+
+    expect(snapshot.tables.users?.checks).toEqual({});
+  });
+
+  test("new table renders checks inline in CREATE TABLE", () => {
+    const posts = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+        check("posts_dates_check")
+          .on(columns.startedAt, columns.endedAt)
+          .where("started_at < ended_at"),
+      ],
+    });
+    const ops = diffSchemas(
+      emptySchema(),
+      snapshotSchema({ posts }),
+      getMigrationDialect("postgres"),
+    );
+    const sql = getMigrationDialect("postgres").render(ops);
+
+    expect(ops.map((op) => op.kind)).toEqual(["createTable"]);
+    expect(sql).toContain('CONSTRAINT "posts_age_check" CHECK (age > 21)');
+    expect(sql).toContain(
+      'CONSTRAINT "posts_dates_check" CHECK (started_at < ended_at)',
+    );
+  });
+
+  test("adds check to existing table on postgres", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ posts: before }),
+      snapshotSchema({ posts: after }),
+      getMigrationDialect("postgres"),
+    );
+    const sql = getMigrationDialect("postgres").render(ops);
+
+    expect(ops).toEqual([{ kind: "createCheck", check: expect.any(Object) }]);
+    expect(sql).toContain(
+      'ALTER TABLE "posts" ADD CONSTRAINT "posts_age_check" CHECK (age > 21)',
+    );
+  });
+
+  test("sqlite adds check to existing table via recreateTable", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ posts: before }),
+      snapshotSchema({ posts: after }),
+      getMigrationDialect("sqlite"),
+    );
+    const sql = getMigrationDialect("sqlite").render(ops);
+
+    expect(ops).toEqual([
+      {
+        kind: "recreateTable",
+        from: expect.any(Object),
+        to: expect.any(Object),
+      },
+    ]);
+    expect(sql).toContain('CONSTRAINT "posts_age_check" CHECK (age > 21)');
+    expect(sql).not.toContain('ALTER TABLE "posts" ADD CONSTRAINT');
+  });
+
+  test("sqlite drops check from existing table via recreateTable", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ posts: before }),
+      snapshotSchema({ posts: after }),
+      getMigrationDialect("sqlite"),
+    );
+    const sql = getMigrationDialect("sqlite").render(ops);
+
+    expect(ops[0]?.kind).toBe("recreateTable");
+    expect(sql).toContain('CREATE TABLE "posts__semola_tmp"');
+    expect(sql).not.toContain('DROP CONSTRAINT "posts_age_check"');
+    expect(sql).not.toContain('CONSTRAINT "posts_age_check" CHECK');
+  });
+
+  test("drops check from existing table", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ posts: before }),
+      snapshotSchema({ posts: after }),
+      getMigrationDialect("postgres"),
+    );
+    const sql = getMigrationDialect("postgres").render(ops);
+
+    expect(ops).toEqual([{ kind: "dropCheck", check: expect.any(Object) }]);
+    expect(sql).toContain(
+      'ALTER TABLE "posts" DROP CONSTRAINT "posts_age_check"',
+    );
+  });
+
+  test("changing a check drops and recreates it", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 18"),
+      ],
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ posts: before }),
+      snapshotSchema({ posts: after }),
+      getMigrationDialect("postgres"),
+    );
+
+    expect(ops.map((op) => op.kind)).toEqual(["dropCheck", "createCheck"]);
+  });
+
+  test("dropCheck precedes dropColumn for referenced column", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: {
+        id: postsColumns.id,
+        authorId: postsColumns.authorId,
+        startedAt: postsColumns.startedAt,
+        endedAt: postsColumns.endedAt,
+      },
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ posts: before }),
+      snapshotSchema({ posts: after }),
+      getMigrationDialect("postgres"),
+    );
+
+    expect(ops.map((op) => op.kind)).toEqual(["dropCheck", "dropColumn"]);
+  });
+
+  test("identical schemas with checks produce no ops", () => {
+    const posts = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ posts }),
+      snapshotSchema({ posts }),
+      getMigrationDialect("postgres"),
+    );
+
+    expect(ops).toEqual([]);
+  });
+
+  test("dropped table does not emit dropCheck because checks are inline", () => {
+    const posts = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+        check("posts_dates_check")
+          .on(columns.startedAt, columns.endedAt)
+          .where("started_at < ended_at"),
+      ],
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ posts }),
+      emptySchema(),
+      getMigrationDialect("postgres"),
+      { strictAddColumn: false },
+    );
+    const sql = getMigrationDialect("postgres").render(ops);
+
+    expect(ops.map((op) => op.kind)).toEqual(["dropTable"]);
+    expect(sql).toContain('DROP TABLE "posts"');
+    expect(sql).not.toContain("DROP CONSTRAINT");
+  });
+
+  test("down migration recreates dropped check on postgres", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+    });
+    const down = getMigrationDialect("postgres").render(
+      diffSchemas(
+        snapshotSchema({ posts: after }),
+        snapshotSchema({ posts: before }),
+        getMigrationDialect("postgres"),
+      ),
+    );
+
+    expect(down).toContain(
+      'ALTER TABLE "posts" ADD CONSTRAINT "posts_age_check" CHECK (age > 21)',
+    );
+  });
+
+  test("drops multiple checks when removing several", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+        check("posts_dates_check")
+          .on(columns.startedAt, columns.endedAt)
+          .where("started_at < ended_at"),
+      ],
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ posts: before }),
+      snapshotSchema({ posts: after }),
+      getMigrationDialect("postgres"),
+    );
+
+    expect(ops.filter((op) => op.kind === "dropCheck")).toHaveLength(2);
+  });
+
+  test("adds multiple checks to existing table on postgres", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+        check("posts_dates_check")
+          .on(columns.startedAt, columns.endedAt)
+          .where("started_at < ended_at"),
+      ],
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ posts: before }),
+      snapshotSchema({ posts: after }),
+      getMigrationDialect("postgres"),
+    );
+    const sql = getMigrationDialect("postgres").render(ops);
+
+    expect(ops.map((op) => op.kind)).toEqual(["createCheck", "createCheck"]);
+    expect(sql).toContain('ADD CONSTRAINT "posts_age_check"');
+    expect(sql).toContain('ADD CONSTRAINT "posts_dates_check"');
+  });
+
+  test("snapshots multi-column check columns from on()", () => {
+    const posts = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_combined_check")
+          .on(columns.age, columns.startedAt, columns.endedAt)
+          .where("age > 21 AND started_at < ended_at"),
+      ],
+    });
+    const snapshot = snapshotSchema({ posts });
+
+    expect(snapshot.tables.posts?.checks.posts_combined_check?.columns).toEqual(
+      ["age", "started_at", "ended_at"],
+    );
+  });
+
+  test("renders complex check expression in CREATE TABLE", () => {
+    const posts = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_complex_check")
+          .on(columns.age, columns.startedAt, columns.endedAt)
+          .where("age IS NULL OR (age > 21 AND started_at < ended_at)"),
+      ],
+    });
+    const sql = getMigrationDialect("postgres").render(
+      diffSchemas(
+        emptySchema(),
+        snapshotSchema({ posts }),
+        getMigrationDialect("postgres"),
+      ),
+    );
+
+    expect(sql).toContain(
+      'CONSTRAINT "posts_complex_check" CHECK (age IS NULL OR (age > 21 AND started_at < ended_at))',
+    );
+  });
+
+  test("assertSchemaSnapshot accepts checks field on tables", () => {
+    const checkName = "posts_age_check";
+    const schema = {
+      tables: {
+        posts: {
+          name: "posts",
+          columns: {
+            age: {
+              name: "age",
+              type: "number",
+              isNullable: true,
+              isPrimaryKey: false,
+              isUnique: false,
+            },
+          },
+          indexes: {},
+          checks: {
+            [checkName]: {
+              name: checkName,
+              table: "posts",
+              expression: "age > 21",
+              columns: ["age"],
+            },
+          },
+        },
+      },
+    } satisfies SchemaSnapshot;
+
+    expect(assertSchemaSnapshot(schema, "schema.json")).toEqual(schema);
+  });
+
+  test("assertSchemaSnapshot defaults missing checks to empty object", () => {
+    const normalized = assertSchemaSnapshot(
+      {
+        tables: {
+          posts: {
+            name: "posts",
+            columns: {
+              age: {
+                name: "age",
+                type: "number",
+                isNullable: true,
+                isPrimaryKey: false,
+                isUnique: false,
+              },
+            },
+            indexes: {},
+          },
+        },
+      },
+      "schema.json",
+    );
+
+    expect(normalized.tables.posts?.checks).toEqual({});
+  });
+
+  test("assertSchemaSnapshot rejects invalid check snapshot", () => {
+    expect(() =>
+      assertSchemaSnapshot(
+        {
+          tables: {
+            posts: {
+              name: "posts",
+              columns: {},
+              indexes: {},
+              checks: {
+                bad: 1,
+              },
+            },
+          },
+        },
+        "schema.json",
+      ),
+    ).toThrow("Invalid schema.json");
+  });
+
+  test("changes check on() columns via drop and recreate", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_dates_check")
+          .on(columns.startedAt)
+          .where("started_at IS NOT NULL"),
+      ],
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_dates_check")
+          .on(columns.startedAt, columns.endedAt)
+          .where("started_at IS NOT NULL"),
+      ],
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ posts: before }),
+      snapshotSchema({ posts: after }),
+      getMigrationDialect("postgres"),
+    );
+
+    expect(ops.map((op) => op.kind)).toEqual(["dropCheck", "createCheck"]);
+  });
+
+  test("changing only on() columns keeps expression in recreated check", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_dates_check")
+          .on(columns.startedAt)
+          .where("started_at < ended_at"),
+      ],
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_dates_check")
+          .on(columns.startedAt, columns.endedAt)
+          .where("started_at < ended_at"),
+      ],
+    });
+    const sql = getMigrationDialect("postgres").render(
+      diffSchemas(
+        snapshotSchema({ posts: before }),
+        snapshotSchema({ posts: after }),
+        getMigrationDialect("postgres"),
+      ),
+    );
+
+    expect(sql).toContain(
+      'ADD CONSTRAINT "posts_dates_check" CHECK (started_at < ended_at)',
+    );
+  });
+
+  test("changing only expression keeps on() columns in snapshot", () => {
+    const posts = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age >= 21"),
+      ],
+    });
+    const snapshot = snapshotSchema({ posts });
+
+    expect(snapshot.tables.posts?.checks.posts_age_check?.columns).toEqual([
+      "age",
+    ]);
+    expect(snapshot.tables.posts?.checks.posts_age_check?.expression).toBe(
+      "age >= 21",
+    );
+  });
+
+  test("dropping column not listed in on() does not drop check", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: {
+        id: postsColumns.id,
+        authorId: postsColumns.authorId,
+        age: postsColumns.age,
+        startedAt: postsColumns.startedAt,
+      },
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ posts: before }),
+      snapshotSchema({ posts: after }),
+      getMigrationDialect("postgres"),
+    );
+
+    expect(ops.map((op) => op.kind)).toEqual(["dropColumn"]);
+    expect(ops.filter((op) => op.kind === "dropCheck")).toHaveLength(0);
+  });
+
+  test("dropping one of several on() columns drops the check first", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_dates_check")
+          .on(columns.startedAt, columns.endedAt)
+          .where("started_at < ended_at"),
+      ],
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: {
+        id: postsColumns.id,
+        authorId: postsColumns.authorId,
+        age: postsColumns.age,
+        startedAt: postsColumns.startedAt,
+      },
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ posts: before }),
+      snapshotSchema({ posts: after }),
+      getMigrationDialect("postgres"),
+    );
+
+    expect(ops.map((op) => op.kind)).toEqual(["dropCheck", "dropColumn"]);
+  });
+
+  test("new table with checks and indexes emits createTable then createIndex", () => {
+    const posts = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      indexes: (columns) => [index("posts_author_idx").on(columns.authorId)],
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const ops = diffSchemas(
+      emptySchema(),
+      snapshotSchema({ posts }),
+      getMigrationDialect("postgres"),
+    );
+    const sql = getMigrationDialect("postgres").render(ops);
+
+    expect(ops.map((op) => op.kind)).toEqual(["createTable", "createIndex"]);
+    expect(sql).toContain('CONSTRAINT "posts_age_check" CHECK (age > 21)');
+    expect(sql).toContain('CREATE INDEX "posts_author_idx"');
+  });
+
+  test("postgres dropCheck precedes dropIndex in rendered sql", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      indexes: (columns) => [index("posts_age_idx").on(columns.age)],
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: {
+        id: postsColumns.id,
+        authorId: postsColumns.authorId,
+        startedAt: postsColumns.startedAt,
+        endedAt: postsColumns.endedAt,
+      },
+    });
+    const sql = getMigrationDialect("postgres").render(
+      diffSchemas(
+        snapshotSchema({ posts: before }),
+        snapshotSchema({ posts: after }),
+        getMigrationDialect("postgres"),
+      ),
+    );
+
+    expect(sql.indexOf('DROP CONSTRAINT "posts_age_check"')).toBeLessThan(
+      sql.indexOf('DROP INDEX "posts_age_idx"'),
+    );
+    expect(sql.indexOf('DROP INDEX "posts_age_idx"')).toBeLessThan(
+      sql.indexOf('DROP COLUMN "age"'),
+    );
+  });
+
+  test("down migration drops added check on postgres", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const down = getMigrationDialect("postgres").render(
+      diffSchemas(
+        snapshotSchema({ posts: after }),
+        snapshotSchema({ posts: before }),
+        getMigrationDialect("postgres"),
+      ),
+    );
+
+    expect(down).toContain(
+      'ALTER TABLE "posts" DROP CONSTRAINT "posts_age_check"',
+    );
+  });
+
+  test("down migration reverses expression change on postgres", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 18"),
+      ],
+    });
+    const down = getMigrationDialect("postgres").render(
+      diffSchemas(
+        snapshotSchema({ posts: after }),
+        snapshotSchema({ posts: before }),
+        getMigrationDialect("postgres"),
+      ),
+    );
+
+    expect(down).toContain('DROP CONSTRAINT "posts_age_check"');
+    expect(down).toContain('ADD CONSTRAINT "posts_age_check" CHECK (age > 21)');
+  });
+
+  test("down migration reverses on() column change on sqlite", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_dates_check")
+          .on(columns.startedAt)
+          .where("started_at IS NOT NULL"),
+      ],
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_dates_check")
+          .on(columns.startedAt, columns.endedAt)
+          .where("started_at IS NOT NULL"),
+      ],
+    });
+    const downOps = diffSchemas(
+      snapshotSchema({ posts: after }),
+      snapshotSchema({ posts: before }),
+      getMigrationDialect("sqlite"),
+    );
+    const down = getMigrationDialect("sqlite").render(downOps);
+
+    expect(downOps[0]?.kind).toBe("recreateTable");
+    expect(down).toContain('CREATE TABLE "posts__semola_tmp"');
+    expect(down).not.toContain('DROP CONSTRAINT "posts_dates_check"');
+    expect(down).toContain(
+      'CONSTRAINT "posts_dates_check" CHECK (started_at IS NOT NULL)',
+    );
+  });
+
+  test("removing one check keeps the other", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+        check("posts_dates_check")
+          .on(columns.startedAt, columns.endedAt)
+          .where("started_at < ended_at"),
+      ],
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ posts: before }),
+      snapshotSchema({ posts: after }),
+      getMigrationDialect("postgres"),
+    );
+
+    expect(ops).toEqual([{ kind: "dropCheck", check: expect.any(Object) }]);
+  });
+
+  test("replacing one check with another emits drop and create", () => {
+    const before = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const after = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_score_check").on(columns.age).where("age >= 0"),
+      ],
+    });
+    const ops = diffSchemas(
+      snapshotSchema({ posts: before }),
+      snapshotSchema({ posts: after }),
+      getMigrationDialect("postgres"),
+    );
+
+    expect(ops.map((op) => op.kind)).toEqual(["dropCheck", "createCheck"]);
+  });
+
+  test("snapshot preserves expression whitespace verbatim", () => {
+    const posts = defineTable({
+      sqlName: "posts",
+      columns: postsColumns,
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("  age   >   21  "),
+      ],
+    });
+    const snapshot = snapshotSchema({ posts });
+
+    expect(snapshot.tables.posts?.checks.posts_age_check?.expression).toBe(
+      "  age   >   21  ",
+    );
+  });
+
+  test("assertSchemaSnapshot rejects whitespace-only check expression", () => {
+    const checkName = "posts_age_check";
+
+    expect(() =>
+      assertSchemaSnapshot(
+        {
+          tables: {
+            posts: {
+              name: "posts",
+              columns: {
+                age: {
+                  name: "age",
+                  type: "number",
+                  isNullable: true,
+                  isPrimaryKey: false,
+                  isUnique: false,
+                },
+              },
+              indexes: {},
+              checks: {
+                [checkName]: {
+                  name: checkName,
+                  table: "posts",
+                  expression: "   ",
+                  columns: ["age"],
+                },
+              },
+            },
+          },
+        },
+        "schema.json",
+      ),
+    ).toThrow("has invalid expression");
+  });
+
+  test("assertSchemaSnapshot rejects check with empty columns array", () => {
+    expect(() =>
+      assertSchemaSnapshot(
+        {
+          tables: {
+            posts: {
+              name: "posts",
+              columns: {},
+              indexes: {},
+              checks: {
+                bad: {
+                  name: "bad",
+                  table: "posts",
+                  expression: "age > 21",
+                  columns: [],
+                },
+              },
+            },
+          },
+        },
+        "schema.json",
+      ),
+    ).toThrow("Invalid schema.json");
   });
 });

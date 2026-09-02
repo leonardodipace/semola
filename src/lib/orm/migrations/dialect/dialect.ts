@@ -1,3 +1,4 @@
+import type { CheckSnapshot } from "../../checks/types.js";
 import { MigrationError } from "../../errors.js";
 import type { IndexSnapshot } from "../../indexes/types.js";
 import { quoteIdentifier } from "../../utils.js";
@@ -179,6 +180,12 @@ export class MigrationDialect {
       );
     }
 
+    for (const check of Object.values(table.checks)) {
+      lines.push(
+        `    CONSTRAINT ${quoteIdentifier(check.name)} CHECK (${check.expression})`,
+      );
+    }
+
     return `CREATE TABLE ${quoteIdentifier(tableName)} (\n${lines.join(",\n")}\n);`;
   }
 
@@ -232,6 +239,14 @@ export class MigrationDialect {
 
   private renderDropIndex(index: IndexSnapshot) {
     return `DROP INDEX ${quoteIdentifier(index.name)};`;
+  }
+
+  private renderCreateCheck(check: CheckSnapshot) {
+    return `ALTER TABLE ${quoteIdentifier(check.table)} ADD CONSTRAINT ${quoteIdentifier(check.name)} CHECK (${check.expression});`;
+  }
+
+  private renderDropCheck(check: CheckSnapshot) {
+    return `ALTER TABLE ${quoteIdentifier(check.table)} DROP CONSTRAINT ${quoteIdentifier(check.name)};`;
   }
 
   private renderRenameTable(op: Extract<MigrationOp, { kind: "renameTable" }>) {
@@ -350,6 +365,10 @@ export class MigrationDialect {
         return this.renderCreateIndex(op.index);
       case "dropIndex":
         return this.renderDropIndex(op.index);
+      case "createCheck":
+        return this.renderCreateCheck(op.check);
+      case "dropCheck":
+        return this.renderDropCheck(op.check);
     }
   }
 }

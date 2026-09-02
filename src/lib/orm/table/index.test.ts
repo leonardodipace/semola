@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { date, string, uuid } from "../column/index.js";
+import { check } from "../checks/index.js";
+import { date, number, string, uuid } from "../column/index.js";
 import { index, uniqueIndex } from "../indexes/index.js";
 import { snapshotSchema } from "../migrations/snapshot.js";
 import { defineTable } from "./index.js";
@@ -169,5 +170,189 @@ describe("defineTable indexes", () => {
     });
 
     expect(table.indexes?.[0]?.columns[0]).toBe(table.columns.authorId);
+  });
+});
+
+describe("defineTable checks", () => {
+  test("omits checks when callback not provided", () => {
+    const table = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+      },
+    });
+
+    expect(table.checks).toBeUndefined();
+  });
+
+  test("resolves checks callback with table columns", () => {
+    const table = defineTable({
+      sqlName: "posts",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        age: number("age"),
+        startedAt: date("started_at").notNull(),
+        endedAt: date("ended_at").nullable(),
+      },
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+        check("posts_dates_check")
+          .on(columns.startedAt, columns.endedAt)
+          .where("started_at < ended_at"),
+      ],
+    });
+
+    expect(table.checks).toHaveLength(2);
+    expect(table.checks?.[0]?.sqlName).toBe("posts_age_check");
+    expect(table.checks?.[1]?.expression).toBe("started_at < ended_at");
+  });
+
+  test("allows empty checks array", () => {
+    const table = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+      },
+      checks: () => [],
+    });
+
+    expect(table.checks).toEqual([]);
+  });
+
+  test("supports multiple checks on same table", () => {
+    const table = defineTable({
+      sqlName: "posts",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        age: number("age"),
+        score: number("score"),
+      },
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+        check("posts_score_check").on(columns.score).where("score >= 0"),
+        check("posts_combined_check")
+          .on(columns.age, columns.score)
+          .where("age > 21 AND score >= 0"),
+      ],
+    });
+
+    expect(table.checks).toHaveLength(3);
+    expect(table.checks?.map((entry) => entry.sqlName)).toEqual([
+      "posts_age_check",
+      "posts_score_check",
+      "posts_combined_check",
+    ]);
+  });
+
+  test("rejects duplicate check names on same table at snapshot", () => {
+    const posts = defineTable({
+      sqlName: "posts",
+      columns: {
+        age: number("age"),
+        score: number("score"),
+      },
+      checks: (columns) => [
+        check("same_name").on(columns.age).where("age > 21"),
+        check("same_name").on(columns.score).where("score > 0"),
+      ],
+    });
+
+    expect(() => snapshotSchema({ posts })).toThrow(
+      "Duplicate check name same_name on table posts",
+    );
+  });
+
+  test("allows duplicate check names across tables in schema", () => {
+    const posts = defineTable({
+      sqlName: "posts",
+      columns: {
+        age: number("age"),
+      },
+      checks: (columns) => [
+        check("shared_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const pages = defineTable({
+      sqlName: "pages",
+      columns: {
+        age: number("age"),
+      },
+      checks: (columns) => [
+        check("shared_check").on(columns.age).where("age > 18"),
+      ],
+    });
+
+    const snapshot = snapshotSchema({ posts, pages });
+
+    expect(snapshot.tables.posts?.checks.shared_check?.expression).toBe(
+      "age > 21",
+    );
+    expect(snapshot.tables.pages?.checks.shared_check?.expression).toBe(
+      "age > 18",
+    );
+  });
+
+  test("rejects check referencing column outside table at snapshot", () => {
+    const posts = defineTable({
+      sqlName: "posts",
+      columns: {
+        slug: string("slug").notNull(),
+      },
+      checks: () => [
+        check("bad_check")
+          .on(string("author_id"))
+          .where("author_id IS NOT NULL"),
+      ],
+    });
+
+    expect(() => snapshotSchema({ posts })).toThrow(
+      "Check bad_check references column author_id which is not on table posts",
+    );
+  });
+
+  test("finalize resolves check columns from table definition", () => {
+    const table = defineTable({
+      sqlName: "posts",
+      columns: {
+        age: number("age"),
+        score: number("score"),
+      },
+      checks: (columns) => [
+        check("posts_combined_check")
+          .on(columns.score, columns.age)
+          .where("age > score"),
+      ],
+    });
+
+    expect(table.checks?.[0]?.columns[0]).toBe(table.columns.score);
+    expect(table.checks?.[0]?.columns[1]).toBe(table.columns.age);
+    expect(table.checks?.[0]?.columns.map((column) => column.sqlName)).toEqual([
+      "score",
+      "age",
+    ]);
+  });
+
+  test("checks work alongside indexes on same table", () => {
+    const table = defineTable({
+      sqlName: "posts",
+      columns: {
+        authorId: uuid("author_id").notNull(),
+        age: number("age"),
+      },
+      indexes: (columns) => [index("posts_author_idx").on(columns.authorId)],
+      checks: (columns) => [
+        check("posts_age_check").on(columns.age).where("age > 21"),
+      ],
+    });
+    const snapshot = snapshotSchema({ posts: table });
+
+    expect(table.indexes).toHaveLength(1);
+    expect(table.checks).toHaveLength(1);
+    expect(Object.keys(snapshot.tables.posts?.indexes ?? {})).toEqual([
+      "posts_author_idx",
+    ]);
+    expect(Object.keys(snapshot.tables.posts?.checks ?? {})).toEqual([
+      "posts_age_check",
+    ]);
   });
 });
