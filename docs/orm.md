@@ -154,6 +154,38 @@ const db = createOrm({
 
 `one(foreignKeyColumn, () => table)` uses the source table's FK column name. `many(() => table)` is the reverse side.
 
+### Checks
+
+Define custom `CHECK` constraints on the table config. Column-level rules (`.primaryKey()`, `.unique()`, `.references()`, `enumType`) stay on columns.
+
+```typescript
+import {
+  check,
+  date,
+  defineTable,
+  number,
+  uuid,
+} from "semola/orm";
+
+const posts = defineTable({
+  sqlName: "posts",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    age: number("age"),
+    startedAt: date("started_at").notNull(),
+    endedAt: date("ended_at").nullable(),
+  },
+  checks: (columns) => [
+    check("posts_age_check").on(columns.age).where("age > 21"),
+    check("posts_dates_check")
+      .on(columns.startedAt, columns.endedAt)
+      .where("started_at < ended_at"),
+  ],
+});
+```
+
+`checks` is optional. Check names are required and must be unique across the schema. Use `.on(columns...)` to declare which columns the check depends on (for migrations when columns are dropped). `.where("...")` takes the raw SQL inside `CHECK (...)`.
+
 ### Indexes
 
 Define secondary indexes on the table config. Column `.unique()` emits a `UNIQUE` constraint on the column. `uniqueIndex()` emits a `CREATE UNIQUE INDEX` (useful for composite uniqueness).

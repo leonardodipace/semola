@@ -1,3 +1,4 @@
+export { check } from "./checks/index.js";
 export {
   boolean,
   date,

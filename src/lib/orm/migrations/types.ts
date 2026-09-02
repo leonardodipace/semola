@@ -1,3 +1,4 @@
+import type { CheckSnapshot } from "../checks/types.js";
 import type { Column } from "../column/types.js";
 import type { Adapter } from "../dialect/types.js";
 import type { IndexSnapshot } from "../indexes/types.js";
@@ -22,6 +23,7 @@ export type TableSnapshot = {
   name: string;
   columns: Record<string, ColumnSnapshot>;
   indexes: Record<string, IndexSnapshot>;
+  checks: Record<string, CheckSnapshot>;
 };
 
 export type SchemaSnapshot = {
@@ -62,7 +64,9 @@ export type MigrationOp =
       column: ColumnSnapshot;
     }
   | { kind: "createIndex"; index: IndexSnapshot }
-  | { kind: "dropIndex"; index: IndexSnapshot };
+  | { kind: "dropIndex"; index: IndexSnapshot }
+  | { kind: "createCheck"; check: CheckSnapshot }
+  | { kind: "dropCheck"; check: CheckSnapshot };
 
 export type RenameQuestion =
   | {
