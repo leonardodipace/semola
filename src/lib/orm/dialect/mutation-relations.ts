@@ -462,6 +462,7 @@ const connectChildRecords = async (input: {
   const placeholders = new PlaceholderGenerator(input.spec);
   const nextPlaceholder = placeholders.asFn();
   const childPk = primaryKeyColumn(input.childTable);
+  const setPlaceholder = nextPlaceholder();
   const params: unknown[] = [
     serializeColumnValue(input.childForeignKey, input.parentKey),
   ];
@@ -472,7 +473,7 @@ const connectChildRecords = async (input: {
     params.push(serializeColumnValue(childPk, childId));
   }
 
-  const statement = `UPDATE ${quoteIdentifier(input.childTable.sqlName)} SET ${quoteIdentifier(input.childForeignKey.sqlName)} = ${input.spec.formatPlaceholder(1)} WHERE ${quoteIdentifier(childPk.sqlName)} IN (${idPlaceholders.join(", ")}) RETURNING ${quoteIdentifier(childPk.sqlName)}`;
+  const statement = `UPDATE ${quoteIdentifier(input.childTable.sqlName)} SET ${quoteIdentifier(input.childForeignKey.sqlName)} = ${setPlaceholder} WHERE ${quoteIdentifier(childPk.sqlName)} IN (${idPlaceholders.join(", ")}) RETURNING ${quoteIdentifier(childPk.sqlName)}`;
   const updated = await input.sql.unsafe(statement, params);
 
   if (updated.length !== input.childIds.length) {
