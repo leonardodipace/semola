@@ -6,6 +6,7 @@ import {
   spyOn,
   test,
 } from "bun:test";
+import { mightThrow } from "../../errors/index.js";
 import { CronDistributed } from "./index.js";
 
 type SetCall = {
@@ -173,6 +174,56 @@ describe("CronDistributed adversarial", () => {
       await Promise.all(handlers.map((handler) => handler()));
 
       expect(runs).toBe(1);
+
+      cronSpy.mockRestore();
+    });
+
+    test("should deduplicate replicas that fire after the one-second lookback window", async () => {
+      setSystemTime(new Date(2027, 4, 8, 12, 35, 2));
+
+      const redis = createMockRedis();
+      let runs = 0;
+      const handlers: Array<() => Promise<void>> = [];
+      const cronSpy = mockInProcessCron(handlers);
+
+      const onTime = new CronDistributed({
+        name: "delayed-dedup",
+        schedule: "@minutely",
+        handler: () => {
+          runs++;
+          return Promise.resolve();
+        },
+        redis,
+        replicaId: "on-time",
+      });
+
+      const delayed = new CronDistributed({
+        name: "delayed-dedup",
+        schedule: "@minutely",
+        handler: () => {
+          runs++;
+          return Promise.resolve();
+        },
+        redis,
+        replicaId: "delayed",
+      });
+
+      onTime.run();
+      delayed.run();
+
+      await runTick(handlers[0]);
+      await runTick(handlers[1]);
+
+      expect(runs).toBe(1);
+
+      const firstKey = redis.setCalls[0]?.key;
+      const secondKey = redis.setCalls[1]?.key;
+
+      if (!firstKey || !secondKey) {
+        throw new Error("Expected lock keys for both replicas");
+      }
+
+      expect(firstKey).toBe(secondKey);
 
       cronSpy.mockRestore();
     });
@@ -442,6 +493,60 @@ describe("CronDistributed adversarial", () => {
       cronSpy.mockRestore();
     });
 
+    test("should allow a delayed replica to run the same tick after lock TTL expires", async () => {
+      setSystemTime(new Date(2027, 4, 8, 12, 22, 2));
+
+      const redis = createMockRedis();
+      let runs = 0;
+      const handlers: Array<() => Promise<void>> = [];
+      const cronSpy = mockInProcessCron(handlers);
+
+      const leader = new CronDistributed({
+        name: "ttl-delayed-replica",
+        schedule: "@minutely",
+        lockTTL: 50,
+        handler: () => {
+          runs++;
+          return Promise.resolve();
+        },
+        redis,
+        replicaId: "leader",
+      });
+
+      const delayed = new CronDistributed({
+        name: "ttl-delayed-replica",
+        schedule: "@minutely",
+        lockTTL: 50,
+        handler: () => {
+          runs++;
+          return Promise.resolve();
+        },
+        redis,
+        replicaId: "delayed",
+      });
+
+      leader.run();
+      delayed.run();
+
+      await runTick(handlers[0]);
+      expect(runs).toBe(1);
+
+      setSystemTime(new Date(2027, 4, 8, 12, 22, 2, 100));
+      await runTick(handlers[1]);
+      expect(runs).toBe(2);
+
+      const firstKey = redis.setCalls[0]?.key;
+      const secondKey = redis.setCalls[1]?.key;
+
+      if (!firstKey || !secondKey) {
+        throw new Error("Expected lock keys for both replicas");
+      }
+
+      expect(firstKey).toBe(secondKey);
+
+      cronSpy.mockRestore();
+    });
+
     test("should pass custom lockTTL to redis SET PX", async () => {
       setSystemTime(new Date(2027, 4, 8, 12, 21, 0));
 
@@ -572,7 +677,10 @@ describe("CronDistributed adversarial", () => {
 
       job.run();
 
-      await expect(runTick(handlers[0])).rejects.toThrow("sync boom");
+      const [error] = await mightThrow(runTick(handlers[0]));
+
+      if (!error) throw new Error("Expected handler to throw");
+      expect(error.message).toBe("sync boom");
 
       cronSpy.mockRestore();
     });
@@ -594,7 +702,10 @@ describe("CronDistributed adversarial", () => {
 
       job.run();
 
-      await expect(runTick(handlers[0])).rejects.toThrow("async boom");
+      const [error] = await mightThrow(runTick(handlers[0]));
+
+      if (!error) throw new Error("Expected handler to reject");
+      expect(error.message).toBe("async boom");
 
       cronSpy.mockRestore();
     });
@@ -617,9 +728,10 @@ describe("CronDistributed adversarial", () => {
 
       job.run();
 
-      await expect(runTick(handlers[0])).rejects.toThrow(
-        "Redis connection error",
-      );
+      const [error] = await mightThrow(runTick(handlers[0]));
+
+      if (!error) throw new Error("Expected redis SET to throw");
+      expect(error.message).toBe("Redis connection error");
 
       cronSpy.mockRestore();
     });
@@ -753,9 +865,7 @@ describe("CronDistributed adversarial", () => {
       winner.run();
       loser.run();
 
-      await expect(
-        Promise.all(handlers.map((handler) => handler())),
-      ).resolves.toBeDefined();
+      await Promise.all(handlers.map((handler) => handler()));
 
       expect(runs).toBe(1);
 

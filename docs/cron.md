@@ -127,7 +127,7 @@ const report = new CronDistributed({
 report.run();
 ```
 
-Use `replicaId` to identify the lock owner in Redis (defaults to a random UUID). `lockTTL` (default five minutes) only covers the race window when replicas compete for the same tick, not the full handler runtime.
+Use `replicaId` to identify the lock owner in Redis (defaults to a random UUID). `lockTTL` (default five minutes) bounds how long the deduplication lock is held. The lock is acquired before `handler()` runs and is not renewed while the handler executes, so deduplication is at-most-once only while that Redis key remains valid. If a replica is delayed past `lockTTL`, another replica can acquire the same tick key and run the handler again. Lock keys are derived from the schedule boundary that triggered the tick, so delayed replicas still coordinate on the same key. Handlers should be idempotent.
 
 Use a unique `name` per job. Two jobs with the same `name` but different schedules are not deduplicated against each other unless their ticks align on the same wall-clock instant.
 

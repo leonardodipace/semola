@@ -10,8 +10,7 @@ import type {
 } from "./types.js";
 
 const DEFAULT_LOCK_TTL = 300_000;
-// Look back one second so next() resolves the tick that just fired, not the following one.
-const TICK_LOOKBACK_MS = 1000;
+const MAX_SCHEDULE_GAP_MS = 1464 * 24 * 60 * 60 * 1000;
 
 const lockKey = (name: string, tickMs: number) => `cron:${name}:${tickMs}`;
 
@@ -46,6 +45,49 @@ class CommonCronUtilities {
     if (parseError) throw parseError;
 
     return nextMatch;
+  }
+
+  public currentScheduledTick(options: CronBaseOptions, from?: Date | number) {
+    const now = from === undefined ? Date.now() : Number(from);
+    const upcoming = this.next(options, now);
+
+    if (!upcoming) return null;
+
+    const gap = upcoming.getTime() - now;
+    const candidate = this.next(options, now - gap);
+
+    if (candidate) {
+      const candidateNext = this.next(options, candidate.getTime());
+
+      if (candidateNext && candidateNext.getTime() === upcoming.getTime()) {
+        return candidate;
+      }
+    }
+
+    return this.previousScheduledTick(options, upcoming);
+  }
+
+  private previousScheduledTick(options: CronBaseOptions, upcoming: Date) {
+    let lo = 1;
+    let hi = MAX_SCHEDULE_GAP_MS;
+
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      const probe = this.next(options, upcoming.getTime() - mid);
+
+      if (probe && probe.getTime() < upcoming.getTime()) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
+    }
+
+    const tick = this.next(options, upcoming.getTime() - lo);
+
+    if (!tick) return null;
+    if (tick.getTime() >= upcoming.getTime()) return null;
+
+    return tick;
   }
 }
 
@@ -129,6 +171,10 @@ export class Cron implements CronUtilitiesInterface {
   public next(from?: Date | number) {
     return this.common.next(this.options, from);
   }
+
+  public currentScheduledTick(from?: Date | number) {
+    return this.common.currentScheduledTick(this.options, from);
+  }
 }
 
 export class CronDistributed implements CronUtilitiesInterface {
@@ -181,7 +227,7 @@ export class CronDistributed implements CronUtilitiesInterface {
   }
 
   private async runIfLeader() {
-    const tick = this.cron.next(Date.now() - TICK_LOOKBACK_MS);
+    const tick = this.cron.currentScheduledTick();
 
     if (!tick) return;
 
