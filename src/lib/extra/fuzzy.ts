@@ -80,8 +80,10 @@ export function normalizeWeights(
 export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
   options: FuzzyOptions<FuzzyType>,
 ) {
+  const { data, keys, weights } = options;
+  const normalizedW = normalizeWeights(data.length, weights);
+
   const searchFn = (needle: string) => {
-    const { data, keys, weights } = options;
     if (data.length === 0) return [];
 
     const result: FuzzyResult[] = [];
@@ -127,8 +129,6 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
         index: dataIdx,
       });
     }
-
-    const normalizedW = normalizeWeights(data.length, weights);
 
     return result
       .map((v, rIdx) => {
