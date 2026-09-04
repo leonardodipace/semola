@@ -268,6 +268,47 @@ await db.posts.deleteMany({
 | `update` / `updateMany` | Patch |
 | `delete` / `deleteMany` | Remove |
 
+### Nested connect and disconnect
+
+Inside `create` or `update`, relation fields accept Prisma-style nested writes. `connect` links to an existing related row by unique key (`id` or another unique column). `disconnect` clears the foreign key without deleting either row. Optional relations only.
+
+The whole mutation runs in one transaction. If a `connect` target is missing, the parent row is not created or updated.
+
+```typescript
+await db.users.create({
+  data: {
+    id: "u1",
+    email: "alice@example.com",
+    profile: { connect: { id: "prof-1" } },
+    posts: { connect: [{ id: "post-1" }, { id: "post-2" }] },
+  },
+});
+
+await db.posts.create({
+  data: {
+    id: "post-3",
+    title: "Hello",
+    author: { connect: { email: "alice@example.com" } },
+  },
+});
+
+await db.users.update({
+  where: { id: "u1" },
+  data: {
+    profile: { disconnect: true },
+    posts: { disconnect: [{ id: "post-1" }] },
+  },
+});
+```
+
+| Nested write | Meaning |
+| --- | --- |
+| `{ connect: { id } }` | Link to-one relation by primary key |
+| `{ connect: { email } }` | Link to-one relation by any unique column |
+| `{ connect: [{ id }, ...] }` | Link to-many children by primary key |
+| `{ disconnect: true }` | Clear optional to-one foreign key |
+| `{ disconnect: [{ id }, ...] }` | Clear optional to-many links for listed children |
+
 ## Transactions and raw SQL
 
 ```typescript
