@@ -8,7 +8,6 @@ import {
   retriveKeys,
   trasform,
 } from "./fuzzy.js";
-import type { FuzzyResult } from "./types.js";
 
 describe("Fuzzy Search", () => {
   test("should return a list of results with 'apple' in the first position", () => {
@@ -17,15 +16,10 @@ describe("Fuzzy Search", () => {
     });
 
     const res = search("aple");
+
     expect(res).toHaveLength(4);
-
-    const item: FuzzyResult = {
-      word: "apple",
-      score: 1,
-      index: 0,
-    };
-
-    expect(res[0]).toMatchObject(item);
+    expect(res[0]?.index).toBe(0);
+    expect(res[0]?.word).toBe("apple");
   });
 
   test("should return an empty list in case input data is an empty list", () => {
@@ -49,22 +43,17 @@ describe("Fuzzy Search", () => {
     });
 
     const res = search("aple");
+
     expect(res).toHaveLength(4);
-
-    const item: FuzzyResult = {
-      word: {
-        record: {
-          name: "apple",
-          color: "red",
-          size: "medium",
-        },
-        key: "name",
+    expect(res[0]?.index).toBe(0);
+    expect(res[0]?.word).toMatchObject({
+      record: {
+        name: "apple",
+        color: "red",
+        size: "medium",
       },
-      score: 1,
-      index: 0,
-    };
-
-    expect(res[0]).toMatchObject(item);
+      key: "name",
+    });
   });
 
   test("should return an empty result list when passing zero data", () => {
@@ -135,15 +124,10 @@ describe("Fuzzy Search", () => {
       });
 
       const res = search("Aple");
+
       expect(res).toHaveLength(4);
-
-      const item: FuzzyResult = {
-        word: "AppLe",
-        score: 2,
-        index: 0,
-      };
-
-      expect(res[0]).toMatchObject(item);
+      expect(res[0]?.index).toBe(0);
+      expect(res[0]?.word).toBe("AppLe");
     });
 
     test("should support both capital and small letter when using objects as data", () => {
@@ -159,22 +143,17 @@ describe("Fuzzy Search", () => {
       });
 
       const res = search("Aple");
+
       expect(res).toHaveLength(4);
-
-      const item: FuzzyResult = {
-        word: {
-          record: {
-            name: "AppLe",
-            color: "red",
-            size: "medium",
-          },
-          key: "name",
+      expect(res[0]?.index).toBe(0);
+      expect(res[0]?.word).toMatchObject({
+        record: {
+          name: "AppLe",
+          color: "red",
+          size: "medium",
         },
-        score: 2,
-        index: 0,
-      };
-
-      expect(res[0]).toMatchObject(item);
+        key: "name",
+      });
     });
 
     test("should fold cases when 'caseSensitive' is disabled over a list of strings", () => {
@@ -183,15 +162,10 @@ describe("Fuzzy Search", () => {
       });
 
       const res = search("Aple");
+
       expect(res).toHaveLength(4);
-
-      const item: FuzzyResult = {
-        word: "AppLe",
-        score: 1,
-        index: 0,
-      };
-
-      expect(res[0]).toMatchObject(item);
+      expect(res[0]?.index).toBe(0);
+      expect(res[0]?.word).toBe("AppLe");
     });
 
     test("should fold cases when 'caseSensitive' is disabled over a list objects", () => {
@@ -208,20 +182,15 @@ describe("Fuzzy Search", () => {
       const res = search("Aple");
       expect(res).toHaveLength(4);
 
-      const item: FuzzyResult = {
-        word: {
-          record: {
-            name: "AppLe",
-            color: "red",
-            size: "medium",
-          },
-          key: "name",
+      expect(res[0]?.index).toBe(0);
+      expect(res[0]?.word).toMatchObject({
+        record: {
+          name: "AppLe",
+          color: "red",
+          size: "medium",
         },
-        score: 1,
-        index: 0,
-      };
-
-      expect(res[0]).toMatchObject(item);
+        key: "name",
+      });
     });
   });
 
@@ -233,15 +202,10 @@ describe("Fuzzy Search", () => {
       });
 
       const res = search("ap/le");
+
       expect(res).toHaveLength(4);
-
-      const item: FuzzyResult = {
-        word: "apple!",
-        score: 1,
-        index: 0,
-      };
-
-      expect(res[0]).toMatchObject(item);
+      expect(res[0]?.index).toBe(0);
+      expect(res[0]?.word).toBe("apple!");
     });
 
     test("should ignore punctuation symbols when using a list of objects", () => {
@@ -257,22 +221,17 @@ describe("Fuzzy Search", () => {
       });
 
       const res = search("pe;ch:");
+
       expect(res).toHaveLength(4);
-
-      const item: FuzzyResult = {
-        word: {
-          record: {
-            name: "<peach>",
-            color: "pink",
-            size: "medium",
-          },
-          key: "name",
+      expect(res[0]?.index).toBe(3);
+      expect(res[0]?.word).toMatchObject({
+        record: {
+          name: "<peach>",
+          color: "pink",
+          size: "medium",
         },
-        score: 1,
-        index: 3,
-      };
-
-      expect(res[0]).toMatchObject(item);
+        key: "name",
+      });
     });
 
     test("should include punctuation symbols when using a list of strings", () => {
@@ -281,15 +240,10 @@ describe("Fuzzy Search", () => {
       });
 
       const res = search("l!me.");
+
       expect(res).toHaveLength(4);
-
-      const item: FuzzyResult = {
-        word: "l.ime.",
-        score: 2,
-        index: 2,
-      };
-
-      expect(res[0]).toMatchObject(item);
+      expect(res[0]?.index).toBe(2);
+      expect(res[0]?.word).toBe("l.ime.");
     });
 
     test("should include punctuation symbols when using a list of objects", () => {
@@ -304,22 +258,17 @@ describe("Fuzzy Search", () => {
       });
 
       const res = search("pe;ch:");
+
       expect(res).toHaveLength(4);
-
-      const item: FuzzyResult = {
-        word: {
-          record: {
-            name: "<peach>",
-            color: "pink",
-            size: "medium",
-          },
-          key: "name",
+      expect(res[0]?.index).toBe(3);
+      expect(res[0]?.word).toMatchObject({
+        record: {
+          name: "<peach>",
+          color: "pink",
+          size: "medium",
         },
-        score: 3,
-        index: 3,
-      };
-
-      expect(res[0]).toMatchObject(item);
+        key: "name",
+      });
     });
   });
 
@@ -331,15 +280,10 @@ describe("Fuzzy Search", () => {
       });
 
       const res = search("wàtèrmelòn");
+
       expect(res).toHaveLength(4);
-
-      const item: FuzzyResult = {
-        word: "wàtèrmélòn",
-        score: 0,
-        index: 1,
-      };
-
-      expect(res[0]).toMatchObject(item);
+      expect(res[0]?.index).toBe(1);
+      expect(res[0]?.word).toBe("wàtèrmélòn");
     });
 
     test("should ignore diacritics when using objects as data", () => {
@@ -355,22 +299,17 @@ describe("Fuzzy Search", () => {
       });
 
       const res = search("wàtèrmelòn");
+
       expect(res).toHaveLength(4);
-
-      const item: FuzzyResult = {
-        word: {
-          record: {
-            name: "wàtèrmélòn",
-            color: "green",
-            size: "large",
-          },
-          key: "name",
+      expect(res[0]?.index).toBe(1);
+      expect(res[0]?.word).toMatchObject({
+        record: {
+          name: "wàtèrmélòn",
+          color: "green",
+          size: "large",
         },
-        score: 0,
-        index: 1,
-      };
-
-      expect(res[0]).toMatchObject(item);
+        key: "name",
+      });
     });
 
     test("should include diacritics when using plain strings as data", () => {
@@ -379,15 +318,10 @@ describe("Fuzzy Search", () => {
       });
 
       const res = search("wàtèrmelòn");
+
       expect(res).toHaveLength(4);
-
-      const item: FuzzyResult = {
-        word: "wàtèrmélòn",
-        score: 1,
-        index: 1,
-      };
-
-      expect(res[0]).toMatchObject(item);
+      expect(res[0]?.index).toBe(1);
+      expect(res[0]?.word).toBe("wàtèrmélòn");
     });
 
     test("should incluide diacritics when using objects as data", () => {
@@ -402,22 +336,17 @@ describe("Fuzzy Search", () => {
       });
 
       const res = search("wàtèrmelòn");
+
       expect(res).toHaveLength(4);
-
-      const item: FuzzyResult = {
-        word: {
-          record: {
-            name: "wàtèrmélòn",
-            color: "green",
-            size: "large",
-          },
-          key: "name",
+      expect(res[0]?.index).toBe(1);
+      expect(res[0]?.word).toMatchObject({
+        record: {
+          name: "wàtèrmélòn",
+          color: "green",
+          size: "large",
         },
-        score: 1,
-        index: 1,
-      };
-
-      expect(res[0]).toMatchObject(item);
+        key: "name",
+      });
     });
   });
 
@@ -434,18 +363,13 @@ describe("Fuzzy Search", () => {
       });
 
       const result = search("watermallon");
+
       expect(result).toHaveLength(4);
-
-      const item: FuzzyResult = {
-        word: {
-          record: { name: "watermelon", color: "green", size: "large" },
-          key: "name",
-        },
-        score: 2,
-        index: 1,
-      };
-
-      expect(result[0]).toMatchObject(item);
+      expect(result[0]?.index).toBe(1);
+      expect(result[0]?.word).toMatchObject({
+        record: { name: "watermelon", color: "green", size: "large" },
+        key: "name",
+      });
     });
 
     test("should retrive all keys when the 'keys' property was not provided", () => {

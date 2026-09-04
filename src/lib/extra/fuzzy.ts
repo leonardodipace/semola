@@ -31,6 +31,17 @@ export function trasform(...transformFn: TransformationFnType[]) {
   return applyFn;
 }
 
+export function toSimilarity(
+  needle: string,
+  candidate: string,
+  distance: number,
+) {
+  const maxLen = Math.max(needle.length, candidate.length);
+  if (maxLen === 0) return 1;
+
+  return 1 - distance / maxLen;
+}
+
 export function createTrasformationList<
   FuzzyType extends string | Record<string, string>,
 >(options: FuzzyOptions<FuzzyType>) {
@@ -89,22 +100,25 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
     const result: FuzzyResult[] = [];
     const actualKeys = retriveKeys(keys, data[0]);
     const trasformations = createTrasformationList<FuzzyType>(options);
-    const applyFn = trasform(...trasformations);
-    needle = applyFn(needle);
+    const applyNormalizationFn = trasform(...trasformations);
+    needle = applyNormalizationFn(needle);
 
     for (let dataIdx = 0; dataIdx < data.length; dataIdx++) {
       const word = data[dataIdx];
       if (!word) return [];
 
       if (typeof word === "string") {
-        const distance = levenshteinDistance(applyFn(word), needle);
-        result.push({ word, score: distance, index: dataIdx });
+        const normalizedWord = applyNormalizationFn(word);
+        const distance = levenshteinDistance(normalizedWord, needle);
+        const score = toSimilarity(needle, normalizedWord, distance);
+        result.push({ word, score, index: dataIdx });
 
         continue;
       }
 
       let minCost = Number.POSITIVE_INFINITY;
       let minCostKey = "";
+      let candidateElement = "";
 
       for (let kIdx = 0; kIdx < actualKeys.length; kIdx++) {
         const key = actualKeys[kIdx];
@@ -113,10 +127,13 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
         const element = word[key];
         if (!element) return [];
 
-        const distance = levenshteinDistance(applyFn(element), needle);
+        const normalizedElem = applyNormalizationFn(element);
+        const distance = levenshteinDistance(normalizedElem, needle);
+
         if (distance < minCost) {
           minCost = distance;
           minCostKey = key;
+          candidateElement = normalizedElem;
         }
       }
 
@@ -125,7 +142,7 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
           record: word,
           key: minCostKey,
         },
-        score: minCost,
+        score: toSimilarity(needle, candidateElement, minCost),
         index: dataIdx,
       });
     }
@@ -138,7 +155,7 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
         v.score *= w;
         return v;
       })
-      .sort((a, b) => a.score - b.score);
+      .sort((a, b) => b.score - a.score);
   };
 
   return searchFn;
