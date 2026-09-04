@@ -1577,6 +1577,450 @@ for (const live of integrationAdapters()) {
 
         await orm.$raw.close();
       });
+
+      test("swaps post links via connect and disconnect in same hasMany update", async () => {
+        const orm = await open();
+
+        await orm.users.create({
+          data: { id: userId, email: "owner@example.com" },
+        });
+        await orm.posts.createMany({
+          data: [
+            { id: edgePostId, title: "Old link", authorId: userId },
+            { id: edgePostId2, title: "Orphan" },
+          ],
+        });
+
+        await orm.users.update({
+          where: { id: userId },
+          data: userUpdateData({
+            posts: {
+              disconnect: [{ id: edgePostId }],
+              connect: [{ id: edgePostId2 }],
+            },
+          }),
+        });
+
+        const oldPost = await orm.posts.findUnique({ where: { id: edgePostId } });
+        const newPost = await orm.posts.findUnique({ where: { id: edgePostId2 } });
+
+        expect(oldPost?.authorId).toBeNull();
+        expect(newPost?.authorId).toBe(userId);
+
+        await orm.$raw.close();
+      });
+
+      test("rolls back create when connecting profile already owned by another user", async () => {
+        const orm = await open();
+
+        await orm.profiles.create({
+          data: { id: edgeProfileId, bio: "Taken" },
+        });
+        await orm.users.create({
+          data: {
+            id: userId,
+            email: "owner@example.com",
+            profileId: edgeProfileId,
+          },
+        });
+
+        const [error] = await mightThrow(
+          orm.users.create({
+            data: userCreateData({
+              id: userId2,
+              email: "rival@example.com",
+              profile: {
+                connect: { id: edgeProfileId },
+              },
+            }),
+          }),
+        );
+
+        expect(error).not.toBeNull();
+        expect(
+          await orm.users.findUnique({ where: { id: userId2 } }),
+        ).toBeNull();
+
+        const owner = await orm.users.findUnique({ where: { id: userId } });
+
+        expect(owner?.profileId).toBe(edgeProfileId);
+
+        await orm.$raw.close();
+      });
+
+      test("rolls back update when connecting profile already owned by another user", async () => {
+        const orm = await open();
+
+        await orm.profiles.create({
+          data: { id: edgeProfileId, bio: "Taken" },
+        });
+        await orm.users.createMany({
+          data: [
+            {
+              id: userId,
+              email: "owner@example.com",
+              profileId: edgeProfileId,
+            },
+            { id: userId2, email: "rival@example.com" },
+          ],
+        });
+
+        const [error] = await mightThrow(
+          orm.users.update({
+            where: { id: userId2 },
+            data: userUpdateData({
+              email: "rival.updated@example.com",
+              profile: {
+                connect: { id: edgeProfileId },
+              },
+            }),
+          }),
+        );
+
+        expect(error).not.toBeNull();
+
+        const rival = await orm.users.findUnique({ where: { id: userId2 } });
+        const owner = await orm.users.findUnique({ where: { id: userId } });
+
+        expect(rival?.email).toBe("rival@example.com");
+        expect(rival?.profileId).toBeNull();
+        expect(owner?.profileId).toBe(edgeProfileId);
+
+        await orm.$raw.close();
+      });
+
+      test("rejects create with both direct authorId and nested author connect", async () => {
+        const orm = await open();
+
+        await orm.users.createMany({
+          data: [
+            { id: userId, email: "old@example.com" },
+            { id: userId2, email: "new@example.com" },
+          ],
+        });
+
+        const [error] = await mightThrow(
+          orm.posts.create({
+            data: postCreateData({
+              id: edgePostId,
+              title: "Conflict",
+              authorId: userId,
+              author: {
+                connect: { email: "new@example.com" },
+              },
+            }),
+          }),
+        );
+
+        expect(error).not.toBeNull();
+        expect(await orm.posts.findMany()).toHaveLength(0);
+
+        await orm.$raw.close();
+      });
+
+      test("rejects update with conflicting direct authorId and nested author connect", async () => {
+        const orm = await open();
+
+        await orm.users.createMany({
+          data: [
+            { id: userId, email: "old@example.com" },
+            { id: userId2, email: "new@example.com" },
+          ],
+        });
+        await orm.posts.create({
+          data: { id: edgePostId, title: "Article" },
+        });
+
+        const [error] = await mightThrow(
+          orm.posts.update({
+            where: { id: edgePostId },
+            data: postUpdateData({
+              authorId: userId,
+              author: {
+                connect: { email: "new@example.com" },
+              },
+            }),
+          }),
+        );
+
+        expect(error).not.toBeNull();
+
+        const post = await orm.posts.findUnique({ where: { id: edgePostId } });
+
+        expect(post?.authorId).toBeNull();
+
+        await orm.$raw.close();
+      });
+
+      test("rejects nested disconnect on to-one relation during create", async () => {
+        const orm = await open();
+
+        const [error] = await mightThrow(
+          orm.users.create({
+            data: userCreateData({
+              id: userId,
+              email: "alice@example.com",
+              profile: {
+                disconnect: true,
+              } as never,
+            }),
+          }),
+        );
+
+        expect(error).not.toBeNull();
+        expect(await orm.users.findMany()).toHaveLength(0);
+
+        await orm.$raw.close();
+      });
+
+      test("rejects connect array containing null element on to-many create", async () => {
+        const orm = await open();
+
+        await orm.posts.create({
+          data: { id: edgePostId, title: "Draft" },
+        });
+
+        const [error] = await mightThrow(
+          orm.users.create({
+            data: userCreateData({
+              id: userId,
+              email: "owner@example.com",
+              posts: {
+                connect: [{ id: edgePostId }, null as never],
+              },
+            }),
+          }),
+        );
+
+        expect(error).not.toBeNull();
+        expect(
+          await orm.users.findUnique({ where: { id: userId } }),
+        ).toBeNull();
+
+        const post = await orm.posts.findUnique({ where: { id: edgePostId } });
+
+        expect(post?.authorId).toBeNull();
+
+        await orm.$raw.close();
+      });
+
+      test("rejects connect with undefined lookup value", async () => {
+        const orm = await open();
+
+        const [error] = await mightThrow(
+          orm.users.create({
+            data: userCreateData({
+              id: userId,
+              email: "alice@example.com",
+              profile: {
+                connect: { id: undefined as never },
+              },
+            }),
+          }),
+        );
+
+        expect(error).not.toBeNull();
+        expect(await orm.users.findMany()).toHaveLength(0);
+
+        await orm.$raw.close();
+      });
+
+      test("rejects null as relation mutation payload on create", async () => {
+        const orm = await open();
+
+        const [error] = await mightThrow(
+          orm.users.create({
+            data: userCreateData({
+              id: userId,
+              email: "alice@example.com",
+              profile: null as never,
+            }),
+          }),
+        );
+
+        expect(error).not.toBeNull();
+        expect(await orm.users.findMany()).toHaveLength(0);
+
+        await orm.$raw.close();
+      });
+
+      test("rejects bare relation object without connect or disconnect operator", async () => {
+        const orm = await open();
+
+        await orm.profiles.create({
+          data: { id: edgeProfileId, bio: "Bio" },
+        });
+
+        const [error] = await mightThrow(
+          orm.users.create({
+            data: userCreateData({
+              id: userId,
+              email: "alice@example.com",
+              profile: {
+                id: edgeProfileId,
+              } as never,
+            }),
+          }),
+        );
+
+        expect(error).not.toBeNull();
+        expect(await orm.users.findMany()).toHaveLength(0);
+
+        await orm.$raw.close();
+      });
+
+      test("rejects connect with empty string id lookup", async () => {
+        const orm = await open();
+
+        const [error] = await mightThrow(
+          orm.users.create({
+            data: userCreateData({
+              id: userId,
+              email: "alice@example.com",
+              profile: {
+                connect: { id: "" },
+              },
+            }),
+          }),
+        );
+
+        expect(error).not.toBeNull();
+        expect(await orm.users.findMany()).toHaveLength(0);
+
+        await orm.$raw.close();
+      });
+
+      test("rejects to-many connect with plain object instead of array", async () => {
+        const orm = await open();
+
+        await orm.posts.create({
+          data: { id: edgePostId, title: "Draft" },
+        });
+
+        const [error] = await mightThrow(
+          orm.users.create({
+            data: userCreateData({
+              id: userId,
+              email: "owner@example.com",
+              posts: {
+                connect: { id: edgePostId },
+              } as never,
+            }),
+          }),
+        );
+
+        expect(error).not.toBeNull();
+        expect(
+          await orm.users.findUnique({ where: { id: userId } }),
+        ).toBeNull();
+
+        await orm.$raw.close();
+      });
+
+      test("rolls back update when profile connect fails after to-many disconnect in same update", async () => {
+        const orm = await open();
+
+        await orm.profiles.createMany({
+          data: [
+            { id: edgeProfileId, bio: "Owned" },
+            { id: edgeProfileId2, bio: "Spare" },
+          ],
+        });
+        await orm.users.createMany({
+          data: [
+            {
+              id: userId,
+              email: "owner@example.com",
+              profileId: edgeProfileId2,
+            },
+            {
+              id: userId2,
+              email: "rival@example.com",
+              profileId: edgeProfileId,
+            },
+          ],
+        });
+        await orm.posts.create({
+          data: { id: edgePostId, title: "Linked", authorId: userId },
+        });
+
+        const [error] = await mightThrow(
+          orm.users.update({
+            where: { id: userId },
+            data: userUpdateData({
+              email: "owner.updated@example.com",
+              posts: {
+                disconnect: [{ id: edgePostId }],
+              },
+              profile: {
+                connect: { id: edgeProfileId },
+              },
+            }),
+          }),
+        );
+
+        expect(error).not.toBeNull();
+
+        const user = await orm.users.findUnique({ where: { id: userId } });
+        const post = await orm.posts.findUnique({ where: { id: edgePostId } });
+
+        expect(user?.email).toBe("owner@example.com");
+        expect(user?.profileId).toBe(edgeProfileId2);
+        expect(post?.authorId).toBe(userId);
+
+        await orm.$raw.close();
+      });
+
+      test("disconnect to-one on update when no link exists leaves profileId null", async () => {
+        const orm = await open();
+
+        await orm.users.create({
+          data: { id: userId, email: "alice@example.com" },
+        });
+
+        const updated = await orm.users.update({
+          where: { id: userId },
+          data: userUpdateData({
+            profile: {
+              disconnect: true,
+            },
+          }),
+        });
+
+        expect(updated.profileId).toBeNull();
+
+        await orm.$raw.close();
+      });
+
+      test("rejects disconnect array containing null element on to-many update", async () => {
+        const orm = await open();
+
+        await orm.users.create({
+          data: { id: userId, email: "owner@example.com" },
+        });
+        await orm.posts.create({
+          data: { id: edgePostId, title: "Linked", authorId: userId },
+        });
+
+        const [error] = await mightThrow(
+          orm.users.update({
+            where: { id: userId },
+            data: userUpdateData({
+              posts: {
+                disconnect: [{ id: edgePostId }, null as never],
+              },
+            }),
+          }),
+        );
+
+        expect(error).not.toBeNull();
+
+        const post = await orm.posts.findUnique({ where: { id: edgePostId } });
+
+        expect(post?.authorId).toBe(userId);
+
+        await orm.$raw.close();
+      });
     });
   });
 }
