@@ -221,6 +221,21 @@ export type CoerceRowInput = {
   descriptors: IncludeDescriptor[];
 };
 
+export type ParsedRelationWrite = {
+  relationName: string;
+  connect?: Record<string, unknown> | Array<Record<string, unknown>>;
+  disconnect?: true | Array<Record<string, unknown>>;
+};
+
+export type RelationMutationContext = {
+  sql: Bun.SQL;
+  spec: DialectSpec;
+  parentTable: Table;
+  relations: TableRelations;
+  relationWrites: ParsedRelationWrite[];
+  parentKey?: unknown;
+};
+
 export type Dialect<
   T extends Table = Table,
   TRelations extends TableRelations = TableRelations,

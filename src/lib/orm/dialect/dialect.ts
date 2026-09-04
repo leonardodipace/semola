@@ -11,6 +11,13 @@ import type {
   UpdateOptions,
 } from "../orm/types.js";
 import type { Table } from "../table/types.js";
+import {
+  assertNoForeignKeyConflicts,
+  primaryKeyValueFromRow,
+  resolveHasOneColumns,
+  runHasManyWrites,
+  splitMutationData,
+} from "./mutation-relations.js";
 import { DialectQueryBuilder } from "./query-builder.js";
 import { RowParser } from "./row-parser.js";
 import { enableSqliteForeignKeys } from "./sqlite.js";
@@ -59,9 +66,35 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
     sql: Bun.SQL,
     options: TOptions,
   ) {
-    const query = this.builder.buildCreate(options);
+    const split = splitMutationData(
+      this.builder.table,
+      this.builder.relations,
+      options.data as Record<string, unknown>,
+    );
 
-    return this.executeOne(sql, query, "insert");
+    if (!split.relationWrites.length) {
+      const query = this.builder.buildCreate(options);
+
+      return this.executeOne(sql, query, "insert");
+    }
+
+    return this.relationTransaction(
+      sql,
+      split,
+      async (txSql, mergedData) => {
+        const row = await this.executeOne(
+          txSql,
+          this.builder.buildCreate({
+            ...options,
+            data: mergedData,
+          } as TOptions),
+          "insert",
+        );
+
+        return { row: row as Record<string, unknown> };
+      },
+      options,
+    );
   }
 
   public async createMany(sql: Bun.SQL, options: CreateManyOptions<T>) {
@@ -78,9 +111,57 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
     sql: Bun.SQL,
     options: TOptions,
   ) {
-    const query = this.builder.buildUpdate(options);
+    const split = splitMutationData(
+      this.builder.table,
+      this.builder.relations,
+      options.data as Record<string, unknown>,
+    );
 
-    return this.executeOne(sql, query, "update");
+    if (!split.relationWrites.length) {
+      const query = this.builder.buildUpdate(options);
+
+      return this.executeOne(sql, query, "update");
+    }
+
+    return this.relationTransaction(
+      sql,
+      split,
+      async (txSql, mergedData) => {
+        if (Object.keys(mergedData).length > 0) {
+          const row = await this.executeOne(
+            txSql,
+            this.builder.buildUpdate({
+              ...options,
+              data: mergedData,
+            } as TOptions),
+            "update",
+          );
+
+          return {
+            row: row as Record<string, unknown>,
+            where: options.where as Record<string, unknown>,
+          };
+        }
+
+        const row = await this.findUnique(txSql, {
+          where: options.where,
+          select: options.select,
+          include: options.include,
+        } as FindUniqueOptions<T, R>);
+
+        if (!row) {
+          throw new Error(
+            `Record not found after update on table ${this.builder.table.sqlName}`,
+          );
+        }
+
+        return {
+          row: row as Record<string, unknown>,
+          where: options.where as Record<string, unknown>,
+        };
+      },
+      options,
+    );
   }
 
   public async updateMany(sql: Bun.SQL, options: UpdateManyOptions<T, R>) {
@@ -102,6 +183,79 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
     const query = this.builder.buildDeleteMany(options);
 
     return this.executeQuery(sql, query);
+  }
+
+  private async relationTransaction(
+    sql: Bun.SQL,
+    split: ReturnType<typeof splitMutationData>,
+    runParent: (
+      txSql: Bun.SQL,
+      mergedData: Record<string, unknown>,
+    ) => Promise<{
+      row: Record<string, unknown>;
+      where?: Record<string, unknown>;
+    }>,
+    options: {
+      include?: FindUniqueOptions<T, R>["include"];
+      select?: FindUniqueOptions<T, R>["select"];
+      where?: FindUniqueOptions<T, R>["where"];
+    },
+  ) {
+    const run = async (txSql: Bun.SQL) => {
+      assertNoForeignKeyConflicts(
+        this.builder.relations,
+        split.columnData,
+        split.relationWrites,
+      );
+
+      const hasOneData = await resolveHasOneColumns({
+        sql: txSql,
+        spec: this.builder.spec,
+        parentTable: this.builder.table,
+        relations: this.builder.relations,
+        relationWrites: split.relationWrites,
+      });
+      const mergedData = { ...split.columnData, ...hasOneData };
+      const { row, where } = await runParent(txSql, mergedData);
+      const parentKey = primaryKeyValueFromRow(this.builder.table, row, where);
+      const ranHasMany = await runHasManyWrites({
+        sql: txSql,
+        spec: this.builder.spec,
+        parentTable: this.builder.table,
+        relations: this.builder.relations,
+        relationWrites: split.relationWrites,
+        parentKey,
+      });
+
+      if (!options.include) return row;
+      if (!ranHasMany) return row;
+
+      if (options.where) {
+        return this.findUnique(txSql, {
+          where: options.where,
+          select: options.select,
+          include: options.include,
+        } as FindUniqueOptions<T, R>);
+      }
+
+      const pkColumn = Object.entries(this.builder.table.columns).find(
+        ([, column]) => column._meta.isPrimaryKey,
+      )?.[0];
+
+      if (!pkColumn) return row;
+
+      return this.findUnique(txSql, {
+        where: { [pkColumn]: parentKey },
+        select: options.select,
+        include: options.include,
+      } as FindUniqueOptions<T, R>);
+    };
+
+    if (this.name === "sqlite") {
+      await enableSqliteForeignKeys(sql);
+    }
+
+    return sql.begin(run);
   }
 
   private async executeQuery(sql: Bun.SQL, query: ReturningQuery) {
