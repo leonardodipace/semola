@@ -1,8 +1,11 @@
-import type { FuzzyKeyType, FuzzyOptions, FuzzyResult } from "./types.js";
+import type {
+  FuzzyKeyType,
+  FuzzyOptions,
+  FuzzyResult,
+  TransformationFnType,
+} from "./types.js";
 
 export const DEFAULT_TRESHOLD = 0.6;
-
-type TransformationFnType = (word: string) => string;
 
 export function foldCase(word: string) {
   return word.toLowerCase();
@@ -59,7 +62,7 @@ export function retriveKeys<FuzzyType extends string | Record<string, string>>(
   keys: FuzzyKeyType<FuzzyType>,
   item: FuzzyType | undefined,
 ) {
-  if (keys && keys.length > 0) return keys;
+  if (keys && keys.length > 0) return keys; // user-provided keys
   if (!item || typeof item === "string") return [] as string[];
 
   return Object.keys(item);
@@ -92,16 +95,17 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
   options: FuzzyOptions<FuzzyType>,
 ) {
   const { data, keys, weights } = options;
+
   const normalizedW = normalizeWeights(data.length, weights);
+  const trasformations = createTrasformationList<FuzzyType>(options);
+  const applyNormalizationFn = trasform(...trasformations);
+  const actualKeys = data.length === 0 ? [] : retriveKeys(keys, data[0]);
 
   const searchFn = (needle: string) => {
     if (data.length === 0) return [];
 
-    const result: FuzzyResult[] = [];
-    const actualKeys = retriveKeys(keys, data[0]);
-    const trasformations = createTrasformationList<FuzzyType>(options);
-    const applyNormalizationFn = trasform(...trasformations);
     needle = applyNormalizationFn(needle);
+    const result: FuzzyResult[] = [];
 
     for (let dataIdx = 0; dataIdx < data.length; dataIdx++) {
       const word = data[dataIdx];

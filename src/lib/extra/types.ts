@@ -78,6 +78,8 @@ export type FuzzyOptions<FuzzyType extends string | Record<string, string>> = {
   readonly weights?: number[];
 };
 
+export type TransformationFnType = (word: string) => string;
+
 export type FuzzyResult = {
   word: string | { record: Record<string, string>; key: string };
   index: number;
