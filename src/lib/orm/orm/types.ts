@@ -390,7 +390,10 @@ type CreateRequiredColumnKeys<T extends Table> = {
     : never;
 }[keyof TableColumns<T>];
 
-export type CreateData<T extends Table> = Prettify<
+export type CreateData<
+  T extends Table,
+  TRelations extends TableRelations = Record<never, never>,
+> = Prettify<
   {
     [TColumnName in CreateRequiredColumnKeys<T>]: ColumnValue<
       TableColumnByName<T, TColumnName>
@@ -400,7 +403,7 @@ export type CreateData<T extends Table> = Prettify<
       keyof TableColumns<T>,
       CreateRequiredColumnKeys<T>
     >]?: ColumnValue<TableColumnByName<T, TColumnName>>;
-  }
+  } & RelationMutationData<TRelations>
 >;
 
 export type CreateOptions<
@@ -409,7 +412,7 @@ export type CreateOptions<
   TAllTables extends Record<string, Table> = Record<string, Table>,
   TAllRelations = Record<string, unknown>,
 > = OrmQueryOptions & {
-  data: CreateData<T>;
+  data: CreateData<T, TRelations>;
   select?: TableSelect<T>;
   include?: TableInclude<TRelations, TAllTables, TAllRelations>;
 };
@@ -428,11 +431,41 @@ export type CreateResult<
     IncludeResult<TRelations, TOptions, TAllTables, TAllRelations>
 >;
 
-export type UpdateData<T extends Table> = Partial<{
+type RelationConnectWhere<T extends Table> = FindUniqueWhere<T>;
+
+type HasManyRelationWrite<T extends Table> = {
+  connect?: RelationConnectWhere<T> | Array<RelationConnectWhere<T>>;
+  disconnect?: Array<RelationConnectWhere<T>>;
+};
+
+type HasOneRelationWrite<T extends Table> = {
+  connect?: RelationConnectWhere<T>;
+  disconnect?: true;
+};
+
+type RelationMutationWrite<R extends HasMany<Table> | HasOne<Table>> =
+  R extends HasMany<infer TTable extends Table>
+    ? HasManyRelationWrite<TTable>
+    : R extends HasOne<infer TTable extends Table>
+      ? HasOneRelationWrite<TTable>
+      : never;
+
+type RelationMutationData<TRelations extends TableRelations> =
+  IsOpenTableRelations<TRelations> extends true
+    ? Record<never, never>
+    : {
+        [K in keyof TRelations]?: RelationMutationWrite<TRelations[K]>;
+      };
+
+export type UpdateData<
+  T extends Table,
+  TRelations extends TableRelations = Record<never, never>,
+> = Partial<{
   [TColumnName in keyof TableColumns<T>]: ColumnValue<
     TableColumnByName<T, TColumnName>
   >;
-}>;
+}> &
+  RelationMutationData<TRelations>;
 
 export type UpdateOptions<
   T extends Table,
@@ -441,7 +474,7 @@ export type UpdateOptions<
   TAllRelations = Record<string, unknown>,
 > = OrmQueryOptions & {
   where: FindUniqueWhere<T>;
-  data: UpdateData<T>;
+  data: UpdateData<T, TRelations>;
   select?: TableSelect<T>;
   include?: TableInclude<TRelations, TAllTables, TAllRelations>;
 };
