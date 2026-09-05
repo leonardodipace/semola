@@ -443,33 +443,39 @@ describe("Fuzzy Search", () => {
     });
 
     test("should normalize all weights and their sum should be equals to 1", () => {
-      const original = [1, 3, 4];
-      const weights = normalizeWeights(original.length, original);
-      expect(weights).toHaveLength(original.length);
+      const originalWeights = [1, 3, 4];
+      const weights = normalizeWeights(originalWeights.length, originalWeights);
+      expect(weights).toHaveLength(originalWeights.length);
 
       const normalSum = sumArr(weights);
       expect(normalSum).toBeCloseTo(1);
 
-      const originalSum = sumArr(original);
+      const originalSum = sumArr(originalWeights);
 
-      expect(weights[0]).toBeCloseTo((original[0] ?? 1) / originalSum);
-      expect(weights[1]).toBeCloseTo((original[1] ?? 1) / originalSum);
-      expect(weights[2]).toBeCloseTo((original[2] ?? 1) / originalSum);
+      expect(weights[0]).toBeCloseTo((originalWeights[0] ?? 1) / originalSum);
+      expect(weights[1]).toBeCloseTo((originalWeights[1] ?? 1) / originalSum);
+      expect(weights[2]).toBeCloseTo((originalWeights[2] ?? 1) / originalSum);
     });
 
-    test("should handle missing weights as 1", () => {
-      const original = [4];
-      const weights = normalizeWeights(3, original);
+    test("should set missing weights as 1", () => {
+      const originalWeights = [4];
+      const weights = normalizeWeights(3, originalWeights);
       expect(weights).toHaveLength(3);
 
       const normalSum = sumArr(weights);
       expect(normalSum).toBeCloseTo(1);
 
-      const originalSum = sumArr(original);
+      const originalSum = sumArr(originalWeights);
 
-      expect(weights[0]).toBeCloseTo((original[0] ?? 1) / originalSum);
-      expect(weights[1]).toBeCloseTo((original[1] ?? 1) / originalSum);
-      expect(weights[2]).toBeCloseTo((original[2] ?? 1) / originalSum);
+      expect(weights[0]).toBeCloseTo((originalWeights[0] ?? 1) / originalSum);
+      expect(weights[1]).toBeCloseTo((originalWeights[1] ?? 1) / originalSum);
+      expect(weights[2]).toBeCloseTo((originalWeights[2] ?? 1) / originalSum);
+    });
+
+    test("should return an empty list of weights when passing an empty dataset", () => {
+      const originalWeights = [1, 2] as number[];
+      const weights = normalizeWeights(0, originalWeights);
+      expect(weights).toHaveLength(0);
     });
   });
 });
