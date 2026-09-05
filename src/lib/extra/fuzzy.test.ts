@@ -402,7 +402,52 @@ describe("Fuzzy Search", () => {
       expect(result[0]?.score).toBeLessThanOrEqual(1);
     });
 
-    test("should retrive all keys when the 'keys' property was not provided", () => {
+    test("should search over all keys and give the best outcome", () => {
+      const search = fuzzySearch({
+        data: [
+          { name: "apple", color: "red", size: "medium" },
+          { name: "watermelon", color: "green", size: "large" },
+          { name: "lime", color: "lime", size: "small" },
+          { name: "peach", color: "pink", size: "medium" },
+        ],
+      });
+
+      const result = search("watermallon");
+
+      expect(result).toHaveLength(4);
+      expect(result[0]?.index).toBe(1);
+      expect(result[0]?.word).toMatchObject({
+        record: { name: "watermelon", color: "green", size: "large" },
+        key: "name",
+      });
+      expect(result[0]?.score).toBeGreaterThanOrEqual(0);
+      expect(result[0]?.score).toBeLessThanOrEqual(1);
+    });
+
+    test("should search over all keys and give the best outcome, when 'keys' property is empty", () => {
+      const search = fuzzySearch({
+        data: [
+          { name: "apple", color: "red", size: "medium" },
+          { name: "watermelon", color: "green", size: "large" },
+          { name: "lime", color: "lime", size: "small" },
+          { name: "peach", color: "pink", size: "medium" },
+        ],
+        keys: [],
+      });
+
+      const result = search("watermallon");
+
+      expect(result).toHaveLength(4);
+      expect(result[0]?.index).toBe(1);
+      expect(result[0]?.word).toMatchObject({
+        record: { name: "watermelon", color: "green", size: "large" },
+        key: "name",
+      });
+      expect(result[0]?.score).toBeGreaterThanOrEqual(0);
+      expect(result[0]?.score).toBeLessThanOrEqual(1);
+    });
+
+    test("should retrive all keys when the 'keys' property is empty", () => {
       const data = [
         { name: "apple", color: "red", size: "medium" },
         { name: "watermelon", color: "green", size: "large" },
@@ -411,6 +456,22 @@ describe("Fuzzy Search", () => {
       ];
 
       const keys = retriveKeys([], data);
+      expect(keys).toHaveLength(3);
+
+      expect(keys[0]).toBe("name");
+      expect(keys[1]).toBe("color");
+      expect(keys[2]).toBe("size");
+    });
+
+    test("should retrive all keys when the 'keys' property is 'undefined'", () => {
+      const data = [
+        { name: "apple", color: "red", size: "medium" },
+        { name: "watermelon", color: "green", size: "large" },
+        { name: "lime", color: "lime", size: "small" },
+        { name: "peach", color: "pink", size: "medium" },
+      ];
+
+      const keys = retriveKeys(undefined, data);
       expect(keys).toHaveLength(3);
 
       expect(keys[0]).toBe("name");
@@ -439,7 +500,7 @@ describe("Fuzzy Search", () => {
       expect(keys).toHaveLength(0);
     });
 
-    test("should return an empty list of keys when passing 'undefined' as your data point", () => {
+    test("should return an empty list of keys when passing an empty dataset", () => {
       expect(retriveKeys(undefined, [] as string[])).toHaveLength(0);
 
       expect(
@@ -447,6 +508,12 @@ describe("Fuzzy Search", () => {
       ).toHaveLength(0);
 
       expect(retriveKeys([], [] as Record<string, string>[])).toHaveLength(0);
+    });
+
+    test("should return an empty list of keys when the dataset is empty while user-provided keys are not", () => {
+      expect(
+        retriveKeys(["key1", "key2"], [] as Record<string, string>[]),
+      ).toHaveLength(0);
     });
   });
 

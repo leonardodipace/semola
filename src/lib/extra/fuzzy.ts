@@ -64,9 +64,17 @@ export function retriveKeys<FuzzyType extends string | Record<string, string>>(
   keys: FuzzyKeyType<FuzzyType> | undefined,
   items: ToArray<FuzzyType>,
 ) {
-  if (!keys) return [];
-  if (keys.length > 0) return keys; // user-provided keys
   if (items.length === 0) return [];
+
+  if (!keys) {
+    const item = items[0];
+    if (!item) return [];
+    if (typeof item === "string") return [];
+
+    return Object.keys(item);
+  }
+
+  if (keys.length > 0) return keys; // user-provided keys
 
   const item = items[0];
   if (!item) return [];
