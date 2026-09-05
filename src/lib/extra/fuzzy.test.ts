@@ -20,6 +20,8 @@ describe("Fuzzy Search", () => {
     expect(res).toHaveLength(4);
     expect(res[0]?.index).toBe(0);
     expect(res[0]?.word).toBe("apple");
+    expect(res[0]?.score).toBeGreaterThanOrEqual(0);
+    expect(res[0]?.score).toBeLessThanOrEqual(1);
   });
 
   test("should return an empty list in case input data is an empty list", () => {
@@ -54,14 +56,16 @@ describe("Fuzzy Search", () => {
       },
       key: "name",
     });
+    expect(res[0]?.score).toBeGreaterThanOrEqual(0);
+    expect(res[0]?.score).toBeLessThanOrEqual(1);
   });
 
   test("should return an empty result list when passing zero data", () => {
-    const search = fuzzySearch({
+    const searchStr = fuzzySearch({
       data: [] as string[],
     });
 
-    const res = search("aple");
+    const res = searchStr("aple");
     expect(res).toHaveLength(0);
 
     const searchKey = fuzzySearch({
@@ -128,6 +132,8 @@ describe("Fuzzy Search", () => {
       expect(res).toHaveLength(4);
       expect(res[0]?.index).toBe(0);
       expect(res[0]?.word).toBe("AppLe");
+      expect(res[0]?.score).toBeGreaterThanOrEqual(0);
+      expect(res[0]?.score).toBeLessThanOrEqual(1);
     });
 
     test("should support both capital and small letter when using objects as data", () => {
@@ -154,6 +160,8 @@ describe("Fuzzy Search", () => {
         },
         key: "name",
       });
+      expect(res[0]?.score).toBeGreaterThanOrEqual(0);
+      expect(res[0]?.score).toBeLessThanOrEqual(1);
     });
 
     test("should fold cases when 'caseSensitive' is disabled over a list of strings", () => {
@@ -166,6 +174,8 @@ describe("Fuzzy Search", () => {
       expect(res).toHaveLength(4);
       expect(res[0]?.index).toBe(0);
       expect(res[0]?.word).toBe("AppLe");
+      expect(res[0]?.score).toBeGreaterThanOrEqual(0);
+      expect(res[0]?.score).toBeLessThanOrEqual(1);
     });
 
     test("should fold cases when 'caseSensitive' is disabled over a list objects", () => {
@@ -191,6 +201,8 @@ describe("Fuzzy Search", () => {
         },
         key: "name",
       });
+      expect(res[0]?.score).toBeGreaterThanOrEqual(0);
+      expect(res[0]?.score).toBeLessThanOrEqual(1);
     });
   });
 
@@ -206,6 +218,8 @@ describe("Fuzzy Search", () => {
       expect(res).toHaveLength(4);
       expect(res[0]?.index).toBe(0);
       expect(res[0]?.word).toBe("apple!");
+      expect(res[0]?.score).toBeGreaterThanOrEqual(0);
+      expect(res[0]?.score).toBeLessThanOrEqual(1);
     });
 
     test("should ignore punctuation symbols when using a list of objects", () => {
@@ -232,6 +246,8 @@ describe("Fuzzy Search", () => {
         },
         key: "name",
       });
+      expect(res[0]?.score).toBeGreaterThanOrEqual(0);
+      expect(res[0]?.score).toBeLessThanOrEqual(1);
     });
 
     test("should include punctuation symbols when using a list of strings", () => {
@@ -244,6 +260,8 @@ describe("Fuzzy Search", () => {
       expect(res).toHaveLength(4);
       expect(res[0]?.index).toBe(2);
       expect(res[0]?.word).toBe("l.ime.");
+      expect(res[0]?.score).toBeGreaterThanOrEqual(0);
+      expect(res[0]?.score).toBeLessThanOrEqual(1);
     });
 
     test("should include punctuation symbols when using a list of objects", () => {
@@ -269,6 +287,8 @@ describe("Fuzzy Search", () => {
         },
         key: "name",
       });
+      expect(res[0]?.score).toBeGreaterThanOrEqual(0);
+      expect(res[0]?.score).toBeLessThanOrEqual(1);
     });
   });
 
@@ -284,6 +304,8 @@ describe("Fuzzy Search", () => {
       expect(res).toHaveLength(4);
       expect(res[0]?.index).toBe(1);
       expect(res[0]?.word).toBe("wàtèrmélòn");
+      expect(res[0]?.score).toBeGreaterThanOrEqual(0);
+      expect(res[0]?.score).toBeLessThanOrEqual(1);
     });
 
     test("should ignore diacritics when using objects as data", () => {
@@ -310,6 +332,8 @@ describe("Fuzzy Search", () => {
         },
         key: "name",
       });
+      expect(res[0]?.score).toBeGreaterThanOrEqual(0);
+      expect(res[0]?.score).toBeLessThanOrEqual(1);
     });
 
     test("should include diacritics when using plain strings as data", () => {
@@ -322,6 +346,8 @@ describe("Fuzzy Search", () => {
       expect(res).toHaveLength(4);
       expect(res[0]?.index).toBe(1);
       expect(res[0]?.word).toBe("wàtèrmélòn");
+      expect(res[0]?.score).toBeGreaterThanOrEqual(0);
+      expect(res[0]?.score).toBeLessThanOrEqual(1);
     });
 
     test("should incluide diacritics when using objects as data", () => {
@@ -347,6 +373,8 @@ describe("Fuzzy Search", () => {
         },
         key: "name",
       });
+      expect(res[0]?.score).toBeGreaterThanOrEqual(0);
+      expect(res[0]?.score).toBeLessThanOrEqual(1);
     });
   });
 
@@ -370,6 +398,8 @@ describe("Fuzzy Search", () => {
         record: { name: "watermelon", color: "green", size: "large" },
         key: "name",
       });
+      expect(result[0]?.score).toBeGreaterThanOrEqual(0);
+      expect(result[0]?.score).toBeLessThanOrEqual(1);
     });
 
     test("should retrive all keys when the 'keys' property was not provided", () => {
