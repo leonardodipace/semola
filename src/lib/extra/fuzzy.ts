@@ -2,6 +2,7 @@ import type {
   FuzzyKeyType,
   FuzzyOptions,
   FuzzyResult,
+  ToArray,
   TransformationFnType,
 } from "./types.js";
 
@@ -59,11 +60,16 @@ export function createTrasformationList<
 }
 
 export function retriveKeys<FuzzyType extends string | Record<string, string>>(
-  keys: FuzzyKeyType<FuzzyType>,
-  item: FuzzyType | undefined,
+  keys: FuzzyKeyType<FuzzyType> | undefined,
+  items: ToArray<FuzzyType>,
 ) {
-  if (keys && keys.length > 0) return keys; // user-provided keys
-  if (!item || typeof item === "string") return [] as string[];
+  if (!keys) return [];
+  if (keys.length > 0) return keys; // user-provided keys
+  if (items.length === 0) return [];
+
+  const item = items[0];
+  if (!item) return [];
+  if (typeof item === "string") return [];
 
   return Object.keys(item);
 }
@@ -72,6 +78,7 @@ export function normalizeWeights(
   dataAmount: number,
   weights: number[] | undefined,
 ) {
+  if (dataAmount === 0) return [];
   if (!weights || weights.length === 0) {
     return Array.from({ length: dataAmount }, () => 1);
   }
@@ -91,15 +98,42 @@ export function normalizeWeights(
   return normalWeights;
 }
 
+export function normalizeDataPoint(
+  data: string[] | Record<string, string>[],
+  keys: string[],
+  normFn: TransformationFnType,
+) {
+  if (typeof data[0] === "string") {
+    return data.map((word) => {
+      return normFn(word as string);
+    });
+  }
+
+  return data.map((word) => {
+    const newRecord: Record<string, string> = {};
+    for (const key of keys) {
+      const obj = word as Record<string, string>;
+      newRecord[key] = normFn(obj[key] ?? "");
+    }
+
+    return newRecord;
+  });
+}
+
 export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
   options: FuzzyOptions<FuzzyType>,
 ) {
   const { data, keys, weights } = options;
-
-  const normalizedW = normalizeWeights(data.length, weights);
   const trasformations = createTrasformationList<FuzzyType>(options);
   const applyNormalizationFn = trasform(...trasformations);
-  const actualKeys = data.length === 0 ? [] : retriveKeys(keys, data[0]);
+
+  const normalizedWeigths = normalizeWeights(data.length, weights);
+  const actualKeys = retriveKeys(keys, data);
+  const normalizedData = normalizeDataPoint(
+    data,
+    actualKeys,
+    applyNormalizationFn,
+  );
 
   const searchFn = (needle: string) => {
     if (data.length === 0) return [];
@@ -109,10 +143,10 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
 
     for (let dataIdx = 0; dataIdx < data.length; dataIdx++) {
       const word = data[dataIdx];
-      if (!word) return [];
+      const normalizedWord = normalizedData[dataIdx];
+      if (!word || !normalizedWord) return [];
 
-      if (typeof word === "string") {
-        const normalizedWord = applyNormalizationFn(word);
+      if (typeof normalizedWord === "string" && typeof word === "string") {
         const distance = levenshteinDistance(normalizedWord, needle);
         const score = toSimilarity(needle, normalizedWord, distance);
         result.push({ word, score, index: dataIdx });
@@ -128,7 +162,7 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
         const key = actualKeys[kIdx];
         if (!key) return [];
 
-        const element = word[key];
+        const element = (word as Record<string, string>)[key];
         if (!element) return [];
 
         const normalizedElem = applyNormalizationFn(element);
@@ -143,7 +177,7 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
 
       result.push({
         word: {
-          record: word,
+          record: word as Record<string, string>,
           key: minCostKey,
         },
         score: toSimilarity(needle, candidateElement, minCost),
@@ -153,7 +187,7 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
 
     return result
       .map((v, rIdx) => {
-        const w = normalizedW[rIdx];
+        const w = normalizedWeigths[rIdx];
         if (!w) return v;
 
         v.score *= w;
