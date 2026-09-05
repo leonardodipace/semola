@@ -60,3 +60,42 @@ export type RetryOptions<TRetryResult> = {
 export type RetryContext = {
   error: Error;
 };
+
+export type FuzzyKeyType<T> =
+  T extends Record<string, string> ? Array<keyof T> : undefined;
+
+export type ToArray<Type> = Type extends string | Record<string, string>
+  ? Type[]
+  : never;
+
+export type FuzzyOptions<FuzzyType extends string | Record<string, string>> = {
+  readonly data: ToArray<FuzzyType>;
+  readonly threshold?: number;
+  readonly keys?: FuzzyKeyType<FuzzyType>;
+  readonly caseSensitive?: boolean;
+  readonly ignorePunctuation?: boolean;
+  readonly ignoreDiacritics?: boolean;
+  readonly weights?: number[];
+};
+
+export type TransformationFnType = (word: string) => string;
+
+export type FuzzyResult = {
+  word: string | { record: Record<string, string>; key: string };
+  index: number;
+  score: number;
+};
+
+type CachedString = {
+  type: "string";
+  orignal: string;
+  normalized: string;
+};
+
+type CachedRecord = {
+  type: "record";
+  orignal: Record<string, string>;
+  normalized: Record<string, string>;
+};
+
+export type CachedDataPointType = Array<CachedString | CachedRecord>;
