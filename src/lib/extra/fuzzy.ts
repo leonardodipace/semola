@@ -1,4 +1,5 @@
 import type {
+  CachedDataPointType,
   FuzzyKeyType,
   FuzzyOptions,
   FuzzyResult,
@@ -103,21 +104,33 @@ export function normalizeDataPoint(
   keys: string[],
   normFn: TransformationFnType,
 ) {
-  if (typeof data[0] === "string") {
-    return data.map((word) => {
-      return normFn(word as string);
+  const cache: CachedDataPointType = [];
+
+  for (const word of data) {
+    if (typeof word === "string") {
+      const normWord = normFn(word);
+      cache.push({
+        type: "string",
+        orignal: word,
+        normalized: normWord,
+      });
+
+      continue;
+    }
+
+    const newRecord: Record<string, string> = {};
+    for (const key of keys) {
+      newRecord[key] = normFn(word[key] ?? "");
+    }
+
+    cache.push({
+      type: "record",
+      orignal: word,
+      normalized: newRecord,
     });
   }
 
-  return data.map((word) => {
-    const newRecord: Record<string, string> = {};
-    for (const key of keys) {
-      const obj = word as Record<string, string>;
-      newRecord[key] = normFn(obj[key] ?? "");
-    }
-
-    return newRecord;
-  });
+  return cache;
 }
 
 export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
@@ -129,11 +142,7 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
 
   const normalizedWeigths = normalizeWeights(data.length, weights);
   const actualKeys = retriveKeys(keys, data);
-  const normalizedData = normalizeDataPoint(
-    data,
-    actualKeys,
-    applyNormalizationFn,
-  );
+  const dataCache = normalizeDataPoint(data, actualKeys, applyNormalizationFn);
 
   const searchFn = (needle: string) => {
     if (data.length === 0) return [];
@@ -141,15 +150,14 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
     needle = applyNormalizationFn(needle);
     const result: FuzzyResult[] = [];
 
-    for (let dataIdx = 0; dataIdx < data.length; dataIdx++) {
-      const word = data[dataIdx];
-      const normalizedWord = normalizedData[dataIdx];
-      if (!word || !normalizedWord) return [];
+    for (let dataIdx = 0; dataIdx < dataCache.length; dataIdx++) {
+      const entry = dataCache[dataIdx];
+      if (!entry) return [];
 
-      if (typeof normalizedWord === "string" && typeof word === "string") {
-        const distance = levenshteinDistance(normalizedWord, needle);
-        const score = toSimilarity(needle, normalizedWord, distance);
-        result.push({ word, score, index: dataIdx });
+      if (entry.type === "string") {
+        const distance = levenshteinDistance(entry.normalized, needle);
+        const score = toSimilarity(needle, entry.normalized, distance);
+        result.push({ word: entry.orignal, score, index: dataIdx });
 
         continue;
       }
@@ -162,7 +170,7 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
         const key = actualKeys[kIdx];
         if (!key) return [];
 
-        const element = (word as Record<string, string>)[key];
+        const element = entry.normalized[key];
         if (!element) return [];
 
         const normalizedElem = applyNormalizationFn(element);
@@ -177,7 +185,7 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
 
       result.push({
         word: {
-          record: word as Record<string, string>,
+          record: entry.orignal,
           key: minCostKey,
         },
         score: toSimilarity(needle, candidateElement, minCost),
