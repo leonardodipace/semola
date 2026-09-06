@@ -45,9 +45,10 @@ function toNormalizedDistance(
   secondSeq: string,
 ) {
   const max = Math.max(firstSeq.length, secondSeq.length);
-  if (max === 0) return 0;
+  if (max === 0) return 1;
 
-  return distance / max;
+  const normalized = distance / max;
+  return 1 - normalized;
 }
 
 export function createTrasformationList<
@@ -281,7 +282,7 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
         v.score *= w;
         return v;
       })
-      .sort((a, b) => a.score - b.score);
+      .sort((a, b) => b.score - a.score);
   };
 
   return searchFn;
