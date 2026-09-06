@@ -1,5 +1,7 @@
 import type {
-  CachedDataPointType,
+  CachedDataPoint,
+  CachedRecord,
+  CachedString,
   FuzzyKeyType,
   FuzzyOptions,
   FuzzyResult,
@@ -8,6 +10,7 @@ import type {
 } from "./types.js";
 
 export const DEFAULT_TRESHOLD = 0.6;
+const NORMALIZATION_STRENGTH = 0.75;
 
 export function foldCase(word: string) {
   return word.toLowerCase();
@@ -36,15 +39,15 @@ export function trasform(...transformFn: TransformationFnType[]) {
   return applyFn;
 }
 
-export function toSimilarity(
-  needle: string,
-  candidate: string,
+function toNormalizedDistance(
   distance: number,
+  firstSeq: string,
+  secondSeq: string,
 ) {
-  const maxLen = Math.max(needle.length, candidate.length);
-  if (maxLen === 0) return 1;
+  const max = Math.max(firstSeq.length, secondSeq.length);
+  if (max === 0) return 0;
 
-  return 1 - distance / maxLen;
+  return distance / max;
 }
 
 export function createTrasformationList<
@@ -112,7 +115,7 @@ export function normalizeDataPoint(
   keys: string[],
   normFn: TransformationFnType,
 ) {
-  const cache: CachedDataPointType = [];
+  let cache: CachedDataPoint = [];
 
   for (const word of data) {
     if (typeof word === "string") {
@@ -121,6 +124,7 @@ export function normalizeDataPoint(
         type: "string",
         orignal: word,
         normalized: normWord,
+        lenNorm: -1,
       });
 
       continue;
@@ -135,10 +139,65 @@ export function normalizeDataPoint(
       type: "record",
       orignal: word,
       normalized: newRecord,
+      lenNorm: -1,
     });
   }
 
+  const avgDocLen = calculateDocAverageLength(cache, keys);
+  cache = cache.map((entry) => {
+    entry.lenNorm = calculateLegthNormalization(entry, avgDocLen, keys);
+    return entry;
+  });
+
   return cache;
+}
+
+function calculateLegthNormalization(
+  sequence: CachedString | CachedRecord,
+  avgDocLen: number,
+  keys: string[],
+) {
+  let docLen = 0;
+
+  switch (sequence.type) {
+    case "string": {
+      docLen = tokenize(sequence.normalized).length;
+      break;
+    }
+    case "record": {
+      for (const key of keys) {
+        docLen += tokenize(sequence.normalized[key] ?? "").length;
+      }
+
+      break;
+    }
+  }
+
+  const lenNorm =
+    1 - NORMALIZATION_STRENGTH + NORMALIZATION_STRENGTH * (docLen / avgDocLen);
+
+  return lenNorm;
+}
+
+function tokenize(sequence: string) {
+  return sequence.split(/\s+/).filter(Boolean);
+}
+
+function calculateDocAverageLength(cache: CachedDataPoint, keys: string[]) {
+  let sum = 0;
+
+  for (const entry of cache) {
+    if (entry.type === "string") {
+      sum += tokenize(entry.normalized).length;
+      continue;
+    }
+
+    for (const key of keys) {
+      sum += tokenize(entry.normalized[key] ?? "").length;
+    }
+  }
+
+  return sum / cache.length;
 }
 
 export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
@@ -163,14 +222,23 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
       if (!entry) return [];
 
       if (entry.type === "string") {
-        const distance = levenshteinDistance(entry.normalized, needle);
-        const score = toSimilarity(needle, entry.normalized, distance);
-        result.push({ word: entry.orignal, score, index: dataIdx });
+        const rawDistance = levenshteinDistance(entry.normalized, needle);
+        const normalizedDistance = toNormalizedDistance(
+          rawDistance,
+          entry.normalized,
+          needle,
+        );
+
+        result.push({
+          word: entry.orignal,
+          score: normalizedDistance * entry.lenNorm,
+          index: dataIdx,
+        });
 
         continue;
       }
 
-      let minCost = Number.POSITIVE_INFINITY;
+      let minRawDistance = Number.POSITIVE_INFINITY;
       let minCostKey = "";
       let candidateElement = "";
 
@@ -181,22 +249,26 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
         const element = entry.normalized[key];
         if (!element) return [];
 
-        const normalizedElem = applyNormalizationFn(element);
-        const distance = levenshteinDistance(normalizedElem, needle);
-
-        if (distance < minCost) {
-          minCost = distance;
+        const rawDistance = levenshteinDistance(element, needle);
+        if (rawDistance < minRawDistance) {
+          minRawDistance = rawDistance;
           minCostKey = key;
-          candidateElement = normalizedElem;
+          candidateElement = element;
         }
       }
+
+      const normalizedDistance = toNormalizedDistance(
+        minRawDistance,
+        candidateElement,
+        needle,
+      );
 
       result.push({
         word: {
           record: entry.orignal,
           key: minCostKey,
         },
-        score: toSimilarity(needle, candidateElement, minCost),
+        score: normalizedDistance * entry.lenNorm,
         index: dataIdx,
       });
     }
@@ -209,7 +281,7 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
         v.score *= w;
         return v;
       })
-      .sort((a, b) => b.score - a.score);
+      .sort((a, b) => a.score - b.score);
   };
 
   return searchFn;

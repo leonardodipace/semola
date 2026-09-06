@@ -86,16 +86,18 @@ export type FuzzyResult = {
   score: number;
 };
 
-type CachedString = {
+export type CachedString = {
   type: "string";
   orignal: string;
   normalized: string;
+  lenNorm: number;
 };
 
-type CachedRecord = {
+export type CachedRecord = {
   type: "record";
   orignal: Record<string, string>;
   normalized: Record<string, string>;
+  lenNorm: number;
 };
 
-export type CachedDataPointType = Array<CachedString | CachedRecord>;
+export type CachedDataPoint = Array<CachedString | CachedRecord>;
