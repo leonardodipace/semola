@@ -206,7 +206,9 @@ function calculateDocAverageLength(cache: CachedDataPoint, keys: string[]) {
 export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
   options: FuzzyOptions<FuzzyType>,
 ) {
-  const { data, keys, weights } = options;
+  const { data, keys, weights, threshold } = options;
+  const scoreLimit = threshold === undefined ? DEFAULT_TRESHOLD : threshold;
+
   const trasformations = createTrasformationList<FuzzyType>(options);
   const applyNormalizationFn = trasform(...trasformations);
 
@@ -293,7 +295,8 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
         r.score = r.score / maxScore;
         return r;
       })
-      .sort((a, b) => a.score - b.score);
+      .sort((a, b) => a.score - b.score)
+      .filter((r) => r.score < scoreLimit);
   };
 
   return searchFn;
