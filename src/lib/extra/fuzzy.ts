@@ -116,7 +116,7 @@ export function normalizeDataPoint(
   keys: string[],
   normFn: TransformationFnType,
 ) {
-  let cache: CachedDataPoint = [];
+  const cache: CachedDataPoint = [];
 
   for (const word of data) {
     if (typeof word === "string") {
@@ -143,12 +143,6 @@ export function normalizeDataPoint(
       lenNorm: -1,
     });
   }
-
-  const avgDocLen = calculateDocAverageLength(cache, keys);
-  cache = cache.map((entry) => {
-    entry.lenNorm = calculateLegthNormalization(entry, avgDocLen, keys);
-    return entry;
-  });
 
   return cache;
 }
@@ -178,6 +172,15 @@ function calculateLegthNormalization(
     1 - NORMALIZATION_STRENGTH + NORMALIZATION_STRENGTH * (docLen / avgDocLen);
 
   return lenNorm;
+}
+
+function saveLenNormalization(cache: CachedDataPoint, keys: string[]) {
+  const avgDocLen = calculateDocAverageLength(cache, keys);
+
+  cache = cache.map((entry) => {
+    entry.lenNorm = calculateLegthNormalization(entry, avgDocLen, keys);
+    return entry;
+  });
 }
 
 function tokenize(sequence: string) {
@@ -211,6 +214,7 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
   const normalizedWeigths = normalizeWeights(data.length, weights);
   const actualKeys = retriveKeys(keys, data);
   const dataCache = normalizeDataPoint(data, actualKeys, applyNormalizationFn);
+  saveLenNormalization(dataCache, actualKeys);
 
   const searchFn = (needle: string) => {
     if (data.length === 0) return [];
