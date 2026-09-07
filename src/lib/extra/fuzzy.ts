@@ -296,7 +296,7 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
         return r;
       })
       .sort((a, b) => a.score - b.score)
-      .filter((r) => r.score < scoreLimit);
+      .filter((r) => r.score <= scoreLimit);
   };
 
   return searchFn;
