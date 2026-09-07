@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  DEFAULT_TRESHOLD,
   foldCase,
   fuzzySearch,
   normalizeWeights,
@@ -13,6 +14,7 @@ describe("Fuzzy Search", () => {
   test("should return a list of results with 'apple' in the first position", () => {
     const search = fuzzySearch({
       data: ["apple", "watermelon", "lime", "peach"],
+      threshold: 1,
     });
 
     const res = search("aple");
@@ -41,6 +43,7 @@ describe("Fuzzy Search", () => {
         { name: "lime", color: "lime", size: "small" },
         { name: "peach", color: "pink", size: "medium" },
       ],
+      threshold: 1,
       keys: ["name"],
     });
 
@@ -125,6 +128,7 @@ describe("Fuzzy Search", () => {
       const search = fuzzySearch({
         data: ["AppLe", "Watermelon", "LiMe", "PEACH"],
         caseSensitive: true,
+        threshold: 1,
       });
 
       const res = search("Aple");
@@ -144,6 +148,7 @@ describe("Fuzzy Search", () => {
           { name: "LiMe", color: "lime", size: "small" },
           { name: "PEACH", color: "pink", size: "medium" },
         ],
+        threshold: 1,
         keys: ["name"],
         caseSensitive: true,
       });
@@ -167,6 +172,7 @@ describe("Fuzzy Search", () => {
     test("should fold cases when 'caseSensitive' is disabled over a list of strings", () => {
       const search = fuzzySearch({
         data: ["AppLe", "Watermelon", "LiMe", "PEACH"],
+        threshold: 1,
       });
 
       const res = search("Aple");
@@ -186,6 +192,7 @@ describe("Fuzzy Search", () => {
           { name: "LiMe", color: "lime", size: "small" },
           { name: "PEACH", color: "pink", size: "medium" },
         ],
+        threshold: 1,
         keys: ["name"],
       });
 
@@ -211,6 +218,7 @@ describe("Fuzzy Search", () => {
       const search = fuzzySearch({
         data: ["apple!", "wat%rmelon?", "l.ime.", "PE<A>CH"],
         ignorePunctuation: true,
+        threshold: 1,
       });
 
       const res = search("ap/le");
@@ -230,6 +238,7 @@ describe("Fuzzy Search", () => {
           { name: "li//me", color: "lime", size: "small" },
           { name: "<peach>", color: "pink", size: "medium" },
         ],
+        threshold: 1,
         keys: ["name"],
         ignorePunctuation: true,
       });
@@ -253,6 +262,7 @@ describe("Fuzzy Search", () => {
     test("should include punctuation symbols when using a list of strings", () => {
       const search = fuzzySearch({
         data: ["apple!", "wat%rmelon?", "l.ime.", "PE<A>CH"],
+        threshold: 1,
       });
 
       const res = search("l!me.");
@@ -272,6 +282,7 @@ describe("Fuzzy Search", () => {
           { name: "li//me", color: "lime", size: "small" },
           { name: "<peach>", color: "pink", size: "medium" },
         ],
+        threshold: 1,
         keys: ["name"],
       });
 
@@ -297,6 +308,7 @@ describe("Fuzzy Search", () => {
       const search = fuzzySearch({
         data: ["àpplé", "wàtèrmélòn", "limé", "peàçh"],
         ignoreDiacritics: true,
+        threshold: 1,
       });
 
       const res = search("wàtèrmelòn");
@@ -316,6 +328,7 @@ describe("Fuzzy Search", () => {
           { name: "limé", color: "lime", size: "small" },
           { name: "peàçh", color: "pink", size: "medium" },
         ],
+        threshold: 1,
         keys: ["name"],
         ignoreDiacritics: true,
       });
@@ -339,6 +352,7 @@ describe("Fuzzy Search", () => {
     test("should include diacritics when using plain strings as data", () => {
       const search = fuzzySearch({
         data: ["àpplé", "wàtèrmélòn", "limé", "peàçh"],
+        threshold: 1,
       });
 
       const res = search("wàtèrmelòn");
@@ -358,6 +372,7 @@ describe("Fuzzy Search", () => {
           { name: "limé", color: "lime", size: "small" },
           { name: "peàçh", color: "pink", size: "medium" },
         ],
+        threshold: 1,
         keys: ["name"],
       });
 
@@ -387,6 +402,7 @@ describe("Fuzzy Search", () => {
           { name: "lime", color: "lime", size: "small" },
           { name: "peach", color: "pink", size: "medium" },
         ],
+        threshold: 1,
         keys: ["name", "size"],
       });
 
@@ -410,6 +426,7 @@ describe("Fuzzy Search", () => {
           { name: "lime", color: "lime", size: "small" },
           { name: "peach", color: "pink", size: "medium" },
         ],
+        threshold: 1,
       });
 
       const result = search("watermallon");
@@ -432,6 +449,7 @@ describe("Fuzzy Search", () => {
           { name: "lime", color: "lime", size: "small" },
           { name: "peach", color: "pink", size: "medium" },
         ],
+        threshold: 1,
         keys: [],
       });
 
@@ -573,6 +591,64 @@ describe("Fuzzy Search", () => {
       const originalWeights = [1, 2] as number[];
       const weights = normalizeWeights(0, originalWeights);
       expect(weights).toHaveLength(0);
+    });
+  });
+
+  describe("Threshold", () => {
+    const controlData = [
+      "JavaScript",
+      "TypeScript",
+      "Java",
+      "Go",
+      "JSON",
+      "Python",
+      "JSX",
+      "Rust",
+    ];
+
+    test("should only show results with a score less than the default threshold", () => {
+      const search = fuzzySearch({ data: controlData });
+      const result = search("javascrpt");
+
+      expect(result.length).toBeGreaterThan(0);
+      result.forEach((r) => {
+        expect(r.score).toBeLessThan(DEFAULT_TRESHOLD);
+      });
+    });
+
+    test("should only show results with a score less than the user-provided threshold", () => {
+      const search = fuzzySearch({ data: controlData, threshold: 0.3 });
+      const result = search("javascrpt");
+
+      expect(result.length).toBeGreaterThan(0);
+      result.forEach((r) => {
+        expect(r.score).toBeLessThan(0.3);
+      });
+    });
+
+    test("should only search an exact match", () => {
+      const search = fuzzySearch({ data: controlData, threshold: 0 });
+      const noRes = search("javascrpt");
+      expect(noRes.length).toBe(0);
+
+      let found = search("javascript");
+      expect(found.length).toBe(1);
+      expect(found[0]?.word).toBe("JavaScript");
+      expect(found[0]?.index).toBe(0);
+
+      found = search("Java");
+      expect(found.length).toBe(1);
+      expect(found[0]?.word).toBe("Java");
+      expect(found[0]?.index).toBe(2);
+    });
+
+    test("should match anything", () => {
+      const search = fuzzySearch({ data: controlData, threshold: 1 });
+      const res = search("javascrpt");
+      expect(res.length).toBe(controlData.length);
+
+      expect(res[0]?.word).toBe("JavaScript");
+      expect(res[0]?.index).toBe(0);
     });
   });
 });
