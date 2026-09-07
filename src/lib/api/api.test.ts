@@ -488,6 +488,133 @@ describe("Api Core", () => {
     expect(body).toEqual({ name: "Alice" });
   });
 
+  test("should reject extra response keys in c.json at compile time", () => {
+    const PublicUserSchema = z.strictObject({
+      id: z.string(),
+      name: z.string(),
+      email: z.string(),
+    });
+
+    const dbUser = {
+      id: "1",
+      name: "Alice",
+      email: "a@b.com",
+      password: "secret",
+    };
+
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/user",
+      method: "GET",
+      response: { 200: PublicUserSchema },
+      handler: (c) => {
+        return c.json(200, {
+          id: "1",
+          name: "Alice",
+          email: "a@b.com",
+        });
+      },
+    });
+
+    api.defineRoute({
+      path: "/user-extra",
+      method: "GET",
+      response: { 200: PublicUserSchema },
+      handler: (c) => {
+        // @ts-expect-error password is not part of the declared response schema
+        return c.json(200, dbUser);
+      },
+    });
+
+    expect(api).toBeDefined();
+  });
+
+  test("should reject nested extra keys and allow union member keys in c.json", () => {
+    const NestedUserSchema = z.object({
+      user: z.object({
+        id: z.string(),
+        name: z.string(),
+      }),
+    });
+
+    const EventSchema = z.discriminatedUnion("type", [
+      z.object({
+        type: z.literal("click"),
+        x: z.number(),
+      }),
+      z.object({
+        type: z.literal("key"),
+        key: z.string(),
+      }),
+    ]);
+
+    const nestedExtra = {
+      user: {
+        id: "1",
+        name: "Alice",
+        password: "secret",
+      },
+    };
+
+    const clickEvent = { type: "click" as const, x: 10 };
+    const keyEvent = { type: "key" as const, key: "Enter" };
+    const clickExtra = { type: "click" as const, x: 10, extra: true };
+
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/nested-ok",
+      method: "GET",
+      response: { 200: NestedUserSchema },
+      handler: (c) => {
+        return c.json(200, {
+          user: { id: "1", name: "Alice" },
+        });
+      },
+    });
+
+    api.defineRoute({
+      path: "/nested-extra",
+      method: "GET",
+      response: { 200: NestedUserSchema },
+      handler: (c) => {
+        // @ts-expect-error password is not part of the nested response schema
+        return c.json(200, nestedExtra);
+      },
+    });
+
+    api.defineRoute({
+      path: "/union-click",
+      method: "GET",
+      response: { 200: EventSchema },
+      handler: (c) => {
+        return c.json(200, clickEvent);
+      },
+    });
+
+    api.defineRoute({
+      path: "/union-key",
+      method: "GET",
+      response: { 200: EventSchema },
+      handler: (c) => {
+        return c.json(200, keyEvent);
+      },
+    });
+
+    api.defineRoute({
+      path: "/union-extra",
+      method: "GET",
+      response: { 200: EventSchema },
+      handler: (c) => {
+        // @ts-expect-error extra is not part of the click member
+        return c.json(200, clickExtra);
+      },
+    });
+
+    expect(api).toBeDefined();
+  });
+
   test("should skip output validation when validation.output is false", async () => {
     const api = new Api({ validation: { output: false } });
     const responseSchema = z.object({ name: z.string() });

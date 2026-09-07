@@ -10,6 +10,22 @@ import {
   uuid,
 } from "./index.js";
 
+const jsonFromSqlLiteral = (sql: string | undefined) => {
+  if (sql === undefined) {
+    throw new Error("missing dbDefault");
+  }
+
+  if (!sql.startsWith("'")) {
+    throw new Error(`dbDefault is not a SQL string literal: ${sql}`);
+  }
+
+  if (!sql.endsWith("'")) {
+    throw new Error(`dbDefault is not a SQL string literal: ${sql}`);
+  }
+
+  return JSON.parse(sql.slice(1, -1).replaceAll("''", "'"));
+};
+
 describe("ORM column builders", () => {
   test("create the expected base column metadata", () => {
     const text = string("email");
@@ -52,7 +68,7 @@ describe("ORM column builders", () => {
 
     expect(col._meta.isNullable).toBe(false);
     expect(col._meta.hasDefault).toBe(true);
-    expect(col._default?.()).toEqual({ isActive: true });
+    expect(col._meta.default?.()).toEqual({ isActive: true });
   });
 
   test("set nullability and keep builders immutable", () => {
@@ -76,10 +92,63 @@ describe("ORM column builders", () => {
     expect(typeof idColumn.primaryKey).toBe("function");
     expect(idColumn._meta.isNullable).toBe(false);
     expect(idColumn._meta.isPrimaryKey).toBe(true);
+    expect(idColumn.sqlType).toBe("uuid");
     expect(typeof emailColumn.unique).toBe("function");
     expect(createdAtColumn._meta.hasDefault).toBeTrue();
     expect(statusColumn._meta.hasDefault).toBeTrue();
-    expect(statusColumn._default?.()).toBe("active");
+    expect(statusColumn._meta.default?.()).toBe("active");
+  });
+
+  test("supports dbDefault for all supported value types", () => {
+    const col = string("role").notNull().dbDefault("user");
+
+    expect(col._meta.dbDefault).toBe("'user'");
+    expect(col._meta.hasDefault).toBe(true);
+    expect(
+      string("role").dbDefault("gen_random_uuid()", { as: "sql" })._meta
+        .dbDefault,
+    ).toBe("gen_random_uuid()");
+    expect(number("count").dbDefault(0)._meta.dbDefault).toBe("0");
+    expect(boolean("ok").dbDefault(true)._meta.dbDefault).toBe("TRUE");
+    expect(boolean("ok").dbDefault(false)._meta.dbDefault).toBe("FALSE");
+    expect(
+      date("created_at").dbDefault(new Date("2020-01-01T00:00:00.000Z"))._meta
+        .dbDefault,
+    ).toBe("'2020-01-01T00:00:00.000Z'");
+    expect(json("meta").dbDefault({ a: 1 })._meta.dbDefault).toBe(
+      "'{\"a\":1}'",
+    );
+    expect(json("meta").dbDefault(null)._meta.dbDefault).toBe("NULL");
+    expect(
+      jsonFromSqlLiteral(json("meta").dbDefault("anon")._meta.dbDefault),
+    ).toBe("anon");
+    expect(
+      jsonFromSqlLiteral(jsonb("extra").dbDefault("anon")._meta.dbDefault),
+    ).toBe("anon");
+    expect(
+      jsonFromSqlLiteral(json("meta").dbDefault(true)._meta.dbDefault),
+    ).toBe(true);
+    expect(jsonFromSqlLiteral(json("meta").dbDefault(0)._meta.dbDefault)).toBe(
+      0,
+    );
+    expect(() => json("meta").dbDefault(undefined as never)).toThrow(
+      "dbDefault cannot be undefined",
+    );
+    expect(() => number("count").dbDefault(Number.NaN)).toThrow(
+      "dbDefault number must be finite",
+    );
+    expect(() => number("count").dbDefault(Number.POSITIVE_INFINITY)).toThrow(
+      "dbDefault number must be finite",
+    );
+    expect(() =>
+      string("role").dbDefault("1; DROP TABLE users", { as: "sql" }),
+    ).toThrow('single expression (no ";")');
+    expect(() =>
+      string("role").dbDefault("now() -- hi", { as: "sql" }),
+    ).toThrow('cannot contain "--"');
+    expect(() =>
+      string("role").dbDefault("now() /* x */", { as: "sql" }),
+    ).toThrow('cannot contain "/*"');
   });
 
   test("does not reopen primary key columns via nullable()", () => {

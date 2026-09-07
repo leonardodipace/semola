@@ -21,9 +21,34 @@ export const serializeColumnValue = (column: Column, value: unknown) => {
 export const resolveCreateValue = (column: Column, provided: unknown) => {
   if (provided !== undefined) return provided;
 
-  if (column._default) return column._default();
+  if (column._meta.default) return column._meta.default();
 
   return null;
+};
+
+export const bindCreateValue = (
+  column: Column,
+  provided: unknown,
+  nextPlaceholder: () => string,
+  params: unknown[],
+) => {
+  if (provided !== undefined) {
+    params.push(serializeColumnValue(column, provided));
+    return nextPlaceholder();
+  }
+
+  if (column._meta.default) {
+    params.push(serializeColumnValue(column, column._meta.default()));
+    return nextPlaceholder();
+  }
+
+  if (column._meta.dbDefault !== undefined) {
+    return column._meta.dbDefault;
+  }
+
+  params.push(serializeColumnValue(column, null));
+
+  return nextPlaceholder();
 };
 
 export const validateFindUniqueWhere = (

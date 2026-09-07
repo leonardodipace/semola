@@ -13,6 +13,7 @@ import type {
 import type { Table } from "../table/types.js";
 import { DialectQueryBuilder } from "./query-builder.js";
 import { RowParser } from "./row-parser.js";
+import { enableSqliteForeignKeys } from "./sqlite.js";
 import type { CreateDialectInput, ReturningQuery } from "./types.js";
 
 export class SqlDialect<T extends Table, R extends TableRelations> {
@@ -31,7 +32,7 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
   ) {
     const query = this.builder.buildFindMany(options);
 
-    return this.parser.executeQuery(sql, this.builder.table, query);
+    return this.executeQuery(sql, query);
   }
 
   public async findFirst<const TOptions extends FindFirstOptions<T, R>>(
@@ -39,11 +40,7 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
     options?: TOptions,
   ) {
     const query = this.builder.buildFindFirst(options);
-    const [row] = await this.parser.executeQuery(
-      sql,
-      this.builder.table,
-      query,
-    );
+    const [row] = await this.executeQuery(sql, query);
 
     return row ?? null;
   }
@@ -53,11 +50,7 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
     options: TOptions,
   ) {
     const query = this.builder.buildFindUnique(options);
-    const [row] = await this.parser.executeQuery(
-      sql,
-      this.builder.table,
-      query,
-    );
+    const [row] = await this.executeQuery(sql, query);
 
     return row ?? null;
   }
@@ -78,7 +71,7 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
 
     const query = this.builder.buildCreateMany(options);
 
-    return this.parser.executeQuery(sql, this.builder.table, query);
+    return this.executeQuery(sql, query);
   }
 
   public async update<const TOptions extends UpdateOptions<T, R>>(
@@ -93,7 +86,7 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
   public async updateMany(sql: Bun.SQL, options: UpdateManyOptions<T, R>) {
     const query = this.builder.buildUpdateMany(options);
 
-    return this.parser.executeQuery(sql, this.builder.table, query);
+    return this.executeQuery(sql, query);
   }
 
   public async delete<const TOptions extends DeleteOptions<T, R>>(
@@ -108,6 +101,14 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
   public async deleteMany(sql: Bun.SQL, options: DeleteManyOptions<T, R>) {
     const query = this.builder.buildDeleteMany(options);
 
+    return this.executeQuery(sql, query);
+  }
+
+  private async executeQuery(sql: Bun.SQL, query: ReturningQuery) {
+    if (this.name === "sqlite") {
+      await enableSqliteForeignKeys(sql);
+    }
+
     return this.parser.executeQuery(sql, this.builder.table, query);
   }
 
@@ -116,11 +117,7 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
     query: ReturningQuery,
     operation: string,
   ) {
-    const [row] = await this.parser.executeQuery(
-      sql,
-      this.builder.table,
-      query,
-    );
+    const [row] = await this.executeQuery(sql, query);
 
     if (!row) {
       throw new Error(

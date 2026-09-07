@@ -160,14 +160,20 @@ describe("include-builder", () => {
   });
 
   test("throws for missing or ambiguous hasMany foreign keys", () => {
-    const commentsTable = defineTable("comments", {
-      id: uuid("id").primaryKey().notNull(),
-      body: string("body").notNull(),
+    const commentsTable = defineTable({
+      sqlName: "comments",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        body: string("body").notNull(),
+      },
     });
-    const membershipsTable = defineTable("memberships", {
-      id: uuid("id").primaryKey().notNull(),
-      memberId: uuid("member_id").references(() => usersTable.columns.id),
-      ownerId: uuid("owner_id").references(() => usersTable.columns.id),
+    const membershipsTable = defineTable({
+      sqlName: "memberships",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        memberId: uuid("member_id").references(() => usersTable.columns.id),
+        ownerId: uuid("owner_id").references(() => usersTable.columns.id),
+      },
     });
 
     expect(() =>
@@ -196,9 +202,12 @@ describe("include-builder", () => {
   });
 
   test("throws for invalid hasOne foreign keys", () => {
-    const profilesTable = defineTable("profiles", {
-      id: uuid("id").primaryKey().notNull(),
-      bio: string("bio").notNull(),
+    const profilesTable = defineTable({
+      sqlName: "profiles",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        bio: string("bio").notNull(),
+      },
     });
 
     expect(() =>

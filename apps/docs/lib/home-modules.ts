@@ -214,9 +214,12 @@ log.error("request failed");`,
   uuid,
 } from "semola/orm";
 
-const users = defineTable("users", {
-  id: uuid("id").primaryKey().notNull(),
-  email: string("email").unique().notNull(),
+const users = defineTable({
+  sqlName: "users",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    email: string("email").unique().notNull(),
+  },
 });
 
 const db = createOrm({

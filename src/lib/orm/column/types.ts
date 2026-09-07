@@ -6,8 +6,8 @@ export type BaseColumn<
   TValue = unknown,
 > = {
   sqlName: string;
-  _meta: ColumnTypeState<TNullable, TPrimaryKey, TUnique, THasDefault>;
-  _default?: () => TValue;
+  _meta: ColumnTypeState<TNullable, TPrimaryKey, TUnique, THasDefault, TValue>;
+  sqlType?: "uuid";
   references?: {
     tableColumn?: () => { sqlName: string };
   };
@@ -18,11 +18,14 @@ type ColumnTypeState<
   TPrimaryKey extends boolean = boolean,
   TUnique extends boolean = boolean,
   THasDefault extends boolean = boolean,
+  TValue = unknown,
 > = {
   isNullable: TNullable;
   isPrimaryKey: TPrimaryKey;
   isUnique: TUnique;
   hasDefault: THasDefault;
+  default?: () => TValue;
+  dbDefault?: string;
 };
 
 export type ColumnRuntimeValueMap = {
@@ -111,7 +114,7 @@ export type Column =
   | JsonColumn
   | JsonbColumn;
 
-type ColumnType = Column["type"];
+export type ColumnType = Column["type"];
 
 type ColumnBuilderState<
   TType extends ColumnType,
@@ -123,8 +126,8 @@ type ColumnBuilderState<
 > = {
   sqlName: string;
   type: TType;
-  _meta: ColumnTypeState<TNullable, TPrimaryKey, TUnique, THasDefault>;
-  _default?: () => TValue;
+  _meta: ColumnTypeState<TNullable, TPrimaryKey, TUnique, THasDefault, TValue>;
+  sqlType?: "uuid";
   enumValues?: readonly TValue[];
   references?: {
     tableColumn?: () => { sqlName: string };
@@ -207,6 +210,15 @@ export type ColumnBuilder<
   default: (
     value: () => TValue,
   ) => SetHasDefault<TType, TNullable, TPrimaryKey, TUnique, TValue>;
+  dbDefault: {
+    (
+      value: TValue,
+    ): SetHasDefault<TType, TNullable, TPrimaryKey, TUnique, TValue>;
+    (
+      value: string,
+      options: { as: "sql" },
+    ): SetHasDefault<TType, TNullable, TPrimaryKey, TUnique, TValue>;
+  };
   references: ((
     tableColumn: () => { sqlName: string },
   ) => ColumnBuilder<

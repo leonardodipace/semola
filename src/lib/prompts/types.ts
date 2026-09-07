@@ -56,14 +56,14 @@ export type SelectChoice<TValue extends string> = {
 };
 
 export type SelectOptions<TValue extends string> = BasePromptOptions<TValue> & {
-  choices: readonly [SelectChoice<TValue>, ...SelectChoice<TValue>[]];
+  choices: readonly SelectChoice<TValue>[];
   defaultValue?: TValue;
 };
 
 export type MultiselectOptions<TValue extends string> = BasePromptOptions<
   TValue[]
 > & {
-  choices: readonly [SelectChoice<TValue>, ...SelectChoice<TValue>[]];
+  choices: readonly SelectChoice<TValue>[];
   defaultValue?: readonly TValue[];
   min?: number;
   max?: number;

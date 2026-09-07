@@ -4,23 +4,32 @@ import { defineTable } from "../table/index.js";
 import { createOrm, one } from "./index.js";
 import type { TableRelationsFor } from "./types.js";
 
-const studentsTable = defineTable("students", {
-  id: uuid("id").primaryKey().notNull(),
-  firstName: string("first_name").notNull(),
+const studentsTable = defineTable({
+  sqlName: "students",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    firstName: string("first_name").notNull(),
+  },
 });
 
-const examsTable = defineTable("exams", {
-  id: uuid("id").primaryKey().notNull(),
-  name: string("name").notNull(),
+const examsTable = defineTable({
+  sqlName: "exams",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    name: string("name").notNull(),
+  },
 });
 
-const studentsToExamsTable = defineTable("students_to_exams", {
-  studentId: uuid("student_id")
-    .notNull()
-    .references(() => studentsTable.columns.id),
-  examId: uuid("exam_id")
-    .notNull()
-    .references(() => examsTable.columns.id),
+const studentsToExamsTable = defineTable({
+  sqlName: "students_to_exams",
+  columns: {
+    studentId: uuid("student_id")
+      .notNull()
+      .references(() => studentsTable.columns.id),
+    examId: uuid("exam_id")
+      .notNull()
+      .references(() => examsTable.columns.id),
+  },
 });
 
 describe("hooks types", () => {

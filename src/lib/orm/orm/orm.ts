@@ -1,3 +1,5 @@
+import { mightThrowSync } from "../../errors/index.js";
+import { enableSqliteForeignKeys } from "../dialect/sqlite.js";
 import type { Table } from "../table/types.js";
 import { pickGlobalHooks } from "./hook-runner.js";
 import { TableClientImpl } from "./table-client.js";
@@ -12,6 +14,28 @@ import type {
   TableRelationsFor,
   TransactionClient,
 } from "./types.js";
+
+const connectionUrls = new WeakMap<object, string>();
+
+const redactDatabaseUrl = (url: string) => {
+  if (!url.includes("://")) return url;
+
+  const [error, parsed] = mightThrowSync(() => new URL(url));
+
+  if (error) return url;
+  if (!parsed.username) {
+    if (!parsed.password) return url;
+  }
+
+  parsed.username = "";
+  parsed.password = "";
+
+  return parsed.href;
+};
+
+export const getOrmConnectionUrl = (client: object) => {
+  return connectionUrls.get(client);
+};
 
 export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
   public readonly $raw: Bun.SQL;
@@ -28,12 +52,20 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
   public buildClient(): OrmClient<T, R> {
     const tableClients = this.buildTableClients(this.$raw);
     const transaction = this.buildTransaction();
-
-    return {
+    const client = {
       ...tableClients,
       $raw: this.$raw,
+      $config: {
+        adapter: this.options.adapter,
+        url: redactDatabaseUrl(this.options.url),
+        tables: this.options.tables,
+      },
       $transaction: transaction,
     };
+
+    connectionUrls.set(client, this.options.url);
+
+    return client;
   }
 
   private buildTableClients(sql: Bun.SQL): OrmTableClients<T, R> {
@@ -53,6 +85,11 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
     table: T[K],
   ) {
     const tableRelations = this.getTableRelations(tableName);
+    let globalHooks: ReturnType<typeof pickGlobalHooks> | undefined;
+
+    if (this.options.hooks) {
+      globalHooks = pickGlobalHooks(this.options.hooks);
+    }
 
     this.tableRelationsMap.set(table, tableRelations);
     clients[tableName] = new TableClientImpl<T[K], TableRelationsFor<R, K>>({
@@ -63,9 +100,7 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
       // @ts-expect-error TableRelationsFor and NonNullable<R[K]> are equivalent here
       relations: tableRelations,
       tableRelationsMap: this.tableRelationsMap,
-      globalHooks: this.options.hooks
-        ? pickGlobalHooks(this.options.hooks)
-        : undefined,
+      globalHooks,
       tableHooks: this.options.hooks?.tables?.[tableName],
     });
   }
@@ -74,6 +109,10 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
     return async <TResult>(
       callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
     ): Promise<TResult> => {
+      if (this.options.adapter === "sqlite") {
+        await enableSqliteForeignKeys(this.$raw);
+      }
+
       return await this.$raw.begin(async (txSql) => {
         const txTableClients = this.buildTableClients(txSql);
         const txClient: TransactionClient<T, R> = {

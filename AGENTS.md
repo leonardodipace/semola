@@ -24,8 +24,9 @@ Read each skill file and follow its instructions.
 | **ponytail** | Default for all implementation work | `.agents/skills/ponytail/SKILL.md` |
 | **caveman** | Default for communication (terse, accurate) | `.agents/skills/caveman/SKILL.md` |
 | **fallow** | Audits, cleanup, PR risk, code health | `.agents/skills/fallow/SKILL.md` |
+| **harden** | After a feature lands: blind test subagent, fix failures, deslop subagent, deslop | `.agents/skills/harden/SKILL.md` |
 
-Ponytail and caveman are always on. Fallow is task-triggered. Caveman affects prose only - never reduce code quality, test coverage, or correctness.
+Ponytail and caveman are always on. Fallow and harden are task-triggered. Caveman affects prose only - never reduce code quality, test coverage, or correctness.
 
 Run fallow with `bunx fallow` (no install or dev dependency needed). Example: `bunx fallow audit --base main --format json --quiet 2>/dev/null || true`. See the fallow skill for commands and flags.
 
@@ -34,6 +35,7 @@ Run fallow with `bunx fallow` (no install or dev dependency needed). Example: `b
 - **Zero runtime dependencies** - do not add packages without strong reason.
 - **Imports** - use `.js` extensions in TypeScript imports (`from "./types.js"`).
 - **Module layout** - each package under `src/lib/<name>/` typically has `index.ts`, `types.ts`, `errors.ts`, and colocated `*.test.ts`.
+- **Types** - define types in `types.ts` and import them from there. Do not re-export types from other modules' `types.ts` or `index.ts`; consumers import from the defining file.
 - **Errors** - use `mightThrow` / `mightThrowSync` from `semola/errors`; define module-specific error classes in `errors.ts`.
 - **Validation** - Standard Schema in library code, not Zod-specific APIs.
 - **Build** - `tsdown` (not tsc for output).
@@ -52,9 +54,19 @@ Modules live in `src/lib/<name>/` and export via `semola/<name>`. Discover the c
 
 ## Code Style
 
+### Clarity over compression
+
+Code should read like English. Prefer clarity over clever density.
+
+- Prefer **named functions/methods whose names state intent** over inlined checks, nested ternaries, or compressed one-liners (`assertDestructiveAllowed`, `canAddColumnInPlace`, `writeMigrationFolder`).
+- Prefer **pure imperative code**: early returns, blank lines between steps, separate `if`s for unrelated conditions. Avoid ternaries and `&&` / `||` chains for control flow.
+- **More lines are fine** when they make the story clearer. Do not shrink for shrink's sake ("deslop" that only compresses and hurts readability is wrong).
+- Cut dead paths, duplicate branches, and clever indirection. Do not invent abstractions "for later."
+- Keep helpers that already clarify intent (e.g. `requireBoolean`, `nonEmptyString`, `mightThrow`). Do **not** inline those back to "simplify."
+
 ### Simplicity
 
-- Write minimal code, no over-engineering.
+- Write minimal code, no over-engineering (ponytail: fewest files, shortest *working* diff - not shortest unreadable line).
 - Keep code breathing with blank lines between logical blocks.
 - Explicit `if` statements over ternaries for complex logic.
 - Blank lines between if-statement groups, const definitions, and return statements inside functions.
@@ -75,12 +87,22 @@ if (!(value instanceof Error)) return;
 if (value.code === "ENOENT") return;
 ```
 
-Same for early returns - no `||` combining unrelated conditions:
+Same for early returns - no `||` / `&&` combining unrelated conditions:
 
 ```typescript
 // bad: if (a || b) return;
 // good: if (a) return; if (b) return;
+
+// bad: if (column.isUnique && !column.isPrimaryKey) { ... }
+// good:
+if (column.isUnique) {
+  if (!column.isPrimaryKey) {
+    // ...
+  }
+}
 ```
+
+Related conditions that express one intent may stay together when a named helper or clear name makes that intent obvious (`isUniqueOrPrimary`).
 
 ### Error handling
 
@@ -92,6 +114,26 @@ if (error) throw new FetchError(error.message);
 ```
 
 Thrown values are always `Error` instances (library errors extend `Error`). Use `error.message` directly - never `instanceof Error` guards or ternaries when reading the message in code or docs.
+
+Do not wrap a call in `mightThrow` only to re-throw the same error unchanged - let it propagate:
+
+```typescript
+// bad
+const [error, data] = await mightThrow(fetch(url));
+if (error) throw error;
+
+// good
+const data = await fetch(url);
+```
+
+Use `mightThrow` when you transform the error, branch on it, or need a tuple without try-catch for control flow.
+
+### Dialect / adapter separation
+
+When a module supports multiple adapters (or dialects), keep an **adapter-driven** design: a shared base plus per-adapter subclasses (or equivalent strategy objects).
+
+- Adapter-specific behavior belongs on the adapter/dialect (override methods), **not** `if (adapter === "…")` (or equivalent) scattered through generic helpers.
+- Do not collapse adapters into shared functions full of adapter branches.
 
 ### TypeScript edge cases
 
@@ -120,6 +162,10 @@ bun pm version <major|minor|patch>   # bump version for publishing
 bun pm version preminor --preid beta    # first beta of next minor (npm tag beta)
 bun pm version prerelease --preid beta  # later betas (npm tag beta)
 bunx fallow audit --base main --format json --quiet 2>/dev/null || true   # changed-code audit
+# Postgres integration (when SEMOLA_POSTGRES_URL is set):
+#   docker run -d --name semola-pg-test -e POSTGRES_USER=semola -e POSTGRES_PASSWORD=semola \
+#     -e POSTGRES_DB=semola -p 5432:5432 postgres:16-alpine
+#   SEMOLA_POSTGRES_URL=postgres://semola:semola@localhost:5432/semola bun test src/lib/orm
 ```
 
 ## Documentation

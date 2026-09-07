@@ -3,6 +3,7 @@ import {
   CLAIM_DUE_TIMER,
   CLAIM_OR_REOWN_PARTITION,
   CREATE_META_AND_ACTIVE,
+  ENQUEUE_IF_ABSENT,
   EXTEND_IF_OWNER,
   HSET_IF_LEASE,
   PERSIST_EXECUTION,
@@ -543,6 +544,18 @@ export class MockRedisClient {
       if (zset.some((row) => row.member === member)) return 0;
 
       this.zaddSync(key, fireAt, member);
+      return 1;
+    }
+
+    if (script === ENQUEUE_IF_ABSENT) {
+      this.sweep(key);
+
+      const list = this.lists.get(key) ?? [];
+
+      if (list.includes(token)) return 0;
+
+      list.unshift(token);
+      this.lists.set(key, list);
       return 1;
     }
 

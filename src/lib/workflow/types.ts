@@ -503,7 +503,7 @@ export type RedisZMember = {
 
 export type CapacityTarget = {
   key: string;
-  field: "partitionSlot" | "concurrencySlot";
+  field: "partitionSlot";
 };
 
 export type EnsureCapacityInput = {

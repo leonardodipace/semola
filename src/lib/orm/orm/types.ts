@@ -90,6 +90,11 @@ export type OrmClient<
   >;
 } & {
   $raw: Bun.SQL;
+  $config: {
+    adapter: Adapter;
+    url: string;
+    tables: T;
+  };
   $transaction: <TResult>(
     callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
   ) => Promise<TResult>;

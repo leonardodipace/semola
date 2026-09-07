@@ -44,6 +44,47 @@ export type InferInput<T extends StandardSchemaV1 | undefined> = SafeTypeAccess<
   "input"
 >;
 
+type HasConcreteOutput<T> = [T] extends [never]
+  ? false
+  : unknown extends T
+    ? false
+    : true;
+
+export type StrictOutput<T, D> = T extends unknown
+  ? [D] extends [T]
+    ? StrictOutputMatched<T, D>
+    : T
+  : never;
+
+type StrictOutputMatched<T, D> = [T] extends [readonly (infer Item)[]]
+  ? D extends ReadonlyArray<infer DItem>
+    ? StrictOutput<Item, DItem>[]
+    : never
+  : [T] extends [object]
+    ? {
+        [K in keyof D]: K extends keyof T ? StrictOutput<T[K], D[K]> : never;
+      }
+    : D;
+
+type JsonBodyConstraint<
+  TRes extends ResponseSchema | undefined,
+  S extends ExtractStatusCodesOrAny<TRes>,
+> = TRes extends ResponseSchema
+  ? HasConcreteOutput<InferOutput<TRes[S]>> extends true
+    ? InferOutput<TRes[S]>
+    : unknown
+  : unknown;
+
+type JsonBody<
+  TRes extends ResponseSchema | undefined,
+  S extends ExtractStatusCodesOrAny<TRes>,
+  D,
+> = TRes extends ResponseSchema
+  ? HasConcreteOutput<InferOutput<TRes[S]>> extends true
+    ? StrictOutput<InferOutput<TRes[S]>, D>
+    : D
+  : D;
+
 export type ExtractStatusCodes<T extends ResponseSchema> = keyof T & number;
 
 export type ExtractStatusCodesOrAny<T extends ResponseSchema | undefined> =
@@ -141,9 +182,12 @@ export type Context<
     cookies: InferOutput<TReq["cookies"]>;
     params: InferOutput<TReq["params"]>;
   };
-  json: <S extends ExtractStatusCodesOrAny<TRes>>(
+  json: <
+    S extends ExtractStatusCodesOrAny<TRes>,
+    const D extends JsonBodyConstraint<TRes, S>,
+  >(
     status: S,
-    data: TRes extends ResponseSchema ? InferOutput<TRes[S]> : unknown,
+    data: JsonBody<TRes, S, D>,
   ) => Response;
   text: (status: number, text: string) => Response;
   html: (status: number, html: string) => Response;

@@ -15,6 +15,12 @@ export type CronOSOptions = CronBaseOptions & {
   path: string;
 };
 
+export type CronDistributedOptions = CronOptions & {
+  redis: Bun.RedisClient;
+  lockTTL?: number;
+  replicaId?: string;
+};
+
 export type CronStatus = "idle" | "running";
 
 export interface CronUtilitiesInterface {
