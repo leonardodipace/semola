@@ -76,6 +76,7 @@ export type FuzzyOptions<FuzzyType extends string | Record<string, string>> = {
   readonly ignorePunctuation?: boolean;
   readonly ignoreDiacritics?: boolean;
   readonly weights?: number[];
+  readonly enableLenNorm?: boolean;
 };
 
 export type TransformationFnType = (word: string) => string;

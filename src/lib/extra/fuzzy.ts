@@ -125,7 +125,7 @@ export function normalizeDataPoint(
         type: "string",
         orignal: word,
         normalized: normWord,
-        lenNorm: -1,
+        lenNorm: 1,
       });
 
       continue;
@@ -140,7 +140,7 @@ export function normalizeDataPoint(
       type: "record",
       orignal: word,
       normalized: newRecord,
-      lenNorm: -1,
+      lenNorm: 1,
     });
   }
 
@@ -207,7 +207,7 @@ function calculateDocAverageLength(cache: CachedDataPoint, keys: string[]) {
 export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
   options: FuzzyOptions<FuzzyType>,
 ) {
-  const { data, keys, weights, threshold } = options;
+  const { data, keys, weights, threshold, enableLenNorm } = options;
   const scoreLimit = threshold === undefined ? DEFAULT_TRESHOLD : threshold;
 
   if (scoreLimit < 0 || scoreLimit > 1) {
@@ -222,7 +222,8 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
   const normalizedWeigths = normalizeWeights(data.length, weights);
   const actualKeys = retriveKeys(keys, data);
   const dataCache = normalizeDataPoint(data, actualKeys, applyNormalizationFn);
-  saveLenNormalization(dataCache, actualKeys);
+
+  if (enableLenNorm) saveLenNormalization(dataCache, actualKeys);
 
   const searchFn = (needle: string) => {
     if (data.length === 0) return [];
