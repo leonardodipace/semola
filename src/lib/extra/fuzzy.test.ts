@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { mightThrowSync } from "../errors/index.js";
+import { InvalidThresholdValueError } from "./errors.js";
 import {
   DEFAULT_TRESHOLD,
   foldCase,
@@ -9,8 +11,6 @@ import {
   retriveKeys,
   trasform,
 } from "./fuzzy.js";
-import { mightThrowSync } from "../errors/index.js";
-import { InvalidThresholdValueError } from "./errors.js";
 
 describe("Fuzzy Search", () => {
   test("should return a list of results with 'apple' in the first position", () => {
