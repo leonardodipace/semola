@@ -9,6 +9,8 @@ import {
   retriveKeys,
   trasform,
 } from "./fuzzy.js";
+import { mightThrowSync } from "../errors/index.js";
+import { InvalidThresholdValueError } from "./errors.js";
 
 describe("Fuzzy Search", () => {
   test("should return a list of results with 'apple' in the first position", () => {
@@ -649,6 +651,30 @@ describe("Fuzzy Search", () => {
 
       expect(res[0]?.word).toBe("JavaScript");
       expect(res[0]?.index).toBe(0);
+    });
+
+    test("should throw an error if threshold is not a valid number", () => {
+      const [lessThanZeroError] = mightThrowSync(() =>
+        fuzzySearch({ data: controlData, threshold: -1 }),
+      );
+
+      expect(lessThanZeroError).not.toBeNull();
+      expect(lessThanZeroError).toBeInstanceOf(InvalidThresholdValueError);
+
+      const [greaterThanOneError] = mightThrowSync(() =>
+        fuzzySearch({ data: controlData, threshold: 2 }),
+      );
+
+      expect(greaterThanOneError).not.toBeNull();
+      expect(greaterThanOneError).toBeInstanceOf(InvalidThresholdValueError);
+    });
+
+    test("should not throw an error if threshold is inside the range", () => {
+      const [theError] = mightThrowSync(() =>
+        fuzzySearch({ data: controlData, threshold: 0.1 }),
+      );
+
+      expect(theError).toBeNull();
     });
   });
 });

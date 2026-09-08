@@ -1,3 +1,4 @@
+import { InvalidThresholdValueError } from "./errors.js";
 import type {
   CachedDataPoint,
   CachedRecord,
@@ -208,6 +209,12 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
 ) {
   const { data, keys, weights, threshold } = options;
   const scoreLimit = threshold === undefined ? DEFAULT_TRESHOLD : threshold;
+
+  if (scoreLimit < 0 || scoreLimit > 1) {
+    throw new InvalidThresholdValueError(`
+      Invalid threshold value: threshold must be >= 0 and <= 1  
+    `);
+  }
 
   const trasformations = createTrasformationList<FuzzyType>(options);
   const applyNormalizationFn = trasform(...trasformations);
