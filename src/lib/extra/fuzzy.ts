@@ -1,8 +1,6 @@
 import { InvalidThresholdValueError } from "./errors.js";
 import type {
   CachedDataPoint,
-  CachedRecord,
-  CachedString,
   FuzzyKeyType,
   FuzzyOptions,
   FuzzyResult,
@@ -11,7 +9,6 @@ import type {
 } from "./types.js";
 
 export const DEFAULT_TRESHOLD = 0.6;
-const NORMALIZATION_STRENGTH = 0.75;
 
 export function foldCase(word: string) {
   return word.toLowerCase();
@@ -38,17 +35,6 @@ export function trasform(...transformFn: TransformationFnType[]) {
   };
 
   return applyFn;
-}
-
-function toNormalizedDistance(
-  distance: number,
-  firstSeq: string,
-  secondSeq: string,
-) {
-  const max = Math.max(firstSeq.length, secondSeq.length);
-  if (max === 0) return 0;
-
-  return distance / max;
 }
 
 export function createTrasformationList<
@@ -85,6 +71,17 @@ export function retriveKeys<FuzzyType extends string | Record<string, string>>(
   if (typeof item === "string") return [];
 
   return Object.keys(item);
+}
+
+function toNormalizedDistance(
+  distance: number,
+  firstSeq: string,
+  secondSeq: string,
+) {
+  const max = Math.max(firstSeq.length, secondSeq.length);
+  if (max === 0) return 0;
+
+  return distance / max;
 }
 
 export function normalizeWeights(
@@ -125,7 +122,6 @@ export function normalizeDataPoint(
         type: "string",
         orignal: word,
         normalized: normWord,
-        lenNorm: 1,
       });
 
       continue;
@@ -140,74 +136,16 @@ export function normalizeDataPoint(
       type: "record",
       orignal: word,
       normalized: newRecord,
-      lenNorm: 1,
     });
   }
 
   return cache;
 }
 
-function calculateLegthNormalization(
-  sequence: CachedString | CachedRecord,
-  avgDocLen: number,
-  keys: string[],
-) {
-  let docLen = 0;
-
-  switch (sequence.type) {
-    case "string": {
-      docLen = tokenize(sequence.normalized).length;
-      break;
-    }
-    case "record": {
-      for (const key of keys) {
-        docLen += tokenize(sequence.normalized[key] ?? "").length;
-      }
-
-      break;
-    }
-  }
-
-  const lenNorm =
-    1 - NORMALIZATION_STRENGTH + NORMALIZATION_STRENGTH * (docLen / avgDocLen);
-
-  return lenNorm;
-}
-
-function saveLenNormalization(cache: CachedDataPoint, keys: string[]) {
-  const avgDocLen = calculateDocAverageLength(cache, keys);
-
-  cache = cache.map((entry) => {
-    entry.lenNorm = calculateLegthNormalization(entry, avgDocLen, keys);
-    return entry;
-  });
-}
-
-function tokenize(sequence: string) {
-  return sequence.split(/\s+/).filter(Boolean);
-}
-
-function calculateDocAverageLength(cache: CachedDataPoint, keys: string[]) {
-  let sum = 0;
-
-  for (const entry of cache) {
-    if (entry.type === "string") {
-      sum += tokenize(entry.normalized).length;
-      continue;
-    }
-
-    for (const key of keys) {
-      sum += tokenize(entry.normalized[key] ?? "").length;
-    }
-  }
-
-  return sum / cache.length;
-}
-
 export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
   options: FuzzyOptions<FuzzyType>,
 ) {
-  const { data, keys, weights, threshold, enableLenNorm } = options;
+  const { data, keys, weights, threshold } = options;
   const scoreLimit = threshold === undefined ? DEFAULT_TRESHOLD : threshold;
 
   if (scoreLimit < 0 || scoreLimit > 1) {
@@ -222,8 +160,6 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
   const normalizedWeigths = normalizeWeights(data.length, weights);
   const actualKeys = retriveKeys(keys, data);
   const dataCache = normalizeDataPoint(data, actualKeys, applyNormalizationFn);
-
-  if (enableLenNorm) saveLenNormalization(dataCache, actualKeys);
 
   const searchFn = (needle: string) => {
     if (data.length === 0) return [];
@@ -245,7 +181,7 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
 
         result.push({
           word: entry.orignal,
-          score: normalizedDistance * entry.lenNorm,
+          score: normalizedDistance,
           index: dataIdx,
         });
 
@@ -282,7 +218,7 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
           record: entry.orignal,
           key: minCostKey,
         },
-        score: normalizedDistance * entry.lenNorm,
+        score: normalizedDistance,
         index: dataIdx,
       });
     }

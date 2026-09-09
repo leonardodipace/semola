@@ -76,7 +76,6 @@ export type FuzzyOptions<FuzzyType extends string | Record<string, string>> = {
   readonly ignorePunctuation?: boolean;
   readonly ignoreDiacritics?: boolean;
   readonly weights?: number[];
-  readonly enableLenNorm?: boolean;
 };
 
 export type TransformationFnType = (word: string) => string;
@@ -91,14 +90,12 @@ export type CachedString = {
   type: "string";
   orignal: string;
   normalized: string;
-  lenNorm: number;
 };
 
 export type CachedRecord = {
   type: "record";
   orignal: Record<string, string>;
   normalized: Record<string, string>;
-  lenNorm: number;
 };
 
 export type CachedDataPoint = Array<CachedString | CachedRecord>;
