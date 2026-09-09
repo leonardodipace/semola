@@ -223,21 +223,13 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
       });
     }
 
-    const finalResul = result.map((v, rIdx) => {
-      const w = normalizedWeigths[rIdx];
-      if (!w) return v;
+    return result
+      .map((v, rIdx) => {
+        const w = normalizedWeigths[rIdx];
+        if (!w) return v;
 
-      v.score *= w;
-      return v;
-    });
-
-    const finalScores = finalResul.map((r) => r.score);
-    const maxScore = Math.max(...finalScores);
-
-    return finalResul
-      .map((r) => {
-        r.score = r.score / maxScore;
-        return r;
+        v.score *= w;
+        return v;
       })
       .sort((a, b) => a.score - b.score)
       .filter((r) => r.score <= scoreLimit);
