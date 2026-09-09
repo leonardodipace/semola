@@ -93,17 +93,21 @@ export function normalizeWeights(
     return Array.from({ length: dataAmount }, () => 1);
   }
 
-  if (weights.length < dataAmount) {
+  const newWeights: number[] = [...weights];
+  if (newWeights.length < dataAmount) {
     const missingWeights = Array.from(
-      { length: dataAmount - weights.length },
+      { length: dataAmount - newWeights.length },
       () => 1,
     );
 
-    weights.push(...missingWeights);
+    newWeights.push(...missingWeights);
   }
 
-  const sum = weights.reduce((acc, curr) => acc + curr);
-  const normalWeights = weights.map((w) => w / sum);
+  const sum = newWeights.reduce((acc, curr) => acc + curr);
+  const normalWeights = newWeights.map((w) => {
+    if (sum === 0) return 1 / newWeights.length;
+    return w / sum;
+  });
 
   return normalWeights;
 }

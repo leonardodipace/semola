@@ -582,11 +582,30 @@ describe("Fuzzy Search", () => {
       const normalSum = sumArr(weights);
       expect(normalSum).toBeCloseTo(1);
 
-      const originalSum = sumArr(originalWeights);
+      const originalSum = sumArr([...originalWeights, 1, 1]);
 
       expect(weights[0]).toBeCloseTo((originalWeights[0] ?? 1) / originalSum);
       expect(weights[1]).toBeCloseTo((originalWeights[1] ?? 1) / originalSum);
       expect(weights[2]).toBeCloseTo((originalWeights[2] ?? 1) / originalSum);
+    });
+
+    test("should return a uniform distributed weights if user-provided weights sum is equals to zero", () => {
+      let originalWeights = [0, 0, 0];
+      let weights = normalizeWeights(originalWeights.length, originalWeights);
+      expect(weights).toHaveLength(originalWeights.length);
+
+      expect(weights[0]).toBeCloseTo(1 / originalWeights.length);
+      expect(weights[1]).toBeCloseTo(1 / originalWeights.length);
+      expect(weights[2]).toBeCloseTo(1 / originalWeights.length);
+
+      originalWeights = [1, -1, -1, 1];
+      weights = normalizeWeights(originalWeights.length, originalWeights);
+      expect(weights).toHaveLength(originalWeights.length);
+
+      expect(weights[0]).toBeCloseTo(1 / originalWeights.length);
+      expect(weights[1]).toBeCloseTo(1 / originalWeights.length);
+      expect(weights[2]).toBeCloseTo(1 / originalWeights.length);
+      expect(weights[3]).toBeCloseTo(1 / originalWeights.length);
     });
 
     test("should return an empty list of weights when passing an empty dataset", () => {
