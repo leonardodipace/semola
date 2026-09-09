@@ -133,7 +133,10 @@ export function normalizeDataPoint(
 
     const newRecord: Record<string, string> = {};
     for (const key of keys) {
-      newRecord[key] = normFn(word[key] ?? "");
+      const element = word[key];
+      if (element === undefined) continue;
+
+      newRecord[key] = normFn(element);
     }
 
     cache.push({
@@ -198,10 +201,10 @@ export function fuzzySearch<FuzzyType extends string | Record<string, string>>(
 
       for (let kIdx = 0; kIdx < actualKeys.length; kIdx++) {
         const key = actualKeys[kIdx];
-        if (!key) return [];
+        if (!key) continue;
 
         const element = entry.normalized[key];
-        if (!element) return [];
+        if (element === undefined) continue;
 
         const rawDistance = levenshteinDistance(element, needle);
         if (rawDistance < minRawDistance) {

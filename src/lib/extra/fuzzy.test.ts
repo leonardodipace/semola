@@ -28,6 +28,52 @@ describe("Fuzzy Search", () => {
     expect(res[0]?.score).toBeLessThanOrEqual(1);
   });
 
+  test("should process all strings, even empty strings", () => {
+    const search = fuzzySearch({
+      data: ["apple", "watermelon", "peach", ""],
+      threshold: 1,
+    });
+
+    const res = search("aple");
+
+    expect(res).toHaveLength(4);
+    expect(res[0]?.index).toBe(0);
+    expect(res[0]?.word).toBe("apple");
+    expect(res[0]?.score).toBeGreaterThanOrEqual(0);
+    expect(res[0]?.score).toBeLessThanOrEqual(1);
+
+    expect(res[res.length - 1]?.index).toBe(res.length - 1);
+    expect(res[res.length - 1]?.word).toBe("");
+    expect(res[res.length - 1]?.score).toBeGreaterThanOrEqual(0);
+    expect(res[res.length - 1]?.score).toBeLessThanOrEqual(1);
+  });
+
+  test("should process objects with empty strings as their value", () => {
+    const search = fuzzySearch({
+      data: [{ content: "apple" }, { content: "watermelon" }, { content: "" }],
+      threshold: 1,
+    });
+
+    const res = search("aple");
+
+    expect(res).toHaveLength(3);
+    expect(res[0]?.index).toBe(0);
+    expect(res[0]?.word).toMatchObject({
+      record: { content: "apple" },
+      key: "content",
+    });
+    expect(res[0]?.score).toBeGreaterThanOrEqual(0);
+    expect(res[0]?.score).toBeLessThanOrEqual(1);
+
+    expect(res[res.length - 1]?.index).toBe(res.length - 1);
+    expect(res[res.length - 1]?.word).toMatchObject({
+      record: { content: "" },
+      key: "content",
+    });
+    expect(res[res.length - 1]?.score).toBeGreaterThanOrEqual(0);
+    expect(res[res.length - 1]?.score).toBeLessThanOrEqual(1);
+  });
+
   test("should return an empty list in case input data is an empty list", () => {
     const search = fuzzySearch({
       data: [] as string[],
