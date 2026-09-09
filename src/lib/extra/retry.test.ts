@@ -9,7 +9,7 @@ import {
 } from "bun:test";
 import { mightThrow, mightThrowSync } from "../errors/index.js";
 import { InvalidResultError, InvalidRetryError } from "./errors.js";
-import { createRetry } from "./index.js";
+import { createRetry } from "./retry.js";
 import {
   BACKOFF_MULTIPLIER,
   BASE_BACKOFF_DELAY,
