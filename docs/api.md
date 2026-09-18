@@ -89,6 +89,30 @@ Invalid input becomes a 400. Query and header values are always strings; use sch
 
 You can also return a plain string or object; Semola wraps it as a response.
 
+## Error handling
+
+Throw from a handler or middleware and map the error with `onError`. Declare `response` schemas so `c.json` stays typed and those statuses appear on every operation in the OpenAPI document.
+
+```typescript
+const api = new Api({
+  onError: {
+    response: {
+      400: z.object({ message: z.string() }),
+      500: z.object({ message: z.string() }),
+    },
+    handler: (c, err) => {
+      if (err instanceof MyDomainError) {
+        return c.json(400, { message: err.message });
+      }
+
+      return c.json(500, { message: "Internal server error" });
+    },
+  },
+});
+```
+
+Input validation failures still return a fixed 400 `{ message }` via Semola; only thrown values go through `onError`.
+
 ## Middleware
 
 Middleware can validate, short-circuit with a `Response`, or attach typed data to the context:
@@ -332,6 +356,7 @@ api.serve(3000, (server) => {
 | `openapi` | `{ title: "API", version: "1.0.0" }` | OpenAPI document info |
 | `middlewares` | `[]` | Applied to every route |
 | `validation` | `{ input: true, output: true }` | `false` disables both; partial object ok |
+| `onError` | - | Map thrown errors to Responses; optional `response` schemas for typing and OpenAPI |
 
 ### Methods
 
