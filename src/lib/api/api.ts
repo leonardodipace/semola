@@ -20,6 +20,7 @@ import type {
   BunRouteHandler,
   HandleRequestConfig,
   MethodRoutes,
+  OnErrorOptions,
   RequestSchema,
   ResolvedValidation,
   ResponseSchema,
@@ -40,6 +41,29 @@ const toResponse = (value: RouteReturn): Response => {
   if (typeof value === "string") return new Response(value);
 
   return Response.json(value);
+};
+
+const catchWithOnError = async (
+  req: Bun.BunRequest,
+  onError: OnErrorOptions | undefined,
+  run: () => Response | Promise<Response>,
+  context?: ReturnType<typeof createContext>,
+) => {
+  try {
+    return await run();
+  } catch (error) {
+    if (!onError) throw error;
+
+    const errorContext = context ?? createContext(req);
+
+    return applyHeaders(
+      errorContext,
+      await onError.handler(
+        errorContext as Parameters<typeof onError.handler>[0],
+        error,
+      ),
+    );
+  }
 };
 
 const validateResponse = async (
@@ -94,11 +118,27 @@ const buildBareRoute = (
   response?: ResponseSchema,
   validateInput = false,
   validateOutput = false,
+  onError?: OnErrorOptions,
 ): BunRouteHandler => {
   const responseSchema = validateOutput ? response : undefined;
   const validateRequest = validateInput
     ? buildRequestValidator(request)
     : undefined;
+
+  if (onError) {
+    return async (req) =>
+      catchWithOnError(req, onError, async () => {
+        if (validateRequest) {
+          const error = await validateRequest(req);
+
+          if (error) return mapValidationError(error);
+        }
+
+        const value = await handler();
+
+        return validateResponse(value, responseSchema);
+      });
+  }
 
   const probe = handler();
 
@@ -133,16 +173,29 @@ const buildBareRoute = (
   };
 };
 
-const buildContextRoute = (handler: AnyRouteHandler): BunRouteHandler => {
+const buildContextRoute = (
+  handler: AnyRouteHandler,
+  onError?: OnErrorOptions,
+): BunRouteHandler => {
   return (req) => {
     const context = createContext(req);
-    const result = handler(context);
 
-    if (result instanceof Promise) {
-      return result.then((value) => applyHeaders(context, toResponse(value)));
-    }
+    return catchWithOnError(
+      req,
+      onError,
+      () => {
+        const result = handler(context);
 
-    return applyHeaders(context, toResponse(result));
+        if (result instanceof Promise) {
+          return result.then((value) =>
+            applyHeaders(context, toResponse(value)),
+          );
+        }
+
+        return applyHeaders(context, toResponse(result));
+      },
+      context,
+    );
   };
 };
 
@@ -194,16 +247,50 @@ const handleRequest = async (
 
   const context = createContext(req, emptyValidated, get);
 
-  for (const middleware of config.middlewares) {
-    const { request: requestSchema, handler: middlewareHandler } =
-      middleware.options;
+  try {
+    for (const middleware of config.middlewares) {
+      const { request: requestSchema, handler: middlewareHandler } =
+        middleware.options;
+
+      let validated = emptyValidated;
+
+      if (config.validateInput && requestSchema) {
+        const data = {};
+        const error = await validateParts(
+          { req, schema: requestSchema, bodyCache },
+          data,
+        );
+
+        if (error) return mapValidationError(error);
+
+        validated = data;
+      }
+
+      context.req = validated;
+
+      const middlewareResult = await middlewareHandler(
+        context as Parameters<typeof middlewareHandler>[0],
+      );
+
+      if (middlewareResult instanceof Response) {
+        return applyHeaders(context, middlewareResult);
+      }
+
+      if (middlewareResult) {
+        if (!extensions) {
+          extensions = {};
+        }
+
+        Object.assign(extensions, middlewareResult);
+      }
+    }
 
     let validated = emptyValidated;
 
-    if (config.validateInput && requestSchema) {
+    if (config.validateInput && config.routeRequest) {
       const data = {};
       const error = await validateParts(
-        { req, schema: requestSchema, bodyCache },
+        { req, schema: config.routeRequest, bodyCache },
         data,
       );
 
@@ -214,46 +301,24 @@ const handleRequest = async (
 
     context.req = validated;
 
-    const middlewareResult = await middlewareHandler(
-      context as Parameters<typeof middlewareHandler>[0],
-    );
-
-    if (middlewareResult instanceof Response) {
-      return applyHeaders(context, middlewareResult);
+    if (jsonHandler) {
+      context.json = jsonHandler;
     }
 
-    if (middlewareResult) {
-      if (!extensions) {
-        extensions = {};
-      }
+    const result = await config.handler(context);
 
-      Object.assign(extensions, middlewareResult);
-    }
-  }
+    return applyHeaders(context, toResponse(result));
+  } catch (error) {
+    if (!config.onError) throw error;
 
-  let validated = emptyValidated;
-
-  if (config.validateInput && config.routeRequest) {
-    const data = {};
-    const error = await validateParts(
-      { req, schema: config.routeRequest, bodyCache },
-      data,
+    return applyHeaders(
+      context,
+      await config.onError.handler(
+        context as Parameters<typeof config.onError.handler>[0],
+        error,
+      ),
     );
-
-    if (error) return mapValidationError(error);
-
-    validated = data;
   }
-
-  context.req = validated;
-
-  if (jsonHandler) {
-    context.json = jsonHandler;
-  }
-
-  const result = await config.handler(context);
-
-  return applyHeaders(context, toResponse(result));
 };
 
 const buildHandler = (
@@ -264,6 +329,7 @@ const buildHandler = (
     readonly Middleware[]
   >,
   validation: ResolvedValidation,
+  onError?: OnErrorOptions,
 ): BunRouteHandler => {
   const middlewares = route.middlewares ?? emptyMiddlewares;
   const handler = route.handler;
@@ -283,6 +349,7 @@ const buildHandler = (
       route.response,
       validateInput,
       validateOutput,
+      onError,
     );
   }
 
@@ -293,7 +360,7 @@ const buildHandler = (
     !validateInput &&
     !validateOutput
   ) {
-    return buildContextRoute(handler as AnyRouteHandler);
+    return buildContextRoute(handler as AnyRouteHandler, onError);
   }
 
   const config: HandleRequestConfig = {
@@ -303,6 +370,7 @@ const buildHandler = (
     validateInput,
     validateOutput,
     handler: handler as AnyRouteHandler,
+    onError,
   };
 
   return (req) => handleRequest(req, config);
@@ -316,6 +384,7 @@ const compileRoutes = (
     readonly Middleware[]
   >[],
   validation: ResolvedValidation,
+  onError?: OnErrorOptions,
 ): MethodRoutes => {
   const bunRoutes: MethodRoutes = {};
 
@@ -331,7 +400,7 @@ const compileRoutes = (
       throw new DuplicateRouteError(route.method, route.path);
     }
 
-    methods[route.method] = buildHandler(route, validation);
+    methods[route.method] = buildHandler(route, validation, onError);
   }
 
   return bunRoutes;
@@ -339,15 +408,16 @@ const compileRoutes = (
 
 export class Api<
   TMiddlewares extends readonly Middleware[] = readonly [],
+  TErrorRes extends ResponseSchema | undefined = undefined,
 > extends Group<TMiddlewares> {
-  protected override options: ApiOptions<TMiddlewares>;
+  protected override options: ApiOptions<TMiddlewares, TErrorRes>;
   private compiled?: {
     routes: MethodRoutes;
     fetch: (req: Request) => Response | Promise<Response>;
   };
   private needsRecompile = true;
 
-  public constructor(options: ApiOptions<TMiddlewares> = {}) {
+  public constructor(options: ApiOptions<TMiddlewares, TErrorRes> = {}) {
     super(options);
     this.options = options;
   }
@@ -373,6 +443,7 @@ export class Api<
       servers: this.options.openapi?.servers,
       securitySchemes: this.options.openapi?.securitySchemes,
       routes: this.collectRoutes(),
+      errorResponses: this.options.onError?.response,
     });
   }
 
@@ -394,6 +465,7 @@ export class Api<
     const routes = compileRoutes(
       this.collectRoutes(),
       resolveValidation(this.options.validation),
+      this.options.onError as OnErrorOptions | undefined,
     );
 
     this.compiled = {

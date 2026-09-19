@@ -345,8 +345,13 @@ const createOperation = (
   route: RouteConfigInternal,
   globalMiddlewares: readonly Middleware[],
   prefix?: string,
+  errorResponses?: ResponseSchema,
 ) => {
-  const { request, response } = createRouteSchemas(route, globalMiddlewares);
+  const { request, response } = createRouteSchemas(
+    route,
+    globalMiddlewares,
+    errorResponses,
+  );
 
   let fullPath = route.path;
 
@@ -401,9 +406,12 @@ const createOperation = (
 const createRouteSchemas = (
   route: RouteConfigInternal,
   globalMiddlewares: readonly Middleware[],
+  errorResponses?: ResponseSchema,
 ) => {
   const request: RequestSchema = {};
   const response: ResponseSchema = {};
+
+  mergeIntoResponse(response, errorResponses);
 
   for (const middleware of [
     ...globalMiddlewares,
@@ -491,6 +499,7 @@ export const generateOpenApiSpec = (options: OpenApiGeneratorOptions) => {
       route,
       options.globalMiddlewares ?? [],
       options.prefix,
+      options.errorResponses,
     );
 
     spec.paths[openApiPath][method] = operation;

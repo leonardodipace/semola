@@ -99,11 +99,13 @@ export type ValidationOptions =
 
 export type ApiOptions<
   TMiddlewares extends readonly Middleware[] = readonly [],
+  TErrorRes extends ResponseSchema | undefined = undefined,
 > = {
   prefix?: string;
   openapi?: OpenApiOptions;
   middlewares?: TMiddlewares;
   validation?: ValidationOptions;
+  onError?: OnErrorOptions<TErrorRes>;
 };
 
 export type GroupOptions<
@@ -194,6 +196,16 @@ export type Context<
   redirect: (status: number, url: string) => Response;
   header: (name: string, value: string) => void;
   get: <K extends keyof TExt>(key: K) => TExt[K];
+};
+
+export type OnErrorOptions<
+  TRes extends ResponseSchema | undefined = undefined,
+> = {
+  response?: TRes;
+  handler: (
+    c: Context<RequestSchema, TRes>,
+    error: unknown,
+  ) => Response | Promise<Response>;
 };
 
 export type RouteReturn =
@@ -380,6 +392,7 @@ export type HandleRequestConfig = {
   validateInput: boolean;
   validateOutput: boolean;
   handler: AnyRouteHandler;
+  onError?: OnErrorOptions;
 };
 
 export type RouteMethods = Partial<Record<HTTPMethod, BunRouteHandler>>;
@@ -479,6 +492,7 @@ export type OpenApiGeneratorOptions = {
   securitySchemes?: Record<string, unknown>;
   routes: RouteConfigInternal[];
   globalMiddlewares?: readonly Middleware[];
+  errorResponses?: ResponseSchema;
 };
 
 export type JsonSchema = {

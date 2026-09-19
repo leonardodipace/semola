@@ -12,6 +12,7 @@ export type {
   MergeMiddlewareExtensions,
   MiddlewareHandler,
   MiddlewareOptions,
+  OnErrorOptions,
   OpenApiOptions,
   RequestSchema,
   ResponseSchema,

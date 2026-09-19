@@ -673,6 +673,148 @@ describe("Api Core", () => {
     expect(spec.info.version).toBe("2.0.0");
   });
 
+  test("onError maps handler throws to a Response", async () => {
+    const api = new Api({
+      onError: {
+        response: { 500: z.object({ message: z.string() }) },
+        handler: (c, err) => {
+          const message = err instanceof Error ? err.message : "error";
+
+          return c.json(500, { message });
+        },
+      },
+    });
+
+    api.defineRoute({
+      path: "/boom",
+      method: "GET",
+      handler: (_c) => {
+        throw new Error("kaboom");
+      },
+    });
+
+    const res = await api.fetch(new Request("http://localhost/boom"));
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ message: "kaboom" });
+  });
+
+  test("onError maps middleware throws to a Response", async () => {
+    const guard = new Middleware({
+      handler: () => {
+        throw new Error("denied");
+      },
+    });
+
+    const api = new Api({
+      onError: {
+        response: { 500: z.object({ message: z.string() }) },
+        handler: (c, err) => {
+          const message = err instanceof Error ? err.message : "error";
+
+          return c.json(500, { message });
+        },
+      },
+    });
+
+    api.defineRoute({
+      path: "/secret",
+      method: "GET",
+      middlewares: [guard],
+      handler: () => new Response("ok"),
+    });
+
+    const res = await api.fetch(new Request("http://localhost/secret"));
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ message: "denied" });
+  });
+
+  test("without onError, handler throws propagate", async () => {
+    const api = new Api();
+
+    api.defineRoute({
+      path: "/boom",
+      method: "GET",
+      handler: (_c) => {
+        throw new Error("kaboom");
+      },
+    });
+
+    expect(api.fetch(new Request("http://localhost/boom"))).rejects.toThrow(
+      "kaboom",
+    );
+  });
+
+  test("onError maps bare sync throws to a Response", async () => {
+    const api = new Api({
+      onError: {
+        response: { 500: z.object({ message: z.string() }) },
+        handler: (c, err) => {
+          const message = err instanceof Error ? err.message : "error";
+
+          return c.json(500, { message });
+        },
+      },
+    });
+
+    api.defineRoute({
+      path: "/boom",
+      method: "GET",
+      handler: () => {
+        throw new Error("bare-sync");
+      },
+    });
+
+    const res = await api.fetch(new Request("http://localhost/boom"));
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ message: "bare-sync" });
+  });
+
+  test("onError maps bare rejected promises to a Response", async () => {
+    const api = new Api({
+      onError: {
+        response: { 500: z.object({ message: z.string() }) },
+        handler: (c, err) => {
+          const message = err instanceof Error ? err.message : "error";
+
+          return c.json(500, { message });
+        },
+      },
+    });
+
+    api.defineRoute({
+      path: "/boom",
+      method: "GET",
+      handler: () => Promise.reject(new Error("bare-async")),
+    });
+
+    const res = await api.fetch(new Request("http://localhost/boom"));
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ message: "bare-async" });
+  });
+
+  test("onError response schemas appear in OpenAPI", async () => {
+    const api = new Api({
+      onError: {
+        response: { 500: z.object({ message: z.string() }) },
+        handler: (c) => c.json(500, { message: "fail" }),
+      },
+    });
+
+    api.defineRoute({
+      path: "/hello",
+      method: "GET",
+      handler: (c) => c.json(200, { ok: true }),
+    });
+
+    const spec = await api.getOpenApiSpec();
+
+    expect(spec.paths["/hello"]?.get?.responses?.["500"]).toBeDefined();
+  });
+
   test("registers multiple methods on the same path", () => {
     const api = new Api();
 
