@@ -125,9 +125,7 @@ const buildBareRoute = (
     ? buildRequestValidator(request)
     : undefined;
 
-  const probe = handler();
-
-  if (probe instanceof Promise) {
+  if (onError) {
     return async (req) =>
       catchWithOnError(req, onError, async () => {
         if (validateRequest) {
@@ -140,6 +138,22 @@ const buildBareRoute = (
 
         return validateResponse(value, responseSchema);
       });
+  }
+
+  const probe = handler();
+
+  if (probe instanceof Promise) {
+    return async (req) => {
+      if (validateRequest) {
+        const error = await validateRequest(req);
+
+        if (error) return mapValidationError(error);
+      }
+
+      const value = await handler();
+
+      return validateResponse(value, responseSchema);
+    };
   }
 
   const cached = prepareResponse(probe, responseSchema);

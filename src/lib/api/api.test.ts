@@ -746,6 +746,56 @@ describe("Api Core", () => {
     );
   });
 
+  test("onError maps bare sync throws to a Response", async () => {
+    const api = new Api({
+      onError: {
+        response: { 500: z.object({ message: z.string() }) },
+        handler: (c, err) => {
+          const message = err instanceof Error ? err.message : "error";
+
+          return c.json(500, { message });
+        },
+      },
+    });
+
+    api.defineRoute({
+      path: "/boom",
+      method: "GET",
+      handler: () => {
+        throw new Error("bare-sync");
+      },
+    });
+
+    const res = await api.fetch(new Request("http://localhost/boom"));
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ message: "bare-sync" });
+  });
+
+  test("onError maps bare rejected promises to a Response", async () => {
+    const api = new Api({
+      onError: {
+        response: { 500: z.object({ message: z.string() }) },
+        handler: (c, err) => {
+          const message = err instanceof Error ? err.message : "error";
+
+          return c.json(500, { message });
+        },
+      },
+    });
+
+    api.defineRoute({
+      path: "/boom",
+      method: "GET",
+      handler: () => Promise.reject(new Error("bare-async")),
+    });
+
+    const res = await api.fetch(new Request("http://localhost/boom"));
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ message: "bare-async" });
+  });
+
   test("onError response schemas appear in OpenAPI", async () => {
     const api = new Api({
       onError: {
