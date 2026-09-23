@@ -107,7 +107,6 @@ export type {
   ErrorMetadataType,
   HookContextType,
   OnFailedAttemptContextType,
-  RetryContext,
   RetryOnErrorContextType,
   RetryOptions,
   RetryOutcomeType,
