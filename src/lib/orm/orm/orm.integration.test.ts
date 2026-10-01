@@ -45,6 +45,14 @@ const metaTable = defineTable({
   },
 });
 
+const notesTable = defineTable({
+  sqlName: "notes",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    userId: uuid("user_id").references(() => usersTable.columns.id),
+  },
+});
+
 const schemaSql = {
   sqlite: {
     users:
@@ -52,6 +60,7 @@ const schemaSql = {
     posts:
       "CREATE TABLE posts (id TEXT PRIMARY KEY, title TEXT NOT NULL, author_id TEXT NOT NULL)",
     meta: "CREATE TABLE meta (id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
+    notes: "CREATE TABLE notes (id TEXT PRIMARY KEY, user_id TEXT)",
   },
   postgres: {
     users:
@@ -59,6 +68,7 @@ const schemaSql = {
     posts:
       "CREATE TABLE posts (id TEXT PRIMARY KEY, title TEXT NOT NULL, author_id TEXT NOT NULL)",
     meta: "CREATE TABLE meta (id TEXT PRIMARY KEY, payload JSONB NOT NULL)",
+    notes: "CREATE TABLE notes (id TEXT PRIMARY KEY, user_id TEXT)",
   },
 } as const;
 
@@ -75,19 +85,124 @@ for (const live of integrationAdapters()) {
       const orm = createOrm({
         adapter: live.adapter,
         url: live.url,
-        tables: { users: usersTable, posts: postsTable, meta: metaTable },
+        tables: {
+          users: usersTable,
+          posts: postsTable,
+          meta: metaTable,
+          notes: notesTable,
+        },
         relations: {
-          users: { posts: many(() => postsTable) },
+          users: {
+            posts: many(() => postsTable),
+            notes: many(() => notesTable),
+          },
           posts: { author: one("authorId", () => usersTable) },
+          notes: { user: one("userId", () => usersTable) },
         },
       });
 
       await orm.$raw.unsafe(ddl.users);
       await orm.$raw.unsafe(ddl.posts);
       await orm.$raw.unsafe(ddl.meta);
+      await orm.$raw.unsafe(ddl.notes);
 
       return orm;
     };
+
+    const createAda = (orm: Awaited<ReturnType<typeof open>>) => {
+      return orm.users.create({
+        data: {
+          id,
+          name: "Ada",
+          email: "ada@example.com",
+          createdAt: new Date("2025-01-01T00:00:00.000Z"),
+        },
+      });
+    };
+
+    test("connect and disconnect one() relations", async () => {
+      const orm = await open();
+      await createAda(orm);
+
+      const post = await orm.posts.create({
+        data: { id: postId, title: "First", author: { connect: { id } } },
+        include: { author: true },
+      });
+      await orm.notes.create({
+        data: { id: postId, user: { connect: { email: "ada@example.com" } } },
+      });
+      const note = await orm.notes.update({
+        where: { id: postId },
+        data: { user: { disconnect: true } },
+      });
+
+      expect(post.authorId).toBe(id);
+      expect(post.author?.name).toBe("Ada");
+      expect(note.userId).toBeNull();
+
+      await orm.$raw.close();
+    });
+
+    test("connect and disconnect many() relations", async () => {
+      const orm = await open();
+      await createAda(orm);
+      await orm.notes.createMany({ data: [{ id: postId }, { id: id2 }] });
+
+      const connected = await orm.users.update({
+        where: { id },
+        data: { notes: { connect: [{ id: postId }, { id: id2 }] } },
+        include: { notes: true },
+      });
+      const disconnected = await orm.users.update({
+        where: { id },
+        data: { name: "Augusta", notes: { disconnect: [{ id: postId }] } },
+        include: { notes: true },
+      });
+
+      expect(connected.notes).toHaveLength(2);
+      expect(disconnected.name).toBe("Augusta");
+      expect(disconnected.notes.map((note) => note.id)).toEqual([id2]);
+
+      await orm.$raw.close();
+    });
+
+    test("missing connect target throws and rolls back the write", async () => {
+      const orm = await open();
+
+      const [error] = await mightThrow(
+        orm.users.create({
+          data: {
+            id,
+            name: "Ada",
+            email: "ada@example.com",
+            createdAt: new Date("2025-01-01T00:00:00.000Z"),
+            notes: { connect: [{ id: postId }] },
+          },
+        }),
+      );
+
+      expect(error?.message).toContain("notes");
+      expect(await orm.users.findMany()).toHaveLength(0);
+
+      await orm.$raw.close();
+    });
+
+    test("connect works inside $transaction", async () => {
+      const orm = await open();
+      await createAda(orm);
+
+      await orm.$transaction(async (tx) => {
+        await tx.notes.create({
+          data: { id: postId, user: { connect: { id } } },
+        });
+      });
+
+      const note = await orm.notes.findUnique({ where: { id: postId } });
+
+      expect(note?.userId).toBe(id);
+
+      await orm.$raw.close();
+    });
 
     test("crud round-trip with defaults and filters", async () => {
       const orm = await open();
