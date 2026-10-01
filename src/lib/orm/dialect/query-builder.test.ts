@@ -119,6 +119,15 @@ describe("DialectQueryBuilder", () => {
         take: 2,
       }),
     ).toThrow('orderBy must include cursor key "id" on table users');
+    expect(() =>
+      builder.buildFindMany({
+        cursor: { id: "u-2" },
+        orderBy: { id: "asc", firstName: "asc" },
+        take: 2,
+      }),
+    ).toThrow(
+      "cursor pagination requires a single-column orderBy on table users",
+    );
   });
 
   test("builds create with defaults and JSON serialization", () => {

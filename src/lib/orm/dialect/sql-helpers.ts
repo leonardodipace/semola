@@ -192,6 +192,20 @@ export const resolveFindManyPagination = (input: {
       );
     }
 
+    const orderKeys = Object.keys(orderBy);
+
+    if (orderKeys.length !== 1) {
+      throw new Error(
+        `cursor pagination requires a single-column orderBy on table ${input.table.sqlName}`,
+      );
+    }
+
+    if (orderKeys[0] !== key) {
+      throw new Error(
+        `orderBy must start with cursor key "${key}" on table ${input.table.sqlName}`,
+      );
+    }
+
     const op = !reverse === (direction === "asc") ? ">=" : "<=";
 
     cursorSql = `${quoteIdentifier(column.sqlName)} ${op} ${input.nextPlaceholder()}`;

@@ -118,9 +118,10 @@ for (const live of integrationAdapters()) {
       const sql = live.createSql();
 
       await setupUsers(sql);
-      await insertUser(sql, "user-1", "Ada", "2025-01-01T00:00:00.000Z");
-      await insertUser(sql, "user-2", "Grace", "2025-01-02T00:00:00.000Z");
-      await insertUser(sql, "user-3", "Alan", "2025-01-03T00:00:00.000Z");
+      await insertUser(sql, "user-0", "Zoe", "2025-01-01T00:00:00.000Z");
+      await insertUser(sql, "user-1", "Ada", "2025-01-02T00:00:00.000Z");
+      await insertUser(sql, "user-2", "Grace", "2025-01-03T00:00:00.000Z");
+      await insertUser(sql, "user-3", "Alan", "2025-01-04T00:00:00.000Z");
 
       const dialect = getDialect({
         adapter: live.adapter,
@@ -141,7 +142,7 @@ for (const live of integrationAdapters()) {
       });
 
       expect(next.map((row) => row.id)).toEqual(["user-3"]);
-      expect(previous.map((row) => row.id)).toEqual(["user-1"]);
+      expect(previous.map((row) => row.id)).toEqual(["user-0", "user-1"]);
 
       await sql.close();
     });
