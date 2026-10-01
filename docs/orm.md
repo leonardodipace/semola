@@ -268,6 +268,47 @@ await db.posts.deleteMany({
 | `update` / `updateMany` | Patch |
 | `delete` / `deleteMany` | Remove |
 
+### Connect and disconnect
+
+`create` and `update` accept `connect` / `disconnect` under a relation key in `data`. Records are matched by unique key.
+
+```typescript
+await db.posts.create({
+  data: { id: "p1", title: "Hello", author: { connect: { id: "u1" } } },
+});
+
+await db.users.update({
+  where: { id: "u1" },
+  data: { posts: { connect: [{ id: "p2" }], disconnect: [{ id: "p3" }] } },
+  include: { posts: true },
+});
+```
+
+| Relation | `connect` | `disconnect` |
+| --- | --- | --- |
+| `one()` | One unique where | `true` (sets the FK to `null`) |
+| `many()` | Array of unique wheres | Array of unique wheres (sets their FK to `null`) |
+
+The whole write runs in one transaction (a savepoint inside `$transaction`). A missing record throws and rolls everything back.
+
+### Connect and disconnect
+
+`create` and `update` accept relation keys in `data` to link existing records by a unique key.
+
+```typescript
+await db.posts.create({
+  data: { id: "p1", title: "Hello", author: { connect: { id: "u1" } } },
+});
+
+await db.users.update({
+  where: { id: "u1" },
+  data: { posts: { connect: [{ id: "p2" }], disconnect: [{ id: "p3" }] } },
+  include: { posts: true },
+});
+```
+
+`one()` relations take `connect: { ... }` or `disconnect: true`. `many()` relations take arrays. The whole write runs in a transaction (a savepoint inside `$transaction`), so a missing record throws and nothing is saved.
+
 ## Transactions and raw SQL
 
 ```typescript

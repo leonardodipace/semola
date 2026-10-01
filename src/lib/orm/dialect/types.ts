@@ -106,6 +106,18 @@ export type ReturningQuery = {
   includeDescriptors: IncludeDescriptor[];
 };
 
+export type Row = Record<string, unknown>;
+
+export type HasOneWriteInput = { connect?: Row; disconnect?: true };
+
+export type HasManyWriteInput = { connect?: Row[]; disconnect?: Row[] };
+
+export type RelationWriteOptions<T extends Table, R extends TableRelations> = {
+  data: object;
+  select?: TableSelect<T>;
+  include?: TableInclude<R>;
+};
+
 export type ParseIncludeRowsInput = {
   table: Table;
   rows: Array<Record<string, unknown>>;

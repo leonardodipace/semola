@@ -51,6 +51,30 @@ export const bindCreateValue = (
   return nextPlaceholder();
 };
 
+export const columnKey = (table: Table, column: object) => {
+  const entry = Object.entries(table.columns).find(([, candidate]) => {
+    return candidate === column;
+  });
+
+  if (!entry) {
+    throw new Error(`Unknown column on table ${table.sqlName}`);
+  }
+
+  return entry[0];
+};
+
+export const primaryKeyOf = (table: Table) => {
+  const entry = Object.entries(table.columns).find(([, column]) => {
+    return column._meta.isPrimaryKey;
+  });
+
+  if (!entry) {
+    throw new Error(`Table ${table.sqlName} has no primary key`);
+  }
+
+  return entry[0];
+};
+
 export const validateFindUniqueWhere = (
   table: Table,
   where: Record<string, unknown>,

@@ -403,13 +403,34 @@ export type CreateData<T extends Table> = Prettify<
   }
 >;
 
+type RelationWrite<R extends HasMany<Table> | HasOne<Table>> =
+  R extends HasMany<infer TTable>
+    ? {
+        connect?: FindUniqueWhere<TTable>[];
+        disconnect?: FindUniqueWhere<TTable>[];
+      }
+    : { connect?: FindUniqueWhere<RelationTable<R>>; disconnect?: true };
+
+type RelationWriteData<TRelations extends TableRelations> =
+  IsOpenTableRelations<TRelations> extends true
+    ? {}
+    : { [K in keyof TRelations]?: RelationWrite<TRelations[K]> };
+
+type HasOneForeignKeys<TRelations> = {
+  [K in keyof TRelations]: TRelations[K] extends HasOne<Table, infer TKey>
+    ? TKey
+    : never;
+}[keyof TRelations];
+
 export type CreateOptions<
   T extends Table,
   TRelations extends TableRelations = TableRelations,
   TAllTables extends Record<string, Table> = Record<string, Table>,
   TAllRelations = Record<string, unknown>,
 > = OrmQueryOptions & {
-  data: CreateData<T>;
+  data: Omit<CreateData<T>, HasOneForeignKeys<TRelations>> &
+    Partial<CreateData<T>> &
+    RelationWriteData<TRelations>;
   select?: TableSelect<T>;
   include?: TableInclude<TRelations, TAllTables, TAllRelations>;
 };
@@ -441,7 +462,7 @@ export type UpdateOptions<
   TAllRelations = Record<string, unknown>,
 > = OrmQueryOptions & {
   where: FindUniqueWhere<T>;
-  data: UpdateData<T>;
+  data: UpdateData<T> & RelationWriteData<TRelations>;
   select?: TableSelect<T>;
   include?: TableInclude<TRelations, TAllTables, TAllRelations>;
 };
