@@ -159,6 +159,8 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
           continue;
         }
 
+        if (value === undefined) continue;
+
         if (relation._type === "hasMany") {
           hasManyWrites.push([relation, value as HasManyWriteInput]);
           continue;
