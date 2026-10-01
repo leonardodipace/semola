@@ -19,6 +19,7 @@ import { selectClauseBuilder } from "./select-clause.js";
 import {
   bindCreateValue,
   buildSetClauses,
+  resolveFindManyPagination,
   validateFindUniqueWhere,
 } from "./sql-helpers.js";
 import type {
@@ -51,25 +52,43 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
       select: options?.select,
       include: options?.include,
     });
+    const paginationPlan = resolveFindManyPagination({
+      table: this.table,
+      cursor: options?.cursor,
+      orderBy: options?.orderBy,
+      take: options?.take,
+      nextPlaceholder,
+    });
+    let whereSql = parts.where.sql;
+    const whereParams = [...parts.where.params, ...paginationPlan.cursorParams];
+
+    if (paginationPlan.cursorSql) {
+      if (whereSql) {
+        whereSql = `${whereSql} AND ${paginationPlan.cursorSql}`;
+      } else {
+        whereSql = paginationPlan.cursorSql;
+      }
+    }
+
     const orderBy = selectClauseBuilder.buildOrderBy(
       this.table,
-      options?.orderBy,
+      paginationPlan.orderBy as FindManyOptions<T, R>["orderBy"],
     );
     const pagination = selectClauseBuilder.buildPagination(
       this.spec,
       nextPlaceholder,
-      options?.take,
+      paginationPlan.take,
       options?.skip,
     );
     const params = [
       ...parts.include.params,
-      ...parts.where.params,
+      ...whereParams,
       ...pagination.params,
     ];
     const statement = selectClauseBuilder.buildStatement({
       tableName: quoteIdentifier(this.table.sqlName),
       columns: parts.selectColumns,
-      where: parts.where.sql,
+      where: whereSql,
       orderBy,
       pagination: pagination.sql,
     });

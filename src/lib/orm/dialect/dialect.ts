@@ -42,8 +42,15 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
     options?: TOptions,
   ) {
     const query = this.builder.buildFindMany(options);
+    const rows = await this.executeQuery(sql, query);
 
-    return this.executeQuery(sql, query);
+    if (options?.take !== undefined) {
+      if (options.take < 0) {
+        rows.reverse();
+      }
+    }
+
+    return rows;
   }
 
   public async findFirst<const TOptions extends FindFirstOptions<T, R>>(

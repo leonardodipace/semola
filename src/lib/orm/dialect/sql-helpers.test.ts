@@ -5,7 +5,9 @@ import { PlaceholderGenerator } from "./placeholder.js";
 import {
   bindCreateValue,
   buildSetClauses,
+  parseCursor,
   resolveCreateValue,
+  resolveFindManyPagination,
   serializeColumnValue,
   validateFindUniqueWhere,
 } from "./sql-helpers.js";
@@ -41,6 +43,52 @@ describe("sql-helpers", () => {
     expect(() => validateFindUniqueWhere(usersTable, { id: null })).toThrow(
       'findUnique where key "id" must be non-null on table users',
     );
+  });
+
+  test("parses cursor and resolves pagination direction", () => {
+    expect(parseCursor(usersTable, { id: "u-2" })).toEqual({
+      key: "id",
+      value: "u-2",
+      column: usersTable.columns.id,
+    });
+    expect(() => parseCursor(usersTable, { firstName: "Ada" })).toThrow(
+      'cursor key "firstName" must be a unique or primary key column on table users',
+    );
+
+    let index = 0;
+    const nextPlaceholder = () => {
+      index += 1;
+      return `$${index}`;
+    };
+
+    expect(
+      resolveFindManyPagination({
+        table: usersTable,
+        cursor: { id: "u-2" },
+        orderBy: { id: "asc" },
+        take: 10,
+        nextPlaceholder,
+      }),
+    ).toEqual({
+      take: 10,
+      orderBy: { id: "asc" },
+      cursorSql: '"id" >= $1',
+      cursorParams: ["u-2"],
+    });
+    expect(
+      resolveFindManyPagination({
+        table: usersTable,
+        cursor: { id: "u-2" },
+        orderBy: { id: "asc" },
+        take: -4,
+        nextPlaceholder,
+      }),
+    ).toEqual({
+      take: 4,
+      orderBy: { id: "desc" },
+      cursorSql: '"id" <= $2',
+      cursorParams: ["u-2"],
+    });
   });
 
   test("rejects unknown update keys", () => {

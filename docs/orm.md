@@ -244,6 +244,20 @@ const page = await db.posts.findMany({
   include: { author: true },
 });
 
+const nextPage = await db.posts.findMany({
+  take: 20,
+  skip: 1,
+  cursor: { id: "p20" },
+  orderBy: { id: "asc" },
+});
+
+const previousPage = await db.posts.findMany({
+  take: -20,
+  skip: 1,
+  cursor: { id: "p20" },
+  orderBy: { id: "asc" },
+});
+
 await db.users.update({
   where: { id: "u1" },
   data: { name: "Augusta" },
@@ -259,6 +273,8 @@ await db.posts.deleteMany({
 | `where` | Column operators, plus `$and` / `$or` / `$not`. Relations: `every` / `some` / `none` |
 | `select` | Fields to return |
 | `include` | Related rows |
+| `cursor` | Unique/PK position marker for cursor pagination. Cursor row included unless `skip: 1`. Negative `take` pages backward |
+| `take` / `skip` | Limit and offset. Negative `take` reverses direction |
 | `$skipHooks` | Skip hooks for this call |
 
 | Method | Meaning |

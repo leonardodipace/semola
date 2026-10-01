@@ -115,6 +115,115 @@ export const validateFindUniqueWhere = (
   }
 };
 
+export const parseCursor = (table: Table, cursor: Record<string, unknown>) => {
+  const entries = Object.entries(cursor).filter(
+    ([, value]) => value !== undefined,
+  );
+  const entry = entries[0];
+
+  if (entries.length !== 1) {
+    throw new Error("cursor requires exactly one unique or primary key column");
+  }
+
+  if (!entry) {
+    throw new Error("cursor requires exactly one unique or primary key column");
+  }
+
+  const [key, value] = entry;
+  const column = table.columns[key];
+
+  if (!column) {
+    throw new Error(`Unknown cursor key "${key}" on table ${table.sqlName}`);
+  }
+
+  if (!column._meta.isPrimaryKey) {
+    if (!column._meta.isUnique) {
+      throw new Error(
+        `cursor key "${key}" must be a unique or primary key column on table ${table.sqlName}`,
+      );
+    }
+  }
+
+  if (value === null) {
+    throw new Error(
+      `cursor key "${key}" must be non-null on table ${table.sqlName}`,
+    );
+  }
+
+  return { key, value, column };
+};
+
+export const resolveFindManyPagination = (input: {
+  table: Table;
+  cursor?: Record<string, unknown>;
+  orderBy?: Record<string, "asc" | "desc" | undefined>;
+  take?: number;
+  nextPlaceholder: () => string;
+}) => {
+  const reverse = input.take !== undefined && input.take < 0;
+  const take = input.take === undefined ? undefined : Math.abs(input.take);
+  let orderBy: Record<string, "asc" | "desc"> | undefined;
+
+  if (input.orderBy) {
+    orderBy = {};
+
+    for (const [key, direction] of Object.entries(input.orderBy)) {
+      if (direction === undefined) continue;
+
+      orderBy[key] = direction;
+    }
+  }
+
+  let cursorSql = "";
+  const cursorParams: unknown[] = [];
+
+  if (input.cursor) {
+    const { key, value, column } = parseCursor(input.table, input.cursor);
+
+    if (!orderBy) {
+      orderBy = { [key]: "asc" };
+    }
+
+    const direction = orderBy[key];
+
+    if (direction === undefined) {
+      throw new Error(
+        `orderBy must include cursor key "${key}" on table ${input.table.sqlName}`,
+      );
+    }
+
+    const op = !reverse === (direction === "asc") ? ">=" : "<=";
+
+    cursorSql = `${quoteIdentifier(column.sqlName)} ${op} ${input.nextPlaceholder()}`;
+    cursorParams.push(serializeColumnValue(column, value));
+  }
+
+  if (!orderBy) {
+    if (reverse) {
+      orderBy = { [primaryKeyOf(input.table)]: "asc" };
+    }
+  }
+
+  if (reverse) {
+    if (orderBy) {
+      const flipped: Record<string, "asc" | "desc"> = {};
+
+      for (const [key, direction] of Object.entries(orderBy)) {
+        if (direction === "desc") {
+          flipped[key] = "asc";
+          continue;
+        }
+
+        flipped[key] = "desc";
+      }
+
+      orderBy = flipped;
+    }
+  }
+
+  return { take, orderBy, cursorSql, cursorParams };
+};
+
 export const buildSetClauses = <T extends Table>(
   input: BuildSetClausesInput<T>,
 ) => {

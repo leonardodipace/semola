@@ -79,6 +79,48 @@ describe("DialectQueryBuilder", () => {
     );
   });
 
+  test("builds findMany with cursor, skip, and negative take", () => {
+    const builder = new DialectQueryBuilder({
+      spec: SQLITE_SPEC,
+      table: usersTable,
+      relations: {},
+    });
+    const forward = builder.buildFindMany({
+      cursor: { id: "u-2" },
+      orderBy: { id: "asc" },
+      take: 10,
+      skip: 1,
+    });
+    const backward = builder.buildFindMany({
+      cursor: { id: "u-2" },
+      orderBy: { id: "asc" },
+      take: -5,
+    });
+    const negativeOnly = builder.buildFindMany({
+      take: -3,
+    });
+
+    expect(forward.statement).toBe(
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" WHERE "id" >= ? ORDER BY "id" ASC LIMIT ? OFFSET ?',
+    );
+    expect(forward.params).toEqual(["u-2", 10, 1]);
+    expect(backward.statement).toBe(
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" WHERE "id" <= ? ORDER BY "id" DESC LIMIT ?',
+    );
+    expect(backward.params).toEqual(["u-2", 5]);
+    expect(negativeOnly.statement).toBe(
+      'SELECT "id" AS "id", "first_name" AS "firstName", "created_at" AS "createdAt", "is_active" AS "isActive" FROM "users" ORDER BY "id" DESC LIMIT ?',
+    );
+    expect(negativeOnly.params).toEqual([3]);
+    expect(() =>
+      builder.buildFindMany({
+        cursor: { id: "u-2" },
+        orderBy: { firstName: "asc" },
+        take: 2,
+      }),
+    ).toThrow('orderBy must include cursor key "id" on table users');
+  });
+
   test("builds create with defaults and JSON serialization", () => {
     const builder = new DialectQueryBuilder({
       spec: SQLITE_SPEC,
