@@ -10,6 +10,7 @@ export const SQLITE_SPEC: DialectSpec = {
   formatDistinct: (quotedColumns) => ({
     selectPrefix: "",
     groupBy: quotedColumns.join(", "),
+    requiresOrderByPrefix: false,
   }),
 };
 

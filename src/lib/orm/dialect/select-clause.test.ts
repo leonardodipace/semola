@@ -120,4 +120,18 @@ describe("select-clause", () => {
       ]),
     ).toThrow('Unknown distinct key "nickname" on table users');
   });
+
+  test("validates distinct orderBy prefix", () => {
+    expect(() =>
+      selectClauseBuilder.validateDistinctOrderBy(["firstName"], {
+        id: "asc",
+      }),
+    ).toThrow("orderBy must start with distinct columns (firstName)");
+
+    selectClauseBuilder.validateDistinctOrderBy(["firstName"], {
+      firstName: "desc",
+      id: "asc",
+    });
+    selectClauseBuilder.validateDistinctOrderBy(["firstName"]);
+  });
 });

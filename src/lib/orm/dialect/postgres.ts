@@ -10,5 +10,6 @@ export const POSTGRES_SPEC: DialectSpec = {
   formatDistinct: (quotedColumns) => ({
     selectPrefix: `DISTINCT ON (${quotedColumns.join(", ")})`,
     groupBy: "",
+    requiresOrderByPrefix: true,
   }),
 };

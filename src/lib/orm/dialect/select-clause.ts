@@ -151,6 +151,23 @@ export class SelectClauseBuilder {
     return quotedColumns;
   }
 
+  public validateDistinctOrderBy(
+    distinct: string[],
+    orderBy?: Record<string, "asc" | "desc">,
+  ) {
+    if (!orderBy) return;
+
+    const orderKeys = Object.keys(orderBy);
+
+    for (let index = 0; index < distinct.length; index++) {
+      if (orderKeys[index] !== distinct[index]) {
+        throw new Error(
+          `orderBy must start with distinct columns (${distinct.join(", ")})`,
+        );
+      }
+    }
+  }
+
   public buildStatement(input: BuildSelectStatementInput) {
     const {
       tableName,

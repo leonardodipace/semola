@@ -77,6 +77,15 @@ describe("DialectQueryBuilder", () => {
       'SELECT "id" AS "id", "title" AS "title" FROM "posts" GROUP BY "title"',
     );
     expect(query.params).toEqual([]);
+    expect(
+      builder.buildFindMany({
+        distinct: ["title"],
+        select: { id: true, title: true },
+        orderBy: { id: "asc" },
+      }).statement,
+    ).toBe(
+      'SELECT "id" AS "id", "title" AS "title" FROM "posts" GROUP BY "title" ORDER BY "id" ASC',
+    );
     expect(() =>
       builder.buildFindMany({
         // @ts-expect-error invalid runtime key

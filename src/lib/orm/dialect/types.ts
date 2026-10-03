@@ -30,6 +30,8 @@ export type DistinctClause = {
   selectPrefix: string;
   // GROUP BY column list when the dialect keys distinct that way. Empty otherwise.
   groupBy: string;
+  // Postgres DISTINCT ON requires orderBy to start with the distinct columns.
+  requiresOrderByPrefix: boolean;
 };
 
 export type DialectSpec = {

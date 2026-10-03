@@ -35,6 +35,22 @@ describe("postgres dialect", () => {
       'SELECT DISTINCT ON ("title") "id" AS "id", "title" AS "title" FROM "posts"',
     );
     expect(query.params).toEqual([]);
+
+    const ordered = builder.buildFindMany({
+      distinct: ["title"],
+      select: { id: true, title: true },
+      orderBy: { title: "asc", id: "asc" },
+    });
+
+    expect(ordered.statement).toBe(
+      'SELECT DISTINCT ON ("title") "id" AS "id", "title" AS "title" FROM "posts" ORDER BY "title" ASC, "id" ASC',
+    );
+    expect(() =>
+      builder.buildFindMany({
+        distinct: ["title"],
+        orderBy: { id: "asc" },
+      }),
+    ).toThrow("orderBy must start with distinct columns (title)");
   });
 
   test("uses numbered placeholders and postgres offset syntax", () => {
