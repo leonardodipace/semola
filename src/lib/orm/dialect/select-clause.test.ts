@@ -84,21 +84,35 @@ describe("select-clause", () => {
     expect(
       selectClauseBuilder.buildStatement({
         tableName: '"users"',
-        columns: '"first_name" AS "firstName"',
+        columns: '"id" AS "id", "first_name" AS "firstName"',
         where: "",
         orderBy: "",
         pagination: "",
-        distinct: true,
+        distinctPrefix: 'DISTINCT ON ("first_name")',
       }),
-    ).toBe('SELECT DISTINCT "first_name" AS "firstName" FROM "users"');
+    ).toBe(
+      'SELECT DISTINCT ON ("first_name") "id" AS "id", "first_name" AS "firstName" FROM "users"',
+    );
+    expect(
+      selectClauseBuilder.buildStatement({
+        tableName: '"users"',
+        columns: '"id" AS "id", "first_name" AS "firstName"',
+        where: "",
+        orderBy: "",
+        pagination: "",
+        groupBy: '"first_name"',
+      }),
+    ).toBe(
+      'SELECT "id" AS "id", "first_name" AS "firstName" FROM "users" GROUP BY "first_name"',
+    );
   });
 
-  test("validates distinct keys", () => {
-    expect(selectClauseBuilder.buildDistinct(usersTable, ["firstName"])).toBe(
-      true,
-    );
-    expect(selectClauseBuilder.buildDistinct(usersTable, [])).toBe(false);
-    expect(selectClauseBuilder.buildDistinct(usersTable)).toBe(false);
+  test("validates distinct keys and returns quoted sql names", () => {
+    expect(
+      selectClauseBuilder.buildDistinct(usersTable, ["firstName"]),
+    ).toEqual(['"first_name"']);
+    expect(selectClauseBuilder.buildDistinct(usersTable, [])).toBe(null);
+    expect(selectClauseBuilder.buildDistinct(usersTable)).toBe(null);
     expect(() =>
       selectClauseBuilder.buildDistinct(usersTable, [
         // @ts-expect-error invalid runtime key

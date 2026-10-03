@@ -70,11 +70,11 @@ describe("DialectQueryBuilder", () => {
     });
     const query = builder.buildFindMany({
       distinct: ["title"],
-      select: { title: true },
+      select: { id: true, title: true },
     });
 
     expect(query.statement).toBe(
-      'SELECT DISTINCT "title" AS "title" FROM "posts"',
+      'SELECT "id" AS "id", "title" AS "title" FROM "posts" GROUP BY "title"',
     );
     expect(query.params).toEqual([]);
     expect(() =>

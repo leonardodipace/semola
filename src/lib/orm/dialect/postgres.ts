@@ -7,4 +7,8 @@ export const POSTGRES_SPEC: DialectSpec = {
   jsonObjectFunctionName: "jsonb_build_object",
   jsonArrayAggregateFunctionName: "jsonb_agg",
   emptyJsonArrayLiteral: "'[]'::jsonb",
+  formatDistinct: (quotedColumns) => ({
+    selectPrefix: `DISTINCT ON (${quotedColumns.join(", ")})`,
+    groupBy: "",
+  }),
 };

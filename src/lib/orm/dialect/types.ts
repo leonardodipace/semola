@@ -25,6 +25,13 @@ import type { Table } from "../table/types.js";
 
 export type Adapter = "sqlite" | "postgres";
 
+export type DistinctClause = {
+  // Inserted after SELECT, e.g. `DISTINCT ON ("title")`. Empty when unused.
+  selectPrefix: string;
+  // GROUP BY column list when the dialect keys distinct that way. Empty otherwise.
+  groupBy: string;
+};
+
 export type DialectSpec = {
   name: Adapter;
   // SQLite: ignores index, returns `?`. Postgres: returns `$${index}`.
@@ -41,6 +48,8 @@ export type DialectSpec = {
   // COALESCE fallback when a `hasMany` subquery returns no rows.
   // SQLite: `'[]'`. Postgres: `'[]'::jsonb`.
   emptyJsonArrayLiteral: string;
+  // Postgres: DISTINCT ON (columns). SQLite: GROUP BY columns.
+  formatDistinct: (quotedColumns: string[]) => DistinctClause;
 };
 
 export type SqlFragment = {
@@ -194,7 +203,8 @@ export type BuildSelectStatementInput = {
   where: string;
   orderBy: string;
   pagination: string;
-  distinct?: boolean;
+  distinctPrefix?: string;
+  groupBy?: string;
 };
 
 export type QueryBuilderInput<T extends Table, R extends TableRelations> = {

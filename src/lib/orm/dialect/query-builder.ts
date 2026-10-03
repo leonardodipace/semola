@@ -85,17 +85,21 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
       ...whereParams,
       ...pagination.params,
     ];
-    const distinct = selectClauseBuilder.buildDistinct(
+    const distinctColumns = selectClauseBuilder.buildDistinct(
       this.table,
       options?.distinct,
     );
+    const distinctClause = distinctColumns
+      ? this.spec.formatDistinct(distinctColumns)
+      : undefined;
     const statement = selectClauseBuilder.buildStatement({
       tableName: quoteIdentifier(this.table.sqlName),
       columns: parts.selectColumns,
       where: whereSql,
       orderBy,
       pagination: pagination.sql,
-      distinct,
+      distinctPrefix: distinctClause?.selectPrefix || undefined,
+      groupBy: distinctClause?.groupBy || undefined,
     });
 
     return {

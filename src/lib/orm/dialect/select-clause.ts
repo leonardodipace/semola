@@ -130,9 +130,11 @@ export class SelectClauseBuilder {
   }
 
   public buildDistinct<T extends Table>(table: T, distinct?: TableDistinct<T>) {
-    if (!distinct) return false;
+    if (!distinct) return null;
 
-    if (!distinct.length) return false;
+    if (!distinct.length) return null;
+
+    const quotedColumns: string[] = [];
 
     for (const key of distinct) {
       const column = table.columns[key];
@@ -142,18 +144,32 @@ export class SelectClauseBuilder {
           `Unknown distinct key "${key}" on table ${table.sqlName}`,
         );
       }
+
+      quotedColumns.push(quoteIdentifier(column.sqlName));
     }
 
-    return true;
+    return quotedColumns;
   }
 
   public buildStatement(input: BuildSelectStatementInput) {
-    const { tableName, columns, where, orderBy, pagination, distinct } = input;
+    const {
+      tableName,
+      columns,
+      where,
+      orderBy,
+      pagination,
+      distinctPrefix,
+      groupBy,
+    } = input;
 
-    const selectKeyword = distinct ? "SELECT DISTINCT" : "SELECT";
+    const selectKeyword = distinctPrefix
+      ? `SELECT ${distinctPrefix}`
+      : "SELECT";
     let query = `${selectKeyword} ${columns} FROM ${tableName}`;
 
     if (where) query = `${query} WHERE ${where}`;
+
+    if (groupBy) query = `${query} GROUP BY ${groupBy}`;
 
     if (orderBy) query = `${query} ORDER BY ${orderBy}`;
 

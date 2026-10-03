@@ -277,7 +277,7 @@ await db.posts.deleteMany({
 | --- | --- |
 | `where` | Column operators, plus `$and` / `$or` / `$not`. Relations: `every` / `some` / `none` |
 | `select` | Fields to return |
-| `distinct` | Column names for `SELECT DISTINCT` deduplication |
+| `distinct` | Deduplicate by these columns (Postgres: `DISTINCT ON`, SQLite: `GROUP BY`) |
 | `include` | Related rows |
 | `cursor` | Unique/PK position marker for cursor pagination. Cursor row included unless `skip: 1`. Negative `take` pages backward |
 | `take` / `skip` | Limit and offset. Negative `take` reverses direction |
