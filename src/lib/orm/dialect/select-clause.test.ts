@@ -81,5 +81,29 @@ describe("select-clause", () => {
     ).toBe(
       'SELECT "id" AS "id" FROM "users" WHERE "id" = ? ORDER BY "id" ASC LIMIT ?',
     );
+    expect(
+      selectClauseBuilder.buildStatement({
+        tableName: '"users"',
+        columns: '"first_name" AS "firstName"',
+        where: "",
+        orderBy: "",
+        pagination: "",
+        distinct: true,
+      }),
+    ).toBe('SELECT DISTINCT "first_name" AS "firstName" FROM "users"');
+  });
+
+  test("validates distinct keys", () => {
+    expect(selectClauseBuilder.buildDistinct(usersTable, ["firstName"])).toBe(
+      true,
+    );
+    expect(selectClauseBuilder.buildDistinct(usersTable, [])).toBe(false);
+    expect(selectClauseBuilder.buildDistinct(usersTable)).toBe(false);
+    expect(() =>
+      selectClauseBuilder.buildDistinct(usersTable, [
+        // @ts-expect-error invalid runtime key
+        "nickname",
+      ]),
+    ).toThrow('Unknown distinct key "nickname" on table users');
   });
 });

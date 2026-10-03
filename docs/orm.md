@@ -258,6 +258,11 @@ const previousPage = await db.posts.findMany({
   orderBy: { id: "asc" },
 });
 
+const titles = await db.posts.findMany({
+  distinct: ["title"],
+  select: { title: true },
+});
+
 await db.users.update({
   where: { id: "u1" },
   data: { name: "Augusta" },
@@ -272,6 +277,7 @@ await db.posts.deleteMany({
 | --- | --- |
 | `where` | Column operators, plus `$and` / `$or` / `$not`. Relations: `every` / `some` / `none` |
 | `select` | Fields to return |
+| `distinct` | Column names for `SELECT DISTINCT` deduplication |
 | `include` | Related rows |
 | `cursor` | Unique/PK position marker for cursor pagination. Cursor row included unless `skip: 1`. Negative `take` pages backward |
 | `take` / `skip` | Limit and offset. Negative `take` reverses direction |

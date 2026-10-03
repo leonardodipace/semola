@@ -62,6 +62,29 @@ describe("DialectQueryBuilder", () => {
     expect(query.params).toEqual([true]);
   });
 
+  test("builds findMany with distinct", () => {
+    const builder = new DialectQueryBuilder({
+      spec: SQLITE_SPEC,
+      table: postsTable,
+      relations: {},
+    });
+    const query = builder.buildFindMany({
+      distinct: ["title"],
+      select: { title: true },
+    });
+
+    expect(query.statement).toBe(
+      'SELECT DISTINCT "title" AS "title" FROM "posts"',
+    );
+    expect(query.params).toEqual([]);
+    expect(() =>
+      builder.buildFindMany({
+        // @ts-expect-error invalid runtime key
+        distinct: ["missing"],
+      }),
+    ).toThrow('Unknown distinct key "missing" on table posts');
+  });
+
   test("builds findUnique and findFirst with LIMIT 1", () => {
     const builder = new DialectQueryBuilder({
       spec: SQLITE_SPEC,

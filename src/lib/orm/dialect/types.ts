@@ -194,6 +194,7 @@ export type BuildSelectStatementInput = {
   where: string;
   orderBy: string;
   pagination: string;
+  distinct?: boolean;
 };
 
 export type QueryBuilderInput<T extends Table, R extends TableRelations> = {

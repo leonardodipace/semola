@@ -1,4 +1,4 @@
-import type { TableOrderBy, TableSelect } from "../orm/types.js";
+import type { TableDistinct, TableOrderBy, TableSelect } from "../orm/types.js";
 import type { Table } from "../table/types.js";
 import { quoteIdentifier } from "../utils.js";
 import type {
@@ -129,10 +129,29 @@ export class SelectClauseBuilder {
     return { sql: `LIMIT ${takePh} OFFSET ${skipPh}`, params };
   }
 
-  public buildStatement(input: BuildSelectStatementInput) {
-    const { tableName, columns, where, orderBy, pagination } = input;
+  public buildDistinct<T extends Table>(table: T, distinct?: TableDistinct<T>) {
+    if (!distinct) return false;
 
-    let query = `SELECT ${columns} FROM ${tableName}`;
+    if (!distinct.length) return false;
+
+    for (const key of distinct) {
+      const column = table.columns[key];
+
+      if (!column) {
+        throw new Error(
+          `Unknown distinct key "${key}" on table ${table.sqlName}`,
+        );
+      }
+    }
+
+    return true;
+  }
+
+  public buildStatement(input: BuildSelectStatementInput) {
+    const { tableName, columns, where, orderBy, pagination, distinct } = input;
+
+    const selectKeyword = distinct ? "SELECT DISTINCT" : "SELECT";
+    let query = `${selectKeyword} ${columns} FROM ${tableName}`;
 
     if (where) query = `${query} WHERE ${where}`;
 
