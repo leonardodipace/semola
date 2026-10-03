@@ -187,6 +187,48 @@ describe("relation helpers", () => {
     await orm.$raw.close();
   });
 
+  test("findMany cursor accepts unique keys and rejects non-unique", async () => {
+    const orm = createOrm({
+      adapter: "sqlite",
+      url: ":memory:",
+      tables: {
+        users: usersTable,
+      },
+    });
+
+    const acceptFindManyOptions = <TOptions>(_options: TOptions) => {
+      return undefined;
+    };
+
+    acceptFindManyOptions<Parameters<typeof orm.users.findMany>[0]>({
+      cursor: { id: "user-1" },
+      orderBy: { id: "asc" },
+      take: 10,
+      skip: 1,
+    });
+
+    acceptFindManyOptions<Parameters<typeof orm.users.findMany>[0]>({
+      cursor: { email: "ada@example.com" },
+      orderBy: { email: "asc" },
+      take: -5,
+    });
+
+    const invalidCursor: Parameters<typeof orm.users.findMany>[0] = {
+      // @ts-expect-error
+      cursor: { name: "Ada" },
+    };
+
+    const invalidFindFirstCursor: Parameters<typeof orm.users.findFirst>[0] = {
+      // @ts-expect-error
+      cursor: { id: "user-1" },
+    };
+
+    expect(invalidCursor).toBeDefined();
+    expect(invalidFindFirstCursor).toBeDefined();
+
+    await orm.$raw.close();
+  });
+
   test("enumType enforces literal values and equals-only where operators", async () => {
     const table = defineTable({
       sqlName: "users",

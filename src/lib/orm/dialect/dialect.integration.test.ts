@@ -114,6 +114,39 @@ for (const live of integrationAdapters()) {
       await sql.close();
     });
 
+    test("findMany cursor and negative take page in orderBy order", async () => {
+      const sql = live.createSql();
+
+      await setupUsers(sql);
+      await insertUser(sql, "user-0", "Zoe", "2025-01-01T00:00:00.000Z");
+      await insertUser(sql, "user-1", "Ada", "2025-01-02T00:00:00.000Z");
+      await insertUser(sql, "user-2", "Grace", "2025-01-03T00:00:00.000Z");
+      await insertUser(sql, "user-3", "Alan", "2025-01-04T00:00:00.000Z");
+
+      const dialect = getDialect({
+        adapter: live.adapter,
+        table: usersTable,
+        relations: {},
+      });
+      const next = await dialect.findMany(sql, {
+        cursor: { id: "user-2" },
+        orderBy: { id: "asc" },
+        take: 2,
+        skip: 1,
+      });
+      const previous = await dialect.findMany(sql, {
+        cursor: { id: "user-2" },
+        orderBy: { id: "asc" },
+        take: -2,
+        skip: 1,
+      });
+
+      expect(next.map((row) => row.id)).toEqual(["user-3"]);
+      expect(previous.map((row) => row.id)).toEqual(["user-0", "user-1"]);
+
+      await sql.close();
+    });
+
     test("findUnique, findFirst, update, and delete return expected rows", async () => {
       const sql = live.createSql();
 

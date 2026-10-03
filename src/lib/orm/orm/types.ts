@@ -291,27 +291,6 @@ export type TableInclude<
     | RelationIncludeOptions<TRelations[K], TAllTables, TAllRelations>;
 }>;
 
-export type FindManyOptions<
-  T extends Table,
-  TRelations extends TableRelations = TableRelations,
-  TAllTables extends Record<string, Table> = Record<string, Table>,
-  TAllRelations = Record<string, unknown>,
-> = OrmQueryOptions & {
-  where?: TableWhere<T, TRelations>;
-  select?: TableSelect<T>;
-  orderBy?: TableOrderBy<T>;
-  include?: TableInclude<TRelations, TAllTables, TAllRelations>;
-  take?: number;
-  skip?: number;
-};
-
-export type FindFirstOptions<
-  T extends Table,
-  TRelations extends TableRelations = TableRelations,
-  TAllTables extends Record<string, Table> = Record<string, Table>,
-  TAllRelations = Record<string, unknown>,
-> = Omit<FindManyOptions<T, TRelations, TAllTables, TAllRelations>, "take">;
-
 type TableColumns<T extends Table> = T["columns"];
 
 type TableColumnByName<
@@ -341,6 +320,35 @@ type UniqueColumnWhereShape<T extends Table> = {
     TableColumnByName<T, TColumnName>
   >;
 };
+
+export type TableCursor<T extends Table> = ExactlyOne<
+  UniqueColumnWhereShape<T>
+>;
+
+export type FindManyOptions<
+  T extends Table,
+  TRelations extends TableRelations = TableRelations,
+  TAllTables extends Record<string, Table> = Record<string, Table>,
+  TAllRelations = Record<string, unknown>,
+> = OrmQueryOptions & {
+  where?: TableWhere<T, TRelations>;
+  select?: TableSelect<T>;
+  orderBy?: TableOrderBy<T>;
+  include?: TableInclude<TRelations, TAllTables, TAllRelations>;
+  cursor?: TableCursor<T>;
+  take?: number;
+  skip?: number;
+};
+
+export type FindFirstOptions<
+  T extends Table,
+  TRelations extends TableRelations = TableRelations,
+  TAllTables extends Record<string, Table> = Record<string, Table>,
+  TAllRelations = Record<string, unknown>,
+> = Omit<
+  FindManyOptions<T, TRelations, TAllTables, TAllRelations>,
+  "take" | "cursor"
+>;
 
 type NonUniqueColumnKeys<T extends Table> = Exclude<
   keyof TableColumns<T>,
