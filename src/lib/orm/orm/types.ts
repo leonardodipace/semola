@@ -244,6 +244,8 @@ export type TableOrderBy<T extends Table> = {
   [TColumnName in keyof T["columns"]]?: "asc" | "desc";
 };
 
+export type TableDistinct<T extends Table> = Array<keyof T["columns"] & string>;
+
 type RelationTable<R extends HasMany<Table> | HasOne<Table>> = R extends {
   _table: infer T extends Table;
 }
@@ -334,6 +336,7 @@ export type FindManyOptions<
   where?: TableWhere<T, TRelations>;
   select?: TableSelect<T>;
   orderBy?: TableOrderBy<T>;
+  distinct?: TableDistinct<T>;
   include?: TableInclude<TRelations, TAllTables, TAllRelations>;
   cursor?: TableCursor<T>;
   take?: number;

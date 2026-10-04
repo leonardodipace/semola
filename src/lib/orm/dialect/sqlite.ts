@@ -7,6 +7,11 @@ export const SQLITE_SPEC: DialectSpec = {
   jsonObjectFunctionName: "json_object",
   jsonArrayAggregateFunctionName: "json_group_array",
   emptyJsonArrayLiteral: "'[]'",
+  formatDistinct: (quotedColumns) => ({
+    selectPrefix: "",
+    groupBy: quotedColumns.join(", "),
+    requiresOrderByPrefix: false,
+  }),
 };
 
 const sqliteForeignKeysOn = new WeakMap<Bun.SQL, Promise<unknown>>();

@@ -223,8 +223,19 @@ describe("relation helpers", () => {
       cursor: { id: "user-1" },
     };
 
+    acceptFindManyOptions<Parameters<typeof orm.users.findMany>[0]>({
+      distinct: ["name", "email"],
+      select: { name: true, email: true },
+    });
+
+    const invalidDistinct: Parameters<typeof orm.users.findMany>[0] = {
+      // @ts-expect-error
+      distinct: ["missing"],
+    };
+
     expect(invalidCursor).toBeDefined();
     expect(invalidFindFirstCursor).toBeDefined();
+    expect(invalidDistinct).toBeDefined();
 
     await orm.$raw.close();
   });

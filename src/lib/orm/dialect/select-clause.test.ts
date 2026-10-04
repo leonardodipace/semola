@@ -81,5 +81,57 @@ describe("select-clause", () => {
     ).toBe(
       'SELECT "id" AS "id" FROM "users" WHERE "id" = ? ORDER BY "id" ASC LIMIT ?',
     );
+    expect(
+      selectClauseBuilder.buildStatement({
+        tableName: '"users"',
+        columns: '"id" AS "id", "first_name" AS "firstName"',
+        where: "",
+        orderBy: "",
+        pagination: "",
+        distinctPrefix: 'DISTINCT ON ("first_name")',
+      }),
+    ).toBe(
+      'SELECT DISTINCT ON ("first_name") "id" AS "id", "first_name" AS "firstName" FROM "users"',
+    );
+    expect(
+      selectClauseBuilder.buildStatement({
+        tableName: '"users"',
+        columns: '"id" AS "id", "first_name" AS "firstName"',
+        where: "",
+        orderBy: "",
+        pagination: "",
+        groupBy: '"first_name"',
+      }),
+    ).toBe(
+      'SELECT "id" AS "id", "first_name" AS "firstName" FROM "users" GROUP BY "first_name"',
+    );
+  });
+
+  test("validates distinct keys and returns quoted sql names", () => {
+    expect(
+      selectClauseBuilder.buildDistinct(usersTable, ["firstName"]),
+    ).toEqual(['"first_name"']);
+    expect(selectClauseBuilder.buildDistinct(usersTable, [])).toBe(null);
+    expect(selectClauseBuilder.buildDistinct(usersTable)).toBe(null);
+    expect(() =>
+      selectClauseBuilder.buildDistinct(usersTable, [
+        // @ts-expect-error invalid runtime key
+        "nickname",
+      ]),
+    ).toThrow('Unknown distinct key "nickname" on table users');
+  });
+
+  test("validates distinct orderBy prefix", () => {
+    expect(() =>
+      selectClauseBuilder.validateDistinctOrderBy(["firstName"], {
+        id: "asc",
+      }),
+    ).toThrow("orderBy must start with distinct columns (firstName)");
+
+    selectClauseBuilder.validateDistinctOrderBy(["firstName"], {
+      firstName: "desc",
+      id: "asc",
+    });
+    selectClauseBuilder.validateDistinctOrderBy(["firstName"]);
   });
 });

@@ -1,4 +1,4 @@
-import type { TableOrderBy, TableSelect } from "../orm/types.js";
+import type { TableDistinct, TableOrderBy, TableSelect } from "../orm/types.js";
 import type { Table } from "../table/types.js";
 import { quoteIdentifier } from "../utils.js";
 import type {
@@ -129,12 +129,64 @@ export class SelectClauseBuilder {
     return { sql: `LIMIT ${takePh} OFFSET ${skipPh}`, params };
   }
 
-  public buildStatement(input: BuildSelectStatementInput) {
-    const { tableName, columns, where, orderBy, pagination } = input;
+  public buildDistinct<T extends Table>(table: T, distinct?: TableDistinct<T>) {
+    if (!distinct) return null;
 
-    let query = `SELECT ${columns} FROM ${tableName}`;
+    if (!distinct.length) return null;
+
+    const quotedColumns: string[] = [];
+
+    for (const key of distinct) {
+      const column = table.columns[key];
+
+      if (!column) {
+        throw new Error(
+          `Unknown distinct key "${key}" on table ${table.sqlName}`,
+        );
+      }
+
+      quotedColumns.push(quoteIdentifier(column.sqlName));
+    }
+
+    return quotedColumns;
+  }
+
+  public validateDistinctOrderBy(
+    distinct: string[],
+    orderBy?: Record<string, "asc" | "desc">,
+  ) {
+    if (!orderBy) return;
+
+    const orderKeys = Object.keys(orderBy);
+
+    for (let index = 0; index < distinct.length; index++) {
+      if (orderKeys[index] !== distinct[index]) {
+        throw new Error(
+          `orderBy must start with distinct columns (${distinct.join(", ")})`,
+        );
+      }
+    }
+  }
+
+  public buildStatement(input: BuildSelectStatementInput) {
+    const {
+      tableName,
+      columns,
+      where,
+      orderBy,
+      pagination,
+      distinctPrefix,
+      groupBy,
+    } = input;
+
+    const selectKeyword = distinctPrefix
+      ? `SELECT ${distinctPrefix}`
+      : "SELECT";
+    let query = `${selectKeyword} ${columns} FROM ${tableName}`;
 
     if (where) query = `${query} WHERE ${where}`;
+
+    if (groupBy) query = `${query} GROUP BY ${groupBy}`;
 
     if (orderBy) query = `${query} ORDER BY ${orderBy}`;
 
