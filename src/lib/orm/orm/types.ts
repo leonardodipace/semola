@@ -46,17 +46,27 @@ export type OrmPoolOptions = {
   connectionTimeout?: number;
 };
 
-export type CreateOrmOptions<
-  T extends Record<string, Table> = Record<string, Table>,
-  R extends RelationsFor<T> = RelationsFor<T>,
+type CreateOrmOptionsBase<
+  T extends Record<string, Table>,
+  R extends RelationsFor<T>,
 > = {
-  adapter: Adapter;
   url: string;
   tables: T;
   relations?: R;
   hooks?: OrmHooksConfig<T, R>;
-  pool?: OrmPoolOptions;
 };
+
+export type CreateOrmOptions<
+  T extends Record<string, Table> = Record<string, Table>,
+  R extends RelationsFor<T> = RelationsFor<T>,
+> =
+  | (CreateOrmOptionsBase<T, R> & {
+      adapter: "sqlite";
+    })
+  | (CreateOrmOptionsBase<T, R> & {
+      adapter: "postgres";
+      pool?: OrmPoolOptions;
+    });
 
 // Look up the raw relations for a table by matching its structural type against all tables.
 // Uses bidirectional extends check to require exact structural match.

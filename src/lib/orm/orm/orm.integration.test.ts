@@ -496,7 +496,7 @@ describe("sqlite orm integration", () => {
       await orm.$raw.close();
     });
 
-    test("echoes pool options on $config", async () => {
+    test("applies pool options to Bun.SQL and echoes them on $config", async () => {
       const pool = {
         max: 4,
         idleTimeout: 30,
@@ -511,6 +511,10 @@ describe("sqlite orm integration", () => {
       });
 
       expect(orm.$config.pool).toEqual(pool);
+      expect(orm.$raw.options.max).toBe(4);
+      expect(orm.$raw.options.idleTimeout).toBe(30_000);
+      expect(orm.$raw.options.maxLifetime).toBe(3_600_000);
+      expect(orm.$raw.options.connectionTimeout).toBe(10_000);
 
       await orm.$raw.close();
     });
@@ -1854,13 +1858,15 @@ if (SEMOLA_POSTGRES_URL) {
   const postgresUrl = SEMOLA_POSTGRES_URL;
 
   describe("postgres connection pool", () => {
-    test("queues excess queries when max is 1", async () => {
+    test("honors max pool size against a live database", async () => {
       const orm = createOrm({
         adapter: "postgres",
         url: postgresUrl,
         tables: { users: usersTable },
         pool: { max: 1 },
       });
+
+      expect(orm.$raw.options.max).toBe(1);
 
       await Promise.all([orm.$ping(), orm.$ping(), orm.$ping()]);
 

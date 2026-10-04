@@ -7,6 +7,7 @@ import type {
   CreateOrmOptions,
   ObjectEntries,
   OrmClient,
+  OrmPoolOptions,
   OrmTableClients,
   RelationsFor,
   StringKeyOf,
@@ -64,6 +65,13 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
   public buildClient(): OrmClient<T, R> {
     const tableClients = this.buildTableClients(this.$raw);
     const transaction = this.buildTransaction();
+
+    let pool: OrmPoolOptions | undefined;
+
+    if (this.options.adapter === "postgres") {
+      pool = this.options.pool;
+    }
+
     const client = {
       ...tableClients,
       $raw: this.$raw,
@@ -71,7 +79,7 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
         adapter: this.options.adapter,
         url: redactDatabaseUrl(this.options.url),
         tables: this.options.tables,
-        pool: this.options.pool,
+        pool,
       },
       $transaction: transaction,
       $ping: () => this.ping(),

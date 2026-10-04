@@ -346,7 +346,7 @@ await db.$raw.unsafe(`SELECT 1`);
 
 ## Connection pooling
 
-Postgres reuses connections through Bun's SQL pool. Queries wait in Bun's queue when every connection is busy. Pass `pool` to set size, idle cleanup, max lifetime, and connect timeout. SQLite ignores `pool`.
+Postgres reuses connections through Bun's SQL pool. Queries wait in Bun's queue when every connection is busy. Pass `pool` to set size, idle cleanup, max lifetime, and connect timeout. `pool` is only available when `adapter` is `"postgres"`.
 
 ```typescript
 const db = createOrm({
