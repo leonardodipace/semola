@@ -39,6 +39,13 @@ export type OrmQueryOptions = {
   $skipHooks?: boolean;
 };
 
+export type OrmPoolOptions = {
+  max?: number;
+  idleTimeout?: number;
+  maxLifetime?: number;
+  connectionTimeout?: number;
+};
+
 export type CreateOrmOptions<
   T extends Record<string, Table> = Record<string, Table>,
   R extends RelationsFor<T> = RelationsFor<T>,
@@ -48,6 +55,7 @@ export type CreateOrmOptions<
   tables: T;
   relations?: R;
   hooks?: OrmHooksConfig<T, R>;
+  pool?: OrmPoolOptions;
 };
 
 // Look up the raw relations for a table by matching its structural type against all tables.
@@ -94,10 +102,12 @@ export type OrmClient<
     adapter: Adapter;
     url: string;
     tables: T;
+    pool?: OrmPoolOptions;
   };
   $transaction: <TResult>(
     callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
   ) => Promise<TResult>;
+  $ping: () => Promise<void>;
 };
 
 export type TransactionClient<

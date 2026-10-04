@@ -44,9 +44,21 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
 
   public constructor(options: CreateOrmOptions<T, R>) {
     this.options = options;
-    this.$raw = new Bun.SQL(options.url, {
+
+    let sqlOptions: Bun.SQL.Options = {
       adapter: options.adapter,
-    });
+    };
+
+    if (options.adapter === "postgres") {
+      if (options.pool) {
+        sqlOptions = {
+          adapter: options.adapter,
+          ...options.pool,
+        };
+      }
+    }
+
+    this.$raw = new Bun.SQL(options.url, sqlOptions);
   }
 
   public buildClient(): OrmClient<T, R> {
@@ -59,8 +71,10 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
         adapter: this.options.adapter,
         url: redactDatabaseUrl(this.options.url),
         tables: this.options.tables,
+        pool: this.options.pool,
       },
       $transaction: transaction,
+      $ping: () => this.ping(),
     };
 
     connectionUrls.set(client, this.options.url);
@@ -123,6 +137,10 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
         return await callback(txClient);
       });
     };
+  }
+
+  private async ping() {
+    await this.$raw.unsafe("SELECT 1");
   }
 
   private getTableRelations<K extends StringKeyOf<T>>(
