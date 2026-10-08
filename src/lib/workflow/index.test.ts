@@ -4335,6 +4335,41 @@ describe("workflow", () => {
       await stop(wf);
     });
 
+    test("status is compensating while unwind runs", async () => {
+      const redis = createRedis();
+      let hang = true;
+
+      const wf = defineWorkflow({
+        name: `saga-status-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("create-vm", async () => ({ id: "vm-1" }), {
+            compensate: async ({ signal }) => {
+              while (hang) {
+                if (signal.aborted) return;
+                await sleep(10);
+              }
+            },
+          });
+
+          await step("provision", async () => {
+            throw new Error("provision failed");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "compensating");
+      hang = false;
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(execution.error).toBe("provision failed");
+
+      await stop(wf);
+    });
+
     test("resume after compensation is rejected", async () => {
       const redis = createRedis();
 

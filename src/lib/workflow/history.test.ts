@@ -164,4 +164,41 @@ describe("parseHistory", () => {
       stepName: "create-account",
     });
   });
+
+  test("compensation failed updates step state", () => {
+    const now = 1_700_000_000_000;
+
+    const view = parseHistory([
+      JSON.stringify({
+        type: "WorkflowStarted",
+        input: "{}",
+        partitionKey: "",
+        timestamp: now,
+      }),
+      JSON.stringify({
+        type: "CompensationStarted",
+        reason: "cancelled",
+        error: null,
+        timestamp: now + 1,
+      }),
+      JSON.stringify({
+        type: "CompensationFailed",
+        stepId: "a0",
+        stepName: "create-account",
+        error: "undo failed",
+        retryable: true,
+        attempt: 1,
+        timestamp: now + 2,
+      }),
+    ]);
+
+    expect(view.compensation?.reason).toBe("cancelled");
+    expect(view.compensation?.steps.get("a0")).toEqual({
+      status: "failed",
+      stepName: "create-account",
+      error: "undo failed",
+      retryable: true,
+      attempt: 1,
+    });
+  });
 });

@@ -284,7 +284,7 @@ const collectCompensations = async <TInput, TResult>(
   let stepSeq = 0;
   let timerSeq = 0;
 
-  await mightThrow(
+  const [handlerError] = await mightThrow(
     Promise.resolve(
       options.handler({
         input: workflowInput,
@@ -293,6 +293,12 @@ const collectCompensations = async <TInput, TResult>(
         step: async (name, _handler, stepOptions) => {
           const stepId = `a${stepSeq++}`;
           const state = view.steps.get(stepId);
+
+          if (state && state.stepName !== name) {
+            throw new Error(
+              `nondeterminism: step ${stepId} expected "${state.stepName}", got "${name}"`,
+            );
+          }
 
           if (state?.status === "completed") {
             const result = fromJson(state.result, `step ${name}`);
@@ -316,7 +322,7 @@ const collectCompensations = async <TInput, TResult>(
         },
         sleep: async (ms) => {
           if (!Number.isFinite(ms) || ms < 0) {
-            throw new Paused();
+            throw new Error("sleep(ms) requires a non-negative finite number");
           }
 
           const timerId = `t${timerSeq++}`;
@@ -329,6 +335,10 @@ const collectCompensations = async <TInput, TResult>(
       }),
     ),
   );
+
+  if (handlerError) {
+    if (!(handlerError instanceof Paused)) throw handlerError;
+  }
 
   return items;
 };
@@ -1202,12 +1212,16 @@ export class WorkflowEngine<TInput, TResult> {
     if (view.compensation) return true;
     if (view.terminal) return false;
 
-    const items = await collectCompensations({
-      options: this.options,
-      view,
-      executionId,
-    });
+    const [collectError, items] = await mightThrow(
+      collectCompensations({
+        options: this.options,
+        view,
+        executionId,
+      }),
+    );
 
+    // Collect blow → skip unwind; caller fails/cancels with original reason.
+    if (collectError) return false;
     if (items.length === 0) return false;
 
     const appended = await this.store.appendEvents({
@@ -1250,11 +1264,27 @@ export class WorkflowEngine<TInput, TResult> {
 
     if (!phase) return false;
 
-    const items = await collectCompensations({
-      options: this.options,
-      view,
-      executionId,
-    });
+    const [collectError, items] = await mightThrow(
+      collectCompensations({
+        options: this.options,
+        view,
+        executionId,
+      }),
+    );
+
+    if (collectError) {
+      await this.finishCompensation({
+        executionId,
+        reason: "failed",
+        error: collectError.message,
+        rawInput,
+        partitionKey,
+        partitionSlot,
+        token,
+      });
+      return false;
+    }
+
     const lifo = items.slice().reverse();
 
     if (lifo.length === 0) {
