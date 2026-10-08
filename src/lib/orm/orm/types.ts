@@ -61,7 +61,8 @@ export type CreateOrmOptions<
   R extends RelationsFor<T> = RelationsFor<T>,
 > =
   | (CreateOrmOptionsBase<T, R> & {
-      adapter: "sqlite";
+      adapter: "sqlite" | "postgres";
+      pool?: never;
     })
   | (CreateOrmOptionsBase<T, R> & {
       adapter: "postgres";
