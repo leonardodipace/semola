@@ -39,16 +39,35 @@ export type OrmQueryOptions = {
   $skipHooks?: boolean;
 };
 
-export type CreateOrmOptions<
-  T extends Record<string, Table> = Record<string, Table>,
-  R extends RelationsFor<T> = RelationsFor<T>,
+export type OrmPoolOptions = {
+  max?: number;
+  idleTimeout?: number;
+  maxLifetime?: number;
+  connectionTimeout?: number;
+};
+
+type CreateOrmOptionsBase<
+  T extends Record<string, Table>,
+  R extends RelationsFor<T>,
 > = {
-  adapter: Adapter;
   url: string;
   tables: T;
   relations?: R;
   hooks?: OrmHooksConfig<T, R>;
 };
+
+export type CreateOrmOptions<
+  T extends Record<string, Table> = Record<string, Table>,
+  R extends RelationsFor<T> = RelationsFor<T>,
+> =
+  | (CreateOrmOptionsBase<T, R> & {
+      adapter: "sqlite" | "postgres";
+      pool?: never;
+    })
+  | (CreateOrmOptionsBase<T, R> & {
+      adapter: "postgres";
+      pool?: OrmPoolOptions;
+    });
 
 // Look up the raw relations for a table by matching its structural type against all tables.
 // Uses bidirectional extends check to require exact structural match.
@@ -94,10 +113,12 @@ export type OrmClient<
     adapter: Adapter;
     url: string;
     tables: T;
+    pool?: OrmPoolOptions;
   };
   $transaction: <TResult>(
     callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
   ) => Promise<TResult>;
+  $ping: () => Promise<void>;
 };
 
 export type TransactionClient<

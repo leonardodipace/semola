@@ -344,6 +344,28 @@ await db.$raw.unsafe(`SELECT 1`);
 
 `$raw` is the underlying `Bun.SQL` instance. Prefer migrations for schema changes.
 
+## Connection pooling
+
+Postgres reuses connections through Bun's SQL pool. Queries wait in Bun's queue when every connection is busy. Pass `pool` to set size, idle cleanup, max lifetime, and connect timeout. `pool` is only available when `adapter` is `"postgres"`.
+
+```typescript
+const db = createOrm({
+  adapter: "postgres",
+  url: process.env.DATABASE_URL!,
+  tables: { users },
+  pool: {
+    max: 20,
+    idleTimeout: 30,
+    maxLifetime: 3600,
+    connectionTimeout: 10,
+  },
+});
+
+await db.$ping();
+```
+
+`$ping()` is a public client method. It runs `SELECT 1` and rejects if the database is unreachable.
+
 ## Hooks
 
 Before-hooks may return patched options. After-hooks and read hooks receive context only. Column-specific work belongs on `hooks.tables.<name>`.
@@ -472,6 +494,7 @@ await db.$transaction(async (tx) => {
 | `tables` | Map of `defineTable` results |
 | `relations` | Optional `one` / `many` map |
 | `hooks` | Global and per-table lifecycle hooks |
+| `pool` | Optional Bun SQL pool settings for Postgres: `max`, `idleTimeout`, `maxLifetime`, `connectionTimeout` (seconds) |
 
 ### Client
 
@@ -480,4 +503,5 @@ await db.$transaction(async (tx) => {
 | `db.<table>` | Typed table client |
 | `db.$raw` | Underlying `Bun.SQL` |
 | `db.$transaction(cb)` | Run work in a transaction |
-| `db.$config` | Adapter, redacted URL, and tables |
+| `db.$config` | Adapter, redacted URL, tables, and pool |
+| `db.$ping()` | Health check (`SELECT 1`) |

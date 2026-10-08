@@ -7,6 +7,7 @@ import {
   PG_ID,
   PG_ID_2,
   PG_ID_3,
+  SEMOLA_POSTGRES_URL,
 } from "../integration-helpers.js";
 import { defineTable } from "../table/index.js";
 import type { Table } from "../table/types.js";
@@ -200,6 +201,14 @@ for (const live of integrationAdapters()) {
       const note = await orm.notes.findUnique({ where: { id: postId } });
 
       expect(note?.userId).toBe(id);
+
+      await orm.$raw.close();
+    });
+
+    test("$ping() resolves", async () => {
+      const orm = await open();
+
+      await orm.$ping();
 
       await orm.$raw.close();
     });
@@ -482,6 +491,42 @@ describe("sqlite orm integration", () => {
       expect(orm.$config.adapter).toBe("sqlite");
       expect(orm.$config.url).toBe(":memory:");
       expect(orm.$config.tables.users).toBe(usersTable);
+      expect(orm.$config.pool).toBeUndefined();
+
+      await orm.$raw.close();
+    });
+
+    test("applies pool options to Bun.SQL and echoes them on $config", async () => {
+      const pool = {
+        max: 4,
+        idleTimeout: 30,
+        maxLifetime: 3600,
+        connectionTimeout: 10,
+      };
+      const orm = createOrm({
+        adapter: "postgres",
+        url: "postgres://user:secret@localhost:5432/app",
+        tables: { users: usersTable },
+        pool,
+      });
+
+      expect(orm.$config.pool).toEqual(pool);
+      expect(orm.$raw.options.max).toBe(4);
+      expect(orm.$raw.options.idleTimeout).toBe(30_000);
+      expect(orm.$raw.options.maxLifetime).toBe(3_600_000);
+      expect(orm.$raw.options.connectionTimeout).toBe(10_000);
+
+      await orm.$raw.close();
+    });
+
+    test("$ping() resolves against sqlite", async () => {
+      const orm = createOrm({
+        adapter: "sqlite",
+        url: ":memory:",
+        tables: { users: usersTable },
+      });
+
+      await orm.$ping();
 
       await orm.$raw.close();
     });
@@ -1808,3 +1853,24 @@ describe("sqlite orm integration", () => {
     });
   });
 });
+
+if (SEMOLA_POSTGRES_URL) {
+  const postgresUrl = SEMOLA_POSTGRES_URL;
+
+  describe("postgres connection pool", () => {
+    test("honors max pool size against a live database", async () => {
+      const orm = createOrm({
+        adapter: "postgres",
+        url: postgresUrl,
+        tables: { users: usersTable },
+        pool: { max: 1 },
+      });
+
+      expect(orm.$raw.options.max).toBe(1);
+
+      await Promise.all([orm.$ping(), orm.$ping(), orm.$ping()]);
+
+      await orm.$raw.close();
+    });
+  });
+}
