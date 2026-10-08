@@ -356,6 +356,7 @@ export class WorkflowEngine<TInput, TResult> {
   private readonly retryMultiplier: number;
   private readonly retryMaxDelay: number;
   private readonly aborts = new Map<string, AbortController>();
+  private readonly compensationAborts = new Map<string, AbortController>();
   private readonly compensating = new Set<string>();
   private readonly capacitySlots = new Map<string, Map<string, number>>();
   private readonly lostLeases = new Set<string>();
@@ -534,6 +535,17 @@ export class WorkflowEngine<TInput, TResult> {
     if (!controller) {
       controller = new AbortController();
       this.aborts.set(executionId, controller);
+    }
+
+    return controller;
+  }
+
+  private compensationAbortController(executionId: string) {
+    let controller = this.compensationAborts.get(executionId);
+
+    if (!controller) {
+      controller = new AbortController();
+      this.compensationAborts.set(executionId, controller);
     }
 
     return controller;
@@ -1373,7 +1385,7 @@ export class WorkflowEngine<TInput, TResult> {
         compensate({
           input: workflowInput,
           result,
-          signal: this.abortController(executionId).signal,
+          signal: this.compensationAbortController(executionId).signal,
           fail: (message) => {
             throw new NonRetryableStepError(message);
           },
@@ -1945,6 +1957,7 @@ export class WorkflowEngine<TInput, TResult> {
 
     await this.store.markInactive(executionId);
     this.aborts.delete(executionId);
+    this.compensationAborts.delete(executionId);
     this.compensating.delete(executionId);
     this.capacitySlots.delete(executionId);
   }

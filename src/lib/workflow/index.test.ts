@@ -4297,6 +4297,7 @@ describe("workflow", () => {
     test("cancel after completed steps compensates then cancelled", async () => {
       const redis = createRedis();
       const order: string[] = [];
+      let compensateSignalAborted: boolean | undefined;
 
       const wf = defineWorkflow({
         name: `saga-cancel-${crypto.randomUUID()}`,
@@ -4311,7 +4312,8 @@ describe("workflow", () => {
               return { id: "vm-1" };
             },
             {
-              compensate: async ({ result }) => {
+              compensate: async ({ result, signal }) => {
+                compensateSignalAborted = signal.aborted;
                 order.push(`terminate:${result.id}`);
               },
             },
@@ -4333,6 +4335,7 @@ describe("workflow", () => {
 
       expect(execution.status).toBe("cancelled");
       expect(order).toEqual(["create-vm", "terminate:vm-1"]);
+      expect(compensateSignalAborted).toBe(false);
 
       await stop(wf);
     });
