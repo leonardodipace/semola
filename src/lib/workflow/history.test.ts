@@ -124,4 +124,44 @@ describe("parseHistory", () => {
       delayMs,
     });
   });
+
+  test("compensation events do not set terminal", () => {
+    const now = 1_700_000_000_000;
+
+    const view = parseHistory([
+      JSON.stringify({
+        type: "WorkflowStarted",
+        input: "{}",
+        partitionKey: "",
+        timestamp: now,
+      }),
+      JSON.stringify({
+        type: "StepCompleted",
+        stepId: "a0",
+        stepName: "create-account",
+        result: '"acc-1"',
+        timestamp: now + 1,
+      }),
+      JSON.stringify({
+        type: "CompensationStarted",
+        reason: "failed",
+        error: "provision failed",
+        timestamp: now + 2,
+      }),
+      JSON.stringify({
+        type: "CompensationCompleted",
+        stepId: "a0",
+        stepName: "create-account",
+        timestamp: now + 3,
+      }),
+    ]);
+
+    expect(view.terminal).toBeNull();
+    expect(view.compensation?.reason).toBe("failed");
+    expect(view.compensation?.error).toBe("provision failed");
+    expect(view.compensation?.steps.get("a0")).toEqual({
+      status: "completed",
+      stepName: "create-account",
+    });
+  });
 });

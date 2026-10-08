@@ -35,7 +35,7 @@ Run fallow with `bunx fallow` (no install or dev dependency needed). Example: `b
 - **Zero runtime dependencies** - do not add packages without strong reason.
 - **Imports** - use `.js` extensions in TypeScript imports (`from "./types.js"`).
 - **Module layout** - each package under `src/lib/<name>/` typically has `index.ts`, `types.ts`, `errors.ts`, and colocated `*.test.ts`.
-- **Types** - define types in `types.ts` and import them from there. Do not re-export types from other modules' `types.ts` or `index.ts`; consumers import from the defining file.
+- **Types** - define types in `types.ts` and import them from there. Never declare inline object types in library source (`const x: { a: string }`, `fn(arg: { a: string })`, inline return shapes). Name them in `types.ts`. Tests may use inline shapes for fixtures. Do not re-export types from other modules' `types.ts` or `index.ts`; consumers import from the defining file.
 - **Errors** - use `mightThrow` / `mightThrowSync` from `semola/errors`; define module-specific error classes in `errors.ts`.
 - **Validation** - Standard Schema in library code, not Zod-specific APIs.
 - **Build** - `tsdown` (not tsc for output).
@@ -137,6 +137,7 @@ When a module supports multiple adapters (or dialects), keep an **adapter-driven
 
 ### TypeScript edge cases
 
+- No inline object type literals in library source. Name the type in `types.ts`.
 - Const type parameters for literal types.
 - After a guard, prefer `?.` over extracting a local - `options.validate?.(value)` not `const v = options.validate; v(value)`.
 - Use explicit discriminant properties for union narrowing.

@@ -1,6 +1,7 @@
 export type WorkflowStatus =
   | "pending"
   | "running"
+  | "compensating"
   | "completed"
   | "failed"
   | "cancelled";
@@ -35,6 +36,21 @@ export type StepHandler<TInput, TStep> = (
   context: StepContext<TInput>,
 ) => TStep | Promise<TStep>;
 
+export type StepCompensateContext<TInput, TStep> = {
+  input: TInput;
+  result: TStep;
+  signal: AbortSignal;
+  fail: (message: string) => never;
+};
+
+export type StepCompensateHandler<TInput, TStep> = (
+  context: StepCompensateContext<TInput, TStep>,
+) => void | Promise<void>;
+
+export type StepOptions<TInput, TStep> = {
+  compensate?: StepCompensateHandler<TInput, TStep>;
+};
+
 export type WorkflowHandlerContext<TInput> = {
   input: TInput;
   executionId: string;
@@ -42,6 +58,7 @@ export type WorkflowHandlerContext<TInput> = {
   step: <TStep>(
     name: string,
     handler: StepHandler<TInput, TStep>,
+    options?: StepOptions<TInput, TStep>,
   ) => Promise<TStep>;
   sleep: (ms: number) => Promise<void>;
 };
@@ -186,6 +203,13 @@ export type TimerTask =
       stepId: string;
       stepName: string;
       attempt: number;
+    }
+  | {
+      kind: "compensation-retry";
+      executionId: string;
+      stepId: string;
+      stepName: string;
+      attempt: number;
     };
 
 export type HistoryEvent =
@@ -256,6 +280,34 @@ export type HistoryEvent =
   | {
       type: "WorkflowResumed";
       timestamp: number;
+    }
+  | {
+      type: "CompensationStarted";
+      reason: "failed" | "cancelled";
+      error: string | null;
+      timestamp: number;
+    }
+  | {
+      type: "CompensationScheduled";
+      stepId: string;
+      stepName: string;
+      attempt: number;
+      timestamp: number;
+    }
+  | {
+      type: "CompensationCompleted";
+      stepId: string;
+      stepName: string;
+      timestamp: number;
+    }
+  | {
+      type: "CompensationFailed";
+      stepId: string;
+      stepName: string;
+      error: string;
+      retryable: boolean;
+      attempt: number;
+      timestamp: number;
     };
 
 export type StepState =
@@ -282,6 +334,30 @@ export type TimerState =
   | { status: "started"; fireAt: number; delayMs: number }
   | { status: "fired"; delayMs: number };
 
+export type CompensationState =
+  | {
+      status: "scheduled";
+      stepName: string;
+      attempt: number;
+    }
+  | {
+      status: "completed";
+      stepName: string;
+    }
+  | {
+      status: "failed";
+      stepName: string;
+      error: string;
+      retryable: boolean;
+      attempt: number;
+    };
+
+export type CompensationPhase = {
+  reason: "failed" | "cancelled";
+  error: string | null;
+  steps: Map<string, CompensationState>;
+};
+
 export type HistoryTerminal =
   | { kind: "completed"; result: string }
   | { kind: "failed"; error: string }
@@ -295,6 +371,7 @@ export type HistoryView = {
   timers: Map<string, TimerState>;
   cancelRequested: boolean;
   terminal: HistoryTerminal | null;
+  compensation: CompensationPhase | null;
 };
 
 export type ResolvePartitionKeyInput<TInput, TResult> = {
@@ -378,6 +455,58 @@ export type FailAfterStepExhaustedInput = {
   partitionSlot: number | undefined;
   message: string;
   errorHistory: WorkflowStepErrorRecord[];
+  token: string;
+};
+
+export type CompensationItem = {
+  stepId: string;
+  stepName: string;
+  result: unknown;
+  compensate: StepCompensateHandler<unknown, unknown>;
+};
+
+export type CollectCompensationsInput<TInput, TResult> = {
+  options: WorkflowOptions<TInput, TResult>;
+  view: HistoryView;
+  executionId: string;
+};
+
+export type MaybeStartCompensationInput = {
+  executionId: string;
+  reason: "failed" | "cancelled";
+  error: string | null;
+  token: string;
+};
+
+export type RunCompensationPhaseInput = {
+  executionId: string;
+  view: HistoryView;
+  rawInput: string;
+  partitionKey: string;
+  partitionSlot: number | undefined;
+  token: string;
+};
+
+export type ExecuteCompensationInput = {
+  executionId: string;
+  stepId: string;
+  stepName: string;
+  attempt: number;
+  result: unknown;
+  compensate: StepCompensateHandler<unknown, unknown>;
+  rawInput: string;
+  partitionKey: string;
+  partitionSlot: number | undefined;
+  token: string;
+};
+
+export type FinishCompensationInput = {
+  executionId: string;
+  reason: "failed" | "cancelled";
+  error: string | null;
+  rawInput: string;
+  partitionKey: string;
+  partitionSlot: number | undefined;
   token: string;
 };
 

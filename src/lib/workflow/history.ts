@@ -1,6 +1,7 @@
 import { mightThrowSync } from "../errors/index.js";
 import { SerializationError } from "./errors.js";
 import type {
+  CompensationPhase,
   HistoryEvent,
   HistoryView,
   StepState,
@@ -24,6 +25,7 @@ export const parseHistory = (rawEvents: string[]): HistoryView => {
   let partitionKey = "";
   let cancelRequested = false;
   let terminal: HistoryView["terminal"] = null;
+  let compensation: CompensationPhase | null = null;
 
   for (const raw of rawEvents) {
     const [error, event] = mightThrowSync(
@@ -125,6 +127,49 @@ export const parseHistory = (rawEvents: string[]): HistoryView => {
     if (event.type === "WorkflowResumed") {
       terminal = null;
       cancelRequested = false;
+      continue;
+    }
+
+    if (event.type === "CompensationStarted") {
+      compensation = {
+        reason: event.reason,
+        error: event.error,
+        steps: new Map(),
+      };
+      continue;
+    }
+
+    if (event.type === "CompensationScheduled") {
+      if (!compensation) continue;
+
+      compensation.steps.set(event.stepId, {
+        status: "scheduled",
+        stepName: event.stepName,
+        attempt: event.attempt,
+      });
+      continue;
+    }
+
+    if (event.type === "CompensationCompleted") {
+      if (!compensation) continue;
+
+      compensation.steps.set(event.stepId, {
+        status: "completed",
+        stepName: event.stepName,
+      });
+      continue;
+    }
+
+    if (event.type === "CompensationFailed") {
+      if (!compensation) continue;
+
+      compensation.steps.set(event.stepId, {
+        status: "failed",
+        stepName: event.stepName,
+        error: event.error,
+        retryable: event.retryable,
+        attempt: event.attempt,
+      });
     }
   }
 
@@ -136,5 +181,6 @@ export const parseHistory = (rawEvents: string[]): HistoryView => {
     timers,
     cancelRequested,
     terminal,
+    compensation,
   };
 };
