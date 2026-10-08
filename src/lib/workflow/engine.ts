@@ -284,7 +284,9 @@ const collectCompensations = async <TInput, TResult>(
   let stepSeq = 0;
   let timerSeq = 0;
 
-  const [handlerError] = await mightThrow(
+  // Handler throw after completed steps is the fail path, not a collect crash.
+  // Keep items already pushed so unwind still runs.
+  await mightThrow(
     Promise.resolve(
       options.handler({
         input: workflowInput,
@@ -336,10 +338,6 @@ const collectCompensations = async <TInput, TResult>(
     ),
   );
 
-  if (handlerError) {
-    if (!(handlerError instanceof Paused)) throw handlerError;
-  }
-
   return items;
 };
 
@@ -358,6 +356,7 @@ export class WorkflowEngine<TInput, TResult> {
   private readonly retryMultiplier: number;
   private readonly retryMaxDelay: number;
   private readonly aborts = new Map<string, AbortController>();
+  private readonly compensating = new Set<string>();
   private readonly capacitySlots = new Map<string, Map<string, number>>();
   private readonly lostLeases = new Set<string>();
   private sweepCursor = "0";
@@ -413,7 +412,9 @@ export class WorkflowEngine<TInput, TResult> {
   public async stop() {
     this.running = false;
 
-    for (const controller of this.aborts.values()) {
+    for (const [executionId, controller] of this.aborts) {
+      if (this.compensating.has(executionId)) continue;
+
       controller.abort();
     }
 
@@ -1240,6 +1241,7 @@ export class WorkflowEngine<TInput, TResult> {
     if (!appended) return false;
 
     this.aborts.delete(executionId);
+    this.compensating.add(executionId);
 
     const extra: Partial<WorkflowMeta> = {};
 
@@ -1247,12 +1249,15 @@ export class WorkflowEngine<TInput, TResult> {
       extra.error = error;
     }
 
-    await this.store.updateStatus({
+    const updated = await this.store.updateStatus({
       executionId,
       status: "compensating",
       extra,
       leaseToken: token,
     });
+
+    // History already has CompensationStarted. Lost lease → reclaim continues.
+    if (!updated) return true;
 
     return true;
   }
@@ -1264,6 +1269,8 @@ export class WorkflowEngine<TInput, TResult> {
 
     if (!phase) return false;
 
+    this.compensating.add(executionId);
+
     const [collectError, items] = await mightThrow(
       collectCompensations({
         options: this.options,
@@ -1272,18 +1279,9 @@ export class WorkflowEngine<TInput, TResult> {
       }),
     );
 
-    if (collectError) {
-      await this.finishCompensation({
-        executionId,
-        reason: "failed",
-        error: collectError.message,
-        rawInput,
-        partitionKey,
-        partitionSlot,
-        token,
-      });
-      return false;
-    }
+    // Handler throws are returned as items. A real collect crash (bad input json)
+    // still skip-fails this turn; reclaim retries. Do not overwrite the original error.
+    if (collectError) return false;
 
     const lifo = items.slice().reverse();
 
@@ -1804,17 +1802,19 @@ export class WorkflowEngine<TInput, TResult> {
           }
         }
 
-        for (const [timerId, state] of view.timers) {
-          if (state.status !== "started") continue;
+        if (!view.compensation) {
+          for (const [timerId, state] of view.timers) {
+            if (state.status !== "started") continue;
 
-          await this.store.scheduleTimerIfAbsent(state.fireAt, {
-            kind: "timer",
-            executionId,
-            timerId,
-          });
+            await this.store.scheduleTimerIfAbsent(state.fireAt, {
+              kind: "timer",
+              executionId,
+              timerId,
+            });
 
-          if (state.fireAt > Date.now()) {
-            waitingOnTimer = true;
+            if (state.fireAt > Date.now()) {
+              waitingOnTimer = true;
+            }
           }
         }
 
@@ -1945,6 +1945,7 @@ export class WorkflowEngine<TInput, TResult> {
 
     await this.store.markInactive(executionId);
     this.aborts.delete(executionId);
+    this.compensating.delete(executionId);
     this.capacitySlots.delete(executionId);
   }
 

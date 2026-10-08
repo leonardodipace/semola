@@ -377,6 +377,10 @@ export const defineWorkflow = <TInput, TResult = void>(
     // Compensate must finish; a second cancel would abort cleanup.
     if (meta.status === "compensating") return snapshot();
 
+    const view = parseHistory(await store.loadHistory(executionId));
+
+    if (view.compensation) return snapshot();
+
     const now = Date.now();
 
     await store.appendEvents({

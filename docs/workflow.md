@@ -88,7 +88,11 @@ const { executionId, status } = await onboard.start(
 
 let execution = await onboard.get(executionId);
 
-while (execution.status === "pending" || execution.status === "running") {
+while (
+  execution.status === "pending" ||
+  execution.status === "running" ||
+  execution.status === "compensating"
+) {
   await Bun.sleep(100);
   execution = await onboard.get(executionId);
 }
@@ -100,7 +104,7 @@ console.log(execution.steps);
 
 ### Cancel an execution
 
-`cancel()` records the request and aborts local work. The return value may still be `pending` or `running`; poll until status is `cancelled`.
+`cancel()` records the request and aborts local work. The return value may still be `pending`, `running`, or `compensating`. Poll until status is `cancelled`, or `failed` if compensation itself exhausts retries.
 
 ```typescript
 const requested = await onboard.cancel(executionId);
@@ -108,7 +112,10 @@ console.log(requested.status);
 
 let execution = await onboard.get(executionId);
 
-while (execution.status !== "cancelled") {
+while (
+  execution.status !== "cancelled" &&
+  execution.status !== "failed"
+) {
   await Bun.sleep(100);
   execution = await onboard.get(executionId);
 }
@@ -135,7 +142,7 @@ if (execution.status === "failed") {
 
 ```typescript
 const active = await listWorkflows(redisClient, {
-  status: ["pending", "running"],
+  status: ["pending", "running", "compensating"],
 });
 
 const failed = await listWorkflows(redisClient, {
@@ -270,7 +277,7 @@ Pass `Infinity` to keep forever, or `0` to unlink immediately after terminal. Fa
 
 ### Graceful shutdown
 
-`stop()` ends polling, waits for in-flight work, and releases this process registration. Other replicas keep reclaiming and running the same workflow name.
+`stop()` ends polling, waits for in-flight work (including compensate unwind), and releases this process registration. Forward `signal` is aborted; compensate `signal` is not, so cleanup can finish. Other replicas keep reclaiming and running the same workflow name.
 
 ```typescript
 await onboard.stop();
@@ -305,7 +312,7 @@ await onboard.stop();
 
 `partitionKey` on `start` overrides `partitionBy` when both are present. Without `partitionBy`, `partitionKey` is stored on meta but capacity stays on the global `*` pool. Empty keys throw. The resolved key is stored on execution meta so `resume` keeps the original partition.
 
-Failed steps retry with exponential backoff before the workflow is marked `failed`. Default `retries: 3` means 4 total attempts. `retries: 0` fails on the first error. The same retry policy applies to `compensate` handlers.
+Failed steps retry with exponential backoff before the workflow is marked `failed`. Default `retries: 3` means 4 total attempts. `retries: 0` fails on the first error. The same retry policy applies to `compensate` handlers. `onRetry` fires only for forward step retries, not compensate retries.
 
 `cancel` is honored during retry backoff and `sleep`, not only between steps. Completed steps with `compensate` unwind before status becomes `cancelled`. After terminal failure, `resume(executionId)` re-queues the execution unless compensation already ran.
 
@@ -314,7 +321,7 @@ Failed steps retry with exponential backoff before the workflow is marked `faile
 Optional lifecycle callbacks. Errors in hooks never fail the workflow. Hooks fire on real transitions, not every history replay.
 
 - `onStart` - once when the execution first moves `pending` → `running`
-- `onRetry` - before each step retry backoff (`attempt`, `nextRetryDelayMs`, `retriesRemaining`, …)
+- `onRetry` - before each forward step retry backoff (`attempt`, `nextRetryDelayMs`, `retriesRemaining`, …). Not fired for `compensate` retries.
 - `onError` - retries exhausted, or immediately after `fail()`
 - `onComplete` - terminal success
 - `onCancel` - terminal cancel
