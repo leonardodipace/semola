@@ -1329,6 +1329,14 @@ export class WorkflowEngine<TInput, TResult> {
           return false;
         }
 
+        await this.store.scheduleTimerIfAbsent(Date.now(), {
+          kind: "compensation-retry",
+          executionId,
+          stepId: item.stepId,
+          stepName: item.stepName,
+          attempt: state.attempt + 1,
+        });
+
         return false;
       }
 

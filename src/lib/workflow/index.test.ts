@@ -4262,6 +4262,51 @@ describe("workflow", () => {
       await stop(wf);
     });
 
+    test("compensation phase reschedules retry after timer drop", async () => {
+      const redis = createRedis();
+      const name = `saga-retry-drop-${crypto.randomUUID()}`;
+      let compensateAttempts = 0;
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retries: 2,
+        retryBackoff: { baseDelay: 10_000, multiplier: 1, maxDelay: 10_000 },
+        handler: async ({ step }) => {
+          await step("create-vm", async () => ({ id: "vm-1" }), {
+            compensate: async () => {
+              compensateAttempts++;
+
+              if (compensateAttempts < 2) {
+                throw new Error("terminate busy");
+              }
+            },
+          });
+
+          await step("provision", async ({ fail }) => {
+            fail("provision failed");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+
+      await waitFor(() => compensateAttempts >= 1, 2000);
+      await sleep(15);
+      redis.clearZset(`workflow:${name}:timers`);
+
+      const store = new WorkflowStore(redis, name);
+      await store.enqueue(executionId);
+
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(execution.error).toBe("provision failed");
+      expect(compensateAttempts).toBe(2);
+
+      await stop(wf);
+    });
+
     test("compensation retries exhaust then fail with compensation error", async () => {
       const redis = createRedis();
       let compensateAttempts = 0;
