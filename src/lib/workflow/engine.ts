@@ -9,15 +9,22 @@ import type {
   CancelExecutionInput,
   CapacityTarget,
   ClearExecutionLocalStateInput,
+  CollectCompensationsInput,
   CollectErrorHistoryInput,
+  CompensationItem,
   CompleteExecutionInput,
   EnsureCapacityInput,
+  ExecuteCompensationInput,
   ExecuteStepInput,
   FailAfterStepExhaustedInput,
   FailExecutionInput,
   FinalizeFromTerminalInput,
+  FinishCompensationInput,
   FireDurableTimerInput,
   HandleStepFailureInput,
+  MaybeStartCompensationInput,
+  RunCompensationPhaseInput,
+  StepCompensateHandler,
   StepHandler,
   TimerTask,
   WithLeaseInput,
@@ -266,6 +273,74 @@ const advance = async <TInput, TResult>(
   };
 };
 
+const collectCompensations = async <TInput, TResult>(
+  input: CollectCompensationsInput<TInput, TResult>,
+) => {
+  const { options, view, executionId } = input;
+  const items: CompensationItem[] = [];
+  const workflowInput = fromJson<TInput>(view.input, "input");
+  const signal = new AbortController().signal;
+
+  let stepSeq = 0;
+  let timerSeq = 0;
+
+  // Handler throw after completed steps is the fail path, not a collect crash.
+  // Keep items already pushed so unwind still runs.
+  await mightThrow(
+    Promise.resolve(
+      options.handler({
+        input: workflowInput,
+        executionId,
+        signal,
+        step: async (name, _handler, stepOptions) => {
+          const stepId = `a${stepSeq++}`;
+          const state = view.steps.get(stepId);
+
+          if (state && state.stepName !== name) {
+            throw new Error(
+              `nondeterminism: step ${stepId} expected "${state.stepName}", got "${name}"`,
+            );
+          }
+
+          if (state?.status === "completed") {
+            const result = fromJson(state.result, `step ${name}`);
+
+            if (stepOptions?.compensate) {
+              items.push({
+                stepId,
+                stepName: name,
+                result,
+                compensate: stepOptions.compensate as StepCompensateHandler<
+                  unknown,
+                  unknown
+                >,
+              });
+            }
+
+            return result as never;
+          }
+
+          throw new Paused();
+        },
+        sleep: async (ms) => {
+          if (!Number.isFinite(ms) || ms < 0) {
+            throw new Error("sleep(ms) requires a non-negative finite number");
+          }
+
+          const timerId = `t${timerSeq++}`;
+          const state = view.timers.get(timerId);
+
+          if (state?.status === "fired") return;
+
+          throw new Paused();
+        },
+      }),
+    ),
+  );
+
+  return items;
+};
+
 export class WorkflowEngine<TInput, TResult> {
   private running = true;
   private active = 0;
@@ -281,6 +356,8 @@ export class WorkflowEngine<TInput, TResult> {
   private readonly retryMultiplier: number;
   private readonly retryMaxDelay: number;
   private readonly aborts = new Map<string, AbortController>();
+  private readonly compensationAborts = new Map<string, AbortController>();
+  private readonly compensating = new Set<string>();
   private readonly capacitySlots = new Map<string, Map<string, number>>();
   private readonly lostLeases = new Set<string>();
   private sweepCursor = "0";
@@ -336,17 +413,63 @@ export class WorkflowEngine<TInput, TResult> {
   public async stop() {
     this.running = false;
 
-    for (const controller of this.aborts.values()) {
+    for (const [executionId, controller] of this.aborts) {
+      if (this.compensating.has(executionId)) continue;
+
       controller.abort();
     }
 
-    while (this.active > 0) {
+    for (const executionId of this.compensating) {
+      await this.store.enqueue(executionId);
+    }
+
+    while (this.hasInFlightWork()) {
+      await this.pruneSettledCompensations();
+
+      if (!this.hasInFlightWork()) break;
+
       await sleepMs(SHUTDOWN_POLL);
     }
   }
 
+  private async pruneSettledCompensations() {
+    for (const executionId of this.compensating) {
+      const [error, meta] = await mightThrow(this.store.getMeta(executionId));
+
+      if (error) continue;
+      if (meta) {
+        if (!isTerminalStatus(meta.status)) continue;
+      }
+
+      this.aborts.delete(executionId);
+      this.compensationAborts.delete(executionId);
+      this.compensating.delete(executionId);
+    }
+  }
+
+  private shouldKeepPolling() {
+    if (this.running) return true;
+    if (this.compensating.size > 0) return true;
+
+    return false;
+  }
+
+  private hasInFlightWork() {
+    if (this.active > 0) return true;
+    if (this.compensating.size > 0) return true;
+
+    return false;
+  }
+
+  private shouldDrainExecution(executionId: string) {
+    if (this.running) return true;
+    if (this.compensating.has(executionId)) return true;
+
+    return false;
+  }
+
   private async workflowLoop() {
-    while (this.running) {
+    while (this.shouldKeepPolling()) {
       const [error, executionId] = await mightThrow(this.store.dequeue());
 
       if (error) {
@@ -355,6 +478,12 @@ export class WorkflowEngine<TInput, TResult> {
       }
 
       if (!executionId) {
+        await sleepMs(this.pollInterval);
+        continue;
+      }
+
+      if (!this.shouldDrainExecution(executionId)) {
+        await this.store.enqueue(executionId);
         await sleepMs(this.pollInterval);
         continue;
       }
@@ -382,7 +511,7 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private async timerLoop() {
-    while (this.running) {
+    while (this.shouldKeepPolling()) {
       this.active++;
 
       try {
@@ -456,6 +585,17 @@ export class WorkflowEngine<TInput, TResult> {
     if (!controller) {
       controller = new AbortController();
       this.aborts.set(executionId, controller);
+    }
+
+    return controller;
+  }
+
+  private compensationAbortController(executionId: string) {
+    let controller = this.compensationAborts.get(executionId);
+
+    if (!controller) {
+      controller = new AbortController();
+      this.compensationAborts.set(executionId, controller);
     }
 
     return controller;
@@ -680,7 +820,8 @@ export class WorkflowEngine<TInput, TResult> {
     }
 
     // Drain decisions under the same lease until sleep/wait/terminal.
-    while (this.running) {
+    // After stop(), keep draining compensate unwind for this execution.
+    while (this.shouldDrainExecution(executionId)) {
       if (!(await this.ownsLease(executionId, token))) return;
 
       history = await this.store.loadHistory(executionId);
@@ -694,6 +835,21 @@ export class WorkflowEngine<TInput, TResult> {
           token,
         });
         return;
+      }
+
+      if (view.compensation) {
+        const cont = await this.runCompensationPhase({
+          executionId,
+          view,
+          rawInput: meta.input,
+          partitionKey,
+          partitionSlot,
+          token,
+        });
+
+        if (!cont) return;
+
+        continue;
       }
 
       if (view.cancelRequested) {
@@ -757,15 +913,15 @@ export class WorkflowEngine<TInput, TResult> {
         return;
       }
 
-      const appended = await this.store.appendEvents({
-        executionId,
-        events: decision.events,
-        leaseToken: token,
-      });
-
-      if (!appended) return;
-
       if (decision.type === "complete") {
+        const appended = await this.store.appendEvents({
+          executionId,
+          events: decision.events,
+          leaseToken: token,
+        });
+
+        if (!appended) return;
+
         await this.completeExecution({
           executionId,
           result: decision.result,
@@ -778,6 +934,23 @@ export class WorkflowEngine<TInput, TResult> {
       }
 
       if (decision.type === "fail") {
+        const compensating = await this.maybeStartCompensation({
+          executionId,
+          reason: "failed",
+          error: decision.error,
+          token,
+        });
+
+        if (compensating) continue;
+
+        const appended = await this.store.appendEvents({
+          executionId,
+          events: decision.events,
+          leaseToken: token,
+        });
+
+        if (!appended) return;
+
         await this.failExecution({
           executionId,
           error: decision.error,
@@ -787,6 +960,23 @@ export class WorkflowEngine<TInput, TResult> {
         });
         return;
       }
+
+      const compensating = await this.maybeStartCompensation({
+        executionId,
+        reason: "cancelled",
+        error: null,
+        token,
+      });
+
+      if (compensating) continue;
+
+      const appended = await this.store.appendEvents({
+        executionId,
+        events: decision.events,
+        leaseToken: token,
+      });
+
+      if (!appended) return;
 
       await this.cancelExecution({
         executionId,
@@ -1005,7 +1195,7 @@ export class WorkflowEngine<TInput, TResult> {
       return false;
     }
 
-    await this.failAfterStepExhausted({
+    const compensating = await this.failAfterStepExhausted({
       executionId,
       stepName,
       attempt,
@@ -1017,7 +1207,7 @@ export class WorkflowEngine<TInput, TResult> {
       token,
     });
 
-    return false;
+    return compensating;
   }
 
   private async failAfterStepExhausted(input: FailAfterStepExhaustedInput) {
@@ -1045,6 +1235,15 @@ export class WorkflowEngine<TInput, TResult> {
       }),
     );
 
+    const compensating = await this.maybeStartCompensation({
+      executionId,
+      reason: "failed",
+      error: message,
+      token,
+    });
+
+    if (compensating) return true;
+
     const appended = await this.store.appendEvents({
       executionId,
       events: [
@@ -1057,7 +1256,321 @@ export class WorkflowEngine<TInput, TResult> {
       leaseToken: token,
     });
 
-    if (!appended) return;
+    if (!appended) return false;
+
+    await this.failExecution({
+      executionId,
+      error: message,
+      partitionKey,
+      partitionSlot,
+      token,
+    });
+
+    return false;
+  }
+
+  private async maybeStartCompensation(input: MaybeStartCompensationInput) {
+    const { executionId, reason, error, token } = input;
+    const view = parseHistory(await this.store.loadHistory(executionId));
+
+    if (view.compensation) return true;
+    if (view.terminal) return false;
+
+    const [collectError, items] = await mightThrow(
+      collectCompensations({
+        options: this.options,
+        view,
+        executionId,
+      }),
+    );
+
+    // Collect blow → skip unwind; caller fails/cancels with original reason.
+    if (collectError) return false;
+    if (items.length === 0) return false;
+
+    const appended = await this.store.appendEvents({
+      executionId,
+      events: [
+        {
+          type: "CompensationStarted",
+          reason,
+          error,
+          timestamp: Date.now(),
+        },
+      ],
+      leaseToken: token,
+    });
+
+    if (!appended) return false;
+
+    this.aborts.delete(executionId);
+    this.compensating.add(executionId);
+
+    const extra: Partial<WorkflowMeta> = {};
+
+    if (error) {
+      extra.error = error;
+    }
+
+    const updated = await this.store.updateStatus({
+      executionId,
+      status: "compensating",
+      extra,
+      leaseToken: token,
+    });
+
+    // History already has CompensationStarted. Lost lease → reclaim continues.
+    if (!updated) return true;
+
+    return true;
+  }
+
+  private async runCompensationPhase(input: RunCompensationPhaseInput) {
+    const { executionId, view, rawInput, partitionKey, partitionSlot, token } =
+      input;
+    const phase = view.compensation;
+
+    if (!phase) return false;
+
+    this.compensating.add(executionId);
+
+    const [collectError, items] = await mightThrow(
+      collectCompensations({
+        options: this.options,
+        view,
+        executionId,
+      }),
+    );
+
+    // Handler throws are returned as items. A real collect crash (bad input json)
+    // still skip-fails this turn; reclaim retries. Do not overwrite the original error.
+    if (collectError) return false;
+
+    const lifo = items.slice().reverse();
+
+    if (lifo.length === 0) {
+      await this.finishCompensation({
+        executionId,
+        reason: phase.reason,
+        error: phase.error,
+        rawInput,
+        partitionKey,
+        partitionSlot,
+        token,
+      });
+      return false;
+    }
+
+    for (const item of lifo) {
+      const state = phase.steps.get(item.stepId);
+
+      if (state?.status === "completed") continue;
+
+      if (state?.status === "failed") {
+        if (!state.retryable || state.attempt > this.retries) {
+          await this.finishCompensation({
+            executionId,
+            reason: "failed",
+            error: state.error,
+            rawInput,
+            partitionKey,
+            partitionSlot,
+            token,
+          });
+          return false;
+        }
+
+        await this.store.scheduleTimerIfAbsent(Date.now(), {
+          kind: "compensation-retry",
+          executionId,
+          stepId: item.stepId,
+          stepName: item.stepName,
+          attempt: state.attempt + 1,
+        });
+
+        return false;
+      }
+
+      let attempt = 1;
+
+      if (state) {
+        attempt = state.attempt;
+      }
+
+      return this.executeCompensation({
+        executionId,
+        stepId: item.stepId,
+        stepName: item.stepName,
+        attempt,
+        result: item.result,
+        compensate: item.compensate,
+        rawInput,
+        partitionKey,
+        partitionSlot,
+        token,
+      });
+    }
+
+    await this.finishCompensation({
+      executionId,
+      reason: phase.reason,
+      error: phase.error,
+      rawInput,
+      partitionKey,
+      partitionSlot,
+      token,
+    });
+
+    return false;
+  }
+
+  private async executeCompensation(input: ExecuteCompensationInput) {
+    const {
+      executionId,
+      stepId,
+      stepName,
+      attempt,
+      result,
+      compensate,
+      rawInput,
+      partitionKey,
+      partitionSlot,
+      token,
+    } = input;
+    const workflowInput = fromJson<TInput>(rawInput, "input");
+
+    const [compensateError] = await mightThrow(
+      Promise.resolve(
+        compensate({
+          input: workflowInput,
+          result,
+          signal: this.compensationAbortController(executionId).signal,
+          fail: (message) => {
+            throw new NonRetryableStepError(message);
+          },
+        }),
+      ),
+    );
+
+    if (!(await this.ownsLease(executionId, token))) return false;
+
+    if (!compensateError) {
+      const completed = await this.store.appendEvents({
+        executionId,
+        events: [
+          {
+            type: "CompensationCompleted",
+            stepId,
+            stepName,
+            timestamp: Date.now(),
+          },
+        ],
+        leaseToken: token,
+      });
+
+      if (!completed) return false;
+
+      return true;
+    }
+
+    const message = compensateError.message;
+    const retryable = !(compensateError instanceof NonRetryableStepError);
+
+    const appended = await this.store.appendEvents({
+      executionId,
+      events: [
+        {
+          type: "CompensationFailed",
+          stepId,
+          stepName,
+          error: message,
+          retryable,
+          attempt,
+          timestamp: Date.now(),
+        },
+      ],
+      leaseToken: token,
+    });
+
+    if (!appended) return false;
+
+    if (retryable && attempt <= this.retries) {
+      const delay = backoffDelay({
+        attempt,
+        base: this.retryBaseDelay,
+        multiplier: this.retryMultiplier,
+        max: this.retryMaxDelay,
+      });
+
+      await this.store.scheduleTimer(Date.now() + delay, {
+        kind: "compensation-retry",
+        executionId,
+        stepId,
+        stepName,
+        attempt: attempt + 1,
+      });
+
+      return false;
+    }
+
+    await this.finishCompensation({
+      executionId,
+      reason: "failed",
+      error: message,
+      rawInput,
+      partitionKey,
+      partitionSlot,
+      token,
+    });
+
+    return false;
+  }
+
+  private async finishCompensation(input: FinishCompensationInput) {
+    const {
+      executionId,
+      reason,
+      error,
+      rawInput,
+      partitionKey,
+      partitionSlot,
+      token,
+    } = input;
+
+    if (reason === "cancelled") {
+      const appended = await this.store.appendEvents({
+        executionId,
+        events: [{ type: "WorkflowCancelled", timestamp: Date.now() }],
+        leaseToken: token,
+      });
+
+      if (!appended) return;
+
+      await this.cancelExecution({
+        executionId,
+        rawInput,
+        partitionKey,
+        partitionSlot,
+        token,
+      });
+      return;
+    }
+
+    const message = error ?? "workflow failed";
+
+    const failed = await this.store.appendEvents({
+      executionId,
+      events: [
+        {
+          type: "WorkflowFailed",
+          error: message,
+          timestamp: Date.now(),
+        },
+      ],
+      leaseToken: token,
+    });
+
+    if (!failed) return;
 
     await this.failExecution({
       executionId,
@@ -1088,7 +1601,7 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private async processDueTimers() {
-    while (this.running) {
+    while (this.shouldKeepPolling()) {
       const raw = await this.store.claimDueTimer(Date.now());
 
       if (!raw) return;
@@ -1107,7 +1620,21 @@ export class WorkflowEngine<TInput, TResult> {
         continue;
       }
 
+      if (task.kind === "compensation-retry") {
+        await this.withLease({
+          executionId: task.executionId,
+          work: (token) => this.fireCompensationRetry(task, token),
+          onBusy: () => this.store.scheduleTimer(Date.now(), task),
+        });
+        continue;
+      }
+
       if (task.kind === "step-retry") {
+        if (!this.running) {
+          await this.store.scheduleTimer(Date.now() + this.pollInterval, task);
+          continue;
+        }
+
         await this.withLease({
           executionId: task.executionId,
           work: (token) => this.fireStepRetry(task, token),
@@ -1118,6 +1645,11 @@ export class WorkflowEngine<TInput, TResult> {
 
       if (task.kind !== "timer") {
         await this.store.deadLetterTimer(raw);
+        continue;
+      }
+
+      if (!this.running) {
+        await this.store.scheduleTimer(Date.now() + this.pollInterval, task);
         continue;
       }
 
@@ -1183,6 +1715,11 @@ export class WorkflowEngine<TInput, TResult> {
 
     const view = parseHistory(await this.store.loadHistory(task.executionId));
 
+    if (view.compensation) {
+      await this.store.enqueue(task.executionId);
+      return;
+    }
+
     if (view.cancelRequested) {
       await this.store.enqueue(task.executionId);
       return;
@@ -1200,6 +1737,43 @@ export class WorkflowEngine<TInput, TResult> {
       events: [
         {
           type: "StepScheduled",
+          stepId: task.stepId,
+          stepName: task.stepName,
+          attempt: task.attempt,
+          timestamp: Date.now(),
+        },
+      ],
+      leaseToken: token,
+    });
+
+    if (!appended) return;
+
+    await this.store.enqueue(task.executionId);
+  }
+
+  private async fireCompensationRetry(
+    task: Extract<TimerTask, { kind: "compensation-retry" }>,
+    token: string,
+  ) {
+    const meta = await this.store.getMeta(task.executionId);
+
+    if (!meta) return;
+
+    if (isTerminalStatus(meta.status)) return;
+
+    const view = parseHistory(await this.store.loadHistory(task.executionId));
+    const existing = view.compensation?.steps.get(task.stepId);
+
+    if (existing?.status === "completed") {
+      await this.store.enqueue(task.executionId);
+      return;
+    }
+
+    const appended = await this.store.appendEvents({
+      executionId: task.executionId,
+      events: [
+        {
+          type: "CompensationScheduled",
           stepId: task.stepId,
           stepName: task.stepName,
           attempt: task.attempt,
@@ -1290,31 +1864,59 @@ export class WorkflowEngine<TInput, TResult> {
               }
             }
 
-            if (state.retryable && state.attempt <= this.retries) {
-              const added = await this.store.scheduleTimerIfAbsent(Date.now(), {
-                kind: "step-retry",
-                executionId,
-                stepId,
-                stepName: state.stepName,
-                attempt: state.attempt + 1,
-              });
+            if (!view.compensation) {
+              if (state.retryable && state.attempt <= this.retries) {
+                const added = await this.store.scheduleTimerIfAbsent(
+                  Date.now(),
+                  {
+                    kind: "step-retry",
+                    executionId,
+                    stepId,
+                    stepName: state.stepName,
+                    attempt: state.attempt + 1,
+                  },
+                );
 
-              if (!added) waitingOnTimer = true;
+                if (!added) waitingOnTimer = true;
+              }
             }
           }
         }
 
-        for (const [timerId, state] of view.timers) {
-          if (state.status !== "started") continue;
+        if (!view.compensation) {
+          for (const [timerId, state] of view.timers) {
+            if (state.status !== "started") continue;
 
-          await this.store.scheduleTimerIfAbsent(state.fireAt, {
-            kind: "timer",
-            executionId,
-            timerId,
-          });
+            await this.store.scheduleTimerIfAbsent(state.fireAt, {
+              kind: "timer",
+              executionId,
+              timerId,
+            });
 
-          if (state.fireAt > Date.now()) {
-            waitingOnTimer = true;
+            if (state.fireAt > Date.now()) {
+              waitingOnTimer = true;
+            }
+          }
+        }
+
+        if (view.compensation) {
+          for (const [stepId, state] of view.compensation.steps) {
+            if (state.status === "completed") continue;
+
+            if (state.status !== "failed") continue;
+
+            if (!state.retryable) continue;
+            if (state.attempt > this.retries) continue;
+
+            const added = await this.store.scheduleTimerIfAbsent(Date.now(), {
+              kind: "compensation-retry",
+              executionId,
+              stepId,
+              stepName: state.stepName,
+              attempt: state.attempt + 1,
+            });
+
+            if (!added) waitingOnTimer = true;
           }
         }
       } finally {
@@ -1424,6 +2026,8 @@ export class WorkflowEngine<TInput, TResult> {
 
     await this.store.markInactive(executionId);
     this.aborts.delete(executionId);
+    this.compensationAborts.delete(executionId);
+    this.compensating.delete(executionId);
     this.capacitySlots.delete(executionId);
   }
 

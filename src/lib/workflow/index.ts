@@ -231,6 +231,13 @@ export const defineWorkflow = <TInput, TResult = void>(
   const resume = async (executionId: string) => {
     const meta = await requireMeta(store, executionId);
     const view = parseHistory(await store.loadHistory(executionId));
+
+    if (view.compensation) {
+      throw new WorkflowStoreError(
+        `Workflow execution ${executionId} cannot be resumed after compensation`,
+      );
+    }
+
     let hasResume = false;
 
     for (const event of view.events) {
@@ -357,15 +364,22 @@ export const defineWorkflow = <TInput, TResult = void>(
   const cancel = async (executionId: string) => {
     const meta = await requireMeta(store, executionId);
 
-    if (isTerminalStatus(meta.status)) {
-      return {
-        status: meta.status as WorkflowStatus,
-        executionId,
-        updatedAt: Number(meta.updatedAt),
-        cancelledAt: optionalTimestamp(meta.cancelledAt),
-        createdAt: Number(meta.createdAt),
-      };
-    }
+    const snapshot = () => ({
+      status: meta.status as WorkflowStatus,
+      executionId,
+      updatedAt: Number(meta.updatedAt),
+      cancelledAt: optionalTimestamp(meta.cancelledAt),
+      createdAt: Number(meta.createdAt),
+    });
+
+    if (isTerminalStatus(meta.status)) return snapshot();
+
+    // Compensate must finish; a second cancel would abort cleanup.
+    if (meta.status === "compensating") return snapshot();
+
+    const view = parseHistory(await store.loadHistory(executionId));
+
+    if (view.compensation) return snapshot();
 
     const now = Date.now();
 
@@ -382,13 +396,7 @@ export const defineWorkflow = <TInput, TResult = void>(
     engine.requestAbort(executionId);
     await store.enqueue(executionId);
 
-    return {
-      status: meta.status as WorkflowStatus,
-      executionId,
-      updatedAt: Number(meta.updatedAt),
-      cancelledAt: optionalTimestamp(meta.cancelledAt),
-      createdAt: Number(meta.createdAt),
-    };
+    return snapshot();
   };
 
   const stop = async () => {
@@ -417,8 +425,11 @@ export {
 } from "./errors.js";
 
 export type {
+  StepCompensateContext,
+  StepCompensateHandler,
   StepContext,
   StepHandler,
+  StepOptions,
   StepSnapshot,
   Workflow,
   WorkflowCancelResult,
