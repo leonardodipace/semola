@@ -419,13 +419,38 @@ export class WorkflowEngine<TInput, TResult> {
       controller.abort();
     }
 
-    while (this.active > 0) {
+    for (const executionId of this.compensating) {
+      await this.store.enqueue(executionId);
+    }
+
+    while (this.hasInFlightWork()) {
       await sleepMs(SHUTDOWN_POLL);
     }
   }
 
+  private shouldKeepPolling() {
+    if (this.running) return true;
+    if (this.compensating.size > 0) return true;
+
+    return false;
+  }
+
+  private hasInFlightWork() {
+    if (this.active > 0) return true;
+    if (this.compensating.size > 0) return true;
+
+    return false;
+  }
+
+  private shouldDrainExecution(executionId: string) {
+    if (this.running) return true;
+    if (this.compensating.has(executionId)) return true;
+
+    return false;
+  }
+
   private async workflowLoop() {
-    while (this.running) {
+    while (this.shouldKeepPolling()) {
       const [error, executionId] = await mightThrow(this.store.dequeue());
 
       if (error) {
@@ -434,6 +459,12 @@ export class WorkflowEngine<TInput, TResult> {
       }
 
       if (!executionId) {
+        await sleepMs(this.pollInterval);
+        continue;
+      }
+
+      if (!this.shouldDrainExecution(executionId)) {
+        await this.store.enqueue(executionId);
         await sleepMs(this.pollInterval);
         continue;
       }
@@ -461,7 +492,7 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private async timerLoop() {
-    while (this.running) {
+    while (this.shouldKeepPolling()) {
       this.active++;
 
       try {
@@ -770,7 +801,8 @@ export class WorkflowEngine<TInput, TResult> {
     }
 
     // Drain decisions under the same lease until sleep/wait/terminal.
-    while (this.running) {
+    // After stop(), keep draining compensate unwind for this execution.
+    while (this.shouldDrainExecution(executionId)) {
       if (!(await this.ownsLease(executionId, token))) return;
 
       history = await this.store.loadHistory(executionId);
@@ -1550,7 +1582,7 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private async processDueTimers() {
-    while (this.running) {
+    while (this.shouldKeepPolling()) {
       const raw = await this.store.claimDueTimer(Date.now());
 
       if (!raw) return;
@@ -1569,15 +1601,6 @@ export class WorkflowEngine<TInput, TResult> {
         continue;
       }
 
-      if (task.kind === "step-retry") {
-        await this.withLease({
-          executionId: task.executionId,
-          work: (token) => this.fireStepRetry(task, token),
-          onBusy: () => this.store.scheduleTimer(Date.now(), task),
-        });
-        continue;
-      }
-
       if (task.kind === "compensation-retry") {
         await this.withLease({
           executionId: task.executionId,
@@ -1587,8 +1610,27 @@ export class WorkflowEngine<TInput, TResult> {
         continue;
       }
 
+      if (task.kind === "step-retry") {
+        if (!this.running) {
+          await this.store.scheduleTimer(Date.now() + this.pollInterval, task);
+          continue;
+        }
+
+        await this.withLease({
+          executionId: task.executionId,
+          work: (token) => this.fireStepRetry(task, token),
+          onBusy: () => this.store.scheduleTimer(Date.now(), task),
+        });
+        continue;
+      }
+
       if (task.kind !== "timer") {
         await this.store.deadLetterTimer(raw);
+        continue;
+      }
+
+      if (!this.running) {
+        await this.store.scheduleTimer(Date.now() + this.pollInterval, task);
         continue;
       }
 
