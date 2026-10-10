@@ -510,12 +510,25 @@ export type FinishCompensationInput = {
   token: string;
 };
 
+export type FailFromCompensationInput = {
+  executionId: string;
+  stepName: string;
+  attempt: number;
+  error: string;
+  errorHistory: WorkflowStepErrorRecord[];
+  rawInput: string;
+  partitionKey: string;
+  partitionSlot: number | undefined;
+  token: string;
+};
+
 export type CollectErrorHistoryInput = {
   events: HistoryEvent[];
   stepId: string;
   attempt: number;
   error: string;
   timestamp: number;
+  failedType: "StepFailed" | "CompensationFailed";
 };
 
 export type FireDurableTimerInput = {

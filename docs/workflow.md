@@ -322,7 +322,7 @@ Optional lifecycle callbacks. Errors in hooks never fail the workflow. Hooks fir
 
 - `onStart` - once when the execution first moves `pending` → `running`
 - `onRetry` - before each forward step retry backoff (`attempt`, `nextRetryDelayMs`, `retriesRemaining`, …). Not fired for `compensate` retries.
-- `onError` - retries exhausted, or immediately after `fail()`
+- `onError` - forward-step retries exhausted, immediately after `fail()`, or when a `compensate` handler exhausts retries (may fire twice if both happen). Compensate calls pass `errorHistory` from `CompensationFailed` attempts only.
 - `onComplete` - terminal success
 - `onCancel` - terminal cancel
 

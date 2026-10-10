@@ -18,6 +18,7 @@ import type {
   ExecuteStepInput,
   FailAfterStepExhaustedInput,
   FailExecutionInput,
+  FailFromCompensationInput,
   FinalizeFromTerminalInput,
   FinishCompensationInput,
   FireDurableTimerInput,
@@ -284,8 +285,7 @@ const collectCompensations = async <TInput, TResult>(
   let stepSeq = 0;
   let timerSeq = 0;
 
-  // Handler throw after completed steps is the fail path, not a collect crash.
-  // Keep items already pushed so unwind still runs.
+  // Inner mightThrow: handler throw after completed steps keeps items for unwind.
   await mightThrow(
     Promise.resolve(
       options.handler({
@@ -1160,6 +1160,7 @@ export class WorkflowEngine<TInput, TResult> {
       attempt,
       error: message,
       timestamp: now,
+      failedType: "StepFailed",
     });
 
     if (retryable && attempt <= this.retries) {
@@ -1284,7 +1285,6 @@ export class WorkflowEngine<TInput, TResult> {
       }),
     );
 
-    // Collect blow → skip unwind; caller fails/cancels with original reason.
     if (collectError) return false;
     if (items.length === 0) return false;
 
@@ -1312,16 +1312,14 @@ export class WorkflowEngine<TInput, TResult> {
       extra.error = error;
     }
 
-    const updated = await this.store.updateStatus({
+    await this.store.updateStatus({
       executionId,
       status: "compensating",
       extra,
       leaseToken: token,
     });
 
-    // History already has CompensationStarted. Lost lease → reclaim continues.
-    if (!updated) return true;
-
+    // Compensating even if status write lost the lease; reclaim continues unwind.
     return true;
   }
 
@@ -1342,8 +1340,6 @@ export class WorkflowEngine<TInput, TResult> {
       }),
     );
 
-    // Handler throws are returned as items. A real collect crash (bad input json)
-    // still skip-fails this turn; reclaim retries. Do not overwrite the original error.
     if (collectError) return false;
 
     const lifo = items.slice().reverse();
@@ -1368,10 +1364,21 @@ export class WorkflowEngine<TInput, TResult> {
 
       if (state?.status === "failed") {
         if (!state.retryable || state.attempt > this.retries) {
-          await this.finishCompensation({
-            executionId,
-            reason: "failed",
+          const errorHistory = this.collectErrorHistory({
+            events: view.events,
+            stepId: item.stepId,
+            attempt: state.attempt,
             error: state.error,
+            timestamp: Date.now(),
+            failedType: "CompensationFailed",
+          });
+
+          await this.failFromCompensation({
+            executionId,
+            stepName: item.stepName,
+            attempt: state.attempt,
+            error: state.error,
+            errorHistory,
             rawInput,
             partitionKey,
             partitionSlot,
@@ -1475,6 +1482,8 @@ export class WorkflowEngine<TInput, TResult> {
 
     const message = compensateError.message;
     const retryable = !(compensateError instanceof NonRetryableStepError);
+    const now = Date.now();
+    const viewBefore = parseHistory(await this.store.loadHistory(executionId));
 
     const appended = await this.store.appendEvents({
       executionId,
@@ -1486,7 +1495,7 @@ export class WorkflowEngine<TInput, TResult> {
           error: message,
           retryable,
           attempt,
-          timestamp: Date.now(),
+          timestamp: now,
         },
       ],
       leaseToken: token,
@@ -1513,10 +1522,21 @@ export class WorkflowEngine<TInput, TResult> {
       return false;
     }
 
-    await this.finishCompensation({
-      executionId,
-      reason: "failed",
+    const errorHistory = this.collectErrorHistory({
+      events: viewBefore.events,
+      stepId,
+      attempt,
       error: message,
+      timestamp: now,
+      failedType: "CompensationFailed",
+    });
+
+    await this.failFromCompensation({
+      executionId,
+      stepName,
+      attempt,
+      error: message,
+      errorHistory,
       rawInput,
       partitionKey,
       partitionSlot,
@@ -1524,6 +1544,42 @@ export class WorkflowEngine<TInput, TResult> {
     });
 
     return false;
+  }
+
+  private async failFromCompensation(input: FailFromCompensationInput) {
+    const {
+      executionId,
+      stepName,
+      attempt,
+      error,
+      errorHistory,
+      rawInput,
+      partitionKey,
+      partitionSlot,
+      token,
+    } = input;
+    const workflowInput = fromJson<TInput>(rawInput, "input");
+
+    await runHook(() =>
+      this.options.hooks?.onError?.({
+        executionId,
+        input: workflowInput,
+        stepName,
+        error,
+        totalAttempts: attempt,
+        errorHistory,
+      }),
+    );
+
+    await this.finishCompensation({
+      executionId,
+      reason: "failed",
+      error,
+      rawInput,
+      partitionKey,
+      partitionSlot,
+      token,
+    });
   }
 
   private async finishCompensation(input: FinishCompensationInput) {
@@ -1582,11 +1638,11 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private collectErrorHistory(input: CollectErrorHistoryInput) {
-    const { events, stepId, attempt, error, timestamp } = input;
+    const { events, stepId, attempt, error, timestamp, failedType } = input;
     const history: WorkflowStepErrorRecord[] = [];
 
     for (const event of events) {
-      if (event.type !== "StepFailed") continue;
+      if (event.type !== failedType) continue;
       if (event.stepId !== stepId) continue;
 
       history.push({
@@ -1596,7 +1652,17 @@ export class WorkflowEngine<TInput, TResult> {
       });
     }
 
-    history.push({ attempt, error, timestamp });
+    const last = history[history.length - 1];
+
+    if (!last) {
+      history.push({ attempt, error, timestamp });
+      return history;
+    }
+
+    if (last.attempt !== attempt) {
+      history.push({ attempt, error, timestamp });
+    }
+
     return history;
   }
 
