@@ -345,10 +345,18 @@ export const defineWorkflow = <TInput, TResult = void>(
       error = meta.error;
     }
 
+    let status = meta.status as WorkflowStatus;
+
+    if (!isTerminalStatus(meta.status)) {
+      if (view.compensation) {
+        status = "compensating";
+      }
+    }
+
     return {
       id: executionId,
       name: meta.name,
-      status: meta.status as WorkflowStatus,
+      status,
       input,
       result,
       error,
@@ -364,8 +372,8 @@ export const defineWorkflow = <TInput, TResult = void>(
   const cancel = async (executionId: string) => {
     const meta = await requireMeta(store, executionId);
 
-    const snapshot = () => ({
-      status: meta.status as WorkflowStatus,
+    const snapshot = (status = meta.status as WorkflowStatus) => ({
+      status,
       executionId,
       updatedAt: Number(meta.updatedAt),
       cancelledAt: optionalTimestamp(meta.cancelledAt),
@@ -379,7 +387,7 @@ export const defineWorkflow = <TInput, TResult = void>(
 
     const view = parseHistory(await store.loadHistory(executionId));
 
-    if (view.compensation) return snapshot();
+    if (view.compensation) return snapshot("compensating");
 
     const now = Date.now();
 

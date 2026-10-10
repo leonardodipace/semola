@@ -284,8 +284,8 @@ const collectCompensations = async <TInput, TResult>(
 
   let stepSeq = 0;
   let timerSeq = 0;
+  let fatal: Error | undefined;
 
-  // Inner mightThrow: handler throw after completed steps keeps items for unwind.
   await mightThrow(
     Promise.resolve(
       options.handler({
@@ -297,13 +297,21 @@ const collectCompensations = async <TInput, TResult>(
           const state = view.steps.get(stepId);
 
           if (state && state.stepName !== name) {
-            throw new Error(
+            fatal = new Error(
               `nondeterminism: step ${stepId} expected "${state.stepName}", got "${name}"`,
             );
+            throw fatal;
           }
 
           if (state?.status === "completed") {
-            const result = fromJson(state.result, `step ${name}`);
+            const [parseError, result] = mightThrowSync(() =>
+              fromJson(state.result, `step ${name}`),
+            );
+
+            if (parseError) {
+              fatal = parseError;
+              throw fatal;
+            }
 
             if (stepOptions?.compensate) {
               items.push({
@@ -324,7 +332,10 @@ const collectCompensations = async <TInput, TResult>(
         },
         sleep: async (ms) => {
           if (!Number.isFinite(ms) || ms < 0) {
-            throw new Error("sleep(ms) requires a non-negative finite number");
+            fatal = new Error(
+              "sleep(ms) requires a non-negative finite number",
+            );
+            throw fatal;
           }
 
           const timerId = `t${timerSeq++}`;
@@ -337,6 +348,8 @@ const collectCompensations = async <TInput, TResult>(
       }),
     ),
   );
+
+  if (fatal) throw fatal;
 
   return items;
 };
@@ -1312,14 +1325,21 @@ export class WorkflowEngine<TInput, TResult> {
       extra.error = error;
     }
 
-    await this.store.updateStatus({
+    const updated = await this.store.updateStatus({
       executionId,
       status: "compensating",
       extra,
       leaseToken: token,
     });
 
-    // Compensating even if status write lost the lease; reclaim continues unwind.
+    if (!updated) {
+      await this.store.updateStatus({
+        executionId,
+        status: "compensating",
+        extra,
+      });
+    }
+
     return true;
   }
 
@@ -1340,15 +1360,26 @@ export class WorkflowEngine<TInput, TResult> {
       }),
     );
 
-    if (collectError) return false;
+    if (collectError) {
+      await this.finishCompensation({
+        executionId,
+        reason: "failed",
+        error: collectError.message,
+        rawInput,
+        partitionKey,
+        partitionSlot,
+        token,
+      });
+      return false;
+    }
 
     const lifo = items.slice().reverse();
 
     if (lifo.length === 0) {
       await this.finishCompensation({
         executionId,
-        reason: phase.reason,
-        error: phase.error,
+        reason: "failed",
+        error: "compensation handlers missing after CompensationStarted",
         rawInput,
         partitionKey,
         partitionSlot,
@@ -1890,6 +1921,24 @@ export class WorkflowEngine<TInput, TResult> {
 
       try {
         const view = parseHistory(await this.store.loadHistory(executionId));
+
+        if (view.compensation) {
+          if (meta.status !== "compensating") {
+            const extra: Partial<WorkflowMeta> = {};
+
+            if (view.compensation.error) {
+              extra.error = view.compensation.error;
+            }
+
+            await this.store.updateStatus({
+              executionId,
+              status: "compensating",
+              extra,
+              leaseToken: reclaimToken,
+            });
+          }
+        }
+
         let lastResumeIdx = -1;
 
         for (let i = 0; i < view.events.length; i++) {

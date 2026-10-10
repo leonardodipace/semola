@@ -1090,8 +1090,6 @@ describe("workflow compensate adversarial", () => {
           },
         );
 
-        // Next step/sleep advance honors cancel. Local code here may still run
-        // when compensate collection replays past completed steps.
         await step("later", async () => {
           laterRan = true;
         });
@@ -1360,7 +1358,6 @@ describe("workflow compensate adversarial", () => {
 
     await waitStatus(wf, executionId, "cancelled");
 
-    // Docs: result written even if cancel arrives mid-handler; compensate may run.
     expect(order).toContain("undo-done");
     expect(order).toContain("undo-running");
     expect(order.indexOf("undo-running")).toBeLessThan(
@@ -1503,6 +1500,157 @@ describe("workflow compensate adversarial", () => {
     await waitStatus(wf, executionId, "cancelled");
 
     await expect(wf.resume(executionId)).rejects.toThrow();
+
+    await stop(wf);
+  });
+
+  test("nondeterminism during compensate collect does not partial-unwind", async () => {
+    const redis = createRedis();
+    const order: string[] = [];
+    let renameSecond = false;
+
+    const wf = defineWorkflow({
+      name: `adv-collect-nondet-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      retries: 0,
+      handler: async ({ step }) => {
+        await step(
+          "a",
+          async () => {
+            order.push("a");
+            return 1;
+          },
+          {
+            compensate: async () => {
+              order.push("undo-a");
+            },
+          },
+        );
+
+        let secondName = "b";
+
+        if (renameSecond) {
+          secondName = "b-renamed";
+        }
+
+        await step(
+          secondName,
+          async () => {
+            order.push("b");
+            return 2;
+          },
+          {
+            compensate: async () => {
+              order.push("undo-b");
+            },
+          },
+        );
+
+        renameSecond = true;
+        throw new Error("boom");
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    const execution = await waitStatus(wf, executionId, "failed");
+
+    expect(execution.error).toBe("boom");
+    expect(order).toEqual(["a", "b"]);
+    expect(order).not.toContain("undo-a");
+    expect(order).not.toContain("undo-b");
+
+    await stop(wf);
+  });
+
+  test("missing compensate handlers after CompensationStarted fail closed", async () => {
+    const redis = createRedis();
+    const order: string[] = [];
+    let handlerPasses = 0;
+
+    const wf = defineWorkflow({
+      name: `adv-missing-comp-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      retries: 0,
+      handler: async ({ step }) => {
+        handlerPasses++;
+
+        let options:
+          | { compensate: () => Promise<void> }
+          | undefined = {
+          compensate: async () => {
+            order.push("undo");
+          },
+        };
+
+        if (handlerPasses >= 4) {
+          options = undefined;
+        }
+
+        await step(
+          "a",
+          async () => {
+            order.push("a");
+            return 1;
+          },
+          options,
+        );
+
+        throw new Error("boom");
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    const execution = await waitStatus(wf, executionId, "failed");
+
+    expect(execution.error).toBe(
+      "compensation handlers missing after CompensationStarted",
+    );
+    expect(order).toEqual(["a"]);
+    expect(order).not.toContain("undo");
+
+    await stop(wf);
+  });
+
+  test("get reports compensating when meta status lags history", async () => {
+    const redis = createRedis();
+    const name = `adv-status-lag-${crypto.randomUUID()}`;
+    let hang = true;
+
+    const wf = defineWorkflow({
+      name,
+      redis,
+      ...fast,
+      retries: 0,
+      handler: async ({ step }) => {
+        await step("create", async () => 1, {
+          compensate: async () => {
+            while (hang) {
+              await sleep(10);
+            }
+          },
+        });
+
+        throw new Error("boom");
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    await waitStatus(wf, executionId, "compensating");
+
+    await redis.hset(
+      `workflow:${name}:meta:${executionId}`,
+      "status",
+      "running",
+    );
+
+    const lagged = await wf.get(executionId);
+    expect(lagged.status).toBe("compensating");
+
+    hang = false;
+    const execution = await waitStatus(wf, executionId, "failed");
+    expect(execution.error).toBe("boom");
 
     await stop(wf);
   });

@@ -185,7 +185,7 @@ const onboard = defineWorkflow<{ userId: string }, { ok: true }>({
 });
 ```
 
-Status is `compensating` while unwind runs. A successful unwind still ends as `failed` (original error) or `cancelled`. If a compensation itself exhausts retries, the execution is `failed` with that compensation error.
+Status is `compensating` while unwind runs. A successful unwind still ends as `failed` (original error) or `cancelled`. If a compensation itself exhausts retries, the execution is `failed` with that compensation error. If compensation collect hits nondeterminism (or cannot load step results), unwind does not start with a partial list. If `compensate` handlers disappear after `CompensationStarted` (for example a rolling deploy), the execution fails closed instead of finishing without undo.
 
 `resume()` is rejected after compensation has started. Completed step results would be wrong after undo; start a new execution. Failed executions that never compensated can still be resumed.
 
