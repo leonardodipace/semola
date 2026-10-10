@@ -424,7 +424,26 @@ export class WorkflowEngine<TInput, TResult> {
     }
 
     while (this.hasInFlightWork()) {
+      await this.pruneSettledCompensations();
+
+      if (!this.hasInFlightWork()) break;
+
       await sleepMs(SHUTDOWN_POLL);
+    }
+  }
+
+  private async pruneSettledCompensations() {
+    for (const executionId of this.compensating) {
+      const [error, meta] = await mightThrow(this.store.getMeta(executionId));
+
+      if (error) continue;
+      if (meta) {
+        if (!isTerminalStatus(meta.status)) continue;
+      }
+
+      this.aborts.delete(executionId);
+      this.compensationAborts.delete(executionId);
+      this.compensating.delete(executionId);
     }
   }
 
