@@ -285,6 +285,7 @@ export type HistoryEvent =
       type: "CompensationStarted";
       reason: "failed" | "cancelled";
       error: string | null;
+      stepIds?: string[];
       timestamp: number;
     }
   | {
@@ -355,6 +356,7 @@ export type CompensationState =
 export type CompensationPhase = {
   reason: "failed" | "cancelled";
   error: string | null;
+  stepIds: string[];
   steps: Map<string, CompensationState>;
 };
 
@@ -469,6 +471,12 @@ export type CollectCompensationsInput<TInput, TResult> = {
   options: WorkflowOptions<TInput, TResult>;
   view: HistoryView;
   executionId: string;
+};
+
+export type CompensationHandlersMissingInput = {
+  expectedIds: string[];
+  collectedIds: Set<string>;
+  phaseSteps: Map<string, CompensationState>;
 };
 
 export type MaybeStartCompensationInput = {

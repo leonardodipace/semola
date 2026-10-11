@@ -11,6 +11,7 @@ import type {
   ClearExecutionLocalStateInput,
   CollectCompensationsInput,
   CollectErrorHistoryInput,
+  CompensationHandlersMissingInput,
   CompensationItem,
   CompleteExecutionInput,
   EnsureCapacityInput,
@@ -274,11 +275,30 @@ const advance = async <TInput, TResult>(
   };
 };
 
+const compensationHandlersMissing = (
+  input: CompensationHandlersMissingInput,
+) => {
+  const { expectedIds, collectedIds, phaseSteps } = input;
+
+  // Corrupt/legacy CompensationStarted without a stepIds snapshot.
+  if (expectedIds.length === 0) return true;
+
+  for (const stepId of expectedIds) {
+    if (phaseSteps.get(stepId)?.status === "completed") continue;
+    if (collectedIds.has(stepId)) continue;
+
+    return true;
+  }
+
+  return false;
+};
+
 const collectCompensations = async <TInput, TResult>(
   input: CollectCompensationsInput<TInput, TResult>,
 ) => {
   const { options, view, executionId } = input;
   const items: CompensationItem[] = [];
+  const visitedCompleted = new Set<string>();
   const workflowInput = fromJson<TInput>(view.input, "input");
   const signal = new AbortController().signal;
 
@@ -286,7 +306,7 @@ const collectCompensations = async <TInput, TResult>(
   let timerSeq = 0;
   let fatal: Error | undefined;
 
-  await mightThrow(
+  const [handlerError] = await mightThrow(
     Promise.resolve(
       options.handler({
         input: workflowInput,
@@ -312,6 +332,8 @@ const collectCompensations = async <TInput, TResult>(
               fatal = parseError;
               throw fatal;
             }
+
+            visitedCompleted.add(stepId);
 
             if (stepOptions?.compensate) {
               items.push({
@@ -350,6 +372,19 @@ const collectCompensations = async <TInput, TResult>(
   );
 
   if (fatal) throw fatal;
+
+  if (handlerError) {
+    if (handlerError instanceof Paused) {
+      return items;
+    }
+
+    for (const [stepId, state] of view.steps) {
+      if (state.status !== "completed") continue;
+      if (visitedCompleted.has(stepId)) continue;
+
+      throw handlerError;
+    }
+  }
 
   return items;
 };
@@ -1308,6 +1343,7 @@ export class WorkflowEngine<TInput, TResult> {
           type: "CompensationStarted",
           reason,
           error,
+          stepIds: items.map((item) => item.stepId),
           timestamp: Date.now(),
         },
       ],
@@ -1373,9 +1409,14 @@ export class WorkflowEngine<TInput, TResult> {
       return false;
     }
 
-    const lifo = items.slice().reverse();
+    const collectedIds = new Set(items.map((item) => item.stepId));
+    const missingHandlers = compensationHandlersMissing({
+      expectedIds: phase.stepIds,
+      collectedIds,
+      phaseSteps: phase.steps,
+    });
 
-    if (lifo.length === 0) {
+    if (missingHandlers) {
       await this.finishCompensation({
         executionId,
         reason: "failed",
@@ -1387,6 +1428,8 @@ export class WorkflowEngine<TInput, TResult> {
       });
       return false;
     }
+
+    const lifo = items.slice().reverse();
 
     for (const item of lifo) {
       const state = phase.steps.get(item.stepId);

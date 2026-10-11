@@ -1563,6 +1563,63 @@ describe("workflow compensate adversarial", () => {
     await stop(wf);
   });
 
+  test("handler throw mid collect does not partial-unwind", async () => {
+    const redis = createRedis();
+    const order: string[] = [];
+    let collectPoison = false;
+
+    const wf = defineWorkflow({
+      name: `adv-collect-poison-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      retries: 0,
+      handler: async ({ step }) => {
+        await step(
+          "a",
+          async () => {
+            order.push("a");
+            return 1;
+          },
+          {
+            compensate: async () => {
+              order.push("undo-a");
+            },
+          },
+        );
+
+        if (collectPoison) {
+          throw new Error("collect poison");
+        }
+
+        await step(
+          "b",
+          async () => {
+            order.push("b");
+            return 2;
+          },
+          {
+            compensate: async () => {
+              order.push("undo-b");
+            },
+          },
+        );
+
+        collectPoison = true;
+        throw new Error("boom");
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    const execution = await waitStatus(wf, executionId, "failed");
+
+    expect(execution.error).toBe("boom");
+    expect(order).toEqual(["a", "b"]);
+    expect(order).not.toContain("undo-a");
+    expect(order).not.toContain("undo-b");
+
+    await stop(wf);
+  });
+
   test("missing compensate handlers after CompensationStarted fail closed", async () => {
     const redis = createRedis();
     const order: string[] = [];
@@ -1576,9 +1633,7 @@ describe("workflow compensate adversarial", () => {
       handler: async ({ step }) => {
         handlerPasses++;
 
-        let options:
-          | { compensate: () => Promise<void> }
-          | undefined = {
+        let options: { compensate: () => Promise<void> } | undefined = {
           compensate: async () => {
             order.push("undo");
           },
@@ -1609,6 +1664,141 @@ describe("workflow compensate adversarial", () => {
     );
     expect(order).toEqual(["a"]);
     expect(order).not.toContain("undo");
+
+    await stop(wf);
+  });
+
+  test("CompensationStarted without stepIds does not stick compensating", async () => {
+    const redis = createRedis();
+    const order: string[] = [];
+    let hang = true;
+
+    const name = `adv-legacy-stepids-${crypto.randomUUID()}`;
+
+    const wf = defineWorkflow({
+      name,
+      redis,
+      ...fast,
+      retries: 0,
+      handler: async ({ step }) => {
+        await step(
+          "a",
+          async () => {
+            order.push("a");
+            return 1;
+          },
+          {
+            compensate: async () => {
+              order.push("undo");
+
+              while (hang) {
+                await sleep(10);
+              }
+            },
+          },
+        );
+
+        throw new Error("boom");
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    await waitStatus(wf, executionId, "compensating");
+    await waitFor(() => order.includes("undo"));
+
+    const historyKey = `workflow:${name}:history:${executionId}`;
+    const raw = await redis.lrange(historyKey, 0, -1);
+    await redis.del(historyKey);
+
+    for (const entry of raw) {
+      const event = JSON.parse(entry) as { type: string; stepIds?: string[] };
+
+      if (event.type === "CompensationStarted") {
+        delete event.stepIds;
+      }
+
+      await redis.rpush(historyKey, JSON.stringify(event));
+    }
+
+    hang = false;
+
+    const execution = await waitStatus(wf, executionId, "failed");
+
+    expect(execution.error).toBe(
+      "compensation handlers missing after CompensationStarted",
+    );
+    expect(order).toEqual(["a", "undo"]);
+
+    await stop(wf);
+  });
+
+  test("missing sibling compensate after partial unwind fail closed", async () => {
+    const redis = createRedis();
+    const order: string[] = [];
+    let hangB = true;
+    let dropA = false;
+
+    const wf = defineWorkflow({
+      name: `adv-sibling-missing-comp-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      retries: 0,
+      handler: async ({ step }) => {
+        let aOptions: { compensate: () => Promise<void> } | undefined = {
+          compensate: async () => {
+            order.push("undo-a");
+          },
+        };
+
+        if (dropA) {
+          aOptions = undefined;
+        }
+
+        await step(
+          "a",
+          async () => {
+            order.push("a");
+            return 1;
+          },
+          aOptions,
+        );
+
+        await step(
+          "b",
+          async () => {
+            order.push("b");
+            return 2;
+          },
+          {
+            compensate: async () => {
+              order.push("undo-b");
+
+              while (hangB) {
+                await sleep(10);
+              }
+            },
+          },
+        );
+
+        throw new Error("boom");
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    await waitStatus(wf, executionId, "compensating");
+
+    await waitFor(() => order.includes("undo-b"));
+
+    dropA = true;
+    hangB = false;
+
+    const execution = await waitStatus(wf, executionId, "failed");
+
+    expect(execution.error).toBe(
+      "compensation handlers missing after CompensationStarted",
+    );
+    expect(order).toEqual(["a", "b", "undo-b"]);
+    expect(order).not.toContain("undo-a");
 
     await stop(wf);
   });
@@ -1651,6 +1841,472 @@ describe("workflow compensate adversarial", () => {
     hang = false;
     const execution = await waitStatus(wf, executionId, "failed");
     expect(execution.error).toBe("boom");
+
+    await stop(wf);
+  });
+
+  test("corrupt CompensationStarted.stepIds empty array fails closed", async () => {
+    const redis = createRedis();
+    const order: string[] = [];
+    let hangB = true;
+    const name = `adv-empty-stepids-${crypto.randomUUID()}`;
+
+    const make = () =>
+      defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retries: 0,
+        lockTTL: 60,
+        handler: async ({ step }) => {
+          await step(
+            "a",
+            async () => {
+              order.push("a");
+              return 1;
+            },
+            {
+              compensate: async () => {
+                order.push("undo-a");
+              },
+            },
+          );
+
+          await step(
+            "b",
+            async () => {
+              order.push("b");
+              return 2;
+            },
+            {
+              compensate: async () => {
+                order.push("undo-b");
+
+                while (hangB) {
+                  await sleep(10);
+                }
+
+                throw new Error("reclaim me");
+              },
+            },
+          );
+
+          throw new Error("boom");
+        },
+      });
+
+    const wf1 = make();
+    const { executionId } = await wf1.start({});
+    await waitStatus(wf1, executionId, "compensating");
+    await waitFor(() => order.includes("undo-b"));
+
+    const historyKey = `workflow:${name}:history:${executionId}`;
+    const raw = await redis.lrange(historyKey, 0, -1);
+    await redis.del(historyKey);
+
+    for (const entry of raw) {
+      const event = JSON.parse(entry) as { type: string; stepIds?: string[] };
+
+      if (event.type === "CompensationStarted") {
+        event.stepIds = [];
+      }
+
+      await redis.rpush(historyKey, JSON.stringify(event));
+    }
+
+    expireLeases(redis);
+    hangB = false;
+    await stop(wf1);
+
+    const wf2 = make();
+    const execution = await waitStatus(wf2, executionId, "failed");
+
+    expect(execution.error).toBe(
+      "compensation handlers missing after CompensationStarted",
+    );
+    expect(order).toContain("undo-b");
+    expect(order).not.toContain("undo-a");
+
+    await stop(wf2);
+  });
+
+  test("corrupt CompensationStarted.stepIds with phantom id fails closed", async () => {
+    const redis = createRedis();
+    const order: string[] = [];
+    let hang = true;
+    const name = `adv-phantom-stepids-${crypto.randomUUID()}`;
+
+    const wf = defineWorkflow({
+      name,
+      redis,
+      ...fast,
+      retries: 0,
+      handler: async ({ step }) => {
+        await step(
+          "a",
+          async () => {
+            order.push("a");
+            return 1;
+          },
+          {
+            compensate: async () => {
+              order.push("undo-a");
+
+              while (hang) {
+                await sleep(10);
+              }
+            },
+          },
+        );
+
+        throw new Error("boom");
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    await waitStatus(wf, executionId, "compensating");
+    await waitFor(() => order.includes("undo-a"));
+
+    const historyKey = `workflow:${name}:history:${executionId}`;
+    const raw = await redis.lrange(historyKey, 0, -1);
+    await redis.del(historyKey);
+
+    for (const entry of raw) {
+      const event = JSON.parse(entry) as { type: string; stepIds?: string[] };
+
+      if (event.type === "CompensationStarted") {
+        event.stepIds = ["ghost99"];
+      }
+
+      await redis.rpush(historyKey, JSON.stringify(event));
+    }
+
+    hang = false;
+
+    const execution = await waitStatus(wf, executionId, "failed");
+
+    expect(execution.error).toBe(
+      "compensation handlers missing after CompensationStarted",
+    );
+
+    await stop(wf);
+  });
+
+  test("corrupt StepCompleted result before collect skips partial unwind", async () => {
+    const redis = createRedis();
+    const order: string[] = [];
+    const name = `adv-corrupt-result-${crypto.randomUUID()}`;
+    let releaseFail: (() => void) | undefined;
+    const failGate = new Promise<void>((resolve) => {
+      releaseFail = resolve;
+    });
+
+    const wf = defineWorkflow({
+      name,
+      redis,
+      ...fast,
+      retries: 0,
+      handler: async ({ step }) => {
+        await step(
+          "a",
+          async () => {
+            order.push("a");
+            return { id: 1 };
+          },
+          {
+            compensate: async () => {
+              order.push("undo-a");
+            },
+          },
+        );
+
+        await step(
+          "b",
+          async () => {
+            order.push("b");
+            return { id: 2 };
+          },
+          {
+            compensate: async () => {
+              order.push("undo-b");
+            },
+          },
+        );
+
+        await step("gate", async ({ fail }) => {
+          await failGate;
+          fail("boom");
+        });
+      },
+    });
+
+    const { executionId } = await wf.start({});
+
+    await waitFor(async () => {
+      const execution = await wf.get(executionId);
+      return (
+        execution.steps.some((s) => s.name === "a") &&
+        execution.steps.some((s) => s.name === "b")
+      );
+    });
+
+    const historyKey = `workflow:${name}:history:${executionId}`;
+    const raw = await redis.lrange(historyKey, 0, -1);
+    await redis.del(historyKey);
+
+    for (const entry of raw) {
+      const event = JSON.parse(entry) as {
+        type: string;
+        stepName?: string;
+        result?: string;
+      };
+
+      if (event.type === "StepCompleted") {
+        if (event.stepName === "a") {
+          event.result = "{not-json";
+        }
+      }
+
+      await redis.rpush(historyKey, JSON.stringify(event));
+    }
+
+    releaseFail?.();
+
+    const execution = await waitStatus(wf, executionId, "failed");
+
+    expect(execution.error).toMatch(/Unable to deserialize step a|boom/);
+    expect(order).not.toContain("undo-a");
+    expect(order).not.toContain("undo-b");
+
+    await stop(wf);
+  });
+
+  test("delete StepCompleted event before collect skips partial unwind", async () => {
+    const redis = createRedis();
+    const order: string[] = [];
+    const name = `adv-missing-result-${crypto.randomUUID()}`;
+    let releaseFail: (() => void) | undefined;
+    const failGate = new Promise<void>((resolve) => {
+      releaseFail = resolve;
+    });
+
+    const wf = defineWorkflow({
+      name,
+      redis,
+      ...fast,
+      retries: 0,
+      handler: async ({ step }) => {
+        await step(
+          "a",
+          async () => {
+            order.push("a");
+            return 1;
+          },
+          {
+            compensate: async () => {
+              order.push("undo-a");
+            },
+          },
+        );
+
+        await step(
+          "b",
+          async () => {
+            order.push("b");
+            return 2;
+          },
+          {
+            compensate: async () => {
+              order.push("undo-b");
+            },
+          },
+        );
+
+        await step("gate", async ({ fail }) => {
+          await failGate;
+          fail("boom");
+        });
+      },
+    });
+
+    const { executionId } = await wf.start({});
+
+    await waitFor(async () => {
+      const execution = await wf.get(executionId);
+      return (
+        execution.steps.some((s) => s.name === "a") &&
+        execution.steps.some((s) => s.name === "b")
+      );
+    });
+
+    const historyKey = `workflow:${name}:history:${executionId}`;
+    const raw = await redis.lrange(historyKey, 0, -1);
+    await redis.del(historyKey);
+
+    for (const entry of raw) {
+      const event = JSON.parse(entry) as {
+        type: string;
+        stepName?: string;
+      };
+
+      if (event.type === "StepCompleted") {
+        if (event.stepName === "a") {
+          continue;
+        }
+      }
+
+      await redis.rpush(historyKey, JSON.stringify(event));
+    }
+
+    releaseFail?.();
+
+    const execution = await waitStatus(wf, executionId, "failed");
+
+    expect(order).not.toContain("undo-a");
+    expect(order).not.toContain("undo-b");
+    expect(execution.error).toBeTruthy();
+
+    await stop(wf);
+  });
+
+  test("cancel during compensate retry backoff still ends failed with compensate error", async () => {
+    const redis = createRedis();
+    let attempts = 0;
+    let onCancelCalls = 0;
+
+    const wf = defineWorkflow({
+      name: `adv-cancel-comp-backoff-${crypto.randomUUID()}`,
+      redis,
+      pollInterval: 5,
+      lockTTL: 40,
+      retries: 2,
+      retryBackoff: { baseDelay: 50, multiplier: 1, maxDelay: 50 },
+      hooks: {
+        onCancel: () => {
+          onCancelCalls++;
+        },
+      },
+      handler: async ({ step }) => {
+        await step("create", async () => 1, {
+          compensate: async () => {
+            attempts++;
+            throw new Error("undo busy");
+          },
+        });
+
+        throw new Error("forward");
+      },
+    });
+
+    const { executionId } = await wf.start({});
+
+    await waitFor(() => attempts >= 1);
+    await wf.cancel(executionId);
+
+    const execution = await waitStatus(wf, executionId, "failed", 8000);
+
+    expect(attempts).toBe(3);
+    expect(execution.error).toBe("undo busy");
+    expect(onCancelCalls).toBe(0);
+
+    await stop(wf);
+  });
+
+  test("cancel races with forward fail near hang step", async () => {
+    const redis = createRedis();
+    const order: string[] = [];
+    let releaseHang: (() => void) | undefined;
+    const hangPromise = new Promise<void>((resolve) => {
+      releaseHang = resolve;
+    });
+
+    const wf = defineWorkflow({
+      name: `adv-cancel-fail-race-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      retries: 0,
+      handler: async ({ step }) => {
+        await step(
+          "a",
+          async () => {
+            order.push("a");
+            return 1;
+          },
+          {
+            compensate: async () => {
+              order.push("undo-a");
+            },
+          },
+        );
+
+        await step("hang", async ({ fail }) => {
+          order.push("hang");
+          await hangPromise;
+          fail("race fail");
+        });
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    await waitFor(() => order.includes("hang"));
+
+    await Promise.all([
+      wf.cancel(executionId),
+      Promise.resolve(releaseHang?.()),
+    ]);
+
+    const execution = await waitFor(async () => {
+      const current = await wf.get(executionId);
+      return current.status === "cancelled" || current.status === "failed";
+    }).then(() => wf.get(executionId));
+
+    expect(["cancelled", "failed"]).toContain(execution.status);
+    expect(order).toContain("undo-a");
+    expect(order.filter((x) => x === "undo-a").length).toBe(1);
+
+    await stop(wf);
+  });
+
+  test("onError errorHistory lists each CompensationFailed attempt message", async () => {
+    const redis = createRedis();
+    const histories: string[][] = [];
+    let attempts = 0;
+
+    const wf = defineWorkflow({
+      name: `adv-onerror-hist-${crypto.randomUUID()}`,
+      redis,
+      pollInterval: 5,
+      lockTTL: 40,
+      retries: 2,
+      retryBackoff: { baseDelay: 5, multiplier: 1, maxDelay: 5 },
+      hooks: {
+        onError: ({ stepName, errorHistory }) => {
+          if (stepName === "create") {
+            histories.push(errorHistory.map((entry) => entry.error));
+          }
+        },
+      },
+      handler: async ({ step }) => {
+        await step("create", async () => 1, {
+          compensate: async () => {
+            attempts++;
+            throw new Error(`undo fail ${attempts}`);
+          },
+        });
+
+        await step("later", async ({ fail }) => {
+          fail("original");
+        });
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    const execution = await waitStatus(wf, executionId, "failed", 8000);
+
+    expect(attempts).toBe(3);
+    expect(execution.error).toBe("undo fail 3");
+    expect(histories.length).toBe(1);
+    expect(histories[0]).toEqual(["undo fail 1", "undo fail 2", "undo fail 3"]);
 
     await stop(wf);
   });

@@ -131,9 +131,12 @@ export const parseHistory = (rawEvents: string[]): HistoryView => {
     }
 
     if (event.type === "CompensationStarted") {
+      const stepIds = Array.isArray(event.stepIds) ? event.stepIds : [];
+
       compensation = {
         reason: event.reason,
         error: event.error,
+        stepIds,
         steps: new Map(),
       };
       continue;

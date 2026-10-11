@@ -146,6 +146,7 @@ describe("parseHistory", () => {
         type: "CompensationStarted",
         reason: "failed",
         error: "provision failed",
+        stepIds: ["a0"],
         timestamp: now + 2,
       }),
       JSON.stringify({
@@ -165,6 +166,27 @@ describe("parseHistory", () => {
     });
   });
 
+  test("CompensationStarted without stepIds normalizes to empty list", () => {
+    const now = 1_700_000_000_000;
+
+    const view = parseHistory([
+      JSON.stringify({
+        type: "WorkflowStarted",
+        input: "{}",
+        partitionKey: "",
+        timestamp: now,
+      }),
+      JSON.stringify({
+        type: "CompensationStarted",
+        reason: "failed",
+        error: "boom",
+        timestamp: now + 1,
+      }),
+    ]);
+
+    expect(view.compensation?.stepIds).toEqual([]);
+  });
+
   test("compensation failed updates step state", () => {
     const now = 1_700_000_000_000;
 
@@ -179,6 +201,7 @@ describe("parseHistory", () => {
         type: "CompensationStarted",
         reason: "cancelled",
         error: null,
+        stepIds: ["a0"],
         timestamp: now + 1,
       }),
       JSON.stringify({
