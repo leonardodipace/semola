@@ -176,7 +176,6 @@ export type WorkflowMeta = {
   cancelledAt: string;
   partitionKey: string;
   partitionSlot: string;
-  concurrencySlot: string;
 };
 
 export type Workflow<TInput, TResult> = {
@@ -431,7 +430,6 @@ export type ExecuteStepInput = {
   handler: StepHandler<unknown, unknown>;
   rawInput: string;
   partitionKey: string;
-  partitionSlot: number | undefined;
   token: string;
 };
 
@@ -442,7 +440,6 @@ export type HandleStepFailureInput = {
   attempt: number;
   rawInput: string;
   partitionKey: string;
-  partitionSlot: number | undefined;
   stepError: Error;
   view: HistoryView;
   token: string;
@@ -454,7 +451,6 @@ export type FailAfterStepExhaustedInput = {
   attempt: number;
   rawInput: string;
   partitionKey: string;
-  partitionSlot: number | undefined;
   stepError: Error;
   errorHistory: WorkflowStepErrorRecord[];
   token: string;
@@ -496,7 +492,6 @@ export type RunCompensationPhaseInput = {
   view: HistoryView;
   rawInput: string;
   partitionKey: string;
-  partitionSlot: number | undefined;
   token: string;
 };
 
@@ -509,7 +504,6 @@ export type ExecuteCompensationInput = {
   compensate: StepCompensateHandler<unknown, unknown>;
   rawInput: string;
   partitionKey: string;
-  partitionSlot: number | undefined;
   token: string;
 };
 
@@ -519,7 +513,6 @@ export type FinishCompensationInput = {
   error: string | null;
   rawInput: string;
   partitionKey: string;
-  partitionSlot: number | undefined;
   token: string;
 };
 
@@ -531,7 +524,6 @@ export type FailFromCompensationInput = {
   errorHistory: WorkflowStepErrorRecord[];
   rawInput: string;
   partitionKey: string;
-  partitionSlot: number | undefined;
   token: string;
 };
 
@@ -553,7 +545,6 @@ export type FireDurableTimerInput = {
 export type ClearExecutionLocalStateInput = {
   executionId: string;
   partitionKey: string;
-  partitionSlot: number | undefined;
 };
 
 export type CompleteExecutionInput = {
@@ -561,7 +552,6 @@ export type CompleteExecutionInput = {
   result: string;
   rawInput: string;
   partitionKey: string;
-  partitionSlot: number | undefined;
   token: string;
 };
 
@@ -569,7 +559,6 @@ export type FailExecutionInput = {
   executionId: string;
   error: string;
   partitionKey: string;
-  partitionSlot: number | undefined;
   token: string;
 };
 
@@ -577,7 +566,6 @@ export type CancelExecutionInput = {
   executionId: string;
   rawInput: string;
   partitionKey: string;
-  partitionSlot: number | undefined;
   token: string;
 };
 
@@ -654,11 +642,6 @@ export type UpdateStatusInput = {
 export type RedisZMember = {
   score: number;
   member: string;
-};
-
-export type CapacityTarget = {
-  key: string;
-  field: "partitionSlot";
 };
 
 export type EnsureCapacityInput = {

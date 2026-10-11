@@ -2287,7 +2287,7 @@ describe("workflow compensate adversarial", () => {
 
     expect(order).not.toContain("undo-a");
     expect(order).not.toContain("undo-b");
-    expect(execution.error).toBeTruthy();
+    expect(execution.error).toBe("boom");
 
     await stop(wf);
   });

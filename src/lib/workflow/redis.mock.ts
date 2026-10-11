@@ -164,13 +164,6 @@ export class MockRedisClient {
     return this.hsetSync(key, fieldValues);
   }
 
-  public async hget(key: string, field: string) {
-    this.maybeFail("hget");
-    this.sweep(key);
-
-    return this.hashes.get(key)?.get(field) ?? null;
-  }
-
   public async hgetall(key: string) {
     this.maybeFail("hgetall");
     this.sweep(key);
@@ -188,7 +181,6 @@ export class MockRedisClient {
   ): Promise<[string, string[]]> {
     this.maybeFail("scan");
 
-    // ponytail: one-shot scan; real Redis paginates
     if (String(cursor) !== "0") return ["0", []];
 
     const matchAt = options.indexOf("MATCH");
@@ -491,22 +483,6 @@ export class MockRedisClient {
 
     if (command === "ZREM") {
       return this.zremSync(args[0] ?? "", args.slice(1));
-    }
-
-    if (command === "HSETNX") {
-      const key = args[0] ?? "";
-      const field = args[1] ?? "";
-      const value = args[2] ?? "";
-
-      this.sweep(key);
-
-      const hash = this.hashes.get(key) ?? new Map<string, string>();
-
-      if (hash.has(field)) return 0;
-
-      hash.set(field, value);
-      this.hashes.set(key, hash);
-      return 1;
     }
 
     if (command !== "EVAL") {

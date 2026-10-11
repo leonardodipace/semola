@@ -60,10 +60,6 @@ export const listWorkflows = async (
       throw new WorkflowStoreError("Unable to scan workflow executions");
     }
 
-    if (!scanned) {
-      throw new WorkflowStoreError("Unable to scan workflow executions");
-    }
-
     const [next, keys] = scanned;
 
     cursor = next;
@@ -134,10 +130,7 @@ const resolvePartitionKey = <TInput, TResult>(
     return startOptions.partitionKey;
   }
 
-  if (!options.partitionBy) {
-    // Shared default key → concurrency is cluster-wide across replicas.
-    return "*";
-  }
+  if (!options.partitionBy) return "*";
 
   const partitionKey = options.partitionBy(workflowInput);
 
@@ -199,7 +192,6 @@ export const defineWorkflow = <TInput, TResult = void>(
       cancelledAt: "",
       partitionKey,
       partitionSlot: "",
-      concurrencySlot: "",
     });
 
     if (!created) {
@@ -263,7 +255,6 @@ export const defineWorkflow = <TInput, TResult = void>(
       }
     }
 
-    // CAS failed -> pending. Pending crash-recovery skips persist.
     if (meta.status === "failed") {
       const persisted = await store.persistExecution(executionId);
 
@@ -284,8 +275,6 @@ export const defineWorkflow = <TInput, TResult = void>(
 
     const now = Date.now();
 
-    // A prior resume may already be in history. Append only if this
-    // failure is not yet resumed (`parseHistory` still has terminal failed).
     if (view.terminal?.kind === "failed") {
       const retryEvents = [];
 
@@ -394,7 +383,6 @@ export const defineWorkflow = <TInput, TResult = void>(
 
     if (isTerminalStatus(meta.status)) return snapshot();
 
-    // Compensate must finish; a second cancel would abort cleanup.
     if (meta.status === "compensating") return snapshot();
 
     const view = parseHistory(await store.loadHistory(executionId));

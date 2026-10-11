@@ -10,10 +10,6 @@ export const toJson = (value: unknown, label: string) => {
 
   if (raw === undefined) return "null";
 
-  if (typeof raw !== "string") {
-    throw new SerializationError(`Unable to serialize ${label}`);
-  }
-
   return raw;
 };
 

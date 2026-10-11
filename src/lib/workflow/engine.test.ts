@@ -70,7 +70,6 @@ const baseMeta = (name: string, input = "{}"): WorkflowMeta => ({
   cancelledAt: "",
   partitionKey: "",
   partitionSlot: "",
-  concurrencySlot: "",
 });
 
 describe("WorkflowEngine", () => {
@@ -327,7 +326,7 @@ describe("WorkflowEngine", () => {
         redis,
         pollInterval: 60_000,
         lockTTL: 60_000,
-        retentionTTL: 0,
+        retentionTTL: Number.POSITIVE_INFINITY,
         retries: 1,
         retryBackoff: { baseDelay: 10_000, multiplier: 1, maxDelay: 10_000 },
         handler,
@@ -341,7 +340,7 @@ describe("WorkflowEngine", () => {
         redis,
         pollInterval: 5,
         lockTTL: 60_000,
-        retentionTTL: 0,
+        retentionTTL: Number.POSITIVE_INFINITY,
         retries: 1,
         retryBackoff: { baseDelay: 5, multiplier: 1, maxDelay: 5 },
         handler,
@@ -381,6 +380,12 @@ describe("WorkflowEngine", () => {
 
       return meta.status === "failed";
     });
+
+    expect(compensateAttempts).toBe(2);
+
+    const meta = await store.getMeta(executionId);
+    expect(meta?.status).toBe("failed");
+    expect(meta?.error).toBe("provision failed");
 
     const doneA = engineA.stop();
     await advanceTimersByTimeAsync(100);

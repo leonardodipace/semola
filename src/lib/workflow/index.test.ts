@@ -303,7 +303,9 @@ describe("workflow", () => {
     ]);
 
     for (const { executionId } of started) {
-      await waitStatus(wf, executionId, "completed");
+      const execution = await waitStatus(wf, executionId, "completed");
+
+      expect(execution.result).toBe(1);
     }
 
     expect(runs).toBe(4);
@@ -757,7 +759,6 @@ describe("workflow", () => {
         cancelledAt: "",
         partitionKey: "*",
         partitionSlot: "",
-        concurrencySlot: "",
       });
       await store.appendEvents({
         executionId,
@@ -1102,8 +1103,6 @@ describe("workflow", () => {
       "*",
       "partitionSlot",
       "",
-      "concurrencySlot",
-      "",
     );
     await redis.sadd(`workflow:${name}:active`, "zombie");
 
@@ -1316,7 +1315,7 @@ describe("workflow", () => {
     await stop(wf);
   });
 
-  test("reclaim recovers start after markActive without history", async () => {
+  test("reclaim recovers start after active without history", async () => {
     const redis = createRedis();
     const name = `orphan-start-${crypto.randomUUID()}`;
     const executionId = crypto.randomUUID();
@@ -1347,8 +1346,6 @@ describe("workflow", () => {
       "partitionKey",
       "",
       "partitionSlot",
-      "",
-      "concurrencySlot",
       "",
     );
     await redis.sadd(`workflow:${name}:active`, executionId);
@@ -1418,8 +1415,6 @@ describe("workflow", () => {
       "partitionKey",
       "",
       "partitionSlot",
-      "",
-      "concurrencySlot",
       "",
     );
 
@@ -1515,7 +1510,6 @@ describe("workflow", () => {
     const { executionId } = await wf.start({});
     await waitStatus(wf, executionId, "failed");
 
-    // Workers already polling; status+active flip atomically before enqueue.
     const resumed = await wf.resume(executionId);
 
     expect(resumed.status).toBe("pending");
@@ -1561,8 +1555,6 @@ describe("workflow", () => {
       "partitionKey",
       "",
       "partitionSlot",
-      "",
-      "concurrencySlot",
       "",
     );
 
@@ -2085,8 +2077,6 @@ describe("workflow", () => {
         "partitionKey",
         "",
         "partitionSlot",
-        "",
-        "concurrencySlot",
         "",
       );
       await redis.rpush(
@@ -2968,7 +2958,6 @@ describe("workflow", () => {
           cancelledAt: "",
           partitionKey,
           partitionSlot: "",
-          concurrencySlot: "",
         });
         await store1.appendEvents({
           executionId,
@@ -3956,7 +3945,7 @@ describe("workflow", () => {
       await stop(wf);
     });
 
-    test("resume retries after events without markActive", async () => {
+    test("resume retries after events without marking active", async () => {
       const redis = createRedis();
       const name = `retain-retry-events-${crypto.randomUUID()}`;
       const wf = failOnce(name, redis);
@@ -4115,8 +4104,6 @@ describe("workflow", () => {
         "",
         "partitionSlot",
         "",
-        "concurrencySlot",
-        "",
       );
       await redis.rpush(
         `workflow:${name}:history:${executionId}`,
@@ -4209,7 +4196,7 @@ describe("workflow", () => {
       await stop(wf);
     });
 
-    test("steps without compensate fail like today", async () => {
+    test("steps without compensate fail with the step error", async () => {
       const redis = createRedis();
       const order: string[] = [];
 

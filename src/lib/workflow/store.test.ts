@@ -17,7 +17,6 @@ const baseMeta = (name: string) =>
     cancelledAt: "",
     partitionKey: "",
     partitionSlot: "",
-    concurrencySlot: "",
   }) satisfies WorkflowMeta;
 
 const failedMeta = (name: string) => ({
@@ -399,12 +398,16 @@ describe("WorkflowStore", () => {
     expect(await store.listActive()).toContain(executionId);
   });
 
-  test("markActive markInactive and empty getMeta", async () => {
-    const store = new WorkflowStore(createRedis(), "store-active");
+  test("getMeta returns null when the execution is missing", async () => {
+    const store = new WorkflowStore(createRedis(), "store-missing");
 
     expect(await store.getMeta("missing")).toBeNull();
+  });
 
-    await store.markActive("x");
+  test("markInactive removes an execution from the active set", async () => {
+    const store = new WorkflowStore(createRedis(), "store-inactive");
+
+    await store.tryCreateMetaAndActive("x", baseMeta("store-inactive"));
     expect(await store.listActive()).toEqual(["x"]);
 
     await store.markInactive("x");
