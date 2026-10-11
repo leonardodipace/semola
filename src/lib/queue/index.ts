@@ -68,6 +68,10 @@ export class Queue<T> {
         this.visibilityTimeoutMs >= MIN_VISIBILITY_MS,
       "Invalid visibilityTimeoutMs: must be at least 1000",
     );
+    assert.ok(
+      this.visibilityTimeoutMs >= this.timeout,
+      "Invalid visibilityTimeoutMs: must be at least timeout",
+    );
 
     this.store = new QueueStore(
       options.redis,

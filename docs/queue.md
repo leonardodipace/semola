@@ -180,7 +180,7 @@ process.on("SIGINT", async () => {
 | `timeout` | `30000` | Per-job timeout in ms |
 | `concurrency` | `1` | Parallel workers |
 | `pollInterval` | `100` | Idle poll delay in ms |
-| `visibilityTimeoutMs` | `max(timeout * 2, 60_000)` | Claim lease before reclaim |
+| `visibilityTimeoutMs` | `max(timeout * 2, 60_000)` | Claim lease before reclaim; must be `>= timeout` |
 | `onSuccess` | - | After a successful job |
 | `onRetry` | - | Before a retry |
 | `onError` | - | When retries are exhausted |

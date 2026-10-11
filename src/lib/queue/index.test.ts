@@ -225,6 +225,20 @@ describe("Queue", () => {
 
       await queue.stop();
     });
+
+    test.concurrent("rejects visibilityTimeoutMs below timeout", () => {
+      const redis = createMockRedis();
+
+      expect(() => {
+        new Queue({
+          name: "test",
+          redis,
+          handler: () => {},
+          timeout: 5_000,
+          visibilityTimeoutMs: 1_000,
+        });
+      }).toThrow("Invalid visibilityTimeoutMs: must be at least timeout");
+    });
   });
 
   describe("processing", () => {
