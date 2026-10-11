@@ -182,25 +182,31 @@ export class Queue<T> {
           new Error("Invalid job JSON"),
         );
         await this.store.pushDeadLetter(claim.raw, "Invalid job JSON");
-        await this.store.ack(claim.raw);
+        await this.store.ack(claim.raw, claim.visibleUntil);
         await this.waitForPollInterval();
         continue;
       }
 
       if (!this.running) {
-        await this.store.release(claim.raw);
+        await this.store.release(claim.raw, claim.visibleUntil);
         break;
       }
 
       this.activeWorkers++;
 
-      await mightThrow(this.handleClaimed(claim.raw, claim.job));
+      await mightThrow(
+        this.handleClaimed(claim.raw, claim.job, claim.visibleUntil),
+      );
 
       this.activeWorkers--;
     }
   }
 
-  private async handleClaimed(raw: string, job: JobState<T>) {
+  private async handleClaimed(
+    raw: string,
+    job: JobState<T>,
+    visibleUntil: number,
+  ) {
     const controller = new AbortController();
 
     const handlerPromise = Promise.resolve().then(() =>
@@ -234,7 +240,7 @@ export class Queue<T> {
         );
       }
 
-      await this.store.ack(raw);
+      await this.store.ack(raw, visibleUntil);
       return;
     }
 
@@ -269,15 +275,19 @@ export class Queue<T> {
         );
       }
 
-      await this.scheduleRetry(raw, job);
+      await this.scheduleRetry(raw, job, visibleUntil);
       return;
     }
 
     await this.callOnError(job);
-    await this.store.ack(raw);
+    await this.store.ack(raw, visibleUntil);
   }
 
-  private async scheduleRetry(raw: string, job: JobState<T>) {
+  private async scheduleRetry(
+    raw: string,
+    job: JobState<T>,
+    visibleUntil: number,
+  ) {
     const delay = this.computeBackoffDelay(job.attempts);
     const runAtMs = Date.now() + delay;
     const [stringifyError, nextRaw] = this.serializeJob(job);
@@ -285,16 +295,21 @@ export class Queue<T> {
     if (stringifyError || !nextRaw) {
       job.error = `Failed to serialize job for retry: ${this.formatErrorMessage(stringifyError)}`;
       await this.callOnError(job);
-      await this.store.ack(raw);
+      await this.store.ack(raw, visibleUntil);
       return;
     }
 
-    const scheduleError = await this.store.scheduleRetry(raw, nextRaw, runAtMs);
+    const scheduleError = await this.store.scheduleRetry(
+      raw,
+      nextRaw,
+      runAtMs,
+      visibleUntil,
+    );
 
     if (scheduleError) {
       job.error = `Failed to schedule job retry: ${this.formatErrorMessage(scheduleError)}`;
       await this.callOnError(job);
-      await this.store.ack(raw);
+      await this.store.ack(raw, visibleUntil);
     }
   }
 

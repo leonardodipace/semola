@@ -1,5 +1,5 @@
 import { mightThrow, mightThrowSync } from "../errors/index.js";
-import type { JobState } from "./types.js";
+import type { JobState, QueueClaimResult } from "./types.js";
 
 const CLAIM_FROM_JOBS =
   "local p=redis.call('RPOP',KEYS[1]) if not p then return false end redis.call('ZADD',KEYS[2],tonumber(ARGV[1]),p) return p";
@@ -7,16 +7,17 @@ const CLAIM_FROM_JOBS =
 const CLAIM_DUE_RETRY =
   "local d=redis.call('ZRANGEBYSCORE',KEYS[1],0,tonumber(ARGV[1]),'LIMIT',0,1) if #d==0 then return false end local p=d[1] redis.call('ZREM',KEYS[1],p) redis.call('ZADD',KEYS[2],tonumber(ARGV[2]),p) return p";
 
-const ACK = "return redis.call('ZREM',KEYS[1],ARGV[1])";
+const ACK =
+  "local s=redis.call('ZSCORE',KEYS[1],ARGV[1]) if not s then return 0 end if tonumber(s)~=tonumber(ARGV[2]) then return 0 end return redis.call('ZREM',KEYS[1],ARGV[1])";
 
 const RECLAIM_ONE =
   "local d=redis.call('ZRANGEBYSCORE',KEYS[1],0,tonumber(ARGV[1]),'LIMIT',0,1) if #d==0 then return false end local p=d[1] redis.call('ZREM',KEYS[1],p) redis.call('LPUSH',KEYS[2],p) return p";
 
 const SCHEDULE_RETRY =
-  "redis.call('ZREM',KEYS[1],ARGV[1]) redis.call('ZADD',KEYS[2],tonumber(ARGV[3]),ARGV[2]) return 1";
+  "local s=redis.call('ZSCORE',KEYS[1],ARGV[1]) if not s then return 0 end if tonumber(s)~=tonumber(ARGV[4]) then return 0 end redis.call('ZREM',KEYS[1],ARGV[1]) redis.call('ZADD',KEYS[2],tonumber(ARGV[3]),ARGV[2]) return 1";
 
 const RELEASE =
-  "local n=redis.call('ZREM',KEYS[1],ARGV[1]) if n==0 then return 0 end redis.call('LPUSH',KEYS[2],ARGV[1]) return 1";
+  "local s=redis.call('ZSCORE',KEYS[1],ARGV[1]) if not s then return 0 end if tonumber(s)~=tonumber(ARGV[2]) then return 0 end redis.call('ZREM',KEYS[1],ARGV[1]) redis.call('LPUSH',KEYS[2],ARGV[1]) return 1";
 
 export class QueueStore {
   public constructor(
@@ -59,7 +60,7 @@ export class QueueStore {
     );
 
     if (retryError) {
-      return { kind: "error" as const, error: retryError };
+      return { kind: "error", error: retryError } satisfies QueueClaimResult<T>;
     }
 
     let raw = typeof retryPayload === "string" ? retryPayload : null;
@@ -76,14 +77,17 @@ export class QueueStore {
       );
 
       if (jobsError) {
-        return { kind: "error" as const, error: jobsError };
+        return {
+          kind: "error",
+          error: jobsError,
+        } satisfies QueueClaimResult<T>;
       }
 
       raw = typeof jobsPayload === "string" ? jobsPayload : null;
     }
 
     if (!raw) {
-      return { kind: "idle" as const };
+      return { kind: "idle" } satisfies QueueClaimResult<T>;
     }
 
     const [parseError, job] = mightThrowSync<JobState<T>>(() =>
@@ -91,33 +95,54 @@ export class QueueStore {
     );
 
     if (parseError || !job) {
-      return { kind: "malformed" as const, raw };
+      return {
+        kind: "malformed",
+        raw,
+        visibleUntil,
+      } satisfies QueueClaimResult<T>;
     }
 
-    return { kind: "claimed" as const, raw, job };
+    return {
+      kind: "claimed",
+      raw,
+      job,
+      visibleUntil,
+    } satisfies QueueClaimResult<T>;
   }
 
-  public async ack(raw: string) {
+  public async ack(raw: string, visibleUntil: number) {
     const { inflight } = this.keys();
 
     const [error] = await mightThrow(
-      this.redis.send("EVAL", [ACK, "1", inflight, raw]),
+      this.redis.send("EVAL", [ACK, "1", inflight, raw, String(visibleUntil)]),
     );
 
     return error;
   }
 
-  public async release(raw: string) {
+  public async release(raw: string, visibleUntil: number) {
     const k = this.keys();
 
     const [error] = await mightThrow(
-      this.redis.send("EVAL", [RELEASE, "2", k.inflight, k.jobs, raw]),
+      this.redis.send("EVAL", [
+        RELEASE,
+        "2",
+        k.inflight,
+        k.jobs,
+        raw,
+        String(visibleUntil),
+      ]),
     );
 
     return error;
   }
 
-  public async scheduleRetry(oldRaw: string, nextRaw: string, runAtMs: number) {
+  public async scheduleRetry(
+    oldRaw: string,
+    nextRaw: string,
+    runAtMs: number,
+    visibleUntil: number,
+  ) {
     const k = this.keys();
 
     const [error] = await mightThrow(
@@ -129,6 +154,7 @@ export class QueueStore {
         oldRaw,
         nextRaw,
         String(runAtMs),
+        String(visibleUntil),
       ]),
     );
 
