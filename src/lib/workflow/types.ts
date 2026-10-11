@@ -486,6 +486,11 @@ export type MaybeStartCompensationInput = {
   token: string;
 };
 
+export type CompensationStartResult =
+  | { type: "started" }
+  | { type: "none" }
+  | { type: "failed"; error: string };
+
 export type RunCompensationPhaseInput = {
   executionId: string;
   view: HistoryView;

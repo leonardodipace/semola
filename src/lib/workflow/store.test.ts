@@ -460,6 +460,30 @@ describe("WorkflowStore", () => {
     });
   });
 
+  test("persistExecution only transitions status failed to pending", async () => {
+    const redis = createRedis();
+    const store = new WorkflowStore(redis, "store-persist-cas");
+    const executionId = "exec-cas";
+
+    await store.tryCreateMetaAndActive(executionId, {
+      ...baseMeta("store-persist-cas"),
+      status: "completed",
+      completedAt: String(Date.now()),
+    });
+
+    expect(await store.persistExecution(executionId)).toBe(false);
+    expect((await store.getMeta(executionId))?.status).toBe("completed");
+
+    await store.updateStatusAndMarkActive({
+      executionId,
+      status: "failed",
+      extra: { error: "boom", failedAt: String(Date.now()) },
+    });
+
+    expect(await store.persistExecution(executionId)).toBe(true);
+    expect((await store.getMeta(executionId))?.status).toBe("pending");
+  });
+
   test("persistExecution removes TTL without marking active", async () => {
     const redis = createRedis();
     const store = new WorkflowStore(redis, "store-persist");

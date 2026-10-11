@@ -1965,6 +1965,95 @@ describe("workflow", () => {
       await stop(wf);
     });
 
+    test("stale resume after complete does not revive execution", async () => {
+      const redis = createRedis();
+      let attempts = 0;
+      let completes = 0;
+
+      const wf = defineWorkflow({
+        name: `resume-stale-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        hooks: {
+          onComplete: () => {
+            completes++;
+          },
+        },
+        handler: async ({ step }) => {
+          await step("once", async () => {
+            attempts++;
+
+            if (attempts === 1) throw new Error("boom");
+
+            return "ok";
+          });
+
+          return "done";
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "failed");
+
+      await wf.resume(executionId);
+      await waitStatus(wf, executionId, "completed");
+
+      await expect(wf.resume(executionId)).rejects.toMatchObject({
+        name: "WorkflowStoreError",
+        message: expect.stringContaining(
+          "only failed executions can be resumed",
+        ),
+      });
+
+      expect(attempts).toBe(2);
+      expect(completes).toBe(1);
+      expect((await wf.get(executionId)).status).toBe("completed");
+
+      await stop(wf);
+    });
+
+    test("onError errorHistory after resume starts a new attempt series", async () => {
+      const redis = createRedis();
+      let attempts = 0;
+      let lastHistory: { attempt: number; error: string }[] = [];
+
+      const wf = defineWorkflow({
+        name: `resume-error-history-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        hooks: {
+          onError: ({ errorHistory }) => {
+            lastHistory = errorHistory.map((entry) => ({
+              attempt: entry.attempt,
+              error: entry.error,
+            }));
+          },
+        },
+        handler: async ({ step }) => {
+          await step("once", async () => {
+            attempts++;
+
+            if (attempts === 1) throw new Error("first");
+
+            throw new Error("second");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "failed");
+      expect(lastHistory).toEqual([{ attempt: 1, error: "first" }]);
+
+      await wf.resume(executionId);
+      await waitStatus(wf, executionId, "failed");
+
+      expect(lastHistory).toEqual([{ attempt: 1, error: "second" }]);
+
+      await stop(wf);
+    });
+
     test("resume rejects pending executions that never failed", async () => {
       const redis = createRedis();
       const name = `resume-pending-${crypto.randomUUID()}`;

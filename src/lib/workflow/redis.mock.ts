@@ -643,6 +643,10 @@ export class MockRedisClient {
 
       if (!this.existsSync(metaKey)) return 0;
 
+      const status = this.hashes.get(metaKey)?.get("status");
+
+      if (status !== "failed") return 0;
+
       this.persistSync(metaKey);
       this.persistSync(historyKey);
       this.zremSync(terminalKey, [executionId]);

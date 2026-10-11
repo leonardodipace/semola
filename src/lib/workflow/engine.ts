@@ -13,6 +13,7 @@ import type {
   CollectErrorHistoryInput,
   CompensationHandlersMissingInput,
   CompensationItem,
+  CompensationStartResult,
   CompleteExecutionInput,
   EnsureCapacityInput,
   ExecuteCompensationInput,
@@ -65,7 +66,8 @@ const isNonRetryableStepError = (error: Error) => {
 const runHook = async (fn: (() => void | Promise<void>) | undefined) => {
   if (!fn) return;
 
-  await mightThrow(Promise.resolve(fn()));
+  // Defer so sync throws become rejections that mightThrow can swallow.
+  await mightThrow(Promise.resolve().then(() => fn()));
 };
 
 const backoffDelay = (input: BackoffDelayInput) => {
@@ -87,7 +89,9 @@ const advance = async <TInput, TResult>(
     return { type: "waiting" };
   }
 
-  if (signal.aborted || view.cancelRequested) {
+  // Only history cancel requests end the run. stop() aborts the signal to
+  // interrupt handlers but must not write WorkflowCancelled.
+  if (view.cancelRequested) {
     return {
       type: "cancel",
       events: [{ type: "WorkflowCancelled", timestamp: now }],
@@ -236,7 +240,7 @@ const advance = async <TInput, TResult>(
     };
   }
 
-  if (signal.aborted || view.cancelRequested) {
+  if (view.cancelRequested) {
     return {
       type: "cancel",
       events: [{ type: "WorkflowCancelled", timestamp: now }],
@@ -392,8 +396,25 @@ const collectCompensations = async <TInput, TResult>(
 
   if (fatal) throw fatal;
 
+  const hasUnvisitedCompleted = () => {
+    for (const [stepId, state] of view.steps) {
+      if (state.status !== "completed") continue;
+      if (visitedCompleted.has(stepId)) continue;
+
+      return true;
+    }
+
+    return false;
+  };
+
   if (handlerError) {
     if (handlerError instanceof Paused) {
+      if (hasUnvisitedCompleted()) {
+        throw new Error(
+          "nondeterminism: compensation collect paused before every completed step was replayed",
+        );
+      }
+
       return items;
     }
 
@@ -403,6 +424,12 @@ const collectCompensations = async <TInput, TResult>(
 
       throw handlerError;
     }
+  }
+
+  if (hasUnvisitedCompleted()) {
+    throw new Error(
+      "nondeterminism: compensation collect returned before every completed step was replayed",
+    );
   }
 
   return items;
@@ -1014,7 +1041,7 @@ export class WorkflowEngine<TInput, TResult> {
           token,
         });
 
-        if (compensating) continue;
+        if (compensating.type === "started") continue;
 
         const appended = await this.store.appendEvents({
           executionId,
@@ -1041,7 +1068,34 @@ export class WorkflowEngine<TInput, TResult> {
         token,
       });
 
-      if (compensating) continue;
+      if (compensating.type === "started") continue;
+
+      if (compensating.type === "failed") {
+        const failedEvents: HistoryEvent[] = [
+          {
+            type: "WorkflowFailed",
+            error: compensating.error,
+            timestamp: Date.now(),
+          },
+        ];
+
+        const appended = await this.store.appendEvents({
+          executionId,
+          events: failedEvents,
+          leaseToken: token,
+        });
+
+        if (!appended) return;
+
+        await this.failExecution({
+          executionId,
+          error: compensating.error,
+          partitionKey,
+          partitionSlot,
+          token,
+        });
+        return;
+      }
 
       const appended = await this.store.appendEvents({
         executionId,
@@ -1113,10 +1167,12 @@ export class WorkflowEngine<TInput, TResult> {
       if (serializeError) {
         const view = parseHistory(await this.store.loadHistory(executionId));
 
-        if (view.cancelRequested || controller.signal.aborted) {
+        if (view.cancelRequested) {
           await this.store.enqueue(executionId);
           return false;
         }
+
+        if (controller.signal.aborted) return false;
 
         return this.handleStepFailure({
           executionId,
@@ -1155,7 +1211,7 @@ export class WorkflowEngine<TInput, TResult> {
       // Persist success before honor cancel so side effects are in history.
       const view = parseHistory(await this.store.loadHistory(executionId));
 
-      if (view.cancelRequested || controller.signal.aborted) {
+      if (view.cancelRequested) {
         await this.store.enqueue(executionId);
       }
 
@@ -1164,10 +1220,12 @@ export class WorkflowEngine<TInput, TResult> {
 
     const view = parseHistory(await this.store.loadHistory(executionId));
 
-    if (view.cancelRequested || controller.signal.aborted) {
+    if (view.cancelRequested) {
       await this.store.enqueue(executionId);
       return false;
     }
+
+    if (controller.signal.aborted) return false;
 
     return this.handleStepFailure({
       executionId,
@@ -1315,7 +1373,7 @@ export class WorkflowEngine<TInput, TResult> {
       token,
     });
 
-    if (compensating) return true;
+    if (compensating.type === "started") return true;
 
     const appended = await this.store.appendEvents({
       executionId,
@@ -1342,12 +1400,14 @@ export class WorkflowEngine<TInput, TResult> {
     return false;
   }
 
-  private async maybeStartCompensation(input: MaybeStartCompensationInput) {
+  private async maybeStartCompensation(
+    input: MaybeStartCompensationInput,
+  ): Promise<CompensationStartResult> {
     const { executionId, reason, error, token } = input;
     const view = parseHistory(await this.store.loadHistory(executionId));
 
-    if (view.compensation) return true;
-    if (view.terminal) return false;
+    if (view.compensation) return { type: "started" };
+    if (view.terminal) return { type: "none" };
 
     const [collectError, items] = await mightThrow(
       collectCompensations({
@@ -1357,8 +1417,11 @@ export class WorkflowEngine<TInput, TResult> {
       }),
     );
 
-    if (collectError) return false;
-    if (items.length === 0) return false;
+    if (collectError) {
+      return { type: "failed", error: collectError.message };
+    }
+
+    if (items.length === 0) return { type: "none" };
 
     const appended = await this.store.appendEvents({
       executionId,
@@ -1374,7 +1437,7 @@ export class WorkflowEngine<TInput, TResult> {
       leaseToken: token,
     });
 
-    if (!appended) return false;
+    if (!appended) return { type: "none" };
 
     this.aborts.delete(executionId);
     this.compensating.add(executionId);
@@ -1392,7 +1455,7 @@ export class WorkflowEngine<TInput, TResult> {
       leaseToken: token,
     });
 
-    return true;
+    return { type: "started" };
   }
 
   private async runCompensationPhase(input: RunCompensationPhaseInput) {
@@ -1736,8 +1799,18 @@ export class WorkflowEngine<TInput, TResult> {
   private collectErrorHistory(input: CollectErrorHistoryInput) {
     const { events, stepId, attempt, error, timestamp, failedType } = input;
     const history: WorkflowStepErrorRecord[] = [];
+    let afterResume = 0;
 
-    for (const event of events) {
+    for (let i = 0; i < events.length; i++) {
+      if (events[i]?.type !== "WorkflowResumed") continue;
+
+      afterResume = i + 1;
+    }
+
+    for (let i = afterResume; i < events.length; i++) {
+      const event = events[i];
+
+      if (!event) continue;
       if (event.type !== failedType) continue;
       if (event.stepId !== stepId) continue;
 
@@ -1956,6 +2029,7 @@ export class WorkflowEngine<TInput, TResult> {
       if (!acquired) continue;
 
       let waitingOnTimer = false;
+      let reclaimed = false;
 
       try {
         const view = parseHistory(await this.store.loadHistory(executionId));
@@ -2072,10 +2146,15 @@ export class WorkflowEngine<TInput, TResult> {
             if (!added) waitingOnTimer = true;
           }
         }
+
+        reclaimed = true;
+      } catch {
+        // Bad history must not block reclaim of later active ids.
       } finally {
         await this.store.releaseLease(executionId, reclaimToken);
       }
 
+      if (!reclaimed) continue;
       if (waitingOnTimer) continue;
 
       await this.store.enqueue(executionId);
@@ -2131,6 +2210,7 @@ export class WorkflowEngine<TInput, TResult> {
         if (error || !ok) {
           this.lostLeases.add(executionId);
           this.capacitySlots.delete(executionId);
+          this.aborts.get(executionId)?.abort();
           return;
         }
 

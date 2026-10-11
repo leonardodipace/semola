@@ -263,11 +263,23 @@ export const defineWorkflow = <TInput, TResult = void>(
       }
     }
 
-    // Persist keys, but stay inactive until resume events exist.
-    const persisted = await store.persistExecution(executionId);
+    // CAS failed -> pending. Pending crash-recovery skips persist.
+    if (meta.status === "failed") {
+      const persisted = await store.persistExecution(executionId);
 
-    if (!persisted) {
-      throw new NotFoundError(`Workflow execution ${executionId} not found`);
+      if (!persisted) {
+        const latest = await store.getMeta(executionId);
+
+        if (!latest) {
+          throw new NotFoundError(
+            `Workflow execution ${executionId} not found`,
+          );
+        }
+
+        throw new WorkflowStoreError(
+          `Workflow execution ${executionId} is ${latest.status}, only failed executions can be resumed`,
+        );
+      }
     }
 
     const now = Date.now();

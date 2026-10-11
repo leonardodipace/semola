@@ -69,9 +69,9 @@ N Bun processes may register the same workflow `name` against the same Redis. Wo
 
 If a replica dies mid-run, lease expiry lets another replica (or the same process after restart) reclaim the execution. You do not need to call `resume()` for crash recovery; workers reclaim from Redis automatically.
 
-History and status writes are lease-fenced (Redis compare-and-append / compare-and-set against the lease token). A writer that loses the lease cannot append; the new owner continues from history. Client paths (`start` / cancel / resume) append without a lease.
+History and status writes are lease-fenced (Redis compare-and-append / compare-and-set against the lease token). A writer that loses the lease cannot append; the new owner continues from history. Client paths (`start` / cancel / resume) append without a lease. Losing a lease aborts the local forward `signal` so the handler can stop; another replica may still re-run the step after reclaim (at-least-once).
 
-`resume(executionId)` re-queues a **failed** execution: persist keys, append a resume event, re-schedule failed steps, then mark active. It also finishes an interrupted resume (`pending` after persist, or after resume events but before active). Plain `pending` / `running` / `compensating` / `completed` / `cancelled` executions reject, as do failed executions that already started compensation. A later failure needs a new resume event even if an older `WorkflowResumed` is already in history.
+`resume(executionId)` re-queues a **failed** execution: atomically persist only while meta status is still `failed`, append a resume event, re-schedule failed steps, then mark active. It also finishes an interrupted resume (`pending` after persist, or after resume events but before active) without re-running that compare-and-set. Plain `pending` / `running` / `compensating` / `completed` / `cancelled` executions reject, as do failed executions that already started compensation. A later failure needs a new resume event even if an older `WorkflowResumed` is already in history.
 
 ## Examples
 
@@ -286,7 +286,7 @@ Pass `Infinity` to keep forever, or `0` to unlink immediately after terminal. Fa
 
 ### Graceful shutdown
 
-`stop()` ends polling, waits for in-flight work (including compensate unwind), and releases this process registration. Forward `signal` is aborted; compensate `signal` is not, so cleanup can finish. Other replicas keep reclaiming and running the same workflow name.
+`stop()` ends polling, waits for in-flight work (including compensate unwind), and releases this process registration. Forward `signal` is aborted so handlers can exit; that abort does not write `WorkflowCancelled` or start compensation. Compensate `signal` is not aborted, so cleanup can finish. Other replicas keep reclaiming and running the same workflow name.
 
 ```typescript
 await onboard.stop();

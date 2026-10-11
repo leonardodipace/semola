@@ -48,7 +48,7 @@ export const HSET_IF_LEASE =
   "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('HSET', KEYS[2], unpack(ARGV, 2)) return 1";
 
 export const PERSIST_EXECUTION =
-  "if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end redis.call('PERSIST', KEYS[1]) redis.call('PERSIST', KEYS[2]) redis.call('ZREM', KEYS[3], ARGV[1]) redis.call('HSET', KEYS[1], 'status', 'pending', 'error', '', 'failedAt', '', 'updatedAt', ARGV[2]) return 1";
+  "local s=redis.call('HGET', KEYS[1], 'status') if s~='failed' then return 0 end redis.call('PERSIST', KEYS[1]) redis.call('PERSIST', KEYS[2]) redis.call('ZREM', KEYS[3], ARGV[1]) redis.call('HSET', KEYS[1], 'status', 'pending', 'error', '', 'failedAt', '', 'updatedAt', ARGV[2]) return 1";
 
 export const RETAIN_IF_TERMINAL =
   "local s=redis.call('HGET', KEYS[1], 'status') if s~='completed' and s~='failed' and s~='cancelled' then return 0 end local ttl=tonumber(ARGV[2]) if ttl then local pttl=redis.call('PTTL', KEYS[1]) if pttl<=0 then if ttl<=0 then redis.call('UNLINK', KEYS[1], KEYS[2], KEYS[3]) redis.call('SREM', KEYS[4], ARGV[1]) redis.call('ZREM', KEYS[5], ARGV[1]) return 1 end redis.call('PEXPIRE', KEYS[1], ARGV[2]) redis.call('PEXPIRE', KEYS[2], ARGV[2]) end end if ARGV[3]~='' then redis.call('ZADD', KEYS[5], ARGV[3], ARGV[1]) end return 1";
