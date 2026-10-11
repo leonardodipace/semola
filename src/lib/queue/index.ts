@@ -35,7 +35,6 @@ export class Queue<T> {
   private retryMultiplier: number;
   private retryMaxDelay: number;
   private visibilityTimeoutMs: number;
-  private reclaimIntervalMs: number;
 
   public constructor(options: QueueOptions<T>) {
     this.options = options;
@@ -51,7 +50,6 @@ export class Queue<T> {
       options.retryBackoff?.maxDelay ?? DEFAULT_RETRY_MAX_DELAY;
     this.visibilityTimeoutMs =
       options.visibilityTimeoutMs ?? Math.max(this.timeout * 2, 60_000);
-    this.reclaimIntervalMs = Math.max(this.pollInterval, 200);
 
     assert.ok(
       Number.isFinite(this.retryBaseDelay) && this.retryBaseDelay > 0,
@@ -78,7 +76,6 @@ export class Queue<T> {
     );
 
     this.startWorkers();
-    void this.reclaimLoop();
   }
 
   private computeBackoffDelay(attempt: number) {
@@ -139,26 +136,6 @@ export class Queue<T> {
   private startWorkers() {
     for (let i = 0; i < this.concurrency; i++) {
       void this.processJobs();
-    }
-  }
-
-  private async reclaimLoop() {
-    while (this.running) {
-      while (this.running) {
-        const raw = await this.store.reclaimOne();
-
-        if (!raw) {
-          break;
-        }
-      }
-
-      if (!this.running) {
-        break;
-      }
-
-      await new Promise((resolve) =>
-        setTimeout(resolve, this.reclaimIntervalMs),
-      );
     }
   }
 

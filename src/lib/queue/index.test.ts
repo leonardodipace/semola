@@ -145,11 +145,6 @@ class MockRedisClient {
     );
   }
 
-  public clear() {
-    this.lists.clear();
-    this.zsets.clear();
-  }
-
   public getList(key: string) {
     return this.lists.get(key) ?? [];
   }
@@ -1191,40 +1186,9 @@ describe("Queue", () => {
   });
 
   describe("durability", () => {
-    test.concurrent("reclaims orphan after visibility expires", async () => {
+    test.concurrent("reclaim restores orphans and ignores stale lease ops", async () => {
       const redis = createMockRedis();
-      const store = new QueueStore(redis, "orphan", 1000);
-      await store.enqueue(
-        JSON.stringify({
-          id: "o1",
-          data: { message: "survive" },
-          attempts: 0,
-          maxRetries: 3,
-          createdAt: 1,
-        }),
-      );
-      expect((await store.claimNext()).kind).toBe("claimed");
-      await sleep(1100);
-      await store.reclaimOne();
-
-      let runs = 0;
-      const queue = new Queue({
-        name: "orphan",
-        redis,
-        visibilityTimeoutMs: 1000,
-        pollInterval: 1,
-        handler: () => {
-          runs++;
-        },
-      });
-      await sleep(150);
-      expect(runs).toBe(1);
-      await queue.stop();
-    });
-
-    test.concurrent("stale lease ops after reclaim do not fork or steal", async () => {
-      const redis = createMockRedis();
-      const store = new QueueStore(redis, "lease-race", 50);
+      const store = new QueueStore(redis, "lease", 1000);
       const raw =
         '{"id":"j1","data":{"message":"once"},"attempts":0,"maxRetries":3,"createdAt":1}';
       const nextRaw = raw.replace('"attempts":0', '"attempts":1');
@@ -1232,7 +1196,7 @@ describe("Queue", () => {
       await store.enqueue(raw);
       const first = await store.claimNext();
       if (first.kind !== "claimed") throw new Error("expected claim");
-      await sleep(60);
+      await sleep(1100);
       await store.reclaimOne();
       await store.scheduleRetry(
         raw,
@@ -1240,17 +1204,21 @@ describe("Queue", () => {
         Date.now() + 1000,
         first.visibleUntil,
       );
-      expect(redis.getList("queue:lease-race:jobs")).toEqual([raw]);
-      expect(redis.getZset("queue:lease-race:retry")).toEqual([]);
+      expect(redis.getList("queue:lease:jobs")).toEqual([raw]);
+      expect(redis.getZset("queue:lease:retry")).toEqual([]);
 
       const second = await store.claimNext();
       if (second.kind !== "claimed") throw new Error("expected second claim");
       await store.ack(raw, first.visibleUntil);
-      expect(redis.getZset("queue:lease-race:inflight")).toEqual([
+      expect(redis.getZset("queue:lease:inflight")).toEqual([
         { score: second.visibleUntil, member: raw },
       ]);
       await store.ack(raw, second.visibleUntil);
-      expect(redis.getZset("queue:lease-race:inflight")).toEqual([]);
+
+      await store.enqueue(raw);
+      expect((await store.claimNext()).kind).toBe("claimed");
+      await sleep(1100);
+      expect((await store.claimNext()).kind).toBe("claimed");
     });
   });
 });

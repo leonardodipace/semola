@@ -4,21 +4,21 @@ import type { JobState } from "./types.js";
 const CLAIM_FROM_JOBS =
   "local p=redis.call('RPOP',KEYS[1]) if not p then return false end redis.call('ZADD',KEYS[2],tonumber(ARGV[1]),p) return p";
 
-const CLAIM_DUE_RETRY =
-  "local d=redis.call('ZRANGEBYSCORE',KEYS[1],0,tonumber(ARGV[1]),'LIMIT',0,1) if #d==0 then return false end local p=d[1] redis.call('ZREM',KEYS[1],p) redis.call('ZADD',KEYS[2],tonumber(ARGV[2]),p) return p";
+const TAKE_DUE =
+  "local d=redis.call('ZRANGEBYSCORE',KEYS[1],0,tonumber(ARGV[1]),'LIMIT',0,1) if #d==0 then return false end local p=d[1] redis.call('ZREM',KEYS[1],p) ";
 
-const ACK =
-  "local s=redis.call('ZSCORE',KEYS[1],ARGV[1]) if not s then return 0 end if tonumber(s)~=tonumber(ARGV[2]) then return 0 end return redis.call('ZREM',KEYS[1],ARGV[1])";
+const CLAIM_DUE_RETRY = `${TAKE_DUE}redis.call('ZADD',KEYS[2],tonumber(ARGV[2]),p) return p`;
 
-const RECLAIM_ONE =
-  "local d=redis.call('ZRANGEBYSCORE',KEYS[1],0,tonumber(ARGV[1]),'LIMIT',0,1) if #d==0 then return false end local p=d[1] redis.call('ZREM',KEYS[1],p) redis.call('LPUSH',KEYS[2],p) return p";
+const RECLAIM_ONE = `${TAKE_DUE}redis.call('LPUSH',KEYS[2],p) return p`;
 
-const SCHEDULE_RETRY =
-  "local s=redis.call('ZSCORE',KEYS[1],ARGV[1]) if not s then return 0 end if tonumber(s)~=tonumber(ARGV[4]) then return 0 end redis.call('ZREM',KEYS[1],ARGV[1]) redis.call('ZADD',KEYS[2],tonumber(ARGV[3]),ARGV[2]) return 1";
+const FENCE =
+  "local s=redis.call('ZSCORE',KEYS[1],ARGV[1]) if not s then return 0 end if tonumber(s)~=tonumber(ARGV[";
 
-const RELEASE =
-  "local s=redis.call('ZSCORE',KEYS[1],ARGV[1]) if not s then return 0 end if tonumber(s)~=tonumber(ARGV[2]) then return 0 end redis.call('ZREM',KEYS[1],ARGV[1]) redis.call('LPUSH',KEYS[2],ARGV[1]) return 1";
+const ACK = `${FENCE}2]) then return 0 end return redis.call('ZREM',KEYS[1],ARGV[1])`;
 
+const SCHEDULE_RETRY = `${FENCE}4]) then return 0 end redis.call('ZREM',KEYS[1],ARGV[1]) redis.call('ZADD',KEYS[2],tonumber(ARGV[3]),ARGV[2]) return 1`;
+
+const RELEASE = `${FENCE}2]) then return 0 end redis.call('ZREM',KEYS[1],ARGV[1]) redis.call('LPUSH',KEYS[2],ARGV[1]) return 1`;
 export class QueueStore {
   public constructor(
     private redis: Bun.RedisClient,
@@ -50,6 +50,8 @@ export class QueueStore {
   }
 
   public async claimNext<T>() {
+    await this.reclaimOne();
+
     const k = this.keys();
     const now = Date.now();
     const visibleUntil = now + this.visibilityTimeoutMs;
