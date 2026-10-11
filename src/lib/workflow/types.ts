@@ -29,7 +29,7 @@ export type WorkflowExecution<TInput, TResult> = {
 export type StepContext<TInput> = {
   input: TInput;
   signal: AbortSignal;
-  fail: (message: string) => never;
+  fail: (error: Error) => never;
 };
 
 export type StepHandler<TInput, TStep> = (
@@ -40,7 +40,7 @@ export type StepCompensateContext<TInput, TStep> = {
   input: TInput;
   result: TStep;
   signal: AbortSignal;
-  fail: (message: string) => never;
+  fail: (error: Error) => never;
 };
 
 export type StepCompensateHandler<TInput, TStep> = (
@@ -83,7 +83,7 @@ export type WorkflowStepErrorContext<TInput> = {
   executionId: string;
   input: TInput;
   stepName: string;
-  error: string;
+  error: Error;
   totalAttempts: number;
   errorHistory: WorkflowStepErrorRecord[];
 };
@@ -455,7 +455,7 @@ export type FailAfterStepExhaustedInput = {
   rawInput: string;
   partitionKey: string;
   partitionSlot: number | undefined;
-  message: string;
+  stepError: Error;
   errorHistory: WorkflowStepErrorRecord[];
   token: string;
 };
@@ -522,7 +522,7 @@ export type FailFromCompensationInput = {
   executionId: string;
   stepName: string;
   attempt: number;
-  error: string;
+  error: Error;
   errorHistory: WorkflowStepErrorRecord[];
   rawInput: string;
   partitionKey: string;

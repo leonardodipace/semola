@@ -129,7 +129,7 @@ describe("workflow compensate adversarial", () => {
         }
 
         await step("boom", async ({ fail }) => {
-          fail("done");
+          fail(new Error("done"));
         });
       },
     });
@@ -458,7 +458,7 @@ describe("workflow compensate adversarial", () => {
         });
 
         await step("later", async ({ fail }) => {
-          fail("later fail");
+          fail(new Error("later fail"));
         });
       },
     });
@@ -491,7 +491,7 @@ describe("workflow compensate adversarial", () => {
         });
 
         await step("later", async ({ fail }) => {
-          fail("later fail");
+          fail(new Error("later fail"));
         });
       },
     });
@@ -708,7 +708,7 @@ describe("workflow compensate adversarial", () => {
         });
 
         await step("later", async ({ fail }) => {
-          fail("later");
+          fail(new Error("later"));
         });
       },
     });
@@ -736,7 +736,7 @@ describe("workflow compensate adversarial", () => {
       retries: 0,
       hooks: {
         onError: ({ error }) => {
-          errors.push(error);
+          errors.push(error.message);
         },
         onCancel: () => {
           onCancelCalls++;
@@ -753,7 +753,7 @@ describe("workflow compensate adversarial", () => {
         });
 
         await step("later", async ({ fail }) => {
-          fail("original");
+          fail(new Error("original"));
         });
       },
     });
@@ -782,7 +782,7 @@ describe("workflow compensate adversarial", () => {
       retries: 0,
       hooks: {
         onError: ({ error, stepName, errorHistory }) => {
-          errors.push(error);
+          errors.push(error.message);
 
           if (stepName === "create") {
             compensateHistories.push(errorHistory.length);
@@ -797,7 +797,7 @@ describe("workflow compensate adversarial", () => {
         });
 
         await step("later", async ({ fail }) => {
-          fail("original");
+          fail(new Error("original"));
         });
       },
     });
@@ -2103,7 +2103,7 @@ describe("workflow compensate adversarial", () => {
 
         await step("gate", async ({ fail }) => {
           await failGate;
-          fail("boom");
+          fail(new Error("boom"));
         });
       },
     });
@@ -2192,7 +2192,7 @@ describe("workflow compensate adversarial", () => {
 
         await step("gate", async ({ fail }) => {
           await failGate;
-          fail("boom");
+          fail(new Error("boom"));
         });
       },
     });
@@ -2310,7 +2310,7 @@ describe("workflow compensate adversarial", () => {
         await step("hang", async ({ fail }) => {
           order.push("hang");
           await hangPromise;
-          fail("race fail");
+          fail(new Error("race fail"));
         });
       },
     });
@@ -2363,7 +2363,7 @@ describe("workflow compensate adversarial", () => {
         });
 
         await step("later", async ({ fail }) => {
-          fail("original");
+          fail(new Error("original"));
         });
       },
     });
