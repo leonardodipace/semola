@@ -124,4 +124,104 @@ describe("parseHistory", () => {
       delayMs,
     });
   });
+
+  test("compensation events do not set terminal", () => {
+    const now = 1_700_000_000_000;
+
+    const view = parseHistory([
+      JSON.stringify({
+        type: "WorkflowStarted",
+        input: "{}",
+        partitionKey: "",
+        timestamp: now,
+      }),
+      JSON.stringify({
+        type: "StepCompleted",
+        stepId: "a0",
+        stepName: "create-account",
+        result: '"acc-1"',
+        timestamp: now + 1,
+      }),
+      JSON.stringify({
+        type: "CompensationStarted",
+        reason: "failed",
+        error: "provision failed",
+        stepIds: ["a0"],
+        timestamp: now + 2,
+      }),
+      JSON.stringify({
+        type: "CompensationCompleted",
+        stepId: "a0",
+        stepName: "create-account",
+        timestamp: now + 3,
+      }),
+    ]);
+
+    expect(view.terminal).toBeNull();
+    expect(view.compensation?.reason).toBe("failed");
+    expect(view.compensation?.error).toBe("provision failed");
+    expect(view.compensation?.steps.get("a0")).toEqual({
+      status: "completed",
+      stepName: "create-account",
+    });
+  });
+
+  test("CompensationStarted without stepIds normalizes to empty list", () => {
+    const now = 1_700_000_000_000;
+
+    const view = parseHistory([
+      JSON.stringify({
+        type: "WorkflowStarted",
+        input: "{}",
+        partitionKey: "",
+        timestamp: now,
+      }),
+      JSON.stringify({
+        type: "CompensationStarted",
+        reason: "failed",
+        error: "boom",
+        timestamp: now + 1,
+      }),
+    ]);
+
+    expect(view.compensation?.stepIds).toEqual([]);
+  });
+
+  test("compensation failed updates step state", () => {
+    const now = 1_700_000_000_000;
+
+    const view = parseHistory([
+      JSON.stringify({
+        type: "WorkflowStarted",
+        input: "{}",
+        partitionKey: "",
+        timestamp: now,
+      }),
+      JSON.stringify({
+        type: "CompensationStarted",
+        reason: "cancelled",
+        error: null,
+        stepIds: ["a0"],
+        timestamp: now + 1,
+      }),
+      JSON.stringify({
+        type: "CompensationFailed",
+        stepId: "a0",
+        stepName: "create-account",
+        error: "undo failed",
+        retryable: true,
+        attempt: 1,
+        timestamp: now + 2,
+      }),
+    ]);
+
+    expect(view.compensation?.reason).toBe("cancelled");
+    expect(view.compensation?.steps.get("a0")).toEqual({
+      status: "failed",
+      stepName: "create-account",
+      error: "undo failed",
+      retryable: true,
+      attempt: 1,
+    });
+  });
 });

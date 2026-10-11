@@ -4057,4 +4057,803 @@ describe("workflow", () => {
       await stop(wf);
     });
   });
+
+  describe("compensate", () => {
+    test("later step fail runs earlier compensations LIFO", async () => {
+      const redis = createRedis();
+      const order: string[] = [];
+
+      const wf = defineWorkflow({
+        name: `saga-lifo-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step(
+            "create-vm",
+            async () => {
+              order.push("create-vm");
+              return { id: "vm-1" };
+            },
+            {
+              compensate: async ({ result }) => {
+                order.push(`terminate:${result.id}`);
+              },
+            },
+          );
+
+          await step(
+            "attach-volume",
+            async () => {
+              order.push("attach-volume");
+              return { id: "vol-1" };
+            },
+            {
+              compensate: async ({ result }) => {
+                order.push(`detach:${result.id}`);
+              },
+            },
+          );
+
+          await step("provision", async () => {
+            order.push("provision");
+            throw new Error("provision failed");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(execution.error).toBe("provision failed");
+      expect(order).toEqual([
+        "create-vm",
+        "attach-volume",
+        "provision",
+        "detach:vol-1",
+        "terminate:vm-1",
+      ]);
+
+      await stop(wf);
+    });
+
+    test("steps without compensate fail like today", async () => {
+      const redis = createRedis();
+      const order: string[] = [];
+
+      const wf = defineWorkflow({
+        name: `saga-none-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("create-vm", async () => {
+            order.push("create-vm");
+            return { id: "vm-1" };
+          });
+
+          await step("provision", async () => {
+            order.push("provision");
+            throw new Error("provision failed");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(execution.error).toBe("provision failed");
+      expect(order).toEqual(["create-vm", "provision"]);
+
+      await stop(wf);
+    });
+
+    test("crash mid-compensation resumes without re-running completed compensations", async () => {
+      const redis = createRedis();
+      const order: string[] = [];
+      const name = `saga-crash-${crypto.randomUUID()}`;
+      let hangDetach = true;
+      let crashHang = true;
+
+      const make = () =>
+        defineWorkflow({
+          name,
+          redis,
+          ...fast,
+          retries: 0,
+          lockTTL: 60,
+          handler: async ({ step }) => {
+            await step(
+              "create-vm",
+              async () => {
+                order.push("create-vm");
+                return { id: "vm-1" };
+              },
+              {
+                compensate: async ({ result }) => {
+                  order.push(`terminate:${result.id}`);
+                },
+              },
+            );
+
+            await step(
+              "attach-volume",
+              async () => {
+                order.push("attach-volume");
+                return { id: "vol-1" };
+              },
+              {
+                compensate: async ({ result }) => {
+                  order.push(`detach:${result.id}`);
+
+                  if (hangDetach) {
+                    hangDetach = false;
+
+                    while (crashHang) {
+                      await sleep(10);
+                    }
+
+                    throw new Error("crashed");
+                  }
+                },
+              },
+            );
+
+            await step("provision", async () => {
+              order.push("provision");
+              throw new Error("provision failed");
+            });
+          },
+        });
+
+      const wf1 = make();
+      const { executionId } = await wf1.start({});
+
+      await waitFor(() => order.includes("detach:vol-1"));
+
+      expireLeases(redis);
+      crashHang = false;
+      await stop(wf1);
+
+      const wf2 = make();
+      const execution = await waitStatus(wf2, executionId, "failed");
+
+      expect(execution.error).toBe("provision failed");
+      expect(order.filter((item) => item.startsWith("detach:")).length).toBe(2);
+      expect(order.filter((item) => item.startsWith("terminate:")).length).toBe(
+        1,
+      );
+
+      await stop(wf2);
+    });
+
+    test("compensation retries then succeeds", async () => {
+      const redis = createRedis();
+      let compensateAttempts = 0;
+
+      const wf = defineWorkflow({
+        name: `saga-retry-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 2,
+        handler: async ({ step }) => {
+          await step("create-vm", async () => ({ id: "vm-1" }), {
+            compensate: async () => {
+              compensateAttempts++;
+
+              if (compensateAttempts < 2) {
+                throw new Error("terminate busy");
+              }
+            },
+          });
+
+          await step("provision", async () => {
+            throw new Error("provision failed");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(execution.error).toBe("provision failed");
+      expect(compensateAttempts).toBe(2);
+
+      await stop(wf);
+    });
+
+    test("compensation phase reschedules retry after timer drop", async () => {
+      const redis = createRedis();
+      const name = `saga-retry-drop-${crypto.randomUUID()}`;
+      let compensateAttempts = 0;
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retries: 2,
+        retryBackoff: { baseDelay: 10_000, multiplier: 1, maxDelay: 10_000 },
+        handler: async ({ step }) => {
+          await step("create-vm", async () => ({ id: "vm-1" }), {
+            compensate: async () => {
+              compensateAttempts++;
+
+              if (compensateAttempts < 2) {
+                throw new Error("terminate busy");
+              }
+            },
+          });
+
+          await step("provision", async ({ fail }) => {
+            fail("provision failed");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+
+      await waitFor(() => compensateAttempts >= 1, 2000);
+      await sleep(15);
+      redis.clearZset(`workflow:${name}:timers`);
+
+      const store = new WorkflowStore(redis, name);
+      await store.enqueue(executionId);
+
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(execution.error).toBe("provision failed");
+      expect(compensateAttempts).toBe(2);
+
+      await stop(wf);
+    });
+
+    test("compensation retries exhaust then fail with compensation error", async () => {
+      const redis = createRedis();
+      let compensateAttempts = 0;
+
+      const wf = defineWorkflow({
+        name: `saga-retry-fail-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 1,
+        handler: async ({ step }) => {
+          await step("create-vm", async () => ({ id: "vm-1" }), {
+            compensate: async () => {
+              compensateAttempts++;
+              throw new Error("terminate down");
+            },
+          });
+
+          await step("provision", async () => {
+            throw new Error("provision failed");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(execution.error).toBe("terminate down");
+      expect(compensateAttempts).toBe(2);
+
+      await stop(wf);
+    });
+
+    test("cancel after completed steps compensates then cancelled", async () => {
+      const redis = createRedis();
+      const order: string[] = [];
+      let compensateSignalAborted: boolean | undefined;
+
+      const wf = defineWorkflow({
+        name: `saga-cancel-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step, sleep: durableSleep }) => {
+          await step(
+            "create-vm",
+            async () => {
+              order.push("create-vm");
+              return { id: "vm-1" };
+            },
+            {
+              compensate: async ({ result, signal }) => {
+                compensateSignalAborted = signal.aborted;
+                order.push(`terminate:${result.id}`);
+              },
+            },
+          );
+
+          await durableSleep(10_000);
+        },
+      });
+
+      const { executionId } = await wf.start({});
+
+      await waitFor(async () => {
+        const execution = await wf.get(executionId);
+        return execution.steps.some((step) => step.name === "create-vm");
+      });
+
+      await wf.cancel(executionId);
+      const execution = await waitStatus(wf, executionId, "cancelled");
+
+      expect(execution.status).toBe("cancelled");
+      expect(order).toEqual(["create-vm", "terminate:vm-1"]);
+      expect(compensateSignalAborted).toBe(false);
+
+      await stop(wf);
+    });
+
+    test("status is compensating while unwind runs", async () => {
+      const redis = createRedis();
+      let hang = true;
+
+      const wf = defineWorkflow({
+        name: `saga-status-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("create-vm", async () => ({ id: "vm-1" }), {
+            compensate: async ({ signal }) => {
+              while (hang) {
+                if (signal.aborted) return;
+                await sleep(10);
+              }
+            },
+          });
+
+          await step("provision", async () => {
+            throw new Error("provision failed");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "compensating");
+      hang = false;
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(execution.error).toBe("provision failed");
+
+      await stop(wf);
+    });
+
+    test("resume after compensation is rejected", async () => {
+      const redis = createRedis();
+
+      const wf = defineWorkflow({
+        name: `saga-resume-block-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("create-vm", async () => ({ id: "vm-1" }), {
+            compensate: async () => {},
+          });
+
+          await step("provision", async () => {
+            throw new Error("provision failed");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "failed");
+
+      await expect(wf.resume(executionId)).rejects.toThrow(
+        "cannot be resumed after compensation",
+      );
+
+      await stop(wf);
+    });
+
+    test("resume on plain fail without compensate still works", async () => {
+      const redis = createRedis();
+      let attempts = 0;
+
+      const wf = defineWorkflow({
+        name: `saga-resume-plain-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          const value = await step("once", async () => {
+            attempts++;
+
+            if (attempts === 1) throw new Error("boom");
+
+            return "ok";
+          });
+
+          return value;
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "failed");
+
+      await wf.resume(executionId);
+      const execution = await waitStatus(wf, executionId, "completed");
+
+      expect(execution.result).toBe("ok");
+      expect(attempts).toBe(2);
+
+      await stop(wf);
+    });
+
+    test("handler throw after completed step still compensates", async () => {
+      const redis = createRedis();
+      const order: string[] = [];
+
+      const wf = defineWorkflow({
+        name: `saga-throw-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step(
+            "create-vm",
+            async () => {
+              order.push("create-vm");
+              return { id: "vm-1" };
+            },
+            {
+              compensate: async ({ result }) => {
+                order.push(`terminate:${result.id}`);
+              },
+            },
+          );
+
+          throw new Error("oops");
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(execution.error).toBe("oops");
+      expect(order).toEqual(["create-vm", "terminate:vm-1"]);
+
+      await stop(wf);
+    });
+
+    test("cancel during sleep then crash still compensates without waiting leftover sleep", async () => {
+      const redis = createRedis();
+      const order: string[] = [];
+      const name = `saga-sleep-crash-${crypto.randomUUID()}`;
+      let hangTerminate = true;
+      let crashHang = true;
+
+      const make = () =>
+        defineWorkflow({
+          name,
+          redis,
+          ...fast,
+          retries: 0,
+          lockTTL: 60,
+          handler: async ({ step, sleep: durableSleep }) => {
+            await step(
+              "create-vm",
+              async () => {
+                order.push("create-vm");
+                return { id: "vm-1" };
+              },
+              {
+                compensate: async ({ result }) => {
+                  order.push(`terminate:${result.id}`);
+
+                  if (hangTerminate) {
+                    hangTerminate = false;
+
+                    while (crashHang) {
+                      await sleep(10);
+                    }
+
+                    throw new Error("crashed");
+                  }
+                },
+              },
+            );
+
+            await durableSleep(10_000);
+          },
+        });
+
+      const wf1 = make();
+      const { executionId } = await wf1.start({});
+
+      await waitFor(async () => {
+        const execution = await wf1.get(executionId);
+        return execution.steps.some((step) => step.name === "create-vm");
+      });
+
+      await wf1.cancel(executionId);
+      await waitStatus(wf1, executionId, "compensating");
+
+      expireLeases(redis);
+      crashHang = false;
+      await stop(wf1);
+
+      const wf2 = make();
+      const execution = await waitStatus(wf2, executionId, "cancelled");
+
+      expect(execution.status).toBe("cancelled");
+      expect(order.filter((item) => item.startsWith("terminate:")).length).toBe(
+        2,
+      );
+
+      await stop(wf2);
+    });
+
+    test("fail() inside compensate is non-retryable", async () => {
+      const redis = createRedis();
+      let compensateAttempts = 0;
+
+      const wf = defineWorkflow({
+        name: `saga-fail-comp-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 2,
+        handler: async ({ step }) => {
+          await step("create-vm", async () => ({ id: "vm-1" }), {
+            compensate: async ({ fail }) => {
+              compensateAttempts++;
+              fail("cannot undo");
+            },
+          });
+
+          await step("provision", async () => {
+            throw new Error("provision failed");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(execution.error).toBe("cannot undo");
+      expect(compensateAttempts).toBe(1);
+
+      await stop(wf);
+    });
+
+    test("cancel while compensating is a no-op and unwind finishes", async () => {
+      const redis = createRedis();
+      let hang = true;
+      let compensateRuns = 0;
+
+      const wf = defineWorkflow({
+        name: `saga-cancel-during-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("create-vm", async () => ({ id: "vm-1" }), {
+            compensate: async () => {
+              compensateRuns++;
+
+              while (hang) {
+                await sleep(10);
+              }
+            },
+          });
+
+          await step("provision", async () => {
+            throw new Error("provision failed");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "compensating");
+
+      const requested = await wf.cancel(executionId);
+
+      expect(requested.status).toBe("compensating");
+
+      hang = false;
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(execution.error).toBe("provision failed");
+      expect(compensateRuns).toBe(1);
+
+      await stop(wf);
+    });
+
+    test("cancel-initiated compensate exhaust ends failed without onCancel", async () => {
+      const redis = createRedis();
+      let onCancelCalls = 0;
+      let compensateAttempts = 0;
+
+      const wf = defineWorkflow({
+        name: `saga-cancel-exhaust-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 1,
+        hooks: {
+          onCancel: () => {
+            onCancelCalls++;
+          },
+        },
+        handler: async ({ step, sleep: durableSleep }) => {
+          await step("create-vm", async () => ({ id: "vm-1" }), {
+            compensate: async () => {
+              compensateAttempts++;
+              throw new Error("terminate down");
+            },
+          });
+
+          await durableSleep(10_000);
+        },
+      });
+
+      const { executionId } = await wf.start({});
+
+      await waitFor(async () => {
+        const execution = await wf.get(executionId);
+        return execution.steps.some((step) => step.name === "create-vm");
+      });
+
+      await wf.cancel(executionId);
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(execution.error).toBe("terminate down");
+      expect(compensateAttempts).toBe(2);
+      expect(onCancelCalls).toBe(0);
+
+      await stop(wf);
+    });
+
+    test("stop during compensate still finishes unwind", async () => {
+      const redis = createRedis();
+      let hang = true;
+      let compensateDone = false;
+
+      const wf = defineWorkflow({
+        name: `saga-stop-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("create-vm", async () => ({ id: "vm-1" }), {
+            compensate: async () => {
+              while (hang) {
+                await sleep(10);
+              }
+
+              compensateDone = true;
+            },
+          });
+
+          await step("provision", async () => {
+            throw new Error("provision failed");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "compensating");
+
+      const done = wf.stop();
+      hang = false;
+      await advanceTimersByTimeAsync(100);
+      await done;
+
+      const execution = await wf.get(executionId);
+
+      expect(compensateDone).toBe(true);
+      expect(execution.status).toBe("failed");
+      expect(execution.error).toBe("provision failed");
+    });
+
+    test("stop during first compensate still runs remaining LIFO", async () => {
+      const redis = createRedis();
+      let hang = true;
+      const order: string[] = [];
+
+      const wf = defineWorkflow({
+        name: `saga-stop-lifo-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step(
+            "create-vm",
+            async () => {
+              order.push("create-vm");
+              return { id: "vm-1" };
+            },
+            {
+              compensate: async () => {
+                order.push("terminate");
+              },
+            },
+          );
+
+          await step(
+            "attach-volume",
+            async () => {
+              order.push("attach-volume");
+              return { id: "vol-1" };
+            },
+            {
+              compensate: async () => {
+                order.push("detach");
+
+                while (hang) {
+                  await sleep(10);
+                }
+              },
+            },
+          );
+
+          await step("provision", async () => {
+            throw new Error("provision failed");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "compensating");
+      await waitFor(() => order.includes("detach"));
+
+      const done = wf.stop();
+      hang = false;
+      await advanceTimersByTimeAsync(100);
+      await done;
+
+      const execution = await wf.get(executionId);
+
+      expect(order).toEqual([
+        "create-vm",
+        "attach-volume",
+        "detach",
+        "terminate",
+      ]);
+      expect(execution.status).toBe("failed");
+      expect(execution.error).toBe("provision failed");
+    });
+
+    test("stop during compensate retry still finishes unwind", async () => {
+      const redis = createRedis();
+      let compensateAttempts = 0;
+
+      const wf = defineWorkflow({
+        name: `saga-stop-retry-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 1,
+        handler: async ({ step }) => {
+          await step("create-vm", async () => ({ id: "vm-1" }), {
+            compensate: async () => {
+              compensateAttempts++;
+
+              if (compensateAttempts < 2) {
+                throw new Error("terminate busy");
+              }
+            },
+          });
+
+          await step("provision", async () => {
+            throw new Error("provision failed");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitFor(() => compensateAttempts >= 1);
+
+      const done = wf.stop();
+      await advanceTimersByTimeAsync(100);
+      await done;
+
+      const execution = await wf.get(executionId);
+
+      expect(compensateAttempts).toBe(2);
+      expect(execution.status).toBe("failed");
+      expect(execution.error).toBe("provision failed");
+    });
+  });
 });
