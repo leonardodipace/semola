@@ -60,4 +60,5 @@ export type QueueOptions<T> = {
   timeout?: number;
   concurrency?: number;
   pollInterval?: number;
+  visibilityTimeoutMs?: number;
 };

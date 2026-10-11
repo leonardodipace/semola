@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { Queue } from "./index.js";
+import { QueueStore } from "./store.js";
 import type { ErrorContext, ParseErrorContext, RetryContext } from "./types.js";
+
+type ZMember = { score: number; member: string };
 
 class MockRedisClient {
   private lists = new Map<string, string[]>();
+  private zsets = new Map<string, ZMember[]>();
   private shouldFail = false;
 
   public setShouldFail(value: boolean) {
@@ -38,12 +42,122 @@ class MockRedisClient {
     return list.pop();
   }
 
+  public async send(command: string, args: string[]) {
+    if (this.shouldFail) {
+      throw new Error("Redis connection error");
+    }
+
+    if (command !== "EVAL") {
+      throw new Error(`Unsupported command: ${command}`);
+    }
+
+    const script = args[0] ?? "";
+    const keyCount = Number(args[1] ?? "0");
+    const keys = args.slice(2, 2 + keyCount);
+    const argv = args.slice(2 + keyCount);
+
+    if (script.includes("RPOP") && script.includes("ZADD")) {
+      const payload = await this.rpop(keys[0] ?? "");
+
+      if (!payload) {
+        return false;
+      }
+
+      this.addZMember(keys[1] ?? "", Number(argv[0]), payload);
+      return payload;
+    }
+
+    if (script.includes("ZRANGEBYSCORE") && script.includes("ZADD")) {
+      const due = this.firstDueMember(keys[0] ?? "", Number(argv[0]));
+
+      if (!due) {
+        return false;
+      }
+
+      this.removeZMember(keys[0] ?? "", due);
+      this.addZMember(keys[1] ?? "", Number(argv[1]), due);
+      return due;
+    }
+
+    if (script.startsWith("return redis.call('ZREM'")) {
+      return this.removeZMember(keys[0] ?? "", argv[0] ?? "");
+    }
+
+    if (script.includes("ZRANGEBYSCORE") && script.includes("LPUSH")) {
+      const due = this.firstDueMember(keys[0] ?? "", Number(argv[0]));
+
+      if (!due) {
+        return false;
+      }
+
+      this.removeZMember(keys[0] ?? "", due);
+      await this.lpush(keys[1] ?? "", due);
+      return due;
+    }
+
+    if (
+      script.includes("ZREM") &&
+      script.includes("ZADD") &&
+      argv.length >= 3
+    ) {
+      this.removeZMember(keys[0] ?? "", argv[0] ?? "");
+      this.addZMember(keys[1] ?? "", Number(argv[2]), argv[1] ?? "");
+      return 1;
+    }
+
+    if (script.includes("ZREM") && script.includes("LPUSH")) {
+      const removed = this.removeZMember(keys[0] ?? "", argv[0] ?? "");
+
+      if (removed === 0) {
+        return 0;
+      }
+
+      await this.lpush(keys[1] ?? "", argv[0] ?? "");
+      return 1;
+    }
+
+    throw new Error(`Unhandled EVAL script: ${script.slice(0, 40)}`);
+  }
+
+  private addZMember(key: string, score: number, member: string) {
+    const rows = this.zsets.get(key) ?? [];
+    const index = rows.findIndex((row) => row.member === member);
+
+    if (index >= 0) {
+      rows[index] = { score, member };
+    } else {
+      rows.push({ score, member });
+    }
+
+    this.zsets.set(key, rows);
+  }
+
+  private removeZMember(key: string, member: string) {
+    const rows = this.zsets.get(key) ?? [];
+    const next = rows.filter((row) => row.member !== member);
+    this.zsets.set(key, next);
+    return rows.length - next.length;
+  }
+
+  private firstDueMember(key: string, max: number) {
+    const rows = (this.zsets.get(key) ?? [])
+      .filter((row) => row.score <= max)
+      .sort((a, b) => a.score - b.score);
+
+    return rows[0]?.member ?? null;
+  }
+
   public clear() {
     this.lists.clear();
+    this.zsets.clear();
   }
 
   public getList(key: string) {
     return this.lists.get(key) ?? [];
+  }
+
+  public getZset(key: string) {
+    return this.zsets.get(key) ?? [];
   }
 }
 
@@ -1075,6 +1189,78 @@ describe("Queue", () => {
 
       // Should have completed at least job1
       expect(processed.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("durability", () => {
+    test.concurrent("reclaims orphan after visibility expires", async () => {
+      const redis = createMockRedis();
+      const store = new QueueStore(redis, "orphan", 1000);
+      const serialized = JSON.stringify({
+        id: "orphan-1",
+        data: { message: "survive" },
+        attempts: 0,
+        maxRetries: 3,
+        createdAt: Date.now(),
+      });
+
+      await store.enqueue(serialized);
+
+      const claim = await store.claimNext<{ message: string }>();
+
+      expect(claim.kind).toBe("claimed");
+
+      await sleep(1100);
+      await store.reclaimOne();
+
+      let runs = 0;
+
+      const queue = new Queue({
+        name: "orphan",
+        redis,
+        visibilityTimeoutMs: 1000,
+        pollInterval: 1,
+        retries: 3,
+        handler: () => {
+          runs++;
+        },
+      });
+
+      await sleep(150);
+
+      expect(runs).toBe(1);
+
+      await queue.stop();
+    });
+
+    test.concurrent("durable retry runs after scheduled score is due", async () => {
+      const redis = createMockRedis();
+      let attempts = 0;
+
+      const queue = new Queue({
+        name: "retry-durable",
+        redis,
+        retries: 2,
+        pollInterval: 1,
+        visibilityTimeoutMs: 5_000,
+        retryBackoff: { baseDelay: 30, multiplier: 2, maxDelay: 100 },
+        handler: () => {
+          attempts++;
+
+          if (attempts < 2) {
+            throw new Error("retry me");
+          }
+        },
+      });
+
+      await queue.enqueue({ message: "x" });
+
+      await sleep(200);
+
+      expect(attempts).toBe(2);
+      expect(redis.getZset("queue:retry-durable:retry").length).toBe(0);
+
+      await queue.stop();
     });
   });
 });

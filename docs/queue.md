@@ -1,11 +1,13 @@
 ---
 title: Queue
-description: Redis-backed background jobs with retries and concurrency
+description: Redis-backed background jobs with retries, reclaim, and concurrency
 ---
 
-Run work in the background with Redis. Jobs are JSON-serialized, polled by workers, and retried with backoff when they fail.
+Run work in the background with Redis. Jobs are JSON-serialized, claimed into an `inflight` ZSET with a visibility deadline, retried on a durable `retry` ZSET, and reclaimed if a worker dies before ack.
 
-Needs a `Bun.RedisClient`.
+Delivery is at-least-once after reclaim. Handlers should be idempotent.
+
+Needs a `Bun.RedisClient` that supports `EVAL`.
 
 ## Import
 
@@ -15,7 +17,7 @@ import { Queue } from "semola/queue";
 
 ## Quick start
 
-Constructing the queue starts four workers. `enqueue()` stores the email job in Redis, and `stop()` later drains active work before shutdown.
+Constructing the queue starts workers (default concurrency `1`). `enqueue()` stores the email job in Redis, and `stop()` later drains active work before shutdown.
 
 ```typescript
 type EmailJob = {
@@ -178,6 +180,7 @@ process.on("SIGINT", async () => {
 | `timeout` | `30000` | Per-job timeout in ms |
 | `concurrency` | `1` | Parallel workers |
 | `pollInterval` | `100` | Idle poll delay in ms |
+| `visibilityTimeoutMs` | `max(timeout * 2, 60_000)` | Claim lease before reclaim |
 | `onSuccess` | - | After a successful job |
 | `onRetry` | - | Before a retry |
 | `onError` | - | When retries are exhausted |
@@ -190,4 +193,4 @@ process.on("SIGINT", async () => {
 | `enqueue(data)` | Push a job; returns job id |
 | `stop()` | Stop workers and drain in-flight work |
 
-Redis keys: `queue:{name}:jobs`, `queue:{name}:dead-letter`.
+Redis keys: `queue:{name}:jobs`, `queue:{name}:inflight`, `queue:{name}:retry`, `queue:{name}:dead-letter`.
