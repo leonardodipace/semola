@@ -62,9 +62,3 @@ export type QueueOptions<T> = {
   pollInterval?: number;
   visibilityTimeoutMs?: number;
 };
-
-export type QueueClaimResult<T> =
-  | { kind: "error"; error: Error }
-  | { kind: "idle" }
-  | { kind: "malformed"; raw: string; visibleUntil: number }
-  | { kind: "claimed"; raw: string; job: JobState<T>; visibleUntil: number };

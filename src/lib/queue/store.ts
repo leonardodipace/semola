@@ -1,5 +1,5 @@
 import { mightThrow, mightThrowSync } from "../errors/index.js";
-import type { JobState, QueueClaimResult } from "./types.js";
+import type { JobState } from "./types.js";
 
 const CLAIM_FROM_JOBS =
   "local p=redis.call('RPOP',KEYS[1]) if not p then return false end redis.call('ZADD',KEYS[2],tonumber(ARGV[1]),p) return p";
@@ -37,6 +37,12 @@ export class QueueStore {
     };
   }
 
+  private eval(script: string, keys: string[], argv: string[]) {
+    return mightThrow(
+      this.redis.send("EVAL", [script, String(keys.length), ...keys, ...argv]),
+    );
+  }
+
   public async enqueue(serialized: string) {
     const { jobs } = this.keys();
 
@@ -48,46 +54,34 @@ export class QueueStore {
     const now = Date.now();
     const visibleUntil = now + this.visibilityTimeoutMs;
 
-    const [retryError, retryPayload] = await mightThrow(
-      this.redis.send("EVAL", [
-        CLAIM_DUE_RETRY,
-        "2",
-        k.retry,
-        k.inflight,
-        String(now),
-        String(visibleUntil),
-      ]),
+    const [retryError, retryPayload] = await this.eval(
+      CLAIM_DUE_RETRY,
+      [k.retry, k.inflight],
+      [String(now), String(visibleUntil)],
     );
 
     if (retryError) {
-      return { kind: "error", error: retryError } satisfies QueueClaimResult<T>;
+      return { kind: "error" as const, error: retryError };
     }
 
     let raw = typeof retryPayload === "string" ? retryPayload : null;
 
     if (!raw) {
-      const [jobsError, jobsPayload] = await mightThrow(
-        this.redis.send("EVAL", [
-          CLAIM_FROM_JOBS,
-          "2",
-          k.jobs,
-          k.inflight,
-          String(visibleUntil),
-        ]),
+      const [jobsError, jobsPayload] = await this.eval(
+        CLAIM_FROM_JOBS,
+        [k.jobs, k.inflight],
+        [String(visibleUntil)],
       );
 
       if (jobsError) {
-        return {
-          kind: "error",
-          error: jobsError,
-        } satisfies QueueClaimResult<T>;
+        return { kind: "error" as const, error: jobsError };
       }
 
       raw = typeof jobsPayload === "string" ? jobsPayload : null;
     }
 
     if (!raw) {
-      return { kind: "idle" } satisfies QueueClaimResult<T>;
+      return { kind: "idle" as const };
     }
 
     const [parseError, job] = mightThrowSync<JobState<T>>(() =>
@@ -95,26 +89,18 @@ export class QueueStore {
     );
 
     if (parseError || !job) {
-      return {
-        kind: "malformed",
-        raw,
-        visibleUntil,
-      } satisfies QueueClaimResult<T>;
+      return { kind: "malformed" as const, raw, visibleUntil };
     }
 
-    return {
-      kind: "claimed",
-      raw,
-      job,
-      visibleUntil,
-    } satisfies QueueClaimResult<T>;
+    return { kind: "claimed" as const, raw, job, visibleUntil };
   }
 
   public async ack(raw: string, visibleUntil: number) {
     const { inflight } = this.keys();
-
-    const [error] = await mightThrow(
-      this.redis.send("EVAL", [ACK, "1", inflight, raw, String(visibleUntil)]),
+    const [error] = await this.eval(
+      ACK,
+      [inflight],
+      [raw, String(visibleUntil)],
     );
 
     return error;
@@ -122,16 +108,10 @@ export class QueueStore {
 
   public async release(raw: string, visibleUntil: number) {
     const k = this.keys();
-
-    const [error] = await mightThrow(
-      this.redis.send("EVAL", [
-        RELEASE,
-        "2",
-        k.inflight,
-        k.jobs,
-        raw,
-        String(visibleUntil),
-      ]),
+    const [error] = await this.eval(
+      RELEASE,
+      [k.inflight, k.jobs],
+      [raw, String(visibleUntil)],
     );
 
     return error;
@@ -144,18 +124,10 @@ export class QueueStore {
     visibleUntil: number,
   ) {
     const k = this.keys();
-
-    const [error] = await mightThrow(
-      this.redis.send("EVAL", [
-        SCHEDULE_RETRY,
-        "2",
-        k.inflight,
-        k.retry,
-        oldRaw,
-        nextRaw,
-        String(runAtMs),
-        String(visibleUntil),
-      ]),
+    const [error] = await this.eval(
+      SCHEDULE_RETRY,
+      [k.inflight, k.retry],
+      [oldRaw, nextRaw, String(runAtMs), String(visibleUntil)],
     );
 
     return error;
@@ -163,38 +135,35 @@ export class QueueStore {
 
   public async reclaimOne() {
     const k = this.keys();
-
-    const [error, result] = await mightThrow(
-      this.redis.send("EVAL", [
-        RECLAIM_ONE,
-        "2",
-        k.inflight,
-        k.jobs,
-        String(Date.now()),
-      ]),
+    const [error, result] = await this.eval(
+      RECLAIM_ONE,
+      [k.inflight, k.jobs],
+      [String(Date.now())],
     );
 
     if (error) {
       return null;
     }
 
-    if (typeof result === "string") {
-      return result;
+    if (typeof result !== "string") {
+      return null;
     }
 
-    return null;
+    return result;
   }
 
   public async pushDeadLetter(raw: string, parseError: string) {
-    const entry = JSON.stringify({
-      jobData: raw,
-      parseError,
-      timestamp: Date.now(),
-    });
-
     const { deadLetter } = this.keys();
-
-    const [error] = await mightThrow(this.redis.lpush(deadLetter, entry));
+    const [error] = await mightThrow(
+      this.redis.lpush(
+        deadLetter,
+        JSON.stringify({
+          jobData: raw,
+          parseError,
+          timestamp: Date.now(),
+        }),
+      ),
+    );
 
     return error;
   }

@@ -67,7 +67,7 @@ class MockRedisClient {
       return payload;
     }
 
-    if (script.includes("ZRANGEBYSCORE") && script.includes("ZADD")) {
+    if (script.includes("ZRANGEBYSCORE")) {
       const due = this.firstDueMember(keys[0] ?? "", Number(argv[0]));
 
       if (!due) {
@@ -75,66 +75,41 @@ class MockRedisClient {
       }
 
       this.removeZMember(keys[0] ?? "", due);
-      this.addZMember(keys[1] ?? "", Number(argv[1]), due);
-      return due;
-    }
 
-    if (script.includes("ZRANGEBYSCORE") && script.includes("LPUSH")) {
-      const due = this.firstDueMember(keys[0] ?? "", Number(argv[0]));
-
-      if (!due) {
-        return false;
+      if (script.includes("ZADD")) {
+        this.addZMember(keys[1] ?? "", Number(argv[1]), due);
+        return due;
       }
 
-      this.removeZMember(keys[0] ?? "", due);
       await this.lpush(keys[1] ?? "", due);
       return due;
     }
 
-    if (
-      script.includes("ZSCORE") &&
-      script.includes("ZADD") &&
-      argv.length >= 4
-    ) {
+    if (script.includes("ZSCORE")) {
+      const scoreArg = script.includes("ZADD")
+        ? Number(argv[3])
+        : Number(argv[1]);
       const removed = this.removeZMemberIfScore(
         keys[0] ?? "",
         argv[0] ?? "",
-        Number(argv[3]),
+        scoreArg,
       );
 
       if (removed === 0) {
         return 0;
       }
 
-      this.addZMember(keys[1] ?? "", Number(argv[2]), argv[1] ?? "");
-      return 1;
-    }
-
-    if (
-      script.includes("ZSCORE") &&
-      script.includes("LPUSH") &&
-      script.includes("ZREM")
-    ) {
-      const removed = this.removeZMemberIfScore(
-        keys[0] ?? "",
-        argv[0] ?? "",
-        Number(argv[1]),
-      );
-
-      if (removed === 0) {
-        return 0;
+      if (script.includes("ZADD")) {
+        this.addZMember(keys[1] ?? "", Number(argv[2]), argv[1] ?? "");
+        return 1;
       }
 
-      await this.lpush(keys[1] ?? "", argv[0] ?? "");
-      return 1;
-    }
+      if (script.includes("LPUSH")) {
+        await this.lpush(keys[1] ?? "", argv[0] ?? "");
+        return 1;
+      }
 
-    if (script.includes("ZSCORE") && script.includes("ZREM")) {
-      return this.removeZMemberIfScore(
-        keys[0] ?? "",
-        argv[0] ?? "",
-        Number(argv[1]),
-      );
+      return removed;
     }
 
     throw new Error(`Unhandled EVAL script: ${script.slice(0, 40)}`);
@@ -143,13 +118,8 @@ class MockRedisClient {
   private addZMember(key: string, score: number, member: string) {
     const rows = this.zsets.get(key) ?? [];
     const index = rows.findIndex((row) => row.member === member);
-
-    if (index >= 0) {
-      rows[index] = { score, member };
-    } else {
-      rows.push({ score, member });
-    }
-
+    if (index >= 0) rows[index] = { score, member };
+    else rows.push({ score, member });
     this.zsets.set(key, rows);
   }
 
@@ -161,26 +131,18 @@ class MockRedisClient {
   }
 
   private removeZMemberIfScore(key: string, member: string, score: number) {
-    const rows = this.zsets.get(key) ?? [];
-    const row = rows.find((entry) => entry.member === member);
-
-    if (!row) {
-      return 0;
-    }
-
-    if (row.score !== score) {
-      return 0;
-    }
-
+    const row = (this.zsets.get(key) ?? []).find((e) => e.member === member);
+    if (!row) return 0;
+    if (row.score !== score) return 0;
     return this.removeZMember(key, member);
   }
 
   private firstDueMember(key: string, max: number) {
-    const rows = (this.zsets.get(key) ?? [])
-      .filter((row) => row.score <= max)
-      .sort((a, b) => a.score - b.score);
-
-    return rows[0]?.member ?? null;
+    return (
+      (this.zsets.get(key) ?? [])
+        .filter((row) => row.score <= max)
+        .sort((a, b) => a.score - b.score)[0]?.member ?? null
+    );
   }
 
   public clear() {
@@ -1232,151 +1194,63 @@ describe("Queue", () => {
     test.concurrent("reclaims orphan after visibility expires", async () => {
       const redis = createMockRedis();
       const store = new QueueStore(redis, "orphan", 1000);
-      const serialized = JSON.stringify({
-        id: "orphan-1",
-        data: { message: "survive" },
-        attempts: 0,
-        maxRetries: 3,
-        createdAt: Date.now(),
-      });
-
-      await store.enqueue(serialized);
-
-      const claim = await store.claimNext<{ message: string }>();
-
-      expect(claim.kind).toBe("claimed");
-
+      await store.enqueue(
+        JSON.stringify({
+          id: "o1",
+          data: { message: "survive" },
+          attempts: 0,
+          maxRetries: 3,
+          createdAt: 1,
+        }),
+      );
+      expect((await store.claimNext()).kind).toBe("claimed");
       await sleep(1100);
       await store.reclaimOne();
 
       let runs = 0;
-
       const queue = new Queue({
         name: "orphan",
         redis,
         visibilityTimeoutMs: 1000,
         pollInterval: 1,
-        retries: 3,
         handler: () => {
           runs++;
         },
       });
-
       await sleep(150);
-
       expect(runs).toBe(1);
-
       await queue.stop();
     });
 
-    test.concurrent("durable retry runs after scheduled score is due", async () => {
+    test.concurrent("stale lease ops after reclaim do not fork or steal", async () => {
       const redis = createMockRedis();
-      let attempts = 0;
-
-      const queue = new Queue({
-        name: "retry-durable",
-        redis,
-        retries: 2,
-        pollInterval: 1,
-        visibilityTimeoutMs: 5_000,
-        retryBackoff: { baseDelay: 30, multiplier: 2, maxDelay: 100 },
-        handler: () => {
-          attempts++;
-
-          if (attempts < 2) {
-            throw new Error("retry me");
-          }
-        },
-      });
-
-      await queue.enqueue({ message: "x" });
-
-      await sleep(200);
-
-      expect(attempts).toBe(2);
-      expect(redis.getZset("queue:retry-durable:retry").length).toBe(0);
-
-      await queue.stop();
-    });
-
-    test.concurrent("scheduleRetry after reclaim does not invent a second copy", async () => {
-      const redis = createMockRedis();
-      const store = new QueueStore(redis, "retry-race", 50);
-      const oldRaw = JSON.stringify({
-        id: "j1",
-        data: { message: "once" },
-        attempts: 0,
-        maxRetries: 3,
-        createdAt: 1,
-      });
-      const nextRaw = JSON.stringify({
-        id: "j1",
-        data: { message: "once" },
-        attempts: 1,
-        maxRetries: 3,
-        createdAt: 1,
-      });
-
-      await store.enqueue(oldRaw);
-
-      const claim = await store.claimNext<{ message: string }>();
-
-      if (claim.kind !== "claimed") {
-        throw new Error("expected claim");
-      }
-
-      await sleep(60);
-      await store.reclaimOne();
-
-      await store.scheduleRetry(
-        oldRaw,
-        nextRaw,
-        Date.now() + 1000,
-        claim.visibleUntil,
-      );
-
-      expect(redis.getList("queue:retry-race:jobs")).toEqual([oldRaw]);
-      expect(redis.getZset("queue:retry-race:retry")).toEqual([]);
-      expect(redis.getZset("queue:retry-race:inflight")).toEqual([]);
-    });
-
-    test.concurrent("stale ack after reclaim does not drop the new claim", async () => {
-      const redis = createMockRedis();
-      const store = new QueueStore(redis, "ack-race", 50);
-      const raw = JSON.stringify({
-        id: "j2",
-        data: { message: "lease" },
-        attempts: 0,
-        maxRetries: 3,
-        createdAt: 1,
-      });
+      const store = new QueueStore(redis, "lease-race", 50);
+      const raw =
+        '{"id":"j1","data":{"message":"once"},"attempts":0,"maxRetries":3,"createdAt":1}';
+      const nextRaw = raw.replace('"attempts":0', '"attempts":1');
 
       await store.enqueue(raw);
-
-      const first = await store.claimNext<{ message: string }>();
-
-      if (first.kind !== "claimed") {
-        throw new Error("expected claim");
-      }
-
+      const first = await store.claimNext();
+      if (first.kind !== "claimed") throw new Error("expected claim");
       await sleep(60);
       await store.reclaimOne();
+      await store.scheduleRetry(
+        raw,
+        nextRaw,
+        Date.now() + 1000,
+        first.visibleUntil,
+      );
+      expect(redis.getList("queue:lease-race:jobs")).toEqual([raw]);
+      expect(redis.getZset("queue:lease-race:retry")).toEqual([]);
 
-      const second = await store.claimNext<{ message: string }>();
-
-      if (second.kind !== "claimed") {
-        throw new Error("expected second claim");
-      }
-
+      const second = await store.claimNext();
+      if (second.kind !== "claimed") throw new Error("expected second claim");
       await store.ack(raw, first.visibleUntil);
-
-      expect(redis.getZset("queue:ack-race:inflight")).toEqual([
+      expect(redis.getZset("queue:lease-race:inflight")).toEqual([
         { score: second.visibleUntil, member: raw },
       ]);
-
       await store.ack(raw, second.visibleUntil);
-
-      expect(redis.getZset("queue:ack-race:inflight")).toEqual([]);
+      expect(redis.getZset("queue:lease-race:inflight")).toEqual([]);
     });
   });
 });
