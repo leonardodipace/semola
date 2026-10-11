@@ -9,14 +9,28 @@ class MockRedisClient {
   private lists = new Map<string, string[]>();
   private zsets = new Map<string, ZMember[]>();
   private shouldFail = false;
+  private failDeadLetterLpush = false;
+  private failScheduleRetry = false;
 
   public setShouldFail(value: boolean) {
     this.shouldFail = value;
   }
 
+  public setFailDeadLetterLpush(value: boolean) {
+    this.failDeadLetterLpush = value;
+  }
+
+  public setFailScheduleRetry(value: boolean) {
+    this.failScheduleRetry = value;
+  }
+
   public async lpush(key: string, value: string) {
     if (this.shouldFail) {
       throw new Error("Redis connection error");
+    }
+
+    if (this.failDeadLetterLpush && key.includes(":dead-letter")) {
+      throw new Error("Redis dead-letter write error");
     }
 
     if (!this.lists.has(key)) {
@@ -86,6 +100,13 @@ class MockRedisClient {
     }
 
     if (script.includes("ZSCORE")) {
+      const isScheduleRetry =
+        script.includes("ZADD") && !script.includes("LPUSH");
+
+      if (this.failScheduleRetry && isScheduleRetry) {
+        throw new Error("Redis schedule-retry error");
+      }
+
       const scoreArg = script.includes("ZADD")
         ? Number(argv[3])
         : Number(argv[1]);
@@ -237,7 +258,21 @@ describe("Queue", () => {
           timeout: 5_000,
           visibilityTimeoutMs: 1_000,
         });
-      }).toThrow("Invalid visibilityTimeoutMs: must be at least timeout");
+      }).toThrow("Invalid visibilityTimeoutMs: must be greater than timeout");
+    });
+
+    test.concurrent("rejects visibilityTimeoutMs equal to timeout", () => {
+      const redis = createMockRedis();
+
+      expect(() => {
+        new Queue({
+          name: "test",
+          redis,
+          handler: () => {},
+          timeout: 5_000,
+          visibilityTimeoutMs: 5_000,
+        });
+      }).toThrow("Invalid visibilityTimeoutMs: must be greater than timeout");
     });
   });
 
@@ -1072,6 +1107,103 @@ describe("Queue", () => {
         expect(firstParseError.parseError).toBeDefined();
         expect(firstParseError.timestamp).toBeGreaterThan(0);
       }
+    });
+
+    test.concurrent("keeps malformed payload in inflight when dead-letter write fails", async () => {
+      const redis = createMockRedis();
+      redis.setFailDeadLetterLpush(true);
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 3,
+        handler: () => {},
+        pollInterval: 10,
+      });
+
+      const malformedData = '{"id":"keep-me","incomplete":';
+      await redis.lpush("queue:test:jobs", malformedData);
+
+      await sleep(100);
+      await queue.stop();
+
+      expect(redis.getList("queue:test:dead-letter")).toEqual([]);
+      expect(redis.getList("queue:test:jobs")).toEqual([]);
+      expect(redis.getZset("queue:test:inflight")).toEqual([
+        { score: expect.any(Number), member: malformedData },
+      ]);
+    });
+
+    test.concurrent("keeps job in inflight when retry scheduling fails", async () => {
+      const redis = createMockRedis();
+      redis.setFailScheduleRetry(true);
+      type RetryJob = { message: string };
+      const errors: ErrorContext<RetryJob>[] = [];
+
+      const queue = new Queue<RetryJob>({
+        name: "test",
+        redis,
+        retries: 3,
+        ...fastRetryQueueOptions,
+        handler: () => {
+          throw new Error("handler failed");
+        },
+        onError: (context) => {
+          errors.push(context);
+        },
+      });
+
+      const jobId = await queue.enqueue({ message: "retry-me" });
+
+      await waitForRetryProcessing();
+      await queue.stop();
+
+      expect(errors.length).toBe(1);
+      expect(errors[0]?.lastError).toContain("Failed to schedule job retry");
+      expect(redis.getZset("queue:test:retry")).toEqual([]);
+      expect(redis.getList("queue:test:jobs")).toEqual([]);
+
+      const inflight = redis.getZset("queue:test:inflight");
+      expect(inflight.length).toBe(1);
+      expect(inflight[0]?.member).toContain(jobId);
+    });
+
+    test.concurrent("keeps original claim in inflight when retry serialization fails", async () => {
+      const redis = createMockRedis();
+      type MutableJob = { message: string; self?: MutableJob };
+      const errors: ErrorContext<MutableJob>[] = [];
+
+      const queue = new Queue<MutableJob>({
+        name: "test",
+        redis,
+        retries: 3,
+        ...fastRetryQueueOptions,
+        handler: (data) => {
+          data.self = data;
+          throw new Error("handler failed");
+        },
+        onError: (context) => {
+          errors.push(context);
+        },
+      });
+
+      const jobId = await queue.enqueue({ message: "circular" });
+
+      await waitForRetryProcessing();
+      await queue.stop();
+
+      expect(errors.length).toBe(1);
+      expect(errors[0]?.lastError).toContain(
+        "Failed to serialize job for retry",
+      );
+      expect(redis.getList("queue:test:jobs")).toEqual([]);
+      expect(redis.getZset("queue:test:retry")).toEqual([]);
+
+      const inflight = redis.getZset("queue:test:inflight");
+      expect(inflight.length).toBe(1);
+      expect(inflight[0]?.member).toContain(jobId);
+      expect(inflight[0]?.member).toContain('"message":"circular"');
+      expect(inflight[0]?.member).not.toContain('"self"');
     });
 
     test.concurrent("should handle large job data", async () => {

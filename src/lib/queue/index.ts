@@ -69,8 +69,8 @@ export class Queue<T> {
       "Invalid visibilityTimeoutMs: must be at least 1000",
     );
     assert.ok(
-      this.visibilityTimeoutMs >= this.timeout,
-      "Invalid visibilityTimeoutMs: must be at least timeout",
+      this.visibilityTimeoutMs > this.timeout,
+      "Invalid visibilityTimeoutMs: must be greater than timeout",
     );
 
     this.store = new QueueStore(
@@ -159,10 +159,16 @@ export class Queue<T> {
 
       if (claim.kind === "malformed") {
         await this.callOnErrorForParseFailure(claim.raw, claim.error);
-        await this.store.pushDeadLetter(
+        const deadLetterError = await this.store.pushDeadLetter(
           claim.raw,
           this.formatErrorMessage(claim.error),
         );
+
+        if (deadLetterError) {
+          await this.waitForPollInterval();
+          continue;
+        }
+
         await this.store.ack(claim.raw, claim.visibleUntil);
         await this.waitForPollInterval();
         continue;
@@ -276,7 +282,6 @@ export class Queue<T> {
     if (stringifyError || !nextRaw) {
       job.error = `Failed to serialize job for retry: ${this.formatErrorMessage(stringifyError)}`;
       await this.callOnError(job);
-      await this.store.ack(raw, visibleUntil);
       return;
     }
 
@@ -290,7 +295,6 @@ export class Queue<T> {
     if (scheduleError) {
       job.error = `Failed to schedule job retry: ${this.formatErrorMessage(scheduleError)}`;
       await this.callOnError(job);
-      await this.store.ack(raw, visibleUntil);
     }
   }
 
