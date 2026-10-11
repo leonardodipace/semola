@@ -24,6 +24,7 @@ import type {
   FinishCompensationInput,
   FireDurableTimerInput,
   HandleStepFailureInput,
+  HistoryEvent,
   MaybeStartCompensationInput,
   RunCompensationPhaseInput,
   StepCompensateHandler,
@@ -88,7 +89,6 @@ const advance = async <TInput, TResult>(
   let decision: WorkflowDecision | null = null;
   let stepSeq = 0;
   let timerSeq = 0;
-
   const workflowInput = fromJson<TInput>(view.input, "input");
 
   const [handlerError, result] = await mightThrow(
@@ -301,7 +301,6 @@ const collectCompensations = async <TInput, TResult>(
   const visitedCompleted = new Set<string>();
   const workflowInput = fromJson<TInput>(view.input, "input");
   const signal = new AbortController().signal;
-
   let stepSeq = 0;
   let timerSeq = 0;
   let fatal: Error | undefined;
@@ -362,6 +361,13 @@ const collectCompensations = async <TInput, TResult>(
 
           const timerId = `t${timerSeq++}`;
           const state = view.timers.get(timerId);
+
+          if (state && state.delayMs !== ms) {
+            fatal = new Error(
+              `nondeterminism: timer ${timerId} expected delay ${state.delayMs}, got ${ms}`,
+            );
+            throw fatal;
+          }
 
           if (state?.status === "fired") return;
 
@@ -484,7 +490,13 @@ export class WorkflowEngine<TInput, TResult> {
     for (const executionId of this.compensating) {
       const [error, meta] = await mightThrow(this.store.getMeta(executionId));
 
-      if (error) continue;
+      if (error) {
+        this.aborts.delete(executionId);
+        this.compensationAborts.delete(executionId);
+        this.compensating.delete(executionId);
+        continue;
+      }
+
       if (meta) {
         if (!isTerminalStatus(meta.status)) continue;
       }
@@ -1361,20 +1373,12 @@ export class WorkflowEngine<TInput, TResult> {
       extra.error = error;
     }
 
-    const updated = await this.store.updateStatus({
+    await this.store.updateStatus({
       executionId,
       status: "compensating",
       extra,
       leaseToken: token,
     });
-
-    if (!updated) {
-      await this.store.updateStatus({
-        executionId,
-        status: "compensating",
-        extra,
-      });
-    }
 
     return true;
   }
@@ -1429,9 +1433,17 @@ export class WorkflowEngine<TInput, TResult> {
       return false;
     }
 
-    const lifo = items.slice().reverse();
+    const byId = new Map(items.map((item) => [item.stepId, item]));
 
-    for (const item of lifo) {
+    for (let index = phase.stepIds.length - 1; index >= 0; index--) {
+      const stepId = phase.stepIds[index];
+
+      if (!stepId) continue;
+
+      const item = byId.get(stepId);
+
+      if (!item) continue;
+
       const state = phase.steps.get(item.stepId);
 
       if (state?.status === "completed") continue;
@@ -1760,24 +1772,17 @@ export class WorkflowEngine<TInput, TResult> {
         continue;
       }
 
-      if (task.kind === "compensation-retry") {
-        await this.withLease({
-          executionId: task.executionId,
-          work: (token) => this.fireCompensationRetry(task, token),
-          onBusy: () => this.store.scheduleTimer(Date.now(), task),
-        });
-        continue;
-      }
-
       if (task.kind === "step-retry") {
         if (!this.running) {
           await this.store.scheduleTimer(Date.now() + this.pollInterval, task);
           continue;
         }
+      }
 
+      if (task.kind === "compensation-retry" || task.kind === "step-retry") {
         await this.withLease({
           executionId: task.executionId,
-          work: (token) => this.fireStepRetry(task, token),
+          work: (token) => this.fireScheduledRetry(task, token),
           onBusy: () => this.store.scheduleTimer(Date.now(), task),
         });
         continue;
@@ -1843,8 +1848,8 @@ export class WorkflowEngine<TInput, TResult> {
     await this.store.enqueue(executionId);
   }
 
-  private async fireStepRetry(
-    task: Extract<TimerTask, { kind: "step-retry" }>,
+  private async fireScheduledRetry(
+    task: Extract<TimerTask, { kind: "step-retry" | "compensation-retry" }>,
     token: string,
   ) {
     const meta = await this.store.getMeta(task.executionId);
@@ -1855,71 +1860,51 @@ export class WorkflowEngine<TInput, TResult> {
 
     const view = parseHistory(await this.store.loadHistory(task.executionId));
 
-    if (view.compensation) {
-      await this.store.enqueue(task.executionId);
-      return;
+    if (task.kind === "step-retry") {
+      if (view.compensation) {
+        await this.store.enqueue(task.executionId);
+        return;
+      }
+
+      if (view.cancelRequested) {
+        await this.store.enqueue(task.executionId);
+        return;
+      }
+
+      if (view.steps.get(task.stepId)?.status === "completed") {
+        await this.store.enqueue(task.executionId);
+        return;
+      }
     }
 
-    if (view.cancelRequested) {
-      await this.store.enqueue(task.executionId);
-      return;
+    if (task.kind === "compensation-retry") {
+      if (view.compensation?.steps.get(task.stepId)?.status === "completed") {
+        await this.store.enqueue(task.executionId);
+        return;
+      }
     }
 
-    const existing = view.steps.get(task.stepId);
+    let event: HistoryEvent = {
+      type: "CompensationScheduled",
+      stepId: task.stepId,
+      stepName: task.stepName,
+      attempt: task.attempt,
+      timestamp: Date.now(),
+    };
 
-    if (existing?.status === "completed") {
-      await this.store.enqueue(task.executionId);
-      return;
-    }
-
-    const appended = await this.store.appendEvents({
-      executionId: task.executionId,
-      events: [
-        {
-          type: "StepScheduled",
-          stepId: task.stepId,
-          stepName: task.stepName,
-          attempt: task.attempt,
-          timestamp: Date.now(),
-        },
-      ],
-      leaseToken: token,
-    });
-
-    if (!appended) return;
-
-    await this.store.enqueue(task.executionId);
-  }
-
-  private async fireCompensationRetry(
-    task: Extract<TimerTask, { kind: "compensation-retry" }>,
-    token: string,
-  ) {
-    const meta = await this.store.getMeta(task.executionId);
-
-    if (!meta) return;
-
-    if (isTerminalStatus(meta.status)) return;
-
-    const view = parseHistory(await this.store.loadHistory(task.executionId));
-    const existing = view.compensation?.steps.get(task.stepId);
-
-    if (existing?.status === "completed") {
-      await this.store.enqueue(task.executionId);
-      return;
+    if (task.kind === "step-retry") {
+      event = {
+        type: "StepScheduled",
+        stepId: task.stepId,
+        stepName: task.stepName,
+        attempt: task.attempt,
+        timestamp: Date.now(),
+      };
     }
 
     const appended = await this.store.appendEvents({
       executionId: task.executionId,
-      events: [
-        {
-          type: "CompensationScheduled",
-          stepId: task.stepId,
-          stepName: task.stepName,
-          attempt: task.attempt,
-          timestamp: Date.now(),
-        },
-      ],
+      events: [event],
       leaseToken: token,
     });
 

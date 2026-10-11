@@ -1803,6 +1803,74 @@ describe("workflow compensate adversarial", () => {
     await stop(wf);
   });
 
+  test("compensate added after CompensationStarted is not run", async () => {
+    const redis = createRedis();
+    const order: string[] = [];
+    let hangA = true;
+    let compensateB = false;
+
+    const wf = defineWorkflow({
+      name: `adv-extra-comp-after-start-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      retries: 0,
+      handler: async ({ step }) => {
+        await step(
+          "a",
+          async () => {
+            order.push("a");
+            return 1;
+          },
+          {
+            compensate: async () => {
+              order.push("undo-a");
+
+              while (hangA) {
+                await sleep(10);
+              }
+            },
+          },
+        );
+
+        let bOptions: { compensate: () => Promise<void> } | undefined;
+
+        if (compensateB) {
+          bOptions = {
+            compensate: async () => {
+              order.push("undo-b");
+            },
+          };
+        }
+
+        await step(
+          "b",
+          async () => {
+            order.push("b");
+            return 2;
+          },
+          bOptions,
+        );
+
+        throw new Error("boom");
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    await waitStatus(wf, executionId, "compensating");
+    await waitFor(() => order.includes("undo-a"));
+
+    compensateB = true;
+    hangA = false;
+
+    const execution = await waitStatus(wf, executionId, "failed");
+
+    expect(execution.error).toBe("boom");
+    expect(order).toEqual(["a", "b", "undo-a"]);
+    expect(order).not.toContain("undo-b");
+
+    await stop(wf);
+  });
+
   test("get reports compensating when meta status lags history", async () => {
     const redis = createRedis();
     const name = `adv-status-lag-${crypto.randomUUID()}`;
