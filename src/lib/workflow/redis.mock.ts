@@ -8,6 +8,7 @@ import {
   HSET_IF_LEASE,
   PERSIST_EXECUTION,
   RELEASE_IF_OWNER,
+  RESUME_IF_PENDING,
   RETAIN_IF_TERMINAL,
   SCHEDULE_TIMER_IF_ABSENT,
   TRIM_IF_MEMBER,
@@ -554,6 +555,50 @@ export class MockRedisClient {
 
       this.hsetSync(metaKey, argv.slice(1));
       this.saddSync(activeKey, executionId);
+      return 1;
+    }
+
+    if (script === RESUME_IF_PENDING) {
+      const metaKey = keyArgs[0] ?? "";
+      const historyKey = keyArgs[1] ?? "";
+      const activeKey = keyArgs[2] ?? "";
+      const queueKey = keyArgs[3] ?? "";
+      const executionId = argv[0] ?? "";
+      const updatedAt = argv[1] ?? "";
+
+      this.sweep(metaKey);
+
+      const status = this.hashes.get(metaKey)?.get("status");
+
+      if (status !== "pending") return 0;
+
+      this.hsetSync(metaKey, [
+        "status",
+        "pending",
+        "error",
+        "",
+        "failedAt",
+        "",
+        "updatedAt",
+        updatedAt,
+      ]);
+      this.saddSync(activeKey, executionId);
+
+      const payloads = argv.slice(2);
+
+      if (payloads.length > 0) {
+        this.rpushSync(historyKey, ...payloads);
+      }
+
+      this.sweep(queueKey);
+
+      const list = this.lists.get(queueKey) ?? [];
+
+      if (!list.includes(executionId)) {
+        list.unshift(executionId);
+        this.lists.set(queueKey, list);
+      }
+
       return 1;
     }
 

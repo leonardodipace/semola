@@ -274,14 +274,18 @@ export const defineWorkflow = <TInput, TResult = void>(
     }
 
     const now = Date.now();
+    const events = [];
 
     if (view.terminal?.kind === "failed") {
-      const retryEvents = [];
+      events.push({
+        type: "WorkflowResumed" as const,
+        timestamp: now,
+      });
 
       for (const [stepId, state] of view.steps) {
         if (state.status !== "failed") continue;
 
-        retryEvents.push({
+        events.push({
           type: "StepScheduled" as const,
           stepId,
           stepName: state.stepName,
@@ -289,29 +293,21 @@ export const defineWorkflow = <TInput, TResult = void>(
           timestamp: now,
         });
       }
-
-      await store.appendEvents({
-        executionId,
-        events: [
-          {
-            type: "WorkflowResumed",
-            timestamp: now,
-          },
-          ...retryEvents,
-        ],
-      });
     }
 
-    await store.updateStatusAndMarkActive({
-      executionId,
-      status: "pending",
-      extra: {
-        error: "",
-        failedAt: "",
-      },
-    });
+    const claimed = await store.resumeIfPending({ executionId, events });
 
-    await store.enqueue(executionId);
+    if (!claimed) {
+      const latest = await store.getMeta(executionId);
+
+      if (!latest) {
+        throw new NotFoundError(`Workflow execution ${executionId} not found`);
+      }
+
+      throw new WorkflowStoreError(
+        `Workflow execution ${executionId} is ${latest.status}, only failed executions can be resumed`,
+      );
+    }
 
     return {
       executionId,

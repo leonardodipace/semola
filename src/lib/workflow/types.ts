@@ -639,6 +639,11 @@ export type UpdateStatusInput = {
   leaseToken?: string;
 };
 
+export type ResumeIfPendingInput = {
+  executionId: string;
+  events: HistoryEvent[];
+};
+
 export type RedisZMember = {
   score: number;
   member: string;

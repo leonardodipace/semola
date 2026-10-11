@@ -125,7 +125,7 @@ console.log(execution.cancelledAt);
 
 ### Resume a failed execution
 
-`resume()` re-queues a failed execution and returns `pending`. Completed steps stay cached and are not repeated. Non-failed statuses reject unless an interrupted resume is already in progress.
+`resume()` re-queues a failed execution and returns `pending`. Completed steps stay cached and are not repeated. Non-failed statuses reject unless an interrupted resume is already in progress. If another worker finishes the run before resume claims it, resume rejects and leaves the terminal status alone.
 
 ```typescript
 const execution = await onboard.get(executionId);

@@ -10,6 +10,7 @@ import type {
   RefreshPartitionInput,
   ReleaseOwnedPartitionsInput,
   ReleasePartitionInput,
+  ResumeIfPendingInput,
   SetMetaInput,
   TimerTask,
   UpdateStatusInput,
@@ -33,6 +34,9 @@ export const CREATE_META_AND_ACTIVE =
 
 export const UPDATE_META_AND_ACTIVE =
   "redis.call('HSET', KEYS[1], unpack(ARGV, 2)) redis.call('SADD', KEYS[2], ARGV[1]) return 1";
+
+export const RESUME_IF_PENDING =
+  "local s=redis.call('HGET', KEYS[1], 'status') if s~='pending' then return 0 end redis.call('HSET', KEYS[1], 'status', 'pending', 'error', '', 'failedAt', '', 'updatedAt', ARGV[2]) redis.call('SADD', KEYS[3], ARGV[1]) for i=3,#ARGV do redis.call('RPUSH', KEYS[2], ARGV[i]) end if not redis.call('LPOS', KEYS[4], ARGV[1]) then redis.call('LPUSH', KEYS[4], ARGV[1]) end return 1";
 
 export const SCHEDULE_TIMER_IF_ABSENT =
   "if redis.call('ZSCORE', KEYS[1], ARGV[2]) ~= false then return 0 end redis.call('ZADD', KEYS[1], ARGV[1], ARGV[2]) return 1";
@@ -562,6 +566,33 @@ export class WorkflowStore {
       throw new WorkflowStoreError(
         `Unable to persist execution ${executionId}`,
       );
+    }
+
+    return Number(result) === 1;
+  }
+
+  public async resumeIfPending(input: ResumeIfPendingInput) {
+    const { executionId, events } = input;
+    const payloads = events.map((event) =>
+      toJson(event, `history event for ${executionId}`),
+    );
+
+    const [error, result] = await mightThrow(
+      this.redis.send("EVAL", [
+        RESUME_IF_PENDING,
+        "4",
+        keys.meta(this.name, executionId),
+        keys.history(this.name, executionId),
+        keys.active(this.name),
+        keys.queue(this.name),
+        executionId,
+        String(Date.now()),
+        ...payloads,
+      ]),
+    );
+
+    if (error) {
+      throw new WorkflowStoreError(`Unable to resume execution ${executionId}`);
     }
 
     return Number(result) === 1;

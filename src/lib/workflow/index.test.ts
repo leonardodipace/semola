@@ -2005,6 +2005,75 @@ describe("workflow", () => {
       await stop(wf);
     });
 
+    test("resume rejects when status leaves pending before claim", async () => {
+      const redis = createRedis();
+      const name = `resume-race-${crypto.randomUUID()}`;
+      const store = new WorkflowStore(redis, name);
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("once", async () => {
+            throw new Error("boom");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "failed");
+      await stop(wf);
+
+      expect(await store.persistExecution(executionId)).toBe(true);
+
+      const live = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("once", async () => "ok");
+        },
+      });
+
+      const resumePromise = live.resume(executionId);
+
+      await drainMicrotasks();
+
+      await store.updateStatus({
+        executionId,
+        status: "completed",
+        extra: {
+          completedAt: String(Date.now()),
+          result: '"done"',
+          error: "",
+          failedAt: "",
+        },
+      });
+
+      await expect(resumePromise).rejects.toMatchObject({
+        name: "WorkflowStoreError",
+        message: expect.stringContaining(
+          "only failed executions can be resumed",
+        ),
+      });
+
+      expect((await live.get(executionId)).status).toBe("completed");
+      expect(await store.dequeue()).toBeNull();
+
+      const history = await store.loadHistory(executionId);
+      const resumed = history.some((raw) => {
+        const event = JSON.parse(raw) as { type?: string };
+        return event.type === "WorkflowResumed";
+      });
+
+      expect(resumed).toBe(false);
+
+      await stop(live);
+    });
+
     test("onError errorHistory after resume starts a new attempt series", async () => {
       const redis = createRedis();
       let attempts = 0;

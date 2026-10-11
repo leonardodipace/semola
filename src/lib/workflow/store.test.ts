@@ -398,6 +398,64 @@ describe("WorkflowStore", () => {
     expect(await store.listActive()).toContain(executionId);
   });
 
+  test("resumeIfPending claims pending then rejects terminal status", async () => {
+    const redis = createRedis();
+    const name = "store-resume-if-pending";
+    const store = new WorkflowStore(redis, name);
+    const executionId = "exec-resume-cas";
+
+    await store.tryCreateMetaAndActive(executionId, {
+      ...baseMeta(name),
+      status: "pending",
+      error: "boom",
+      failedAt: String(Date.now()),
+    });
+    await store.markInactive(executionId);
+
+    const claimed = await store.resumeIfPending({
+      executionId,
+      events: [
+        {
+          type: "WorkflowResumed",
+          timestamp: Date.now(),
+        },
+      ],
+    });
+
+    expect(claimed).toBe(true);
+    expect((await store.getMeta(executionId))?.status).toBe("pending");
+    expect((await store.getMeta(executionId))?.error).toBe("");
+    expect(await store.listActive()).toContain(executionId);
+    expect(await store.loadHistory(executionId)).toHaveLength(1);
+    expect(await store.dequeue()).toBe(executionId);
+
+    await store.updateStatus({
+      executionId,
+      status: "completed",
+      extra: {
+        completedAt: String(Date.now()),
+        result: '"ok"',
+      },
+    });
+    await store.markInactive(executionId);
+
+    const again = await store.resumeIfPending({
+      executionId,
+      events: [
+        {
+          type: "WorkflowResumed",
+          timestamp: Date.now(),
+        },
+      ],
+    });
+
+    expect(again).toBe(false);
+    expect((await store.getMeta(executionId))?.status).toBe("completed");
+    expect(await store.listActive()).not.toContain(executionId);
+    expect(await store.loadHistory(executionId)).toHaveLength(1);
+    expect(await store.dequeue()).toBeNull();
+  });
+
   test("getMeta returns null when the execution is missing", async () => {
     const store = new WorkflowStore(createRedis(), "store-missing");
 
