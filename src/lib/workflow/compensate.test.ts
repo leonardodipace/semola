@@ -1563,6 +1563,61 @@ describe("workflow compensate adversarial", () => {
     await stop(wf);
   });
 
+  test("early return mid collect does not partial-unwind", async () => {
+    const redis = createRedis();
+    const order: string[] = [];
+    let shorten = false;
+
+    const wf = defineWorkflow({
+      name: `adv-collect-return-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      retries: 0,
+      handler: async ({ step }) => {
+        await step(
+          "a",
+          async () => {
+            order.push("a");
+            return 1;
+          },
+          {
+            compensate: async () => {
+              order.push("undo-a");
+            },
+          },
+        );
+
+        if (shorten) return { ok: true };
+
+        await step(
+          "b",
+          async () => {
+            order.push("b");
+            return 2;
+          },
+          {
+            compensate: async () => {
+              order.push("undo-b");
+            },
+          },
+        );
+
+        shorten = true;
+        throw new Error("boom");
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    const execution = await waitStatus(wf, executionId, "failed");
+
+    expect(execution.error).toBe("boom");
+    expect(order).toEqual(["a", "b"]);
+    expect(order).not.toContain("undo-a");
+    expect(order).not.toContain("undo-b");
+
+    await stop(wf);
+  });
+
   test("handler throw mid collect does not partial-unwind", async () => {
     const redis = createRedis();
     const order: string[] = [];
@@ -2232,7 +2287,7 @@ describe("workflow compensate adversarial", () => {
 
     expect(order).not.toContain("undo-a");
     expect(order).not.toContain("undo-b");
-    expect(execution.error).toBeTruthy();
+    expect(execution.error).toBe("boom");
 
     await stop(wf);
   });

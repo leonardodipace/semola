@@ -303,7 +303,9 @@ describe("workflow", () => {
     ]);
 
     for (const { executionId } of started) {
-      await waitStatus(wf, executionId, "completed");
+      const execution = await waitStatus(wf, executionId, "completed");
+
+      expect(execution.result).toBe(1);
     }
 
     expect(runs).toBe(4);
@@ -757,7 +759,6 @@ describe("workflow", () => {
         cancelledAt: "",
         partitionKey: "*",
         partitionSlot: "",
-        concurrencySlot: "",
       });
       await store.appendEvents({
         executionId,
@@ -1102,8 +1103,6 @@ describe("workflow", () => {
       "*",
       "partitionSlot",
       "",
-      "concurrencySlot",
-      "",
     );
     await redis.sadd(`workflow:${name}:active`, "zombie");
 
@@ -1316,7 +1315,7 @@ describe("workflow", () => {
     await stop(wf);
   });
 
-  test("reclaim recovers start after markActive without history", async () => {
+  test("reclaim recovers start after active without history", async () => {
     const redis = createRedis();
     const name = `orphan-start-${crypto.randomUUID()}`;
     const executionId = crypto.randomUUID();
@@ -1347,8 +1346,6 @@ describe("workflow", () => {
       "partitionKey",
       "",
       "partitionSlot",
-      "",
-      "concurrencySlot",
       "",
     );
     await redis.sadd(`workflow:${name}:active`, executionId);
@@ -1418,8 +1415,6 @@ describe("workflow", () => {
       "partitionKey",
       "",
       "partitionSlot",
-      "",
-      "concurrencySlot",
       "",
     );
 
@@ -1515,7 +1510,6 @@ describe("workflow", () => {
     const { executionId } = await wf.start({});
     await waitStatus(wf, executionId, "failed");
 
-    // Workers already polling; status+active flip atomically before enqueue.
     const resumed = await wf.resume(executionId);
 
     expect(resumed.status).toBe("pending");
@@ -1561,8 +1555,6 @@ describe("workflow", () => {
       "partitionKey",
       "",
       "partitionSlot",
-      "",
-      "concurrencySlot",
       "",
     );
 
@@ -1965,6 +1957,164 @@ describe("workflow", () => {
       await stop(wf);
     });
 
+    test("stale resume after complete does not revive execution", async () => {
+      const redis = createRedis();
+      let attempts = 0;
+      let completes = 0;
+
+      const wf = defineWorkflow({
+        name: `resume-stale-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        hooks: {
+          onComplete: () => {
+            completes++;
+          },
+        },
+        handler: async ({ step }) => {
+          await step("once", async () => {
+            attempts++;
+
+            if (attempts === 1) throw new Error("boom");
+
+            return "ok";
+          });
+
+          return "done";
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "failed");
+
+      await wf.resume(executionId);
+      await waitStatus(wf, executionId, "completed");
+
+      await expect(wf.resume(executionId)).rejects.toMatchObject({
+        name: "WorkflowStoreError",
+        message: expect.stringContaining(
+          "only failed executions can be resumed",
+        ),
+      });
+
+      expect(attempts).toBe(2);
+      expect(completes).toBe(1);
+      expect((await wf.get(executionId)).status).toBe("completed");
+
+      await stop(wf);
+    });
+
+    test("resume rejects when status leaves pending before claim", async () => {
+      const redis = createRedis();
+      const name = `resume-race-${crypto.randomUUID()}`;
+      const store = new WorkflowStore(redis, name);
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("once", async () => {
+            throw new Error("boom");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "failed");
+      await stop(wf);
+
+      expect(await store.persistExecution(executionId)).toBe(true);
+
+      const live = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("once", async () => "ok");
+        },
+      });
+
+      const resumePromise = live.resume(executionId);
+
+      await drainMicrotasks();
+
+      await store.updateStatus({
+        executionId,
+        status: "completed",
+        extra: {
+          completedAt: String(Date.now()),
+          result: '"done"',
+          error: "",
+          failedAt: "",
+        },
+      });
+
+      await expect(resumePromise).rejects.toMatchObject({
+        name: "WorkflowStoreError",
+        message: expect.stringContaining(
+          "only failed executions can be resumed",
+        ),
+      });
+
+      expect((await live.get(executionId)).status).toBe("completed");
+      expect(await store.dequeue()).toBeNull();
+
+      const history = await store.loadHistory(executionId);
+      const resumed = history.some((raw) => {
+        const event = JSON.parse(raw) as { type?: string };
+        return event.type === "WorkflowResumed";
+      });
+
+      expect(resumed).toBe(false);
+
+      await stop(live);
+    });
+
+    test("onError errorHistory after resume starts a new attempt series", async () => {
+      const redis = createRedis();
+      let attempts = 0;
+      let lastHistory: { attempt: number; error: string }[] = [];
+
+      const wf = defineWorkflow({
+        name: `resume-error-history-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        hooks: {
+          onError: ({ errorHistory }) => {
+            lastHistory = errorHistory.map((entry) => ({
+              attempt: entry.attempt,
+              error: entry.error,
+            }));
+          },
+        },
+        handler: async ({ step }) => {
+          await step("once", async () => {
+            attempts++;
+
+            if (attempts === 1) throw new Error("first");
+
+            throw new Error("second");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "failed");
+      expect(lastHistory).toEqual([{ attempt: 1, error: "first" }]);
+
+      await wf.resume(executionId);
+      await waitStatus(wf, executionId, "failed");
+
+      expect(lastHistory).toEqual([{ attempt: 1, error: "second" }]);
+
+      await stop(wf);
+    });
+
     test("resume rejects pending executions that never failed", async () => {
       const redis = createRedis();
       const name = `resume-pending-${crypto.randomUUID()}`;
@@ -1996,8 +2146,6 @@ describe("workflow", () => {
         "partitionKey",
         "",
         "partitionSlot",
-        "",
-        "concurrencySlot",
         "",
       );
       await redis.rpush(
@@ -2879,7 +3027,6 @@ describe("workflow", () => {
           cancelledAt: "",
           partitionKey,
           partitionSlot: "",
-          concurrencySlot: "",
         });
         await store1.appendEvents({
           executionId,
@@ -3867,7 +4014,7 @@ describe("workflow", () => {
       await stop(wf);
     });
 
-    test("resume retries after events without markActive", async () => {
+    test("resume retries after events without marking active", async () => {
       const redis = createRedis();
       const name = `retain-retry-events-${crypto.randomUUID()}`;
       const wf = failOnce(name, redis);
@@ -4026,8 +4173,6 @@ describe("workflow", () => {
         "",
         "partitionSlot",
         "",
-        "concurrencySlot",
-        "",
       );
       await redis.rpush(
         `workflow:${name}:history:${executionId}`,
@@ -4120,7 +4265,7 @@ describe("workflow", () => {
       await stop(wf);
     });
 
-    test("steps without compensate fail like today", async () => {
+    test("steps without compensate fail with the step error", async () => {
       const redis = createRedis();
       const order: string[] = [];
 

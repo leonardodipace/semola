@@ -60,10 +60,6 @@ export const listWorkflows = async (
       throw new WorkflowStoreError("Unable to scan workflow executions");
     }
 
-    if (!scanned) {
-      throw new WorkflowStoreError("Unable to scan workflow executions");
-    }
-
     const [next, keys] = scanned;
 
     cursor = next;
@@ -134,10 +130,7 @@ const resolvePartitionKey = <TInput, TResult>(
     return startOptions.partitionKey;
   }
 
-  if (!options.partitionBy) {
-    // Shared default key → concurrency is cluster-wide across replicas.
-    return "*";
-  }
+  if (!options.partitionBy) return "*";
 
   const partitionKey = options.partitionBy(workflowInput);
 
@@ -199,7 +192,6 @@ export const defineWorkflow = <TInput, TResult = void>(
       cancelledAt: "",
       partitionKey,
       partitionSlot: "",
-      concurrencySlot: "",
     });
 
     if (!created) {
@@ -263,24 +255,37 @@ export const defineWorkflow = <TInput, TResult = void>(
       }
     }
 
-    // Persist keys, but stay inactive until resume events exist.
-    const persisted = await store.persistExecution(executionId);
+    if (meta.status === "failed") {
+      const persisted = await store.persistExecution(executionId);
 
-    if (!persisted) {
-      throw new NotFoundError(`Workflow execution ${executionId} not found`);
+      if (!persisted) {
+        const latest = await store.getMeta(executionId);
+
+        if (!latest) {
+          throw new NotFoundError(
+            `Workflow execution ${executionId} not found`,
+          );
+        }
+
+        throw new WorkflowStoreError(
+          `Workflow execution ${executionId} is ${latest.status}, only failed executions can be resumed`,
+        );
+      }
     }
 
     const now = Date.now();
+    const events = [];
 
-    // A prior resume may already be in history. Append only if this
-    // failure is not yet resumed (`parseHistory` still has terminal failed).
     if (view.terminal?.kind === "failed") {
-      const retryEvents = [];
+      events.push({
+        type: "WorkflowResumed" as const,
+        timestamp: now,
+      });
 
       for (const [stepId, state] of view.steps) {
         if (state.status !== "failed") continue;
 
-        retryEvents.push({
+        events.push({
           type: "StepScheduled" as const,
           stepId,
           stepName: state.stepName,
@@ -288,29 +293,21 @@ export const defineWorkflow = <TInput, TResult = void>(
           timestamp: now,
         });
       }
-
-      await store.appendEvents({
-        executionId,
-        events: [
-          {
-            type: "WorkflowResumed",
-            timestamp: now,
-          },
-          ...retryEvents,
-        ],
-      });
     }
 
-    await store.updateStatusAndMarkActive({
-      executionId,
-      status: "pending",
-      extra: {
-        error: "",
-        failedAt: "",
-      },
-    });
+    const claimed = await store.resumeIfPending({ executionId, events });
 
-    await store.enqueue(executionId);
+    if (!claimed) {
+      const latest = await store.getMeta(executionId);
+
+      if (!latest) {
+        throw new NotFoundError(`Workflow execution ${executionId} not found`);
+      }
+
+      throw new WorkflowStoreError(
+        `Workflow execution ${executionId} is ${latest.status}, only failed executions can be resumed`,
+      );
+    }
 
     return {
       executionId,
@@ -382,7 +379,6 @@ export const defineWorkflow = <TInput, TResult = void>(
 
     if (isTerminalStatus(meta.status)) return snapshot();
 
-    // Compensate must finish; a second cancel would abort cleanup.
     if (meta.status === "compensating") return snapshot();
 
     const view = parseHistory(await store.loadHistory(executionId));

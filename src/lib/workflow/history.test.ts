@@ -7,6 +7,10 @@ describe("parseHistory", () => {
     expect(() => parseHistory(["not-json"])).toThrow(SerializationError);
   });
 
+  test("throws SerializationError for JSON null event", () => {
+    expect(() => parseHistory(["null"])).toThrow(SerializationError);
+  });
+
   test("roundtrips a basic event sequence", () => {
     const now = 1_700_000_000_000;
 

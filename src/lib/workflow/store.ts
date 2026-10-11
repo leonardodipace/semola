@@ -10,6 +10,7 @@ import type {
   RefreshPartitionInput,
   ReleaseOwnedPartitionsInput,
   ReleasePartitionInput,
+  ResumeIfPendingInput,
   SetMetaInput,
   TimerTask,
   UpdateStatusInput,
@@ -34,11 +35,13 @@ export const CREATE_META_AND_ACTIVE =
 export const UPDATE_META_AND_ACTIVE =
   "redis.call('HSET', KEYS[1], unpack(ARGV, 2)) redis.call('SADD', KEYS[2], ARGV[1]) return 1";
 
+export const RESUME_IF_PENDING =
+  "local s=redis.call('HGET', KEYS[1], 'status') if s~='pending' then return 0 end redis.call('HSET', KEYS[1], 'status', 'pending', 'error', '', 'failedAt', '', 'updatedAt', ARGV[2]) redis.call('SADD', KEYS[3], ARGV[1]) for i=3,#ARGV do redis.call('RPUSH', KEYS[2], ARGV[i]) end if not redis.call('LPOS', KEYS[4], ARGV[1]) then redis.call('LPUSH', KEYS[4], ARGV[1]) end return 1";
+
 export const SCHEDULE_TIMER_IF_ABSENT =
   "if redis.call('ZSCORE', KEYS[1], ARGV[2]) ~= false then return 0 end redis.call('ZADD', KEYS[1], ARGV[1], ARGV[2]) return 1";
 
 export const ENQUEUE_IF_ABSENT =
-  // ponytail: LPOS O(n) scan, queued SET if the queue is huge
   "if redis.call('LPOS', KEYS[1], ARGV[1]) then return 0 end redis.call('LPUSH', KEYS[1], ARGV[1]) return 1";
 
 export const APPEND_IF_LEASE =
@@ -48,7 +51,7 @@ export const HSET_IF_LEASE =
   "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('HSET', KEYS[2], unpack(ARGV, 2)) return 1";
 
 export const PERSIST_EXECUTION =
-  "if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end redis.call('PERSIST', KEYS[1]) redis.call('PERSIST', KEYS[2]) redis.call('ZREM', KEYS[3], ARGV[1]) redis.call('HSET', KEYS[1], 'status', 'pending', 'error', '', 'failedAt', '', 'updatedAt', ARGV[2]) return 1";
+  "local s=redis.call('HGET', KEYS[1], 'status') if s~='failed' then return 0 end redis.call('PERSIST', KEYS[1]) redis.call('PERSIST', KEYS[2]) redis.call('ZREM', KEYS[3], ARGV[1]) redis.call('HSET', KEYS[1], 'status', 'pending', 'error', '', 'failedAt', '', 'updatedAt', ARGV[2]) return 1";
 
 export const RETAIN_IF_TERMINAL =
   "local s=redis.call('HGET', KEYS[1], 'status') if s~='completed' and s~='failed' and s~='cancelled' then return 0 end local ttl=tonumber(ARGV[2]) if ttl then local pttl=redis.call('PTTL', KEYS[1]) if pttl<=0 then if ttl<=0 then redis.call('UNLINK', KEYS[1], KEYS[2], KEYS[3]) redis.call('SREM', KEYS[4], ARGV[1]) redis.call('ZREM', KEYS[5], ARGV[1]) return 1 end redis.call('PEXPIRE', KEYS[1], ARGV[2]) redis.call('PEXPIRE', KEYS[2], ARGV[2]) end end if ARGV[3]~='' then redis.call('ZADD', KEYS[5], ARGV[3], ARGV[1]) end return 1";
@@ -324,18 +327,6 @@ export class WorkflowStore {
     }
   }
 
-  public async markActive(executionId: string) {
-    const [error] = await mightThrow(
-      this.redis.sadd(keys.active(this.name), executionId),
-    );
-
-    if (error) {
-      throw new WorkflowStoreError(
-        `Unable to mark active execution ${executionId}`,
-      );
-    }
-  }
-
   public async markInactive(executionId: string) {
     const [error] = await mightThrow(
       this.redis.srem(keys.active(this.name), executionId),
@@ -575,6 +566,33 @@ export class WorkflowStore {
       throw new WorkflowStoreError(
         `Unable to persist execution ${executionId}`,
       );
+    }
+
+    return Number(result) === 1;
+  }
+
+  public async resumeIfPending(input: ResumeIfPendingInput) {
+    const { executionId, events } = input;
+    const payloads = events.map((event) =>
+      toJson(event, `history event for ${executionId}`),
+    );
+
+    const [error, result] = await mightThrow(
+      this.redis.send("EVAL", [
+        RESUME_IF_PENDING,
+        "4",
+        keys.meta(this.name, executionId),
+        keys.history(this.name, executionId),
+        keys.active(this.name),
+        keys.queue(this.name),
+        executionId,
+        String(Date.now()),
+        ...payloads,
+      ]),
+    );
+
+    if (error) {
+      throw new WorkflowStoreError(`Unable to resume execution ${executionId}`);
     }
 
     return Number(result) === 1;

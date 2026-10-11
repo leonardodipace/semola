@@ -36,6 +36,10 @@ export const parseHistory = (rawEvents: string[]): HistoryView => {
       throw new SerializationError("Unable to parse history event");
     }
 
+    if (event === null || typeof event !== "object") {
+      throw new SerializationError("Unable to parse history event");
+    }
+
     events.push(event);
 
     if (event.type === "WorkflowStarted") {

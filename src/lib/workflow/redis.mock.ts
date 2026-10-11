@@ -8,6 +8,7 @@ import {
   HSET_IF_LEASE,
   PERSIST_EXECUTION,
   RELEASE_IF_OWNER,
+  RESUME_IF_PENDING,
   RETAIN_IF_TERMINAL,
   SCHEDULE_TIMER_IF_ABSENT,
   TRIM_IF_MEMBER,
@@ -164,13 +165,6 @@ export class MockRedisClient {
     return this.hsetSync(key, fieldValues);
   }
 
-  public async hget(key: string, field: string) {
-    this.maybeFail("hget");
-    this.sweep(key);
-
-    return this.hashes.get(key)?.get(field) ?? null;
-  }
-
   public async hgetall(key: string) {
     this.maybeFail("hgetall");
     this.sweep(key);
@@ -188,7 +182,6 @@ export class MockRedisClient {
   ): Promise<[string, string[]]> {
     this.maybeFail("scan");
 
-    // ponytail: one-shot scan; real Redis paginates
     if (String(cursor) !== "0") return ["0", []];
 
     const matchAt = options.indexOf("MATCH");
@@ -493,22 +486,6 @@ export class MockRedisClient {
       return this.zremSync(args[0] ?? "", args.slice(1));
     }
 
-    if (command === "HSETNX") {
-      const key = args[0] ?? "";
-      const field = args[1] ?? "";
-      const value = args[2] ?? "";
-
-      this.sweep(key);
-
-      const hash = this.hashes.get(key) ?? new Map<string, string>();
-
-      if (hash.has(field)) return 0;
-
-      hash.set(field, value);
-      this.hashes.set(key, hash);
-      return 1;
-    }
-
     if (command !== "EVAL") {
       throw new Error(`Unsupported command ${command}`);
     }
@@ -581,6 +558,50 @@ export class MockRedisClient {
       return 1;
     }
 
+    if (script === RESUME_IF_PENDING) {
+      const metaKey = keyArgs[0] ?? "";
+      const historyKey = keyArgs[1] ?? "";
+      const activeKey = keyArgs[2] ?? "";
+      const queueKey = keyArgs[3] ?? "";
+      const executionId = argv[0] ?? "";
+      const updatedAt = argv[1] ?? "";
+
+      this.sweep(metaKey);
+
+      const status = this.hashes.get(metaKey)?.get("status");
+
+      if (status !== "pending") return 0;
+
+      this.hsetSync(metaKey, [
+        "status",
+        "pending",
+        "error",
+        "",
+        "failedAt",
+        "",
+        "updatedAt",
+        updatedAt,
+      ]);
+      this.saddSync(activeKey, executionId);
+
+      const payloads = argv.slice(2);
+
+      if (payloads.length > 0) {
+        this.rpushSync(historyKey, ...payloads);
+      }
+
+      this.sweep(queueKey);
+
+      const list = this.lists.get(queueKey) ?? [];
+
+      if (!list.includes(executionId)) {
+        list.unshift(executionId);
+        this.lists.set(queueKey, list);
+      }
+
+      return 1;
+    }
+
     if (script === APPEND_IF_LEASE) {
       const historyKey = keyArgs[1] ?? "";
       const current = this.getSync(key);
@@ -642,6 +663,10 @@ export class MockRedisClient {
       const updatedAt = argv[1] ?? "";
 
       if (!this.existsSync(metaKey)) return 0;
+
+      const status = this.hashes.get(metaKey)?.get("status");
+
+      if (status !== "failed") return 0;
 
       this.persistSync(metaKey);
       this.persistSync(historyKey);

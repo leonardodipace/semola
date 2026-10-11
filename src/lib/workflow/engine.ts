@@ -7,12 +7,12 @@ import type {
   AdvanceInput,
   BackoffDelayInput,
   CancelExecutionInput,
-  CapacityTarget,
   ClearExecutionLocalStateInput,
   CollectCompensationsInput,
   CollectErrorHistoryInput,
   CompensationHandlersMissingInput,
   CompensationItem,
+  CompensationStartResult,
   CompleteExecutionInput,
   EnsureCapacityInput,
   ExecuteCompensationInput,
@@ -65,7 +65,8 @@ const isNonRetryableStepError = (error: Error) => {
 const runHook = async (fn: (() => void | Promise<void>) | undefined) => {
   if (!fn) return;
 
-  await mightThrow(Promise.resolve(fn()));
+  // Defer so sync throws become rejections that mightThrow can swallow.
+  await mightThrow(Promise.resolve().then(() => fn()));
 };
 
 const backoffDelay = (input: BackoffDelayInput) => {
@@ -77,6 +78,40 @@ const backoffDelay = (input: BackoffDelayInput) => {
 const sleepMs = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
+const invalidSleepDelay = (ms: number) => {
+  if (!Number.isFinite(ms) || ms < 0) {
+    return new Error("sleep(ms) requires a non-negative finite number");
+  }
+
+  return null;
+};
+
+const stepNameMismatch = (
+  stepId: string,
+  expected: string | undefined,
+  actual: string,
+) => {
+  if (expected === undefined) return null;
+  if (expected === actual) return null;
+
+  return new Error(
+    `nondeterminism: step ${stepId} expected "${expected}", got "${actual}"`,
+  );
+};
+
+const timerDelayMismatch = (
+  timerId: string,
+  expected: number | undefined,
+  actual: number,
+) => {
+  if (expected === undefined) return null;
+  if (expected === actual) return null;
+
+  return new Error(
+    `nondeterminism: timer ${timerId} expected delay ${expected}, got ${actual}`,
+  );
+};
+
 const advance = async <TInput, TResult>(
   input: AdvanceInput<TInput, TResult>,
 ): Promise<WorkflowDecision> => {
@@ -87,7 +122,9 @@ const advance = async <TInput, TResult>(
     return { type: "waiting" };
   }
 
-  if (signal.aborted || view.cancelRequested) {
+  // Only history cancel requests end the run. stop() aborts the signal to
+  // interrupt handlers but must not write WorkflowCancelled.
+  if (view.cancelRequested) {
     return {
       type: "cancel",
       events: [{ type: "WorkflowCancelled", timestamp: now }],
@@ -116,11 +153,9 @@ const advance = async <TInput, TResult>(
 
           const state = view.steps.get(stepId);
 
-          if (state && state.stepName !== name) {
-            throw new Error(
-              `nondeterminism: step ${stepId} expected "${state.stepName}", got "${name}"`,
-            );
-          }
+          const nameError = stepNameMismatch(stepId, state?.stepName, name);
+
+          if (nameError) throw nameError;
 
           if (state?.status === "completed") {
             return fromJson(state.result, `step ${name}`) as never;
@@ -135,7 +170,6 @@ const advance = async <TInput, TResult>(
               throw new Error(state.error);
             }
 
-            // Retry timer will re-schedule; do not run yet.
             decision = { type: "waiting" };
             throw new Paused();
           }
@@ -172,20 +206,17 @@ const advance = async <TInput, TResult>(
           throw new Paused();
         },
         sleep: async (ms) => {
-          if (!Number.isFinite(ms) || ms < 0) {
-            throw new Error("sleep(ms) requires a non-negative finite number");
-          }
+          const delayError = invalidSleepDelay(ms);
+
+          if (delayError) throw delayError;
 
           const timerId = `t${timerSeq++}`;
           consumed.timers.add(timerId);
 
           const state = view.timers.get(timerId);
+          const delayMismatch = timerDelayMismatch(timerId, state?.delayMs, ms);
 
-          if (state && state.delayMs !== ms) {
-            throw new Error(
-              `nondeterminism: timer ${timerId} expected delay ${state.delayMs}, got ${ms}`,
-            );
-          }
+          if (delayMismatch) throw delayMismatch;
 
           if (state?.status === "fired") return;
 
@@ -236,7 +267,7 @@ const advance = async <TInput, TResult>(
     };
   }
 
-  if (signal.aborted || view.cancelRequested) {
+  if (view.cancelRequested) {
     return {
       type: "cancel",
       events: [{ type: "WorkflowCancelled", timestamp: now }],
@@ -275,13 +306,15 @@ const advance = async <TInput, TResult>(
     };
   }
 
+  const serialized = toJson(result as TResult, "result");
+
   return {
     type: "complete",
-    result: toJson(result as TResult, "result"),
+    result: serialized,
     events: [
       {
         type: "WorkflowCompleted",
-        result: toJson(result as TResult, "result"),
+        result: serialized,
         timestamp: now,
       },
     ],
@@ -328,10 +361,10 @@ const collectCompensations = async <TInput, TResult>(
           const stepId = `a${stepSeq++}`;
           const state = view.steps.get(stepId);
 
-          if (state && state.stepName !== name) {
-            fatal = new Error(
-              `nondeterminism: step ${stepId} expected "${state.stepName}", got "${name}"`,
-            );
+          const nameError = stepNameMismatch(stepId, state?.stepName, name);
+
+          if (nameError) {
+            fatal = nameError;
             throw fatal;
           }
 
@@ -365,20 +398,19 @@ const collectCompensations = async <TInput, TResult>(
           throw new Paused();
         },
         sleep: async (ms) => {
-          if (!Number.isFinite(ms) || ms < 0) {
-            fatal = new Error(
-              "sleep(ms) requires a non-negative finite number",
-            );
+          const delayError = invalidSleepDelay(ms);
+
+          if (delayError) {
+            fatal = delayError;
             throw fatal;
           }
 
           const timerId = `t${timerSeq++}`;
           const state = view.timers.get(timerId);
+          const delayMismatch = timerDelayMismatch(timerId, state?.delayMs, ms);
 
-          if (state && state.delayMs !== ms) {
-            fatal = new Error(
-              `nondeterminism: timer ${timerId} expected delay ${state.delayMs}, got ${ms}`,
-            );
+          if (delayMismatch) {
+            fatal = delayMismatch;
             throw fatal;
           }
 
@@ -392,8 +424,25 @@ const collectCompensations = async <TInput, TResult>(
 
   if (fatal) throw fatal;
 
+  const hasUnvisitedCompleted = () => {
+    for (const [stepId, state] of view.steps) {
+      if (state.status !== "completed") continue;
+      if (visitedCompleted.has(stepId)) continue;
+
+      return true;
+    }
+
+    return false;
+  };
+
   if (handlerError) {
     if (handlerError instanceof Paused) {
+      if (hasUnvisitedCompleted()) {
+        throw new Error(
+          "nondeterminism: compensation collect paused before every completed step was replayed",
+        );
+      }
+
       return items;
     }
 
@@ -403,6 +452,12 @@ const collectCompensations = async <TInput, TResult>(
 
       throw handlerError;
     }
+  }
+
+  if (hasUnvisitedCompleted()) {
+    throw new Error(
+      "nondeterminism: compensation collect returned before every completed step was replayed",
+    );
   }
 
   return items;
@@ -503,15 +558,10 @@ export class WorkflowEngine<TInput, TResult> {
     for (const executionId of this.compensating) {
       const [error, meta] = await mightThrow(this.store.getMeta(executionId));
 
-      if (error) {
-        this.aborts.delete(executionId);
-        this.compensationAborts.delete(executionId);
-        this.compensating.delete(executionId);
-        continue;
-      }
-
-      if (meta) {
-        if (!isTerminalStatus(meta.status)) continue;
+      if (!error) {
+        if (meta) {
+          if (!isTerminalStatus(meta.status)) continue;
+        }
       }
 
       this.aborts.delete(executionId);
@@ -573,7 +623,6 @@ export class WorkflowEngine<TInput, TResult> {
         this.active--;
       });
 
-      // ponytail: partitioned dequeue is not process-capped; Redis per-key slots gate work
       if (this.options.partitionBy) {
         void run;
         continue;
@@ -642,7 +691,6 @@ export class WorkflowEngine<TInput, TResult> {
       this.capacitySlots.delete(executionId);
     }
 
-    // RELEASE_IF_OWNER no-ops if token no longer owns the key
     await this.store.releaseLease(executionId, token);
   }
 
@@ -682,10 +730,6 @@ export class WorkflowEngine<TInput, TResult> {
     return GLOBAL_CAPACITY_KEY;
   }
 
-  private capacityTargets(partitionKey: string): CapacityTarget[] {
-    return [{ key: this.capacityKey(partitionKey), field: "partitionSlot" }];
-  }
-
   private parseSlot(raw: string | undefined) {
     if (!raw) return undefined;
 
@@ -702,12 +746,6 @@ export class WorkflowEngine<TInput, TResult> {
     const slots = new Map<string, number>();
 
     if (!meta) return slots;
-
-    const concurrencySlot = this.parseSlot(meta.concurrencySlot);
-
-    if (concurrencySlot !== undefined) {
-      slots.set(GLOBAL_CAPACITY_KEY, concurrencySlot);
-    }
 
     const partitionSlot = this.parseSlot(meta.partitionSlot);
 
@@ -729,12 +767,6 @@ export class WorkflowEngine<TInput, TResult> {
     return this.slotsFromMeta(meta, meta?.partitionKey ?? "");
   }
 
-  private resolvePartitionSlot(executionId: string, meta: WorkflowMeta | null) {
-    const held = this.heldSlots(executionId, meta);
-
-    return held.get(this.capacityKey(meta?.partitionKey ?? ""));
-  }
-
   private async ensureCapacity(input: EnsureCapacityInput) {
     const { executionId, token, partitionKey, meta } = input;
     const held = new Map(this.heldSlots(executionId, meta));
@@ -748,62 +780,61 @@ export class WorkflowEngine<TInput, TResult> {
       this.capacitySlots.set(executionId, held);
     };
 
-    for (const target of this.capacityTargets(partitionKey)) {
-      let slot = held.get(target.key);
+    const key = this.capacityKey(partitionKey);
+    let slot = held.get(key);
+
+    if (
+      slot !== undefined &&
+      !(await this.store.refreshPartition({
+        partitionKey: key,
+        slot,
+        executionId,
+        ttlMs: this.lockTTL,
+      }))
+    ) {
+      held.delete(key);
+      slot = undefined;
+    }
+
+    if (slot === undefined) {
+      const claimed = await this.store.claimPartition({
+        partitionKey: key,
+        executionId,
+        concurrency: this.concurrency,
+        ttlMs: this.lockTTL,
+      });
+
+      if (claimed === null) {
+        persistHeld();
+        await sleepMs(this.pollInterval);
+        await this.store.enqueue(executionId);
+        return null;
+      }
 
       if (
-        slot !== undefined &&
-        !(await this.store.refreshPartition({
-          partitionKey: target.key,
-          slot,
+        !(await this.store.setMeta({
           executionId,
-          ttlMs: this.lockTTL,
+          fields: { partitionSlot: String(claimed) },
+          leaseToken: token,
         }))
       ) {
-        held.delete(target.key);
-        slot = undefined;
-      }
-
-      if (slot === undefined) {
-        const claimed = await this.store.claimPartition({
-          partitionKey: target.key,
+        // Meta not durable. Release the Redis claim so refresh cannot pin the slot.
+        await this.store.releasePartition({
+          partitionKey: key,
+          slot: claimed,
           executionId,
-          concurrency: this.concurrency,
-          ttlMs: this.lockTTL,
         });
-
-        if (claimed === null) {
-          persistHeld();
-          await sleepMs(this.pollInterval);
-          await this.store.enqueue(executionId);
-          return null;
-        }
-
-        if (
-          !(await this.store.setMeta({
-            executionId,
-            fields: { [target.field]: String(claimed) },
-            leaseToken: token,
-          }))
-        ) {
-          // Meta not durable — release Redis claim so refresh cannot pin the slot.
-          await this.store.releasePartition({
-            partitionKey: target.key,
-            slot: claimed,
-            executionId,
-          });
-          persistHeld();
-          return null;
-        }
-
-        held.set(target.key, claimed);
-      } else {
-        held.set(target.key, slot);
+        persistHeld();
+        return null;
       }
+
+      held.set(key, claimed);
+    } else {
+      held.set(key, slot);
     }
 
     persistHeld();
-    return held.get(this.capacityKey(partitionKey)) ?? null;
+    return held.get(key) ?? null;
   }
 
   private async runExecution(executionId: string, token: string) {
@@ -818,7 +849,6 @@ export class WorkflowEngine<TInput, TResult> {
       await this.clearExecutionLocalState({
         executionId,
         partitionKey: meta.partitionKey,
-        partitionSlot: this.resolvePartitionSlot(executionId, meta),
       });
       await this.retainTerminal(executionId);
       return;
@@ -892,7 +922,6 @@ export class WorkflowEngine<TInput, TResult> {
       }
     }
 
-    // Drain decisions under the same lease until sleep/wait/terminal.
     // After stop(), keep draining compensate unwind for this execution.
     while (this.shouldDrainExecution(executionId)) {
       if (!(await this.ownsLease(executionId, token))) return;
@@ -916,7 +945,6 @@ export class WorkflowEngine<TInput, TResult> {
           view,
           rawInput: meta.input,
           partitionKey,
-          partitionSlot,
           token,
         });
 
@@ -960,7 +988,6 @@ export class WorkflowEngine<TInput, TResult> {
           handler: decision.handler,
           rawInput: meta.input,
           partitionKey,
-          partitionSlot,
           token,
         });
 
@@ -1000,7 +1027,6 @@ export class WorkflowEngine<TInput, TResult> {
           result: decision.result,
           rawInput: meta.input,
           partitionKey,
-          partitionSlot,
           token,
         });
         return;
@@ -1014,7 +1040,7 @@ export class WorkflowEngine<TInput, TResult> {
           token,
         });
 
-        if (compensating) continue;
+        if (compensating.type === "started") continue;
 
         const appended = await this.store.appendEvents({
           executionId,
@@ -1028,7 +1054,6 @@ export class WorkflowEngine<TInput, TResult> {
           executionId,
           error: decision.error,
           partitionKey,
-          partitionSlot,
           token,
         });
         return;
@@ -1041,7 +1066,33 @@ export class WorkflowEngine<TInput, TResult> {
         token,
       });
 
-      if (compensating) continue;
+      if (compensating.type === "started") continue;
+
+      if (compensating.type === "failed") {
+        const failedEvents: HistoryEvent[] = [
+          {
+            type: "WorkflowFailed",
+            error: compensating.error,
+            timestamp: Date.now(),
+          },
+        ];
+
+        const appended = await this.store.appendEvents({
+          executionId,
+          events: failedEvents,
+          leaseToken: token,
+        });
+
+        if (!appended) return;
+
+        await this.failExecution({
+          executionId,
+          error: compensating.error,
+          partitionKey,
+          token,
+        });
+        return;
+      }
 
       const appended = await this.store.appendEvents({
         executionId,
@@ -1055,7 +1106,6 @@ export class WorkflowEngine<TInput, TResult> {
         executionId,
         rawInput: meta.input,
         partitionKey,
-        partitionSlot,
         token,
       });
       return;
@@ -1071,7 +1121,6 @@ export class WorkflowEngine<TInput, TResult> {
       handler,
       rawInput,
       partitionKey,
-      partitionSlot,
       token,
     } = input;
     const controller = this.abortController(executionId);
@@ -1113,10 +1162,12 @@ export class WorkflowEngine<TInput, TResult> {
       if (serializeError) {
         const view = parseHistory(await this.store.loadHistory(executionId));
 
-        if (view.cancelRequested || controller.signal.aborted) {
+        if (view.cancelRequested) {
           await this.store.enqueue(executionId);
           return false;
         }
+
+        if (controller.signal.aborted) return false;
 
         return this.handleStepFailure({
           executionId,
@@ -1125,12 +1176,7 @@ export class WorkflowEngine<TInput, TResult> {
           attempt,
           rawInput,
           partitionKey,
-          partitionSlot,
-          stepError: new NonRetryableStepError(
-            serializeError instanceof Error
-              ? serializeError.message
-              : "Unable to serialize step",
-          ),
+          stepError: new NonRetryableStepError(serializeError.message),
           view,
           token,
         });
@@ -1155,7 +1201,7 @@ export class WorkflowEngine<TInput, TResult> {
       // Persist success before honor cancel so side effects are in history.
       const view = parseHistory(await this.store.loadHistory(executionId));
 
-      if (view.cancelRequested || controller.signal.aborted) {
+      if (view.cancelRequested) {
         await this.store.enqueue(executionId);
       }
 
@@ -1164,10 +1210,12 @@ export class WorkflowEngine<TInput, TResult> {
 
     const view = parseHistory(await this.store.loadHistory(executionId));
 
-    if (view.cancelRequested || controller.signal.aborted) {
+    if (view.cancelRequested) {
       await this.store.enqueue(executionId);
       return false;
     }
+
+    if (controller.signal.aborted) return false;
 
     return this.handleStepFailure({
       executionId,
@@ -1176,7 +1224,6 @@ export class WorkflowEngine<TInput, TResult> {
       attempt,
       rawInput,
       partitionKey,
-      partitionSlot,
       stepError,
       view,
       token,
@@ -1191,7 +1238,6 @@ export class WorkflowEngine<TInput, TResult> {
       attempt,
       rawInput,
       partitionKey,
-      partitionSlot,
       stepError,
       view,
       token,
@@ -1273,7 +1319,6 @@ export class WorkflowEngine<TInput, TResult> {
       attempt,
       rawInput,
       partitionKey,
-      partitionSlot,
       stepError,
       errorHistory,
       token,
@@ -1289,7 +1334,6 @@ export class WorkflowEngine<TInput, TResult> {
       attempt,
       rawInput,
       partitionKey,
-      partitionSlot,
       stepError,
       errorHistory,
       token,
@@ -1315,7 +1359,7 @@ export class WorkflowEngine<TInput, TResult> {
       token,
     });
 
-    if (compensating) return true;
+    if (compensating.type === "started") return true;
 
     const appended = await this.store.appendEvents({
       executionId,
@@ -1335,19 +1379,20 @@ export class WorkflowEngine<TInput, TResult> {
       executionId,
       error: message,
       partitionKey,
-      partitionSlot,
       token,
     });
 
     return false;
   }
 
-  private async maybeStartCompensation(input: MaybeStartCompensationInput) {
+  private async maybeStartCompensation(
+    input: MaybeStartCompensationInput,
+  ): Promise<CompensationStartResult> {
     const { executionId, reason, error, token } = input;
     const view = parseHistory(await this.store.loadHistory(executionId));
 
-    if (view.compensation) return true;
-    if (view.terminal) return false;
+    if (view.compensation) return { type: "started" };
+    if (view.terminal) return { type: "none" };
 
     const [collectError, items] = await mightThrow(
       collectCompensations({
@@ -1357,8 +1402,11 @@ export class WorkflowEngine<TInput, TResult> {
       }),
     );
 
-    if (collectError) return false;
-    if (items.length === 0) return false;
+    if (collectError) {
+      return { type: "failed", error: collectError.message };
+    }
+
+    if (items.length === 0) return { type: "none" };
 
     const appended = await this.store.appendEvents({
       executionId,
@@ -1374,7 +1422,7 @@ export class WorkflowEngine<TInput, TResult> {
       leaseToken: token,
     });
 
-    if (!appended) return false;
+    if (!appended) return { type: "none" };
 
     this.aborts.delete(executionId);
     this.compensating.add(executionId);
@@ -1392,12 +1440,11 @@ export class WorkflowEngine<TInput, TResult> {
       leaseToken: token,
     });
 
-    return true;
+    return { type: "started" };
   }
 
   private async runCompensationPhase(input: RunCompensationPhaseInput) {
-    const { executionId, view, rawInput, partitionKey, partitionSlot, token } =
-      input;
+    const { executionId, view, rawInput, partitionKey, token } = input;
     const phase = view.compensation;
 
     if (!phase) return false;
@@ -1419,7 +1466,6 @@ export class WorkflowEngine<TInput, TResult> {
         error: collectError.message,
         rawInput,
         partitionKey,
-        partitionSlot,
         token,
       });
       return false;
@@ -1439,7 +1485,6 @@ export class WorkflowEngine<TInput, TResult> {
         error: "compensation handlers missing after CompensationStarted",
         rawInput,
         partitionKey,
-        partitionSlot,
         token,
       });
       return false;
@@ -1479,7 +1524,6 @@ export class WorkflowEngine<TInput, TResult> {
             errorHistory,
             rawInput,
             partitionKey,
-            partitionSlot,
             token,
           });
           return false;
@@ -1511,7 +1555,6 @@ export class WorkflowEngine<TInput, TResult> {
         compensate: item.compensate,
         rawInput,
         partitionKey,
-        partitionSlot,
         token,
       });
     }
@@ -1522,7 +1565,6 @@ export class WorkflowEngine<TInput, TResult> {
       error: phase.error,
       rawInput,
       partitionKey,
-      partitionSlot,
       token,
     });
 
@@ -1539,7 +1581,6 @@ export class WorkflowEngine<TInput, TResult> {
       compensate,
       rawInput,
       partitionKey,
-      partitionSlot,
       token,
     } = input;
     const workflowInput = fromJson<TInput>(rawInput, "input");
@@ -1635,7 +1676,6 @@ export class WorkflowEngine<TInput, TResult> {
       errorHistory,
       rawInput,
       partitionKey,
-      partitionSlot,
       token,
     });
 
@@ -1651,7 +1691,6 @@ export class WorkflowEngine<TInput, TResult> {
       errorHistory,
       rawInput,
       partitionKey,
-      partitionSlot,
       token,
     } = input;
     const workflowInput = fromJson<TInput>(rawInput, "input");
@@ -1673,21 +1712,12 @@ export class WorkflowEngine<TInput, TResult> {
       error: error.message,
       rawInput,
       partitionKey,
-      partitionSlot,
       token,
     });
   }
 
   private async finishCompensation(input: FinishCompensationInput) {
-    const {
-      executionId,
-      reason,
-      error,
-      rawInput,
-      partitionKey,
-      partitionSlot,
-      token,
-    } = input;
+    const { executionId, reason, error, rawInput, partitionKey, token } = input;
 
     if (reason === "cancelled") {
       const appended = await this.store.appendEvents({
@@ -1702,7 +1732,6 @@ export class WorkflowEngine<TInput, TResult> {
         executionId,
         rawInput,
         partitionKey,
-        partitionSlot,
         token,
       });
       return;
@@ -1728,7 +1757,6 @@ export class WorkflowEngine<TInput, TResult> {
       executionId,
       error: message,
       partitionKey,
-      partitionSlot,
       token,
     });
   }
@@ -1736,8 +1764,18 @@ export class WorkflowEngine<TInput, TResult> {
   private collectErrorHistory(input: CollectErrorHistoryInput) {
     const { events, stepId, attempt, error, timestamp, failedType } = input;
     const history: WorkflowStepErrorRecord[] = [];
+    let afterResume = 0;
 
-    for (const event of events) {
+    for (let i = 0; i < events.length; i++) {
+      if (events[i]?.type !== "WorkflowResumed") continue;
+
+      afterResume = i + 1;
+    }
+
+    for (let i = afterResume; i < events.length; i++) {
+      const event = events[i];
+
+      if (!event) continue;
       if (event.type !== failedType) continue;
       if (event.stepId !== stepId) continue;
 
@@ -1938,7 +1976,6 @@ export class WorkflowEngine<TInput, TResult> {
         await this.clearExecutionLocalState({
           executionId,
           partitionKey: meta.partitionKey,
-          partitionSlot: this.resolvePartitionSlot(executionId, meta),
         });
         await this.retainTerminal(executionId);
         continue;
@@ -1957,125 +1994,129 @@ export class WorkflowEngine<TInput, TResult> {
 
       let waitingOnTimer = false;
 
-      try {
-        const view = parseHistory(await this.store.loadHistory(executionId));
+      const [error] = await mightThrow(
+        (async () => {
+          const view = parseHistory(await this.store.loadHistory(executionId));
 
-        if (view.compensation) {
-          if (meta.status !== "compensating") {
-            const extra: Partial<WorkflowMeta> = {};
+          if (view.compensation) {
+            if (meta.status !== "compensating") {
+              const extra: Partial<WorkflowMeta> = {};
 
-            if (view.compensation.error) {
-              extra.error = view.compensation.error;
-            }
-
-            await this.store.updateStatus({
-              executionId,
-              status: "compensating",
-              extra,
-              leaseToken: reclaimToken,
-            });
-          }
-        }
-
-        let lastResumeIdx = -1;
-
-        for (let i = 0; i < view.events.length; i++) {
-          if (view.events[i]?.type === "WorkflowResumed") lastResumeIdx = i;
-        }
-
-        for (const [stepId, state] of view.steps) {
-          if (state.status === "completed") continue;
-
-          if (state.status === "failed") {
-            if (lastResumeIdx >= 0) {
-              let scheduledAfterResume = false;
-
-              for (let i = lastResumeIdx + 1; i < view.events.length; i++) {
-                const event = view.events[i];
-
-                if (event?.type !== "StepScheduled") continue;
-                if (event.stepId !== stepId) continue;
-
-                scheduledAfterResume = true;
-                break;
+              if (view.compensation.error) {
+                extra.error = view.compensation.error;
               }
 
-              if (!scheduledAfterResume) {
-                await this.store.appendEvents({
-                  executionId,
-                  events: [
-                    {
-                      type: "StepScheduled",
-                      stepId,
-                      stepName: state.stepName,
-                      attempt: 1,
-                      timestamp: Date.now(),
-                    },
-                  ],
-                  leaseToken: reclaimToken,
-                });
-              }
-            }
-
-            if (!view.compensation) {
-              if (state.retryable && state.attempt <= this.retries) {
-                const added = await this.store.scheduleTimerIfAbsent(
-                  Date.now(),
-                  {
-                    kind: "step-retry",
-                    executionId,
-                    stepId,
-                    stepName: state.stepName,
-                    attempt: state.attempt + 1,
-                  },
-                );
-
-                if (!added) waitingOnTimer = true;
-              }
+              await this.store.updateStatus({
+                executionId,
+                status: "compensating",
+                extra,
+                leaseToken: reclaimToken,
+              });
             }
           }
-        }
 
-        if (!view.compensation) {
-          for (const [timerId, state] of view.timers) {
-            if (state.status !== "started") continue;
+          let lastResumeIdx = -1;
 
-            await this.store.scheduleTimerIfAbsent(state.fireAt, {
-              kind: "timer",
-              executionId,
-              timerId,
-            });
-
-            if (state.fireAt > Date.now()) {
-              waitingOnTimer = true;
-            }
+          for (let i = 0; i < view.events.length; i++) {
+            if (view.events[i]?.type === "WorkflowResumed") lastResumeIdx = i;
           }
-        }
 
-        if (view.compensation) {
-          for (const [stepId, state] of view.compensation.steps) {
+          for (const [stepId, state] of view.steps) {
             if (state.status === "completed") continue;
 
-            if (state.status !== "failed") continue;
+            if (state.status === "failed") {
+              if (lastResumeIdx >= 0) {
+                let scheduledAfterResume = false;
 
-            if (!state.retryable) continue;
-            if (state.attempt > this.retries) continue;
+                for (let i = lastResumeIdx + 1; i < view.events.length; i++) {
+                  const event = view.events[i];
 
-            const added = await this.store.scheduleTimerIfAbsent(Date.now(), {
-              kind: "compensation-retry",
-              executionId,
-              stepId,
-              stepName: state.stepName,
-              attempt: state.attempt + 1,
-            });
+                  if (event?.type !== "StepScheduled") continue;
+                  if (event.stepId !== stepId) continue;
 
-            if (!added) waitingOnTimer = true;
+                  scheduledAfterResume = true;
+                  break;
+                }
+
+                if (!scheduledAfterResume) {
+                  await this.store.appendEvents({
+                    executionId,
+                    events: [
+                      {
+                        type: "StepScheduled",
+                        stepId,
+                        stepName: state.stepName,
+                        attempt: 1,
+                        timestamp: Date.now(),
+                      },
+                    ],
+                    leaseToken: reclaimToken,
+                  });
+                }
+              }
+
+              if (!view.compensation) {
+                if (state.retryable && state.attempt <= this.retries) {
+                  const added = await this.store.scheduleTimerIfAbsent(
+                    Date.now(),
+                    {
+                      kind: "step-retry",
+                      executionId,
+                      stepId,
+                      stepName: state.stepName,
+                      attempt: state.attempt + 1,
+                    },
+                  );
+
+                  if (!added) waitingOnTimer = true;
+                }
+              }
+            }
           }
-        }
-      } finally {
-        await this.store.releaseLease(executionId, reclaimToken);
-      }
 
+          if (!view.compensation) {
+            for (const [timerId, state] of view.timers) {
+              if (state.status !== "started") continue;
+
+              await this.store.scheduleTimerIfAbsent(state.fireAt, {
+                kind: "timer",
+                executionId,
+                timerId,
+              });
+
+              if (state.fireAt > Date.now()) {
+                waitingOnTimer = true;
+              }
+            }
+          }
+
+          if (view.compensation) {
+            for (const [stepId, state] of view.compensation.steps) {
+              if (state.status === "completed") continue;
+
+              if (state.status !== "failed") continue;
+
+              if (!state.retryable) continue;
+              if (state.attempt > this.retries) continue;
+
+              const added = await this.store.scheduleTimerIfAbsent(Date.now(), {
+                kind: "compensation-retry",
+                executionId,
+                stepId,
+                stepName: state.stepName,
+                attempt: state.attempt + 1,
+              });
+
+              if (!added) waitingOnTimer = true;
+            }
+          }
+        })(),
+      );
+
+      await this.store.releaseLease(executionId, reclaimToken);
+
+      // Bad history must not block reclaim of later active ids.
+      if (error) continue;
       if (waitingOnTimer) continue;
 
       await this.store.enqueue(executionId);
@@ -2095,7 +2136,6 @@ export class WorkflowEngine<TInput, TResult> {
         await this.clearExecutionLocalState({
           executionId,
           partitionKey: meta.partitionKey,
-          partitionSlot: held.get(this.capacityKey(meta.partitionKey)),
         });
         continue;
       }
@@ -2131,6 +2171,7 @@ export class WorkflowEngine<TInput, TResult> {
         if (error || !ok) {
           this.lostLeases.add(executionId);
           this.capacitySlots.delete(executionId);
+          this.aborts.get(executionId)?.abort();
           return;
         }
 
@@ -2163,7 +2204,7 @@ export class WorkflowEngine<TInput, TResult> {
     const meta = await this.store.getMeta(executionId);
     const held = this.heldSlots(executionId, meta);
     const key = partitionKey || meta?.partitionKey || GLOBAL_CAPACITY_KEY;
-    const keys = new Set(this.capacityTargets(key).map((target) => target.key));
+    const keys = new Set([this.capacityKey(key)]);
 
     for (const heldKey of held.keys()) {
       keys.add(heldKey);
@@ -2185,14 +2226,7 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private async completeExecution(input: CompleteExecutionInput) {
-    const {
-      executionId,
-      result,
-      rawInput,
-      partitionKey,
-      partitionSlot,
-      token,
-    } = input;
+    const { executionId, result, rawInput, partitionKey, token } = input;
 
     const updated = await this.store.updateStatus({
       executionId,
@@ -2202,7 +2236,6 @@ export class WorkflowEngine<TInput, TResult> {
         completedAt: String(Date.now()),
         error: "",
         partitionSlot: "",
-        concurrencySlot: "",
       },
       leaseToken: token,
     });
@@ -2212,7 +2245,6 @@ export class WorkflowEngine<TInput, TResult> {
     await this.clearExecutionLocalState({
       executionId,
       partitionKey,
-      partitionSlot,
     });
 
     const workflowInput = fromJson<TInput>(rawInput, "input");
@@ -2229,7 +2261,7 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private async failExecution(input: FailExecutionInput) {
-    const { executionId, error, partitionKey, partitionSlot, token } = input;
+    const { executionId, error, partitionKey, token } = input;
 
     const updated = await this.store.updateStatus({
       executionId,
@@ -2238,7 +2270,6 @@ export class WorkflowEngine<TInput, TResult> {
         error,
         failedAt: String(Date.now()),
         partitionSlot: "",
-        concurrencySlot: "",
       },
       leaseToken: token,
     });
@@ -2248,14 +2279,13 @@ export class WorkflowEngine<TInput, TResult> {
     await this.clearExecutionLocalState({
       executionId,
       partitionKey,
-      partitionSlot,
     });
 
     await this.retainTerminal(executionId);
   }
 
   private async cancelExecution(input: CancelExecutionInput) {
-    const { executionId, rawInput, partitionKey, partitionSlot, token } = input;
+    const { executionId, rawInput, partitionKey, token } = input;
 
     const updated = await this.store.updateStatus({
       executionId,
@@ -2264,7 +2294,6 @@ export class WorkflowEngine<TInput, TResult> {
         cancelledAt: String(Date.now()),
         error: "",
         partitionSlot: "",
-        concurrencySlot: "",
       },
       leaseToken: token,
     });
@@ -2274,7 +2303,6 @@ export class WorkflowEngine<TInput, TResult> {
     await this.clearExecutionLocalState({
       executionId,
       partitionKey,
-      partitionSlot,
     });
 
     const workflowInput = fromJson<TInput>(rawInput, "input");
@@ -2348,7 +2376,6 @@ export class WorkflowEngine<TInput, TResult> {
     const { executionId, terminal, rawInput, token } = input;
     const meta = await this.store.getMeta(executionId);
     const partitionKey = meta?.partitionKey ?? "";
-    const slot = this.resolvePartitionSlot(executionId, meta);
 
     if (terminal.kind === "completed") {
       await this.completeExecution({
@@ -2356,7 +2383,6 @@ export class WorkflowEngine<TInput, TResult> {
         result: terminal.result,
         rawInput,
         partitionKey,
-        partitionSlot: slot,
         token,
       });
       return;
@@ -2367,7 +2393,6 @@ export class WorkflowEngine<TInput, TResult> {
         executionId,
         error: terminal.error,
         partitionKey,
-        partitionSlot: slot,
         token,
       });
       return;
@@ -2377,7 +2402,6 @@ export class WorkflowEngine<TInput, TResult> {
       executionId,
       rawInput,
       partitionKey,
-      partitionSlot: slot,
       token,
     });
   }
