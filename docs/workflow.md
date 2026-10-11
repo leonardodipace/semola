@@ -191,18 +191,27 @@ Status is `compensating` while unwind runs. A successful unwind still ends as `f
 
 ### Fail without retrying
 
-Call `fail()` inside a step for a non-retryable failure.
+Call `fail(error)` inside a step for a non-retryable failure. Pass an `Error` (or subclass) so `onError` can branch with `instanceof`.
 
 ```typescript
+class CardDeclinedError extends Error {}
+
 const payment = defineWorkflow<{ orderId: string }, { charged: true }>({
   name: "charge-order",
   redis: redisClient,
+  hooks: {
+    onError: ({ error }) => {
+      if (error instanceof CardDeclinedError) {
+        // ...
+      }
+    },
+  },
   handler: async ({ input, step }) => {
     await step("charge", async ({ fail }) => {
       const charged = await charge(input.orderId);
 
       if (!charged) {
-        fail("card declined");
+        fail(new CardDeclinedError("card declined"));
       }
     });
 
@@ -291,7 +300,7 @@ await onboard.stop();
 - `step(name, handler, options?)` - durable side effect; handler gets `{ input, signal, fail }`. `options.compensate` undoes a completed step on later failure or cancel; it gets `{ input, result, signal, fail }`. Compensate `signal` is not the cancelled forward signal, so cleanup can finish after cancel.
 - `sleep(ms)` - durable timer (survives replay / reclaim)
 
-`fail(message)` inside a step marks a non-retryable failure (`NonRetryableStepError`). Same inside `compensate`.
+`fail(error)` inside a step marks a non-retryable failure and passes that `Error` to `onError`. Same inside `compensate`. History and status still store the message string. `throw new NonRetryableStepError(...)` remains non-retryable without going through `fail`.
 
 ### Options
 
@@ -322,7 +331,7 @@ Optional lifecycle callbacks. Errors in hooks never fail the workflow. Hooks fir
 
 - `onStart` - once when the execution first moves `pending` → `running`
 - `onRetry` - before each forward step retry backoff (`attempt`, `nextRetryDelayMs`, `retriesRemaining`, …). Not fired for `compensate` retries.
-- `onError` - forward-step retries exhausted, immediately after `fail()`, or when a `compensate` handler exhausts retries (may fire twice if both happen). Compensate calls pass `errorHistory` from `CompensationFailed` attempts only.
+- `onError` - forward-step retries exhausted, immediately after `fail()`, or when a `compensate` handler exhausts retries (may fire twice if both happen). `error` is the thrown/`fail()` `Error` instance (use `instanceof` for typed branches). Compensate calls pass `errorHistory` from `CompensationFailed` attempts only (messages as strings).
 - `onComplete` - terminal success
 - `onCancel` - terminal cancel
 

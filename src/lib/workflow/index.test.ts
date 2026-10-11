@@ -495,7 +495,7 @@ describe("workflow", () => {
       handler: async ({ step }) => {
         await step("nope", async ({ fail }) => {
           attempts++;
-          fail("hard stop");
+          fail(new Error("hard stop"));
         });
       },
     });
@@ -2355,9 +2355,11 @@ describe("workflow", () => {
       let onRetryCalls = 0;
       const errorContexts: Array<{
         stepName: string;
-        error: string;
+        error: Error;
         totalAttempts: number;
       }> = [];
+
+      class PermanentError extends Error {}
 
       const wf = defineWorkflow({
         name: `fail-hooks-${crypto.randomUUID()}`,
@@ -2378,7 +2380,7 @@ describe("workflow", () => {
         },
         handler: async ({ step }) => {
           await step("risky", async ({ fail }) => {
-            fail("permanent");
+            fail(new PermanentError("permanent"));
           });
         },
       });
@@ -2390,7 +2392,8 @@ describe("workflow", () => {
       expect(onRetryCalls).toBe(0);
       expect(errorContexts.length).toBe(1);
       expect(errorContexts[0]?.stepName).toBe("risky");
-      expect(errorContexts[0]?.error).toBe("permanent");
+      expect(errorContexts[0]?.error).toBeInstanceOf(PermanentError);
+      expect(errorContexts[0]?.error.message).toBe("permanent");
       expect(errorContexts[0]?.totalAttempts).toBe(1);
 
       await stop(wf);
@@ -4285,7 +4288,7 @@ describe("workflow", () => {
           });
 
           await step("provision", async ({ fail }) => {
-            fail("provision failed");
+            fail(new Error("provision failed"));
           });
         },
       });
@@ -4600,7 +4603,7 @@ describe("workflow", () => {
           await step("create-vm", async () => ({ id: "vm-1" }), {
             compensate: async ({ fail }) => {
               compensateAttempts++;
-              fail("cannot undo");
+              fail(new Error("cannot undo"));
             },
           });
 

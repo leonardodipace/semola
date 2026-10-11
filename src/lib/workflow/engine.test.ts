@@ -317,7 +317,7 @@ describe("WorkflowEngine", () => {
       });
 
       await step("provision", async ({ fail }) => {
-        fail("provision failed");
+        fail(new Error("provision failed"));
       });
     };
 

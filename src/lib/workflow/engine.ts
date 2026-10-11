@@ -49,6 +49,19 @@ const HEARTBEAT_RATIO = 0.4;
 const SHUTDOWN_POLL = 10;
 const GLOBAL_CAPACITY_KEY = "*";
 
+const nonRetryableViaFail = new WeakSet<Error>();
+
+const failWith = (error: Error): never => {
+  nonRetryableViaFail.add(error);
+  throw error;
+};
+
+const isNonRetryableStepError = (error: Error) => {
+  if (error instanceof NonRetryableStepError) return true;
+  if (nonRetryableViaFail.has(error)) return true;
+  return false;
+};
+
 const runHook = async (fn: (() => void | Promise<void>) | undefined) => {
   if (!fn) return;
 
@@ -1085,9 +1098,7 @@ export class WorkflowEngine<TInput, TResult> {
         handler({
           input: workflowInput,
           signal: controller.signal,
-          fail: (message) => {
-            throw new NonRetryableStepError(message);
-          },
+          fail: failWith,
         }),
       ),
     );
@@ -1186,7 +1197,7 @@ export class WorkflowEngine<TInput, TResult> {
       token,
     } = input;
     const message = stepError.message;
-    const retryable = !(stepError instanceof NonRetryableStepError);
+    const retryable = !isNonRetryableStepError(stepError);
     const now = Date.now();
 
     const appended = await this.store.appendEvents({
@@ -1263,7 +1274,7 @@ export class WorkflowEngine<TInput, TResult> {
       rawInput,
       partitionKey,
       partitionSlot,
-      message,
+      stepError,
       errorHistory,
       token,
     });
@@ -1279,18 +1290,19 @@ export class WorkflowEngine<TInput, TResult> {
       rawInput,
       partitionKey,
       partitionSlot,
-      message,
+      stepError,
       errorHistory,
       token,
     } = input;
     const workflowInput = fromJson<TInput>(rawInput, "input");
+    const message = stepError.message;
 
     await runHook(() =>
       this.options.hooks?.onError?.({
         executionId,
         input: workflowInput,
         stepName,
-        error: message,
+        error: stepError,
         totalAttempts: attempt,
         errorHistory,
       }),
@@ -1463,7 +1475,7 @@ export class WorkflowEngine<TInput, TResult> {
             executionId,
             stepName: item.stepName,
             attempt: state.attempt,
-            error: state.error,
+            error: new Error(state.error),
             errorHistory,
             rawInput,
             partitionKey,
@@ -1538,9 +1550,7 @@ export class WorkflowEngine<TInput, TResult> {
           input: workflowInput,
           result,
           signal: this.compensationAbortController(executionId).signal,
-          fail: (message) => {
-            throw new NonRetryableStepError(message);
-          },
+          fail: failWith,
         }),
       ),
     );
@@ -1567,7 +1577,7 @@ export class WorkflowEngine<TInput, TResult> {
     }
 
     const message = compensateError.message;
-    const retryable = !(compensateError instanceof NonRetryableStepError);
+    const retryable = !isNonRetryableStepError(compensateError);
     const now = Date.now();
     const viewBefore = parseHistory(await this.store.loadHistory(executionId));
 
@@ -1621,7 +1631,7 @@ export class WorkflowEngine<TInput, TResult> {
       executionId,
       stepName,
       attempt,
-      error: message,
+      error: compensateError,
       errorHistory,
       rawInput,
       partitionKey,
@@ -1660,7 +1670,7 @@ export class WorkflowEngine<TInput, TResult> {
     await this.finishCompensation({
       executionId,
       reason: "failed",
-      error,
+      error: error.message,
       rawInput,
       partitionKey,
       partitionSlot,
