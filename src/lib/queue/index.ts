@@ -158,11 +158,11 @@ export class Queue<T> {
       }
 
       if (claim.kind === "malformed") {
-        await this.callOnErrorForParseFailure(
+        await this.callOnErrorForParseFailure(claim.raw, claim.error);
+        await this.store.pushDeadLetter(
           claim.raw,
-          new Error("Invalid job JSON"),
+          this.formatErrorMessage(claim.error),
         );
-        await this.store.pushDeadLetter(claim.raw, "Invalid job JSON");
         await this.store.ack(claim.raw, claim.visibleUntil);
         await this.waitForPollInterval();
         continue;

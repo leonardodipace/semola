@@ -942,6 +942,13 @@ describe("Queue", () => {
       });
 
       const malformedData = '{"bad": json}';
+      let expectedParseError = "";
+      try {
+        JSON.parse(malformedData);
+      } catch (error) {
+        expectedParseError = (error as Error).message;
+      }
+
       await redis.lpush("queue:test:jobs", malformedData);
 
       await sleep(100);
@@ -952,9 +959,14 @@ describe("Queue", () => {
       expect(firstError).toBeDefined();
       if (firstError) {
         expect(firstError.rawJobData).toBe(malformedData);
-        expect(firstError.parseError).toBeDefined();
+        expect(firstError.parseError).toBe(expectedParseError);
         expect(firstError.timestamp).toBeGreaterThan(0);
       }
+
+      const deadLetter = redis.getList("queue:test:dead-letter");
+      expect(deadLetter.length).toBe(1);
+      const deadLetterEntry = JSON.parse(deadLetter[0] ?? "{}");
+      expect(deadLetterEntry.parseError).toBe(expectedParseError);
     });
 
     test.concurrent("should continue processing valid jobs after malformed jobs", async () => {

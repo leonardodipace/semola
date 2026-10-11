@@ -91,7 +91,12 @@ export class QueueStore {
     );
 
     if (parseError || !job) {
-      return { kind: "malformed" as const, raw, visibleUntil };
+      return {
+        kind: "malformed" as const,
+        raw,
+        visibleUntil,
+        error: parseError ?? new Error("Invalid job JSON"),
+      };
     }
 
     return { kind: "claimed" as const, raw, job, visibleUntil };
