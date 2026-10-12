@@ -47,6 +47,15 @@ export type QueueRetryBackoff = {
   maxDelay?: number;
 };
 
+export type QueueDurabilityOptions = {
+  visibilityTimeoutMs?: number;
+  reclaimBatchSize?: number;
+};
+
+export type ClaimedJob = {
+  serialized: string;
+};
+
 export type QueueOptions<T> = {
   name: string;
   redis: Bun.RedisClient;
@@ -60,4 +69,4 @@ export type QueueOptions<T> = {
   timeout?: number;
   concurrency?: number;
   pollInterval?: number;
-};
+} & QueueDurabilityOptions;
