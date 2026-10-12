@@ -2,8 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Queue } from "./index.js";
 import {
   CLAIM_JOB,
-  PROMOTE_RETRIES,
-  RECLAIM_INFLIGHT,
+  MOVE_DUE_ZSET_TO_JOBS,
   RELEASE_JOB,
   SCHEDULE_RETRY,
 } from "./scripts.js";
@@ -201,7 +200,7 @@ class MockRedisClient {
       return 1;
     }
 
-    if (script === PROMOTE_RETRIES || script === RECLAIM_INFLIGHT) {
+    if (script === MOVE_DUE_ZSET_TO_JOBS) {
       const sourceKey = keyArgs[0] ?? "";
       const jobsKey = keyArgs[1] ?? "";
       const now = Number(argv[0]);

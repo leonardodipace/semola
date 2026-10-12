@@ -188,7 +188,7 @@ export class Queue<T> {
       if (parseError || !job) {
         await this.callOnErrorForParseFailure(jobData, parseError);
         await this.moveToDeadLetterQueue(jobData, parseError);
-        await mightThrow(this.store.ack(jobData));
+        await mightThrow(this.store.removeInflight(jobData));
         await this.waitForPollInterval();
         continue;
       }
@@ -233,7 +233,7 @@ export class Queue<T> {
     }
 
     if (!handlerError) {
-      await mightThrow(this.store.ack(serializedAtClaim));
+      await mightThrow(this.store.removeInflight(serializedAtClaim));
 
       if (this.options.onSuccess) {
         await mightThrow(
@@ -279,7 +279,7 @@ export class Queue<T> {
 
       if (stringifyError || !updatedSerialized) {
         job.error = `Failed to serialize job for retry: ${this.formatErrorMessage(stringifyError)}`;
-        await mightThrow(this.store.ack(serializedAtClaim));
+        await mightThrow(this.store.removeInflight(serializedAtClaim));
         await this.callOnError(job);
         return;
       }
@@ -292,15 +292,13 @@ export class Queue<T> {
       );
 
       if (scheduleError) {
-        // Keep the claim durable: release back to jobs (or leave inflight if
-        // release fails) instead of acking, which would drop the only copy.
         await mightThrow(this.store.release(serializedAtClaim));
       }
 
       return;
     }
 
-    await mightThrow(this.store.ack(serializedAtClaim));
+    await mightThrow(this.store.removeInflight(serializedAtClaim));
     await this.callOnError(job);
   }
 

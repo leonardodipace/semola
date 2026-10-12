@@ -2,8 +2,7 @@ import { mightThrow } from "../errors/index.js";
 import { queueKey } from "./keys.js";
 import {
   CLAIM_JOB,
-  PROMOTE_RETRIES,
-  RECLAIM_INFLIGHT,
+  MOVE_DUE_ZSET_TO_JOBS,
   RELEASE_JOB,
   SCHEDULE_RETRY,
 } from "./scripts.js";
@@ -50,7 +49,7 @@ export class QueueRedisStore {
     const limit = String(this.options.reclaimBatchSize);
 
     const [promoteError] = await this.evalScript(
-      PROMOTE_RETRIES,
+      MOVE_DUE_ZSET_TO_JOBS,
       2,
       [this.retryKey, this.jobsKey],
       [now, limit],
@@ -61,7 +60,7 @@ export class QueueRedisStore {
     }
 
     const [reclaimError] = await this.evalScript(
-      RECLAIM_INFLIGHT,
+      MOVE_DUE_ZSET_TO_JOBS,
       2,
       [this.inflightKey, this.jobsKey],
       [now, limit],
@@ -97,7 +96,7 @@ export class QueueRedisStore {
     return mightThrow(this.options.redis.lpush(this.jobsKey, serialized));
   }
 
-  public async ack(serialized: string) {
+  public async removeInflight(serialized: string) {
     return mightThrow(this.options.redis.zrem(this.inflightKey, serialized));
   }
 
