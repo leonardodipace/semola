@@ -4,6 +4,7 @@ import type {
   FinishedSpan,
   MetricPoint,
   OtlpAnyValue,
+  OtlpInstrumentationScope,
   OtlpKeyValue,
   OtlpPostOptions,
   PendingLogRecord,
@@ -15,7 +16,9 @@ import type {
   SpanStatus,
 } from "./types.js";
 
-function spanStatusCode(code: SpanStatus["code"]): number {
+const OTLP_FETCH_TIMEOUT_MS = 10_000;
+
+const spanStatusCode = (code: SpanStatus["code"]) => {
   if (code === "OK") {
     return 1;
   }
@@ -25,9 +28,25 @@ function spanStatusCode(code: SpanStatus["code"]): number {
   }
 
   return 0;
-}
+};
 
-export function encodeAttributeValue(value: AttributeValue): OtlpAnyValue {
+const stripTrailingSlash = (url: string) => {
+  if (url.endsWith("/")) {
+    return url.slice(0, -1);
+  }
+
+  return url;
+};
+
+const encodeEventAttributes = (attributes: AttributeMap | undefined) => {
+  if (!attributes) {
+    return [];
+  }
+
+  return encodeAttributes(attributes);
+};
+
+export const encodeAttributeValue = (value: AttributeValue): OtlpAnyValue => {
   if (typeof value === "string") {
     return { stringValue: value };
   }
@@ -47,11 +66,10 @@ export function encodeAttributeValue(value: AttributeValue): OtlpAnyValue {
   const values = value.map((entry) => encodeAttributeValue(entry));
 
   return { arrayValue: { values } };
-}
+};
 
-export function encodeAttributes(map: AttributeMap): OtlpKeyValue[] {
+export const encodeAttributes = (map: AttributeMap): OtlpKeyValue[] => {
   const keys = Object.keys(map).sort();
-
   const pairs: OtlpKeyValue[] = [];
 
   for (const key of keys) {
@@ -68,16 +86,16 @@ export function encodeAttributes(map: AttributeMap): OtlpKeyValue[] {
   }
 
   return pairs;
-}
+};
 
-export function encodeResource(resource: Resource) {
+export const encodeResource = (resource: Resource) => {
   return {
     attributes: encodeAttributes(resource.attributes),
   };
-}
+};
 
-export function encodeScope(scope: Scope) {
-  const encoded: { name: string; version?: string } = {
+export const encodeScope = (scope: Scope): OtlpInstrumentationScope => {
+  const encoded: OtlpInstrumentationScope = {
     name: scope.scopeName,
   };
 
@@ -86,9 +104,9 @@ export function encodeScope(scope: Scope) {
   }
 
   return encoded;
-}
+};
 
-export function encodeSpan(span: FinishedSpan) {
+export const encodeSpan = (span: FinishedSpan) => {
   const encoded: Record<string, unknown> = {
     traceId: span.traceId,
     spanId: span.spanId,
@@ -100,7 +118,7 @@ export function encodeSpan(span: FinishedSpan) {
     events: span.events.map((event) => ({
       name: event.name,
       timeUnixNano: event.timeUnixNano,
-      attributes: event.attributes ? encodeAttributes(event.attributes) : [],
+      attributes: encodeEventAttributes(event.attributes),
     })),
     status: {
       code: spanStatusCode(span.status.code),
@@ -116,12 +134,12 @@ export function encodeSpan(span: FinishedSpan) {
   }
 
   return encoded;
-}
+};
 
-export function encodeTracesExport(
+export const encodeTracesExport = (
   resource: Resource,
   scopeSpans: ScopeSpans[],
-) {
+) => {
   return {
     resourceSpans: [
       {
@@ -133,9 +151,9 @@ export function encodeTracesExport(
       },
     ],
   };
-}
+};
 
-export function encodeLogRecord(record: PendingLogRecord) {
+export const encodeLogRecord = (record: PendingLogRecord) => {
   const encoded: Record<string, unknown> = {
     timeUnixNano: record.timeUnixNano,
     severityText: record.severityText,
@@ -152,9 +170,12 @@ export function encodeLogRecord(record: PendingLogRecord) {
   }
 
   return encoded;
-}
+};
 
-export function encodeLogsExport(resource: Resource, scopeLogs: ScopeLogs[]) {
+export const encodeLogsExport = (
+  resource: Resource,
+  scopeLogs: ScopeLogs[],
+) => {
   return {
     resourceLogs: [
       {
@@ -166,29 +187,41 @@ export function encodeLogsExport(resource: Resource, scopeLogs: ScopeLogs[]) {
       },
     ],
   };
-}
+};
 
-export function encodeMetric(point: MetricPoint) {
+export const encodeMetric = (point: MetricPoint) => {
   if (point.kind === "histogram") {
+    const bucketCounts = point.dataPoints.map((dp) => {
+      const counts = dp.bucketCounts ?? [];
+
+      return {
+        attributes: encodeAttributes(dp.attributes),
+        startTimeUnixNano: dp.startTimeUnixNano,
+        timeUnixNano: dp.timeUnixNano,
+        count: String(dp.count ?? 0),
+        sum: dp.sum ?? 0,
+        min: dp.min,
+        max: dp.max,
+        bucketCounts: counts.map((count) => String(count)),
+        explicitBounds: dp.explicitBounds,
+      };
+    });
+
     return {
       name: point.name,
       description: point.description,
       unit: point.unit,
       histogram: {
         aggregationTemporality: 2,
-        dataPoints: point.dataPoints.map((dp) => ({
-          attributes: encodeAttributes(dp.attributes),
-          startTimeUnixNano: dp.startTimeUnixNano,
-          timeUnixNano: dp.timeUnixNano,
-          count: String(dp.count ?? 0),
-          sum: dp.sum ?? 0,
-          min: dp.min,
-          max: dp.max,
-          bucketCounts: (dp.bucketCounts ?? []).map((count) => String(count)),
-          explicitBounds: dp.explicitBounds,
-        })),
+        dataPoints: bucketCounts,
       },
     };
+  }
+
+  let isMonotonic = false;
+
+  if (point.kind === "counter") {
+    isMonotonic = true;
   }
 
   return {
@@ -197,7 +230,7 @@ export function encodeMetric(point: MetricPoint) {
     unit: point.unit,
     sum: {
       aggregationTemporality: 2,
-      isMonotonic: point.kind === "counter",
+      isMonotonic,
       dataPoints: point.dataPoints.map((dp) => ({
         attributes: encodeAttributes(dp.attributes),
         startTimeUnixNano: dp.startTimeUnixNano,
@@ -206,12 +239,12 @@ export function encodeMetric(point: MetricPoint) {
       })),
     },
   };
-}
+};
 
-export function encodeMetricsExport(
+export const encodeMetricsExport = (
   resource: Resource,
   scopeMetrics: ScopeMetrics[],
-) {
+) => {
   return {
     resourceMetrics: [
       {
@@ -223,10 +256,10 @@ export function encodeMetricsExport(
       },
     ],
   };
-}
+};
 
-export async function otlpPost(options: OtlpPostOptions): Promise<void> {
-  const base = options.baseUrl.replace(/\/$/, "");
+export const otlpPost = async (options: OtlpPostOptions) => {
+  const base = stripTrailingSlash(options.baseUrl);
   const url = `${base}${options.path}`;
 
   const headers: Record<string, string> = {
@@ -238,7 +271,7 @@ export async function otlpPost(options: OtlpPostOptions): Promise<void> {
     method: "POST",
     headers,
     body: JSON.stringify(options.body),
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(OTLP_FETCH_TIMEOUT_MS),
   });
 
   await response.body?.cancel();
@@ -246,4 +279,4 @@ export async function otlpPost(options: OtlpPostOptions): Promise<void> {
   if (response.status < 200 || response.status >= 300) {
     throw new Error(`OTLP export failed with status ${response.status}`);
   }
-}
+};

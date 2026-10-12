@@ -174,6 +174,11 @@ export type OtlpKeyValue = {
   value: OtlpAnyValue;
 };
 
+export type OtlpInstrumentationScope = {
+  name: string;
+  version?: string;
+};
+
 export type OtlpAnyValue = {
   stringValue?: string;
   intValue?: string;

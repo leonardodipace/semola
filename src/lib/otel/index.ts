@@ -44,8 +44,54 @@ import {
 const contextAls = new AsyncLocalStorage<OtelContext>();
 
 const SPAN_KIND_INTERNAL = 1;
+const TRACEPARENT_VERSION = "00";
+const TRACE_ID_LENGTH = 32;
+const SPAN_ID_LENGTH = 16;
+const FLAGS_HEX_LENGTH = 2;
 
-export function inject(carrier: Headers | Record<string, string>): void {
+const isLowerHexChar = (char: string) => {
+  const code = char.charCodeAt(0);
+
+  if (code >= 48 && code <= 57) {
+    return true;
+  }
+
+  if (code >= 97 && code <= 102) {
+    return true;
+  }
+
+  return false;
+};
+
+const isLowerHex = (value: string) => {
+  for (const char of value) {
+    if (!isLowerHexChar(char)) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+const isAllZeros = (value: string) => {
+  for (const char of value) {
+    if (char !== "0") {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+const readTraceparent = (carrier: Headers | Record<string, string>) => {
+  if (carrier instanceof Headers) {
+    return carrier.get("traceparent");
+  }
+
+  return carrier.traceparent;
+};
+
+export const inject = (carrier: Headers | Record<string, string>) => {
   const ctx = contextAls.getStore();
 
   if (!ctx?.span) {
@@ -54,7 +100,7 @@ export function inject(carrier: Headers | Record<string, string>): void {
 
   const { traceId, spanId, traceFlags } = ctx.span;
   const flags = traceFlags.toString(16).padStart(2, "0");
-  const traceparent = `00-${traceId}-${spanId}-${flags}`;
+  const traceparent = `${TRACEPARENT_VERSION}-${traceId}-${spanId}-${flags}`;
 
   if (carrier instanceof Headers) {
     carrier.set("traceparent", traceparent);
@@ -62,15 +108,12 @@ export function inject(carrier: Headers | Record<string, string>): void {
   }
 
   carrier.traceparent = traceparent;
-}
+};
 
-export function extract(
+export const extract = (
   carrier: Headers | Record<string, string>,
-): OtelContext {
-  const raw =
-    carrier instanceof Headers
-      ? carrier.get("traceparent")
-      : carrier.traceparent;
+): OtelContext => {
+  const raw = readTraceparent(carrier);
 
   if (!raw) {
     return { span: null };
@@ -82,48 +125,73 @@ export function extract(
     return { span: null };
   }
 
-  const version = parts[0];
-  const traceId = parts[1];
-  const spanId = parts[2];
-  const flagsHex = parts[3];
+  const [version, traceIdRaw, spanIdRaw, flagsHex] = parts;
 
-  if (version !== "00") {
+  if (version !== TRACEPARENT_VERSION) {
     return { span: null };
   }
 
-  if (!traceId || traceId.length !== 32) {
+  if (!traceIdRaw) {
     return { span: null };
   }
 
-  if (!spanId || spanId.length !== 16) {
+  if (!spanIdRaw) {
     return { span: null };
   }
 
-  if (!/^[0-9a-f]+$/i.test(traceId) || /^0+$/.test(traceId)) {
+  if (!flagsHex) {
     return { span: null };
   }
 
-  if (!/^[0-9a-f]+$/i.test(spanId) || /^0+$/.test(spanId)) {
+  if (traceIdRaw.length !== TRACE_ID_LENGTH) {
     return { span: null };
   }
 
-  if (!flagsHex || !/^[0-9a-f]{2}$/i.test(flagsHex)) {
+  if (spanIdRaw.length !== SPAN_ID_LENGTH) {
     return { span: null };
   }
 
-  const traceFlags = Number.parseInt(flagsHex, 16);
+  if (flagsHex.length !== FLAGS_HEX_LENGTH) {
+    return { span: null };
+  }
+
+  const traceId = traceIdRaw.toLowerCase();
+  const spanId = spanIdRaw.toLowerCase();
+  const flags = flagsHex.toLowerCase();
+
+  if (!isLowerHex(traceId)) {
+    return { span: null };
+  }
+
+  if (isAllZeros(traceId)) {
+    return { span: null };
+  }
+
+  if (!isLowerHex(spanId)) {
+    return { span: null };
+  }
+
+  if (isAllZeros(spanId)) {
+    return { span: null };
+  }
+
+  if (!isLowerHex(flags)) {
+    return { span: null };
+  }
+
+  const traceFlags = Number.parseInt(flags, 16);
 
   return {
     span: {
-      traceId: traceId.toLowerCase(),
-      spanId: spanId.toLowerCase(),
+      traceId,
+      spanId,
       traceFlags,
       isRemote: true,
     },
   };
-}
+};
 
-function randomHex(byteLength: number): string {
+const randomHex = (byteLength: number) => {
   const bytes = new Uint8Array(byteLength);
   crypto.getRandomValues(bytes);
 
@@ -134,17 +202,17 @@ function randomHex(byteLength: number): string {
   }
 
   return hex;
-}
+};
 
-function timeUnixNanoString(ms?: number): string {
+const timeUnixNanoString = (ms?: number) => {
   const millis = ms ?? Date.now();
   const whole = Math.trunc(millis);
   const fraction = Math.round((millis - whole) * 1_000_000);
 
   return String(BigInt(whole) * 1_000_000n + BigInt(fraction));
-}
+};
 
-function attributeKey(attributes: AttributeMap): string {
+const attributeKey = (attributes: AttributeMap) => {
   const keys = Object.keys(attributes).sort();
 
   if (keys.length === 0) {
@@ -164,9 +232,9 @@ function attributeKey(attributes: AttributeMap): string {
   }
 
   return JSON.stringify(sorted);
-}
+};
 
-function rootTraceSampled(traceId: string, ratio: number): boolean {
+const rootTraceSampled = (traceId: string, ratio: number) => {
   if (ratio >= 1) {
     return true;
   }
@@ -180,9 +248,9 @@ function rootTraceSampled(traceId: string, ratio: number): boolean {
   const threshold = ratio * 10_000;
 
   return n % 10_000 < threshold;
-}
+};
 
-function histogramBucketIndex(value: number): number {
+const histogramBucketIndex = (value: number) => {
   for (let i = 0; i < HISTOGRAM_EXPLICIT_BOUNDS.length; i++) {
     const bound = HISTOGRAM_EXPLICIT_BOUNDS[i];
 
@@ -192,7 +260,7 @@ function histogramBucketIndex(value: number): number {
   }
 
   return HISTOGRAM_EXPLICIT_BOUNDS.length;
-}
+};
 
 export class Otel {
   private enabled: boolean;
@@ -574,7 +642,7 @@ export class Otel {
   }
 }
 
-function groupSpansByScope(spans: FinishedSpan[]): ScopeSpans[] {
+const groupSpansByScope = (spans: FinishedSpan[]): ScopeSpans[] => {
   const map = new Map<string, ScopeSpans>();
 
   for (const span of spans) {
@@ -596,9 +664,9 @@ function groupSpansByScope(spans: FinishedSpan[]): ScopeSpans[] {
   }
 
   return [...map.values()];
-}
+};
 
-function groupLogsByScope(logs: PendingLogRecord[]): ScopeLogs[] {
+const groupLogsByScope = (logs: PendingLogRecord[]): ScopeLogs[] => {
   const map = new Map<string, ScopeLogs>();
 
   for (const record of logs) {
@@ -620,9 +688,9 @@ function groupLogsByScope(logs: PendingLogRecord[]): ScopeLogs[] {
   }
 
   return [...map.values()];
-}
+};
 
-function groupMetricsByScope(metrics: MetricPoint[]): ScopeMetrics[] {
+const groupMetricsByScope = (metrics: MetricPoint[]): ScopeMetrics[] => {
   const map = new Map<string, ScopeMetrics>();
 
   for (const metric of metrics) {
@@ -644,23 +712,12 @@ function groupMetricsByScope(metrics: MetricPoint[]): ScopeMetrics[] {
   }
 
   return [...map.values()];
-}
+};
 
-function snapshotInstrument(
-  instrument: RegisteredInstrument,
-  now: string,
-): MetricPoint["dataPoints"] {
-  if (instrument.kind === "histogram") {
-    return snapshotHistograms(instrument.histograms, now);
-  }
-
-  return snapshotSums(instrument.sums, now);
-}
-
-function snapshotSums(
+const snapshotSums = (
   sums: Map<string, SumMetricBucket>,
   now: string,
-): MetricPoint["dataPoints"] {
+): MetricPoint["dataPoints"] => {
   const points: MetricPoint["dataPoints"] = [];
 
   for (const bucket of sums.values()) {
@@ -673,12 +730,12 @@ function snapshotSums(
   }
 
   return points;
-}
+};
 
-function snapshotHistograms(
+const snapshotHistograms = (
   histograms: Map<string, HistogramMetricBucket>,
   now: string,
-): MetricPoint["dataPoints"] {
+): MetricPoint["dataPoints"] => {
   const points: MetricPoint["dataPoints"] = [];
 
   for (const bucket of histograms.values()) {
@@ -697,7 +754,18 @@ function snapshotHistograms(
   }
 
   return points;
-}
+};
+
+const snapshotInstrument = (
+  instrument: RegisteredInstrument,
+  now: string,
+): MetricPoint["dataPoints"] => {
+  if (instrument.kind === "histogram") {
+    return snapshotHistograms(instrument.histograms, now);
+  }
+
+  return snapshotSums(instrument.sums, now);
+};
 
 export class Tracer {
   public constructor(
@@ -719,7 +787,12 @@ export class Tracer {
 
     const spanId = randomHex(8);
     const sampled = this.otel.shouldRecordTrace(traceId, parentSpan);
-    const traceFlags = sampled ? TRACE_FLAG_SAMPLED : 0;
+
+    let traceFlags = 0;
+
+    if (sampled) {
+      traceFlags = TRACE_FLAG_SAMPLED;
+    }
 
     const startMs = options?.startTime ?? Date.now();
 
@@ -874,13 +947,13 @@ export class Meter {
   }
 }
 
-function instrumentKey(
+const instrumentKey = (
   scope: Scope,
   name: string,
   kind: InstrumentKind,
-): InstrumentKey {
+): InstrumentKey => {
   return `${scope.scopeName}\0${scope.scopeVersion ?? ""}\0${name}\0${kind}`;
-}
+};
 
 export class Counter {
   private handle: InstrumentHandle;

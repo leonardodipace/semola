@@ -12,12 +12,15 @@ const createMockFetch = (status = 200) => {
   const calls: FetchCall[] = [];
 
   const mockFetch = async (url: string | URL | Request, init?: RequestInit) => {
-    const resolved =
-      typeof url === "string"
-        ? url
-        : url instanceof URL
-          ? url.toString()
-          : url.url;
+    let resolved = "";
+
+    if (typeof url === "string") {
+      resolved = url;
+    } else if (url instanceof URL) {
+      resolved = url.toString();
+    } else {
+      resolved = url.url;
+    }
 
     calls.push({ url: resolved, init });
 
@@ -31,12 +34,15 @@ const createFailingPathFetch = (failPath: string) => {
   const calls: FetchCall[] = [];
 
   const mockFetch = async (url: string | URL | Request, init?: RequestInit) => {
-    const resolved =
-      typeof url === "string"
-        ? url
-        : url instanceof URL
-          ? url.toString()
-          : url.url;
+    let resolved = "";
+
+    if (typeof url === "string") {
+      resolved = url;
+    } else if (url instanceof URL) {
+      resolved = url.toString();
+    } else {
+      resolved = url.url;
+    }
 
     calls.push({ url: resolved, init });
 
