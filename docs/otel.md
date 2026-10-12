@@ -57,8 +57,13 @@ await tracer.startActiveSpan("risky", async (span) => {
   try {
     await charge();
   } catch (err) {
-    span.recordException(err);
-    span.setStatus({ code: "ERROR", message: err.message });
+    if (err instanceof Error) {
+      span.recordException(err);
+      span.setStatus({ code: "ERROR", message: err.message });
+    } else {
+      span.setStatus({ code: "ERROR", message: String(err) });
+    }
+
     throw err;
   }
 });
@@ -132,7 +137,7 @@ otel.logger("checkout").emit({
 
 ## Sampling
 
-`sampleRatio: 1` keeps all root spans. Below `1`, roots are sampled deterministically from trace id; child spans follow the parent's sampled flag. When a trace is not sampled, spans are no-ops and export is skipped for that trace.
+When a parent span context exists (local ALS or `extract`), children always follow that parent's sampled flag. Root spans use `sampleRatio`: `1` keeps all roots, `0` drops all roots, and values in between sample roots deterministically from the trace id. Unsampled spans are no-ops and are not exported.
 
 ## Soft-disable
 
@@ -165,3 +170,6 @@ await otel.shutdown();
 | `flushIntervalMs` | Batch flush period (default 5000 ms) |
 | `serviceVersion` | Optional resource attribute |
 | `fetch` | Optional `fetch` override for tests or proxies |
+| `onExportError` | Called when a periodic flush fails (does not rethrow) |
+
+Metrics use cumulative aggregation. Values keep growing across flushes until process exit.

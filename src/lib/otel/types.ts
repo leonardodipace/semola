@@ -6,6 +6,7 @@ export type OtelOptions = {
   enabled?: boolean;
   flushIntervalMs?: number;
   fetch?: typeof fetch;
+  onExportError?: (error: Error) => void;
 };
 
 export type OtlpHttpExport = {

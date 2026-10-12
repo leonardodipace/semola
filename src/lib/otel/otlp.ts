@@ -238,7 +238,10 @@ export async function otlpPost(options: OtlpPostOptions): Promise<void> {
     method: "POST",
     headers,
     body: JSON.stringify(options.body),
+    signal: AbortSignal.timeout(10_000),
   });
+
+  await response.body?.cancel();
 
   if (response.status < 200 || response.status >= 300) {
     throw new Error(`OTLP export failed with status ${response.status}`);

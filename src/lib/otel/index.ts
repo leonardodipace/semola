@@ -99,23 +99,19 @@ export function extract(
     return { span: null };
   }
 
-  if (!/^[0-9a-f]+$/i.test(traceId)) {
+  if (!/^[0-9a-f]+$/i.test(traceId) || /^0+$/.test(traceId)) {
     return { span: null };
   }
 
-  if (!/^[0-9a-f]+$/i.test(spanId)) {
+  if (!/^[0-9a-f]+$/i.test(spanId) || /^0+$/.test(spanId)) {
     return { span: null };
   }
 
-  if (!flagsHex || flagsHex.length !== 2) {
+  if (!flagsHex || !/^[0-9a-f]{2}$/i.test(flagsHex)) {
     return { span: null };
   }
 
   const traceFlags = Number.parseInt(flagsHex, 16);
-
-  if (Number.isNaN(traceFlags)) {
-    return { span: null };
-  }
 
   return {
     span: {
@@ -142,7 +138,10 @@ function randomHex(byteLength: number): string {
 
 function timeUnixNanoString(ms?: number): string {
   const millis = ms ?? Date.now();
-  return String(BigInt(millis) * 1_000_000n);
+  const whole = Math.trunc(millis);
+  const fraction = Math.round((millis - whole) * 1_000_000);
+
+  return String(BigInt(whole) * 1_000_000n + BigInt(fraction));
 }
 
 function attributeKey(attributes: AttributeMap): string {
@@ -207,6 +206,7 @@ export class Otel {
   private metricRegistry = new Map<InstrumentKey, RegisteredInstrument>();
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private flushIntervalMs: number;
+  private onExportError: ((error: Error) => void) | undefined;
 
   public constructor(options: OtelOptions) {
     if (!options.serviceName.trim()) {
@@ -231,6 +231,7 @@ export class Otel {
     this.exportOptions = options.export;
     this.fetchImpl = options.fetch ?? fetch;
     this.flushIntervalMs = options.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS;
+    this.onExportError = options.onExportError;
 
     const attributes: AttributeMap = {
       "service.name": options.serviceName,
@@ -250,7 +251,14 @@ export class Otel {
     }
 
     this.flushTimer = setInterval(() => {
-      void this.flushAll();
+      void this.flushAll().catch((error: unknown) => {
+        if (error instanceof Error) {
+          this.onExportError?.(error);
+          return;
+        }
+
+        this.onExportError?.(new ExportError(String(error)));
+      });
     }, this.flushIntervalMs);
     this.flushTimer.unref();
   }
@@ -298,16 +306,16 @@ export class Otel {
     traceId: string,
     parent: SpanContext | null,
   ): boolean {
+    if (parent) {
+      return (parent.traceFlags & TRACE_FLAG_SAMPLED) === TRACE_FLAG_SAMPLED;
+    }
+
     if (this.sampleRatio >= 1) {
       return true;
     }
 
     if (this.sampleRatio <= 0) {
       return false;
-    }
-
-    if (parent) {
-      return (parent.traceFlags & TRACE_FLAG_SAMPLED) === TRACE_FLAG_SAMPLED;
     }
 
     return rootTraceSampled(traceId, this.sampleRatio);
@@ -474,6 +482,7 @@ export class Otel {
     }
 
     const headers = this.exportOptions.headers;
+    let exportError: ExportError | null = null;
 
     if (spans.length > 0) {
       const scopeSpans = groupSpansByScope(spans);
@@ -490,7 +499,7 @@ export class Otel {
       );
 
       if (error) {
-        throw new ExportError(error.message);
+        exportError = new ExportError(error.message);
       }
     }
 
@@ -509,19 +518,22 @@ export class Otel {
       );
 
       if (error) {
-        throw new ExportError(error.message);
+        if (!exportError) {
+          exportError = new ExportError(error.message);
+        }
       }
+    }
+
+    if (exportError) {
+      throw exportError;
     }
   }
 
   private async flushMetrics(): Promise<void> {
-    const registry = this.metricRegistry;
-    this.metricRegistry = new Map();
-
     const points: MetricPoint[] = [];
+    const now = timeUnixNanoString();
 
-    for (const instrument of registry.values()) {
-      const now = timeUnixNanoString();
+    for (const instrument of this.metricRegistry.values()) {
       const dataPoints = snapshotInstrument(instrument, now);
 
       if (dataPoints.length === 0) {
