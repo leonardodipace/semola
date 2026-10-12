@@ -1,6 +1,7 @@
 import assert from "node:assert";
 import { mightThrow, mightThrowSync } from "../errors/index.js";
 import { EnqueueError, SerializationError } from "./errors.js";
+import { QueueRedisStore } from "./store.js";
 import type { Job, JobState, QueueOptions } from "./types.js";
 
 const toMinimalJob = <T>(jobState: JobState<T>): Job<T> => ({
@@ -18,10 +19,21 @@ const DEFAULT_POLL_INTERVAL = 100;
 const DEFAULT_RETRY_MAX_DELAY = 60000;
 const DEFAULT_RETRY_BASE_DELAY = 1000;
 const DEFAULT_RETRY_MULTIPLIER = 2;
+const DEFAULT_VISIBILITY_MIN_MS = 60_000;
+const DEFAULT_RECLAIM_BATCH_SIZE = 32;
 const SHUTDOWN_POLL_INTERVAL = 10;
+
+const resolveVisibilityTimeoutMs = (timeoutMs: number, explicit?: number) => {
+  if (explicit !== undefined) {
+    return explicit;
+  }
+
+  return Math.max(timeoutMs * 2, DEFAULT_VISIBILITY_MIN_MS);
+};
 
 export class Queue<T> {
   private options: QueueOptions<T>;
+  private store: QueueRedisStore;
   private running = true;
   private activeWorkers = 0;
   private retries: number;
@@ -58,6 +70,20 @@ export class Queue<T> {
       "Invalid retryBackoff.maxDelay: must be a positive finite number",
     );
 
+    const visibilityTimeoutMs = resolveVisibilityTimeoutMs(
+      this.timeout,
+      options.visibilityTimeoutMs,
+    );
+    const reclaimBatchSize =
+      options.reclaimBatchSize ?? DEFAULT_RECLAIM_BATCH_SIZE;
+
+    this.store = new QueueRedisStore({
+      redis: options.redis,
+      queueName: options.name,
+      visibilityTimeoutMs,
+      reclaimBatchSize,
+    });
+
     this.startWorkers();
   }
 
@@ -83,7 +109,7 @@ export class Queue<T> {
       throw new SerializationError("Unable to serialize job data");
     }
 
-    const [enqueueError] = await this.enqueueJobData(serialized);
+    const [enqueueError] = await this.store.enqueue(serialized);
 
     if (enqueueError) {
       throw new EnqueueError("Unable to enqueue job");
@@ -95,7 +121,6 @@ export class Queue<T> {
   public async stop() {
     this.running = false;
 
-    // Wait for all active workers to finish processing
     while (this.activeWorkers > 0) {
       await new Promise((resolve) =>
         setTimeout(resolve, SHUTDOWN_POLL_INTERVAL),
@@ -111,20 +136,14 @@ export class Queue<T> {
     return mightThrowSync(() => JSON.stringify(job));
   }
 
-  private async enqueueJobData(serialized: string) {
-    const queueKey = `queue:${this.options.name}:jobs`;
-    return mightThrow(this.options.redis.lpush(queueKey, serialized));
-  }
-
   private async moveToDeadLetterQueue(jobData: string, parseError: Error) {
-    const deadLetterKey = `queue:${this.options.name}:dead-letter`;
     const deadLetterEntry = JSON.stringify({
       jobData,
       parseError: this.formatErrorMessage(parseError),
       timestamp: Date.now(),
     });
 
-    return mightThrow(this.options.redis.lpush(deadLetterKey, deadLetterEntry));
+    return this.store.pushDeadLetter(deadLetterEntry);
   }
 
   private formatErrorMessage(error: Error | null) {
@@ -141,54 +160,52 @@ export class Queue<T> {
 
   private async processJobs() {
     while (this.running) {
-      const queueKey = `queue:${this.options.name}:jobs`;
+      const [tickError] = await mightThrow(this.store.tick());
 
-      const [popError, jobData] = await mightThrow(
-        this.options.redis.rpop(queueKey),
-      );
-
-      if (popError) {
+      if (tickError) {
         await this.waitForPollInterval();
         continue;
       }
 
-      if (!jobData) {
+      const [claimError, claimed] = await mightThrow(this.store.claim());
+
+      if (claimError) {
         await this.waitForPollInterval();
         continue;
       }
+
+      if (!claimed) {
+        await this.waitForPollInterval();
+        continue;
+      }
+
+      const jobData = claimed.serialized;
 
       const [parseError, job] = mightThrowSync<JobState<T>>(() =>
         JSON.parse(jobData),
       );
 
       if (parseError || !job) {
-        // Handle malformed payload: preserve to dead-letter queue and notify
         await this.callOnErrorForParseFailure(jobData, parseError);
         await this.moveToDeadLetterQueue(jobData, parseError);
+        await mightThrow(this.store.ack(jobData));
         await this.waitForPollInterval();
         continue;
       }
 
-      // Skip processing if we've been stopped
       if (!this.running) {
-        // Re-enqueue the job so it's not lost
-        const [stringifyError, serialized] = this.serializeJob(job);
-
-        if (!stringifyError && serialized) {
-          await mightThrow(this.options.redis.lpush(queueKey, serialized));
-        }
-
+        await mightThrow(this.store.release(jobData));
         break;
       }
 
       this.activeWorkers++;
 
-      await mightThrow(this.handleJob(job));
+      await mightThrow(this.handleJob(job, jobData));
       this.activeWorkers--;
     }
   }
 
-  private async handleJob(job: JobState<T>) {
+  private async handleJob(job: JobState<T>, serializedAtClaim: string) {
     const controller = new AbortController();
 
     const handlerPromise = Promise.resolve().then(() =>
@@ -211,12 +228,13 @@ export class Queue<T> {
       clearTimeout(timerId);
     }
 
-    // Abort handler if timeout occurred
     if (handlerError && !controller.signal.aborted) {
       controller.abort();
     }
 
     if (!handlerError) {
+      await mightThrow(this.store.ack(serializedAtClaim));
+
       if (this.options.onSuccess) {
         await mightThrow(
           Promise.resolve(this.options.onSuccess(toMinimalJob(job))),
@@ -240,11 +258,10 @@ export class Queue<T> {
       timestamp: Date.now(),
     });
 
-    // Check if we should retry. Attempt starts at 1, so we retry while attempts <= maxRetries
     if (job.attempts <= job.maxRetries) {
-      if (this.options.onRetry) {
-        const delay = this.computeBackoffDelay(job.attempts);
+      const delay = this.computeBackoffDelay(job.attempts);
 
+      if (this.options.onRetry) {
         await mightThrow(
           Promise.resolve(
             this.options.onRetry({
@@ -257,10 +274,34 @@ export class Queue<T> {
           ),
         );
       }
-      await this.retryJob(job);
-    } else {
-      await this.callOnError(job);
+
+      const [stringifyError, updatedSerialized] = this.serializeJob(job);
+
+      if (stringifyError || !updatedSerialized) {
+        job.error = `Failed to serialize job for retry: ${this.formatErrorMessage(stringifyError)}`;
+        await mightThrow(this.store.ack(serializedAtClaim));
+        await this.callOnError(job);
+        return;
+      }
+
+      const dueAtMs = Date.now() + delay;
+      const [scheduleError] = await this.store.scheduleRetry(
+        serializedAtClaim,
+        updatedSerialized,
+        dueAtMs,
+      );
+
+      if (scheduleError) {
+        job.error = `Failed to schedule job retry: ${this.formatErrorMessage(scheduleError)}`;
+        await mightThrow(this.store.ack(serializedAtClaim));
+        await this.callOnError(job);
+      }
+
+      return;
     }
+
+    await mightThrow(this.store.ack(serializedAtClaim));
+    await this.callOnError(job);
   }
 
   private async callOnError(job: JobState<T>) {
@@ -295,29 +336,5 @@ export class Queue<T> {
         }),
       ),
     );
-  }
-
-  private async retryJob(job: JobState<T>) {
-    const delay = this.computeBackoffDelay(job.attempts);
-
-    await new Promise((resolve) => setTimeout(resolve, delay));
-
-    const [stringifyError, serialized] = this.serializeJob(job);
-
-    if (stringifyError || !serialized) {
-      job.error = `Failed to serialize job for retry: ${this.formatErrorMessage(stringifyError)}`;
-      await this.callOnError(job);
-      return;
-    }
-
-    const queueKey = `queue:${this.options.name}:jobs`;
-    const [pushError] = await mightThrow(
-      this.options.redis.lpush(queueKey, serialized),
-    );
-
-    if (pushError) {
-      job.error = `Failed to re-enqueue job for retry: ${this.formatErrorMessage(pushError)}`;
-      await this.callOnError(job);
-    }
   }
 }

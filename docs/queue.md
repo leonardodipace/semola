@@ -5,6 +5,8 @@ description: Redis-backed background jobs with retries and concurrency
 
 Run work in the background with Redis. Jobs are JSON-serialized, polled by workers, and retried with backoff when they fail.
 
+Delivery is **at-least-once**: a worker crash or visibility expiry can run the same job again. Handlers should be **idempotent**.
+
 Needs a `Bun.RedisClient`.
 
 ## Import
@@ -46,9 +48,11 @@ Workers start as soon as you construct the queue. `enqueue` returns a job id.
 
 ## Retries and timeouts
 
-Failed jobs retry until `retries` is exhausted, then call `onError`. Malformed Redis payloads land on the dead-letter list (`queue:{name}:dead-letter`) and call `onParseError`.
+Failed jobs retry until `retries` is exhausted, then call `onError`. Backoff delays live in Redis (`queue:{name}:retry`), not in-process timers, so retries survive worker restarts. Malformed Redis payloads land on the dead-letter list (`queue:{name}:dead-letter`) and call `onParseError`.
 
 Use `signal` in the handler to abort work when the job times out (default 30s).
+
+**Visibility vs timeout:** On claim, the job moves to an in-flight ZSET with score `now + visibilityTimeoutMs` (default `max(timeout * 2, 60_000)`). If the handler does not finish and ack before that deadline, the job is reclaimed to the ready list and may run again. Long-running work needs a higher `visibilityTimeoutMs` or you accept reclaim/redelivery. There is no lease renewal API in v1.
 
 ### Hooks
 
@@ -76,13 +80,11 @@ const emails = new Queue<EmailJob>({
 
 ## Shutdown
 
-`stop()` ends polling, re-queues interrupted pops, and waits for active handlers.
+`stop()` stops claiming new work, releases any claim that never reached the handler back to the ready list, and waits for active handlers (each acks success or failure in Redis).
 
 ```typescript
 await emails.stop();
 ```
-
-Stops polling and waits for in-flight handlers to finish. In-flight pops are re-queued.
 
 ## Examples
 
@@ -178,6 +180,8 @@ process.on("SIGINT", async () => {
 | `timeout` | `30000` | Per-job timeout in ms |
 | `concurrency` | `1` | Parallel workers |
 | `pollInterval` | `100` | Idle poll delay in ms |
+| `visibilityTimeoutMs` | `max(timeout * 2, 60000)` | In-flight reclaim deadline on claim |
+| `reclaimBatchSize` | `32` | Max jobs promoted/reclaimed per worker tick |
 | `onSuccess` | - | After a successful job |
 | `onRetry` | - | Before a retry |
 | `onError` | - | When retries are exhausted |
@@ -190,4 +194,4 @@ process.on("SIGINT", async () => {
 | `enqueue(data)` | Push a job; returns job id |
 | `stop()` | Stop workers and drain in-flight work |
 
-Redis keys: `queue:{name}:jobs`, `queue:{name}:dead-letter`.
+Redis keys (observability): `queue:{name}:jobs` (ready LIST), `queue:{name}:inflight` (claimed ZSET, score = visibility deadline ms), `queue:{name}:retry` (backoff ZSET, score = due ms), `queue:{name}:dead-letter` (malformed payloads).

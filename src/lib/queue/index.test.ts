@@ -1,19 +1,94 @@
 import { describe, expect, test } from "bun:test";
 import { Queue } from "./index.js";
+import {
+  CLAIM_JOB,
+  PROMOTE_RETRIES,
+  RECLAIM_INFLIGHT,
+  RELEASE_JOB,
+  SCHEDULE_RETRY,
+} from "./scripts.js";
+import { QueueRedisStore } from "./store.js";
 import type { ErrorContext, ParseErrorContext, RetryContext } from "./types.js";
+
+type ZMember = { score: number; member: string };
 
 class MockRedisClient {
   private lists = new Map<string, string[]>();
+  private zsets = new Map<string, ZMember[]>();
   private shouldFail = false;
 
   public setShouldFail(value: boolean) {
     this.shouldFail = value;
   }
 
-  public async lpush(key: string, value: string) {
+  private maybeFail() {
     if (this.shouldFail) {
       throw new Error("Redis connection error");
     }
+  }
+
+  private zsetOrder(a: ZMember, b: ZMember) {
+    if (a.score !== b.score) return a.score - b.score;
+
+    if (a.member < b.member) return -1;
+
+    if (a.member > b.member) return 1;
+
+    return 0;
+  }
+
+  private zaddSync(key: string, score: number, member: string) {
+    const zset = this.zsets.get(key) ?? [];
+    const existing = zset.findIndex((row) => row.member === member);
+
+    if (existing >= 0) {
+      zset[existing] = { score, member };
+    } else {
+      zset.push({ score, member });
+    }
+
+    this.zsets.set(key, zset);
+  }
+
+  private zremSync(key: string, members: string[]) {
+    const zset = this.zsets.get(key) ?? [];
+    const next = zset.filter((row) => !members.includes(row.member));
+    const removed = zset.length - next.length;
+
+    this.zsets.set(key, next);
+    return removed;
+  }
+
+  private zrangebyscoreSync(
+    key: string,
+    min: number,
+    max: number,
+    limit?: number,
+  ) {
+    const zset = this.zsets.get(key) ?? [];
+
+    const members = zset
+      .filter((row) => row.score >= min && row.score <= max)
+      .sort((a, b) => this.zsetOrder(a, b))
+      .map((row) => row.member);
+
+    if (limit === undefined) {
+      return members;
+    }
+
+    return members.slice(0, limit);
+  }
+
+  private parseScoreBound(value: string) {
+    if (value === "-inf") return Number.NEGATIVE_INFINITY;
+
+    if (value === "+inf") return Number.POSITIVE_INFINITY;
+
+    return Number(value);
+  }
+
+  public async lpush(key: string, value: string) {
+    this.maybeFail();
 
     if (!this.lists.has(key)) {
       this.lists.set(key, []);
@@ -24,10 +99,21 @@ class MockRedisClient {
     return this.lists.get(key)?.length ?? 0;
   }
 
-  public async rpop(key: string) {
-    if (this.shouldFail) {
-      throw new Error("Redis connection error");
+  public async rpush(key: string, ...values: string[]) {
+    this.maybeFail();
+
+    const list = this.lists.get(key) ?? [];
+
+    for (const value of values) {
+      list.push(value);
     }
+
+    this.lists.set(key, list);
+    return list.length;
+  }
+
+  public async rpop(key: string) {
+    this.maybeFail();
 
     const list = this.lists.get(key);
 
@@ -38,12 +124,117 @@ class MockRedisClient {
     return list.pop();
   }
 
+  public async zadd(key: string, score: number, member: string) {
+    this.maybeFail();
+    this.zaddSync(key, score, member);
+    return 1;
+  }
+
+  public async zrem(key: string, ...members: string[]) {
+    this.maybeFail();
+
+    return this.zremSync(key, members);
+  }
+
+  public async zrangebyscore(
+    key: string,
+    min: number | string,
+    max: number | string,
+  ) {
+    this.maybeFail();
+
+    const minScore = typeof min === "string" ? this.parseScoreBound(min) : min;
+    const maxScore = typeof max === "string" ? this.parseScoreBound(max) : max;
+
+    return this.zrangebyscoreSync(key, minScore, maxScore);
+  }
+
+  public async send(command: string, args: string[]) {
+    this.maybeFail();
+
+    if (command === "RPUSH") {
+      const [key, ...values] = args;
+
+      return this.rpush(key ?? "", ...values);
+    }
+
+    if (command !== "EVAL") {
+      throw new Error(`Unsupported command ${command}`);
+    }
+
+    const script = args[0] ?? "";
+    const numKeys = Number(args[1] ?? "1");
+    const keyArgs = args.slice(2, 2 + numKeys);
+    const argv = args.slice(2 + numKeys);
+
+    if (script === CLAIM_JOB) {
+      const jobsKey = keyArgs[0] ?? "";
+      const inflightKey = keyArgs[1] ?? "";
+      const deadline = Number(argv[0]);
+      const payload = await this.rpop(jobsKey);
+
+      if (!payload) return false;
+
+      this.zaddSync(inflightKey, deadline, payload);
+      return payload;
+    }
+
+    if (script === SCHEDULE_RETRY) {
+      const inflightKey = keyArgs[0] ?? "";
+      const retryKey = keyArgs[1] ?? "";
+      const oldMember = argv[0] ?? "";
+      const newMember = argv[1] ?? "";
+      const dueScore = Number(argv[2]);
+
+      this.zremSync(inflightKey, [oldMember]);
+      this.zaddSync(retryKey, dueScore, newMember);
+      return 1;
+    }
+
+    if (script === RELEASE_JOB) {
+      const inflightKey = keyArgs[0] ?? "";
+      const jobsKey = keyArgs[1] ?? "";
+      const member = argv[0] ?? "";
+
+      this.zremSync(inflightKey, [member]);
+      await this.rpush(jobsKey, member);
+      return 1;
+    }
+
+    if (script === PROMOTE_RETRIES || script === RECLAIM_INFLIGHT) {
+      const sourceKey = keyArgs[0] ?? "";
+      const jobsKey = keyArgs[1] ?? "";
+      const now = Number(argv[0]);
+      const limit = Number(argv[1]);
+      const members = this.zrangebyscoreSync(
+        sourceKey,
+        Number.NEGATIVE_INFINITY,
+        now,
+        limit,
+      );
+
+      for (const member of members) {
+        await this.rpush(jobsKey, member);
+        this.zremSync(sourceKey, [member]);
+      }
+
+      return members.length;
+    }
+
+    throw new Error("Unknown EVAL script");
+  }
+
   public clear() {
     this.lists.clear();
+    this.zsets.clear();
   }
 
   public getList(key: string) {
     return this.lists.get(key) ?? [];
+  }
+
+  public getZset(key: string) {
+    return [...(this.zsets.get(key) ?? [])];
   }
 }
 
@@ -1075,6 +1266,139 @@ describe("Queue", () => {
 
       // Should have completed at least job1
       expect(processed.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("durability", () => {
+    test.concurrent("reclaims inflight when ack never runs (simulated crash)", async () => {
+      const redis = createMockRedis();
+      const serialized = JSON.stringify({
+        id: "crash-job",
+        data: { n: 1 },
+        attempts: 0,
+        maxRetries: 3,
+        createdAt: Date.now(),
+      });
+
+      await redis.lpush("queue:crash:jobs", serialized);
+
+      const store = new QueueRedisStore({
+        redis,
+        queueName: "crash",
+        visibilityTimeoutMs: 5,
+        reclaimBatchSize: 32,
+      });
+
+      const claimed = await store.claim();
+      expect(claimed?.serialized).toBe(serialized);
+      expect(redis.getList("queue:crash:jobs").length).toBe(0);
+      expect(redis.getZset("queue:crash:inflight").length).toBe(1);
+
+      await sleep(10);
+      await store.tick();
+
+      expect(redis.getZset("queue:crash:inflight").length).toBe(0);
+      expect(redis.getList("queue:crash:jobs")).toContain(serialized);
+
+      let handled = false;
+      const queue = new Queue({
+        name: "crash",
+        redis,
+        retries: 3,
+        pollInterval: 1,
+        visibilityTimeoutMs: 60_000,
+        handler: () => {
+          handled = true;
+        },
+      });
+
+      await sleep(50);
+      expect(handled).toBe(true);
+
+      await queue.stop();
+    });
+
+    test.concurrent("failed job schedules retry in Redis retry zset", async () => {
+      const redis = createMockRedis();
+      let calls = 0;
+
+      const queue = new Queue({
+        name: "retry-redis",
+        redis,
+        retries: 3,
+        pollInterval: 2,
+        retryBackoff: { baseDelay: 200, multiplier: 2, maxDelay: 500 },
+        handler: () => {
+          calls++;
+          if (calls === 1) {
+            throw new Error("fail once");
+          }
+        },
+      });
+
+      await queue.enqueue({ x: 1 });
+
+      await sleep(20);
+
+      expect(calls).toBe(1);
+      expect(redis.getZset("queue:retry-redis:retry").length).toBe(1);
+      expect(redis.getList("queue:retry-redis:jobs").length).toBe(0);
+
+      await sleep(250);
+
+      expect(calls).toBe(2);
+
+      await queue.stop();
+    });
+
+    test.concurrent("release moves inflight payload back to jobs", async () => {
+      const redis = createMockRedis();
+      const store = new QueueRedisStore({
+        redis,
+        queueName: "rel",
+        visibilityTimeoutMs: 1000,
+        reclaimBatchSize: 32,
+      });
+      const payload = JSON.stringify({
+        id: "rel-1",
+        data: {},
+        attempts: 0,
+        maxRetries: 1,
+        createdAt: Date.now(),
+      });
+
+      await redis.lpush("queue:rel:jobs", payload);
+      const claimed = await store.claim();
+
+      expect(claimed?.serialized).toBe(payload);
+
+      await store.release(payload);
+
+      expect(redis.getZset("queue:rel:inflight").length).toBe(0);
+      expect(redis.getList("queue:rel:jobs")).toContain(payload);
+    });
+
+    test.concurrent("stop before handle releases claim back to jobs", async () => {
+      const redis = createMockRedis();
+      let handlerRuns = 0;
+
+      const queue = new Queue({
+        name: "stop-before",
+        redis,
+        retries: 1,
+        pollInterval: 5,
+        visibilityTimeoutMs: 60_000,
+        handler: () => {
+          handlerRuns++;
+        },
+      });
+
+      await queue.enqueue({ v: 1 });
+      await queue.stop();
+
+      expect(handlerRuns).toBe(0);
+      expect(redis.getZset("queue:stop-before:inflight").length).toBe(0);
+      expect(redis.getList("queue:stop-before:jobs").length).toBe(1);
     });
   });
 });
