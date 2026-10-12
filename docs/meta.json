@@ -18,6 +18,7 @@
     "---Utilities---",
     "errors",
     "logging",
+    "otel",
     "prompts",
     "cli",
     "extra"
