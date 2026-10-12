@@ -1134,7 +1134,7 @@ describe("Queue", () => {
       ]);
     });
 
-    test.concurrent("keeps job in inflight when retry scheduling fails", async () => {
+    test.concurrent("acks claim when retry scheduling fails", async () => {
       const redis = createMockRedis();
       redis.setFailScheduleRetry(true);
       type RetryJob = { message: string };
@@ -1153,7 +1153,7 @@ describe("Queue", () => {
         },
       });
 
-      const jobId = await queue.enqueue({ message: "retry-me" });
+      await queue.enqueue({ message: "retry-me" });
 
       await waitForRetryProcessing();
       await queue.stop();
@@ -1162,13 +1162,10 @@ describe("Queue", () => {
       expect(errors[0]?.lastError).toContain("Failed to schedule job retry");
       expect(redis.getZset("queue:test:retry")).toEqual([]);
       expect(redis.getList("queue:test:jobs")).toEqual([]);
-
-      const inflight = redis.getZset("queue:test:inflight");
-      expect(inflight.length).toBe(1);
-      expect(inflight[0]?.member).toContain(jobId);
+      expect(redis.getZset("queue:test:inflight")).toEqual([]);
     });
 
-    test.concurrent("keeps original claim in inflight when retry serialization fails", async () => {
+    test.concurrent("acks claim when retry serialization fails", async () => {
       const redis = createMockRedis();
       type MutableJob = { message: string; self?: MutableJob };
       const errors: ErrorContext<MutableJob>[] = [];
@@ -1187,7 +1184,7 @@ describe("Queue", () => {
         },
       });
 
-      const jobId = await queue.enqueue({ message: "circular" });
+      await queue.enqueue({ message: "circular" });
 
       await waitForRetryProcessing();
       await queue.stop();
@@ -1198,12 +1195,7 @@ describe("Queue", () => {
       );
       expect(redis.getList("queue:test:jobs")).toEqual([]);
       expect(redis.getZset("queue:test:retry")).toEqual([]);
-
-      const inflight = redis.getZset("queue:test:inflight");
-      expect(inflight.length).toBe(1);
-      expect(inflight[0]?.member).toContain(jobId);
-      expect(inflight[0]?.member).toContain('"message":"circular"');
-      expect(inflight[0]?.member).not.toContain('"self"');
+      expect(redis.getZset("queue:test:inflight")).toEqual([]);
     });
 
     test.concurrent("should handle large job data", async () => {

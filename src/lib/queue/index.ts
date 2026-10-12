@@ -282,6 +282,7 @@ export class Queue<T> {
     if (stringifyError || !nextRaw) {
       job.error = `Failed to serialize job for retry: ${this.formatErrorMessage(stringifyError)}`;
       await this.callOnError(job);
+      await this.store.ack(raw, visibleUntil);
       return;
     }
 
@@ -295,6 +296,7 @@ export class Queue<T> {
     if (scheduleError) {
       job.error = `Failed to schedule job retry: ${this.formatErrorMessage(scheduleError)}`;
       await this.callOnError(job);
+      await this.store.ack(raw, visibleUntil);
     }
   }
 
