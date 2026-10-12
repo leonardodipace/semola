@@ -100,11 +100,11 @@ inject(headers);
 await fetch(upstream, { headers });
 ```
 
-`extract` parses incoming headers and returns a parent context for `startActiveSpan` options. No baggage in v1.
+`extract` parses W3C `traceparent` from incoming headers and returns a parent context for `startActiveSpan` options.
 
 ## Metrics
 
-Sync instruments only: Counter, UpDownCounter, Histogram. No observable/async callbacks in v1.
+Counters, up-down counters, and histograms. Create them on a meter, then call `add` or `record`.
 
 ```typescript
 const meter = otel.meter("checkout");
