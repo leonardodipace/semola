@@ -68,8 +68,11 @@ Code should read like English. Prefer clarity over clever density.
 
 - Write minimal code, no over-engineering (ponytail: fewest files, shortest *working* diff - not shortest unreadable line).
 - Keep code breathing with blank lines between logical blocks.
-- Explicit `if` statements over ternaries for complex logic.
+- Explicit `if` statements over ternaries. Do not use ternaries for control flow, assignments that branch, or nested conditions. Prefer early returns and plain `if` / `else`. Nullish coalescing (`??`) and optional chaining (`?.`) are fine.
 - Blank lines between if-statement groups, const definitions, and return statements inside functions.
+- Module helpers use `const name = () => { ... }` (or `const name = async () => { ... }`), not `function name()`. Match existing Semola modules (`api/validate.ts`, `api/dispatch.ts`). Classes stay as `class`.
+- Prefer destructuring over indexed access when the shape is fixed (`const [a, b] = parts`, not `parts[0]` / `parts[1]`).
+- Avoid regex when string methods, length checks, or a small char loop are enough. If a regex is truly needed, hoist it to a named constant at module top.
 - No `any` type. Infer types, avoid explicit return types. Use generics extensively.
 - No type predicates (`value is Type` return annotations) - use inline guards for narrowing.
 - No em-dashes; use regular hyphens.
@@ -177,6 +180,7 @@ bunx fallow audit --base main --format json --quiet 2>/dev/null || true   # chan
 - Update existing docs when public API, behavior, or usage changes.
 - Skip docs only for internal refactors with no user-facing change.
 - Docs site: `bun run docs:dev` (not part of the published package).
+- Write what the API does today. Do not use roadmap voice ("in v1", "no X yet", "coming soon", "for now"). Protocol path segments like OTLP `/v1/traces` are fine when they are real URLs.
 
 ## Boundaries
 
