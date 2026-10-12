@@ -1,18 +1,36 @@
 import { describe, expect, test } from "bun:test";
 import { Queue } from "./index.js";
+import { QueueStore } from "./store.js";
 import type { ErrorContext, ParseErrorContext, RetryContext } from "./types.js";
+
+type ZMember = { score: number; member: string };
 
 class MockRedisClient {
   private lists = new Map<string, string[]>();
+  private zsets = new Map<string, ZMember[]>();
   private shouldFail = false;
+  private failDeadLetterLpush = false;
+  private failScheduleRetry = false;
 
   public setShouldFail(value: boolean) {
     this.shouldFail = value;
   }
 
+  public setFailDeadLetterLpush(value: boolean) {
+    this.failDeadLetterLpush = value;
+  }
+
+  public setFailScheduleRetry(value: boolean) {
+    this.failScheduleRetry = value;
+  }
+
   public async lpush(key: string, value: string) {
     if (this.shouldFail) {
       throw new Error("Redis connection error");
+    }
+
+    if (this.failDeadLetterLpush && key.includes(":dead-letter")) {
+      throw new Error("Redis dead-letter write error");
     }
 
     if (!this.lists.has(key)) {
@@ -38,12 +56,122 @@ class MockRedisClient {
     return list.pop();
   }
 
-  public clear() {
-    this.lists.clear();
+  public async send(command: string, args: string[]) {
+    if (this.shouldFail) {
+      throw new Error("Redis connection error");
+    }
+
+    if (command !== "EVAL") {
+      throw new Error(`Unsupported command: ${command}`);
+    }
+
+    const script = args[0] ?? "";
+    const keyCount = Number(args[1] ?? "0");
+    const keys = args.slice(2, 2 + keyCount);
+    const argv = args.slice(2 + keyCount);
+
+    if (script.includes("RPOP") && script.includes("ZADD")) {
+      const payload = await this.rpop(keys[0] ?? "");
+
+      if (!payload) {
+        return false;
+      }
+
+      this.addZMember(keys[1] ?? "", Number(argv[0]), payload);
+      return payload;
+    }
+
+    if (script.includes("ZRANGEBYSCORE")) {
+      const due = this.firstDueMember(keys[0] ?? "", Number(argv[0]));
+
+      if (!due) {
+        return false;
+      }
+
+      this.removeZMember(keys[0] ?? "", due);
+
+      if (script.includes("ZADD")) {
+        this.addZMember(keys[1] ?? "", Number(argv[1]), due);
+        return due;
+      }
+
+      await this.lpush(keys[1] ?? "", due);
+      return due;
+    }
+
+    if (script.includes("ZSCORE")) {
+      const isScheduleRetry =
+        script.includes("ZADD") && !script.includes("LPUSH");
+
+      if (this.failScheduleRetry && isScheduleRetry) {
+        throw new Error("Redis schedule-retry error");
+      }
+
+      const scoreArg = script.includes("ZADD")
+        ? Number(argv[3])
+        : Number(argv[1]);
+      const removed = this.removeZMemberIfScore(
+        keys[0] ?? "",
+        argv[0] ?? "",
+        scoreArg,
+      );
+
+      if (removed === 0) {
+        return 0;
+      }
+
+      if (script.includes("ZADD")) {
+        this.addZMember(keys[1] ?? "", Number(argv[2]), argv[1] ?? "");
+        return 1;
+      }
+
+      if (script.includes("LPUSH")) {
+        await this.lpush(keys[1] ?? "", argv[0] ?? "");
+        return 1;
+      }
+
+      return removed;
+    }
+
+    throw new Error(`Unhandled EVAL script: ${script.slice(0, 40)}`);
+  }
+
+  private addZMember(key: string, score: number, member: string) {
+    const rows = this.zsets.get(key) ?? [];
+    const index = rows.findIndex((row) => row.member === member);
+    if (index >= 0) rows[index] = { score, member };
+    else rows.push({ score, member });
+    this.zsets.set(key, rows);
+  }
+
+  private removeZMember(key: string, member: string) {
+    const rows = this.zsets.get(key) ?? [];
+    const next = rows.filter((row) => row.member !== member);
+    this.zsets.set(key, next);
+    return rows.length - next.length;
+  }
+
+  private removeZMemberIfScore(key: string, member: string, score: number) {
+    const row = (this.zsets.get(key) ?? []).find((e) => e.member === member);
+    if (!row) return 0;
+    if (row.score !== score) return 0;
+    return this.removeZMember(key, member);
+  }
+
+  private firstDueMember(key: string, max: number) {
+    return (
+      (this.zsets.get(key) ?? [])
+        .filter((row) => row.score <= max)
+        .sort((a, b) => a.score - b.score)[0]?.member ?? null
+    );
   }
 
   public getList(key: string) {
     return this.lists.get(key) ?? [];
+  }
+
+  public getZset(key: string) {
+    return this.zsets.get(key) ?? [];
   }
 }
 
@@ -117,6 +245,34 @@ describe("Queue", () => {
       });
 
       await queue.stop();
+    });
+
+    test.concurrent("rejects visibilityTimeoutMs below timeout", () => {
+      const redis = createMockRedis();
+
+      expect(() => {
+        new Queue({
+          name: "test",
+          redis,
+          handler: () => {},
+          timeout: 5_000,
+          visibilityTimeoutMs: 1_000,
+        });
+      }).toThrow("Invalid visibilityTimeoutMs: must be greater than timeout");
+    });
+
+    test.concurrent("rejects visibilityTimeoutMs equal to timeout", () => {
+      const redis = createMockRedis();
+
+      expect(() => {
+        new Queue({
+          name: "test",
+          redis,
+          handler: () => {},
+          timeout: 5_000,
+          visibilityTimeoutMs: 5_000,
+        });
+      }).toThrow("Invalid visibilityTimeoutMs: must be greater than timeout");
     });
   });
 
@@ -821,6 +977,13 @@ describe("Queue", () => {
       });
 
       const malformedData = '{"bad": json}';
+      let expectedParseError = "";
+      try {
+        JSON.parse(malformedData);
+      } catch (error) {
+        expectedParseError = (error as Error).message;
+      }
+
       await redis.lpush("queue:test:jobs", malformedData);
 
       await sleep(100);
@@ -831,9 +994,14 @@ describe("Queue", () => {
       expect(firstError).toBeDefined();
       if (firstError) {
         expect(firstError.rawJobData).toBe(malformedData);
-        expect(firstError.parseError).toBeDefined();
+        expect(firstError.parseError).toBe(expectedParseError);
         expect(firstError.timestamp).toBeGreaterThan(0);
       }
+
+      const deadLetter = redis.getList("queue:test:dead-letter");
+      expect(deadLetter.length).toBe(1);
+      const deadLetterEntry = JSON.parse(deadLetter[0] ?? "{}");
+      expect(deadLetterEntry.parseError).toBe(expectedParseError);
     });
 
     test.concurrent("should continue processing valid jobs after malformed jobs", async () => {
@@ -939,6 +1107,95 @@ describe("Queue", () => {
         expect(firstParseError.parseError).toBeDefined();
         expect(firstParseError.timestamp).toBeGreaterThan(0);
       }
+    });
+
+    test.concurrent("keeps malformed payload in inflight when dead-letter write fails", async () => {
+      const redis = createMockRedis();
+      redis.setFailDeadLetterLpush(true);
+
+      const queue = new Queue({
+        name: "test",
+        redis,
+        retries: 3,
+        handler: () => {},
+        pollInterval: 10,
+      });
+
+      const malformedData = '{"id":"keep-me","incomplete":';
+      await redis.lpush("queue:test:jobs", malformedData);
+
+      await sleep(100);
+      await queue.stop();
+
+      expect(redis.getList("queue:test:dead-letter")).toEqual([]);
+      expect(redis.getList("queue:test:jobs")).toEqual([]);
+      expect(redis.getZset("queue:test:inflight")).toEqual([
+        { score: expect.any(Number), member: malformedData },
+      ]);
+    });
+
+    test.concurrent("acks claim when retry scheduling fails", async () => {
+      const redis = createMockRedis();
+      redis.setFailScheduleRetry(true);
+      type RetryJob = { message: string };
+      const errors: ErrorContext<RetryJob>[] = [];
+
+      const queue = new Queue<RetryJob>({
+        name: "test",
+        redis,
+        retries: 3,
+        ...fastRetryQueueOptions,
+        handler: () => {
+          throw new Error("handler failed");
+        },
+        onError: (context) => {
+          errors.push(context);
+        },
+      });
+
+      await queue.enqueue({ message: "retry-me" });
+
+      await waitForRetryProcessing();
+      await queue.stop();
+
+      expect(errors.length).toBe(1);
+      expect(errors[0]?.lastError).toContain("Failed to schedule job retry");
+      expect(redis.getZset("queue:test:retry")).toEqual([]);
+      expect(redis.getList("queue:test:jobs")).toEqual([]);
+      expect(redis.getZset("queue:test:inflight")).toEqual([]);
+    });
+
+    test.concurrent("acks claim when retry serialization fails", async () => {
+      const redis = createMockRedis();
+      type MutableJob = { message: string; self?: MutableJob };
+      const errors: ErrorContext<MutableJob>[] = [];
+
+      const queue = new Queue<MutableJob>({
+        name: "test",
+        redis,
+        retries: 3,
+        ...fastRetryQueueOptions,
+        handler: (data) => {
+          data.self = data;
+          throw new Error("handler failed");
+        },
+        onError: (context) => {
+          errors.push(context);
+        },
+      });
+
+      await queue.enqueue({ message: "circular" });
+
+      await waitForRetryProcessing();
+      await queue.stop();
+
+      expect(errors.length).toBe(1);
+      expect(errors[0]?.lastError).toContain(
+        "Failed to serialize job for retry",
+      );
+      expect(redis.getList("queue:test:jobs")).toEqual([]);
+      expect(redis.getZset("queue:test:retry")).toEqual([]);
+      expect(redis.getZset("queue:test:inflight")).toEqual([]);
     });
 
     test.concurrent("should handle large job data", async () => {
@@ -1075,6 +1332,43 @@ describe("Queue", () => {
 
       // Should have completed at least job1
       expect(processed.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("durability", () => {
+    test.concurrent("reclaim restores orphans and ignores stale lease ops", async () => {
+      const redis = createMockRedis();
+      const store = new QueueStore(redis, "lease", 1000);
+      const raw =
+        '{"id":"j1","data":{"message":"once"},"attempts":0,"maxRetries":3,"createdAt":1}';
+      const nextRaw = raw.replace('"attempts":0', '"attempts":1');
+
+      await store.enqueue(raw);
+      const first = await store.claimNext();
+      if (first.kind !== "claimed") throw new Error("expected claim");
+      await sleep(1100);
+      await store.reclaimOne();
+      await store.scheduleRetry(
+        raw,
+        nextRaw,
+        Date.now() + 1000,
+        first.visibleUntil,
+      );
+      expect(redis.getList("queue:lease:jobs")).toEqual([raw]);
+      expect(redis.getZset("queue:lease:retry")).toEqual([]);
+
+      const second = await store.claimNext();
+      if (second.kind !== "claimed") throw new Error("expected second claim");
+      await store.ack(raw, first.visibleUntil);
+      expect(redis.getZset("queue:lease:inflight")).toEqual([
+        { score: second.visibleUntil, member: raw },
+      ]);
+      await store.ack(raw, second.visibleUntil);
+
+      await store.enqueue(raw);
+      expect((await store.claimNext()).kind).toBe("claimed");
+      await sleep(1100);
+      expect((await store.claimNext()).kind).toBe("claimed");
     });
   });
 });
