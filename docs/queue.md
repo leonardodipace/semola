@@ -1,9 +1,9 @@
 ---
 title: Queue
-description: Redis-backed background jobs with retries and concurrency
+description: Redis-backed background jobs with retries, reclaim, and concurrency
 ---
 
-Run work in the background with Redis. Jobs are JSON-serialized, polled by workers, and retried with backoff when they fail.
+Run work in the background with Redis. Jobs are JSON-serialized, claimed into an in-flight ZSET with a visibility deadline, retried on a durable retry ZSET, and reclaimed if a worker dies before ack.
 
 Delivery is **at-least-once**: a worker crash or visibility expiry can run the same job again. Handlers should be **idempotent**.
 

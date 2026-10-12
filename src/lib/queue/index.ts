@@ -292,9 +292,9 @@ export class Queue<T> {
       );
 
       if (scheduleError) {
-        job.error = `Failed to schedule job retry: ${this.formatErrorMessage(scheduleError)}`;
-        await mightThrow(this.store.ack(serializedAtClaim));
-        await this.callOnError(job);
+        // Keep the claim durable: release back to jobs (or leave inflight if
+        // release fails) instead of acking, which would drop the only copy.
+        await mightThrow(this.store.release(serializedAtClaim));
       }
 
       return;
