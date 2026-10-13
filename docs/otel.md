@@ -121,11 +121,11 @@ const latency = meter.createHistogram("charge.duration_ms");
 latency.record(12, { region: "us-east" });
 ```
 
-Histograms use fixed explicit bucket bounds defined on `HISTOGRAM_EXPLICIT_BOUNDS` in the module types. Metrics flush on the same periodic schedule as trace and log batching.
+Histograms use fixed explicit bucket bounds (`HISTOGRAM_EXPLICIT_BOUNDS`, exported from `semola/otel`). Metrics flush on the same periodic schedule as trace and log batching.
 
 ## Logs
 
-Loggers are scope-named emitters. Records carry severity (`LogSeverity` or a string), body, and attributes. They export as OTLP log records and share the trace context active when `emit` runs.
+Loggers are scope-named emitters. Records carry a severity text (`TRACE` through `FATAL`, or any string), body, and attributes. They export as OTLP log records and share the trace context active when `emit` runs.
 
 ```typescript
 otel.logger("checkout").emit({

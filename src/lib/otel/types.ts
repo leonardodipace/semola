@@ -32,7 +32,6 @@ export type SpanContext = {
   traceId: string;
   spanId: string;
   traceFlags: number;
-  isRemote?: boolean;
 };
 
 export type OtelContext = {
@@ -88,8 +87,6 @@ export type Scope = {
 };
 
 export type InstrumentKind = "counter" | "updowncounter" | "histogram";
-
-export type InstrumentKey = string;
 
 export type FinishedSpan = {
   traceId: string;
@@ -187,7 +184,6 @@ export type OtlpAnyValue = {
   arrayValue?: { values: OtlpAnyValue[] };
 };
 
-/** Fixed explicit bounds for histogram instruments (milliseconds-friendly). */
 export const HISTOGRAM_EXPLICIT_BOUNDS: readonly number[] = [
   0, 5, 10, 25, 50, 75, 100, 250, 500, 1000,
 ];
@@ -228,7 +224,7 @@ export type MetricRecorder = {
   recordMetric: (
     scopeName: string,
     scopeVersion: string | undefined,
-    instrumentKey: InstrumentKey,
+    instrumentKey: string,
     kind: InstrumentKind,
     name: string,
     value: number,
@@ -241,6 +237,7 @@ export type InstrumentHandle = {
   otel: MetricRecorder;
   scope: Scope;
   name: string;
+  kind: InstrumentKind;
   options: MetricOptions;
 };
 

@@ -72,7 +72,8 @@ Code should read like English. Prefer clarity over clever density.
 - Blank lines between if-statement groups, const definitions, and return statements inside functions.
 - Module helpers use `const name = () => { ... }` (or `const name = async () => { ... }`), not `function name()`. Match existing Semola modules (`api/validate.ts`, `api/dispatch.ts`). Classes stay as `class`.
 - Prefer destructuring over indexed access when the shape is fixed (`const [a, b] = parts`, not `parts[0]` / `parts[1]`).
-- Avoid regex when string methods, length checks, or a small char loop are enough. If a regex is truly needed, hoist it to a named constant at module top.
+- Prefer a named regex constant (or a simple alphabet string) for hex/format checks. Do not invent char-code ranges, paired micro-helpers (`isX` / `isXChar`), or constant inflation that renames every literal (`HTTP_STATUS_OK_MIN`). Name protocol values when the number is opaque or reused with meaning; leave obvious literals alone.
+- Delete unused types, error classes, and fields. Do not keep pass-through wrappers that only forward one call.
 - No `any` type. Infer types, avoid explicit return types. Use generics extensively.
 - No type predicates (`value is Type` return annotations) - use inline guards for narrowing.
 - No em-dashes; use regular hyphens.

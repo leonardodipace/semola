@@ -14,11 +14,11 @@ import type {
   FinishedSpan,
   HistogramMetricBucket,
   InstrumentHandle,
-  InstrumentKey,
   InstrumentKind,
   LogRecord,
   MetricOptions,
   MetricPoint,
+  MetricRecorder,
   OtelContext,
   OtelOptions,
   PendingLogRecord,
@@ -45,37 +45,16 @@ const contextAls = new AsyncLocalStorage<OtelContext>();
 
 const SPAN_KIND_INTERNAL = 1;
 const TRACEPARENT_VERSION = "00";
-const TRACEPARENT_PART_COUNT = 4;
 const TRACE_ID_LENGTH = 32;
 const SPAN_ID_LENGTH = 16;
 const FLAGS_HEX_LENGTH = 2;
-const HEX_CHARS_PER_BYTE = 2;
 const TRACE_ID_BYTES = 16;
 const SPAN_ID_BYTES = 8;
 const NANOS_PER_MILLISECOND = 1_000_000;
 const SAMPLE_RATIO_BUCKETS = 10_000;
-const TRACE_ID_SAMPLE_PREFIX_LENGTH = 8;
-const HEX_DIGITS = "0123456789abcdef";
 const ZERO_TRACE_ID = "0".repeat(TRACE_ID_LENGTH);
 const ZERO_SPAN_ID = "0".repeat(SPAN_ID_LENGTH);
-
-const isLowerHex = (value: string) => {
-  for (const char of value) {
-    if (!HEX_DIGITS.includes(char)) {
-      return false;
-    }
-  }
-
-  return true;
-};
-
-const readTraceparent = (carrier: Headers | Record<string, string>) => {
-  if (carrier instanceof Headers) {
-    return carrier.get("traceparent");
-  }
-
-  return carrier.traceparent;
-};
+const LOWER_HEX = /^[0-9a-f]+$/;
 
 export const inject = (carrier: Headers | Record<string, string>) => {
   const ctx = contextAls.getStore();
@@ -99,7 +78,13 @@ export const inject = (carrier: Headers | Record<string, string>) => {
 export const extract = (
   carrier: Headers | Record<string, string>,
 ): OtelContext => {
-  const raw = readTraceparent(carrier);
+  let raw: string | null | undefined;
+
+  if (carrier instanceof Headers) {
+    raw = carrier.get("traceparent");
+  } else {
+    raw = carrier.traceparent;
+  }
 
   if (!raw) {
     return { span: null };
@@ -107,7 +92,7 @@ export const extract = (
 
   const parts = raw.trim().split("-");
 
-  if (parts.length !== TRACEPARENT_PART_COUNT) {
+  if (parts.length !== 4) {
     return { span: null };
   }
 
@@ -145,7 +130,7 @@ export const extract = (
   const spanId = spanIdRaw.toLowerCase();
   const flags = flagsHex.toLowerCase();
 
-  if (!isLowerHex(traceId)) {
+  if (!LOWER_HEX.test(traceId)) {
     return { span: null };
   }
 
@@ -153,7 +138,7 @@ export const extract = (
     return { span: null };
   }
 
-  if (!isLowerHex(spanId)) {
+  if (!LOWER_HEX.test(spanId)) {
     return { span: null };
   }
 
@@ -161,18 +146,15 @@ export const extract = (
     return { span: null };
   }
 
-  if (!isLowerHex(flags)) {
+  if (!LOWER_HEX.test(flags)) {
     return { span: null };
   }
-
-  const traceFlags = Number.parseInt(flags, 16);
 
   return {
     span: {
       traceId,
       spanId,
-      traceFlags,
-      isRemote: true,
+      traceFlags: Number.parseInt(flags, 16),
     },
   };
 };
@@ -184,7 +166,7 @@ const randomHex = (byteLength: number) => {
   let hex = "";
 
   for (const byte of bytes) {
-    hex += byte.toString(16).padStart(HEX_CHARS_PER_BYTE, "0");
+    hex += byte.toString(16).padStart(2, "0");
   }
 
   return hex;
@@ -231,7 +213,7 @@ const rootTraceSampled = (traceId: string, ratio: number) => {
     return false;
   }
 
-  const slice = traceId.slice(0, TRACE_ID_SAMPLE_PREFIX_LENGTH);
+  const slice = traceId.slice(0, 8);
   const n = Number.parseInt(slice, 16);
   const threshold = ratio * SAMPLE_RATIO_BUCKETS;
 
@@ -259,7 +241,7 @@ export class Otel {
   private fetchImpl: typeof fetch;
   private spanBatch: FinishedSpan[] = [];
   private logBatch: PendingLogRecord[] = [];
-  private metricRegistry = new Map<InstrumentKey, RegisteredInstrument>();
+  private metricRegistry = new Map<string, RegisteredInstrument>();
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private flushIntervalMs: number;
   private onExportError: ((error: Error) => void) | undefined;
@@ -366,14 +348,6 @@ export class Otel {
       return (parent.traceFlags & TRACE_FLAG_SAMPLED) === TRACE_FLAG_SAMPLED;
     }
 
-    if (this.sampleRatio >= 1) {
-      return true;
-    }
-
-    if (this.sampleRatio <= 0) {
-      return false;
-    }
-
     return rootTraceSampled(traceId, this.sampleRatio);
   }
 
@@ -403,7 +377,7 @@ export class Otel {
   public recordMetric(
     scopeName: string,
     scopeVersion: string | undefined,
-    instrumentKey: InstrumentKey,
+    instrumentKey: string,
     kind: InstrumentKind,
     name: string,
     value: number,
@@ -630,22 +604,24 @@ export class Otel {
   }
 }
 
+const scopeKey = (scope: Scope) => {
+  return `${scope.scopeName}\0${scope.scopeVersion ?? ""}`;
+};
+
 const groupSpansByScope = (spans: FinishedSpan[]): ScopeSpans[] => {
   const map = new Map<string, ScopeSpans>();
 
   for (const span of spans) {
-    const scopeKey = `${span.scopeName}\0${span.scopeVersion ?? ""}`;
-    let group = map.get(scopeKey);
+    const scope: Scope = {
+      scopeName: span.scopeName,
+      scopeVersion: span.scopeVersion,
+    };
+    const key = scopeKey(scope);
+    let group = map.get(key);
 
     if (!group) {
-      group = {
-        scope: {
-          scopeName: span.scopeName,
-          scopeVersion: span.scopeVersion,
-        },
-        spans: [],
-      };
-      map.set(scopeKey, group);
+      group = { scope, spans: [] };
+      map.set(key, group);
     }
 
     group.spans.push(span);
@@ -658,18 +634,16 @@ const groupLogsByScope = (logs: PendingLogRecord[]): ScopeLogs[] => {
   const map = new Map<string, ScopeLogs>();
 
   for (const record of logs) {
-    const scopeKey = `${record.scopeName}\0${record.scopeVersion ?? ""}`;
-    let group = map.get(scopeKey);
+    const scope: Scope = {
+      scopeName: record.scopeName,
+      scopeVersion: record.scopeVersion,
+    };
+    const key = scopeKey(scope);
+    let group = map.get(key);
 
     if (!group) {
-      group = {
-        scope: {
-          scopeName: record.scopeName,
-          scopeVersion: record.scopeVersion,
-        },
-        logRecords: [],
-      };
-      map.set(scopeKey, group);
+      group = { scope, logRecords: [] };
+      map.set(key, group);
     }
 
     group.logRecords.push(record);
@@ -682,18 +656,16 @@ const groupMetricsByScope = (metrics: MetricPoint[]): ScopeMetrics[] => {
   const map = new Map<string, ScopeMetrics>();
 
   for (const metric of metrics) {
-    const scopeKey = `${metric.scopeName}\0${metric.scopeVersion ?? ""}`;
-    let group = map.get(scopeKey);
+    const scope: Scope = {
+      scopeName: metric.scopeName,
+      scopeVersion: metric.scopeVersion,
+    };
+    const key = scopeKey(scope);
+    let group = map.get(key);
 
     if (!group) {
-      group = {
-        scope: {
-          scopeName: metric.scopeName,
-          scopeVersion: metric.scopeVersion,
-        },
-        metrics: [],
-      };
-      map.set(scopeKey, group);
+      group = { scope, metrics: [] };
+      map.set(key, group);
     }
 
     group.metrics.push(metric);
@@ -935,110 +907,85 @@ export class Meter {
   }
 }
 
-const instrumentKey = (
-  scope: Scope,
-  name: string,
-  kind: InstrumentKind,
-): InstrumentKey => {
+const instrumentKey = (scope: Scope, name: string, kind: InstrumentKind) => {
   return `${scope.scopeName}\0${scope.scopeVersion ?? ""}\0${name}\0${kind}`;
 };
 
-export class Counter {
-  private handle: InstrumentHandle;
+class MetricInstrument {
+  protected handle: InstrumentHandle;
 
   public constructor(
-    otel: Otel,
+    otel: MetricRecorder,
     scope: Scope,
     name: string,
+    kind: InstrumentKind,
     options?: MetricOptions,
   ) {
     this.handle = {
       otel,
       scope,
       name,
+      kind,
       options: options ?? {},
     };
   }
 
-  public add(value: number, attributes?: AttributeMap): void {
-    const attrs = attributes ?? {};
-
+  protected write(value: number, attributes?: AttributeMap) {
     this.handle.otel.recordMetric(
       this.handle.scope.scopeName,
       this.handle.scope.scopeVersion,
-      instrumentKey(this.handle.scope, this.handle.name, "counter"),
-      "counter",
+      instrumentKey(this.handle.scope, this.handle.name, this.handle.kind),
+      this.handle.kind,
       this.handle.name,
       value,
-      attrs,
+      attributes ?? {},
       this.handle.options,
     );
   }
 }
 
-export class UpDownCounter {
-  private handle: InstrumentHandle;
-
+export class Counter extends MetricInstrument {
   public constructor(
     otel: Otel,
     scope: Scope,
     name: string,
     options?: MetricOptions,
   ) {
-    this.handle = {
-      otel,
-      scope,
-      name,
-      options: options ?? {},
-    };
+    super(otel, scope, name, "counter", options);
   }
 
-  public add(value: number, attributes?: AttributeMap): void {
-    const attrs = attributes ?? {};
-
-    this.handle.otel.recordMetric(
-      this.handle.scope.scopeName,
-      this.handle.scope.scopeVersion,
-      instrumentKey(this.handle.scope, this.handle.name, "updowncounter"),
-      "updowncounter",
-      this.handle.name,
-      value,
-      attrs,
-      this.handle.options,
-    );
+  public add(value: number, attributes?: AttributeMap) {
+    this.write(value, attributes);
   }
 }
 
-export class Histogram {
-  private handle: InstrumentHandle;
-
+export class UpDownCounter extends MetricInstrument {
   public constructor(
     otel: Otel,
     scope: Scope,
     name: string,
     options?: MetricOptions,
   ) {
-    this.handle = {
-      otel,
-      scope,
-      name,
-      options: options ?? {},
-    };
+    super(otel, scope, name, "updowncounter", options);
   }
 
-  public record(value: number, attributes?: AttributeMap): void {
-    const attrs = attributes ?? {};
+  public add(value: number, attributes?: AttributeMap) {
+    this.write(value, attributes);
+  }
+}
 
-    this.handle.otel.recordMetric(
-      this.handle.scope.scopeName,
-      this.handle.scope.scopeVersion,
-      instrumentKey(this.handle.scope, this.handle.name, "histogram"),
-      "histogram",
-      this.handle.name,
-      value,
-      attrs,
-      this.handle.options,
-    );
+export class Histogram extends MetricInstrument {
+  public constructor(
+    otel: Otel,
+    scope: Scope,
+    name: string,
+    options?: MetricOptions,
+  ) {
+    super(otel, scope, name, "histogram", options);
+  }
+
+  public record(value: number, attributes?: AttributeMap) {
+    this.write(value, attributes);
   }
 }
 
@@ -1061,3 +1008,13 @@ export class Logger {
     });
   }
 }
+
+export { ExportError, InvalidOptionsError } from "./errors.js";
+export type {
+  LogSeverity,
+  OtelOptions,
+  OtlpHttpExport,
+  SpanContext,
+  SpanStatus,
+} from "./types.js";
+export { HISTOGRAM_EXPLICIT_BOUNDS } from "./types.js";

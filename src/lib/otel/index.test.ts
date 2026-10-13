@@ -623,7 +623,6 @@ describe("W3C propagation", () => {
 
       const parent = extract(outbound);
       expect(parent.span).not.toBeNull();
-      expect(parent.span?.isRemote).toBe(true);
 
       const parts = (outbound.traceparent ?? "").split("-");
       expect(parent.span?.traceId).toBe(parts[1]);
