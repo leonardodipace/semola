@@ -17,17 +17,23 @@ import type {
 } from "./types.js";
 
 const OTLP_FETCH_TIMEOUT_MS = 10_000;
+const OTLP_STATUS_UNSET = 0;
+const OTLP_STATUS_OK = 1;
+const OTLP_STATUS_ERROR = 2;
+const OTLP_AGGREGATION_TEMPORALITY_CUMULATIVE = 2;
+const HTTP_STATUS_OK_MIN = 200;
+const HTTP_STATUS_REDIRECT_MIN = 300;
 
 const spanStatusCode = (code: SpanStatus["code"]) => {
   if (code === "OK") {
-    return 1;
+    return OTLP_STATUS_OK;
   }
 
   if (code === "ERROR") {
-    return 2;
+    return OTLP_STATUS_ERROR;
   }
 
-  return 0;
+  return OTLP_STATUS_UNSET;
 };
 
 const stripTrailingSlash = (url: string) => {
@@ -212,7 +218,7 @@ export const encodeMetric = (point: MetricPoint) => {
       description: point.description,
       unit: point.unit,
       histogram: {
-        aggregationTemporality: 2,
+        aggregationTemporality: OTLP_AGGREGATION_TEMPORALITY_CUMULATIVE,
         dataPoints: bucketCounts,
       },
     };
@@ -229,7 +235,7 @@ export const encodeMetric = (point: MetricPoint) => {
     description: point.description,
     unit: point.unit,
     sum: {
-      aggregationTemporality: 2,
+      aggregationTemporality: OTLP_AGGREGATION_TEMPORALITY_CUMULATIVE,
       isMonotonic,
       dataPoints: point.dataPoints.map((dp) => ({
         attributes: encodeAttributes(dp.attributes),
@@ -276,7 +282,11 @@ export const otlpPost = async (options: OtlpPostOptions) => {
 
   await response.body?.cancel();
 
-  if (response.status < 200 || response.status >= 300) {
+  if (response.status < HTTP_STATUS_OK_MIN) {
+    throw new Error(`OTLP export failed with status ${response.status}`);
+  }
+
+  if (response.status >= HTTP_STATUS_REDIRECT_MIN) {
     throw new Error(`OTLP export failed with status ${response.status}`);
   }
 };

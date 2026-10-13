@@ -45,37 +45,23 @@ const contextAls = new AsyncLocalStorage<OtelContext>();
 
 const SPAN_KIND_INTERNAL = 1;
 const TRACEPARENT_VERSION = "00";
+const TRACEPARENT_PART_COUNT = 4;
 const TRACE_ID_LENGTH = 32;
 const SPAN_ID_LENGTH = 16;
 const FLAGS_HEX_LENGTH = 2;
-
-const isLowerHexChar = (char: string) => {
-  const code = char.charCodeAt(0);
-
-  if (code >= 48 && code <= 57) {
-    return true;
-  }
-
-  if (code >= 97 && code <= 102) {
-    return true;
-  }
-
-  return false;
-};
+const HEX_CHARS_PER_BYTE = 2;
+const TRACE_ID_BYTES = 16;
+const SPAN_ID_BYTES = 8;
+const NANOS_PER_MILLISECOND = 1_000_000;
+const SAMPLE_RATIO_BUCKETS = 10_000;
+const TRACE_ID_SAMPLE_PREFIX_LENGTH = 8;
+const HEX_DIGITS = "0123456789abcdef";
+const ZERO_TRACE_ID = "0".repeat(TRACE_ID_LENGTH);
+const ZERO_SPAN_ID = "0".repeat(SPAN_ID_LENGTH);
 
 const isLowerHex = (value: string) => {
   for (const char of value) {
-    if (!isLowerHexChar(char)) {
-      return false;
-    }
-  }
-
-  return true;
-};
-
-const isAllZeros = (value: string) => {
-  for (const char of value) {
-    if (char !== "0") {
+    if (!HEX_DIGITS.includes(char)) {
       return false;
     }
   }
@@ -99,7 +85,7 @@ export const inject = (carrier: Headers | Record<string, string>) => {
   }
 
   const { traceId, spanId, traceFlags } = ctx.span;
-  const flags = traceFlags.toString(16).padStart(2, "0");
+  const flags = traceFlags.toString(16).padStart(FLAGS_HEX_LENGTH, "0");
   const traceparent = `${TRACEPARENT_VERSION}-${traceId}-${spanId}-${flags}`;
 
   if (carrier instanceof Headers) {
@@ -121,7 +107,7 @@ export const extract = (
 
   const parts = raw.trim().split("-");
 
-  if (parts.length !== 4) {
+  if (parts.length !== TRACEPARENT_PART_COUNT) {
     return { span: null };
   }
 
@@ -163,7 +149,7 @@ export const extract = (
     return { span: null };
   }
 
-  if (isAllZeros(traceId)) {
+  if (traceId === ZERO_TRACE_ID) {
     return { span: null };
   }
 
@@ -171,7 +157,7 @@ export const extract = (
     return { span: null };
   }
 
-  if (isAllZeros(spanId)) {
+  if (spanId === ZERO_SPAN_ID) {
     return { span: null };
   }
 
@@ -198,7 +184,7 @@ const randomHex = (byteLength: number) => {
   let hex = "";
 
   for (const byte of bytes) {
-    hex += byte.toString(16).padStart(2, "0");
+    hex += byte.toString(16).padStart(HEX_CHARS_PER_BYTE, "0");
   }
 
   return hex;
@@ -207,9 +193,11 @@ const randomHex = (byteLength: number) => {
 const timeUnixNanoString = (ms?: number) => {
   const millis = ms ?? Date.now();
   const whole = Math.trunc(millis);
-  const fraction = Math.round((millis - whole) * 1_000_000);
+  const fraction = Math.round((millis - whole) * NANOS_PER_MILLISECOND);
 
-  return String(BigInt(whole) * 1_000_000n + BigInt(fraction));
+  return String(
+    BigInt(whole) * BigInt(NANOS_PER_MILLISECOND) + BigInt(fraction),
+  );
 };
 
 const attributeKey = (attributes: AttributeMap) => {
@@ -243,11 +231,11 @@ const rootTraceSampled = (traceId: string, ratio: number) => {
     return false;
   }
 
-  const slice = traceId.slice(0, 8);
+  const slice = traceId.slice(0, TRACE_ID_SAMPLE_PREFIX_LENGTH);
   const n = Number.parseInt(slice, 16);
-  const threshold = ratio * 10_000;
+  const threshold = ratio * SAMPLE_RATIO_BUCKETS;
 
-  return n % 10_000 < threshold;
+  return n % SAMPLE_RATIO_BUCKETS < threshold;
 };
 
 const histogramBucketIndex = (value: number) => {
@@ -777,7 +765,7 @@ export class Tracer {
     const parentCtx = options?.parent ?? this.otel.getActiveContext();
     const parentSpan = parentCtx.span;
 
-    let traceId = randomHex(16);
+    let traceId = randomHex(TRACE_ID_BYTES);
     let parentSpanId: string | undefined;
 
     if (parentSpan) {
@@ -785,7 +773,7 @@ export class Tracer {
       parentSpanId = parentSpan.spanId;
     }
 
-    const spanId = randomHex(8);
+    const spanId = randomHex(SPAN_ID_BYTES);
     const sampled = this.otel.shouldRecordTrace(traceId, parentSpan);
 
     let traceFlags = 0;
