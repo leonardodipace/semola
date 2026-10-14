@@ -1,75 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { ExportError, InvalidOptionsError } from "./errors.js";
 import { extract, inject, Otel } from "./index.js";
+import {
+  baseOptions,
+  createFailingPathFetch,
+  createMockFetch,
+  type FetchCall,
+  parseBody,
+  resolveUrl,
+} from "./test-fixtures.js";
 import { HISTOGRAM_EXPLICIT_BOUNDS } from "./types.js";
-
-type FetchCall = {
-  url: string;
-  init?: RequestInit;
-};
-
-const createMockFetch = (status = 200) => {
-  const calls: FetchCall[] = [];
-
-  const mockFetch = async (url: string | URL | Request, init?: RequestInit) => {
-    let resolved = "";
-
-    if (typeof url === "string") {
-      resolved = url;
-    } else if (url instanceof URL) {
-      resolved = url.toString();
-    } else {
-      resolved = url.url;
-    }
-
-    calls.push({ url: resolved, init });
-
-    return new Response(null, { status });
-  };
-
-  return { fetch: mockFetch as typeof fetch, calls };
-};
-
-const createFailingPathFetch = (failPath: string) => {
-  const calls: FetchCall[] = [];
-
-  const mockFetch = async (url: string | URL | Request, init?: RequestInit) => {
-    let resolved = "";
-
-    if (typeof url === "string") {
-      resolved = url;
-    } else if (url instanceof URL) {
-      resolved = url.toString();
-    } else {
-      resolved = url.url;
-    }
-
-    calls.push({ url: resolved, init });
-
-    if (resolved.endsWith(failPath)) {
-      return new Response(null, { status: 500 });
-    }
-
-    return new Response(null, { status: 200 });
-  };
-
-  return { fetch: mockFetch as typeof fetch, calls };
-};
-
-const baseOptions = (fetchImpl: typeof fetch) => ({
-  serviceName: "test-svc",
-  export: { type: "otlp-http" as const, url: "http://collector:4318" },
-  sampleRatio: 1,
-  enabled: true,
-  flushIntervalMs: 60_000,
-  shutdownTimeoutMs: 0,
-  fetch: fetchImpl,
-});
-
-const parseBody = (call: FetchCall | undefined) => {
-  expect(call).toBeDefined();
-  return JSON.parse(String(call?.init?.body));
-};
 
 const traceSpans = (calls: FetchCall[]) => {
   const call = calls.find((entry) => entry.url.endsWith("/v1/traces"));
@@ -89,61 +29,6 @@ const traceSpans = (calls: FetchCall[]) => {
 };
 
 describe("Otel constructor", () => {
-  test("rejects empty serviceName", () => {
-    const { fetch } = createMockFetch();
-
-    expect(() => {
-      new Otel({
-        ...baseOptions(fetch),
-        serviceName: "   ",
-      });
-    }).toThrow(InvalidOptionsError);
-  });
-
-  test("rejects empty export url", () => {
-    const { fetch } = createMockFetch();
-
-    expect(() => {
-      new Otel({
-        ...baseOptions(fetch),
-        export: { type: "otlp-http", url: " " },
-      });
-    }).toThrow(InvalidOptionsError);
-  });
-
-  test("rejects sampleRatio below 0", () => {
-    const { fetch } = createMockFetch();
-
-    expect(() => {
-      new Otel({
-        ...baseOptions(fetch),
-        sampleRatio: -0.1,
-      });
-    }).toThrow(InvalidOptionsError);
-  });
-
-  test("rejects sampleRatio above 1", () => {
-    const { fetch } = createMockFetch();
-
-    expect(() => {
-      new Otel({
-        ...baseOptions(fetch),
-        sampleRatio: 1.1,
-      });
-    }).toThrow(InvalidOptionsError);
-  });
-
-  test("rejects flushIntervalMs below 1", () => {
-    const { fetch } = createMockFetch();
-
-    expect(() => {
-      new Otel({
-        ...baseOptions(fetch),
-        flushIntervalMs: 0,
-      });
-    }).toThrow(InvalidOptionsError);
-  });
-
   test("includes service.version and service.instance.id on resource", async () => {
     const { fetch, calls } = createMockFetch();
     const otel = new Otel({
@@ -948,16 +833,7 @@ describe("Otel lifecycle and export", () => {
       url: string | URL | Request,
       init?: RequestInit,
     ) => {
-      let resolved = "";
-
-      if (typeof url === "string") {
-        resolved = url;
-      } else if (url instanceof URL) {
-        resolved = url.toString();
-      } else {
-        resolved = url.url;
-      }
-
+      const resolved = resolveUrl(url);
       calls.push({ url: resolved, init });
 
       if (failTraces) {
@@ -992,16 +868,7 @@ describe("Otel lifecycle and export", () => {
       url: string | URL | Request,
       init?: RequestInit,
     ) => {
-      let resolved = "";
-
-      if (typeof url === "string") {
-        resolved = url;
-      } else if (url instanceof URL) {
-        resolved = url.toString();
-      } else {
-        resolved = url.url;
-      }
-
+      const resolved = resolveUrl(url);
       calls.push({ url: resolved, init });
 
       if (failLogs) {
@@ -1039,16 +906,7 @@ describe("Otel lifecycle and export", () => {
       url: string | URL | Request,
       init?: RequestInit,
     ) => {
-      let resolved = "";
-
-      if (typeof url === "string") {
-        resolved = url;
-      } else if (url instanceof URL) {
-        resolved = url.toString();
-      } else {
-        resolved = url.url;
-      }
-
+      const resolved = resolveUrl(url);
       calls.push({ url: resolved, init });
 
       if (failMetrics) {

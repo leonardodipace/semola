@@ -96,7 +96,7 @@ const parent = extract(request.headers);
 await tracer.startActiveSpan(
   "handle",
   async (span) => {
-    /* ... */
+    span.setAttribute("http.route", "/orders");
   },
   { parent, kind: "server" },
 );

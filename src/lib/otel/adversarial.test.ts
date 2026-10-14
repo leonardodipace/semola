@@ -1,61 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { ExportError, InvalidOptionsError } from "./errors.js";
 import { extract, inject, Otel } from "./index.js";
+import {
+  baseOptions,
+  createMockFetch,
+  type FetchCall,
+  parseBody,
+  resolveUrl,
+} from "./test-fixtures.js";
 import { HISTOGRAM_EXPLICIT_BOUNDS } from "./types.js";
-
-type FetchCall = {
-  url: string;
-  init?: RequestInit;
-};
-
-const createMockFetch = (status = 200) => {
-  const calls: FetchCall[] = [];
-
-  const mockFetch = async (url: string | URL | Request, init?: RequestInit) => {
-    let resolved = "";
-
-    if (typeof url === "string") {
-      resolved = url;
-    } else if (url instanceof URL) {
-      resolved = url.toString();
-    } else {
-      resolved = url.url;
-    }
-
-    calls.push({ url: resolved, init });
-
-    return new Response(null, { status });
-  };
-
-  return { fetch: mockFetch as typeof fetch, calls };
-};
-
-const resolveUrl = (url: string | URL | Request) => {
-  if (typeof url === "string") {
-    return url;
-  }
-
-  if (url instanceof URL) {
-    return url.toString();
-  }
-
-  return url.url;
-};
-
-const baseOptions = (fetchImpl: typeof fetch) => ({
-  serviceName: "adv-svc",
-  export: { type: "otlp-http" as const, url: "http://collector:4318" },
-  sampleRatio: 1,
-  enabled: true,
-  flushIntervalMs: 60_000,
-  shutdownTimeoutMs: 0,
-  fetch: fetchImpl,
-});
-
-const parseBody = (call: FetchCall | undefined) => {
-  expect(call).toBeDefined();
-  return JSON.parse(String(call?.init?.body));
-};
 
 const traceSpans = (calls: FetchCall[]) => {
   const call = calls.find((entry) => entry.url.endsWith("/v1/traces"));

@@ -1,48 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { ExportError, InvalidOptionsError } from "./errors.js";
 import { Otel } from "./otel.js";
+import {
+  baseOptions,
+  createMockFetch,
+  type FetchCall,
+  parseBody,
+  resolveUrl,
+} from "./test-fixtures.js";
 import { TRACE_FLAG_SAMPLED } from "./types.js";
-
-type FetchCall = {
-  url: string;
-  init?: RequestInit;
-};
-
-const createMockFetch = (status = 200) => {
-  const calls: FetchCall[] = [];
-
-  const mockFetch = async (url: string | URL | Request, init?: RequestInit) => {
-    let resolved = "";
-
-    if (typeof url === "string") {
-      resolved = url;
-    } else if (url instanceof URL) {
-      resolved = url.toString();
-    } else {
-      resolved = url.url;
-    }
-
-    calls.push({ url: resolved, init });
-    return new Response(null, { status });
-  };
-
-  return { fetch: mockFetch as typeof fetch, calls };
-};
-
-const baseOptions = (fetchImpl: typeof fetch) => ({
-  serviceName: "otel-unit",
-  export: { type: "otlp-http" as const, url: "http://collector:4318" },
-  sampleRatio: 1,
-  enabled: true,
-  flushIntervalMs: 60_000,
-  shutdownTimeoutMs: 0,
-  fetch: fetchImpl,
-});
-
-const parseBody = (call: FetchCall | undefined) => {
-  expect(call).toBeDefined();
-  return JSON.parse(String(call?.init?.body));
-};
 
 describe("Otel constructor", () => {
   test("rejects empty serviceName", () => {
@@ -58,6 +24,16 @@ describe("Otel constructor", () => {
       new Otel({
         ...baseOptions(fetch),
         export: { type: "otlp-http", url: "" },
+      });
+    }).toThrow(InvalidOptionsError);
+  });
+
+  test("rejects whitespace-only export url", () => {
+    const { fetch } = createMockFetch();
+    expect(() => {
+      new Otel({
+        ...baseOptions(fetch),
+        export: { type: "otlp-http", url: " " },
       });
     }).toThrow(InvalidOptionsError);
   });
@@ -157,16 +133,7 @@ describe("Otel lifecycle", () => {
       url: string | URL | Request,
       init?: RequestInit,
     ) => {
-      let resolved = "";
-
-      if (typeof url === "string") {
-        resolved = url;
-      } else if (url instanceof URL) {
-        resolved = url.toString();
-      } else {
-        resolved = url.url;
-      }
-
+      const resolved = resolveUrl(url);
       calls.push({ url: resolved, init });
 
       if (fail && resolved.endsWith("/v1/traces")) {
@@ -195,15 +162,7 @@ describe("Otel lifecycle", () => {
       url: string | URL | Request,
       _init?: RequestInit,
     ) => {
-      let resolved = "";
-
-      if (typeof url === "string") {
-        resolved = url;
-      } else if (url instanceof URL) {
-        resolved = url.toString();
-      } else {
-        resolved = url.url;
-      }
+      const resolved = resolveUrl(url);
 
       if (resolved.endsWith("/v1/traces")) {
         attempts += 1;
