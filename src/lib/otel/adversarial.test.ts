@@ -48,6 +48,7 @@ const baseOptions = (fetchImpl: typeof fetch) => ({
   sampleRatio: 1,
   enabled: true,
   flushIntervalMs: 60_000,
+  shutdownTimeoutMs: 0,
   fetch: fetchImpl,
 });
 

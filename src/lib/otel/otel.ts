@@ -31,7 +31,9 @@ import type {
 } from "./types.js";
 import {
   DEFAULT_FLUSH_INTERVAL_MS,
+  DEFAULT_SHUTDOWN_TIMEOUT_MS,
   HISTOGRAM_EXPLICIT_BOUNDS,
+  SHUTDOWN_RETRY_DELAYS_MS,
   TRACE_FLAG_SAMPLED,
 } from "./types.js";
 import {
@@ -53,6 +55,7 @@ export class Otel {
   private metricRegistry = new Map<string, RegisteredInstrument>();
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private flushIntervalMs: number;
+  private shutdownTimeoutMs: number;
   private onExportError: ((error: Error) => void) | undefined;
   private flushChain: Promise<void> = Promise.resolve();
 
@@ -82,10 +85,18 @@ export class Otel {
       throw new InvalidOptionsError("flushIntervalMs must be at least 1");
     }
 
+    const shutdownTimeoutMs =
+      options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
+
+    if (shutdownTimeoutMs < 0) {
+      throw new InvalidOptionsError("shutdownTimeoutMs must be at least 0");
+    }
+
     this.sampleRatio = ratio;
     this.exportOptions = options.export;
     this.fetchImpl = options.fetch ?? fetch;
     this.flushIntervalMs = flushIntervalMs;
+    this.shutdownTimeoutMs = shutdownTimeoutMs;
     this.onExportError = options.onExportError;
 
     const attributes: AttributeMap = {
@@ -149,8 +160,42 @@ export class Otel {
       return;
     }
 
-    await this.flushAll();
-    this.shutDown = true;
+    const deadline = Date.now() + this.shutdownTimeoutMs;
+    let lastError: Error | null = null;
+    let attempt = 0;
+
+    while (true) {
+      const [error] = await mightThrow(this.flushAll());
+
+      if (!error) {
+        this.shutDown = true;
+        return;
+      }
+
+      if (error instanceof ExportError) {
+        lastError = error;
+      } else {
+        lastError = new ExportError(error.message);
+      }
+
+      const remaining = deadline - Date.now();
+
+      if (remaining <= 0) {
+        break;
+      }
+
+      const delayIndex = Math.min(attempt, SHUTDOWN_RETRY_DELAYS_MS.length - 1);
+      const delay = SHUTDOWN_RETRY_DELAYS_MS[delayIndex] ?? 0;
+      attempt += 1;
+
+      await Bun.sleep(Math.min(delay, remaining));
+    }
+
+    if (lastError) {
+      throw lastError;
+    }
+
+    throw new ExportError("shutdown flush failed");
   }
 
   public runWithContext<T>(ctx: OtelContext, fn: () => T): T {

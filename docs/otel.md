@@ -167,17 +167,14 @@ const otel = new Otel({
 
 Call `shutdown()` before exit so batches flush and the periodic timer stops. A successful second `shutdown()` is a no-op. After a successful shutdown, recording behaves like `enabled: false`.
 
-Each OTLP POST retries up to three times on network errors, `429`, and `5xx`, with short backoff (about 100 ms total across attempts). `shutdown()` and `flushAll()` still reject with `ExportError` when all attempts fail. Failed trace and log batches are put back for the next flush. Metrics stay in the cumulative registry and are sent again. If `shutdown()` rejects, call it again after the collector recovers. The timer is already cleared, so only an explicit `flushAll()` or another `shutdown()` retries.
+Each OTLP POST retries up to three times on network errors, `429`, and `5xx`, with short backoff (about 100 ms total across attempts).
+
+`shutdown()` also retries the full flush until it succeeds or `shutdownTimeoutMs` elapses (default 10 seconds), with backoff between flush attempts. Call `await otel.shutdown()` at process exit and you usually do not need your own retry loop. If the budget is exhausted it rejects with `ExportError`; batches stay re-queued so a later `shutdown()` or `flushAll()` can still deliver them. `flushAll()` itself does not use the shutdown budget.
 
 Periodic flush failures call `onExportError` (they do not rethrow). Those batches are also re-queued for the next interval.
 
 ```typescript
-try {
-  await otel.shutdown();
-} catch (error) {
-  // log ExportError, then retry shutdown or flushAll when the collector is up
-  throw error;
-}
+await otel.shutdown();
 ```
 
 Point `export.url` at the OTLP base (for example `http://localhost:4318`), not a full `/v1/traces` path. The client appends `/v1/traces`, `/v1/metrics`, and `/v1/logs`.
@@ -192,6 +189,7 @@ Point `export.url` at the OTLP base (for example `http://localhost:4318`), not a
 | `sampleRatio` | `0..1`, default `1` |
 | `enabled` | When `false`, full no-op |
 | `flushIntervalMs` | Batch flush period in ms, minimum `1` (default 5000) |
+| `shutdownTimeoutMs` | Wall-clock budget for shutdown flush retries (default 10000, minimum 0) |
 | `serviceVersion` | Optional resource attribute |
 | `fetch` | Optional `fetch` override for tests or proxies |
 | `onExportError` | Called when a periodic flush fails (does not rethrow) |

@@ -35,6 +35,7 @@ const baseOptions = (fetchImpl: typeof fetch) => ({
   sampleRatio: 1,
   enabled: true,
   flushIntervalMs: 60_000,
+  shutdownTimeoutMs: 0,
   fetch: fetchImpl,
 });
 
@@ -185,6 +186,56 @@ describe("Otel lifecycle", () => {
     expect(
       calls.filter((call) => call.url.endsWith("/v1/traces")).length,
     ).toBeGreaterThan(1);
+  });
+
+  test("shutdown retries within timeout until collector recovers", async () => {
+    let attempts = 0;
+
+    const fetchImpl = async (
+      url: string | URL | Request,
+      _init?: RequestInit,
+    ) => {
+      let resolved = "";
+
+      if (typeof url === "string") {
+        resolved = url;
+      } else if (url instanceof URL) {
+        resolved = url.toString();
+      } else {
+        resolved = url.url;
+      }
+
+      if (resolved.endsWith("/v1/traces")) {
+        attempts += 1;
+
+        if (attempts < 4) {
+          return new Response(null, { status: 503 });
+        }
+      }
+
+      return new Response(null, { status: 200 });
+    };
+
+    const otel = new Otel({
+      ...baseOptions(fetchImpl as typeof fetch),
+      shutdownTimeoutMs: 2_000,
+    });
+
+    await otel.tracer("t").startActiveSpan("patient", async () => {});
+    await otel.shutdown();
+
+    expect(attempts).toBeGreaterThanOrEqual(4);
+  });
+
+  test("rejects negative shutdownTimeoutMs", () => {
+    const { fetch } = createMockFetch();
+
+    expect(() => {
+      new Otel({
+        ...baseOptions(fetch),
+        shutdownTimeoutMs: -1,
+      });
+    }).toThrow(InvalidOptionsError);
   });
 
   test("flushAll with empty buffers is a no-op", async () => {
