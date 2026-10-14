@@ -235,6 +235,15 @@ export type MetricRecorder = {
   ) => void;
 };
 
+export type TraceHost = {
+  shouldRecordTrace: (traceId: string, parent: SpanContext | null) => boolean;
+  onSpanEnded: (span: FinishedSpan) => void;
+};
+
+export type LogHost = {
+  onLogEmitted: (record: PendingLogRecord) => void;
+};
+
 export type InstrumentHandle = {
   otel: MetricRecorder;
   scope: Scope;
