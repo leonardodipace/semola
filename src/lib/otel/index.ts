@@ -44,17 +44,15 @@ import {
 const contextAls = new AsyncLocalStorage<OtelContext>();
 
 const SPAN_KIND_INTERNAL = 1;
-const TRACEPARENT_VERSION = "00";
-const TRACE_ID_LENGTH = 32;
-const SPAN_ID_LENGTH = 16;
-const FLAGS_HEX_LENGTH = 2;
 const TRACE_ID_BYTES = 16;
 const SPAN_ID_BYTES = 8;
 const NANOS_PER_MILLISECOND = 1_000_000;
 const SAMPLE_RATIO_BUCKETS = 10_000;
-const ZERO_TRACE_ID = "0".repeat(TRACE_ID_LENGTH);
-const ZERO_SPAN_ID = "0".repeat(SPAN_ID_LENGTH);
-const LOWER_HEX = /^[0-9a-f]+$/;
+const ZERO_TRACE_ID = "0".repeat(32);
+const ZERO_SPAN_ID = "0".repeat(16);
+
+// W3C traceparent: version 00, 32-hex trace id, 16-hex span id, 2-hex flags
+const TRACEPARENT = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/i;
 
 export const inject = (carrier: Headers | Record<string, string>) => {
   const ctx = contextAls.getStore();
@@ -64,8 +62,8 @@ export const inject = (carrier: Headers | Record<string, string>) => {
   }
 
   const { traceId, spanId, traceFlags } = ctx.span;
-  const flags = traceFlags.toString(16).padStart(FLAGS_HEX_LENGTH, "0");
-  const traceparent = `${TRACEPARENT_VERSION}-${traceId}-${spanId}-${flags}`;
+  const flags = traceFlags.toString(16).padStart(2, "0");
+  const traceparent = `00-${traceId}-${spanId}-${flags}`;
 
   if (carrier instanceof Headers) {
     carrier.set("traceparent", traceparent);
@@ -90,17 +88,13 @@ export const extract = (
     return { span: null };
   }
 
-  const parts = raw.trim().split("-");
+  const match = TRACEPARENT.exec(raw.trim());
 
-  if (parts.length !== 4) {
+  if (!match) {
     return { span: null };
   }
 
-  const [version, traceIdRaw, spanIdRaw, flagsHex] = parts;
-
-  if (version !== TRACEPARENT_VERSION) {
-    return { span: null };
-  }
+  const [, traceIdRaw, spanIdRaw, flagsHex] = match;
 
   if (!traceIdRaw) {
     return { span: null };
@@ -114,31 +108,10 @@ export const extract = (
     return { span: null };
   }
 
-  if (traceIdRaw.length !== TRACE_ID_LENGTH) {
-    return { span: null };
-  }
-
-  if (spanIdRaw.length !== SPAN_ID_LENGTH) {
-    return { span: null };
-  }
-
-  if (flagsHex.length !== FLAGS_HEX_LENGTH) {
-    return { span: null };
-  }
-
   const traceId = traceIdRaw.toLowerCase();
   const spanId = spanIdRaw.toLowerCase();
-  const flags = flagsHex.toLowerCase();
-
-  if (!LOWER_HEX.test(traceId)) {
-    return { span: null };
-  }
 
   if (traceId === ZERO_TRACE_ID) {
-    return { span: null };
-  }
-
-  if (!LOWER_HEX.test(spanId)) {
     return { span: null };
   }
 
@@ -146,15 +119,11 @@ export const extract = (
     return { span: null };
   }
 
-  if (!LOWER_HEX.test(flags)) {
-    return { span: null };
-  }
-
   return {
     span: {
       traceId,
       spanId,
-      traceFlags: Number.parseInt(flags, 16),
+      traceFlags: Number.parseInt(flagsHex, 16),
     },
   };
 };

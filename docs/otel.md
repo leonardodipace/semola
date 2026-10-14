@@ -100,7 +100,7 @@ inject(headers);
 await fetch(upstream, { headers });
 ```
 
-`extract` parses W3C `traceparent` from incoming headers and returns a parent context for `startActiveSpan` options.
+`extract` reads W3C `traceparent` from incoming headers and returns a parent context for `startActiveSpan` options. Invalid headers yield an empty parent.
 
 ## Metrics
 
