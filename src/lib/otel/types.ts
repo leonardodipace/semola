@@ -1,6 +1,7 @@
 export type OtelOptions = {
   serviceName: string;
   serviceVersion?: string;
+  serviceInstanceId?: string;
   export: OtlpHttpExport;
   sampleRatio?: number;
   enabled?: boolean;
@@ -23,6 +24,13 @@ export type LogSeverity =
   | "ERROR"
   | "FATAL";
 
+export type SpanKind =
+  | "internal"
+  | "server"
+  | "client"
+  | "producer"
+  | "consumer";
+
 export type SpanStatus = {
   code: "UNSET" | "OK" | "ERROR";
   message?: string;
@@ -32,18 +40,22 @@ export type SpanContext = {
   traceId: string;
   spanId: string;
   traceFlags: number;
+  traceState?: string;
+  isRemote?: boolean;
 };
 
 export type TraceCarrier = Headers | Record<string, string>;
 
 export type OtelContext = {
   span: SpanContext | null;
+  baggage?: string;
 };
 
 export type SpanStartOptions = {
   parent?: OtelContext;
   attributes?: AttributeMap;
   startTime?: number;
+  kind?: SpanKind;
 };
 
 export type SpanApi = {
@@ -96,6 +108,7 @@ export type FinishedSpan = {
   parentSpanId?: string;
   name: string;
   kind: number;
+  flags: number;
   startTimeUnixNano: string;
   endTimeUnixNano: string;
   attributes: AttributeMap;
@@ -103,6 +116,7 @@ export type FinishedSpan = {
   status: SpanStatus;
   scopeName: string;
   scopeVersion?: string;
+  traceState?: string;
 };
 
 export type SpanEvent = {
@@ -114,6 +128,7 @@ export type SpanEvent = {
 export type PendingLogRecord = {
   timeUnixNano: string;
   severityText: string;
+  severityNumber?: number;
   body: string;
   attributes: AttributeMap;
   traceId?: string;
@@ -216,11 +231,25 @@ export type SpanState = {
   spanId: string;
   parentSpanId?: string;
   traceFlags: number;
+  traceState?: string;
+  parentIsRemote: boolean;
+  kind: SpanKind;
   dropped: boolean;
   scope: Scope;
   startTimeMs: number;
   initialAttributes?: AttributeMap;
 };
+
+export const SPAN_KIND_CODE = {
+  internal: 1,
+  server: 2,
+  client: 3,
+  producer: 4,
+  consumer: 5,
+} as const;
+
+export const SPAN_FLAGS_CONTEXT_HAS_IS_REMOTE = 0x100;
+export const SPAN_FLAGS_CONTEXT_IS_REMOTE = 0x200;
 
 export type MetricRecorder = {
   recordMetric: (

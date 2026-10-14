@@ -34,7 +34,7 @@ Run fallow with `bunx fallow` (no install or dev dependency needed). Example: `b
 
 - **Zero runtime dependencies** - do not add packages without strong reason.
 - **Imports** - use `.js` extensions in TypeScript imports (`from "./types.js"`).
-- **Module layout** - each package under `src/lib/<name>/` typically has `index.ts`, `types.ts`, `errors.ts`, and colocated `*.test.ts`. Keep `index.ts` a thin barrel when the implementation grows; split by topic (`propagation.ts`, `otel.ts`, `tracer.ts`) rather than one giant file. Prefer few topical files over deep folder trees.
+- **Module layout** - each package under `src/lib/<name>/` typically has `index.ts`, `types.ts`, `errors.ts`, and colocated `*.test.ts`. Keep `index.ts` a thin barrel when the implementation grows; split by topic (`propagation.ts`, `otel.ts`, `tracer.ts`) rather than one giant file. Prefer few topical files over deep folder trees. When split, each implementation file gets a matching `<topic>.test.ts` (`propagation.ts` → `propagation.test.ts`). Keep `index.test.ts` for package-level or cross-cutting coverage. Pure `types.ts` needs no test file.
 - **Package names** - name `semola/<name>` after what the module ships (wire format, domain noun), not a vague umbrella. Prefer `otel` over `observability` when the surface is OTLP-shaped.
 - **Types** - In new or modified library source, define types in `types.ts` and import them from there. Do not introduce inline object types (`const x: { a: string }`, `fn(arg: { a: string })`, inline return shapes) or inline union parameter types used at API boundaries (`carrier: Headers | Record<string, string>` → `TraceCarrier` in `types.ts`). Existing inline shapes may stay until that code is touched. Tests may use inline shapes for fixtures. Do not re-export types from other modules' `types.ts` or `index.ts`; consumers import from the defining file. Same-module barrel re-exports of that module's own public types are fine.
 - **Errors** - use `mightThrow` / `mightThrowSync` from `semola/errors`; define module-specific error classes in `errors.ts`.
@@ -155,6 +155,7 @@ When a module supports multiple adapters (or dialects), keep an **adapter-driven
 ### Testing
 
 - Colocate tests with source (`*.test.ts`).
+- When a package is split into topical modules, give each implementation file its own `<name>.test.ts`. Use `index.test.ts` for cross-cutting package behavior. Extra suites (`adversarial.test.ts`) are fine on top of that.
 - Clear test names describing behavior.
 - Simple assertions without chains.
 

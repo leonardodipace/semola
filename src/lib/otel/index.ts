@@ -9,6 +9,7 @@ export type {
   OtelOptions,
   OtlpHttpExport,
   SpanContext,
+  SpanKind,
   SpanStatus,
   TraceCarrier,
 } from "./types.js";

@@ -1,3 +1,4 @@
+import { InvalidOptionsError } from "./errors.js";
 import type {
   AttributeMap,
   InstrumentHandle,
@@ -55,6 +56,16 @@ export class Counter extends MetricInstrument {
   }
 
   public add(value: number, attributes?: AttributeMap) {
+    if (!Number.isFinite(value)) {
+      throw new InvalidOptionsError(
+        "Counter.add value must be a finite number",
+      );
+    }
+
+    if (value < 0) {
+      throw new InvalidOptionsError("Counter.add value must be non-negative");
+    }
+
     this.write(value, attributes);
   }
 }

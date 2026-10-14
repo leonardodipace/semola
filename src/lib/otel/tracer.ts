@@ -13,7 +13,12 @@ import type {
   SpanStatus,
   TraceHost,
 } from "./types.js";
-import { TRACE_FLAG_SAMPLED } from "./types.js";
+import {
+  SPAN_FLAGS_CONTEXT_HAS_IS_REMOTE,
+  SPAN_FLAGS_CONTEXT_IS_REMOTE,
+  SPAN_KIND_CODE,
+  TRACE_FLAG_SAMPLED,
+} from "./types.js";
 import {
   randomHex,
   SPAN_ID_BYTES,
@@ -21,7 +26,16 @@ import {
   timeUnixNanoString,
 } from "./util.js";
 
-const SPAN_KIND_INTERNAL = 1;
+const spanFlags = (traceFlags: number, parentIsRemote: boolean) => {
+  let flags = traceFlags & 0xff;
+  flags |= SPAN_FLAGS_CONTEXT_HAS_IS_REMOTE;
+
+  if (parentIsRemote) {
+    flags |= SPAN_FLAGS_CONTEXT_IS_REMOTE;
+  }
+
+  return flags;
+};
 
 export class Tracer {
   public constructor(
@@ -35,10 +49,14 @@ export class Tracer {
 
     let traceId = randomHex(TRACE_ID_BYTES);
     let parentSpanId: string | undefined;
+    let traceState: string | undefined;
+    let parentIsRemote = false;
 
     if (parentSpan) {
       traceId = parentSpan.traceId;
       parentSpanId = parentSpan.spanId;
+      traceState = parentSpan.traceState;
+      parentIsRemote = parentSpan.isRemote === true;
     }
 
     const spanId = randomHex(SPAN_ID_BYTES);
@@ -51,6 +69,7 @@ export class Tracer {
     }
 
     const startMs = options?.startTime ?? Date.now();
+    const kind = options?.kind ?? "internal";
 
     return new Span(this.host, {
       name,
@@ -58,6 +77,9 @@ export class Tracer {
       spanId,
       parentSpanId,
       traceFlags,
+      traceState,
+      parentIsRemote,
+      kind,
       dropped: !sampled,
       scope: this.scope,
       startTimeMs: startMs,
@@ -70,9 +92,11 @@ export class Tracer {
     fn: ActiveSpanCallback<T>,
     options?: SpanStartOptions,
   ): Promise<T> {
+    const parentCtx = options?.parent ?? getActiveContext();
     const span = this.startSpan(name, options);
     const ctx: OtelContext = {
       span: span.context(),
+      baggage: parentCtx.baggage,
     };
 
     return runWithContext(ctx, async () => {
@@ -143,11 +167,17 @@ export class Span {
   }
 
   public context(): SpanContext {
-    return {
+    const ctx: SpanContext = {
       traceId: this.state.traceId,
       spanId: this.state.spanId,
       traceFlags: this.state.traceFlags,
     };
+
+    if (this.state.traceState) {
+      ctx.traceState = this.state.traceState;
+    }
+
+    return ctx;
   }
 
   public end(endTime?: number): void {
@@ -167,7 +197,8 @@ export class Span {
       spanId: this.state.spanId,
       parentSpanId: this.state.parentSpanId,
       name: this.state.name,
-      kind: SPAN_KIND_INTERNAL,
+      kind: SPAN_KIND_CODE[this.state.kind],
+      flags: spanFlags(this.state.traceFlags, this.state.parentIsRemote),
       startTimeUnixNano: timeUnixNanoString(this.state.startTimeMs),
       endTimeUnixNano: timeUnixNanoString(endMs),
       attributes: this.attributes,
@@ -176,6 +207,10 @@ export class Span {
       scopeName: this.state.scope.scopeName,
       scopeVersion: this.state.scope.scopeVersion,
     };
+
+    if (this.state.traceState) {
+      finished.traceState = this.state.traceState;
+    }
 
     this.host.onSpanEnded(finished);
   }

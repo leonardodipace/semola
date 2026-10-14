@@ -16,6 +16,7 @@ import { Otel, inject, extract } from "semola/otel";
 ```typescript
 const otel = new Otel({
   serviceName: "orders",
+  serviceInstanceId: process.env.HOSTNAME,
   export: { type: "otlp-http", url: "http://localhost:4318" },
   sampleRatio: 1,
   enabled: true,
@@ -36,16 +37,27 @@ await tracer.startActiveSpan("charge", async (span) => {
     body: "charged",
     attributes: { orderId },
   });
-});
+}, { kind: "server" });
 
 await otel.shutdown();
 ```
 
 Point `export.url` at an OTLP HTTP receiver (default paths: `/v1/traces`, `/v1/metrics`, `/v1/logs` under that base).
 
+## Multi-replica
+
+Each process owns its own `Otel` instance, batches, and ALS context. That is the correct model for multiple pods or workers.
+
+- Propagate with `inject` / `extract` so child services and replicas continue the same trace.
+- Sampling follows the parent when a context is present, so a sampled decision survives hops.
+- Metrics are cumulative per process. Backends aggregate by resource attributes. Set `serviceInstanceId` (mapped to `service.instance.id`) when you want per-replica series.
+- There is no shared in-memory state across replicas.
+
 ## Traces
 
 `otel.tracer(scopeName)` returns a tracer for that instrumentation scope. Prefer `startActiveSpan` so the span becomes the active context for nested work and for `inject`.
+
+Pass `kind` as `internal` (default), `server`, `client`, `producer`, or `consumer`. Remote parents from `extract` set OTLP span `flags` so UIs can mark the parent edge as remote.
 
 ```typescript
 await tracer.startActiveSpan("work", async (span) => {
@@ -66,7 +78,7 @@ await tracer.startActiveSpan("risky", async (span) => {
 
     throw err;
   }
-});
+}, { kind: "client" });
 ```
 
 Manual spans (no active context switch):
@@ -86,13 +98,13 @@ await tracer.startActiveSpan(
   async (span) => {
     /* ... */
   },
-  { parent },
+  { parent, kind: "server" },
 );
 ```
 
 ## Propagation
 
-`inject` writes W3C `traceparent` from the current async context into a `Headers` instance or a plain record.
+`inject` writes W3C `traceparent`, and when present `tracestate` and `baggage`, from the current async context into a `Headers` instance or a plain record. `tracestate` and `baggage` are opaque strings passed through.
 
 ```typescript
 const headers: Record<string, string> = {};
@@ -100,11 +112,11 @@ inject(headers);
 await fetch(upstream, { headers });
 ```
 
-`extract` reads W3C `traceparent` from incoming headers and returns a parent context for `startActiveSpan` options. Invalid headers yield an empty parent.
+`extract` reads those headers and returns a parent context for `startActiveSpan` options. Invalid `traceparent` values yield an empty span parent (baggage alone can still come through). Plain-record keys are matched case-insensitively.
 
 ## Metrics
 
-Counters, up-down counters, and histograms. Create them on a meter, then call `add` or `record`.
+Counters, up-down counters, and histograms. Create them on a meter, then call `add` or `record`. Counters only accept finite non-negative values (monotonic OTLP sums). Use an up-down counter when the value can go down.
 
 ```typescript
 const meter = otel.meter("checkout");
@@ -125,7 +137,7 @@ Histograms use fixed explicit bucket bounds (`HISTOGRAM_EXPLICIT_BOUNDS`, export
 
 ## Logs
 
-Loggers are scope-named emitters. Records carry a severity text (`TRACE` through `FATAL`, or any string), body, and attributes. They export as OTLP log records and share the trace context active when `emit` runs.
+Loggers are scope-named emitters. Records carry a severity text (`TRACE` through `FATAL`, or any string), body, and attributes. Known severity texts also set OTLP `severityNumber` (`TRACE=1`, `DEBUG=5`, `INFO=9`, `WARN=13`, `ERROR=17`, `FATAL=21`). They export as OTLP log records and share the trace context active when `emit` runs.
 
 ```typescript
 otel.logger("checkout").emit({
@@ -151,23 +163,35 @@ const otel = new Otel({
 });
 ```
 
-## Shutdown
+## Shutdown and export failures
 
-Call `shutdown()` before exit so batches flush and the periodic timer stops. A second `shutdown()` is a no-op. After shutdown, recording behaves like `enabled: false`.
+Call `shutdown()` before exit so batches flush and the periodic timer stops. A successful second `shutdown()` is a no-op. After a successful shutdown, recording behaves like `enabled: false`.
+
+Each OTLP POST retries up to three times on network errors, `429`, and `5xx`, with short backoff (about 100 ms total across attempts). `shutdown()` and `flushAll()` still reject with `ExportError` when all attempts fail. Failed trace and log batches are put back for the next flush. Metrics stay in the cumulative registry and are sent again. If `shutdown()` rejects, call it again after the collector recovers. The timer is already cleared, so only an explicit `flushAll()` or another `shutdown()` retries.
+
+Periodic flush failures call `onExportError` (they do not rethrow). Those batches are also re-queued for the next interval.
 
 ```typescript
-await otel.shutdown();
+try {
+  await otel.shutdown();
+} catch (error) {
+  // log ExportError, then retry shutdown or flushAll when the collector is up
+  throw error;
+}
 ```
+
+Point `export.url` at the OTLP base (for example `http://localhost:4318`), not a full `/v1/traces` path. The client appends `/v1/traces`, `/v1/metrics`, and `/v1/logs`.
 
 ## Options (summary)
 
 | Option | Role |
 |--------|------|
 | `serviceName` | Required resource `service.name` |
+| `serviceInstanceId` | Optional resource `service.instance.id` (use per replica) |
 | `export` | `{ type: "otlp-http", url, headers? }` base URL for OTLP HTTP |
 | `sampleRatio` | `0..1`, default `1` |
 | `enabled` | When `false`, full no-op |
-| `flushIntervalMs` | Batch flush period (default 5000 ms) |
+| `flushIntervalMs` | Batch flush period in ms, minimum `1` (default 5000) |
 | `serviceVersion` | Optional resource attribute |
 | `fetch` | Optional `fetch` override for tests or proxies |
 | `onExportError` | Called when a periodic flush fails (does not rethrow) |

@@ -20,8 +20,6 @@ export const randomHex = (byteLength: number) => {
   return hex;
 };
 
-// OTLP wants Unix epoch nanos. Bun.nanoseconds / hrtime are monotonic only;
-// Number cannot hold ms * 1e6 past MAX_SAFE_INTEGER, so split via BigInt.
 export const timeUnixNanoString = (ms?: number) => {
   const millis = ms ?? Date.now();
   const whole = Math.trunc(millis);

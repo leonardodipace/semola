@@ -54,6 +54,7 @@ export class Otel {
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private flushIntervalMs: number;
   private onExportError: ((error: Error) => void) | undefined;
+  private flushChain: Promise<void> = Promise.resolve();
 
   public constructor(options: OtelOptions) {
     if (!options.serviceName.trim()) {
@@ -74,10 +75,17 @@ export class Otel {
       throw new InvalidOptionsError("sampleRatio must be between 0 and 1");
     }
 
+    const flushIntervalMs =
+      options.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS;
+
+    if (flushIntervalMs < 1) {
+      throw new InvalidOptionsError("flushIntervalMs must be at least 1");
+    }
+
     this.sampleRatio = ratio;
     this.exportOptions = options.export;
     this.fetchImpl = options.fetch ?? fetch;
-    this.flushIntervalMs = options.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS;
+    this.flushIntervalMs = flushIntervalMs;
     this.onExportError = options.onExportError;
 
     const attributes: AttributeMap = {
@@ -86,6 +94,10 @@ export class Otel {
 
     if (options.serviceVersion) {
       attributes["service.version"] = options.serviceVersion;
+    }
+
+    if (options.serviceInstanceId) {
+      attributes["service.instance.id"] = options.serviceInstanceId;
     }
 
     this.resource = { attributes };
@@ -127,18 +139,18 @@ export class Otel {
       return;
     }
 
-    this.shutDown = true;
-
     if (this.flushTimer) {
       clearInterval(this.flushTimer);
       this.flushTimer = null;
     }
 
     if (!this.enabled) {
+      this.shutDown = true;
       return;
     }
 
     await this.flushAll();
+    this.shutDown = true;
   }
 
   public runWithContext<T>(ctx: OtelContext, fn: () => T): T {
@@ -229,7 +241,16 @@ export class Otel {
       return;
     }
 
-    await Promise.all([this.flushTracesAndLogs(), this.flushMetrics()]);
+    const run = this.flushChain.then(async () => {
+      await Promise.all([this.flushTracesAndLogs(), this.flushMetrics()]);
+    });
+
+    this.flushChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+
+    await run;
   }
 
   private canRecord(): boolean {
@@ -322,6 +343,8 @@ export class Otel {
 
     const headers = this.exportOptions.headers;
     let exportError: ExportError | null = null;
+    let tracesFailed = false;
+    let logsFailed = false;
 
     if (spans.length > 0) {
       const scopeSpans = groupSpansByScope(spans);
@@ -339,6 +362,7 @@ export class Otel {
 
       if (error) {
         exportError = new ExportError(error.message);
+        tracesFailed = true;
       }
     }
 
@@ -357,10 +381,20 @@ export class Otel {
       );
 
       if (error) {
+        logsFailed = true;
+
         if (!exportError) {
           exportError = new ExportError(error.message);
         }
       }
+    }
+
+    if (tracesFailed) {
+      this.spanBatch = spans.concat(this.spanBatch);
+    }
+
+    if (logsFailed) {
+      this.logBatch = logs.concat(this.logBatch);
     }
 
     if (exportError) {

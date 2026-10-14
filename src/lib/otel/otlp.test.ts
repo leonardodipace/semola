@@ -31,6 +31,7 @@ const sampleSpan = (overrides: Partial<FinishedSpan> = {}): FinishedSpan => ({
   parentSpanId: "c".repeat(16),
   name: "op",
   kind: 1,
+  flags: 0x100,
   startTimeUnixNano: "1",
   endTimeUnixNano: "2",
   attributes: { "http.method": "GET", retry: false, count: 3 },
@@ -89,6 +90,12 @@ describe("otlp encodeSpan and traces export", () => {
     expect(encoded.parentSpanId).toBe("c".repeat(16));
     expect(encoded.status).toEqual({ code: 2, message: "failed" });
     expect((encoded.events as unknown[]).length).toBe(1);
+    expect(encoded.flags).toBe(0x100);
+  });
+
+  test("includes traceState when present", () => {
+    const encoded = encodeSpan(sampleSpan({ traceState: "vendor=1" }));
+    expect(encoded.traceState).toBe("vendor=1");
   });
 
   test("omits parent and status message when absent", () => {
@@ -130,6 +137,7 @@ describe("otlp encode logs", () => {
     const record: PendingLogRecord = {
       timeUnixNano: "10",
       severityText: "INFO",
+      severityNumber: 9,
       body: "hi",
       attributes: { k: "v" },
       traceId: "a".repeat(32),
@@ -140,6 +148,7 @@ describe("otlp encode logs", () => {
     const encoded = encodeLogRecord(record);
     expect(encoded.traceId).toBe("a".repeat(32));
     expect(encoded.spanId).toBe("b".repeat(16));
+    expect(encoded.severityNumber).toBe(9);
     expect(encoded.body).toEqual({ stringValue: "hi" });
   });
 
@@ -298,8 +307,11 @@ describe("otlpPost", () => {
   });
 
   test("throws on non-2xx", async () => {
-    const fetchImpl = (async () =>
-      new Response(null, { status: 503 })) as unknown as typeof fetch;
+    let attempts = 0;
+    const fetchImpl = (async () => {
+      attempts += 1;
+      return new Response(null, { status: 503 });
+    }) as unknown as typeof fetch;
 
     await expect(
       otlpPost({
@@ -309,6 +321,49 @@ describe("otlpPost", () => {
         fetch: fetchImpl,
       }),
     ).rejects.toThrow("OTLP export failed with status 503");
+
+    expect(attempts).toBe(3);
+  });
+
+  test("does not retry client errors", async () => {
+    let attempts = 0;
+    const fetchImpl = (async () => {
+      attempts += 1;
+      return new Response(null, { status: 400 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      otlpPost({
+        baseUrl: "http://collector:4318",
+        path: "/v1/logs",
+        body: {},
+        fetch: fetchImpl,
+      }),
+    ).rejects.toThrow("OTLP export failed with status 400");
+
+    expect(attempts).toBe(1);
+  });
+
+  test("retries then succeeds", async () => {
+    let attempts = 0;
+    const fetchImpl = (async () => {
+      attempts += 1;
+
+      if (attempts < 2) {
+        return new Response(null, { status: 503 });
+      }
+
+      return new Response(null, { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await otlpPost({
+      baseUrl: "http://collector:4318",
+      path: "/v1/traces",
+      body: {},
+      fetch: fetchImpl,
+    });
+
+    expect(attempts).toBe(2);
   });
 
   test("accepts 204 no content", async () => {

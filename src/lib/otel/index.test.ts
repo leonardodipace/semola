@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ExportError, InvalidOptionsError } from "./errors.js";
 import { extract, inject, Otel } from "./index.js";
-import { HISTOGRAM_EXPLICIT_BOUNDS, TRACE_FLAG_SAMPLED } from "./types.js";
+import { HISTOGRAM_EXPLICIT_BOUNDS } from "./types.js";
 
 type FetchCall = {
   url: string;
@@ -78,6 +78,9 @@ const traceSpans = (calls: FetchCall[]) => {
     traceId: string;
     spanId: string;
     parentSpanId?: string;
+    kind?: number;
+    flags?: number;
+    traceState?: string;
     attributes: Array<{ key: string; value: Record<string, unknown> }>;
     events: Array<{ name: string; attributes: unknown[] }>;
     status: { code: number; message?: string };
@@ -129,11 +132,23 @@ describe("Otel constructor", () => {
     }).toThrow(InvalidOptionsError);
   });
 
-  test("includes service.version on resource attributes", async () => {
+  test("rejects flushIntervalMs below 1", () => {
+    const { fetch } = createMockFetch();
+
+    expect(() => {
+      new Otel({
+        ...baseOptions(fetch),
+        flushIntervalMs: 0,
+      });
+    }).toThrow(InvalidOptionsError);
+  });
+
+  test("includes service.version and service.instance.id on resource", async () => {
     const { fetch, calls } = createMockFetch();
     const otel = new Otel({
       ...baseOptions(fetch),
       serviceVersion: "1.2.3",
+      serviceInstanceId: "pod-a",
     });
 
     await otel.tracer("app").startActiveSpan("v", async () => {});
@@ -153,6 +168,10 @@ describe("Otel constructor", () => {
     expect(
       attrs.find((attr) => attr.key === "service.version")?.value.stringValue,
     ).toBe("1.2.3");
+    expect(
+      attrs.find((attr) => attr.key === "service.instance.id")?.value
+        .stringValue,
+    ).toBe("pod-a");
   });
 });
 
@@ -270,6 +289,27 @@ describe("Otel traces", () => {
     expect(span.endTimeUnixNano.endsWith("250000")).toBe(true);
   });
 
+  test("exports span kind and remote parent flags", async () => {
+    const { fetch, calls } = createMockFetch();
+    const otel = new Otel(baseOptions(fetch));
+    const parent = extract({
+      traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
+    });
+
+    await otel.tracer("app").startActiveSpan("http", async () => {}, {
+      parent,
+      kind: "server",
+    });
+
+    await otel.shutdown();
+
+    const spans = traceSpans(calls);
+    const flags = spans[0]?.flags ?? 0;
+    expect(spans[0]?.kind).toBe(2);
+    expect(flags & 0x100).toBe(0x100);
+    expect(flags & 0x200).toBe(0x200);
+  });
+
   test("groups spans by instrumentation scope", async () => {
     const { fetch, calls } = createMockFetch();
     const otel = new Otel(baseOptions(fetch));
@@ -379,17 +419,21 @@ describe("Otel sampling", () => {
     const { fetch, calls } = createMockFetch();
     const otel = new Otel({
       ...baseOptions(fetch),
-      sampleRatio: 0,
+      sampleRatio: 1,
     });
 
-    const root = otel.tracer("app").startSpan("root");
-    expect(root.context().traceFlags & TRACE_FLAG_SAMPLED).toBe(0);
-
-    await otel.tracer("app").startActiveSpan("child", async () => {}, {
-      parent: { span: root.context() },
+    const parent = extract({
+      traceparent: `00-${"e".repeat(32)}-${"f".repeat(16)}-00`,
     });
 
-    root.end();
+    await otel.tracer("app").startActiveSpan(
+      "root",
+      async () => {
+        await otel.tracer("app").startActiveSpan("child", async () => {});
+      },
+      { parent },
+    );
+
     await otel.shutdown();
     expect(calls.filter((call) => call.url.endsWith("/v1/traces")).length).toBe(
       0,
@@ -474,6 +518,21 @@ describe("Otel metrics", () => {
     ).toBe(true);
   });
 
+  test("rejects negative and non-finite Counter.add values", async () => {
+    const { fetch } = createMockFetch();
+    const otel = new Otel(baseOptions(fetch));
+    const counter = otel.meter("m").createCounter("hits");
+
+    expect(() => counter.add(-1)).toThrow(InvalidOptionsError);
+    expect(() => counter.add(Number.NaN)).toThrow(InvalidOptionsError);
+    expect(() => counter.add(Number.POSITIVE_INFINITY)).toThrow(
+      InvalidOptionsError,
+    );
+
+    counter.add(0);
+    await otel.shutdown();
+  });
+
   test("keeps cumulative metric values across flushes", async () => {
     const { fetch, calls } = createMockFetch();
     const otel = new Otel(baseOptions(fetch));
@@ -553,6 +612,22 @@ describe("Otel metrics", () => {
 });
 
 describe("Otel logs", () => {
+  test("includes severityNumber for known severity text", async () => {
+    const { fetch, calls } = createMockFetch();
+    const otel = new Otel(baseOptions(fetch));
+
+    otel.logger("app").emit({
+      severityText: "ERROR",
+      body: "boom",
+    });
+    await otel.shutdown();
+
+    const body = parseBody(calls.find((call) => call.url.endsWith("/v1/logs")));
+    expect(body.resourceLogs[0].scopeLogs[0].logRecords[0].severityNumber).toBe(
+      17,
+    );
+  });
+
   test("includes trace correlation from active span", async () => {
     const { fetch, calls } = createMockFetch();
     const otel = new Otel(baseOptions(fetch));
@@ -632,6 +707,32 @@ describe("W3C propagation", () => {
     await otel.shutdown();
   });
 
+  test("propagates tracestate and baggage", async () => {
+    const { fetch, calls } = createMockFetch();
+    const otel = new Otel(baseOptions(fetch));
+    const parent = extract({
+      traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
+      tracestate: "cong=1",
+      baggage: "userId=42",
+    });
+
+    await otel.tracer("app").startActiveSpan(
+      "with-state",
+      async () => {
+        const outbound: Record<string, string> = {};
+        inject(outbound);
+        expect(outbound.tracestate).toBe("cong=1");
+        expect(outbound.baggage).toBe("userId=42");
+      },
+      { parent },
+    );
+
+    await otel.shutdown();
+
+    const spans = traceSpans(calls);
+    expect(spans[0]?.traceState).toBe("cong=1");
+  });
+
   test("inject and extract work with Headers", async () => {
     const { fetch } = createMockFetch();
     const otel = new Otel(baseOptions(fetch));
@@ -654,9 +755,44 @@ describe("W3C propagation", () => {
     expect(carrier.traceparent).toBeUndefined();
   });
 
+  test("inject masks traceFlags to two hex digits", async () => {
+    const { fetch } = createMockFetch();
+    const otel = new Otel(baseOptions(fetch));
+    const carrier: Record<string, string> = {};
+
+    otel.runWithContext(
+      {
+        span: {
+          traceId: "a".repeat(32),
+          spanId: "b".repeat(16),
+          traceFlags: 0x101,
+        },
+      },
+      () => {
+        inject(carrier);
+      },
+    );
+
+    expect(carrier.traceparent).toBe(
+      `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
+    );
+
+    await otel.shutdown();
+  });
+
   test("extract rejects missing header", () => {
     expect(extract({}).span).toBeNull();
     expect(extract(new Headers()).span).toBeNull();
+  });
+
+  test("extract accepts Traceparent key on plain records", () => {
+    const carrier: Record<string, string> = {};
+    carrier.Traceparent = `00-${"a".repeat(32)}-${"b".repeat(16)}-01`;
+
+    const ctx = extract(carrier);
+
+    expect(ctx.span?.traceId).toBe("a".repeat(32));
+    expect(ctx.span?.spanId).toBe("b".repeat(16));
   });
 
   test("extract rejects wrong version", () => {
@@ -803,6 +939,172 @@ describe("Otel lifecycle and export", () => {
     expect(calls.some((call) => call.url.endsWith("/v1/logs"))).toBe(true);
   });
 
+  test("failed export requeues batches and shutdown can retry", async () => {
+    let failTraces = true;
+    const calls: FetchCall[] = [];
+
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      let resolved = "";
+
+      if (typeof url === "string") {
+        resolved = url;
+      } else if (url instanceof URL) {
+        resolved = url.toString();
+      } else {
+        resolved = url.url;
+      }
+
+      calls.push({ url: resolved, init });
+
+      if (failTraces) {
+        if (resolved.endsWith("/v1/traces")) {
+          return new Response(null, { status: 500 });
+        }
+      }
+
+      return new Response(null, { status: 200 });
+    };
+
+    const otel = new Otel(baseOptions(fetchImpl as typeof fetch));
+
+    await otel.tracer("app").startActiveSpan("retry-me", async () => {});
+    await expect(otel.shutdown()).rejects.toBeInstanceOf(ExportError);
+
+    failTraces = false;
+    await otel.shutdown();
+
+    const traceCalls = calls.filter((call) => call.url.endsWith("/v1/traces"));
+    expect(traceCalls.length).toBe(4);
+    expect(traceSpans(calls).some((span) => span.name === "retry-me")).toBe(
+      true,
+    );
+  });
+
+  test("failed logs export requeues and flush can retry", async () => {
+    let failLogs = true;
+    const calls: FetchCall[] = [];
+
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      let resolved = "";
+
+      if (typeof url === "string") {
+        resolved = url;
+      } else if (url instanceof URL) {
+        resolved = url.toString();
+      } else {
+        resolved = url.url;
+      }
+
+      calls.push({ url: resolved, init });
+
+      if (failLogs) {
+        if (resolved.endsWith("/v1/logs")) {
+          return new Response(null, { status: 500 });
+        }
+      }
+
+      return new Response(null, { status: 200 });
+    };
+
+    const otel = new Otel(baseOptions(fetchImpl as typeof fetch));
+    otel.logger("app").emit({ severityText: "WARN", body: "keep-log" });
+
+    await expect(otel.flushAll()).rejects.toBeInstanceOf(ExportError);
+
+    failLogs = false;
+    await otel.flushAll();
+    await otel.shutdown();
+
+    const logCalls = calls.filter((call) => call.url.endsWith("/v1/logs"));
+    expect(logCalls.length).toBe(4);
+
+    const body = parseBody(logCalls[3]);
+    expect(
+      body.resourceLogs[0].scopeLogs[0].logRecords[0].body.stringValue,
+    ).toBe("keep-log");
+  });
+
+  test("failed metrics export retries on later flush", async () => {
+    let failMetrics = true;
+    const calls: FetchCall[] = [];
+
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      let resolved = "";
+
+      if (typeof url === "string") {
+        resolved = url;
+      } else if (url instanceof URL) {
+        resolved = url.toString();
+      } else {
+        resolved = url.url;
+      }
+
+      calls.push({ url: resolved, init });
+
+      if (failMetrics) {
+        if (resolved.endsWith("/v1/metrics")) {
+          return new Response(null, { status: 500 });
+        }
+      }
+
+      return new Response(null, { status: 200 });
+    };
+
+    const otel = new Otel(baseOptions(fetchImpl as typeof fetch));
+    otel.meter("m").createCounter("hits").add(3);
+
+    await expect(otel.flushAll()).rejects.toBeInstanceOf(ExportError);
+
+    failMetrics = false;
+    await otel.flushAll();
+
+    const metricCalls = calls.filter((call) =>
+      call.url.endsWith("/v1/metrics"),
+    );
+    expect(metricCalls.length).toBe(4);
+
+    const body = parseBody(metricCalls[3]);
+    expect(
+      body.resourceMetrics[0].scopeMetrics[0].metrics[0].sum.dataPoints[0]
+        .asDouble,
+    ).toBe(3);
+
+    await otel.shutdown();
+  });
+
+  test("flushAll serializes overlapping calls", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+
+    const fetchImpl = async (
+      _url: string | URL | Request,
+      _init?: RequestInit,
+    ) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await Bun.sleep(40);
+      inFlight -= 1;
+      return new Response(null, { status: 200 });
+    };
+
+    const otel = new Otel(baseOptions(fetchImpl as typeof fetch));
+    otel.meter("m").createCounter("hits").add(1);
+
+    await Promise.all([otel.flushAll(), otel.flushAll()]);
+    await otel.shutdown();
+
+    expect(maxInFlight).toBe(1);
+  });
+
   test("failed metrics export throws ExportError", async () => {
     const { fetch } = createFailingPathFetch("/v1/metrics");
     const otel = new Otel(baseOptions(fetch));
@@ -817,20 +1119,29 @@ describe("Otel lifecycle and export", () => {
     const { fetch } = createFailingPathFetch("/v1/traces");
     const otel = new Otel({
       ...baseOptions(fetch),
-      flushIntervalMs: 20,
+      flushIntervalMs: 30,
       onExportError: (error) => {
         errors.push(error);
       },
     });
 
     await otel.tracer("app").startActiveSpan("x", async () => {});
-    await Bun.sleep(80);
+
+    const deadline = Date.now() + 2000;
+
+    while (errors.length === 0) {
+      if (Date.now() > deadline) {
+        break;
+      }
+
+      await Bun.sleep(20);
+    }
 
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0]).toBeInstanceOf(ExportError);
 
     await otel.shutdown().catch(() => undefined);
-  });
+  }, 10_000);
 
   test("flushAll with empty buffers is a no-op", async () => {
     const { fetch, calls } = createMockFetch();

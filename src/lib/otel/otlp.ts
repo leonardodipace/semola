@@ -1,3 +1,4 @@
+import { mightThrow } from "../errors/index.js";
 import type {
   AttributeMap,
   AttributeValue,
@@ -18,6 +19,7 @@ import type {
 
 const OTLP_FETCH_TIMEOUT_MS = 10_000;
 const OTLP_AGGREGATION_TEMPORALITY_CUMULATIVE = 2;
+const OTLP_RETRY_DELAYS_MS = [0, 25, 75] as const;
 
 const spanStatusCode = (code: SpanStatus["code"]) => {
   if (code === "OK") {
@@ -91,6 +93,7 @@ export const encodeSpan = (span: FinishedSpan) => {
     spanId: span.spanId,
     name: span.name,
     kind: span.kind,
+    flags: span.flags,
     startTimeUnixNano: span.startTimeUnixNano,
     endTimeUnixNano: span.endTimeUnixNano,
     attributes: encodeAttributes(span.attributes),
@@ -106,6 +109,10 @@ export const encodeSpan = (span: FinishedSpan) => {
 
   if (span.parentSpanId) {
     encoded.parentSpanId = span.parentSpanId;
+  }
+
+  if (span.traceState) {
+    encoded.traceState = span.traceState;
   }
 
   if (span.status.message) {
@@ -141,6 +148,10 @@ export const encodeLogRecord = (record: PendingLogRecord) => {
     body: { stringValue: record.body },
     attributes: encodeAttributes(record.attributes),
   };
+
+  if (record.severityNumber !== undefined) {
+    encoded.severityNumber = record.severityNumber;
+  }
 
   if (record.traceId) {
     encoded.traceId = record.traceId;
@@ -237,10 +248,22 @@ export const encodeMetricsExport = (
   };
 };
 
+const shouldRetryStatus = (status: number) => {
+  if (status === 429) {
+    return true;
+  }
+
+  if (status >= 500) {
+    return true;
+  }
+
+  return false;
+};
+
 export const otlpPost = async (options: OtlpPostOptions) => {
   let base = options.baseUrl;
 
-  if (base.endsWith("/")) {
+  while (base.endsWith("/")) {
     base = base.slice(0, -1);
   }
 
@@ -249,16 +272,45 @@ export const otlpPost = async (options: OtlpPostOptions) => {
     ...options.headers,
   };
 
-  const response = await options.fetch(`${base}${options.path}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(options.body),
-    signal: AbortSignal.timeout(OTLP_FETCH_TIMEOUT_MS),
-  });
+  const url = `${base}${options.path}`;
+  const body = JSON.stringify(options.body);
+  let lastError: Error | null = null;
 
-  await response.body?.cancel();
+  for (const delayMs of OTLP_RETRY_DELAYS_MS) {
+    if (delayMs > 0) {
+      await Bun.sleep(delayMs);
+    }
 
-  if (!response.ok) {
-    throw new Error(`OTLP export failed with status ${response.status}`);
+    const [error, response] = await mightThrow(
+      options.fetch(url, {
+        method: "POST",
+        headers,
+        body,
+        signal: AbortSignal.timeout(OTLP_FETCH_TIMEOUT_MS),
+      }),
+    );
+
+    if (error) {
+      lastError = error;
+      continue;
+    }
+
+    await response.body?.cancel();
+
+    if (response.ok) {
+      return;
+    }
+
+    lastError = new Error(`OTLP export failed with status ${response.status}`);
+
+    if (!shouldRetryStatus(response.status)) {
+      throw lastError;
+    }
   }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  throw new Error("OTLP export failed");
 };
