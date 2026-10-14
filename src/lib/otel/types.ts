@@ -34,6 +34,8 @@ export type SpanContext = {
   traceFlags: number;
 };
 
+export type TraceCarrier = Headers | Record<string, string>;
+
 export type OtelContext = {
   span: SpanContext | null;
 };

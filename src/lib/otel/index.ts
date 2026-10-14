@@ -34,6 +34,7 @@ import type {
   SpanState,
   SpanStatus,
   SumMetricBucket,
+  TraceCarrier,
 } from "./types.js";
 import {
   DEFAULT_FLUSH_INTERVAL_MS,
@@ -50,11 +51,16 @@ const NANOS_PER_MILLISECOND = 1_000_000;
 const SAMPLE_RATIO_BUCKETS = 10_000;
 const ZERO_TRACE_ID = "0".repeat(32);
 const ZERO_SPAN_ID = "0".repeat(16);
+/** W3C trace-flags field is always two lowercase hex digits. */
+const TRACE_FLAGS_HEX_WIDTH = 2;
 
 // W3C traceparent: version 00, 32-hex trace id, 16-hex span id, 2-hex flags
 const TRACEPARENT = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/i;
 
-export const inject = (carrier: Headers | Record<string, string>) => {
+const formatTraceFlagsHex = (traceFlags: number) =>
+  traceFlags.toString(16).padStart(TRACE_FLAGS_HEX_WIDTH, "0");
+
+export const inject = (carrier: TraceCarrier) => {
   const ctx = contextAls.getStore();
 
   if (!ctx?.span) {
@@ -62,8 +68,7 @@ export const inject = (carrier: Headers | Record<string, string>) => {
   }
 
   const { traceId, spanId, traceFlags } = ctx.span;
-  const flags = traceFlags.toString(16).padStart(2, "0");
-  const traceparent = `00-${traceId}-${spanId}-${flags}`;
+  const traceparent = `00-${traceId}-${spanId}-${formatTraceFlagsHex(traceFlags)}`;
 
   if (carrier instanceof Headers) {
     carrier.set("traceparent", traceparent);
@@ -73,9 +78,7 @@ export const inject = (carrier: Headers | Record<string, string>) => {
   carrier.traceparent = traceparent;
 };
 
-export const extract = (
-  carrier: Headers | Record<string, string>,
-): OtelContext => {
+export const extract = (carrier: TraceCarrier): OtelContext => {
   let raw: string | null | undefined;
 
   if (carrier instanceof Headers) {
@@ -141,6 +144,8 @@ const randomHex = (byteLength: number) => {
   return hex;
 };
 
+// OTLP wants Unix epoch nanos. Bun.nanoseconds / hrtime are monotonic only;
+// Number cannot hold ms * 1e6 past MAX_SAFE_INTEGER, so split via BigInt.
 const timeUnixNanoString = (ms?: number) => {
   const millis = ms ?? Date.now();
   const whole = Math.trunc(millis);
@@ -985,5 +990,6 @@ export type {
   OtlpHttpExport,
   SpanContext,
   SpanStatus,
+  TraceCarrier,
 } from "./types.js";
 export { HISTOGRAM_EXPLICIT_BOUNDS } from "./types.js";
