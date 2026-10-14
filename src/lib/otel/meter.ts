@@ -1,7 +1,6 @@
 import { InvalidOptionsError } from "./errors.js";
 import type {
   AttributeMap,
-  InstrumentHandle,
   InstrumentKind,
   MetricOptions,
   MetricRecorder,
@@ -13,7 +12,11 @@ const instrumentKey = (scope: Scope, name: string, kind: InstrumentKind) => {
 };
 
 class MetricInstrument {
-  protected handle: InstrumentHandle;
+  protected otel: MetricRecorder;
+  protected scope: Scope;
+  protected name: string;
+  protected kind: InstrumentKind;
+  protected options: MetricOptions;
 
   public constructor(
     otel: MetricRecorder,
@@ -22,25 +25,23 @@ class MetricInstrument {
     kind: InstrumentKind,
     options?: MetricOptions,
   ) {
-    this.handle = {
-      otel,
-      scope,
-      name,
-      kind,
-      options: options ?? {},
-    };
+    this.otel = otel;
+    this.scope = scope;
+    this.name = name;
+    this.kind = kind;
+    this.options = options ?? {};
   }
 
   protected write(value: number, attributes?: AttributeMap) {
-    this.handle.otel.recordMetric(
-      this.handle.scope.scopeName,
-      this.handle.scope.scopeVersion,
-      instrumentKey(this.handle.scope, this.handle.name, this.handle.kind),
-      this.handle.kind,
-      this.handle.name,
+    this.otel.recordMetric(
+      this.scope.scopeName,
+      this.scope.scopeVersion,
+      instrumentKey(this.scope, this.name, this.kind),
+      this.kind,
+      this.name,
       value,
       attributes ?? {},
-      this.handle.options,
+      this.options,
     );
   }
 }

@@ -81,45 +81,32 @@ export const inject = (carrier: TraceCarrier) => {
 export const extract = (carrier: TraceCarrier): OtelContext => {
   const raw = getCarrierValue(carrier, "traceparent");
   const baggage = getCarrierValue(carrier, "baggage");
-  const empty: OtelContext = { span: null };
+  const withoutSpan: OtelContext = { span: null };
 
   if (baggage) {
-    empty.baggage = baggage;
+    withoutSpan.baggage = baggage;
   }
 
   if (!raw) {
-    return empty;
+    return withoutSpan;
   }
 
   const match = TRACEPARENT.exec(raw.trim());
 
   if (!match) {
-    return empty;
+    return withoutSpan;
   }
 
-  const [, traceIdRaw, spanIdRaw, flagsHex] = match;
-
-  if (!traceIdRaw) {
-    return empty;
-  }
-
-  if (!spanIdRaw) {
-    return empty;
-  }
-
-  if (!flagsHex) {
-    return empty;
-  }
-
+  const [, traceIdRaw = "", spanIdRaw = "", flagsHex = ""] = match;
   const traceId = traceIdRaw.toLowerCase();
   const spanId = spanIdRaw.toLowerCase();
 
   if (traceId === ZERO_TRACE_ID) {
-    return empty;
+    return withoutSpan;
   }
 
   if (spanId === ZERO_SPAN_ID) {
-    return empty;
+    return withoutSpan;
   }
 
   const traceState = getCarrierValue(carrier, "tracestate");

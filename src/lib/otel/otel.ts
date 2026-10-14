@@ -23,9 +23,6 @@ import type {
   RegisteredInstrument,
   Resource,
   Scope,
-  ScopeLogs,
-  ScopeMetrics,
-  ScopeSpans,
   SpanContext,
   SumMetricBucket,
 } from "./types.js";
@@ -290,10 +287,7 @@ export class Otel {
       await Promise.all([this.flushTracesAndLogs(), this.flushMetrics()]);
     });
 
-    this.flushChain = run.then(
-      () => undefined,
-      () => undefined,
-    );
+    this.flushChain = settleFlushChain(run);
 
     await run;
   }
@@ -392,7 +386,13 @@ export class Otel {
     let logsFailed = false;
 
     if (spans.length > 0) {
-      const scopeSpans = groupSpansByScope(spans);
+      const scopeSpans = groupByScope(
+        spans,
+        (scope) => ({ scope, spans: [] as FinishedSpan[] }),
+        (group, span) => {
+          group.spans.push(span);
+        },
+      );
       const body = encodeTracesExport(this.resource, scopeSpans);
 
       const [error] = await mightThrow(
@@ -412,7 +412,13 @@ export class Otel {
     }
 
     if (logs.length > 0) {
-      const scopeLogs = groupLogsByScope(logs);
+      const scopeLogs = groupByScope(
+        logs,
+        (scope) => ({ scope, logRecords: [] as PendingLogRecord[] }),
+        (group, record) => {
+          group.logRecords.push(record);
+        },
+      );
       const body = encodeLogsExport(this.resource, scopeLogs);
 
       const [error] = await mightThrow(
@@ -473,7 +479,13 @@ export class Otel {
       return;
     }
 
-    const scopeMetrics = groupMetricsByScope(points);
+    const scopeMetrics = groupByScope(
+      points,
+      (scope) => ({ scope, metrics: [] as MetricPoint[] }),
+      (group, metric) => {
+        group.metrics.push(metric);
+      },
+    );
     const body = encodeMetricsExport(this.resource, scopeMetrics);
 
     const [error] = await mightThrow(
@@ -492,71 +504,41 @@ export class Otel {
   }
 }
 
+const settleFlushChain = (run: Promise<void>) => {
+  return run.then(
+    () => undefined,
+    () => undefined,
+  );
+};
+
 const scopeKey = (scope: Scope) => {
   return `${scope.scopeName}\0${scope.scopeVersion ?? ""}`;
 };
 
-const groupSpansByScope = (spans: FinishedSpan[]): ScopeSpans[] => {
-  const map = new Map<string, ScopeSpans>();
+const groupByScope = <
+  T extends { scopeName: string; scopeVersion?: string },
+  G,
+>(
+  items: T[],
+  createGroup: (scope: Scope) => G,
+  append: (group: G, item: T) => void,
+): G[] => {
+  const map = new Map<string, G>();
 
-  for (const span of spans) {
+  for (const item of items) {
     const scope: Scope = {
-      scopeName: span.scopeName,
-      scopeVersion: span.scopeVersion,
+      scopeName: item.scopeName,
+      scopeVersion: item.scopeVersion,
     };
     const key = scopeKey(scope);
     let group = map.get(key);
 
     if (!group) {
-      group = { scope, spans: [] };
+      group = createGroup(scope);
       map.set(key, group);
     }
 
-    group.spans.push(span);
-  }
-
-  return [...map.values()];
-};
-
-const groupLogsByScope = (logs: PendingLogRecord[]): ScopeLogs[] => {
-  const map = new Map<string, ScopeLogs>();
-
-  for (const record of logs) {
-    const scope: Scope = {
-      scopeName: record.scopeName,
-      scopeVersion: record.scopeVersion,
-    };
-    const key = scopeKey(scope);
-    let group = map.get(key);
-
-    if (!group) {
-      group = { scope, logRecords: [] };
-      map.set(key, group);
-    }
-
-    group.logRecords.push(record);
-  }
-
-  return [...map.values()];
-};
-
-const groupMetricsByScope = (metrics: MetricPoint[]): ScopeMetrics[] => {
-  const map = new Map<string, ScopeMetrics>();
-
-  for (const metric of metrics) {
-    const scope: Scope = {
-      scopeName: metric.scopeName,
-      scopeVersion: metric.scopeVersion,
-    };
-    const key = scopeKey(scope);
-    let group = map.get(key);
-
-    if (!group) {
-      group = { scope, metrics: [] };
-      map.set(key, group);
-    }
-
-    group.metrics.push(metric);
+    append(group, item);
   }
 
   return [...map.values()];

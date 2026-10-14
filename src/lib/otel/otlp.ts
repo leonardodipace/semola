@@ -8,6 +8,7 @@ import type {
   OtlpInstrumentationScope,
   OtlpKeyValue,
   OtlpPostOptions,
+  OtlpSpanStatus,
   PendingLogRecord,
   Resource,
   Scope,
@@ -75,7 +76,7 @@ export const encodeAttributes = (map: AttributeMap): OtlpKeyValue[] => {
   return pairs;
 };
 
-export const encodeScope = (scope: Scope): OtlpInstrumentationScope => {
+const encodeScope = (scope: Scope): OtlpInstrumentationScope => {
   const encoded: OtlpInstrumentationScope = {
     name: scope.scopeName,
   };
@@ -88,6 +89,14 @@ export const encodeScope = (scope: Scope): OtlpInstrumentationScope => {
 };
 
 export const encodeSpan = (span: FinishedSpan) => {
+  const status: OtlpSpanStatus = {
+    code: spanStatusCode(span.status.code),
+  };
+
+  if (span.status.message) {
+    status.message = span.status.message;
+  }
+
   const encoded: Record<string, unknown> = {
     traceId: span.traceId,
     spanId: span.spanId,
@@ -102,9 +111,7 @@ export const encodeSpan = (span: FinishedSpan) => {
       timeUnixNano: event.timeUnixNano,
       attributes: encodeAttributes(event.attributes ?? {}),
     })),
-    status: {
-      code: spanStatusCode(span.status.code),
-    },
+    status,
   };
 
   if (span.parentSpanId) {
@@ -113,10 +120,6 @@ export const encodeSpan = (span: FinishedSpan) => {
 
   if (span.traceState) {
     encoded.traceState = span.traceState;
-  }
-
-  if (span.status.message) {
-    (encoded.status as Record<string, unknown>).message = span.status.message;
   }
 
   return encoded;
@@ -260,6 +263,10 @@ const shouldRetryStatus = (status: number) => {
   return false;
 };
 
+const discardResponseBody = async (response: Response) => {
+  await response.body?.cancel();
+};
+
 export const otlpPost = async (options: OtlpPostOptions) => {
   let base = options.baseUrl;
 
@@ -295,7 +302,7 @@ export const otlpPost = async (options: OtlpPostOptions) => {
       continue;
     }
 
-    await response.body?.cancel();
+    await discardResponseBody(response);
 
     if (response.ok) {
       return;

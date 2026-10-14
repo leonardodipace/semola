@@ -184,6 +184,11 @@ export type OtlpPostOptions = {
   headers?: Record<string, string>;
 };
 
+export type OtlpSpanStatus = {
+  code: number;
+  message?: string;
+};
+
 export type OtlpKeyValue = {
   key: string;
   value: OtlpAnyValue;
@@ -276,14 +281,6 @@ export type TraceHost = {
 
 export type LogHost = {
   onLogEmitted: (record: PendingLogRecord) => void;
-};
-
-export type InstrumentHandle = {
-  otel: MetricRecorder;
-  scope: Scope;
-  name: string;
-  kind: InstrumentKind;
-  options: MetricOptions;
 };
 
 export type RegisteredInstrument = {
