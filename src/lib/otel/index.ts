@@ -5,11 +5,18 @@ export { Otel } from "./otel.js";
 export { extract, inject } from "./propagation.js";
 export { Span, Tracer } from "./tracer.js";
 export type {
+  ActiveSpanCallback,
+  AttributeMap,
+  AttributeValue,
+  LogRecord,
   LogSeverity,
+  MetricOptions,
+  OtelContext,
   OtelOptions,
   OtlpHttpExport,
   SpanContext,
   SpanKind,
+  SpanStartOptions,
   SpanStatus,
   TraceCarrier,
 } from "./types.js";
