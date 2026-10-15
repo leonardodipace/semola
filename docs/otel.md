@@ -169,7 +169,7 @@ Call `shutdown()` before exit so batches flush and the periodic timer stops. A s
 
 Each OTLP POST retries up to three times on network errors and OTLP retryable statuses (`429`, `502`, `503`, `504`), with short backoff (about 100 ms total across attempts). Other `4xx` and `5xx` responses fail without retry. A `200` body with OTLP `partialSuccess` and a nonzero rejected count fails without retrying accepted records.
 
-`shutdown()` also retries the full flush until it succeeds or `shutdownTimeoutMs` elapses (default 10 seconds), with backoff between flush attempts. In-flight OTLP requests and their retries are cancelled when that wall-clock budget ends. Call `await otel.shutdown()` at process exit and you usually do not need your own retry loop. If the budget is exhausted it rejects with `ExportError`. Retryable failures re-queue batches (capped by `maxQueueSize`, default 2048, dropping oldest) so a later `shutdown()` or `flushAll()` can still deliver them. Non-retryable failures drop that batch.
+`shutdown()` runs one flush under `shutdownTimeoutMs` (default 10 seconds). In-flight OTLP requests and their retries cancel when that budget ends. If the flush fails it rejects with `ExportError` and leaves the instance open so a later `shutdown()` or `flushAll()` can try again. Retryable failures re-queue batches (capped by `maxQueueSize`, default 2048, dropping oldest). Non-retryable failures drop that batch.
 
 Periodic flush failures call `onExportError` (they do not rethrow). Retryable batches are re-queued for the next interval.
 
@@ -189,7 +189,7 @@ Point `export.url` at the OTLP base (for example `http://localhost:4318`), not a
 | `sampleRatio` | `0..1`, default `1` |
 | `enabled` | When `false`, full no-op |
 | `flushIntervalMs` | Batch flush period in ms, minimum `1` (default 5000) |
-| `shutdownTimeoutMs` | Wall-clock budget for shutdown flush retries and in-flight export cancellation (default 10000, minimum 0) |
+| `shutdownTimeoutMs` | Wall-clock budget for the shutdown flush and in-flight export cancellation (default 10000, minimum 0) |
 | `maxQueueSize` | Max pending spans or logs per signal (default 2048, finite positive integer). Oldest drop first |
 | `serviceVersion` | Optional resource attribute |
 | `fetch` | Optional `fetch` override for tests or proxies |

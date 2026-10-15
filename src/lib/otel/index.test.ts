@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ExportError, InvalidOptionsError } from "./errors.js";
-import { extract, inject, Otel } from "./index.js";
+import { extract, inject, Otel, runWithContext } from "./index.js";
 import {
   baseOptions,
   createFailingPathFetch,
@@ -646,7 +646,7 @@ describe("W3C propagation", () => {
     const otel = new Otel(baseOptions(fetch));
     const carrier: Record<string, string> = {};
 
-    otel.runWithContext(
+    runWithContext(
       {
         span: {
           traceId: "a".repeat(32),

@@ -8,7 +8,7 @@ import {
   encodeTracesExport,
   otlpPost,
 } from "./otlp.js";
-import { getActiveContext, runWithContext } from "./propagation.js";
+import { getActiveContext } from "./propagation.js";
 import { Tracer } from "./tracer.js";
 import type {
   AttributeMap,
@@ -17,7 +17,6 @@ import type {
   InstrumentKind,
   MetricOptions,
   MetricPoint,
-  OtelContext,
   OtelOptions,
   PendingLogRecord,
   RegisteredInstrument,
@@ -31,7 +30,6 @@ import {
   DEFAULT_MAX_QUEUE_SIZE,
   DEFAULT_SHUTDOWN_TIMEOUT_MS,
   HISTOGRAM_EXPLICIT_BOUNDS,
-  SHUTDOWN_RETRY_DELAYS_MS,
   TRACE_FLAG_SAMPLED,
 } from "./types.js";
 import {
@@ -93,13 +91,7 @@ export class Otel {
 
     const maxQueueSize = options.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE;
 
-    if (!Number.isInteger(maxQueueSize)) {
-      throw new InvalidOptionsError(
-        "maxQueueSize must be a finite positive integer",
-      );
-    }
-
-    if (maxQueueSize < 1) {
+    if (!Number.isInteger(maxQueueSize) || maxQueueSize < 1) {
       throw new InvalidOptionsError(
         "maxQueueSize must be a finite positive integer",
       );
@@ -174,53 +166,23 @@ export class Otel {
       return;
     }
 
-    const deadline = Date.now() + this.shutdownTimeoutMs;
-    let lastError: Error | null = null;
-    let attempt = 0;
+    const signal =
+      this.shutdownTimeoutMs > 0
+        ? AbortSignal.timeout(this.shutdownTimeoutMs)
+        : undefined;
 
-    while (true) {
-      const remaining = deadline - Date.now();
-      const signal = remaining > 0 ? AbortSignal.timeout(remaining) : undefined;
+    const [error] = await mightThrow(this.flushAll(signal));
 
-      const [error] = await mightThrow(this.flushAll(signal));
-
-      if (!error) {
-        this.shutDown = true;
-        return;
-      }
-
-      if (error instanceof ExportError) {
-        lastError = error;
-      } else {
-        lastError = new ExportError(error.message);
-      }
-
-      const afterFlush = deadline - Date.now();
-
-      if (afterFlush <= 0) {
-        break;
-      }
-
-      const delayIndex = Math.min(attempt, SHUTDOWN_RETRY_DELAYS_MS.length - 1);
-      const delay = SHUTDOWN_RETRY_DELAYS_MS[delayIndex] ?? 0;
-      attempt += 1;
-
-      await Bun.sleep(Math.min(delay, afterFlush));
+    if (!error) {
+      this.shutDown = true;
+      return;
     }
 
-    if (lastError) {
-      throw lastError;
+    if (error instanceof ExportError) {
+      throw error;
     }
 
-    throw new ExportError("shutdown flush failed");
-  }
-
-  public runWithContext<T>(ctx: OtelContext, fn: () => T): T {
-    return runWithContext(ctx, fn);
-  }
-
-  public getActiveContext(): OtelContext {
-    return getActiveContext();
+    throw new ExportError(error.message);
   }
 
   public shouldRecordTrace(
@@ -635,7 +597,6 @@ const snapshotHistograms = (
       attributes: bucket.attributes,
       startTimeUnixNano: bucket.startTimeUnixNano,
       timeUnixNano: now,
-      value: bucket.sum,
       count: bucket.count,
       sum: bucket.sum,
       min: bucket.min,

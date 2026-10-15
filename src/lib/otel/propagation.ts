@@ -59,9 +59,9 @@ export const inject = (carrier: TraceCarrier) => {
   }
 
   const { traceId, spanId, traceFlags, traceState } = ctx.span;
-  const flagsHex = Buffer.from([traceFlags & TRACE_FLAGS_BYTE_MASK]).toString(
-    "hex",
-  );
+  const flagsHex = (traceFlags & TRACE_FLAGS_BYTE_MASK)
+    .toString(16)
+    .padStart(2, "0");
   const traceparent = `00-${traceId}-${spanId}-${flagsHex}`;
 
   setCarrierValue(carrier, "traceparent", traceparent);

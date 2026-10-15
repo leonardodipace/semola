@@ -178,37 +178,6 @@ describe("Otel lifecycle", () => {
     ).toBeGreaterThan(1);
   });
 
-  test("shutdown retries within timeout until collector recovers", async () => {
-    let attempts = 0;
-
-    const fetchImpl = async (
-      url: string | URL | Request,
-      _init?: RequestInit,
-    ) => {
-      const resolved = resolveUrl(url);
-
-      if (resolved.endsWith("/v1/traces")) {
-        attempts += 1;
-
-        if (attempts < 4) {
-          return new Response(null, { status: 503 });
-        }
-      }
-
-      return new Response(null, { status: 200 });
-    };
-
-    const otel = new Otel({
-      ...baseOptions(fetchImpl as typeof fetch),
-      shutdownTimeoutMs: 2_000,
-    });
-
-    await otel.tracer("t").startActiveSpan("patient", async () => {});
-    await otel.shutdown();
-
-    expect(attempts).toBeGreaterThanOrEqual(4);
-  });
-
   test("rejects negative shutdownTimeoutMs", () => {
     const { fetch } = createMockFetch();
 

@@ -18,6 +18,7 @@ import type {
   ScopeSpans,
   SpanStatus,
 } from "./types.js";
+import { sortedAttributeEntries } from "./util.js";
 
 const OTLP_FETCH_TIMEOUT_MS = 10_000;
 const OTLP_AGGREGATION_TEMPORALITY_CUMULATIVE = 2;
@@ -26,11 +27,8 @@ const OTLP_PARTIAL_SUCCESS_BODY_LIMIT = 65_536;
 const OTLP_RETRY_STATUSES = new Set([429, 502, 503, 504]);
 const REJECTED_COUNT_KEYS = [
   "rejectedSpans",
-  "rejected_spans",
   "rejectedLogRecords",
-  "rejected_log_records",
   "rejectedDataPoints",
-  "rejected_data_points",
 ] as const;
 
 const spanStatusCode = (code: SpanStatus["code"]) => {
@@ -68,23 +66,10 @@ export const encodeAttributeValue = (value: AttributeValue): OtlpAnyValue => {
 };
 
 export const encodeAttributes = (map: AttributeMap): OtlpKeyValue[] => {
-  const keys = Object.keys(map).sort();
-  const pairs: OtlpKeyValue[] = [];
-
-  for (const key of keys) {
-    const value = map[key];
-
-    if (value === undefined) {
-      continue;
-    }
-
-    pairs.push({
-      key,
-      value: encodeAttributeValue(value),
-    });
-  }
-
-  return pairs;
+  return sortedAttributeEntries(map).map(([key, value]) => ({
+    key,
+    value: encodeAttributeValue(value),
+  }));
 };
 
 const encodeScope = (scope: Scope): OtlpInstrumentationScope => {
@@ -237,7 +222,7 @@ export const encodeMetric = (point: MetricPoint) => {
         attributes: encodeAttributes(dp.attributes),
         startTimeUnixNano: dp.startTimeUnixNano,
         timeUnixNano: dp.timeUnixNano,
-        asDouble: dp.value,
+        asDouble: dp.value ?? 0,
       })),
     },
   };
@@ -263,10 +248,7 @@ export const encodeMetricsExport = (
 };
 
 const joinOtlpUrl = (baseUrl: string, path: string) => {
-  const base = `${baseUrl.replace(/\/+$/, "")}/`;
-  const relative = path.replace(/^\/+/, "");
-
-  return new URL(relative, base).href;
+  return new URL(path, `${baseUrl.replace(/\/+$/, "")}/`).href;
 };
 
 const rejectedCountFromPartial = (partial: object) => {
@@ -357,7 +339,7 @@ const assertNoPartialRejection = async (response: Response) => {
   }
 
   const body = parsed as Record<string, unknown>;
-  const partial = body.partialSuccess ?? body["partial_success"];
+  const partial = body.partialSuccess;
 
   if (typeof partial !== "object") {
     return;
@@ -449,9 +431,5 @@ export const otlpPost = async (options: OtlpPostOptions) => {
     }
   }
 
-  if (lastError) {
-    throw lastError;
-  }
-
-  throw new ExportError("OTLP export failed", true);
+  throw lastError ?? new ExportError("OTLP export failed", true);
 };

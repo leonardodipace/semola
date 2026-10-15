@@ -143,7 +143,7 @@ export type MetricDataPoint = {
   attributes: AttributeMap;
   startTimeUnixNano?: string;
   timeUnixNano: string;
-  value: number;
+  value?: number;
   count?: number;
   sum?: number;
   min?: number;
@@ -218,8 +218,6 @@ export const DEFAULT_FLUSH_INTERVAL_MS = 5000;
 export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
 
 export const DEFAULT_MAX_QUEUE_SIZE = 2048;
-
-export const SHUTDOWN_RETRY_DELAYS_MS = [250, 1000, 2000] as const;
 
 export const TRACE_FLAG_SAMPLED = 0x01;
 

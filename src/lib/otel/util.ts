@@ -23,14 +23,9 @@ export const timeUnixNanoString = (ms?: number) => {
   );
 };
 
-export const attributeKey = (attributes: AttributeMap) => {
+export const sortedAttributeEntries = (attributes: AttributeMap) => {
   const keys = Object.keys(attributes).sort();
-
-  if (keys.length === 0) {
-    return "";
-  }
-
-  const sorted: AttributeMap = {};
+  const entries: [string, NonNullable<AttributeMap[string]>][] = [];
 
   for (const key of keys) {
     const value = attributes[key];
@@ -39,10 +34,20 @@ export const attributeKey = (attributes: AttributeMap) => {
       continue;
     }
 
-    sorted[key] = value;
+    entries.push([key, value]);
   }
 
-  return JSON.stringify(sorted);
+  return entries;
+};
+
+export const attributeKey = (attributes: AttributeMap) => {
+  const entries = sortedAttributeEntries(attributes);
+
+  if (entries.length === 0) {
+    return "";
+  }
+
+  return JSON.stringify(Object.fromEntries(entries));
 };
 
 export const rootTraceSampled = (traceId: string, ratio: number) => {
