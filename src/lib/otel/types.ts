@@ -183,6 +183,7 @@ export type OtlpPostOptions = {
   body: unknown;
   fetch: typeof fetch;
   headers?: Record<string, string>;
+  signal?: AbortSignal;
 };
 
 export type OtlpSpanStatus = {

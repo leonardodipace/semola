@@ -93,8 +93,16 @@ export class Otel {
 
     const maxQueueSize = options.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE;
 
+    if (!Number.isInteger(maxQueueSize)) {
+      throw new InvalidOptionsError(
+        "maxQueueSize must be a finite positive integer",
+      );
+    }
+
     if (maxQueueSize < 1) {
-      throw new InvalidOptionsError("maxQueueSize must be at least 1");
+      throw new InvalidOptionsError(
+        "maxQueueSize must be a finite positive integer",
+      );
     }
 
     this.sampleRatio = ratio;
@@ -171,7 +179,10 @@ export class Otel {
     let attempt = 0;
 
     while (true) {
-      const [error] = await mightThrow(this.flushAll());
+      const remaining = deadline - Date.now();
+      const signal = remaining > 0 ? AbortSignal.timeout(remaining) : undefined;
+
+      const [error] = await mightThrow(this.flushAll(signal));
 
       if (!error) {
         this.shutDown = true;
@@ -184,9 +195,9 @@ export class Otel {
         lastError = new ExportError(error.message);
       }
 
-      const remaining = deadline - Date.now();
+      const afterFlush = deadline - Date.now();
 
-      if (remaining <= 0) {
+      if (afterFlush <= 0) {
         break;
       }
 
@@ -194,7 +205,7 @@ export class Otel {
       const delay = SHUTDOWN_RETRY_DELAYS_MS[delayIndex] ?? 0;
       attempt += 1;
 
-      await Bun.sleep(Math.min(delay, remaining));
+      await Bun.sleep(Math.min(delay, afterFlush));
     }
 
     if (lastError) {
@@ -289,13 +300,30 @@ export class Otel {
     this.addSum(instrument, key, attributes, value, now);
   }
 
-  public async flushAll(): Promise<void> {
+  public async flushAll(signal?: AbortSignal): Promise<void> {
     if (!this.enabled) {
       return;
     }
 
     const run = this.flushChain.then(async () => {
-      await Promise.all([this.flushTracesAndLogs(), this.flushMetrics()]);
+      const results = await Promise.allSettled([
+        this.flushTracesAndLogs(signal),
+        this.flushMetrics(signal),
+      ]);
+
+      for (const result of results) {
+        if (result.status !== "rejected") {
+          continue;
+        }
+
+        const reason = result.reason;
+
+        if (reason instanceof Error) {
+          throw toExportError(reason);
+        }
+
+        throw new ExportError(String(reason));
+      }
     });
 
     this.flushChain = settleFlushChain(run);
@@ -381,7 +409,7 @@ export class Otel {
     }
   }
 
-  private async flushTracesAndLogs(): Promise<void> {
+  private async flushTracesAndLogs(signal?: AbortSignal): Promise<void> {
     const spans = this.spanBatch;
     const logs = this.logBatch;
     this.spanBatch = [];
@@ -413,6 +441,7 @@ export class Otel {
           body,
           fetch: this.fetchImpl,
           headers,
+          signal,
         }),
       );
 
@@ -439,6 +468,7 @@ export class Otel {
           body,
           fetch: this.fetchImpl,
           headers,
+          signal,
         }),
       );
 
@@ -468,7 +498,7 @@ export class Otel {
     }
   }
 
-  private async flushMetrics(): Promise<void> {
+  private async flushMetrics(signal?: AbortSignal): Promise<void> {
     const points: MetricPoint[] = [];
     const now = timeUnixNanoString();
 
@@ -510,6 +540,7 @@ export class Otel {
         body,
         fetch: this.fetchImpl,
         headers: this.exportOptions.headers,
+        signal,
       }),
     );
 

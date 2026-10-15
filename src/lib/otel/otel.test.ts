@@ -54,6 +54,29 @@ describe("Otel constructor", () => {
       new Otel({ ...baseOptions(fetch), flushIntervalMs: 0 });
     }).toThrow(InvalidOptionsError);
   });
+
+  test("rejects non-finite or fractional maxQueueSize", () => {
+    const { fetch } = createMockFetch();
+
+    expect(() => {
+      new Otel({ ...baseOptions(fetch), maxQueueSize: Number.NaN });
+    }).toThrow(InvalidOptionsError);
+
+    expect(() => {
+      new Otel({
+        ...baseOptions(fetch),
+        maxQueueSize: Number.POSITIVE_INFINITY,
+      });
+    }).toThrow(InvalidOptionsError);
+
+    expect(() => {
+      new Otel({ ...baseOptions(fetch), maxQueueSize: 1.5 });
+    }).toThrow(InvalidOptionsError);
+
+    expect(() => {
+      new Otel({ ...baseOptions(fetch), maxQueueSize: 0 });
+    }).toThrow(InvalidOptionsError);
+  });
 });
 
 describe("Otel resource and factories", () => {
@@ -195,6 +218,88 @@ describe("Otel lifecycle", () => {
         shutdownTimeoutMs: -1,
       });
     }).toThrow(InvalidOptionsError);
+  });
+
+  test("shutdown cancels in-flight export within budget", async () => {
+    let sawAbort = false;
+
+    const fetchImpl = async (
+      _url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const signal = init?.signal;
+
+      if (!signal) {
+        return new Response(null, { status: 503 });
+      }
+
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) {
+          sawAbort = true;
+          resolve();
+          return;
+        }
+
+        signal.addEventListener(
+          "abort",
+          () => {
+            sawAbort = true;
+            resolve();
+          },
+          { once: true },
+        );
+      });
+
+      throw new DOMException("The operation was aborted.", "AbortError");
+    };
+
+    const otel = new Otel({
+      ...baseOptions(fetchImpl as typeof fetch),
+      shutdownTimeoutMs: 50,
+    });
+
+    await otel.tracer("t").startActiveSpan("slow", async () => {});
+
+    await expect(otel.shutdown()).rejects.toBeInstanceOf(ExportError);
+    expect(sawAbort).toBe(true);
+  });
+
+  test("flushAll waits for metrics when traces reject", async () => {
+    let metricsStarted = false;
+    let metricsFinished = false;
+    let tracesRejected = false;
+
+    const fetchImpl = async (url: string | URL | Request) => {
+      const resolved = resolveUrl(url);
+
+      if (resolved.endsWith("/v1/traces")) {
+        await Bun.sleep(30);
+        tracesRejected = true;
+        return new Response(null, { status: 400 });
+      }
+
+      if (resolved.endsWith("/v1/metrics")) {
+        metricsStarted = true;
+        await Bun.sleep(60);
+        metricsFinished = true;
+        return new Response(null, { status: 200 });
+      }
+
+      return new Response(null, { status: 200 });
+    };
+
+    const otel = new Otel(baseOptions(fetchImpl as typeof fetch));
+
+    await otel.tracer("t").startActiveSpan("span", async () => {
+      otel.meter("m").createCounter("c").add(1);
+    });
+
+    await expect(otel.flushAll()).rejects.toBeInstanceOf(ExportError);
+    expect(tracesRejected).toBe(true);
+    expect(metricsStarted).toBe(true);
+    expect(metricsFinished).toBe(true);
+
+    await otel.shutdown();
   });
 
   test("flushAll with empty buffers is a no-op", async () => {

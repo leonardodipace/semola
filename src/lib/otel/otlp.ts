@@ -293,18 +293,52 @@ const rejectedCountFromPartial = (partial: object) => {
   return 0;
 };
 
-const assertNoPartialRejection = async (response: Response) => {
-  const [error, text] = await mightThrow(response.text());
+const readResponseTextBounded = async (response: Response, limit: number) => {
+  const body = response.body;
 
-  if (error) {
-    throw new ExportError(error.message, true);
+  if (!body) {
+    return "";
   }
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let size = 0;
+
+  while (true) {
+    const [readError, chunk] = await mightThrow(reader.read());
+
+    if (readError) {
+      throw new ExportError(readError.message, false);
+    }
+
+    const { done, value } = chunk;
+
+    if (done) {
+      break;
+    }
+
+    size += value.byteLength;
+
+    if (size > limit) {
+      await reader.cancel();
+      throw new ExportError("OTLP response body exceeds size limit", false);
+    }
+
+    text += decoder.decode(value, { stream: true });
+  }
+
+  text += decoder.decode();
+  return text;
+};
+
+const assertNoPartialRejection = async (response: Response) => {
+  const text = await readResponseTextBounded(
+    response,
+    OTLP_PARTIAL_SUCCESS_BODY_LIMIT,
+  );
 
   if (!text) {
-    return;
-  }
-
-  if (text.length > OTLP_PARTIAL_SUCCESS_BODY_LIMIT) {
     return;
   }
 
@@ -345,6 +379,16 @@ const assertNoPartialRejection = async (response: Response) => {
   );
 };
 
+const fetchSignal = (signal?: AbortSignal) => {
+  const timeout = AbortSignal.timeout(OTLP_FETCH_TIMEOUT_MS);
+
+  if (!signal) {
+    return timeout;
+  }
+
+  return AbortSignal.any([timeout, signal]);
+};
+
 export const otlpPost = async (options: OtlpPostOptions) => {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -356,8 +400,16 @@ export const otlpPost = async (options: OtlpPostOptions) => {
   let lastError: ExportError | null = null;
 
   for (const delayMs of OTLP_RETRY_DELAYS_MS) {
+    if (options.signal?.aborted) {
+      throw lastError ?? new ExportError("OTLP export aborted", false);
+    }
+
     if (delayMs > 0) {
       await Bun.sleep(delayMs);
+
+      if (options.signal?.aborted) {
+        throw lastError ?? new ExportError("OTLP export aborted", false);
+      }
     }
 
     const [error, response] = await mightThrow(
@@ -365,12 +417,17 @@ export const otlpPost = async (options: OtlpPostOptions) => {
         method: "POST",
         headers,
         body,
-        signal: AbortSignal.timeout(OTLP_FETCH_TIMEOUT_MS),
+        signal: fetchSignal(options.signal),
       }),
     );
 
     if (error) {
       lastError = new ExportError(error.message, true);
+
+      if (options.signal?.aborted) {
+        throw lastError;
+      }
+
       continue;
     }
 

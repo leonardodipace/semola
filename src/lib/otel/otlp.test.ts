@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ExportError } from "./errors.js";
 import {
   encodeAttributes,
   encodeAttributeValue,
@@ -415,6 +416,85 @@ describe("otlpPost", () => {
         fetch: fetchImpl,
       }),
     ).rejects.toThrow("OTLP partial success rejected 2 records");
+
+    expect(attempts).toBe(1);
+  });
+
+  test("unreadable ok body is not retryable", async () => {
+    let attempts = 0;
+    const fetchImpl = (async () => {
+      attempts += 1;
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new Error("stream broken"));
+          },
+        }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    try {
+      await otlpPost({
+        baseUrl: "http://collector:4318",
+        path: "/v1/traces",
+        body: {},
+        fetch: fetchImpl,
+      });
+      expect(true).toBe(false);
+    } catch (error) {
+      expect(error).toBeInstanceOf(ExportError);
+      expect((error as ExportError).retryable).toBe(false);
+    }
+
+    expect(attempts).toBe(1);
+  });
+
+  test("oversized ok body is not retryable", async () => {
+    let attempts = 0;
+    const fetchImpl = (async () => {
+      attempts += 1;
+      return new Response("x".repeat(65_537), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    try {
+      await otlpPost({
+        baseUrl: "http://collector:4318",
+        path: "/v1/traces",
+        body: {},
+        fetch: fetchImpl,
+      });
+      expect(true).toBe(false);
+    } catch (error) {
+      expect(error).toBeInstanceOf(ExportError);
+      expect((error as ExportError).message).toBe(
+        "OTLP response body exceeds size limit",
+      );
+      expect((error as ExportError).retryable).toBe(false);
+    }
+
+    expect(attempts).toBe(1);
+  });
+
+  test("stops retrying when caller signal aborts", async () => {
+    let attempts = 0;
+    const controller = new AbortController();
+
+    const fetchImpl = (async () => {
+      attempts += 1;
+      controller.abort();
+      return new Response(null, { status: 503 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      otlpPost({
+        baseUrl: "http://collector:4318",
+        path: "/v1/traces",
+        body: {},
+        fetch: fetchImpl,
+        signal: controller.signal,
+      }),
+    ).rejects.toBeInstanceOf(ExportError);
 
     expect(attempts).toBe(1);
   });
