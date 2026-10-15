@@ -1,7 +1,10 @@
 export class ExportError extends Error {
-  public constructor(message: string) {
+  public readonly retryable: boolean;
+
+  public constructor(message: string, retryable = true) {
     super(message);
     this.name = "ExportError";
+    this.retryable = retryable;
   }
 }
 

@@ -825,6 +825,54 @@ describe("Otel lifecycle and export", () => {
     expect(calls.some((call) => call.url.endsWith("/v1/logs"))).toBe(true);
   });
 
+  test("non-retryable export drops the batch", async () => {
+    const calls: FetchCall[] = [];
+
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const resolved = resolveUrl(url);
+      calls.push({ url: resolved, init });
+
+      if (resolved.endsWith("/v1/traces")) {
+        return new Response(null, { status: 400 });
+      }
+
+      return new Response(null, { status: 200 });
+    };
+
+    const otel = new Otel(baseOptions(fetchImpl as typeof fetch));
+    await otel.tracer("app").startActiveSpan("drop-me", async () => {});
+    await expect(otel.shutdown()).rejects.toBeInstanceOf(ExportError);
+
+    await otel.shutdown();
+
+    expect(calls.filter((call) => call.url.endsWith("/v1/traces")).length).toBe(
+      1,
+    );
+  });
+
+  test("maxQueueSize drops oldest spans", async () => {
+    const { fetch, calls } = createMockFetch();
+    const otel = new Otel({
+      ...baseOptions(fetch),
+      maxQueueSize: 2,
+      enabled: true,
+      flushIntervalMs: 60_000,
+    });
+
+    await otel.tracer("app").startActiveSpan("old", async () => {});
+    await otel.tracer("app").startActiveSpan("mid", async () => {});
+    await otel.tracer("app").startActiveSpan("new", async () => {});
+    await otel.shutdown();
+
+    const names = traceSpans(calls).map((span) => span.name);
+    expect(names.includes("old")).toBe(false);
+    expect(names.includes("mid")).toBe(true);
+    expect(names.includes("new")).toBe(true);
+  });
+
   test("failed export requeues batches and shutdown can retry", async () => {
     let failTraces = true;
     const calls: FetchCall[] = [];
@@ -838,7 +886,7 @@ describe("Otel lifecycle and export", () => {
 
       if (failTraces) {
         if (resolved.endsWith("/v1/traces")) {
-          return new Response(null, { status: 500 });
+          return new Response(null, { status: 503 });
         }
       }
 
@@ -873,7 +921,7 @@ describe("Otel lifecycle and export", () => {
 
       if (failLogs) {
         if (resolved.endsWith("/v1/logs")) {
-          return new Response(null, { status: 500 });
+          return new Response(null, { status: 503 });
         }
       }
 
@@ -911,7 +959,7 @@ describe("Otel lifecycle and export", () => {
 
       if (failMetrics) {
         if (resolved.endsWith("/v1/metrics")) {
-          return new Response(null, { status: 500 });
+          return new Response(null, { status: 503 });
         }
       }
 

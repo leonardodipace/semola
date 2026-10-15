@@ -62,6 +62,15 @@ describe("Logger", () => {
     expect(records[0]?.severityNumber).toBeUndefined();
   });
 
+  test("omits severityNumber for inherited object keys", () => {
+    const { host, records } = createHost();
+    new Logger(host, { scopeName: "s" }).emit({
+      severityText: "__proto__",
+      body: "x",
+    });
+    expect(records[0]?.severityNumber).toBeUndefined();
+  });
+
   test("uses provided timestamp", () => {
     const { host, records } = createHost();
     new Logger(host, { scopeName: "s" }).emit({

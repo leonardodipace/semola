@@ -1,4 +1,5 @@
-import { mightThrow } from "../errors/index.js";
+import { mightThrow, mightThrowSync } from "../errors/index.js";
+import { ExportError } from "./errors.js";
 import type {
   AttributeMap,
   AttributeValue,
@@ -21,6 +22,7 @@ import type {
 const OTLP_FETCH_TIMEOUT_MS = 10_000;
 const OTLP_AGGREGATION_TEMPORALITY_CUMULATIVE = 2;
 const OTLP_RETRY_DELAYS_MS = [0, 25, 75] as const;
+const OTLP_PARTIAL_SUCCESS_BODY_LIMIT = 65_536;
 
 const spanStatusCode = (code: SpanStatus["code"]) => {
   if (code === "OK") {
@@ -256,15 +258,114 @@ const shouldRetryStatus = (status: number) => {
     return true;
   }
 
-  if (status >= 500) {
+  if (status === 502) {
+    return true;
+  }
+
+  if (status === 503) {
+    return true;
+  }
+
+  if (status === 504) {
     return true;
   }
 
   return false;
 };
 
-const discardResponseBody = async (response: Response) => {
-  await response.body?.cancel();
+const positiveRejectedCount = (value: unknown) => {
+  if (typeof value === "number") {
+    if (value > 0) {
+      return value;
+    }
+
+    return 0;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+
+    if (parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return 0;
+};
+
+const REJECTED_COUNT_KEYS = [
+  "rejectedSpans",
+  "rejected_spans",
+  "rejectedLogRecords",
+  "rejected_log_records",
+  "rejectedDataPoints",
+  "rejected_data_points",
+] as const;
+
+const rejectedCountFromPartial = (partial: object) => {
+  const record = partial as Record<string, unknown>;
+
+  for (const key of REJECTED_COUNT_KEYS) {
+    const rejected = positiveRejectedCount(record[key]);
+
+    if (rejected > 0) {
+      return rejected;
+    }
+  }
+
+  return 0;
+};
+
+const assertNoPartialRejection = async (response: Response) => {
+  const [error, text] = await mightThrow(response.text());
+
+  if (error) {
+    throw new ExportError(error.message, true);
+  }
+
+  if (!text) {
+    return;
+  }
+
+  if (text.length > OTLP_PARTIAL_SUCCESS_BODY_LIMIT) {
+    return;
+  }
+
+  const [parseError, parsed] = mightThrowSync(() => JSON.parse(text));
+
+  if (parseError) {
+    return;
+  }
+
+  if (typeof parsed !== "object") {
+    return;
+  }
+
+  if (parsed === null) {
+    return;
+  }
+
+  const body = parsed as Record<string, unknown>;
+  const partial = body.partialSuccess ?? body["partial_success"];
+
+  if (typeof partial !== "object") {
+    return;
+  }
+
+  if (partial === null) {
+    return;
+  }
+
+  const rejected = rejectedCountFromPartial(partial);
+
+  if (rejected === 0) {
+    return;
+  }
+
+  throw new ExportError(
+    `OTLP partial success rejected ${rejected} records`,
+    false,
+  );
 };
 
 export const otlpPost = async (options: OtlpPostOptions) => {
@@ -281,7 +382,7 @@ export const otlpPost = async (options: OtlpPostOptions) => {
 
   const url = `${base}${options.path}`;
   const body = JSON.stringify(options.body);
-  let lastError: Error | null = null;
+  let lastError: ExportError | null = null;
 
   for (const delayMs of OTLP_RETRY_DELAYS_MS) {
     if (delayMs > 0) {
@@ -298,19 +399,23 @@ export const otlpPost = async (options: OtlpPostOptions) => {
     );
 
     if (error) {
-      lastError = error;
+      lastError = new ExportError(error.message, true);
       continue;
     }
 
-    await discardResponseBody(response);
-
     if (response.ok) {
+      await assertNoPartialRejection(response);
       return;
     }
 
-    lastError = new Error(`OTLP export failed with status ${response.status}`);
+    await response.body?.cancel();
 
-    if (!shouldRetryStatus(response.status)) {
+    lastError = new ExportError(
+      `OTLP export failed with status ${response.status}`,
+      shouldRetryStatus(response.status),
+    );
+
+    if (!lastError.retryable) {
       throw lastError;
     }
   }
@@ -319,5 +424,5 @@ export const otlpPost = async (options: OtlpPostOptions) => {
     throw lastError;
   }
 
-  throw new Error("OTLP export failed");
+  throw new ExportError("OTLP export failed", true);
 };

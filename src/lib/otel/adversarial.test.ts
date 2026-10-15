@@ -321,14 +321,16 @@ describe("adversarial sampling", () => {
       sampleRatio: 0.01,
     });
 
-    for (let index = 0; index < 200; index++) {
+    for (let index = 0; index < 1000; index++) {
       await otel.tracer("s").startActiveSpan(`r-${index}`, async () => {});
     }
 
     await otel.shutdown();
 
-    const tracePosts = calls.filter((call) => call.url.endsWith("/v1/traces"));
-    expect(tracePosts.length).toBeLessThanOrEqual(1);
+    const hasTracePost = calls.some((call) => call.url.endsWith("/v1/traces"));
+    const exported = hasTracePost ? traceSpans(calls).length : 0;
+    expect(exported).toBeGreaterThan(0);
+    expect(exported).toBeLessThan(1000);
   });
 
   test("local nested child under sampled root is exported", async () => {
@@ -808,7 +810,7 @@ describe("adversarial lifecycle and concurrency", () => {
       calls.push({ url: resolved, init });
 
       if (resolved.endsWith("/v1/traces")) {
-        return new Response(null, { status: 500 });
+        return new Response(null, { status: 503 });
       }
 
       return new Response(null, { status: 200 });

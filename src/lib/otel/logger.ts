@@ -19,7 +19,12 @@ export class Logger {
 
   public emit(record: LogRecord): void {
     const timeUnixNano = timeUnixNanoString(record.timestamp);
-    const severityNumber = SEVERITY_BY_TEXT[record.severityText.toLowerCase()];
+    const severityKey = record.severityText.toLowerCase();
+    let severityNumber: number | undefined;
+
+    if (Object.hasOwn(SEVERITY_BY_TEXT, severityKey)) {
+      severityNumber = SEVERITY_BY_TEXT[severityKey];
+    }
 
     this.host.onLogEmitted({
       timeUnixNano,

@@ -167,11 +167,11 @@ const otel = new Otel({
 
 Call `shutdown()` before exit so batches flush and the periodic timer stops. A successful second `shutdown()` is a no-op. After a successful shutdown, recording behaves like `enabled: false`.
 
-Each OTLP POST retries up to three times on network errors, `429`, and `5xx`, with short backoff (about 100 ms total across attempts).
+Each OTLP POST retries up to three times on network errors and OTLP retryable statuses (`429`, `502`, `503`, `504`), with short backoff (about 100 ms total across attempts). Other `4xx` and `5xx` responses fail without retry. A `200` body with OTLP `partialSuccess` and a nonzero rejected count fails without retrying accepted records.
 
-`shutdown()` also retries the full flush until it succeeds or `shutdownTimeoutMs` elapses (default 10 seconds), with backoff between flush attempts. Call `await otel.shutdown()` at process exit and you usually do not need your own retry loop. If the budget is exhausted it rejects with `ExportError`; batches stay re-queued so a later `shutdown()` or `flushAll()` can still deliver them. `flushAll()` itself does not use the shutdown budget.
+`shutdown()` also retries the full flush until it succeeds or `shutdownTimeoutMs` elapses (default 10 seconds), with backoff between flush attempts. Call `await otel.shutdown()` at process exit and you usually do not need your own retry loop. If the budget is exhausted it rejects with `ExportError`. Retryable failures re-queue batches (capped by `maxQueueSize`, default 2048, dropping oldest) so a later `shutdown()` or `flushAll()` can still deliver them. Non-retryable failures drop that batch. `flushAll()` itself does not use the shutdown budget.
 
-Periodic flush failures call `onExportError` (they do not rethrow). Those batches are also re-queued for the next interval.
+Periodic flush failures call `onExportError` (they do not rethrow). Retryable batches are re-queued for the next interval.
 
 ```typescript
 await otel.shutdown();
@@ -190,6 +190,7 @@ Point `export.url` at the OTLP base (for example `http://localhost:4318`), not a
 | `enabled` | When `false`, full no-op |
 | `flushIntervalMs` | Batch flush period in ms, minimum `1` (default 5000) |
 | `shutdownTimeoutMs` | Wall-clock budget for shutdown flush retries (default 10000, minimum 0) |
+| `maxQueueSize` | Max pending spans or logs per signal (default 2048, minimum 1). Oldest drop first |
 | `serviceVersion` | Optional resource attribute |
 | `fetch` | Optional `fetch` override for tests or proxies |
 | `onExportError` | Called when a periodic flush fails (does not rethrow) |

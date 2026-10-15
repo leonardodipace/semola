@@ -39,7 +39,7 @@ export const createFailingPathFetch = (failPath: string) => {
     calls.push({ url: resolved, init });
 
     if (resolved.endsWith(failPath)) {
-      return new Response(null, { status: 500 });
+      return new Response(null, { status: 503 });
     }
 
     return new Response(null, { status: 200 });

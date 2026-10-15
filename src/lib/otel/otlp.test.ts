@@ -377,4 +377,45 @@ describe("otlpPost", () => {
       fetch: fetchImpl,
     });
   });
+
+  test("does not retry HTTP 500", async () => {
+    let attempts = 0;
+    const fetchImpl = (async () => {
+      attempts += 1;
+      return new Response(null, { status: 500 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      otlpPost({
+        baseUrl: "http://collector:4318",
+        path: "/v1/traces",
+        body: {},
+        fetch: fetchImpl,
+      }),
+    ).rejects.toThrow("OTLP export failed with status 500");
+
+    expect(attempts).toBe(1);
+  });
+
+  test("rejects partial success with rejected spans", async () => {
+    let attempts = 0;
+    const fetchImpl = (async () => {
+      attempts += 1;
+      return new Response(
+        JSON.stringify({ partialSuccess: { rejectedSpans: 2 } }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    await expect(
+      otlpPost({
+        baseUrl: "http://collector:4318",
+        path: "/v1/traces",
+        body: {},
+        fetch: fetchImpl,
+      }),
+    ).rejects.toThrow("OTLP partial success rejected 2 records");
+
+    expect(attempts).toBe(1);
+  });
 });

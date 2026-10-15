@@ -7,6 +7,7 @@ export type OtelOptions = {
   enabled?: boolean;
   flushIntervalMs?: number;
   shutdownTimeoutMs?: number;
+  maxQueueSize?: number;
   fetch?: typeof fetch;
   onExportError?: (error: Error) => void;
 };
@@ -214,6 +215,8 @@ export const HISTOGRAM_EXPLICIT_BOUNDS: readonly number[] = [
 export const DEFAULT_FLUSH_INTERVAL_MS = 5000;
 
 export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
+
+export const DEFAULT_MAX_QUEUE_SIZE = 2048;
 
 export const SHUTDOWN_RETRY_DELAYS_MS = [250, 1000, 2000] as const;
 

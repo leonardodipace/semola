@@ -82,6 +82,12 @@ export class UpDownCounter extends MetricInstrument {
   }
 
   public add(value: number, attributes?: AttributeMap) {
+    if (!Number.isFinite(value)) {
+      throw new InvalidOptionsError(
+        "UpDownCounter.add value must be a finite number",
+      );
+    }
+
     this.write(value, attributes);
   }
 }
@@ -97,6 +103,12 @@ export class Histogram extends MetricInstrument {
   }
 
   public record(value: number, attributes?: AttributeMap) {
+    if (!Number.isFinite(value)) {
+      throw new InvalidOptionsError(
+        "Histogram.record value must be a finite number",
+      );
+    }
+
     this.write(value, attributes);
   }
 }

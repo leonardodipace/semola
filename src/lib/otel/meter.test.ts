@@ -76,6 +76,18 @@ describe("Meter", () => {
     expect(calls[0]?.value).toBe(-3);
   });
 
+  test("updown counter rejects non-finite values", () => {
+    const { recorder } = createRecorder();
+    const updown = new Meter(recorder, { scopeName: "m" }).createUpDownCounter(
+      "depth",
+    );
+
+    expect(() => updown.add(Number.NaN)).toThrow(InvalidOptionsError);
+    expect(() => updown.add(Number.POSITIVE_INFINITY)).toThrow(
+      InvalidOptionsError,
+    );
+  });
+
   test("histogram record forwards value", () => {
     const { recorder, calls } = createRecorder();
     new Meter(recorder, { scopeName: "m" })
@@ -84,6 +96,18 @@ describe("Meter", () => {
 
     expect(calls[0]?.kind).toBe("histogram");
     expect(calls[0]?.value).toBe(12);
+  });
+
+  test("histogram rejects non-finite values", () => {
+    const { recorder } = createRecorder();
+    const histogram = new Meter(recorder, { scopeName: "m" }).createHistogram(
+      "latency",
+    );
+
+    expect(() => histogram.record(Number.NaN)).toThrow(InvalidOptionsError);
+    expect(() => histogram.record(Number.NEGATIVE_INFINITY)).toThrow(
+      InvalidOptionsError,
+    );
   });
 
   test("instruments with different kinds get different keys", () => {

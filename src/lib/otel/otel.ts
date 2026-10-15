@@ -28,6 +28,7 @@ import type {
 } from "./types.js";
 import {
   DEFAULT_FLUSH_INTERVAL_MS,
+  DEFAULT_MAX_QUEUE_SIZE,
   DEFAULT_SHUTDOWN_TIMEOUT_MS,
   HISTOGRAM_EXPLICIT_BOUNDS,
   SHUTDOWN_RETRY_DELAYS_MS,
@@ -53,6 +54,7 @@ export class Otel {
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private flushIntervalMs: number;
   private shutdownTimeoutMs: number;
+  private maxQueueSize: number;
   private onExportError: ((error: Error) => void) | undefined;
   private flushChain: Promise<void> = Promise.resolve();
 
@@ -89,11 +91,18 @@ export class Otel {
       throw new InvalidOptionsError("shutdownTimeoutMs must be at least 0");
     }
 
+    const maxQueueSize = options.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE;
+
+    if (maxQueueSize < 1) {
+      throw new InvalidOptionsError("maxQueueSize must be at least 1");
+    }
+
     this.sampleRatio = ratio;
     this.exportOptions = options.export;
     this.fetchImpl = options.fetch ?? fetch;
     this.flushIntervalMs = flushIntervalMs;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
+    this.maxQueueSize = maxQueueSize;
     this.onExportError = options.onExportError;
 
     const attributes: AttributeMap = {
@@ -220,6 +229,7 @@ export class Otel {
     }
 
     this.spanBatch.push(span);
+    this.spanBatch = trimQueue(this.spanBatch, this.maxQueueSize);
   }
 
   public onLogEmitted(record: PendingLogRecord): void {
@@ -235,6 +245,7 @@ export class Otel {
     }
 
     this.logBatch.push(record);
+    this.logBatch = trimQueue(this.logBatch, this.maxQueueSize);
   }
 
   public recordMetric(
@@ -406,8 +417,8 @@ export class Otel {
       );
 
       if (error) {
-        exportError = new ExportError(error.message);
-        tracesFailed = true;
+        exportError = toExportError(error);
+        tracesFailed = exportError.retryable;
       }
     }
 
@@ -432,20 +443,24 @@ export class Otel {
       );
 
       if (error) {
-        logsFailed = true;
+        const logError = toExportError(error);
+        logsFailed = logError.retryable;
 
         if (!exportError) {
-          exportError = new ExportError(error.message);
+          exportError = logError;
         }
       }
     }
 
     if (tracesFailed) {
-      this.spanBatch = spans.concat(this.spanBatch);
+      this.spanBatch = trimQueue(
+        spans.concat(this.spanBatch),
+        this.maxQueueSize,
+      );
     }
 
     if (logsFailed) {
-      this.logBatch = logs.concat(this.logBatch);
+      this.logBatch = trimQueue(logs.concat(this.logBatch), this.maxQueueSize);
     }
 
     if (exportError) {
@@ -499,10 +514,26 @@ export class Otel {
     );
 
     if (error) {
-      throw new ExportError(error.message);
+      throw toExportError(error);
     }
   }
 }
+
+const toExportError = (error: Error) => {
+  if (error instanceof ExportError) {
+    return error;
+  }
+
+  return new ExportError(error.message);
+};
+
+const trimQueue = <T>(items: T[], maxQueueSize: number) => {
+  if (items.length <= maxQueueSize) {
+    return items;
+  }
+
+  return items.slice(items.length - maxQueueSize);
+};
 
 const settleFlushChain = (run: Promise<void>) => {
   return run.then(
