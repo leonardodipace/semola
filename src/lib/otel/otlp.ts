@@ -23,6 +23,15 @@ const OTLP_FETCH_TIMEOUT_MS = 10_000;
 const OTLP_AGGREGATION_TEMPORALITY_CUMULATIVE = 2;
 const OTLP_RETRY_DELAYS_MS = [0, 25, 75] as const;
 const OTLP_PARTIAL_SUCCESS_BODY_LIMIT = 65_536;
+const OTLP_RETRY_STATUSES = new Set([429, 502, 503, 504]);
+const REJECTED_COUNT_KEYS = [
+  "rejectedSpans",
+  "rejected_spans",
+  "rejectedLogRecords",
+  "rejected_log_records",
+  "rejectedDataPoints",
+  "rejected_data_points",
+] as const;
 
 const spanStatusCode = (code: SpanStatus["code"]) => {
   if (code === "OK") {
@@ -253,63 +262,31 @@ export const encodeMetricsExport = (
   };
 };
 
-const shouldRetryStatus = (status: number) => {
-  if (status === 429) {
-    return true;
-  }
+const joinOtlpUrl = (baseUrl: string, path: string) => {
+  const base = `${baseUrl.replace(/\/+$/, "")}/`;
+  const relative = path.replace(/^\/+/, "");
 
-  if (status === 502) {
-    return true;
-  }
-
-  if (status === 503) {
-    return true;
-  }
-
-  if (status === 504) {
-    return true;
-  }
-
-  return false;
+  return new URL(relative, base).href;
 };
-
-const positiveRejectedCount = (value: unknown) => {
-  if (typeof value === "number") {
-    if (value > 0) {
-      return value;
-    }
-
-    return 0;
-  }
-
-  if (typeof value === "string") {
-    const parsed = Number(value);
-
-    if (parsed > 0) {
-      return parsed;
-    }
-  }
-
-  return 0;
-};
-
-const REJECTED_COUNT_KEYS = [
-  "rejectedSpans",
-  "rejected_spans",
-  "rejectedLogRecords",
-  "rejected_log_records",
-  "rejectedDataPoints",
-  "rejected_data_points",
-] as const;
 
 const rejectedCountFromPartial = (partial: object) => {
   const record = partial as Record<string, unknown>;
 
   for (const key of REJECTED_COUNT_KEYS) {
-    const rejected = positiveRejectedCount(record[key]);
+    const value = record[key];
 
-    if (rejected > 0) {
-      return rejected;
+    if (typeof value === "number") {
+      if (value > 0) {
+        return value;
+      }
+    }
+
+    if (typeof value === "string") {
+      const parsed = Number(value);
+
+      if (parsed > 0) {
+        return parsed;
+      }
     }
   }
 
@@ -369,18 +346,12 @@ const assertNoPartialRejection = async (response: Response) => {
 };
 
 export const otlpPost = async (options: OtlpPostOptions) => {
-  let base = options.baseUrl;
-
-  while (base.endsWith("/")) {
-    base = base.slice(0, -1);
-  }
-
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...options.headers,
   };
 
-  const url = `${base}${options.path}`;
+  const url = joinOtlpUrl(options.baseUrl, options.path);
   const body = JSON.stringify(options.body);
   let lastError: ExportError | null = null;
 
@@ -410,12 +381,13 @@ export const otlpPost = async (options: OtlpPostOptions) => {
 
     await response.body?.cancel();
 
+    const retryable = OTLP_RETRY_STATUSES.has(response.status);
     lastError = new ExportError(
       `OTLP export failed with status ${response.status}`,
-      shouldRetryStatus(response.status),
+      retryable,
     );
 
-    if (!lastError.retryable) {
+    if (!retryable) {
       throw lastError;
     }
   }

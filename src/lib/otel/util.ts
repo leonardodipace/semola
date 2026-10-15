@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { AttributeMap } from "./types.js";
 import { HISTOGRAM_EXPLICIT_BOUNDS } from "./types.js";
 
@@ -8,18 +9,10 @@ const NANOS_PER_MILLISECOND = 1_000_000;
 const SAMPLE_RATIO_BUCKETS = 10_000;
 
 export const randomHex = (byteLength: number) => {
-  const bytes = new Uint8Array(byteLength);
-  crypto.getRandomValues(bytes);
-
-  let hex = "";
-
-  for (const byte of bytes) {
-    hex += byte.toString(16).padStart(2, "0");
-  }
-
-  return hex;
+  return randomBytes(byteLength).toString("hex");
 };
 
+// Wall-clock unix nanos for OTLP. Bun.nanoseconds / hrtime are monotonic only.
 export const timeUnixNanoString = (ms?: number) => {
   const millis = ms ?? Date.now();
   const whole = Math.trunc(millis);
@@ -69,13 +62,11 @@ export const rootTraceSampled = (traceId: string, ratio: number) => {
 };
 
 export const histogramBucketIndex = (value: number) => {
-  for (let i = 0; i < HISTOGRAM_EXPLICIT_BOUNDS.length; i++) {
-    const bound = HISTOGRAM_EXPLICIT_BOUNDS[i];
+  const index = HISTOGRAM_EXPLICIT_BOUNDS.findIndex((bound) => value <= bound);
 
-    if (bound !== undefined && value <= bound) {
-      return i;
-    }
+  if (index === -1) {
+    return HISTOGRAM_EXPLICIT_BOUNDS.length;
   }
 
-  return HISTOGRAM_EXPLICIT_BOUNDS.length;
+  return index;
 };

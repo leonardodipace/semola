@@ -5,14 +5,8 @@ const contextAls = new AsyncLocalStorage<OtelContext>();
 
 const ZERO_TRACE_ID = "0".repeat(32);
 const ZERO_SPAN_ID = "0".repeat(16);
-const TRACE_FLAGS_HEX_WIDTH = 2;
 const TRACE_FLAGS_BYTE_MASK = 0xff;
 const TRACEPARENT = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/i;
-
-const formatTraceFlagsHex = (traceFlags: number) =>
-  (traceFlags & TRACE_FLAGS_BYTE_MASK)
-    .toString(16)
-    .padStart(TRACE_FLAGS_HEX_WIDTH, "0");
 
 const getCarrierValue = (carrier: TraceCarrier, name: string) => {
   if (carrier instanceof Headers) {
@@ -65,7 +59,10 @@ export const inject = (carrier: TraceCarrier) => {
   }
 
   const { traceId, spanId, traceFlags, traceState } = ctx.span;
-  const traceparent = `00-${traceId}-${spanId}-${formatTraceFlagsHex(traceFlags)}`;
+  const flagsHex = Buffer.from([traceFlags & TRACE_FLAGS_BYTE_MASK]).toString(
+    "hex",
+  );
+  const traceparent = `00-${traceId}-${spanId}-${flagsHex}`;
 
   setCarrierValue(carrier, "traceparent", traceparent);
 
