@@ -811,6 +811,21 @@ describe("Otel lifecycle and export", () => {
     ).toBe(true);
   });
 
+  test("preserves path prefix on export url", async () => {
+    const { fetch, calls } = createMockFetch();
+    const otel = new Otel({
+      ...baseOptions(fetch),
+      export: { type: "otlp-http", url: "http://collector:4318/otlp" },
+    });
+
+    await otel.tracer("app").startActiveSpan("prefixed", async () => {});
+    await otel.shutdown();
+
+    expect(
+      calls.some((call) => call.url === "http://collector:4318/otlp/v1/traces"),
+    ).toBe(true);
+  });
+
   test("failed traces export still attempts logs export", async () => {
     const { fetch, calls } = createFailingPathFetch("/v1/traces");
     const otel = new Otel(baseOptions(fetch));

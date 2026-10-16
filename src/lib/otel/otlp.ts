@@ -248,7 +248,10 @@ export const encodeMetricsExport = (
 };
 
 const joinOtlpUrl = (baseUrl: string, path: string) => {
-  return new URL(path, `${baseUrl.replace(/\/+$/, "")}/`).href;
+  const base = `${baseUrl.replace(/\/+$/, "")}/`;
+  const relative = path.replace(/^\/+/, "");
+
+  return new URL(relative, base).href;
 };
 
 const rejectedCountFromPartial = (partial: object) => {
