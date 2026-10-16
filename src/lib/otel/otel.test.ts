@@ -148,6 +148,48 @@ describe("Otel lifecycle", () => {
     expect(calls.length).toBe(afterFirst);
   });
 
+  test("shutdown exports spans that end during the final flush", async () => {
+    let releaseExport: (() => void) | undefined;
+    const exportGate = new Promise<void>((resolve) => {
+      releaseExport = resolve;
+    });
+    const bodies: string[] = [];
+    let posts = 0;
+
+    const fetchImpl = async (
+      _url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      posts += 1;
+      bodies.push(String(init?.body ?? ""));
+
+      if (posts === 1) {
+        await exportGate;
+      }
+
+      return new Response("{}", { status: 200 });
+    };
+
+    const otel = new Otel({
+      ...baseOptions(fetchImpl as typeof fetch),
+      shutdownTimeoutMs: 5000,
+    });
+    const tracer = otel.tracer("app");
+
+    tracer.startSpan("before").end();
+
+    const shutdownPromise = otel.shutdown();
+
+    await Bun.sleep(10);
+    tracer.startSpan("during-shutdown").end();
+    releaseExport?.();
+
+    await shutdownPromise;
+
+    expect(bodies.some((body) => body.includes("before"))).toBe(true);
+    expect(bodies.some((body) => body.includes("during-shutdown"))).toBe(true);
+  });
+
   test("failed shutdown can retry after collector recovers", async () => {
     let fail = true;
     const calls: FetchCall[] = [];
@@ -187,6 +229,31 @@ describe("Otel lifecycle", () => {
         shutdownTimeoutMs: -1,
       });
     }).toThrow(InvalidOptionsError);
+  });
+
+  test("encode failure drops the bad batch and still exports logs", async () => {
+    const { fetch, calls } = createMockFetch();
+    const otel = new Otel(baseOptions(fetch));
+
+    const span = otel.tracer("app").startSpan("poison");
+    span.setAttribute("bad", { nested: true } as unknown as string);
+    span.end();
+    otel.logger("app").emit({ severityText: "INFO", body: "still-ok" });
+
+    await expect(otel.flushAll()).rejects.toBeInstanceOf(ExportError);
+
+    expect(calls.some((call) => call.url.endsWith("/v1/traces"))).toBe(false);
+    expect(calls.some((call) => call.url.endsWith("/v1/logs"))).toBe(true);
+
+    await otel.tracer("app").startActiveSpan("good", async () => {});
+    await otel.flushAll();
+
+    const traceCalls = calls.filter((call) => call.url.endsWith("/v1/traces"));
+    expect(traceCalls.length).toBe(1);
+    expect(String(traceCalls[0]?.init?.body)).toContain("good");
+    expect(String(traceCalls[0]?.init?.body)).not.toContain("poison");
+
+    await otel.shutdown();
   });
 
   test("shutdown cancels in-flight export within budget", async () => {

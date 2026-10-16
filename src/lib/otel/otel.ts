@@ -1,4 +1,4 @@
-import { mightThrow } from "../errors/index.js";
+import { mightThrow, mightThrowSync } from "../errors/index.js";
 import { ExportError, InvalidOptionsError } from "./errors.js";
 import { Logger } from "./logger.js";
 import { Meter } from "./meter.js";
@@ -171,18 +171,20 @@ export class Otel {
         ? AbortSignal.timeout(this.shutdownTimeoutMs)
         : undefined;
 
-    const [error] = await mightThrow(this.flushAll(signal));
+    const [firstError] = await mightThrow(this.flushAll(signal));
 
-    if (!error) {
-      this.shutDown = true;
-      return;
+    if (firstError) {
+      throw toExportError(firstError);
     }
 
-    if (error instanceof ExportError) {
-      throw error;
-    }
+    this.shutDown = true;
 
-    throw new ExportError(error.message);
+    const [secondError] = await mightThrow(this.flushAll(signal));
+
+    if (secondError) {
+      this.shutDown = false;
+      throw toExportError(secondError);
+    }
   }
 
   public shouldRecordTrace(
@@ -394,22 +396,28 @@ export class Otel {
           group.spans.push(span);
         },
       );
-      const body = encodeTracesExport(this.resource, scopeSpans);
-
-      const [error] = await mightThrow(
-        otlpPost({
-          baseUrl: this.exportOptions.url,
-          path: "/v1/traces",
-          body,
-          fetch: this.fetchImpl,
-          headers,
-          signal,
-        }),
+      const [encodeError, body] = mightThrowSync(() =>
+        encodeTracesExport(this.resource, scopeSpans),
       );
 
-      if (error) {
-        exportError = toExportError(error);
-        tracesFailed = exportError.retryable;
+      if (encodeError) {
+        exportError = new ExportError(encodeError.message, false);
+      } else {
+        const [error] = await mightThrow(
+          otlpPost({
+            baseUrl: this.exportOptions.url,
+            path: "/v1/traces",
+            body,
+            fetch: this.fetchImpl,
+            headers,
+            signal,
+          }),
+        );
+
+        if (error) {
+          exportError = toExportError(error);
+          tracesFailed = exportError.retryable;
+        }
       }
     }
 
@@ -421,25 +429,33 @@ export class Otel {
           group.logRecords.push(record);
         },
       );
-      const body = encodeLogsExport(this.resource, scopeLogs);
-
-      const [error] = await mightThrow(
-        otlpPost({
-          baseUrl: this.exportOptions.url,
-          path: "/v1/logs",
-          body,
-          fetch: this.fetchImpl,
-          headers,
-          signal,
-        }),
+      const [encodeError, body] = mightThrowSync(() =>
+        encodeLogsExport(this.resource, scopeLogs),
       );
 
-      if (error) {
-        const logError = toExportError(error);
-        logsFailed = logError.retryable;
-
+      if (encodeError) {
         if (!exportError) {
-          exportError = logError;
+          exportError = new ExportError(encodeError.message, false);
+        }
+      } else {
+        const [error] = await mightThrow(
+          otlpPost({
+            baseUrl: this.exportOptions.url,
+            path: "/v1/logs",
+            body,
+            fetch: this.fetchImpl,
+            headers,
+            signal,
+          }),
+        );
+
+        if (error) {
+          const logError = toExportError(error);
+          logsFailed = logError.retryable;
+
+          if (!exportError) {
+            exportError = logError;
+          }
         }
       }
     }
@@ -493,7 +509,13 @@ export class Otel {
         group.metrics.push(metric);
       },
     );
-    const body = encodeMetricsExport(this.resource, scopeMetrics);
+    const [encodeError, body] = mightThrowSync(() =>
+      encodeMetricsExport(this.resource, scopeMetrics),
+    );
+
+    if (encodeError) {
+      throw new ExportError(encodeError.message, false);
+    }
 
     const [error] = await mightThrow(
       otlpPost({
