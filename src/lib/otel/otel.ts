@@ -126,17 +126,7 @@ export class Otel {
       return;
     }
 
-    this.flushTimer = setInterval(() => {
-      void this.flushAll().catch((error: unknown) => {
-        if (error instanceof Error) {
-          this.onExportError?.(error);
-          return;
-        }
-
-        this.onExportError?.(new ExportError(String(error)));
-      });
-    }, this.flushIntervalMs);
-    this.flushTimer.unref();
+    this.startFlushTimer();
   }
 
   public tracer(scopeName: string, scopeVersion?: string): Tracer {
@@ -174,6 +164,7 @@ export class Otel {
     const [firstError] = await mightThrow(this.flushAll(signal));
 
     if (firstError) {
+      this.startFlushTimer();
       throw toExportError(firstError);
     }
 
@@ -183,6 +174,7 @@ export class Otel {
 
     if (secondError) {
       this.shutDown = false;
+      this.startFlushTimer();
       throw toExportError(secondError);
     }
   }
@@ -305,6 +297,24 @@ export class Otel {
     }
 
     return true;
+  }
+
+  private startFlushTimer(): void {
+    if (this.flushTimer) {
+      return;
+    }
+
+    this.flushTimer = setInterval(() => {
+      void this.flushAll().catch((error: unknown) => {
+        if (error instanceof Error) {
+          this.onExportError?.(error);
+          return;
+        }
+
+        this.onExportError?.(new ExportError(String(error)));
+      });
+    }, this.flushIntervalMs);
+    this.flushTimer.unref();
   }
 
   private addSum(

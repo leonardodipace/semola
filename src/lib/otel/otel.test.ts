@@ -220,6 +220,40 @@ describe("Otel lifecycle", () => {
     ).toBeGreaterThan(1);
   });
 
+  test("failed shutdown restarts the periodic flush timer", async () => {
+    let failTraces = true;
+    const calls: FetchCall[] = [];
+
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const resolved = resolveUrl(url);
+      calls.push({ url: resolved, init });
+
+      if (failTraces && resolved.endsWith("/v1/traces")) {
+        return new Response(null, { status: 503 });
+      }
+
+      return new Response(null, { status: 200 });
+    };
+
+    const otel = new Otel({
+      ...baseOptions(fetchImpl as typeof fetch),
+      flushIntervalMs: 30,
+    });
+
+    await otel.tracer("t").startActiveSpan("queued", async () => {});
+    await expect(otel.shutdown()).rejects.toBeInstanceOf(ExportError);
+
+    const afterFail = calls.length;
+    failTraces = false;
+    await Bun.sleep(80);
+
+    expect(calls.length).toBeGreaterThan(afterFail);
+    await otel.shutdown();
+  });
+
   test("rejects negative shutdownTimeoutMs", () => {
     const { fetch } = createMockFetch();
 
