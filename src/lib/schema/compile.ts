@@ -1,0 +1,462 @@
+import type { Issue } from "./types.js";
+
+export type RunFn<Output> = (
+  value: unknown,
+  path: PropertyKey[],
+  issues: Issue[],
+) => Output;
+
+export type StringRule =
+  | { kind: "min"; length: number; message: string }
+  | { kind: "max"; length: number; message: string }
+  | { kind: "length"; length: number; message: string }
+  | { kind: "regex"; pattern: RegExp; message: string }
+  | { kind: "email"; message: string }
+  | { kind: "url"; message: string }
+  | { kind: "startsWith"; prefix: string; message: string }
+  | { kind: "endsWith"; suffix: string; message: string }
+  | { kind: "includes"; search: string; message: string };
+
+export type NumberRule =
+  | { kind: "min"; value: number; message: string }
+  | { kind: "max"; value: number; message: string }
+  | { kind: "positive"; message: string }
+  | { kind: "nonnegative"; message: string };
+
+export type ArrayBound =
+  | { kind: "min"; length: number; message: string }
+  | { kind: "max"; length: number; message: string };
+
+export type ObjectField = {
+  key: string;
+  run: RunFn<unknown>;
+  optional: boolean;
+  toInline: (
+    expr: string,
+    pathPrefix: PropertyKey[],
+    binds: unknown[],
+    dynamicIndex?: string,
+  ) => string | null;
+};
+
+export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export const pushIssue = (
+  issues: Issue[],
+  message: string,
+  path: PropertyKey[],
+) => {
+  if (path.length === 0) {
+    issues.push({ message });
+    return;
+  }
+
+  issues.push({ message, path: path.slice() });
+};
+
+export const applyStringRules = (
+  value: string,
+  path: PropertyKey[],
+  issues: Issue[],
+  rules: ReadonlyArray<StringRule>,
+) => {
+  for (let i = 0; i < rules.length; i++) {
+    const rule = rules[i];
+
+    if (!rule) {
+      continue;
+    }
+
+    if (rule.kind === "min") {
+      if (value.length < rule.length) {
+        pushIssue(issues, rule.message, path);
+        return;
+      }
+      continue;
+    }
+
+    if (rule.kind === "max") {
+      if (value.length > rule.length) {
+        pushIssue(issues, rule.message, path);
+        return;
+      }
+      continue;
+    }
+
+    if (rule.kind === "length") {
+      if (value.length !== rule.length) {
+        pushIssue(issues, rule.message, path);
+        return;
+      }
+      continue;
+    }
+
+    if (rule.kind === "regex") {
+      if (!rule.pattern.test(value)) {
+        pushIssue(issues, rule.message, path);
+        return;
+      }
+      continue;
+    }
+
+    if (rule.kind === "email") {
+      if (!EMAIL_PATTERN.test(value)) {
+        pushIssue(issues, rule.message, path);
+        return;
+      }
+      continue;
+    }
+
+    if (rule.kind === "url") {
+      try {
+        new URL(value);
+      } catch {
+        pushIssue(issues, rule.message, path);
+        return;
+      }
+      continue;
+    }
+
+    if (rule.kind === "startsWith") {
+      if (!value.startsWith(rule.prefix)) {
+        pushIssue(issues, rule.message, path);
+        return;
+      }
+      continue;
+    }
+
+    if (rule.kind === "endsWith") {
+      if (!value.endsWith(rule.suffix)) {
+        pushIssue(issues, rule.message, path);
+        return;
+      }
+      continue;
+    }
+
+    if (!value.includes(rule.search)) {
+      pushIssue(issues, rule.message, path);
+    }
+  }
+};
+
+export const applyNumberRules = (
+  value: number,
+  path: PropertyKey[],
+  issues: Issue[],
+  rules: ReadonlyArray<NumberRule>,
+  integerOnly: boolean,
+  integerMessage: string,
+) => {
+  if (!Number.isFinite(value)) {
+    pushIssue(issues, "Expected finite number", path);
+    return;
+  }
+
+  if (integerOnly) {
+    if (!Number.isInteger(value)) {
+      pushIssue(issues, integerMessage, path);
+      return;
+    }
+  }
+
+  for (let i = 0; i < rules.length; i++) {
+    const rule = rules[i];
+
+    if (!rule) {
+      continue;
+    }
+
+    if (rule.kind === "min") {
+      if (value < rule.value) {
+        pushIssue(issues, rule.message, path);
+        return;
+      }
+      continue;
+    }
+
+    if (rule.kind === "max") {
+      if (value > rule.value) {
+        pushIssue(issues, rule.message, path);
+        return;
+      }
+      continue;
+    }
+
+    if (rule.kind === "positive") {
+      if (value <= 0) {
+        pushIssue(issues, rule.message, path);
+        return;
+      }
+      continue;
+    }
+
+    if (value < 0) {
+      pushIssue(issues, rule.message, path);
+      return;
+    }
+  }
+};
+
+/** Pooled success result - valid only until the next validate on this thread. */
+export const SUCCESS_RESULT: { value: unknown } = { value: undefined };
+
+export const SAFE_OK: { success: true; data: unknown } = {
+  success: true,
+  data: undefined,
+};
+
+const isIdentKey = (key: string) => {
+  return /^[A-Za-z_$][\w$]*$/.test(key);
+};
+
+/** JS expression for an issue path. null = omit path (root). */
+export const formatPathExpr = (
+  prefix: PropertyKey[],
+  dynamic?: string,
+): string | null => {
+  if (dynamic === undefined) {
+    if (prefix.length === 0) {
+      return null;
+    }
+
+    return JSON.stringify(prefix);
+  }
+
+  if (prefix.length === 0) {
+    return `[${dynamic}]`;
+  }
+
+  const head = prefix.map((part) => JSON.stringify(part)).join(",");
+  return `[${head},${dynamic}]`;
+};
+
+export const emitIssue = (messageLit: string, pathExpr: string | null) => {
+  if (!pathExpr) {
+    return `issues.push({message:${messageLit}});`;
+  }
+
+  return `issues.push({message:${messageLit},path:${pathExpr}});`;
+};
+
+export const emitStringRules = (
+  expr: string,
+  pathPrefix: PropertyKey[],
+  rules: ReadonlyArray<StringRule>,
+  binds: unknown[],
+  dynamicIndex?: string,
+) => {
+  const pathExpr = formatPathExpr(pathPrefix, dynamicIndex);
+  const parts = [
+    `if(typeof ${expr}!=='string'){${emitIssue('"Expected string"', pathExpr)}}else{`,
+  ];
+
+  for (let i = 0; i < rules.length; i++) {
+    const rule = rules[i];
+
+    if (!rule) {
+      continue;
+    }
+
+    const msg = JSON.stringify(rule.message);
+
+    if (rule.kind === "min") {
+      parts.push(
+        `if(${expr}.length<${rule.length}){${emitIssue(msg, pathExpr)}}`,
+      );
+      continue;
+    }
+
+    if (rule.kind === "max") {
+      parts.push(
+        `if(${expr}.length>${rule.length}){${emitIssue(msg, pathExpr)}}`,
+      );
+      continue;
+    }
+
+    if (rule.kind === "length") {
+      parts.push(
+        `if(${expr}.length!==${rule.length}){${emitIssue(msg, pathExpr)}}`,
+      );
+      continue;
+    }
+
+    if (rule.kind === "regex") {
+      const id = binds.length;
+      binds.push(rule.pattern);
+      parts.push(
+        `if(!binds[${id}].test(${expr})){${emitIssue(msg, pathExpr)}}`,
+      );
+      continue;
+    }
+
+    if (rule.kind === "email") {
+      const id = binds.length;
+      binds.push(EMAIL_PATTERN);
+      parts.push(
+        `if(!binds[${id}].test(${expr})){${emitIssue(msg, pathExpr)}}`,
+      );
+      continue;
+    }
+
+    if (rule.kind === "url") {
+      parts.push(`try{new URL(${expr})}catch{${emitIssue(msg, pathExpr)}}`);
+      continue;
+    }
+
+    if (rule.kind === "startsWith") {
+      parts.push(
+        `if(!${expr}.startsWith(${JSON.stringify(rule.prefix)})){${emitIssue(msg, pathExpr)}}`,
+      );
+      continue;
+    }
+
+    if (rule.kind === "endsWith") {
+      parts.push(
+        `if(!${expr}.endsWith(${JSON.stringify(rule.suffix)})){${emitIssue(msg, pathExpr)}}`,
+      );
+      continue;
+    }
+
+    parts.push(
+      `if(!${expr}.includes(${JSON.stringify(rule.search)})){${emitIssue(msg, pathExpr)}}`,
+    );
+  }
+
+  parts.push("}");
+  return parts.join("");
+};
+
+export const emitNumberRules = (
+  expr: string,
+  pathPrefix: PropertyKey[],
+  rules: ReadonlyArray<NumberRule>,
+  integerOnly: boolean,
+  integerMessage: string,
+  dynamicIndex?: string,
+) => {
+  const pathExpr = formatPathExpr(pathPrefix, dynamicIndex);
+  const parts = [
+    `if(typeof ${expr}!=='number'){${emitIssue('"Expected number"', pathExpr)}}else if(!Number.isFinite(${expr})){${emitIssue('"Expected finite number"', pathExpr)}}`,
+  ];
+
+  if (integerOnly) {
+    parts.push(
+      `else if(!Number.isInteger(${expr})){${emitIssue(JSON.stringify(integerMessage), pathExpr)}}`,
+    );
+  }
+
+  for (let i = 0; i < rules.length; i++) {
+    const rule = rules[i];
+
+    if (!rule) {
+      continue;
+    }
+
+    const msg = JSON.stringify(rule.message);
+
+    if (rule.kind === "min") {
+      parts.push(`else if(${expr}<${rule.value}){${emitIssue(msg, pathExpr)}}`);
+      continue;
+    }
+
+    if (rule.kind === "max") {
+      parts.push(`else if(${expr}>${rule.value}){${emitIssue(msg, pathExpr)}}`);
+      continue;
+    }
+
+    if (rule.kind === "positive") {
+      parts.push(`else if(${expr}<=0){${emitIssue(msg, pathExpr)}}`);
+      continue;
+    }
+
+    parts.push(`else if(${expr}<0){${emitIssue(msg, pathExpr)}}`);
+  }
+
+  return parts.join("");
+};
+
+/** Compile a top-level validator that skips the path argument entirely when fully inlined. */
+export const compileObjectValidate = <Output>(fields: ObjectField[]) => {
+  const runs: RunFn<unknown>[] = [];
+  const binds: unknown[] = [];
+  const pathExprRoot = formatPathExpr([]);
+  let needsPath = false;
+
+  const lines = [
+    `if(typeof value!=='object'||value===null||Array.isArray(value)){${emitIssue('"Expected object"', pathExprRoot)}return;}`,
+  ];
+
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i];
+
+    if (!field) {
+      continue;
+    }
+
+    const keyLiteral = JSON.stringify(field.key);
+    const access = isIdentKey(field.key)
+      ? `value.${field.key}`
+      : `value[${keyLiteral}]`;
+    const hasKey = `${keyLiteral} in value`;
+    const fieldPrefix: PropertyKey[] = [field.key];
+    const requiredPath = formatPathExpr(fieldPrefix);
+
+    lines.push(`if(!(${hasKey})){`);
+
+    if (!field.optional) {
+      lines.push(emitIssue('"Required"', requiredPath));
+    }
+
+    const inline = field.toInline(access, fieldPrefix, binds);
+
+    if (inline) {
+      lines.push("}else{", inline, "}");
+      continue;
+    }
+
+    needsPath = true;
+    const runIndex = runs.length;
+    runs.push(field.run);
+    lines.push(
+      "}else{",
+      `path.push(${keyLiteral});`,
+      `runs[${runIndex}](${access},path,issues);`,
+      "path.pop();",
+      "}",
+    );
+  }
+
+  const factory = new Function(
+    "binds",
+    "runs",
+    needsPath
+      ? `return function(value,path,issues){${lines.join("")}}`
+      : `return function(value,issues){${lines.join("")}}`,
+  );
+
+  if (needsPath) {
+    const run = factory(binds, runs) as RunFn<Output>;
+
+    return {
+      needsPath: true as const,
+      run,
+      check: (value: unknown, path: PropertyKey[], issues: Issue[]) => {
+        run(value, path, issues);
+      },
+    };
+  }
+
+  const check = factory(binds, runs) as (
+    value: unknown,
+    issues: Issue[],
+  ) => void;
+
+  return {
+    needsPath: false as const,
+    check,
+    run: ((value, _path, issues) => {
+      check(value, issues);
+      return value as Output;
+    }) as RunFn<Output>,
+  };
+};

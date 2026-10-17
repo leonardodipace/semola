@@ -186,11 +186,23 @@ export type JsonSchema = Record<string, unknown>;
 /** Covariant schema surface for object/tuple/union composition. */
 export interface SchemaBase<out Output = unknown> {
   readonly schemaType: string;
+  /** Hot-path validator used by composite schemas. */
+  readonly run: (
+    value: unknown,
+    path: PropertyKey[],
+    issues: Issue[],
+  ) => Output;
   readonly "~standard": StandardSchemaV1.Props<Output, Output> &
     StandardJSONSchemaV1.Props<Output, Output>;
   parse(data: unknown): Output;
   safeParse(data: unknown): SafeParseResult<Output>;
   toJsonSchema(target?: StandardJSONSchemaV1.Target): JsonSchema;
+  toInline(
+    expr: string,
+    pathPrefix: PropertyKey[],
+    binds: unknown[],
+    dynamicIndex?: string,
+  ): string | null;
 }
 
 export type ObjectShape = Record<string, SchemaBase>;

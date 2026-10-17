@@ -1,4 +1,21 @@
 import {
+  type ArrayBound,
+  applyNumberRules,
+  applyStringRules,
+  compileObjectValidate,
+  emitIssue,
+  emitNumberRules,
+  emitStringRules,
+  formatPathExpr,
+  type NumberRule,
+  type ObjectField,
+  pushIssue,
+  type RunFn,
+  SAFE_OK,
+  type StringRule,
+  SUCCESS_RESULT,
+} from "./compile.js";
+import {
   formatIssues,
   SchemaError,
   UnsupportedJsonSchemaTargetError,
@@ -19,8 +36,6 @@ import type {
 
 const VENDOR = "semola";
 
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 const assertJsonSchemaTarget = (target: StandardJSONSchemaV1.Target) => {
   if (target === "draft-2020-12") return;
   if (target === "draft-07") return;
@@ -29,45 +44,42 @@ const assertJsonSchemaTarget = (target: StandardJSONSchemaV1.Target) => {
   throw new UnsupportedJsonSchemaTargetError(target);
 };
 
-const issue = (message: string, path: Path = []): Issue => {
-  if (path.length === 0) {
-    return { message };
-  }
-
-  return { message, path: [...path] };
-};
-
-const fail = (
-  message: string,
-  path: Path = [],
-): StandardSchemaV1.FailureResult => {
-  return { issues: [issue(message, path)] };
-};
-
-const ok = <T>(value: T): StandardSchemaV1.SuccessResult<T> => {
-  return { value };
-};
-
-const prependPath = (
-  result: StandardSchemaV1.FailureResult,
-  key: PropertyKey,
-): StandardSchemaV1.FailureResult => {
-  return {
-    issues: result.issues.map((entry) => {
-      return {
-        message: entry.message,
-        path: [key, ...(entry.path ?? [])],
-      };
-    }),
-  };
-};
-
-type ParseFn<Output> = (
-  value: unknown,
-  path: Path,
-) => StandardSchemaV1.Result<Output>;
-
 type JsonSchemaFn = (target: StandardJSONSchemaV1.Target) => JsonSchema;
+
+// Sync validation is single-threaded; reuse buffers when not re-entrant.
+const TLS_PATH: PropertyKey[] = [];
+const TLS_ISSUES: Issue[] = [];
+let tlsDepth = 0;
+
+const runTopLevel = <Output>(run: RunFn<Output>, value: unknown) => {
+  tlsDepth += 1;
+
+  try {
+    if (tlsDepth === 1) {
+      TLS_PATH.length = 0;
+      TLS_ISSUES.length = 0;
+      const output = run(value, TLS_PATH, TLS_ISSUES);
+
+      if (TLS_ISSUES.length > 0) {
+        return { issues: TLS_ISSUES.slice() as Issue[], output: undefined };
+      }
+
+      return { issues: undefined, output };
+    }
+
+    const path: PropertyKey[] = [];
+    const issues: Issue[] = [];
+    const output = run(value, path, issues);
+
+    if (issues.length > 0) {
+      return { issues, output: undefined };
+    }
+
+    return { issues: undefined, output };
+  } finally {
+    tlsDepth -= 1;
+  }
+};
 
 export abstract class Schema<Output = unknown>
   implements
@@ -77,45 +89,59 @@ export abstract class Schema<Output = unknown>
 {
   public abstract readonly schemaType: string;
 
+  /** Hot-path validator. On failure pushes to `issues` and return value is ignored. */
+  public readonly run: RunFn<Output>;
+
   public readonly "~standard": StandardJSONSchemaV1.Props<Output, Output> &
     StandardSchemaV1.Props<Output, Output>;
 
-  protected constructor(
-    private readonly parseValue: ParseFn<Output>,
-    private readonly buildJsonSchema: JsonSchemaFn,
-  ) {
+  protected constructor(run: RunFn<Output>, buildJsonSchema: JsonSchemaFn) {
+    this.run = run;
+
     this["~standard"] = {
       version: 1,
       vendor: VENDOR,
       validate: (value) => {
-        return this.parseValue(value, []);
+        return this.validateStd(value);
       },
       jsonSchema: {
         input: (options) => {
           assertJsonSchemaTarget(options.target);
-          return this.buildJsonSchema(options.target);
+          return buildJsonSchema(options.target);
         },
         output: (options) => {
           assertJsonSchemaTarget(options.target);
-          return this.buildJsonSchema(options.target);
+          return buildJsonSchema(options.target);
         },
       },
       types: undefined as unknown as StandardSchemaV1.Types<Output, Output>,
     };
   }
 
+  /** Standard Schema validate. Success result is pooled - read `.value` before next validate. */
+  public validateStd(value: unknown): StandardSchemaV1.Result<Output> {
+    const result = runTopLevel(this.run, value);
+
+    if (result.issues) {
+      return { issues: result.issues };
+    }
+
+    SUCCESS_RESULT.value = result.output;
+    return SUCCESS_RESULT as StandardSchemaV1.SuccessResult<Output>;
+  }
+
   public parse(data: unknown): Output {
-    const result = this.parseValue(data, []);
+    const result = runTopLevel(this.run, data);
 
     if (result.issues) {
       throw new SchemaError(result.issues);
     }
 
-    return result.value;
+    return result.output as Output;
   }
 
   public safeParse(data: unknown): SafeParseResult<Output> {
-    const result = this.parseValue(data, []);
+    const result = runTopLevel(this.run, data);
 
     if (result.issues) {
       return {
@@ -127,12 +153,13 @@ export abstract class Schema<Output = unknown>
       };
     }
 
-    return { success: true, data: result.value };
+    SAFE_OK.data = result.output;
+    return SAFE_OK as SafeParseResult<Output>;
   }
 
   public toJsonSchema(target: StandardJSONSchemaV1.Target = "draft-2020-12") {
     assertJsonSchemaTarget(target);
-    return this.buildJsonSchema(target);
+    return this["~standard"].jsonSchema.output({ target });
   }
 
   public optional(): OptionalSchema<Output> {
@@ -151,25 +178,38 @@ export abstract class Schema<Output = unknown>
     check: (value: Output) => boolean,
     message = "Invalid input",
   ): Schema<Output> {
-    const parseValue = this.parseValue;
-    const buildJsonSchema = this.buildJsonSchema;
+    const parentRun = this.run;
     const schemaType = this.schemaType;
+    const parentJson = (target: StandardJSONSchemaV1.Target) => {
+      return this.toJsonSchema(target);
+    };
 
     return new (class extends Schema<Output> {
       public readonly schemaType = schemaType;
-    })((value, path) => {
-      const result = parseValue(value, path);
+    })((value, path, issues) => {
+      const before = issues.length;
+      const output = parentRun(value, path, issues);
 
-      if (result.issues) {
-        return result;
+      if (issues.length > before) {
+        return output;
       }
 
-      if (!check(result.value)) {
-        return fail(message, path);
+      if (!check(output)) {
+        pushIssue(issues, message, path);
       }
 
-      return ok(result.value);
-    }, buildJsonSchema);
+      return output;
+    }, parentJson);
+  }
+
+  /** Emit inlined JS for object codegen, or null if not supported. */
+  public toInline(
+    _expr: string,
+    _pathPrefix: PropertyKey[],
+    _binds: unknown[],
+    _dynamicIndex?: string,
+  ): string | null {
+    return null;
   }
 }
 
@@ -178,10 +218,10 @@ class LeafSchema<Output> extends Schema<Output> {
 
   public constructor(
     schemaType: string,
-    parseValue: ParseFn<Output>,
+    run: RunFn<Output>,
     buildJsonSchema: JsonSchemaFn,
   ) {
-    super(parseValue, buildJsonSchema);
+    super(run, buildJsonSchema);
     this.schemaType = schemaType;
   }
 }
@@ -189,39 +229,29 @@ class LeafSchema<Output> extends Schema<Output> {
 export class StringSchema extends Schema<string> {
   public readonly schemaType = "string";
 
-  private readonly checks: ReadonlyArray<
-    (value: string, path: Path) => Issue | undefined
-  >;
+  private readonly rules: ReadonlyArray<StringRule>;
   private readonly jsonExtras: JsonSchema;
 
   private constructor(
-    checks: ReadonlyArray<
-      (value: string, path: Path) => Issue | undefined
-    > = [],
+    rules: ReadonlyArray<StringRule> = [],
     jsonExtras: JsonSchema = {},
   ) {
     super(
-      (value, path) => {
+      (value, path, issues) => {
         if (typeof value !== "string") {
-          return fail("Expected string", path);
+          pushIssue(issues, "Expected string", path);
+          return "";
         }
 
-        for (const check of checks) {
-          const nextIssue = check(value, path);
-
-          if (nextIssue) {
-            return { issues: [nextIssue] };
-          }
-        }
-
-        return ok(value);
+        applyStringRules(value, path, issues, rules);
+        return value;
       },
       () => {
         return { type: "string", ...jsonExtras };
       },
     );
 
-    this.checks = checks;
+    this.rules = rules;
     this.jsonExtras = jsonExtras;
   }
 
@@ -229,151 +259,134 @@ export class StringSchema extends Schema<string> {
     return new StringSchema();
   }
 
-  private withCheck(
-    check: (value: string, path: Path) => Issue | undefined,
-    extras: JsonSchema,
-  ) {
-    return new StringSchema([...this.checks, check], {
+  private withRule(rule: StringRule, extras: JsonSchema) {
+    return new StringSchema([...this.rules, rule], {
       ...this.jsonExtras,
       ...extras,
     });
   }
 
-  public min(length: number, message?: string) {
-    return this.withCheck(
-      (value, path) => {
-        if (value.length >= length) return;
+  public override toInline(
+    expr: string,
+    pathPrefix: PropertyKey[],
+    binds: unknown[],
+    dynamicIndex?: string,
+  ) {
+    return emitStringRules(expr, pathPrefix, this.rules, binds, dynamicIndex);
+  }
 
-        return issue(message ?? `Expected string length >= ${length}`, path);
+  public min(length: number, message?: string) {
+    return this.withRule(
+      {
+        kind: "min",
+        length,
+        message: message ?? `Expected string length >= ${length}`,
       },
       { minLength: length },
     );
   }
 
   public max(length: number, message?: string) {
-    return this.withCheck(
-      (value, path) => {
-        if (value.length <= length) return;
-
-        return issue(message ?? `Expected string length <= ${length}`, path);
+    return this.withRule(
+      {
+        kind: "max",
+        length,
+        message: message ?? `Expected string length <= ${length}`,
       },
       { maxLength: length },
     );
   }
 
   public length(length: number, message?: string) {
-    return this.withCheck(
-      (value, path) => {
-        if (value.length === length) return;
-
-        return issue(message ?? `Expected string length == ${length}`, path);
+    return this.withRule(
+      {
+        kind: "length",
+        length,
+        message: message ?? `Expected string length == ${length}`,
       },
       { minLength: length, maxLength: length },
     );
   }
 
   public regex(pattern: RegExp, message = "Invalid string") {
-    return this.withCheck(
-      (value, path) => {
-        if (pattern.test(value)) return;
-
-        return issue(message, path);
-      },
+    return this.withRule(
+      { kind: "regex", pattern, message },
       { pattern: pattern.source },
     );
   }
 
   public email(message = "Invalid email") {
-    return this.withCheck(
-      (value, path) => {
-        if (EMAIL_PATTERN.test(value)) return;
-
-        return issue(message, path);
-      },
-      { format: "email" },
-    );
+    return this.withRule({ kind: "email", message }, { format: "email" });
   }
 
   public url(message = "Invalid url") {
-    return this.withCheck(
-      (value, path) => {
-        try {
-          new URL(value);
-          return;
-        } catch {
-          return issue(message, path);
-        }
-      },
-      { format: "uri" },
-    );
+    return this.withRule({ kind: "url", message }, { format: "uri" });
   }
 
   public startsWith(prefix: string, message?: string) {
-    return this.withCheck((value, path) => {
-      if (value.startsWith(prefix)) return;
-
-      return issue(message ?? `Expected string to start with ${prefix}`, path);
-    }, {});
+    return this.withRule(
+      {
+        kind: "startsWith",
+        prefix,
+        message: message ?? `Expected string to start with ${prefix}`,
+      },
+      {},
+    );
   }
 
   public endsWith(suffix: string, message?: string) {
-    return this.withCheck((value, path) => {
-      if (value.endsWith(suffix)) return;
-
-      return issue(message ?? `Expected string to end with ${suffix}`, path);
-    }, {});
+    return this.withRule(
+      {
+        kind: "endsWith",
+        suffix,
+        message: message ?? `Expected string to end with ${suffix}`,
+      },
+      {},
+    );
   }
 
   public includes(search: string, message?: string) {
-    return this.withCheck((value, path) => {
-      if (value.includes(search)) return;
-
-      return issue(message ?? `Expected string to include ${search}`, path);
-    }, {});
+    return this.withRule(
+      {
+        kind: "includes",
+        search,
+        message: message ?? `Expected string to include ${search}`,
+      },
+      {},
+    );
   }
 }
 
 export class NumberSchema extends Schema<number> {
   public readonly schemaType = "number";
 
-  private readonly checks: ReadonlyArray<
-    (value: number, path: Path) => Issue | undefined
-  >;
+  private readonly rules: ReadonlyArray<NumberRule>;
   private readonly jsonExtras: JsonSchema;
   private readonly integerOnly: boolean;
+  private readonly integerMessage: string;
 
   private constructor(
-    checks: ReadonlyArray<
-      (value: number, path: Path) => Issue | undefined
-    > = [],
+    rules: ReadonlyArray<NumberRule> = [],
     jsonExtras: JsonSchema = {},
     integerOnly = false,
+    integerMessage = "Expected integer",
   ) {
     super(
-      (value, path) => {
+      (value, path, issues) => {
         if (typeof value !== "number") {
-          return fail("Expected number", path);
+          pushIssue(issues, "Expected number", path);
+          return 0;
         }
 
-        if (!Number.isFinite(value)) {
-          return fail("Expected finite number", path);
-        }
-
-        if (integerOnly) {
-          if (!Number.isInteger(value)) {
-            return fail("Expected integer", path);
-          }
-        }
-
-        for (const check of checks) {
-          const nextIssue = check(value, path);
-
-          if (nextIssue) {
-            return { issues: [nextIssue] };
-          }
-        }
-
-        return ok(value);
+        applyNumberRules(
+          value,
+          path,
+          issues,
+          rules,
+          integerOnly,
+          integerMessage,
+        );
+        return value;
       },
       () => {
         if (integerOnly) {
@@ -384,81 +397,76 @@ export class NumberSchema extends Schema<number> {
       },
     );
 
-    this.checks = checks;
+    this.rules = rules;
     this.jsonExtras = jsonExtras;
     this.integerOnly = integerOnly;
+    this.integerMessage = integerMessage;
   }
 
   public static create() {
     return new NumberSchema();
   }
 
-  private withCheck(
-    check: (value: number, path: Path) => Issue | undefined,
-    extras: JsonSchema,
-    integerOnly = this.integerOnly,
-  ) {
+  private withRule(rule: NumberRule, extras: JsonSchema) {
     return new NumberSchema(
-      [...this.checks, check],
+      [...this.rules, rule],
       { ...this.jsonExtras, ...extras },
-      integerOnly,
+      this.integerOnly,
+      this.integerMessage,
+    );
+  }
+
+  public override toInline(
+    expr: string,
+    pathPrefix: PropertyKey[],
+    _binds: unknown[],
+    dynamicIndex?: string,
+  ) {
+    return emitNumberRules(
+      expr,
+      pathPrefix,
+      this.rules,
+      this.integerOnly,
+      this.integerMessage,
+      dynamicIndex,
     );
   }
 
   public min(value: number, message?: string) {
-    return this.withCheck(
-      (candidate, path) => {
-        if (candidate >= value) return;
-
-        return issue(message ?? `Expected number >= ${value}`, path);
+    return this.withRule(
+      {
+        kind: "min",
+        value,
+        message: message ?? `Expected number >= ${value}`,
       },
       { minimum: value },
     );
   }
 
   public max(value: number, message?: string) {
-    return this.withCheck(
-      (candidate, path) => {
-        if (candidate <= value) return;
-
-        return issue(message ?? `Expected number <= ${value}`, path);
+    return this.withRule(
+      {
+        kind: "max",
+        value,
+        message: message ?? `Expected number <= ${value}`,
       },
       { maximum: value },
     );
   }
 
   public int(message = "Expected integer") {
-    return this.withCheck(
-      (candidate, path) => {
-        if (Number.isInteger(candidate)) return;
-
-        return issue(message, path);
-      },
-      {},
-      true,
-    );
+    return new NumberSchema(this.rules, this.jsonExtras, true, message);
   }
 
   public positive(message = "Expected positive number") {
-    return this.withCheck(
-      (candidate, path) => {
-        if (candidate > 0) return;
-
-        return issue(message, path);
-      },
+    return this.withRule(
+      { kind: "positive", message },
       { exclusiveMinimum: 0 },
     );
   }
 
   public nonnegative(message = "Expected non-negative number") {
-    return this.withCheck(
-      (candidate, path) => {
-        if (candidate >= 0) return;
-
-        return issue(message, path);
-      },
-      { minimum: 0 },
-    );
+    return this.withRule({ kind: "nonnegative", message }, { minimum: 0 });
   }
 }
 
@@ -467,17 +475,27 @@ export class BooleanSchema extends Schema<boolean> {
 
   public constructor() {
     super(
-      (value, path) => {
+      (value, path, issues) => {
         if (typeof value !== "boolean") {
-          return fail("Expected boolean", path);
+          pushIssue(issues, "Expected boolean", path);
+          return false;
         }
 
-        return ok(value);
+        return value;
       },
       () => {
         return { type: "boolean" };
       },
     );
+  }
+
+  public override toInline(
+    expr: string,
+    pathPrefix: PropertyKey[],
+    _binds: unknown[],
+    dynamicIndex?: string,
+  ) {
+    return `if(typeof ${expr}!=='boolean'){${emitIssue('"Expected boolean"', formatPathExpr(pathPrefix, dynamicIndex))}}`;
   }
 }
 
@@ -486,12 +504,13 @@ export class BigintSchema extends Schema<bigint> {
 
   public constructor() {
     super(
-      (value, path) => {
+      (value, path, issues) => {
         if (typeof value !== "bigint") {
-          return fail("Expected bigint", path);
+          pushIssue(issues, "Expected bigint", path);
+          return 0n;
         }
 
-        return ok(value);
+        return value;
       },
       () => {
         // ponytail: JSON Schema has no bigint; document as integer
@@ -506,16 +525,17 @@ export class DateSchema extends Schema<Date> {
 
   public constructor() {
     super(
-      (value, path) => {
+      (value, path, issues) => {
         if (!(value instanceof Date)) {
-          return fail("Expected Date", path);
+          pushIssue(issues, "Expected Date", path);
+          return value as Date;
         }
 
         if (Number.isNaN(value.getTime())) {
-          return fail("Expected valid Date", path);
+          pushIssue(issues, "Expected valid Date", path);
         }
 
-        return ok(value);
+        return value;
       },
       () => {
         return { type: "string", format: "date-time" };
@@ -529,12 +549,12 @@ export class LiteralSchema<T extends LiteralValue> extends Schema<T> {
 
   public constructor(expected: T) {
     super(
-      (value, path) => {
+      (value, path, issues) => {
         if (value !== expected) {
-          return fail(`Expected ${String(expected)}`, path);
+          pushIssue(issues, `Expected ${String(expected)}`, path);
         }
 
-        return ok(expected);
+        return expected;
       },
       () => {
         return { const: expected };
@@ -547,17 +567,20 @@ export class EnumSchema<T extends string> extends Schema<T> {
   public readonly schemaType = "enum";
 
   public constructor(values: readonly T[]) {
+    const allowed = new Set(values);
+
     super(
-      (value, path) => {
+      (value, path, issues) => {
         if (typeof value !== "string") {
-          return fail("Expected string", path);
+          pushIssue(issues, "Expected string", path);
+          return values[0] as T;
         }
 
-        if (!values.includes(value as T)) {
-          return fail(`Expected one of: ${values.join(", ")}`, path);
+        if (!allowed.has(value as T)) {
+          pushIssue(issues, `Expected one of: ${values.join(", ")}`, path);
         }
 
-        return ok(value as T);
+        return value as T;
       },
       () => {
         return { type: "string", enum: [...values] };
@@ -571,19 +594,32 @@ export class OptionalSchema<Output> extends Schema<Output | undefined> {
 
   public constructor(public readonly inner: Schema<Output>) {
     super(
-      (value, _path) => {
+      (value, path, issues) => {
         if (value === undefined) {
-          return ok(undefined);
+          return undefined;
         }
 
-        return inner["~standard"].validate(value) as StandardSchemaV1.Result<
-          Output | undefined
-        >;
+        return inner.run(value, path, issues);
       },
       (target) => {
         return inner.toJsonSchema(target);
       },
     );
+  }
+
+  public override toInline(
+    expr: string,
+    pathPrefix: PropertyKey[],
+    binds: unknown[],
+    dynamicIndex?: string,
+  ) {
+    const inner = this.inner.toInline(expr, pathPrefix, binds, dynamicIndex);
+
+    if (!inner) {
+      return null;
+    }
+
+    return `if(${expr}!==undefined){${inner}}`;
   }
 }
 
@@ -592,14 +628,12 @@ export class NullableSchema<Output> extends Schema<Output | null> {
 
   public constructor(public readonly inner: Schema<Output>) {
     super(
-      (value, _path) => {
+      (value, path, issues) => {
         if (value === null) {
-          return ok(null);
+          return null;
         }
 
-        return inner["~standard"].validate(
-          value,
-        ) as StandardSchemaV1.Result<Output | null>;
+        return inner.run(value, path, issues);
       },
       (target) => {
         const base = inner.toJsonSchema(target);
@@ -615,18 +649,16 @@ export class NullishSchema<Output> extends Schema<Output | null | undefined> {
 
   public constructor(public readonly inner: Schema<Output>) {
     super(
-      (value, _path) => {
+      (value, path, issues) => {
         if (value === null) {
-          return ok(null);
+          return null;
         }
 
         if (value === undefined) {
-          return ok(undefined);
+          return undefined;
         }
 
-        return inner["~standard"].validate(value) as StandardSchemaV1.Result<
-          Output | null | undefined
-        >;
+        return inner.run(value, path, issues);
       },
       (target) => {
         const base = inner.toJsonSchema(target);
@@ -640,59 +672,59 @@ export class NullishSchema<Output> extends Schema<Output | null | undefined> {
 export class ArraySchema<Output> extends Schema<Output[]> {
   public readonly schemaType = "array";
 
-  private readonly checks: ReadonlyArray<
-    (value: Output[], path: Path) => Issue | undefined
-  >;
+  private readonly bounds: ReadonlyArray<ArrayBound>;
   private readonly jsonExtras: JsonSchema;
   private readonly element: Schema<Output>;
 
   private constructor(
     element: Schema<Output>,
-    checks: ReadonlyArray<
-      (value: Output[], path: Path) => Issue | undefined
-    > = [],
+    bounds: ReadonlyArray<ArrayBound> = [],
     jsonExtras: JsonSchema = {},
   ) {
+    const elementRun = element.run;
+
     super(
-      (value, path) => {
+      (value, path, issues) => {
         if (!Array.isArray(value)) {
-          return fail("Expected array", path);
+          pushIssue(issues, "Expected array", path);
+          return value as Output[];
         }
 
-        const output: Output[] = [];
-        const issues: Issue[] = [];
+        const list = value as Output[];
+        const before = issues.length;
 
-        for (let index = 0; index < value.length; index++) {
-          const itemResult = element["~standard"].validate(value[index]);
+        for (let index = 0; index < list.length; index++) {
+          path.push(index);
+          elementRun(list[index], path, issues);
+          path.pop();
+        }
 
-          if (itemResult instanceof Promise) {
-            return fail("Async schema validation is not supported", [
-              ...path,
-              index,
-            ]);
-          }
+        if (issues.length > before) {
+          return list;
+        }
 
-          if (itemResult.issues) {
-            issues.push(...prependPath(itemResult, index).issues);
+        for (let i = 0; i < bounds.length; i++) {
+          const bound = bounds[i];
+
+          if (!bound) {
             continue;
           }
 
-          output.push(itemResult.value);
-        }
+          if (bound.kind === "min") {
+            if (list.length < bound.length) {
+              pushIssue(issues, bound.message, path);
+              return list;
+            }
+            continue;
+          }
 
-        if (issues.length > 0) {
-          return { issues };
-        }
-
-        for (const check of checks) {
-          const nextIssue = check(output, path);
-
-          if (nextIssue) {
-            return { issues: [nextIssue] };
+          if (list.length > bound.length) {
+            pushIssue(issues, bound.message, path);
+            return list;
           }
         }
 
-        return ok(output);
+        return list;
       },
       (target) => {
         return {
@@ -704,7 +736,7 @@ export class ArraySchema<Output> extends Schema<Output[]> {
     );
 
     this.element = element;
-    this.checks = checks;
+    this.bounds = bounds;
     this.jsonExtras = jsonExtras;
   }
 
@@ -712,33 +744,87 @@ export class ArraySchema<Output> extends Schema<Output[]> {
     return new ArraySchema(element);
   }
 
-  private withCheck(
-    check: (value: Output[], path: Path) => Issue | undefined,
-    extras: JsonSchema,
-  ) {
-    return new ArraySchema(this.element, [...this.checks, check], {
+  private withBound(bound: ArrayBound, extras: JsonSchema) {
+    return new ArraySchema(this.element, [...this.bounds, bound], {
       ...this.jsonExtras,
       ...extras,
     });
   }
 
-  public min(length: number, message?: string) {
-    return this.withCheck(
-      (value, path) => {
-        if (value.length >= length) return;
+  public override toInline(
+    expr: string,
+    pathPrefix: PropertyKey[],
+    binds: unknown[],
+    dynamicIndex?: string,
+  ) {
+    // Array under a dynamic index is rare; skip codegen.
+    if (dynamicIndex !== undefined) {
+      return null;
+    }
 
-        return issue(message ?? `Expected array length >= ${length}`, path);
+    const elementInline = this.element.toInline(
+      "__el",
+      pathPrefix,
+      binds,
+      "__i",
+    );
+
+    if (!elementInline) {
+      return null;
+    }
+
+    const pathExpr = formatPathExpr(pathPrefix);
+    const parts = [
+      `if(!Array.isArray(${expr})){${emitIssue('"Expected array"', pathExpr)}}else{`,
+    ];
+
+    for (let i = 0; i < this.bounds.length; i++) {
+      const bound = this.bounds[i];
+
+      if (!bound) {
+        continue;
+      }
+
+      const msg = JSON.stringify(bound.message);
+
+      if (bound.kind === "min") {
+        parts.push(
+          `if(${expr}.length<${bound.length}){${emitIssue(msg, pathExpr)}}`,
+        );
+        continue;
+      }
+
+      parts.push(
+        `if(${expr}.length>${bound.length}){${emitIssue(msg, pathExpr)}}`,
+      );
+    }
+
+    parts.push(
+      `for(let __i=0;__i<${expr}.length;__i++){const __el=${expr}[__i];`,
+      elementInline,
+      "}}",
+    );
+
+    return parts.join("");
+  }
+
+  public min(length: number, message?: string) {
+    return this.withBound(
+      {
+        kind: "min",
+        length,
+        message: message ?? `Expected array length >= ${length}`,
       },
       { minItems: length },
     );
   }
 
   public max(length: number, message?: string) {
-    return this.withCheck(
-      (value, path) => {
-        if (value.length <= length) return;
-
-        return issue(message ?? `Expected array length <= ${length}`, path);
+    return this.withBound(
+      {
+        kind: "max",
+        length,
+        message: message ?? `Expected array length <= ${length}`,
       },
       { maxItems: length },
     );
@@ -754,109 +840,230 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
 > {
   public readonly schemaType = "object";
 
+  private readonly compiled: ReturnType<
+    typeof compileObjectValidate<InferObjectOutput<Shape>>
+  >;
+  private readonly shape: Shape;
+
   public constructor(shape: Shape) {
-    super(
-      (value, path) => {
-        if (typeof value !== "object") {
-          return fail("Expected object", path);
+    const fields: ObjectField[] = [];
+    const keys = Object.keys(shape);
+
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+
+      if (key === undefined) {
+        continue;
+      }
+
+      const propertySchema = shape[key];
+
+      if (!propertySchema) {
+        continue;
+      }
+
+      fields.push({
+        key,
+        run: propertySchema.run,
+        optional:
+          propertySchema.schemaType === "optional" ||
+          propertySchema.schemaType === "nullish",
+        toInline: (expr, pathPrefix, binds, dynamicIndex) => {
+          return propertySchema.toInline(expr, pathPrefix, binds, dynamicIndex);
+        },
+      });
+    }
+
+    const compiled = compileObjectValidate<InferObjectOutput<Shape>>(fields);
+
+    super(compiled.run, (target) => {
+      const properties: Record<string, JsonSchema> = {};
+      const required: string[] = [];
+
+      for (let i = 0; i < fields.length; i++) {
+        const field = fields[i];
+
+        if (!field) {
+          continue;
         }
 
-        if (value === null) {
-          return fail("Expected object", path);
+        const propertySchema = shape[field.key];
+
+        if (!propertySchema) {
+          continue;
         }
 
-        if (Array.isArray(value)) {
-          return fail("Expected object", path);
+        properties[field.key] = propertySchema.toJsonSchema(target);
+
+        if (field.optional) {
+          continue;
         }
 
-        const output: Record<string, unknown> = {};
-        const issues: Issue[] = [];
-        const record = value as Record<string, unknown>;
+        required.push(field.key);
+      }
 
-        for (const key of Object.keys(shape)) {
-          const propertySchema = shape[key];
+      const schema: JsonSchema = {
+        type: "object",
+        properties,
+      };
 
-          if (!propertySchema) {
-            continue;
-          }
+      if (required.length > 0) {
+        schema.required = required;
+      }
 
-          const hasKey = Object.hasOwn(record, key);
-          const propertyValue = record[key];
+      return schema;
+    });
 
-          if (!hasKey) {
-            if (propertySchema.schemaType === "optional") {
-              continue;
-            }
+    this.compiled = compiled;
+    this.shape = shape;
+  }
 
-            if (propertySchema.schemaType === "nullish") {
-              continue;
-            }
+  public override validateStd(
+    value: unknown,
+  ): StandardSchemaV1.Result<InferObjectOutput<Shape>> {
+    if (tlsDepth !== 0) {
+      return super.validateStd(value);
+    }
 
-            issues.push(issue("Required", [...path, key]));
-            continue;
-          }
+    tlsDepth = 1;
 
-          const propertyResult =
-            propertySchema["~standard"].validate(propertyValue);
+    try {
+      TLS_ISSUES.length = 0;
 
-          if (propertyResult instanceof Promise) {
-            issues.push(
-              issue("Async schema validation is not supported", [...path, key]),
-            );
-            continue;
-          }
+      if (this.compiled.needsPath) {
+        TLS_PATH.length = 0;
+        this.compiled.run(value, TLS_PATH, TLS_ISSUES);
+      } else {
+        this.compiled.check(value, TLS_ISSUES);
+      }
 
-          if (propertyResult.issues) {
-            issues.push(...prependPath(propertyResult, key).issues);
-            continue;
-          }
+      if (TLS_ISSUES.length > 0) {
+        return { issues: TLS_ISSUES.slice() };
+      }
 
-          output[key] = propertyResult.value;
-        }
+      SUCCESS_RESULT.value = value;
+      return SUCCESS_RESULT as StandardSchemaV1.SuccessResult<
+        InferObjectOutput<Shape>
+      >;
+    } finally {
+      tlsDepth = 0;
+    }
+  }
 
-        if (issues.length > 0) {
-          return { issues };
-        }
+  public override parse(data: unknown): InferObjectOutput<Shape> {
+    if (tlsDepth !== 0) {
+      return super.parse(data);
+    }
 
-        return ok(output as InferObjectOutput<Shape>);
-      },
-      (target) => {
-        const properties: Record<string, JsonSchema> = {};
-        const required: string[] = [];
+    tlsDepth = 1;
 
-        for (const key of Object.keys(shape)) {
-          const propertySchema = shape[key];
+    try {
+      TLS_ISSUES.length = 0;
 
-          if (!propertySchema) {
-            continue;
-          }
+      if (this.compiled.needsPath) {
+        TLS_PATH.length = 0;
+        this.compiled.run(data, TLS_PATH, TLS_ISSUES);
+      } else {
+        this.compiled.check(data, TLS_ISSUES);
+      }
 
-          properties[key] = propertySchema.toJsonSchema(target);
+      if (TLS_ISSUES.length > 0) {
+        throw new SchemaError(TLS_ISSUES.slice());
+      }
 
-          if (propertySchema.schemaType === "optional") {
-            continue;
-          }
+      return data as InferObjectOutput<Shape>;
+    } finally {
+      tlsDepth = 0;
+    }
+  }
 
-          if (propertySchema.schemaType === "nullish") {
-            continue;
-          }
+  public override safeParse(
+    data: unknown,
+  ): SafeParseResult<InferObjectOutput<Shape>> {
+    if (tlsDepth !== 0) {
+      return super.safeParse(data);
+    }
 
-          required.push(key);
-        }
+    tlsDepth = 1;
 
-        const schema: JsonSchema = {
-          type: "object",
-          properties,
-          additionalProperties: false,
+    try {
+      TLS_ISSUES.length = 0;
+
+      if (this.compiled.needsPath) {
+        TLS_PATH.length = 0;
+        this.compiled.run(data, TLS_PATH, TLS_ISSUES);
+      } else {
+        this.compiled.check(data, TLS_ISSUES);
+      }
+
+      if (TLS_ISSUES.length > 0) {
+        const issues = TLS_ISSUES.slice();
+
+        return {
+          success: false,
+          error: { issues, message: formatIssues(issues) },
         };
+      }
 
-        if (required.length > 0) {
-          schema.required = required;
-        }
+      SAFE_OK.data = data;
+      return SAFE_OK as SafeParseResult<InferObjectOutput<Shape>>;
+    } finally {
+      tlsDepth = 0;
+    }
+  }
 
-        return schema;
-      },
-    );
+  public override toInline(
+    expr: string,
+    pathPrefix: PropertyKey[],
+    binds: unknown[],
+    dynamicIndex?: string,
+  ) {
+    if (dynamicIndex !== undefined) {
+      return null;
+    }
+
+    const keys = Object.keys(this.shape);
+    const parts: string[] = [
+      `if(typeof ${expr}!=='object'||${expr}===null||Array.isArray(${expr})){${emitIssue('"Expected object"', formatPathExpr(pathPrefix))}}else{`,
+    ];
+
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+
+      if (key === undefined) {
+        continue;
+      }
+
+      const propertySchema = this.shape[key];
+
+      if (!propertySchema) {
+        continue;
+      }
+
+      const keyLiteral = JSON.stringify(key);
+      const access = `${expr}[${keyLiteral}]`;
+      const childPrefix = [...pathPrefix, key];
+      const optional =
+        propertySchema.schemaType === "optional" ||
+        propertySchema.schemaType === "nullish";
+      const inline = propertySchema.toInline(access, childPrefix, binds);
+
+      parts.push(`if(!(${keyLiteral} in ${expr})){`);
+
+      if (!optional) {
+        parts.push(emitIssue('"Required"', formatPathExpr(childPrefix)));
+      }
+
+      if (inline) {
+        parts.push("}else{", inline, "}");
+        continue;
+      }
+
+      return null;
+    }
+
+    parts.push("}");
+    return parts.join("");
   }
 }
 
@@ -864,47 +1071,41 @@ export class RecordSchema<Output> extends Schema<Record<string, Output>> {
   public readonly schemaType = "record";
 
   public constructor(valueSchema: Schema<Output>) {
+    const valueRun = valueSchema.run;
+
     super(
-      (value, path) => {
+      (value, path, issues) => {
         if (typeof value !== "object") {
-          return fail("Expected object", path);
+          pushIssue(issues, "Expected object", path);
+          return value as Record<string, Output>;
         }
 
         if (value === null) {
-          return fail("Expected object", path);
+          pushIssue(issues, "Expected object", path);
+          return value as unknown as Record<string, Output>;
         }
 
         if (Array.isArray(value)) {
-          return fail("Expected object", path);
+          pushIssue(issues, "Expected object", path);
+          return value as unknown as Record<string, Output>;
         }
 
-        const output: Record<string, Output> = {};
-        const issues: Issue[] = [];
-        const record = value as Record<string, unknown>;
+        const record = value as Record<string, Output>;
+        const keys = Object.keys(record);
 
-        for (const key of Object.keys(record)) {
-          const entryResult = valueSchema["~standard"].validate(record[key]);
+        for (let i = 0; i < keys.length; i++) {
+          const key = keys[i];
 
-          if (entryResult instanceof Promise) {
-            issues.push(
-              issue("Async schema validation is not supported", [...path, key]),
-            );
+          if (key === undefined) {
             continue;
           }
 
-          if (entryResult.issues) {
-            issues.push(...prependPath(entryResult, key).issues);
-            continue;
-          }
-
-          output[key] = entryResult.value;
+          path.push(key);
+          valueRun(record[key], path, issues);
+          path.pop();
         }
 
-        if (issues.length > 0) {
-          return { issues };
-        }
-
-        return ok(output);
+        return record;
       },
       (target) => {
         return {
@@ -922,57 +1123,40 @@ export class TupleSchema<T extends readonly SchemaBase[]> extends Schema<{
   public readonly schemaType = "tuple";
 
   public constructor(items: T) {
+    const itemRuns = items.map((item) => item.run);
+    const length = items.length;
+
     super(
-      (value, path) => {
+      (value, path, issues) => {
         if (!Array.isArray(value)) {
-          return fail("Expected array", path);
+          pushIssue(issues, "Expected array", path);
+          return value as { [K in keyof T]: InferOutput<T[K]> };
         }
 
-        if (value.length !== items.length) {
-          return fail(`Expected tuple of length ${items.length}`, path);
+        if (value.length !== length) {
+          pushIssue(issues, `Expected tuple of length ${length}`, path);
+          return value as { [K in keyof T]: InferOutput<T[K]> };
         }
 
-        const output: unknown[] = [];
-        const issues: Issue[] = [];
+        for (let index = 0; index < length; index++) {
+          const itemRun = itemRuns[index];
 
-        for (let index = 0; index < items.length; index++) {
-          const itemSchema = items[index];
-
-          if (!itemSchema) {
+          if (!itemRun) {
             continue;
           }
 
-          const itemResult = itemSchema["~standard"].validate(value[index]);
-
-          if (itemResult instanceof Promise) {
-            issues.push(
-              issue("Async schema validation is not supported", [
-                ...path,
-                index,
-              ]),
-            );
-            continue;
-          }
-
-          if (itemResult.issues) {
-            issues.push(...prependPath(itemResult, index).issues);
-            continue;
-          }
-
-          output.push(itemResult.value);
+          path.push(index);
+          itemRun(value[index], path, issues);
+          path.pop();
         }
 
-        if (issues.length > 0) {
-          return { issues };
-        }
-
-        return ok(output as { [K in keyof T]: InferOutput<T[K]> });
+        return value as { [K in keyof T]: InferOutput<T[K]> };
       },
       (target) => {
         return {
           type: "array",
-          minItems: items.length,
-          maxItems: items.length,
+          minItems: length,
+          maxItems: length,
           prefixItems: items.map((item) => item.toJsonSchema(target)),
           items: false,
         };
@@ -987,21 +1171,29 @@ export class UnionSchema<T extends readonly SchemaBase[]> extends Schema<
   public readonly schemaType = "union";
 
   public constructor(options: T) {
-    super(
-      (value, path) => {
-        for (const option of options) {
-          const result = option["~standard"].validate(value);
+    const optionRuns = options.map((option) => option.run);
 
-          if (result instanceof Promise) {
-            return fail("Async schema validation is not supported", path);
+    super(
+      (value, path, issues) => {
+        const localIssues: Issue[] = [];
+
+        for (let i = 0; i < optionRuns.length; i++) {
+          const optionRun = optionRuns[i];
+
+          if (!optionRun) {
+            continue;
           }
 
-          if (!result.issues) {
-            return ok(result.value as InferOutput<T[number]>);
+          localIssues.length = 0;
+          const output = optionRun(value, path, localIssues);
+
+          if (localIssues.length === 0) {
+            return output as InferOutput<T[number]>;
           }
         }
 
-        return { issues: [issue("Invalid input", path)] };
+        pushIssue(issues, "Invalid input", path);
+        return value as InferOutput<T[number]>;
       },
       (target) => {
         return {
@@ -1071,7 +1263,7 @@ export const nullish = <Output>(schema: Schema<Output>) => {
 export const any = () => {
   return new LeafSchema<unknown>(
     "any",
-    (value) => ok(value),
+    (value) => value,
     () => {
       return {};
     },
@@ -1081,7 +1273,7 @@ export const any = () => {
 export const unknown = () => {
   return new LeafSchema<unknown>(
     "unknown",
-    (value) => ok(value),
+    (value) => value,
     () => {
       return {};
     },
@@ -1091,7 +1283,10 @@ export const unknown = () => {
 export const never = () => {
   return new LeafSchema<never>(
     "never",
-    (_value, path) => fail("Expected never", path),
+    (value, path, issues) => {
+      pushIssue(issues, "Expected never", path);
+      return value as never;
+    },
     () => {
       return { not: {} };
     },
@@ -1101,12 +1296,12 @@ export const never = () => {
 export const nullType = () => {
   return new LeafSchema<null>(
     "null",
-    (value, path) => {
+    (value, path, issues) => {
       if (value !== null) {
-        return fail("Expected null", path);
+        pushIssue(issues, "Expected null", path);
       }
 
-      return ok(null);
+      return null;
     },
     () => {
       return { type: "null" };
@@ -1117,12 +1312,12 @@ export const nullType = () => {
 export const undefinedType = () => {
   return new LeafSchema<undefined>(
     "undefined",
-    (value, path) => {
+    (value, path, issues) => {
       if (value !== undefined) {
-        return fail("Expected undefined", path);
+        pushIssue(issues, "Expected undefined", path);
       }
 
-      return ok(undefined);
+      return undefined;
     },
     () => {
       return {};
@@ -1137,3 +1332,5 @@ export const parse = <Output>(schema: Schema<Output>, data: unknown) => {
 export const safeParse = <Output>(schema: Schema<Output>, data: unknown) => {
   return schema.safeParse(data);
 };
+
+export type { Path };

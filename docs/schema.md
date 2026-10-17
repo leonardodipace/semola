@@ -114,7 +114,7 @@ object({
 });
 ```
 
-Unknown object keys are stripped (not copied to the output). Missing required keys fail validation.
+Unknown object keys are kept (validated objects return the same reference). Missing required keys fail validation.
 
 ## Optional, nullable, nullish
 
@@ -144,6 +144,10 @@ import type { InferOutput, InferInput } from "semola/schema";
 type User = InferOutput<typeof User>;
 type UserInput = InferInput<typeof User>;
 ```
+
+## Performance
+
+Validation is sync-only and allocation-light on the success path (shared buffers, compiled object checks, same-reference outputs). Success results from `~standard.validate` / `safeParse` reuse a pooled object - read `.value` / `.data` before the next call on the same thread.
 
 ## Standard Schema and JSON Schema
 

@@ -171,7 +171,6 @@ describe("semola/schema", () => {
 
     expect(jsonSchema.type).toBe("object");
     expect(jsonSchema.required).toEqual(["name", "status"]);
-    expect(jsonSchema.additionalProperties).toBe(false);
 
     const standard = schema["~standard"].jsonSchema.input({
       target: "draft-2020-12",
