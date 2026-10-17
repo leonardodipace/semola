@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import { type } from "arktype";
 import { z } from "zod";
 import { Middleware } from "../middleware.js";
 import { generateOpenApiSpec } from "./index.js";
@@ -38,6 +39,43 @@ const schemaWithNestedDefs = {
               name: { $ref: "#/$defs/name" },
             },
           },
+          name: { type: "string" },
+        },
+      }),
+    },
+  },
+} as unknown as StandardSchemaV1;
+
+const schemaWithRefSiblings = {
+  "~standard": {
+    version: 1,
+    vendor: "test",
+    jsonSchema: {
+      input: () => ({
+        type: "object",
+        properties: {
+          child: {
+            $ref: "#/external",
+            properties: {
+              name: { $ref: "#/$defs/name" },
+            },
+          },
+        },
+        $defs: {
+          name: { type: "string" },
+        },
+      }),
+      output: () => ({
+        type: "object",
+        properties: {
+          child: {
+            $ref: "#/external",
+            properties: {
+              name: { $ref: "#/$defs/name" },
+            },
+          },
+        },
+        $defs: {
           name: { type: "string" },
         },
       }),
@@ -502,7 +540,6 @@ describe("OpenAPI Generation", () => {
       },
       required: ["id", "name"],
     });
-
     // Check that the request body uses a $ref
     const requestBody = spec.paths["/users"]?.post?.requestBody;
     expect(requestBody?.content["application/json"]?.schema).toEqual({
@@ -513,6 +550,131 @@ describe("OpenAPI Generation", () => {
     const response = spec.paths["/users"]?.post?.responses["201"];
     expect(response?.content?.["application/json"]?.schema).toEqual({
       $ref: "#/components/schemas/User",
+    });
+  });
+
+  test("should hoist chained named schemas into components", async () => {
+    const ZodUser = z
+      .object({ id: z.string(), name: z.string() })
+      .meta({ id: "ZodUser" });
+    const ArkUser = type({ id: "string", name: "string" }).configure({
+      id: "ArkUser",
+    } as never);
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/zod-users",
+          method: "GET",
+          response: { 200: ZodUser.array() },
+          handler: () => {},
+        },
+        {
+          path: "/ark-users",
+          method: "GET",
+          response: { 200: ArkUser.array() },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas?.ZodUser).toMatchObject({
+      type: "object",
+      properties: { id: { type: "string" }, name: { type: "string" } },
+    });
+    expect(spec.components?.schemas?.ArkUser).toMatchObject({
+      type: "object",
+      properties: { id: { type: "string" }, name: { type: "string" } },
+    });
+    expect(
+      spec.paths["/zod-users"]?.get?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema,
+    ).toEqual({
+      type: "array",
+      items: { $ref: "#/components/schemas/ZodUser" },
+    });
+    expect(
+      spec.paths["/ark-users"]?.get?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema,
+    ).toEqual({
+      type: "array",
+      items: { $ref: "#/components/schemas/ArkUser" },
+    });
+  });
+
+  test("should not hoist id fields inside default or examples", async () => {
+    const User = z
+      .object({ id: z.string(), name: z.string() })
+      .default({ id: "user-1", name: "Alice" })
+      .meta({ examples: [{ id: "ex-1", name: "Bob" }] });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/users",
+          method: "POST",
+          request: { body: User },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas).toBeUndefined();
+
+    const schema =
+      spec.paths["/users"]?.post?.requestBody?.content["application/json"]
+        ?.schema;
+
+    expect(schema).toMatchObject({
+      type: "object",
+      default: { id: "user-1", name: "Alice" },
+      examples: [{ id: "ex-1", name: "Bob" }],
+    });
+  });
+
+  test("should rewrite $defs refs for properties named like instance data keys", async () => {
+    const Something = z.object({ value: z.string() }).meta({ id: "Something" });
+
+    const Config = z.object({
+      default: Something,
+      examples: Something,
+      name: z.string(),
+    });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/config",
+          method: "POST",
+          request: { body: Config },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas?.Something).toMatchObject({
+      type: "object",
+      properties: { value: { type: "string" } },
+    });
+
+    expect(
+      spec.paths["/config"]?.post?.requestBody?.content["application/json"]
+        ?.schema,
+    ).toMatchObject({
+      type: "object",
+      properties: {
+        default: { $ref: "#/components/schemas/Something" },
+        examples: { $ref: "#/components/schemas/Something" },
+        name: { type: "string" },
+      },
     });
   });
 
@@ -649,6 +811,82 @@ describe("OpenAPI Generation", () => {
     ).toMatchObject({
       properties: {
         person: { $ref: "#/components/schemas/person" },
+      },
+    });
+  });
+
+  test("should hoist nested $defs into components when parent schema has an id", async () => {
+    const schemaWithNestedLocalDefs = {
+      "~standard": {
+        version: 1,
+        vendor: "test",
+        jsonSchema: {
+          input: () => ({
+            type: "object",
+            properties: {
+              wrapper: {
+                type: "object",
+                id: "Wrapper",
+                properties: { child: { $ref: "#/$defs/nestedChild" } },
+                $defs: { nestedChild: { type: "string" } },
+              },
+            },
+          }),
+          output: () => ({}),
+        },
+      },
+    } as unknown as StandardSchemaV1;
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/wrap",
+          method: "POST",
+          request: { body: schemaWithNestedLocalDefs },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas?.nestedChild).toEqual({ type: "string" });
+    expect(spec.components?.schemas?.Wrapper).toEqual({
+      type: "object",
+      properties: {
+        child: { $ref: "#/components/schemas/nestedChild" },
+      },
+    });
+    expect(spec.components?.schemas?.Wrapper).not.toHaveProperty("$defs");
+  });
+
+  test("should rewrite $defs refs in siblings of non-defs $ref objects", async () => {
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/items",
+          method: "POST",
+          request: { body: schemaWithRefSiblings },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas?.name).toEqual({ type: "string" });
+
+    expect(
+      spec.paths["/items"]?.post?.requestBody?.content["application/json"]
+        ?.schema,
+    ).toMatchObject({
+      properties: {
+        child: {
+          $ref: "#/external",
+          properties: {
+            name: { $ref: "#/components/schemas/name" },
+          },
+        },
       },
     });
   });
