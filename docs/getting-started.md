@@ -14,6 +14,7 @@ Some packages need runtime-native clients (HTTP server, Redis, SQL, cron). Each 
 ## Where to go next
 
 - [API](/docs/api) - middleware, groups, OpenAPI
+- [Schema](/docs/schema) - Standard Schema validation
 - [Errors](/docs/errors) - result tuples and `mightThrow`
 - [Queue](/docs/queue) - Redis-backed background jobs
 - [ORM](/docs/orm) - typed tables and queries

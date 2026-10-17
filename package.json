@@ -166,6 +166,16 @@
         "types": "./dist/lib/extra/index.d.cts",
         "default": "./dist/lib/extra/index.cjs"
       }
+    },
+    "./schema": {
+      "import": {
+        "types": "./dist/lib/schema/index.d.mts",
+        "default": "./dist/lib/schema/index.mjs"
+      },
+      "require": {
+        "types": "./dist/lib/schema/index.d.cts",
+        "default": "./dist/lib/schema/index.cjs"
+      }
     }
   },
   "workspaces": [

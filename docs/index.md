@@ -11,7 +11,7 @@ import { mightThrow } from "semola/errors";
 import { Queue } from "semola/queue";
 ```
 
-No runtime dependencies. Validation works with any [Standard Schema](https://standardschema.dev/) library (Zod, Valibot, ArkType, and others).
+No runtime dependencies. Validation works with [`semola/schema`](/docs/schema) or any other [Standard Schema](https://standardschema.dev/) library (Zod, Valibot, ArkType, and others).
 
 ## What you can build with
 
@@ -38,6 +38,7 @@ No runtime dependencies. Validation works with any [Standard Schema](https://sta
 
 | You need… | Start here |
 | --- | --- |
+| Runtime schema validation | [Schema](/docs/schema) |
 | Errors without try/catch | [Errors](/docs/errors) |
 | Prefixed console or file logs | [Logging](/docs/logging) |
 | Interactive terminal input | [Prompts](/docs/prompts) |
