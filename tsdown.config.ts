@@ -13,6 +13,7 @@ export default defineConfig({
     "lib/pubsub/index": "src/lib/pubsub/index.ts",
     "lib/cron/index": "src/lib/cron/index.ts",
     "lib/logging/index": "src/lib/logging/index.ts",
+    "lib/otel/index": "src/lib/otel/index.ts",
     "lib/prompts/index": "src/lib/prompts/index.ts",
     "lib/cli/index": "src/lib/cli/index.ts",
     "lib/workflow/index": "src/lib/workflow/index.ts",

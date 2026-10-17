@@ -34,8 +34,9 @@ Run fallow with `bunx fallow` (no install or dev dependency needed). Example: `b
 
 - **Zero runtime dependencies** - do not add packages without strong reason.
 - **Imports** - use `.js` extensions in TypeScript imports (`from "./types.js"`).
-- **Module layout** - each package under `src/lib/<name>/` typically has `index.ts`, `types.ts`, `errors.ts`, and colocated `*.test.ts`.
-- **Types** - In new or modified library source, define types in `types.ts` and import them from there. Do not introduce inline object types (`const x: { a: string }`, `fn(arg: { a: string })`, inline return shapes); name them in `types.ts`. Existing inline shapes may stay until that code is touched. Tests may use inline shapes for fixtures. Do not re-export types from other modules' `types.ts` or `index.ts`; consumers import from the defining file.
+- **Module layout** - each package under `src/lib/<name>/` typically has `index.ts`, `types.ts`, `errors.ts`, and colocated `*.test.ts`. Keep `index.ts` a thin barrel when the implementation grows; split by topic (`propagation.ts`, `otel.ts`, `tracer.ts`) rather than one giant file. Prefer few topical files over deep folder trees. When split, each implementation file gets a matching `<topic>.test.ts` (`propagation.ts` → `propagation.test.ts`). Keep `index.test.ts` for package-level or cross-cutting coverage. Pure `types.ts` needs no test file.
+- **Package names** - name `semola/<name>` after what the module ships (wire format, domain noun), not a vague umbrella. Prefer `otel` over `observability` when the surface is OTLP-shaped.
+- **Types** - In new or modified library source, define types in `types.ts` and import them from there. Do not introduce inline object types (`const x: { a: string }`, `fn(arg: { a: string })`, inline return shapes) or inline union parameter types used at API boundaries (`carrier: Headers | Record<string, string>` → `TraceCarrier` in `types.ts`). Existing inline shapes may stay until that code is touched. Tests may use inline shapes for fixtures. Do not re-export types from other modules' `types.ts` or `index.ts`; consumers import from the defining file. Same-module barrel re-exports of that module's own public types are fine.
 - **Errors** - use `mightThrow` / `mightThrowSync` from `semola/errors`; define module-specific error classes in `errors.ts`.
 - **Validation** - Standard Schema in library code, not Zod-specific APIs.
 - **Build** - `tsdown` (not tsc for output).
@@ -66,10 +67,16 @@ Code should read like English. Prefer clarity over clever density.
 
 ### Simplicity
 
-- Write minimal code, no over-engineering (ponytail: fewest files, shortest *working* diff - not shortest unreadable line).
+- Write minimal code, no over-engineering (ponytail: fewest files, shortest *working* diff - not shortest unreadable line). Production-ready means correct wire/interop and lifecycle, not a full vendor SDK surface.
+- Prefer Bun / Node / stdlib helpers when they exist. Do not hand-roll parsers or converters the platform already covers. When the platform has no fit (example: wall-clock Unix epoch nanos for OTLP; `Bun.nanoseconds` / `hrtime` are monotonic only), keep a small named helper - do not invent a fake "stdlib" wrapper.
 - Keep code breathing with blank lines between logical blocks.
-- Explicit `if` statements over ternaries for complex logic.
+- Explicit `if` statements over ternaries. Do not use ternaries for control flow, assignments that branch, or nested conditions. Prefer early returns and plain `if` / `else`. Nullish coalescing (`??`) and optional chaining (`?.`) are fine.
 - Blank lines between if-statement groups, const definitions, and return statements inside functions.
+- Module helpers use `const name = () => { ... }` (or `const name = async () => { ... }`), not `function name()`. Match existing Semola modules (`api/validate.ts`, `api/dispatch.ts`). Classes stay as `class`.
+- Prefer destructuring over indexed access when the shape is fixed (`const [a, b] = parts`, not `parts[0]` / `parts[1]`).
+- Prefer a named regex constant (or a simple alphabet string) for hex/format/wire checks. Collapse split-and-validate parsers (`parts.length !== 4`) into one regex when the format is fixed. Do not invent char-code ranges, paired micro-helpers (`isX` / `isXChar`), or constant inflation that renames every literal (`HTTP_STATUS_OK_MIN`).
+- **Opaque numbers** - if a reader cannot tell what a numeric literal means from the surrounding name, name it or wrap it (`TRACE_FLAGS_HEX_WIDTH`, `formatTraceFlagsHex`). Protocol field widths, magic lengths, and flag encodings count. Leave obvious literals alone (`0`, `1`, empty checks).
+- Delete unused types, error classes, and fields. Do not keep pass-through wrappers that only forward one call.
 - No `any` type. Infer types, avoid explicit return types. Use generics extensively.
 - No type predicates (`value is Type` return annotations) - use inline guards for narrowing.
 - No em-dashes; use regular hyphens.
@@ -148,6 +155,7 @@ When a module supports multiple adapters (or dialects), keep an **adapter-driven
 ### Testing
 
 - Colocate tests with source (`*.test.ts`).
+- When a package is split into topical modules, give each implementation file its own `<name>.test.ts`. Use `index.test.ts` for cross-cutting package behavior. Extra suites (`adversarial.test.ts`) are fine on top of that.
 - Clear test names describing behavior.
 - Simple assertions without chains.
 
@@ -177,6 +185,7 @@ bunx fallow audit --base main --format json --quiet 2>/dev/null || true   # chan
 - Update existing docs when public API, behavior, or usage changes.
 - Skip docs only for internal refactors with no user-facing change.
 - Docs site: `bun run docs:dev` (not part of the published package).
+- Write what the API does today. Do not use roadmap voice ("in v1", "no X yet", "coming soon", "for now"). Protocol path segments like OTLP `/v1/traces` are fine when they are real URLs.
 
 ## Boundaries
 

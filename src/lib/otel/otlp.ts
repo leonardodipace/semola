@@ -1,0 +1,403 @@
+import { mightThrow, mightThrowSync } from "../errors/index.js";
+import { ExportError } from "./errors.js";
+import type {
+  AttributeMap,
+  AttributeValue,
+  FinishedSpan,
+  MetricPoint,
+  OtlpAnyValue,
+  OtlpPostOptions,
+  OtlpSpanStatus,
+  PendingLogRecord,
+  Resource,
+  Scope,
+  ScopeLogs,
+  ScopeMetrics,
+  ScopeSpans,
+  SpanStatus,
+} from "./types.js";
+import { sortedAttributeEntries } from "./util.js";
+
+const OTLP_FETCH_TIMEOUT_MS = 10_000;
+const OTLP_AGGREGATION_TEMPORALITY_CUMULATIVE = 2;
+const OTLP_RETRY_DELAYS_MS = [0, 25, 75] as const;
+const OTLP_PARTIAL_SUCCESS_BODY_LIMIT = 65_536;
+const OTLP_RETRY_STATUSES = new Set([429, 502, 503, 504]);
+const REJECTED_COUNT_KEYS = [
+  "rejectedSpans",
+  "rejectedLogRecords",
+  "rejectedDataPoints",
+] as const;
+
+const spanStatusCode = (code: SpanStatus["code"]) => {
+  if (code === "OK") {
+    return 1;
+  }
+
+  if (code === "ERROR") {
+    return 2;
+  }
+
+  return 0;
+};
+
+export const encodeAttributeValue = (value: AttributeValue): OtlpAnyValue => {
+  if (typeof value === "string") {
+    return { stringValue: value };
+  }
+
+  if (typeof value === "boolean") {
+    return { boolValue: value };
+  }
+
+  if (typeof value === "number") {
+    if (Number.isInteger(value)) {
+      return { intValue: String(value) };
+    }
+
+    return { doubleValue: value };
+  }
+
+  return {
+    arrayValue: {
+      values: value.map((entry) => encodeAttributeValue(entry)),
+    },
+  };
+};
+
+export const encodeAttributes = (map: AttributeMap) => {
+  return sortedAttributeEntries(map).map(([key, value]) => ({
+    key,
+    value: encodeAttributeValue(value),
+  }));
+};
+
+const encodeScope = (scope: Scope) => {
+  if (scope.scopeVersion) {
+    return { name: scope.scopeName, version: scope.scopeVersion };
+  }
+
+  return { name: scope.scopeName };
+};
+
+const encodeResourceSignal = <T>(
+  resourceKey: string,
+  scopeKey: string,
+  resource: Resource,
+  groups: T[],
+  mapGroup: (group: T) => unknown,
+) => {
+  return {
+    [resourceKey]: [
+      {
+        resource: {
+          attributes: encodeAttributes(resource.attributes),
+        },
+        [scopeKey]: groups.map(mapGroup),
+      },
+    ],
+  };
+};
+
+export const encodeSpan = (span: FinishedSpan) => {
+  const status: OtlpSpanStatus = {
+    code: spanStatusCode(span.status.code),
+  };
+
+  if (span.status.message) {
+    status.message = span.status.message;
+  }
+
+  const encoded: Record<string, unknown> = {
+    traceId: span.traceId,
+    spanId: span.spanId,
+    name: span.name,
+    kind: span.kind,
+    flags: span.flags,
+    startTimeUnixNano: span.startTimeUnixNano,
+    endTimeUnixNano: span.endTimeUnixNano,
+    attributes: encodeAttributes(span.attributes),
+    events: span.events.map((event) => ({
+      name: event.name,
+      timeUnixNano: event.timeUnixNano,
+      attributes: encodeAttributes(event.attributes ?? {}),
+    })),
+    status,
+  };
+
+  if (span.parentSpanId) {
+    encoded.parentSpanId = span.parentSpanId;
+  }
+
+  if (span.traceState) {
+    encoded.traceState = span.traceState;
+  }
+
+  return encoded;
+};
+
+export const encodeTracesExport = (
+  resource: Resource,
+  scopeSpans: ScopeSpans[],
+) => {
+  return encodeResourceSignal(
+    "resourceSpans",
+    "scopeSpans",
+    resource,
+    scopeSpans,
+    (group) => ({
+      scope: encodeScope(group.scope),
+      spans: group.spans.map(encodeSpan),
+    }),
+  );
+};
+
+export const encodeLogRecord = (record: PendingLogRecord) => {
+  const encoded: Record<string, unknown> = {
+    timeUnixNano: record.timeUnixNano,
+    severityText: record.severityText,
+    body: { stringValue: record.body },
+    attributes: encodeAttributes(record.attributes),
+  };
+
+  if (record.severityNumber !== undefined) {
+    encoded.severityNumber = record.severityNumber;
+  }
+
+  if (record.traceId) {
+    encoded.traceId = record.traceId;
+  }
+
+  if (record.spanId) {
+    encoded.spanId = record.spanId;
+  }
+
+  return encoded;
+};
+
+export const encodeLogsExport = (
+  resource: Resource,
+  scopeLogs: ScopeLogs[],
+) => {
+  return encodeResourceSignal(
+    "resourceLogs",
+    "scopeLogs",
+    resource,
+    scopeLogs,
+    (group) => ({
+      scope: encodeScope(group.scope),
+      logRecords: group.logRecords.map(encodeLogRecord),
+    }),
+  );
+};
+
+export const encodeMetric = (point: MetricPoint) => {
+  if (point.kind === "histogram") {
+    return {
+      name: point.name,
+      description: point.description,
+      unit: point.unit,
+      histogram: {
+        aggregationTemporality: OTLP_AGGREGATION_TEMPORALITY_CUMULATIVE,
+        dataPoints: point.dataPoints.map((dp) => ({
+          attributes: encodeAttributes(dp.attributes),
+          startTimeUnixNano: dp.startTimeUnixNano,
+          timeUnixNano: dp.timeUnixNano,
+          count: String(dp.count ?? 0),
+          sum: dp.sum ?? 0,
+          min: dp.min,
+          max: dp.max,
+          bucketCounts: (dp.bucketCounts ?? []).map((count) => String(count)),
+          explicitBounds: dp.explicitBounds,
+        })),
+      },
+    };
+  }
+
+  return {
+    name: point.name,
+    description: point.description,
+    unit: point.unit,
+    sum: {
+      aggregationTemporality: OTLP_AGGREGATION_TEMPORALITY_CUMULATIVE,
+      isMonotonic: point.kind === "counter",
+      dataPoints: point.dataPoints.map((dp) => ({
+        attributes: encodeAttributes(dp.attributes),
+        startTimeUnixNano: dp.startTimeUnixNano,
+        timeUnixNano: dp.timeUnixNano,
+        asDouble: dp.value ?? 0,
+      })),
+    },
+  };
+};
+
+export const encodeMetricsExport = (
+  resource: Resource,
+  scopeMetrics: ScopeMetrics[],
+) => {
+  return encodeResourceSignal(
+    "resourceMetrics",
+    "scopeMetrics",
+    resource,
+    scopeMetrics,
+    (group) => ({
+      scope: encodeScope(group.scope),
+      metrics: group.metrics.map(encodeMetric),
+    }),
+  );
+};
+
+const joinOtlpUrl = (baseUrl: string, path: string) => {
+  const base = `${baseUrl.replace(/\/+$/, "")}/`;
+  const relative = path.replace(/^\/+/, "");
+
+  return new URL(relative, base).href;
+};
+
+const rejectedCountFromPartial = (partial: object) => {
+  const record = partial as Record<string, unknown>;
+
+  for (const key of REJECTED_COUNT_KEYS) {
+    const value = record[key];
+
+    if (typeof value === "number") {
+      if (value > 0) {
+        return value;
+      }
+    }
+
+    if (typeof value === "string") {
+      const parsed = Number(value);
+
+      if (parsed > 0) {
+        return parsed;
+      }
+    }
+  }
+
+  return 0;
+};
+
+const assertNoPartialRejection = async (response: Response) => {
+  const [readError, text] = await mightThrow(response.text());
+
+  if (readError) {
+    throw new ExportError(readError.message, false);
+  }
+
+  if (text.length > OTLP_PARTIAL_SUCCESS_BODY_LIMIT) {
+    throw new ExportError("OTLP response body exceeds size limit", false);
+  }
+
+  if (!text) {
+    return;
+  }
+
+  const [parseError, parsed] = mightThrowSync(() => JSON.parse(text));
+
+  if (parseError) {
+    return;
+  }
+
+  if (typeof parsed !== "object") {
+    return;
+  }
+
+  if (parsed === null) {
+    return;
+  }
+
+  const partial = (parsed as Record<string, unknown>).partialSuccess;
+
+  if (typeof partial !== "object") {
+    return;
+  }
+
+  if (partial === null) {
+    return;
+  }
+
+  const rejected = rejectedCountFromPartial(partial);
+
+  if (rejected === 0) {
+    return;
+  }
+
+  throw new ExportError(
+    `OTLP partial success rejected ${rejected} records`,
+    false,
+  );
+};
+
+const fetchSignal = (signal?: AbortSignal) => {
+  const timeout = AbortSignal.timeout(OTLP_FETCH_TIMEOUT_MS);
+
+  if (!signal) {
+    return timeout;
+  }
+
+  return AbortSignal.any([timeout, signal]);
+};
+
+export const otlpPost = async (options: OtlpPostOptions) => {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...options.headers,
+  };
+
+  const url = joinOtlpUrl(options.baseUrl, options.path);
+  const body = JSON.stringify(options.body);
+  let lastError: ExportError | null = null;
+
+  for (const delayMs of OTLP_RETRY_DELAYS_MS) {
+    if (options.signal?.aborted) {
+      throw lastError ?? new ExportError("OTLP export aborted", false);
+    }
+
+    if (delayMs > 0) {
+      await Bun.sleep(delayMs);
+
+      if (options.signal?.aborted) {
+        throw lastError ?? new ExportError("OTLP export aborted", false);
+      }
+    }
+
+    const [error, response] = await mightThrow(
+      options.fetch(url, {
+        method: "POST",
+        headers,
+        body,
+        signal: fetchSignal(options.signal),
+      }),
+    );
+
+    if (error) {
+      lastError = new ExportError(error.message, true);
+
+      if (options.signal?.aborted) {
+        throw lastError;
+      }
+
+      continue;
+    }
+
+    if (response.ok) {
+      await assertNoPartialRejection(response);
+      return;
+    }
+
+    await response.body?.cancel();
+
+    const retryable = OTLP_RETRY_STATUSES.has(response.status);
+    lastError = new ExportError(
+      `OTLP export failed with status ${response.status}`,
+      retryable,
+    );
+
+    if (!retryable) {
+      throw lastError;
+    }
+  }
+
+  throw lastError ?? new ExportError("OTLP export failed", true);
+};

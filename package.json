@@ -37,6 +37,16 @@
         "default": "./dist/lib/cache/index.cjs"
       }
     },
+    "./otel": {
+      "import": {
+        "types": "./dist/lib/otel/index.d.mts",
+        "default": "./dist/lib/otel/index.mjs"
+      },
+      "require": {
+        "types": "./dist/lib/otel/index.d.cts",
+        "default": "./dist/lib/otel/index.cjs"
+      }
+    },
     "./i18n": {
       "import": {
         "types": "./dist/lib/i18n/index.d.mts",
