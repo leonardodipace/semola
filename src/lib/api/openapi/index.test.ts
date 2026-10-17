@@ -46,6 +46,43 @@ const schemaWithNestedDefs = {
   },
 } as unknown as StandardSchemaV1;
 
+const schemaWithRefSiblings = {
+  "~standard": {
+    version: 1,
+    vendor: "test",
+    jsonSchema: {
+      input: () => ({
+        type: "object",
+        properties: {
+          child: {
+            $ref: "#/external",
+            properties: {
+              name: { $ref: "#/$defs/name" },
+            },
+          },
+        },
+        $defs: {
+          name: { type: "string" },
+        },
+      }),
+      output: () => ({
+        type: "object",
+        properties: {
+          child: {
+            $ref: "#/external",
+            properties: {
+              name: { $ref: "#/$defs/name" },
+            },
+          },
+        },
+        $defs: {
+          name: { type: "string" },
+        },
+      }),
+    },
+  },
+} as unknown as StandardSchemaV1;
+
 describe("OpenAPI Generation", () => {
   test("should generate a valid base spec with info", async () => {
     const spec = await generateOpenApiSpec({
@@ -601,6 +638,46 @@ describe("OpenAPI Generation", () => {
     });
   });
 
+  test("should rewrite $defs refs for properties named like instance data keys", async () => {
+    const Something = z.object({ value: z.string() }).meta({ id: "Something" });
+
+    const Config = z.object({
+      default: Something,
+      examples: Something,
+      name: z.string(),
+    });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/config",
+          method: "POST",
+          request: { body: Config },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas?.Something).toMatchObject({
+      type: "object",
+      properties: { value: { type: "string" } },
+    });
+
+    expect(
+      spec.paths["/config"]?.post?.requestBody?.content["application/json"]
+        ?.schema,
+    ).toMatchObject({
+      type: "object",
+      properties: {
+        default: { $ref: "#/components/schemas/Something" },
+        examples: { $ref: "#/components/schemas/Something" },
+        name: { type: "string" },
+      },
+    });
+  });
+
   test("should inline schemas without id", async () => {
     const PostSchema = z.object({
       title: z.string(),
@@ -734,6 +811,82 @@ describe("OpenAPI Generation", () => {
     ).toMatchObject({
       properties: {
         person: { $ref: "#/components/schemas/person" },
+      },
+    });
+  });
+
+  test("should hoist nested $defs into components when parent schema has an id", async () => {
+    const schemaWithNestedLocalDefs = {
+      "~standard": {
+        version: 1,
+        vendor: "test",
+        jsonSchema: {
+          input: () => ({
+            type: "object",
+            properties: {
+              wrapper: {
+                type: "object",
+                id: "Wrapper",
+                properties: { child: { $ref: "#/$defs/nestedChild" } },
+                $defs: { nestedChild: { type: "string" } },
+              },
+            },
+          }),
+          output: () => ({}),
+        },
+      },
+    } as unknown as StandardSchemaV1;
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/wrap",
+          method: "POST",
+          request: { body: schemaWithNestedLocalDefs },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas?.nestedChild).toEqual({ type: "string" });
+    expect(spec.components?.schemas?.Wrapper).toEqual({
+      type: "object",
+      properties: {
+        child: { $ref: "#/components/schemas/nestedChild" },
+      },
+    });
+    expect(spec.components?.schemas?.Wrapper).not.toHaveProperty("$defs");
+  });
+
+  test("should rewrite $defs refs in siblings of non-defs $ref objects", async () => {
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/items",
+          method: "POST",
+          request: { body: schemaWithRefSiblings },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas?.name).toEqual({ type: "string" });
+
+    expect(
+      spec.paths["/items"]?.post?.requestBody?.content["application/json"]
+        ?.schema,
+    ).toMatchObject({
+      properties: {
+        child: {
+          $ref: "#/external",
+          properties: {
+            name: { $ref: "#/components/schemas/name" },
+          },
+        },
       },
     });
   });

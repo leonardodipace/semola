@@ -24,6 +24,48 @@ const instanceDataKeys = new Set([
   "example",
 ]);
 
+// Maps whose keys are names, not JSON Schema keywords.
+const schemaMapKeys = new Set([
+  "properties",
+  "patternProperties",
+  "dependentSchemas",
+]);
+
+const rewriteSchemaMap = (
+  value: unknown,
+  schemas: Record<string, JsonSchema>,
+) => {
+  if (typeof value !== "object") return value;
+  if (value === null) return value;
+
+  const record = value as Record<string, unknown>;
+  const next: Record<string, unknown> = {};
+
+  for (const name in record) {
+    next[name] = rewriteSchemaTree(record[name], schemas);
+  }
+
+  return next;
+};
+
+const hoistDefsIntoSchemas = (
+  defs: unknown,
+  schemas: Record<string, JsonSchema>,
+) => {
+  if (typeof defs !== "object") return;
+  if (defs === null) return;
+
+  const defsRecord = defs as Record<string, unknown>;
+
+  for (const name in defsRecord) {
+    schemas[name] = rewriteSchemaTree(
+      defsRecord[name],
+      schemas,
+      true,
+    ) as JsonSchema;
+  }
+};
+
 const rewriteSchemaTree = (
   value: unknown,
   schemas: Record<string, JsonSchema>,
@@ -37,20 +79,31 @@ const rewriteSchemaTree = (
   if (value === null) return value;
 
   const record = value as Record<string, unknown>;
-
-  if (typeof record.$ref === "string") {
-    if (record.$ref.startsWith("#/$defs/")) {
-      const name = record.$ref.slice("#/$defs/".length);
-
-      return { $ref: `#/components/schemas/${name}` };
-    }
-
-    return record;
-  }
-
   const next: Record<string, unknown> = {};
 
   for (const key in record) {
+    if (key === "$defs") {
+      hoistDefsIntoSchemas(record.$defs, schemas);
+      continue;
+    }
+
+    if (key === "$ref") {
+      const ref = record.$ref;
+
+      if (typeof ref === "string" && ref.startsWith("#/$defs/")) {
+        next.$ref = `#/components/schemas/${ref.slice("#/$defs/".length)}`;
+        continue;
+      }
+
+      next.$ref = ref;
+      continue;
+    }
+
+    if (schemaMapKeys.has(key)) {
+      next[key] = rewriteSchemaMap(record[key], schemas);
+      continue;
+    }
+
     if (instanceDataKeys.has(key)) {
       next[key] = record[key];
       continue;
@@ -73,23 +126,7 @@ const rewriteSchemaTree = (
 
 const hoistDefsToComponents = (jsonSchema: JsonSchema) => {
   const schemas: Record<string, JsonSchema> = {};
-  const defs = jsonSchema.$defs;
-  const root = { ...jsonSchema };
-  delete root.$defs;
-
-  if (defs && typeof defs === "object") {
-    const defsRecord = defs as Record<string, JsonSchema>;
-
-    for (const name in defsRecord) {
-      schemas[name] = rewriteSchemaTree(
-        defsRecord[name],
-        schemas,
-        true,
-      ) as JsonSchema;
-    }
-  }
-
-  const schema = rewriteSchemaTree(root, schemas, true) as JsonSchema;
+  const schema = rewriteSchemaTree(jsonSchema, schemas, true) as JsonSchema;
 
   if (Object.keys(schemas).length === 0) {
     return { schema: jsonSchema, components: undefined };
