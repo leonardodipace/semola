@@ -39,7 +39,37 @@ export type ObjectField = {
   ) => string | null;
 };
 
-export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Linear email check - no regex backtracking. */
+export const isEmail = (value: string) => {
+  const at = value.indexOf("@");
+
+  if (at <= 0) {
+    return false;
+  }
+
+  if (value.includes("@", at + 1)) {
+    return false;
+  }
+
+  const domain = value.slice(at + 1);
+  const dot = domain.lastIndexOf(".");
+
+  if (dot <= 0) {
+    return false;
+  }
+
+  if (dot === domain.length - 1) {
+    return false;
+  }
+
+  for (let i = 0; i < value.length; i++) {
+    if (value.charCodeAt(i) <= 32) {
+      return false;
+    }
+  }
+
+  return true;
+};
 
 export const pushIssue = (
   issues: Issue[],
@@ -92,6 +122,8 @@ export const applyStringRules = (
     }
 
     if (rule.kind === "regex") {
+      rule.pattern.lastIndex = 0;
+
       if (!rule.pattern.test(value)) {
         pushIssue(issues, rule.message, path);
         return;
@@ -100,7 +132,7 @@ export const applyStringRules = (
     }
 
     if (rule.kind === "email") {
-      if (!EMAIL_PATTERN.test(value)) {
+      if (!isEmail(value)) {
         pushIssue(issues, rule.message, path);
         return;
       }
@@ -284,17 +316,15 @@ export const emitStringRules = (
       const id = binds.length;
       binds.push(rule.pattern);
       parts.push(
-        `if(!binds[${id}].test(${expr})){${emitIssue(msg, pathExpr)}}`,
+        `binds[${id}].lastIndex=0;if(!binds[${id}].test(${expr})){${emitIssue(msg, pathExpr)}}`,
       );
       continue;
     }
 
     if (rule.kind === "email") {
       const id = binds.length;
-      binds.push(EMAIL_PATTERN);
-      parts.push(
-        `if(!binds[${id}].test(${expr})){${emitIssue(msg, pathExpr)}}`,
-      );
+      binds.push(isEmail);
+      parts.push(`if(!binds[${id}](${expr})){${emitIssue(msg, pathExpr)}}`);
       continue;
     }
 

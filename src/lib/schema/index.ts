@@ -1,6 +1,7 @@
 export {
   formatIssues,
   SchemaError,
+  UnsupportedJsonSchemaConversionError,
   UnsupportedJsonSchemaTargetError,
 } from "./errors.js";
 export {

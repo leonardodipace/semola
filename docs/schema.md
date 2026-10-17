@@ -22,7 +22,7 @@ import {
 
 ## Quick start
 
-Define a shape, then `parse` (throws `SchemaError`) or `safeParse` (result tuple-style object).
+Define a shape, then `parse` (throws `SchemaError`) or `safeParse` (result object).
 
 ```typescript
 import { object, string, number, optional } from "semola/schema";
@@ -151,10 +151,10 @@ Validation is sync-only and allocation-light on the success path (shared buffers
 
 ## Standard Schema and JSON Schema
 
-Every schema exposes `~standard` (`version: 1`, `vendor: "semola"`, sync `validate`) and `~standard.jsonSchema` for `draft-2020-12`, `draft-07`, and `openapi-3.0`.
+Every schema exposes `~standard` (`version: 1`, `vendor: "semola"`, sync `validate`) and `~standard.jsonSchema` for `draft-2020-12`. `date()` and `bigint()` support output JSON Schema only - input conversion throws because JSON has no `Date` or `bigint`.
 
 ```typescript
-const result = User["~standard"].validate(data);
+const result = User["~standard"].validate(user);
 const jsonSchema = User.toJsonSchema();
 ```
 

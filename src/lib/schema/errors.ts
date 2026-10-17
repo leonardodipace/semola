@@ -17,6 +17,13 @@ export class UnsupportedJsonSchemaTargetError extends Error {
   }
 }
 
+export class UnsupportedJsonSchemaConversionError extends Error {
+  public constructor(schemaType: string) {
+    super(`JSON Schema input is not supported for ${schemaType}`);
+    this.name = "UnsupportedJsonSchemaConversionError";
+  }
+}
+
 const formatIssuePath = (issue: Issue) => {
   if (!issue.path) return;
   if (issue.path.length === 0) return;

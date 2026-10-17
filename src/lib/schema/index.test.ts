@@ -4,7 +4,9 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 import {
   any,
   array,
+  bigint,
   boolean,
+  date,
   enumValues,
   literal,
   never,
@@ -20,6 +22,8 @@ import {
   safeParse,
   string,
   tuple,
+  UnsupportedJsonSchemaConversionError,
+  UnsupportedJsonSchemaTargetError,
   union,
   unknown,
 } from "./index.js";
@@ -198,5 +202,31 @@ describe("semola/schema", () => {
     }
 
     expect(result.error.issues[0]?.path).toEqual(["user", "email"]);
+  });
+
+  test("regex validation resets lastIndex for global patterns", () => {
+    const schema = string().regex(/a/g);
+
+    expect(schema.safeParse("a").success).toBe(true);
+    expect(schema.safeParse("a").success).toBe(true);
+  });
+
+  test("rejects unsupported JSON Schema targets", () => {
+    expect(() => string().toJsonSchema("draft-07")).toThrow(
+      UnsupportedJsonSchemaTargetError,
+    );
+  });
+
+  test("date and bigint reject JSON Schema input conversion", () => {
+    expect(() =>
+      date()["~standard"].jsonSchema.input({ target: "draft-2020-12" }),
+    ).toThrow(UnsupportedJsonSchemaConversionError);
+
+    expect(() =>
+      bigint()["~standard"].jsonSchema.input({ target: "draft-2020-12" }),
+    ).toThrow(UnsupportedJsonSchemaConversionError);
+
+    expect(date().toJsonSchema().format).toBe("date-time");
+    expect(bigint().toJsonSchema().type).toBe("integer");
   });
 });

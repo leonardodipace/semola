@@ -18,6 +18,7 @@ import {
 import {
   formatIssues,
   SchemaError,
+  UnsupportedJsonSchemaConversionError,
   UnsupportedJsonSchemaTargetError,
 } from "./errors.js";
 import type {
@@ -37,9 +38,9 @@ import type {
 const VENDOR = "semola";
 
 const assertJsonSchemaTarget = (target: StandardJSONSchemaV1.Target) => {
-  if (target === "draft-2020-12") return;
-  if (target === "draft-07") return;
-  if (target === "openapi-3.0") return;
+  if (target === "draft-2020-12") {
+    return;
+  }
 
   throw new UnsupportedJsonSchemaTargetError(target);
 };
@@ -95,7 +96,11 @@ export abstract class Schema<Output = unknown>
   public readonly "~standard": StandardJSONSchemaV1.Props<Output, Output> &
     StandardSchemaV1.Props<Output, Output>;
 
-  protected constructor(run: RunFn<Output>, buildJsonSchema: JsonSchemaFn) {
+  protected constructor(
+    run: RunFn<Output>,
+    buildOutputJsonSchema: JsonSchemaFn,
+    buildInputJsonSchema: JsonSchemaFn = buildOutputJsonSchema,
+  ) {
     this.run = run;
 
     this["~standard"] = {
@@ -107,11 +112,11 @@ export abstract class Schema<Output = unknown>
       jsonSchema: {
         input: (options) => {
           assertJsonSchemaTarget(options.target);
-          return buildJsonSchema(options.target);
+          return buildInputJsonSchema(options.target);
         },
         output: (options) => {
           assertJsonSchemaTarget(options.target);
-          return buildJsonSchema(options.target);
+          return buildOutputJsonSchema(options.target);
         },
       },
       types: undefined as unknown as StandardSchemaV1.Types<Output, Output>,
@@ -513,8 +518,11 @@ export class BigintSchema extends Schema<bigint> {
         return value;
       },
       () => {
-        // ponytail: JSON Schema has no bigint; document as integer
+        // ponytail: JSON Schema has no bigint; document as integer for output
         return { type: "integer" };
+      },
+      () => {
+        throw new UnsupportedJsonSchemaConversionError("bigint");
       },
     );
   }
@@ -539,6 +547,9 @@ export class DateSchema extends Schema<Date> {
       },
       () => {
         return { type: "string", format: "date-time" };
+      },
+      () => {
+        throw new UnsupportedJsonSchemaConversionError("date");
       },
     );
   }
