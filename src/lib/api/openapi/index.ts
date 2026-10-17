@@ -16,6 +16,14 @@ import type {
   RouteConfigInternal,
 } from "../types.js";
 
+const instanceDataKeys = new Set([
+  "default",
+  "enum",
+  "const",
+  "examples",
+  "example",
+]);
+
 const rewriteSchemaTree = (
   value: unknown,
   schemas: Record<string, JsonSchema>,
@@ -43,6 +51,11 @@ const rewriteSchemaTree = (
   const next: Record<string, unknown> = {};
 
   for (const key in record) {
+    if (instanceDataKeys.has(key)) {
+      next[key] = record[key];
+      continue;
+    }
+
     next[key] = rewriteSchemaTree(record[key], schemas);
   }
 

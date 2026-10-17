@@ -569,6 +569,38 @@ describe("OpenAPI Generation", () => {
     });
   });
 
+  test("should not hoist id fields inside default or examples", async () => {
+    const User = z
+      .object({ id: z.string(), name: z.string() })
+      .default({ id: "user-1", name: "Alice" })
+      .meta({ examples: [{ id: "ex-1", name: "Bob" }] });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/users",
+          method: "POST",
+          request: { body: User },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas).toBeUndefined();
+
+    const schema =
+      spec.paths["/users"]?.post?.requestBody?.content["application/json"]
+        ?.schema;
+
+    expect(schema).toMatchObject({
+      type: "object",
+      default: { id: "user-1", name: "Alice" },
+      examples: [{ id: "ex-1", name: "Bob" }],
+    });
+  });
+
   test("should inline schemas without id", async () => {
     const PostSchema = z.object({
       title: z.string(),
