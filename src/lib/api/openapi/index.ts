@@ -16,9 +16,13 @@ import type {
   RouteConfigInternal,
 } from "../types.js";
 
-const rewriteDefsRefs = (value: unknown): unknown => {
+const rewriteSchemaTree = (
+  value: unknown,
+  schemas: Record<string, JsonSchema>,
+  isRoot = false,
+): unknown => {
   if (Array.isArray(value)) {
-    return value.map(rewriteDefsRefs);
+    return value.map((item) => rewriteSchemaTree(item, schemas));
   }
 
   if (typeof value !== "object") return value;
@@ -26,36 +30,56 @@ const rewriteDefsRefs = (value: unknown): unknown => {
 
   const record = value as Record<string, unknown>;
 
-  if (typeof record.$ref === "string" && record.$ref.startsWith("#/$defs/")) {
-    const name = record.$ref.slice("#/$defs/".length);
+  if (typeof record.$ref === "string") {
+    if (record.$ref.startsWith("#/$defs/")) {
+      const name = record.$ref.slice("#/$defs/".length);
 
-    return { $ref: `#/components/schemas/${name}` };
+      return { $ref: `#/components/schemas/${name}` };
+    }
+
+    return record;
   }
 
-  const rewritten: Record<string, unknown> = {};
+  const next: Record<string, unknown> = {};
 
   for (const key in record) {
-    rewritten[key] = rewriteDefsRefs(record[key]);
+    next[key] = rewriteSchemaTree(record[key], schemas);
   }
 
-  return rewritten;
+  if (isRoot) return next;
+  if (typeof next.id !== "string") return next;
+
+  const id = next.id;
+  const definition = { ...next };
+  delete definition.id;
+  delete definition.$schema;
+  schemas[id] = definition as JsonSchema;
+
+  return { $ref: `#/components/schemas/${id}` };
 };
 
 const hoistDefsToComponents = (jsonSchema: JsonSchema) => {
+  const schemas: Record<string, JsonSchema> = {};
   const defs = jsonSchema.$defs;
+  const root = { ...jsonSchema };
+  delete root.$defs;
 
-  if (!defs || typeof defs !== "object") {
-    return { schema: jsonSchema, components: undefined };
+  if (defs && typeof defs === "object") {
+    const defsRecord = defs as Record<string, JsonSchema>;
+
+    for (const name in defsRecord) {
+      schemas[name] = rewriteSchemaTree(
+        defsRecord[name],
+        schemas,
+        true,
+      ) as JsonSchema;
+    }
   }
 
-  const schema = rewriteDefsRefs({ ...jsonSchema }) as JsonSchema;
-  delete schema.$defs;
+  const schema = rewriteSchemaTree(root, schemas, true) as JsonSchema;
 
-  const defsRecord = defs as Record<string, JsonSchema>;
-  const schemas: Record<string, JsonSchema> = {};
-
-  for (const name in defsRecord) {
-    schemas[name] = rewriteDefsRefs(defsRecord[name]) as JsonSchema;
+  if (Object.keys(schemas).length === 0) {
+    return { schema: jsonSchema, components: undefined };
   }
 
   return {

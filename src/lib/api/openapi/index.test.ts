@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import { type } from "arktype";
 import { z } from "zod";
 import { Middleware } from "../middleware.js";
 import { generateOpenApiSpec } from "./index.js";
@@ -502,7 +503,6 @@ describe("OpenAPI Generation", () => {
       },
       required: ["id", "name"],
     });
-
     // Check that the request body uses a $ref
     const requestBody = spec.paths["/users"]?.post?.requestBody;
     expect(requestBody?.content["application/json"]?.schema).toEqual({
@@ -513,6 +513,59 @@ describe("OpenAPI Generation", () => {
     const response = spec.paths["/users"]?.post?.responses["201"];
     expect(response?.content?.["application/json"]?.schema).toEqual({
       $ref: "#/components/schemas/User",
+    });
+  });
+
+  test("should hoist chained named schemas into components", async () => {
+    const ZodUser = z
+      .object({ id: z.string(), name: z.string() })
+      .meta({ id: "ZodUser" });
+    const ArkUser = type({ id: "string", name: "string" }).configure({
+      id: "ArkUser",
+    } as never);
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/zod-users",
+          method: "GET",
+          response: { 200: ZodUser.array() },
+          handler: () => {},
+        },
+        {
+          path: "/ark-users",
+          method: "GET",
+          response: { 200: ArkUser.array() },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas?.ZodUser).toMatchObject({
+      type: "object",
+      properties: { id: { type: "string" }, name: { type: "string" } },
+    });
+    expect(spec.components?.schemas?.ArkUser).toMatchObject({
+      type: "object",
+      properties: { id: { type: "string" }, name: { type: "string" } },
+    });
+    expect(
+      spec.paths["/zod-users"]?.get?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema,
+    ).toEqual({
+      type: "array",
+      items: { $ref: "#/components/schemas/ZodUser" },
+    });
+    expect(
+      spec.paths["/ark-users"]?.get?.responses["200"]?.content?.[
+        "application/json"
+      ]?.schema,
+    ).toEqual({
+      type: "array",
+      items: { $ref: "#/components/schemas/ArkUser" },
     });
   });
 
