@@ -226,7 +226,70 @@ describe("semola/schema", () => {
       bigint()["~standard"].jsonSchema.input({ target: "draft-2020-12" }),
     ).toThrow(UnsupportedJsonSchemaConversionError);
 
+    expect(() =>
+      object({ d: date() })["~standard"].jsonSchema.input({
+        target: "draft-2020-12",
+      }),
+    ).toThrow(UnsupportedJsonSchemaConversionError);
+
     expect(date().toJsonSchema().format).toBe("date-time");
     expect(bigint().toJsonSchema().type).toBe("integer");
+  });
+
+  test("union of objects with literals keeps the matched output", () => {
+    const schema = union([
+      object({ type: literal("a"), value: string() }),
+      object({ type: literal("b"), value: number() }),
+    ]);
+
+    expect(schema.parse({ type: "a", value: "hi" })).toEqual({
+      type: "a",
+      value: "hi",
+    });
+    expect(schema.parse({ type: "b", value: 2 })).toEqual({
+      type: "b",
+      value: 2,
+    });
+  });
+
+  test("refine on object with enum field receives parsed output", () => {
+    const schema = object({ s: enumValues(["a", "b"]) }).refine(
+      (value) => value.s === "a",
+      "Expected a",
+    );
+
+    expect(schema.parse({ s: "a" })).toEqual({ s: "a" });
+    expect(() => schema.parse({ s: "b" })).toThrow(SchemaError);
+  });
+
+  test("success results are not overwritten by later validates", () => {
+    const schema = object({ id: number() });
+    const first = schema.safeParse({ id: 1 });
+    const second = schema.safeParse({ id: 2 });
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+
+    if (first.success) {
+      expect(first.data).toEqual({ id: 1 });
+    }
+
+    if (second.success) {
+      expect(second.data).toEqual({ id: 2 });
+    }
+
+    const stdFirst = schema["~standard"].validate({ id: 3 });
+    const stdSecond = schema["~standard"].validate({ id: 4 });
+
+    if (stdFirst instanceof Promise || stdSecond instanceof Promise) {
+      throw new Error("expected sync validation");
+    }
+
+    if (stdFirst.issues || stdSecond.issues) {
+      throw new Error("expected success");
+    }
+
+    expect(stdFirst.value).toEqual({ id: 3 });
+    expect(stdSecond.value).toEqual({ id: 4 });
   });
 });

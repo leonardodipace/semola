@@ -229,14 +229,6 @@ export const applyNumberRules = (
   }
 };
 
-/** Pooled success result - valid only until the next validate on this thread. */
-export const SUCCESS_RESULT: { value: unknown } = { value: undefined };
-
-export const SAFE_OK: { success: true; data: unknown } = {
-  success: true,
-  data: undefined,
-};
-
 const isIdentKey = (key: string) => {
   return /^[A-Za-z_$][\w$]*$/.test(key);
 };
@@ -413,7 +405,7 @@ export const compileObjectValidate = <Output>(fields: ObjectField[]) => {
   let needsPath = false;
 
   const lines = [
-    `if(typeof value!=='object'||value===null||Array.isArray(value)){${emitIssue('"Expected object"', pathExprRoot)}return;}`,
+    `if(typeof value!=='object'||value===null||Array.isArray(value)){${emitIssue('"Expected object"', pathExprRoot)}return value;}`,
   ];
 
   for (let i = 0; i < fields.length; i++) {
@@ -460,7 +452,7 @@ export const compileObjectValidate = <Output>(fields: ObjectField[]) => {
     "binds",
     "runs",
     needsPath
-      ? `return function(value,path,issues){${lines.join("")}}`
+      ? `return function(value,path,issues){${lines.join("")}return value;}`
       : `return function(value,issues){${lines.join("")}}`,
   );
 

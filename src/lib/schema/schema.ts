@@ -11,9 +11,7 @@ import {
   type ObjectField,
   pushIssue,
   type RunFn,
-  SAFE_OK,
   type StringRule,
-  SUCCESS_RESULT,
 } from "./compile.js";
 import {
   formatIssues,
@@ -26,6 +24,7 @@ import type {
   InferOutput,
   Issue,
   JsonSchema,
+  JsonSchemaMode,
   LiteralValue,
   ObjectShape,
   Path,
@@ -45,7 +44,22 @@ const assertJsonSchemaTarget = (target: StandardJSONSchemaV1.Target) => {
   throw new UnsupportedJsonSchemaTargetError(target);
 };
 
-type JsonSchemaFn = (target: StandardJSONSchemaV1.Target) => JsonSchema;
+type JsonSchemaFn = (
+  target: StandardJSONSchemaV1.Target,
+  mode: JsonSchemaMode,
+) => JsonSchema;
+
+const childJsonSchema = (
+  schema: SchemaBase,
+  target: StandardJSONSchemaV1.Target,
+  mode: JsonSchemaMode,
+) => {
+  if (mode === "output") {
+    return schema.toJsonSchema(target);
+  }
+
+  return schema["~standard"].jsonSchema.input({ target }) as JsonSchema;
+};
 
 // Sync validation is single-threaded; reuse buffers when not re-entrant.
 const TLS_PATH: PropertyKey[] = [];
@@ -96,11 +110,7 @@ export abstract class Schema<Output = unknown>
   public readonly "~standard": StandardJSONSchemaV1.Props<Output, Output> &
     StandardSchemaV1.Props<Output, Output>;
 
-  protected constructor(
-    run: RunFn<Output>,
-    buildOutputJsonSchema: JsonSchemaFn,
-    buildInputJsonSchema: JsonSchemaFn = buildOutputJsonSchema,
-  ) {
+  protected constructor(run: RunFn<Output>, buildJsonSchema: JsonSchemaFn) {
     this.run = run;
 
     this["~standard"] = {
@@ -112,18 +122,17 @@ export abstract class Schema<Output = unknown>
       jsonSchema: {
         input: (options) => {
           assertJsonSchemaTarget(options.target);
-          return buildInputJsonSchema(options.target);
+          return buildJsonSchema(options.target, "input");
         },
         output: (options) => {
           assertJsonSchemaTarget(options.target);
-          return buildOutputJsonSchema(options.target);
+          return buildJsonSchema(options.target, "output");
         },
       },
       types: undefined as unknown as StandardSchemaV1.Types<Output, Output>,
     };
   }
 
-  /** Standard Schema validate. Success result is pooled - read `.value` before next validate. */
   public validateStd(value: unknown): StandardSchemaV1.Result<Output> {
     const result = runTopLevel(this.run, value);
 
@@ -131,8 +140,7 @@ export abstract class Schema<Output = unknown>
       return { issues: result.issues };
     }
 
-    SUCCESS_RESULT.value = result.output;
-    return SUCCESS_RESULT as StandardSchemaV1.SuccessResult<Output>;
+    return { value: result.output as Output };
   }
 
   public parse(data: unknown): Output {
@@ -158,8 +166,7 @@ export abstract class Schema<Output = unknown>
       };
     }
 
-    SAFE_OK.data = result.output;
-    return SAFE_OK as SafeParseResult<Output>;
+    return { success: true, data: result.output as Output };
   }
 
   public toJsonSchema(target: StandardJSONSchemaV1.Target = "draft-2020-12") {
@@ -185,26 +192,28 @@ export abstract class Schema<Output = unknown>
   ): Schema<Output> {
     const parentRun = this.run;
     const schemaType = this.schemaType;
-    const parentJson = (target: StandardJSONSchemaV1.Target) => {
-      return this.toJsonSchema(target);
-    };
 
     return new (class extends Schema<Output> {
       public readonly schemaType = schemaType;
-    })((value, path, issues) => {
-      const before = issues.length;
-      const output = parentRun(value, path, issues);
+    })(
+      (value, path, issues) => {
+        const before = issues.length;
+        const output = parentRun(value, path, issues);
 
-      if (issues.length > before) {
+        if (issues.length > before) {
+          return output;
+        }
+
+        if (!check(output)) {
+          pushIssue(issues, message, path);
+        }
+
         return output;
-      }
-
-      if (!check(output)) {
-        pushIssue(issues, message, path);
-      }
-
-      return output;
-    }, parentJson);
+      },
+      (target, mode) => {
+        return childJsonSchema(this, target, mode);
+      },
+    );
   }
 
   /** Emit inlined JS for object codegen, or null if not supported. */
@@ -517,12 +526,13 @@ export class BigintSchema extends Schema<bigint> {
 
         return value;
       },
-      () => {
+      (_target, mode) => {
+        if (mode === "input") {
+          throw new UnsupportedJsonSchemaConversionError("bigint");
+        }
+
         // ponytail: JSON Schema has no bigint; document as integer for output
         return { type: "integer" };
-      },
-      () => {
-        throw new UnsupportedJsonSchemaConversionError("bigint");
       },
     );
   }
@@ -545,11 +555,12 @@ export class DateSchema extends Schema<Date> {
 
         return value;
       },
-      () => {
+      (_target, mode) => {
+        if (mode === "input") {
+          throw new UnsupportedJsonSchemaConversionError("date");
+        }
+
         return { type: "string", format: "date-time" };
-      },
-      () => {
-        throw new UnsupportedJsonSchemaConversionError("date");
       },
     );
   }
@@ -612,8 +623,8 @@ export class OptionalSchema<Output> extends Schema<Output | undefined> {
 
         return inner.run(value, path, issues);
       },
-      (target) => {
-        return inner.toJsonSchema(target);
+      (target, mode) => {
+        return childJsonSchema(inner, target, mode);
       },
     );
   }
@@ -646,8 +657,8 @@ export class NullableSchema<Output> extends Schema<Output | null> {
 
         return inner.run(value, path, issues);
       },
-      (target) => {
-        const base = inner.toJsonSchema(target);
+      (target, mode) => {
+        const base = childJsonSchema(inner, target, mode);
 
         return { anyOf: [base, { type: "null" }] };
       },
@@ -671,8 +682,8 @@ export class NullishSchema<Output> extends Schema<Output | null | undefined> {
 
         return inner.run(value, path, issues);
       },
-      (target) => {
-        const base = inner.toJsonSchema(target);
+      (target, mode) => {
+        const base = childJsonSchema(inner, target, mode);
 
         return { anyOf: [base, { type: "null" }] };
       },
@@ -737,10 +748,10 @@ export class ArraySchema<Output> extends Schema<Output[]> {
 
         return list;
       },
-      (target) => {
+      (target, mode) => {
         return {
           type: "array",
-          items: element.toJsonSchema(target),
+          items: childJsonSchema(element, target, mode),
           ...jsonExtras,
         };
       },
@@ -887,7 +898,7 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
 
     const compiled = compileObjectValidate<InferObjectOutput<Shape>>(fields);
 
-    super(compiled.run, (target) => {
+    super(compiled.run, (target, mode) => {
       const properties: Record<string, JsonSchema> = {};
       const required: string[] = [];
 
@@ -904,7 +915,7 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
           continue;
         }
 
-        properties[field.key] = propertySchema.toJsonSchema(target);
+        properties[field.key] = childJsonSchema(propertySchema, target, mode);
 
         if (field.optional) {
           continue;
@@ -952,10 +963,7 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
         return { issues: TLS_ISSUES.slice() };
       }
 
-      SUCCESS_RESULT.value = value;
-      return SUCCESS_RESULT as StandardSchemaV1.SuccessResult<
-        InferObjectOutput<Shape>
-      >;
+      return { value: value as InferObjectOutput<Shape> };
     } finally {
       tlsDepth = 0;
     }
@@ -1016,8 +1024,10 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
         };
       }
 
-      SAFE_OK.data = data;
-      return SAFE_OK as SafeParseResult<InferObjectOutput<Shape>>;
+      return {
+        success: true,
+        data: data as InferObjectOutput<Shape>,
+      };
     } finally {
       tlsDepth = 0;
     }
@@ -1118,10 +1128,10 @@ export class RecordSchema<Output> extends Schema<Record<string, Output>> {
 
         return record;
       },
-      (target) => {
+      (target, mode) => {
         return {
           type: "object",
-          additionalProperties: valueSchema.toJsonSchema(target),
+          additionalProperties: childJsonSchema(valueSchema, target, mode),
         };
       },
     );
@@ -1163,12 +1173,12 @@ export class TupleSchema<T extends readonly SchemaBase[]> extends Schema<{
 
         return value as { [K in keyof T]: InferOutput<T[K]> };
       },
-      (target) => {
+      (target, mode) => {
         return {
           type: "array",
           minItems: length,
           maxItems: length,
-          prefixItems: items.map((item) => item.toJsonSchema(target)),
+          prefixItems: items.map((item) => childJsonSchema(item, target, mode)),
           items: false,
         };
       },
@@ -1206,9 +1216,9 @@ export class UnionSchema<T extends readonly SchemaBase[]> extends Schema<
         pushIssue(issues, "Invalid input", path);
         return value as InferOutput<T[number]>;
       },
-      (target) => {
+      (target, mode) => {
         return {
-          anyOf: options.map((option) => option.toJsonSchema(target)),
+          anyOf: options.map((option) => childJsonSchema(option, target, mode)),
         };
       },
     );

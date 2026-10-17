@@ -147,11 +147,11 @@ type UserInput = InferInput<typeof User>;
 
 ## Performance
 
-Validation is sync-only and allocation-light on the success path (shared buffers, compiled object checks, same-reference outputs). Success results from `~standard.validate` / `safeParse` reuse a pooled object - read `.value` / `.data` before the next call on the same thread.
+Validation is sync-only and allocation-light on the success path (shared path/issue buffers, compiled object checks, same-reference outputs).
 
 ## Standard Schema and JSON Schema
 
-Every schema exposes `~standard` (`version: 1`, `vendor: "semola"`, sync `validate`) and `~standard.jsonSchema` for `draft-2020-12`. `date()` and `bigint()` support output JSON Schema only - input conversion throws because JSON has no `Date` or `bigint`.
+Every schema exposes `~standard` (`version: 1`, `vendor: "semola"`, sync `validate`) and `~standard.jsonSchema` for `draft-2020-12`. `date()` and `bigint()` support output JSON Schema only - input conversion throws because JSON has no `Date` or `bigint`, including when nested under `object`, `array`, `union`, and the other composites.
 
 ```typescript
 const result = User["~standard"].validate(user);
