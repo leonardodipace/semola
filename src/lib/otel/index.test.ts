@@ -481,8 +481,12 @@ describe("Otel constructor and lifecycle edges", () => {
       { export: { type: "otlp-http", url: "" } },
       { sampleRatio: -0.1 },
       { sampleRatio: 1.1 },
+      { sampleRatio: Number.NaN },
       { flushIntervalMs: 0 },
+      { flushIntervalMs: Number.NaN },
+      { flushIntervalMs: Number.POSITIVE_INFINITY },
       { shutdownTimeoutMs: -1 },
+      { shutdownTimeoutMs: Number.NaN },
       { maxQueueSize: 0 },
       { maxQueueSize: 1.5 },
     ];

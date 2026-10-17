@@ -535,6 +535,10 @@ const requireRange = (
   max: number,
   message: string,
 ) => {
+  if (!Number.isFinite(value)) {
+    throw new InvalidOptionsError(message);
+  }
+
   if (value < min) {
     throw new InvalidOptionsError(message);
   }
@@ -545,6 +549,10 @@ const requireRange = (
 };
 
 const requireAtLeast = (value: number, min: number, message: string) => {
+  if (!Number.isFinite(value)) {
+    throw new InvalidOptionsError(message);
+  }
+
   if (value < min) {
     throw new InvalidOptionsError(message);
   }
