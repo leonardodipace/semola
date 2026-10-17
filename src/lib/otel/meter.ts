@@ -11,6 +11,14 @@ const instrumentKey = (scope: Scope, name: string, kind: InstrumentKind) => {
   return `${scope.scopeName}\0${scope.scopeVersion ?? ""}\0${name}\0${kind}`;
 };
 
+const requireFinite = (value: number, label: string) => {
+  if (Number.isFinite(value)) {
+    return;
+  }
+
+  throw new InvalidOptionsError(`${label} must be a finite number`);
+};
+
 class MetricInstrument {
   protected otel: MetricRecorder;
   protected scope: Scope;
@@ -57,11 +65,7 @@ export class Counter extends MetricInstrument {
   }
 
   public add(value: number, attributes?: AttributeMap) {
-    if (!Number.isFinite(value)) {
-      throw new InvalidOptionsError(
-        "Counter.add value must be a finite number",
-      );
-    }
+    requireFinite(value, "Counter.add value");
 
     if (value < 0) {
       throw new InvalidOptionsError("Counter.add value must be non-negative");
@@ -82,12 +86,7 @@ export class UpDownCounter extends MetricInstrument {
   }
 
   public add(value: number, attributes?: AttributeMap) {
-    if (!Number.isFinite(value)) {
-      throw new InvalidOptionsError(
-        "UpDownCounter.add value must be a finite number",
-      );
-    }
-
+    requireFinite(value, "UpDownCounter.add value");
     this.write(value, attributes);
   }
 }
@@ -103,12 +102,7 @@ export class Histogram extends MetricInstrument {
   }
 
   public record(value: number, attributes?: AttributeMap) {
-    if (!Number.isFinite(value)) {
-      throw new InvalidOptionsError(
-        "Histogram.record value must be a finite number",
-      );
-    }
-
+    requireFinite(value, "Histogram.record value");
     this.write(value, attributes);
   }
 }

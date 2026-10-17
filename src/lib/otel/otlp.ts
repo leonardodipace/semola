@@ -6,8 +6,6 @@ import type {
   FinishedSpan,
   MetricPoint,
   OtlpAnyValue,
-  OtlpInstrumentationScope,
-  OtlpKeyValue,
   OtlpPostOptions,
   OtlpSpanStatus,
   PendingLogRecord,
@@ -60,28 +58,45 @@ export const encodeAttributeValue = (value: AttributeValue): OtlpAnyValue => {
     return { doubleValue: value };
   }
 
-  const values = value.map((entry) => encodeAttributeValue(entry));
-
-  return { arrayValue: { values } };
+  return {
+    arrayValue: {
+      values: value.map((entry) => encodeAttributeValue(entry)),
+    },
+  };
 };
 
-export const encodeAttributes = (map: AttributeMap): OtlpKeyValue[] => {
+export const encodeAttributes = (map: AttributeMap) => {
   return sortedAttributeEntries(map).map(([key, value]) => ({
     key,
     value: encodeAttributeValue(value),
   }));
 };
 
-const encodeScope = (scope: Scope): OtlpInstrumentationScope => {
-  const encoded: OtlpInstrumentationScope = {
-    name: scope.scopeName,
-  };
-
+const encodeScope = (scope: Scope) => {
   if (scope.scopeVersion) {
-    encoded.version = scope.scopeVersion;
+    return { name: scope.scopeName, version: scope.scopeVersion };
   }
 
-  return encoded;
+  return { name: scope.scopeName };
+};
+
+const encodeResourceSignal = <T>(
+  resourceKey: string,
+  scopeKey: string,
+  resource: Resource,
+  groups: T[],
+  mapGroup: (group: T) => unknown,
+) => {
+  return {
+    [resourceKey]: [
+      {
+        resource: {
+          attributes: encodeAttributes(resource.attributes),
+        },
+        [scopeKey]: groups.map(mapGroup),
+      },
+    ],
+  };
 };
 
 export const encodeSpan = (span: FinishedSpan) => {
@@ -125,19 +140,16 @@ export const encodeTracesExport = (
   resource: Resource,
   scopeSpans: ScopeSpans[],
 ) => {
-  return {
-    resourceSpans: [
-      {
-        resource: {
-          attributes: encodeAttributes(resource.attributes),
-        },
-        scopeSpans: scopeSpans.map((group) => ({
-          scope: encodeScope(group.scope),
-          spans: group.spans.map(encodeSpan),
-        })),
-      },
-    ],
-  };
+  return encodeResourceSignal(
+    "resourceSpans",
+    "scopeSpans",
+    resource,
+    scopeSpans,
+    (group) => ({
+      scope: encodeScope(group.scope),
+      spans: group.spans.map(encodeSpan),
+    }),
+  );
 };
 
 export const encodeLogRecord = (record: PendingLogRecord) => {
@@ -167,19 +179,16 @@ export const encodeLogsExport = (
   resource: Resource,
   scopeLogs: ScopeLogs[],
 ) => {
-  return {
-    resourceLogs: [
-      {
-        resource: {
-          attributes: encodeAttributes(resource.attributes),
-        },
-        scopeLogs: scopeLogs.map((group) => ({
-          scope: encodeScope(group.scope),
-          logRecords: group.logRecords.map(encodeLogRecord),
-        })),
-      },
-    ],
-  };
+  return encodeResourceSignal(
+    "resourceLogs",
+    "scopeLogs",
+    resource,
+    scopeLogs,
+    (group) => ({
+      scope: encodeScope(group.scope),
+      logRecords: group.logRecords.map(encodeLogRecord),
+    }),
+  );
 };
 
 export const encodeMetric = (point: MetricPoint) => {
@@ -205,19 +214,13 @@ export const encodeMetric = (point: MetricPoint) => {
     };
   }
 
-  let isMonotonic = false;
-
-  if (point.kind === "counter") {
-    isMonotonic = true;
-  }
-
   return {
     name: point.name,
     description: point.description,
     unit: point.unit,
     sum: {
       aggregationTemporality: OTLP_AGGREGATION_TEMPORALITY_CUMULATIVE,
-      isMonotonic,
+      isMonotonic: point.kind === "counter",
       dataPoints: point.dataPoints.map((dp) => ({
         attributes: encodeAttributes(dp.attributes),
         startTimeUnixNano: dp.startTimeUnixNano,
@@ -232,19 +235,16 @@ export const encodeMetricsExport = (
   resource: Resource,
   scopeMetrics: ScopeMetrics[],
 ) => {
-  return {
-    resourceMetrics: [
-      {
-        resource: {
-          attributes: encodeAttributes(resource.attributes),
-        },
-        scopeMetrics: scopeMetrics.map((group) => ({
-          scope: encodeScope(group.scope),
-          metrics: group.metrics.map(encodeMetric),
-        })),
-      },
-    ],
-  };
+  return encodeResourceSignal(
+    "resourceMetrics",
+    "scopeMetrics",
+    resource,
+    scopeMetrics,
+    (group) => ({
+      scope: encodeScope(group.scope),
+      metrics: group.metrics.map(encodeMetric),
+    }),
+  );
 };
 
 const joinOtlpUrl = (baseUrl: string, path: string) => {
@@ -278,50 +278,16 @@ const rejectedCountFromPartial = (partial: object) => {
   return 0;
 };
 
-const readResponseTextBounded = async (response: Response, limit: number) => {
-  const body = response.body;
-
-  if (!body) {
-    return "";
-  }
-
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let text = "";
-  let size = 0;
-
-  while (true) {
-    const [readError, chunk] = await mightThrow(reader.read());
-
-    if (readError) {
-      throw new ExportError(readError.message, false);
-    }
-
-    const { done, value } = chunk;
-
-    if (done) {
-      break;
-    }
-
-    size += value.byteLength;
-
-    if (size > limit) {
-      await reader.cancel();
-      throw new ExportError("OTLP response body exceeds size limit", false);
-    }
-
-    text += decoder.decode(value, { stream: true });
-  }
-
-  text += decoder.decode();
-  return text;
-};
-
 const assertNoPartialRejection = async (response: Response) => {
-  const text = await readResponseTextBounded(
-    response,
-    OTLP_PARTIAL_SUCCESS_BODY_LIMIT,
-  );
+  const [readError, text] = await mightThrow(response.text());
+
+  if (readError) {
+    throw new ExportError(readError.message, false);
+  }
+
+  if (text.length > OTLP_PARTIAL_SUCCESS_BODY_LIMIT) {
+    throw new ExportError("OTLP response body exceeds size limit", false);
+  }
 
   if (!text) {
     return;
@@ -341,8 +307,7 @@ const assertNoPartialRejection = async (response: Response) => {
     return;
   }
 
-  const body = parsed as Record<string, unknown>;
-  const partial = body.partialSuccess;
+  const partial = (parsed as Record<string, unknown>).partialSuccess;
 
   if (typeof partial !== "object") {
     return;

@@ -57,37 +57,28 @@ export class Otel {
   private flushChain: Promise<void> = Promise.resolve();
 
   public constructor(options: OtelOptions) {
-    if (!options.serviceName.trim()) {
-      throw new InvalidOptionsError("serviceName is required");
-    }
+    requireTrimmed(options.serviceName, "serviceName is required");
 
     if (options.export.type !== "otlp-http") {
       throw new InvalidOptionsError("export.type must be otlp-http");
     }
 
-    if (!options.export.url.trim()) {
-      throw new InvalidOptionsError("export.url is required");
-    }
+    requireTrimmed(options.export.url, "export.url is required");
 
     const ratio = options.sampleRatio ?? 1;
-
-    if (ratio < 0 || ratio > 1) {
-      throw new InvalidOptionsError("sampleRatio must be between 0 and 1");
-    }
+    requireRange(ratio, 0, 1, "sampleRatio must be between 0 and 1");
 
     const flushIntervalMs =
       options.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS;
-
-    if (flushIntervalMs < 1) {
-      throw new InvalidOptionsError("flushIntervalMs must be at least 1");
-    }
+    requireAtLeast(flushIntervalMs, 1, "flushIntervalMs must be at least 1");
 
     const shutdownTimeoutMs =
       options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
-
-    if (shutdownTimeoutMs < 0) {
-      throw new InvalidOptionsError("shutdownTimeoutMs must be at least 0");
-    }
+    requireAtLeast(
+      shutdownTimeoutMs,
+      0,
+      "shutdownTimeoutMs must be at least 0",
+    );
 
     const maxQueueSize = options.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE;
 
@@ -393,7 +384,6 @@ export class Otel {
       return;
     }
 
-    const headers = this.exportOptions.headers;
     let exportError: ExportError | null = null;
     let tracesFailed = false;
     let logsFailed = false;
@@ -406,28 +396,15 @@ export class Otel {
           group.spans.push(span);
         },
       );
-      const [encodeError, body] = mightThrowSync(() =>
-        encodeTracesExport(this.resource, scopeSpans),
+      const result = await this.postEncoded(
+        () => encodeTracesExport(this.resource, scopeSpans),
+        "/v1/traces",
+        signal,
       );
 
-      if (encodeError) {
-        exportError = new ExportError(encodeError.message, false);
-      } else {
-        const [error] = await mightThrow(
-          otlpPost({
-            baseUrl: this.exportOptions.url,
-            path: "/v1/traces",
-            body,
-            fetch: this.fetchImpl,
-            headers,
-            signal,
-          }),
-        );
-
-        if (error) {
-          exportError = toExportError(error);
-          tracesFailed = exportError.retryable;
-        }
+      if (result.error) {
+        exportError = result.error;
+        tracesFailed = result.error.retryable;
       }
     }
 
@@ -439,33 +416,17 @@ export class Otel {
           group.logRecords.push(record);
         },
       );
-      const [encodeError, body] = mightThrowSync(() =>
-        encodeLogsExport(this.resource, scopeLogs),
+      const result = await this.postEncoded(
+        () => encodeLogsExport(this.resource, scopeLogs),
+        "/v1/logs",
+        signal,
       );
 
-      if (encodeError) {
+      if (result.error) {
+        logsFailed = result.error.retryable;
+
         if (!exportError) {
-          exportError = new ExportError(encodeError.message, false);
-        }
-      } else {
-        const [error] = await mightThrow(
-          otlpPost({
-            baseUrl: this.exportOptions.url,
-            path: "/v1/logs",
-            body,
-            fetch: this.fetchImpl,
-            headers,
-            signal,
-          }),
-        );
-
-        if (error) {
-          const logError = toExportError(error);
-          logsFailed = logError.retryable;
-
-          if (!exportError) {
-            exportError = logError;
-          }
+          exportError = result.error;
         }
       }
     }
@@ -519,18 +480,32 @@ export class Otel {
         group.metrics.push(metric);
       },
     );
-    const [encodeError, body] = mightThrowSync(() =>
-      encodeMetricsExport(this.resource, scopeMetrics),
+    const result = await this.postEncoded(
+      () => encodeMetricsExport(this.resource, scopeMetrics),
+      "/v1/metrics",
+      signal,
     );
 
+    if (result.error) {
+      throw result.error;
+    }
+  }
+
+  private async postEncoded(
+    encode: () => unknown,
+    path: "/v1/traces" | "/v1/metrics" | "/v1/logs",
+    signal?: AbortSignal,
+  ) {
+    const [encodeError, body] = mightThrowSync(encode);
+
     if (encodeError) {
-      throw new ExportError(encodeError.message, false);
+      return { error: new ExportError(encodeError.message, false) };
     }
 
     const [error] = await mightThrow(
       otlpPost({
         baseUrl: this.exportOptions.url,
-        path: "/v1/metrics",
+        path,
         body,
         fetch: this.fetchImpl,
         headers: this.exportOptions.headers,
@@ -539,10 +514,41 @@ export class Otel {
     );
 
     if (error) {
-      throw toExportError(error);
+      return { error: toExportError(error) };
     }
+
+    return { error: null };
   }
 }
+
+const requireTrimmed = (value: string, message: string) => {
+  if (value.trim()) {
+    return;
+  }
+
+  throw new InvalidOptionsError(message);
+};
+
+const requireRange = (
+  value: number,
+  min: number,
+  max: number,
+  message: string,
+) => {
+  if (value < min) {
+    throw new InvalidOptionsError(message);
+  }
+
+  if (value > max) {
+    throw new InvalidOptionsError(message);
+  }
+};
+
+const requireAtLeast = (value: number, min: number, message: string) => {
+  if (value < min) {
+    throw new InvalidOptionsError(message);
+  }
+};
 
 const toExportError = (error: Error) => {
   if (error instanceof ExportError) {
@@ -600,32 +606,12 @@ const groupByScope = <
   return [...map.values()];
 };
 
-const snapshotSums = (
-  sums: Map<string, SumMetricBucket>,
+const snapshotInstrument = (
+  instrument: RegisteredInstrument,
   now: string,
 ): MetricPoint["dataPoints"] => {
-  const points: MetricPoint["dataPoints"] = [];
-
-  for (const bucket of sums.values()) {
-    points.push({
-      attributes: bucket.attributes,
-      startTimeUnixNano: bucket.startTimeUnixNano,
-      timeUnixNano: now,
-      value: bucket.value,
-    });
-  }
-
-  return points;
-};
-
-const snapshotHistograms = (
-  histograms: Map<string, HistogramMetricBucket>,
-  now: string,
-): MetricPoint["dataPoints"] => {
-  const points: MetricPoint["dataPoints"] = [];
-
-  for (const bucket of histograms.values()) {
-    points.push({
+  if (instrument.kind === "histogram") {
+    return snapshotBuckets(instrument.histograms, (bucket) => ({
       attributes: bucket.attributes,
       startTimeUnixNano: bucket.startTimeUnixNano,
       timeUnixNano: now,
@@ -635,19 +621,26 @@ const snapshotHistograms = (
       max: bucket.max,
       bucketCounts: [...bucket.bucketCounts],
       explicitBounds: [...HISTOGRAM_EXPLICIT_BOUNDS],
-    });
+    }));
+  }
+
+  return snapshotBuckets(instrument.sums, (bucket) => ({
+    attributes: bucket.attributes,
+    startTimeUnixNano: bucket.startTimeUnixNano,
+    timeUnixNano: now,
+    value: bucket.value,
+  }));
+};
+
+const snapshotBuckets = <T extends SumMetricBucket | HistogramMetricBucket>(
+  buckets: Map<string, T>,
+  mapPoint: (bucket: T) => MetricPoint["dataPoints"][number],
+) => {
+  const points: MetricPoint["dataPoints"] = [];
+
+  for (const bucket of buckets.values()) {
+    points.push(mapPoint(bucket));
   }
 
   return points;
-};
-
-const snapshotInstrument = (
-  instrument: RegisteredInstrument,
-  now: string,
-): MetricPoint["dataPoints"] => {
-  if (instrument.kind === "histogram") {
-    return snapshotHistograms(instrument.histograms, now);
-  }
-
-  return snapshotSums(instrument.sums, now);
 };

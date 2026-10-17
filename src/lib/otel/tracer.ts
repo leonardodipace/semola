@@ -68,9 +68,6 @@ export class Tracer {
       traceFlags = TRACE_FLAG_SAMPLED;
     }
 
-    const startMs = options?.startTime ?? Date.now();
-    const kind = options?.kind ?? "internal";
-
     return new Span(this.host, {
       name,
       traceId,
@@ -79,10 +76,10 @@ export class Tracer {
       traceFlags,
       traceState,
       parentIsRemote,
-      kind,
+      kind: options?.kind ?? "internal",
       dropped: !sampled,
       scope: this.scope,
-      startTimeMs: startMs,
+      startTimeMs: options?.startTime ?? Date.now(),
       initialAttributes: options?.attributes,
     });
   }
@@ -147,10 +144,6 @@ export class Span {
   }
 
   public recordException(err: Error): void {
-    if (this.state.dropped) {
-      return;
-    }
-
     this.addEvent("exception", {
       "exception.message": err.message,
       "exception.stack": err.stack ?? "",
@@ -191,7 +184,6 @@ export class Span {
 
     this.ended = true;
 
-    const endMs = endTime ?? Date.now();
     const finished: FinishedSpan = {
       traceId: this.state.traceId,
       spanId: this.state.spanId,
@@ -200,7 +192,7 @@ export class Span {
       kind: SPAN_KIND_CODE[this.state.kind],
       flags: spanFlags(this.state.traceFlags, this.state.parentIsRemote),
       startTimeUnixNano: timeUnixNanoString(this.state.startTimeMs),
-      endTimeUnixNano: timeUnixNanoString(endMs),
+      endTimeUnixNano: timeUnixNanoString(endTime ?? Date.now()),
       attributes: this.attributes,
       events: this.events,
       status: this.status,

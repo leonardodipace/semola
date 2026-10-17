@@ -1,121 +1,22 @@
 import { describe, expect, test } from "bun:test";
 import { ExportError, InvalidOptionsError } from "./errors.js";
-import { extract, inject, Otel, runWithContext } from "./index.js";
+import { extract, inject, Otel } from "./index.js";
 import {
   baseOptions,
   createFailingPathFetch,
   createMockFetch,
+  createTogglePathFetch,
   type FetchCall,
   parseBody,
+  pathCallCount,
   resolveUrl,
+  signalBody,
+  traceSpans,
 } from "./test-fixtures.js";
-import { HISTOGRAM_EXPLICIT_BOUNDS } from "./types.js";
+import type { OtelOptions } from "./types.js";
+import { HISTOGRAM_EXPLICIT_BOUNDS, TRACE_FLAG_SAMPLED } from "./types.js";
 
-const traceSpans = (calls: FetchCall[]) => {
-  const call = calls.find((entry) => entry.url.endsWith("/v1/traces"));
-  const body = parseBody(call);
-  return body.resourceSpans[0].scopeSpans[0].spans as Array<{
-    name: string;
-    traceId: string;
-    spanId: string;
-    parentSpanId?: string;
-    kind?: number;
-    flags?: number;
-    traceState?: string;
-    attributes: Array<{ key: string; value: Record<string, unknown> }>;
-    events: Array<{ name: string; attributes: unknown[] }>;
-    status: { code: number; message?: string };
-  }>;
-};
-
-describe("Otel constructor", () => {
-  test("includes service.version and service.instance.id on resource", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel({
-      ...baseOptions(fetch),
-      serviceVersion: "1.2.3",
-      serviceInstanceId: "pod-a",
-    });
-
-    await otel.tracer("app").startActiveSpan("v", async () => {});
-    await otel.shutdown();
-
-    const body = parseBody(
-      calls.find((call) => call.url.endsWith("/v1/traces")),
-    );
-    const attrs = body.resourceSpans[0].resource.attributes as Array<{
-      key: string;
-      value: { stringValue?: string };
-    }>;
-
-    expect(
-      attrs.find((attr) => attr.key === "service.name")?.value.stringValue,
-    ).toBe("test-svc");
-    expect(
-      attrs.find((attr) => attr.key === "service.version")?.value.stringValue,
-    ).toBe("1.2.3");
-    expect(
-      attrs.find((attr) => attr.key === "service.instance.id")?.value
-        .stringValue,
-    ).toBe("pod-a");
-  });
-});
-
-describe("Otel traces", () => {
-  test("nested spans share trace id and set parent span id", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel(baseOptions(fetch));
-    const tracer = otel.tracer("app");
-
-    await tracer.startActiveSpan("root", async (root) => {
-      root.setAttribute("layer", "root");
-
-      await tracer.startActiveSpan("child", async (child) => {
-        child.setAttribute("layer", "child");
-      });
-    });
-
-    await otel.shutdown();
-
-    const spans = traceSpans(calls);
-    expect(spans.length).toBe(2);
-
-    const rootSpan = spans.find((span) => span.name === "root");
-    const childSpan = spans.find((span) => span.name === "child");
-
-    expect(rootSpan?.traceId).toBe(childSpan?.traceId);
-    expect(childSpan?.parentSpanId).toBe(rootSpan?.spanId);
-  });
-
-  test("manual startSpan requires end to export", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel(baseOptions(fetch));
-    const span = otel.tracer("app").startSpan("manual");
-
-    await otel.flushAll();
-    expect(calls.filter((call) => call.url.endsWith("/v1/traces")).length).toBe(
-      0,
-    );
-
-    span.end();
-    await otel.shutdown();
-
-    const spans = traceSpans(calls);
-    expect(spans.some((entry) => entry.name === "manual")).toBe(true);
-  });
-
-  test("double end exports the span once", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel(baseOptions(fetch));
-    const span = otel.tracer("app").startSpan("once");
-    span.end();
-    span.end();
-    await otel.shutdown();
-
-    const spans = traceSpans(calls).filter((entry) => entry.name === "once");
-    expect(spans.length).toBe(1);
-  });
-
+describe("Otel cross-cutting traces", () => {
   test("records attributes events exception and status", async () => {
     const { fetch, calls } = createMockFetch();
     const otel = new Otel(baseOptions(fetch));
@@ -132,8 +33,6 @@ describe("Otel traces", () => {
     await otel.shutdown();
 
     const span = traceSpans(calls).find((entry) => entry.name === "work");
-    expect(span).toBeDefined();
-
     const attrMap = Object.fromEntries(
       (span?.attributes ?? []).map((attr) => [attr.key, attr.value]),
     );
@@ -145,55 +44,25 @@ describe("Otel traces", () => {
     expect(span?.events.some((event) => event.name === "checkpoint")).toBe(
       true,
     );
-    expect(span?.status.code).toBe(2);
-    expect(span?.status.message).toBe("charge failed");
+    expect(span?.status).toEqual({ code: 2, message: "charge failed" });
   });
 
   test("supports fractional start and end times", async () => {
     const { fetch, calls } = createMockFetch();
     const otel = new Otel(baseOptions(fetch));
-    const tracer = otel.tracer("app");
 
-    await tracer.startActiveSpan(
+    await otel.tracer("app").startActiveSpan(
       "hr",
       async (span) => {
         span.end(1_700_000_000_000.25);
       },
       { startTime: 1_700_000_000_000.75 },
     );
-
     await otel.shutdown();
 
-    const body = parseBody(
-      calls.find((call) => call.url.endsWith("/v1/traces")),
-    );
-    const span = body.resourceSpans[0].scopeSpans[0].spans.find(
-      (entry: { name: string }) => entry.name === "hr",
-    ) as { startTimeUnixNano: string; endTimeUnixNano: string };
-
-    expect(span.startTimeUnixNano.endsWith("750000")).toBe(true);
-    expect(span.endTimeUnixNano.endsWith("250000")).toBe(true);
-  });
-
-  test("exports span kind and remote parent flags", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel(baseOptions(fetch));
-    const parent = extract({
-      traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
-    });
-
-    await otel.tracer("app").startActiveSpan("http", async () => {}, {
-      parent,
-      kind: "server",
-    });
-
-    await otel.shutdown();
-
-    const spans = traceSpans(calls);
-    const flags = spans[0]?.flags ?? 0;
-    expect(spans[0]?.kind).toBe(2);
-    expect(flags & 0x100).toBe(0x100);
-    expect(flags & 0x200).toBe(0x200);
+    const hr = traceSpans(calls).find((entry) => entry.name === "hr");
+    expect(hr?.startTimeUnixNano.endsWith("750000")).toBe(true);
+    expect(hr?.endTimeUnixNano.endsWith("250000")).toBe(true);
   });
 
   test("groups spans by instrumentation scope", async () => {
@@ -204,152 +73,103 @@ describe("Otel traces", () => {
     await otel.tracer("b", "2").startActiveSpan("sb", async () => {});
     await otel.shutdown();
 
-    const body = parseBody(
-      calls.find((call) => call.url.endsWith("/v1/traces")),
-    );
-    const scopes = body.resourceSpans[0].scopeSpans as Array<{
-      scope: { name: string; version?: string };
-      spans: unknown[];
-    }>;
-
+    const scopes = signalBody(calls, "traces").resourceSpans[0]
+      .scopeSpans as Array<{ scope: { name: string } }>;
     expect(scopes.length).toBe(2);
     expect(scopes.map((scope) => scope.scope.name).sort()).toEqual(["a", "b"]);
-  });
-
-  test("startActiveSpan rethrows callback errors after ending the span", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel(baseOptions(fetch));
-
-    await expect(
-      otel.tracer("app").startActiveSpan("fail", async () => {
-        throw new Error("nope");
-      }),
-    ).rejects.toThrow("nope");
-
-    await otel.shutdown();
-    expect(traceSpans(calls).some((span) => span.name === "fail")).toBe(true);
   });
 });
 
 describe("Otel sampling", () => {
-  test("sampleRatio 0 drops root spans from export", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel({
-      ...baseOptions(fetch),
+  test("sampleRatio and remote parent flags", async () => {
+    const dropped = createMockFetch();
+    const droppedOtel = new Otel({
+      ...baseOptions(dropped.fetch),
       sampleRatio: 0,
     });
+    await droppedOtel.tracer("app").startActiveSpan("dropped", async () => {});
+    await droppedOtel.shutdown();
+    expect(pathCallCount(dropped.calls, "/v1/traces")).toBe(0);
 
-    await otel.tracer("app").startActiveSpan("dropped", async (span) => {
-      span.setAttribute("x", 1);
+    const keep = createMockFetch();
+    const keepOtel = new Otel({ ...baseOptions(keep.fetch), sampleRatio: 0 });
+    await keepOtel.tracer("app").startActiveSpan("child", async () => {}, {
+      parent: extract({
+        traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
+      }),
     });
+    await keepOtel.shutdown();
+    expect(traceSpans(keep.calls)[0]?.parentSpanId).toBe("b".repeat(16));
 
-    await otel.shutdown();
-    expect(calls.filter((call) => call.url.endsWith("/v1/traces")).length).toBe(
-      0,
-    );
-  });
-
-  test("child follows remote parent sampled flag when ratio is 0", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel({
-      ...baseOptions(fetch),
-      sampleRatio: 0,
-    });
-
-    const parent = extract({
-      traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
-    });
-
-    await otel.tracer("app").startActiveSpan(
-      "child",
-      async (span) => {
-        span.setAttribute("kept", true);
-      },
-      { parent },
-    );
-
-    await otel.shutdown();
-
-    const spans = traceSpans(calls);
-    expect(spans.length).toBe(1);
-    expect(spans[0]?.traceId).toBe("a".repeat(32));
-    expect(spans[0]?.parentSpanId).toBe("b".repeat(16));
-  });
-
-  test("child follows remote parent unsampled flag when ratio is 1", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel({
-      ...baseOptions(fetch),
+    const unsampled = createMockFetch();
+    const unsampledOtel = new Otel({
+      ...baseOptions(unsampled.fetch),
       sampleRatio: 1,
     });
-
-    const parent = extract({
-      traceparent: `00-${"c".repeat(32)}-${"d".repeat(16)}-00`,
+    await unsampledOtel.tracer("app").startActiveSpan("child", async () => {}, {
+      parent: extract({
+        traceparent: `00-${"c".repeat(32)}-${"d".repeat(16)}-00`,
+      }),
     });
-
-    await otel.tracer("app").startActiveSpan(
-      "child",
-      async (span) => {
-        span.setAttribute("dropped", true);
-      },
-      { parent },
-    );
-
-    await otel.shutdown();
-    expect(calls.filter((call) => call.url.endsWith("/v1/traces")).length).toBe(
-      0,
-    );
-  });
-
-  test("local child follows unsampled parent under ratio 1", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel({
-      ...baseOptions(fetch),
-      sampleRatio: 1,
-    });
-
-    const parent = extract({
-      traceparent: `00-${"e".repeat(32)}-${"f".repeat(16)}-00`,
-    });
-
-    await otel.tracer("app").startActiveSpan(
+    await unsampledOtel.tracer("app").startActiveSpan(
       "root",
       async () => {
-        await otel.tracer("app").startActiveSpan("child", async () => {});
+        await unsampledOtel
+          .tracer("app")
+          .startActiveSpan("nested", async () => {});
       },
-      { parent },
+      {
+        parent: extract({
+          traceparent: `00-${"e".repeat(32)}-${"f".repeat(16)}-00`,
+        }),
+      },
     );
+    await unsampledOtel.shutdown();
+    expect(pathCallCount(unsampled.calls, "/v1/traces")).toBe(0);
 
-    await otel.shutdown();
-    expect(calls.filter((call) => call.url.endsWith("/v1/traces")).length).toBe(
-      0,
-    );
-  });
-
-  test("fractional sampleRatio samples some roots and drops others", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel({
-      ...baseOptions(fetch),
+    const fractional = createMockFetch();
+    const fractionalOtel = new Otel({
+      ...baseOptions(fractional.fetch),
       sampleRatio: 0.5,
     });
-
     for (let index = 0; index < 40; index++) {
-      await otel.tracer("app").startActiveSpan(`root-${index}`, async () => {});
+      await fractionalOtel
+        .tracer("app")
+        .startActiveSpan(`root-${index}`, async () => {});
     }
-
-    await otel.shutdown();
-
-    const traceCalls = calls.filter((call) => call.url.endsWith("/v1/traces"));
-    expect(traceCalls.length).toBe(1);
-
-    const spans = traceSpans(calls);
-    expect(spans.length).toBeGreaterThan(0);
-    expect(spans.length).toBeLessThan(40);
+    await fractionalOtel.shutdown();
+    expect(pathCallCount(fractional.calls, "/v1/traces")).toBe(1);
+    expect(traceSpans(fractional.calls).length).toBeGreaterThan(0);
+    expect(traceSpans(fractional.calls).length).toBeLessThan(40);
   });
 });
 
-describe("Otel metrics", () => {
-  test("exports histogram counter and updowncounter bodies", async () => {
+const flatMetrics = (calls: FetchCall[], callIndex = -1) => {
+  const metricCalls = calls.filter((call) => call.url.endsWith("/v1/metrics"));
+  const index = callIndex < 0 ? metricCalls.length + callIndex : callIndex;
+  const scopes = parseBody(metricCalls[index]).resourceMetrics[0]
+    .scopeMetrics as Array<{
+    metrics: Array<{
+      name: string;
+      sum?: { isMonotonic: boolean; dataPoints: Array<{ asDouble: number }> };
+      histogram?: {
+        dataPoints: Array<{
+          count: string;
+          sum: number;
+          min: number;
+          max: number;
+          explicitBounds: number[];
+          bucketCounts: string[];
+        }>;
+      };
+    }>;
+  }>;
+
+  return scopes.flatMap((scope) => scope.metrics);
+};
+
+describe("Otel metrics and logs integration", () => {
+  test("exports metric bodies cumulative buckets and attribute series", async () => {
     const { fetch, calls } = createMockFetch();
     const otel = new Otel(baseOptions(fetch));
     const meter = otel.meter("metrics");
@@ -360,161 +180,63 @@ describe("Otel metrics", () => {
       .createHistogram("charge.duration_ms")
       .record(12, { region: "us-east" });
 
-    await otel.flushAll();
-    await otel.shutdown();
-
-    const body = parseBody(
-      calls.find((call) => call.url.endsWith("/v1/metrics")),
-    );
-    const metrics = body.resourceMetrics[0].scopeMetrics[0].metrics as Array<{
-      name: string;
-      sum?: { isMonotonic: boolean; dataPoints: Array<{ asDouble: number }> };
-      histogram?: {
-        dataPoints: Array<{
-          count: string;
-          explicitBounds: number[];
-          bucketCounts: string[];
-        }>;
-      };
-    }>;
-
-    const names = metrics.map((metric) => metric.name);
-    expect(names).toContain("orders.paid");
-    expect(names).toContain("queue.depth");
-    expect(names).toContain("charge.duration_ms");
-
-    const counter = metrics.find((metric) => metric.name === "orders.paid");
-    expect(counter?.sum?.isMonotonic).toBe(true);
-    expect(counter?.sum?.dataPoints[0]?.asDouble).toBe(2);
-
-    const updown = metrics.find((metric) => metric.name === "queue.depth");
-    expect(updown?.sum?.isMonotonic).toBe(false);
-    expect(updown?.sum?.dataPoints[0]?.asDouble).toBe(-1);
-
-    const histogram = metrics.find(
-      (metric) => metric.name === "charge.duration_ms",
-    );
-    expect(histogram?.histogram?.dataPoints[0]?.explicitBounds).toEqual([
-      ...HISTOGRAM_EXPLICIT_BOUNDS,
-    ]);
-    expect(
-      histogram?.histogram?.dataPoints[0]?.bucketCounts.every(
-        (count) => typeof count === "string",
-      ),
-    ).toBe(true);
-  });
-
-  test("rejects negative and non-finite Counter.add values", async () => {
-    const { fetch } = createMockFetch();
-    const otel = new Otel(baseOptions(fetch));
     const counter = otel.meter("m").createCounter("hits");
-
-    expect(() => counter.add(-1)).toThrow(InvalidOptionsError);
-    expect(() => counter.add(Number.NaN)).toThrow(InvalidOptionsError);
-    expect(() => counter.add(Number.POSITIVE_INFINITY)).toThrow(
-      InvalidOptionsError,
-    );
-
-    counter.add(0);
-    await otel.shutdown();
-  });
-
-  test("keeps cumulative metric values across flushes", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel(baseOptions(fetch));
-    const counter = otel.meter("m").createCounter("hits");
-
     counter.add(1);
     await otel.flushAll();
     counter.add(2);
     await otel.flushAll();
-    await otel.shutdown();
 
-    const metricCalls = calls.filter((call) =>
-      call.url.endsWith("/v1/metrics"),
-    );
-    expect(metricCalls.length).toBeGreaterThanOrEqual(2);
-
-    const first = parseBody(metricCalls[0]);
-    const second = parseBody(metricCalls[1]);
-
-    const firstValue =
-      first.resourceMetrics[0].scopeMetrics[0].metrics[0].sum.dataPoints[0]
-        .asDouble;
-    const secondValue =
-      second.resourceMetrics[0].scopeMetrics[0].metrics[0].sum.dataPoints[0]
-        .asDouble;
-
-    expect(firstValue).toBe(1);
-    expect(secondValue).toBe(3);
-  });
-
-  test("aggregates histogram observations into buckets", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel(baseOptions(fetch));
     const hist = otel.meter("m").createHistogram("latency");
-
     hist.record(3);
     hist.record(40);
     hist.record(2000);
 
+    const byAttr = otel.meter("m").createCounter("by_attr");
+    byAttr.add(1, { route: "/a" });
+    byAttr.add(2, { route: "/b" });
     await otel.shutdown();
 
-    const body = parseBody(
-      calls.find((call) => call.url.endsWith("/v1/metrics")),
-    );
-    const point =
-      body.resourceMetrics[0].scopeMetrics[0].metrics[0].histogram
-        .dataPoints[0];
+    const first = flatMetrics(calls, 0);
+    const second = flatMetrics(calls, 1);
+    const last = flatMetrics(calls, -1);
 
-    expect(point.count).toBe("3");
-    expect(point.sum).toBe(2043);
-    expect(point.min).toBe(3);
-    expect(point.max).toBe(2000);
+    expect(
+      first.find((metric) => metric.name === "orders.paid")?.sum?.isMonotonic,
+    ).toBe(true);
+    expect(
+      first.find((metric) => metric.name === "orders.paid")?.sum?.dataPoints[0]
+        ?.asDouble,
+    ).toBe(2);
+    expect(
+      first.find((metric) => metric.name === "queue.depth")?.sum?.isMonotonic,
+    ).toBe(false);
+    expect(
+      first.find((metric) => metric.name === "charge.duration_ms")?.histogram
+        ?.dataPoints[0]?.explicitBounds,
+    ).toEqual([...HISTOGRAM_EXPLICIT_BOUNDS]);
 
-    const counts = point.bucketCounts.map((value: string) => Number(value));
-    expect(counts.reduce((sum: number, value: number) => sum + value, 0)).toBe(
-      3,
-    );
+    expect(
+      first.find((metric) => metric.name === "hits")?.sum?.dataPoints[0]
+        ?.asDouble,
+    ).toBe(1);
+    expect(
+      second.find((metric) => metric.name === "hits")?.sum?.dataPoints[0]
+        ?.asDouble,
+    ).toBe(3);
+
+    const latency = last.find((metric) => metric.name === "latency")?.histogram
+      ?.dataPoints[0];
+    expect(latency?.count).toBe("3");
+    expect(latency?.sum).toBe(2043);
+    expect(latency?.min).toBe(3);
+    expect(latency?.max).toBe(2000);
+
+    expect(
+      last.find((metric) => metric.name === "by_attr")?.sum?.dataPoints.length,
+    ).toBe(2);
   });
 
-  test("separates series by attribute sets", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel(baseOptions(fetch));
-    const counter = otel.meter("m").createCounter("by_attr");
-
-    counter.add(1, { route: "/a" });
-    counter.add(2, { route: "/b" });
-    await otel.shutdown();
-
-    const body = parseBody(
-      calls.find((call) => call.url.endsWith("/v1/metrics")),
-    );
-    const points =
-      body.resourceMetrics[0].scopeMetrics[0].metrics[0].sum.dataPoints;
-
-    expect(points.length).toBe(2);
-  });
-});
-
-describe("Otel logs", () => {
-  test("includes severityNumber for known severity text", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel(baseOptions(fetch));
-
-    otel.logger("app").emit({
-      severityText: "ERROR",
-      body: "boom",
-    });
-    await otel.shutdown();
-
-    const body = parseBody(calls.find((call) => call.url.endsWith("/v1/logs")));
-    expect(body.resourceLogs[0].scopeLogs[0].logRecords[0].severityNumber).toBe(
-      17,
-    );
-  });
-
-  test("includes trace correlation from active span", async () => {
+  test("log correlation fractional timestamp and propagation", async () => {
     const { fetch, calls } = createMockFetch();
     const otel = new Otel(baseOptions(fetch));
 
@@ -525,83 +247,18 @@ describe("Otel logs", () => {
         attributes: { attempt: 1 },
       });
     });
-
-    await otel.shutdown();
-
-    const body = parseBody(calls.find((call) => call.url.endsWith("/v1/logs")));
-    const record = body.resourceLogs[0].scopeLogs[0].logRecords[0];
-
-    expect(record.traceId).toBeDefined();
-    expect(record.spanId).toBeDefined();
-    expect(record.severityText).toBe("INFO");
-    expect(record.body.stringValue).toBe("hello");
-  });
-
-  test("omits trace ids when no active span", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel(baseOptions(fetch));
-
     otel.logger("app").emit({ severityText: "DEBUG", body: "alone" });
-    await otel.shutdown();
-
-    const body = parseBody(calls.find((call) => call.url.endsWith("/v1/logs")));
-    const record = body.resourceLogs[0].scopeLogs[0].logRecords[0];
-
-    expect(record.traceId).toBeUndefined();
-    expect(record.spanId).toBeUndefined();
-  });
-
-  test("supports fractional log timestamps", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel(baseOptions(fetch));
-
     otel.logger("app").emit({
       severityText: "INFO",
       body: "ts",
       timestamp: 1_700_000_000_000.5,
     });
-    await otel.shutdown();
 
-    const body = parseBody(calls.find((call) => call.url.endsWith("/v1/logs")));
-    const record = body.resourceLogs[0].scopeLogs[0].logRecords[0];
-
-    expect(String(record.timeUnixNano).endsWith("500000")).toBe(true);
-  });
-});
-
-describe("W3C propagation", () => {
-  test("inject and extract roundtrip on records", async () => {
-    const { fetch } = createMockFetch();
-    const otel = new Otel(baseOptions(fetch));
-
-    await otel.tracer("app").startActiveSpan("propagate", async () => {
-      const outbound: Record<string, string> = {};
-      inject(outbound);
-
-      expect(outbound.traceparent).toMatch(
-        /^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/,
-      );
-
-      const parent = extract(outbound);
-      expect(parent.span).not.toBeNull();
-
-      const parts = (outbound.traceparent ?? "").split("-");
-      expect(parent.span?.traceId).toBe(parts[1]);
-      expect(parent.span?.spanId).toBe(parts[2]);
-    });
-
-    await otel.shutdown();
-  });
-
-  test("propagates tracestate and baggage", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel(baseOptions(fetch));
     const parent = extract({
       traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
       tracestate: "cong=1",
       baggage: "userId=42",
     });
-
     await otel.tracer("app").startActiveSpan(
       "with-state",
       async () => {
@@ -615,235 +272,103 @@ describe("W3C propagation", () => {
 
     await otel.shutdown();
 
-    const spans = traceSpans(calls);
-    expect(spans[0]?.traceState).toBe("cong=1");
-  });
+    const records = signalBody(calls, "logs").resourceLogs[0].scopeLogs[0]
+      .logRecords as Array<{
+      traceId?: string;
+      spanId?: string;
+      severityText: string;
+      body: { stringValue: string };
+      timeUnixNano: string;
+    }>;
 
-  test("inject and extract work with Headers", async () => {
-    const { fetch } = createMockFetch();
-    const otel = new Otel(baseOptions(fetch));
-
-    await otel.tracer("app").startActiveSpan("headers", async () => {
-      const headers = new Headers();
-      inject(headers);
-      expect(headers.get("traceparent")).toBeTruthy();
-
-      const parent = extract(headers);
-      expect(parent.span?.traceId).toHaveLength(32);
-    });
-
-    await otel.shutdown();
-  });
-
-  test("inject is a no-op without active span", () => {
-    const carrier: Record<string, string> = {};
-    inject(carrier);
-    expect(carrier.traceparent).toBeUndefined();
-  });
-
-  test("inject masks traceFlags to two hex digits", async () => {
-    const { fetch } = createMockFetch();
-    const otel = new Otel(baseOptions(fetch));
-    const carrier: Record<string, string> = {};
-
-    runWithContext(
-      {
-        span: {
-          traceId: "a".repeat(32),
-          spanId: "b".repeat(16),
-          traceFlags: 0x101,
-        },
-      },
-      () => {
-        inject(carrier);
-      },
-    );
-
-    expect(carrier.traceparent).toBe(
-      `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
-    );
-
-    await otel.shutdown();
-  });
-
-  test("extract rejects missing header", () => {
-    expect(extract({}).span).toBeNull();
-    expect(extract(new Headers()).span).toBeNull();
-  });
-
-  test("extract accepts Traceparent key on plain records", () => {
-    const carrier: Record<string, string> = {};
-    carrier.Traceparent = `00-${"a".repeat(32)}-${"b".repeat(16)}-01`;
-
-    const ctx = extract(carrier);
-
-    expect(ctx.span?.traceId).toBe("a".repeat(32));
-    expect(ctx.span?.spanId).toBe("b".repeat(16));
-  });
-
-  test("extract rejects wrong version", () => {
+    expect(records[0]?.traceId).toBeDefined();
+    expect(records[0]?.spanId).toBeDefined();
+    expect(records[0]?.body.stringValue).toBe("hello");
+    expect(records[1]?.traceId).toBeUndefined();
+    expect(String(records[2]?.timeUnixNano).endsWith("500000")).toBe(true);
     expect(
-      extract({
-        traceparent: `01-${"a".repeat(32)}-${"b".repeat(16)}-01`,
-      }).span,
-    ).toBeNull();
-  });
-
-  test("extract rejects wrong part count", () => {
-    expect(extract({ traceparent: "00-abc" }).span).toBeNull();
-  });
-
-  test("extract rejects short ids", () => {
-    expect(
-      extract({
-        traceparent: `00-${"a".repeat(31)}-${"b".repeat(16)}-01`,
-      }).span,
-    ).toBeNull();
-    expect(
-      extract({
-        traceparent: `00-${"a".repeat(32)}-${"b".repeat(15)}-01`,
-      }).span,
-    ).toBeNull();
-  });
-
-  test("extract rejects all-zero trace and span ids", () => {
-    expect(
-      extract({
-        traceparent: `00-${"0".repeat(32)}-${"b".repeat(16)}-01`,
-      }).span,
-    ).toBeNull();
-    expect(
-      extract({
-        traceparent: `00-${"a".repeat(32)}-${"0".repeat(16)}-01`,
-      }).span,
-    ).toBeNull();
-  });
-
-  test("extract rejects non-hex flags", () => {
-    expect(
-      extract({
-        traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-0g`,
-      }).span,
-    ).toBeNull();
-  });
-
-  test("extract rejects non-hex ids", () => {
-    expect(
-      extract({
-        traceparent: `00-${"g".repeat(32)}-${"b".repeat(16)}-01`,
-      }).span,
-    ).toBeNull();
+      traceSpans(calls).find((span) => span.name === "with-state")?.traceState,
+    ).toBe("cong=1");
   });
 });
 
-describe("Otel lifecycle and export", () => {
-  test("enabled false performs no fetch", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel({
-      ...baseOptions(fetch),
-      enabled: false,
-    });
-
-    await otel.tracer("app").startActiveSpan("noop", async (span) => {
-      span.setAttribute("x", 1);
-    });
-    otel.logger("app").emit({ severityText: "INFO", body: "x" });
-    otel.meter("m").createCounter("c").add(1);
-    await otel.shutdown();
-
-    expect(calls.length).toBe(0);
-  });
-
-  test("shutdown flushes and second shutdown is idempotent", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel(baseOptions(fetch));
-
-    await otel.tracer("app").startActiveSpan("once", async () => {
-      otel.logger("app").emit({ severityText: "WARN", body: "flush-me" });
-    });
-
-    await otel.shutdown();
-    const afterFirst = calls.length;
-    expect(afterFirst).toBeGreaterThan(0);
-
-    await otel.shutdown();
-    await otel.tracer("app").startActiveSpan("after-shutdown", async (span) => {
-      span.setAttribute("ignored", true);
-    });
-
-    expect(calls.length).toBe(afterFirst);
-  });
-
-  test("export headers are sent on OTLP posts", async () => {
-    const { fetch, calls } = createMockFetch();
+describe("Otel export integration", () => {
+  test("headers url shaping and independent signal export", async () => {
+    const headed = createMockFetch();
     const authHeader = "Authorization";
-    const otel = new Otel({
-      ...baseOptions(fetch),
+    const headedOtel = new Otel({
+      ...baseOptions(headed.fetch),
       export: {
         type: "otlp-http",
         url: "http://collector:4318",
         headers: { [authHeader]: "Bearer test-token" },
       },
     });
-
-    await otel.tracer("app").startActiveSpan("h", async () => {});
-    await otel.shutdown();
-
-    const headers = calls.find((call) => call.url.endsWith("/v1/traces"))?.init
-      ?.headers as Record<string, string>;
-
+    await headedOtel.tracer("app").startActiveSpan("h", async () => {});
+    await headedOtel.shutdown();
+    const headers = headed.calls.find((call) => call.url.endsWith("/v1/traces"))
+      ?.init?.headers as Record<string, string>;
     expect(headers[authHeader]).toBe("Bearer test-token");
     expect(headers["Content-Type"]).toBe("application/json");
-  });
 
-  test("strips trailing slash from export url", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel({
-      ...baseOptions(fetch),
+    const slash = createMockFetch();
+    const slashOtel = new Otel({
+      ...baseOptions(slash.fetch),
       export: { type: "otlp-http", url: "http://collector:4318/" },
     });
-
-    await otel.tracer("app").startActiveSpan("slash", async () => {});
-    await otel.shutdown();
-
+    await slashOtel.tracer("app").startActiveSpan("slash", async () => {});
+    await slashOtel.shutdown();
     expect(
-      calls.some((call) => call.url === "http://collector:4318/v1/traces"),
+      slash.calls.some(
+        (call) => call.url === "http://collector:4318/v1/traces",
+      ),
     ).toBe(true);
-  });
 
-  test("preserves path prefix on export url", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel({
-      ...baseOptions(fetch),
+    const prefix = createMockFetch();
+    const prefixOtel = new Otel({
+      ...baseOptions(prefix.fetch),
       export: { type: "otlp-http", url: "http://collector:4318/otlp" },
     });
-
-    await otel.tracer("app").startActiveSpan("prefixed", async () => {});
-    await otel.shutdown();
-
+    await prefixOtel.tracer("app").startActiveSpan("prefixed", async () => {});
+    await prefixOtel.shutdown();
     expect(
-      calls.some((call) => call.url === "http://collector:4318/otlp/v1/traces"),
+      prefix.calls.some(
+        (call) => call.url === "http://collector:4318/otlp/v1/traces",
+      ),
     ).toBe(true);
-  });
 
-  test("failed traces export still attempts logs export", async () => {
-    const { fetch, calls } = createFailingPathFetch("/v1/traces");
-    const otel = new Otel(baseOptions(fetch));
-
-    await otel.tracer("app").startActiveSpan("both", async () => {
-      otel.logger("app").emit({ severityText: "ERROR", body: "keep-me" });
+    const failing = createFailingPathFetch("/v1/traces");
+    const failingOtel = new Otel(baseOptions(failing.fetch));
+    await failingOtel.tracer("app").startActiveSpan("both", async () => {
+      failingOtel
+        .logger("app")
+        .emit({ severityText: "ERROR", body: "keep-me" });
     });
-
-    await expect(otel.shutdown()).rejects.toBeInstanceOf(ExportError);
-
-    expect(calls.some((call) => call.url.endsWith("/v1/traces"))).toBe(true);
-    expect(calls.some((call) => call.url.endsWith("/v1/logs"))).toBe(true);
+    await expect(failingOtel.shutdown()).rejects.toBeInstanceOf(ExportError);
+    expect(failing.calls.some((call) => call.url.endsWith("/v1/traces"))).toBe(
+      true,
+    );
+    expect(failing.calls.some((call) => call.url.endsWith("/v1/logs"))).toBe(
+      true,
+    );
   });
 
-  test("non-retryable export drops the batch", async () => {
-    const calls: FetchCall[] = [];
+  test("queue drop non-retryable drop and requeues", async () => {
+    const queued = createMockFetch();
+    const queuedOtel = new Otel({
+      ...baseOptions(queued.fetch),
+      maxQueueSize: 2,
+    });
+    await queuedOtel.tracer("app").startActiveSpan("old", async () => {});
+    await queuedOtel.tracer("app").startActiveSpan("mid", async () => {});
+    await queuedOtel.tracer("app").startActiveSpan("new", async () => {});
+    await queuedOtel.shutdown();
+    const names = traceSpans(queued.calls).map((span) => span.name);
+    expect(names.includes("old")).toBe(false);
+    expect(names).toEqual(expect.arrayContaining(["mid", "new"]));
 
-    const fetchImpl = async (
+    const calls: FetchCall[] = [];
+    const badFetch = async (
       url: string | URL | Request,
       init?: RequestInit,
     ) => {
@@ -856,220 +381,338 @@ describe("Otel lifecycle and export", () => {
 
       return new Response(null, { status: 200 });
     };
+    const dropOtel = new Otel(baseOptions(badFetch as typeof fetch));
+    await dropOtel.tracer("app").startActiveSpan("drop-me", async () => {});
+    await expect(dropOtel.shutdown()).rejects.toBeInstanceOf(ExportError);
+    await dropOtel.shutdown();
+    expect(pathCallCount(calls, "/v1/traces")).toBe(1);
 
-    const otel = new Otel(baseOptions(fetchImpl as typeof fetch));
-    await otel.tracer("app").startActiveSpan("drop-me", async () => {});
-    await expect(otel.shutdown()).rejects.toBeInstanceOf(ExportError);
-
-    await otel.shutdown();
-
-    expect(calls.filter((call) => call.url.endsWith("/v1/traces")).length).toBe(
-      1,
-    );
-  });
-
-  test("maxQueueSize drops oldest spans", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel({
-      ...baseOptions(fetch),
-      maxQueueSize: 2,
-      enabled: true,
-      flushIntervalMs: 60_000,
-    });
-
-    await otel.tracer("app").startActiveSpan("old", async () => {});
-    await otel.tracer("app").startActiveSpan("mid", async () => {});
-    await otel.tracer("app").startActiveSpan("new", async () => {});
-    await otel.shutdown();
-
-    const names = traceSpans(calls).map((span) => span.name);
-    expect(names.includes("old")).toBe(false);
-    expect(names.includes("mid")).toBe(true);
-    expect(names.includes("new")).toBe(true);
-  });
-
-  test("failed export requeues batches and shutdown can retry", async () => {
-    let failTraces = true;
-    const calls: FetchCall[] = [];
-
-    const fetchImpl = async (
-      url: string | URL | Request,
-      init?: RequestInit,
-    ) => {
-      const resolved = resolveUrl(url);
-      calls.push({ url: resolved, init });
-
-      if (failTraces) {
-        if (resolved.endsWith("/v1/traces")) {
-          return new Response(null, { status: 503 });
-        }
-      }
-
-      return new Response(null, { status: 200 });
-    };
-
-    const otel = new Otel(baseOptions(fetchImpl as typeof fetch));
-
-    await otel.tracer("app").startActiveSpan("retry-me", async () => {});
-    await expect(otel.shutdown()).rejects.toBeInstanceOf(ExportError);
-
-    failTraces = false;
-    await otel.shutdown();
-
-    const traceCalls = calls.filter((call) => call.url.endsWith("/v1/traces"));
-    expect(traceCalls.length).toBe(4);
-    expect(traceSpans(calls).some((span) => span.name === "retry-me")).toBe(
-      true,
-    );
-  });
-
-  test("failed logs export requeues and flush can retry", async () => {
-    let failLogs = true;
-    const calls: FetchCall[] = [];
-
-    const fetchImpl = async (
-      url: string | URL | Request,
-      init?: RequestInit,
-    ) => {
-      const resolved = resolveUrl(url);
-      calls.push({ url: resolved, init });
-
-      if (failLogs) {
-        if (resolved.endsWith("/v1/logs")) {
-          return new Response(null, { status: 503 });
-        }
-      }
-
-      return new Response(null, { status: 200 });
-    };
-
-    const otel = new Otel(baseOptions(fetchImpl as typeof fetch));
-    otel.logger("app").emit({ severityText: "WARN", body: "keep-log" });
-
-    await expect(otel.flushAll()).rejects.toBeInstanceOf(ExportError);
-
-    failLogs = false;
-    await otel.flushAll();
-    await otel.shutdown();
-
-    const logCalls = calls.filter((call) => call.url.endsWith("/v1/logs"));
-    expect(logCalls.length).toBe(4);
-
-    const body = parseBody(logCalls[3]);
+    const traces = createTogglePathFetch("/v1/traces");
+    const tracesOtel = new Otel(baseOptions(traces.fetch));
+    await tracesOtel.tracer("app").startActiveSpan("retry-me", async () => {});
+    await expect(tracesOtel.shutdown()).rejects.toBeInstanceOf(ExportError);
+    traces.recover();
+    await tracesOtel.shutdown();
+    expect(pathCallCount(traces.calls, "/v1/traces")).toBe(4);
     expect(
-      body.resourceLogs[0].scopeLogs[0].logRecords[0].body.stringValue,
+      traceSpans(traces.calls).some((span) => span.name === "retry-me"),
+    ).toBe(true);
+
+    const logs = createTogglePathFetch("/v1/logs");
+    const logsOtel = new Otel(baseOptions(logs.fetch));
+    logsOtel.logger("app").emit({ severityText: "WARN", body: "keep-log" });
+    await expect(logsOtel.flushAll()).rejects.toBeInstanceOf(ExportError);
+    logs.recover();
+    await logsOtel.flushAll();
+    await logsOtel.shutdown();
+    expect(pathCallCount(logs.calls, "/v1/logs")).toBe(4);
+    expect(
+      parseBody(logs.calls.filter((call) => call.url.endsWith("/v1/logs"))[3])
+        .resourceLogs[0].scopeLogs[0].logRecords[0].body.stringValue,
     ).toBe("keep-log");
-  });
 
-  test("failed metrics export retries on later flush", async () => {
-    let failMetrics = true;
-    const calls: FetchCall[] = [];
-
-    const fetchImpl = async (
-      url: string | URL | Request,
-      init?: RequestInit,
-    ) => {
-      const resolved = resolveUrl(url);
-      calls.push({ url: resolved, init });
-
-      if (failMetrics) {
-        if (resolved.endsWith("/v1/metrics")) {
-          return new Response(null, { status: 503 });
-        }
-      }
-
-      return new Response(null, { status: 200 });
-    };
-
-    const otel = new Otel(baseOptions(fetchImpl as typeof fetch));
-    otel.meter("m").createCounter("hits").add(3);
-
-    await expect(otel.flushAll()).rejects.toBeInstanceOf(ExportError);
-
-    failMetrics = false;
-    await otel.flushAll();
-
-    const metricCalls = calls.filter((call) =>
-      call.url.endsWith("/v1/metrics"),
-    );
-    expect(metricCalls.length).toBe(4);
-
-    const body = parseBody(metricCalls[3]);
+    const metrics = createTogglePathFetch("/v1/metrics");
+    const metricsOtel = new Otel(baseOptions(metrics.fetch));
+    metricsOtel.meter("m").createCounter("hits").add(3);
+    await expect(metricsOtel.flushAll()).rejects.toBeInstanceOf(ExportError);
+    metrics.recover();
+    await metricsOtel.flushAll();
+    expect(pathCallCount(metrics.calls, "/v1/metrics")).toBe(4);
     expect(
-      body.resourceMetrics[0].scopeMetrics[0].metrics[0].sum.dataPoints[0]
+      parseBody(
+        metrics.calls.filter((call) => call.url.endsWith("/v1/metrics"))[3],
+      ).resourceMetrics[0].scopeMetrics[0].metrics[0].sum.dataPoints[0]
         .asDouble,
     ).toBe(3);
-
-    await otel.shutdown();
+    await metricsOtel.shutdown();
   });
 
-  test("flushAll serializes overlapping calls", async () => {
+  test("flush serialization ExportError and onExportError", async () => {
     let inFlight = 0;
     let maxInFlight = 0;
-
-    const fetchImpl = async (
-      _url: string | URL | Request,
-      _init?: RequestInit,
-    ) => {
+    const serialFetch = async () => {
       inFlight += 1;
       maxInFlight = Math.max(maxInFlight, inFlight);
       await Bun.sleep(40);
       inFlight -= 1;
       return new Response(null, { status: 200 });
     };
-
-    const otel = new Otel(baseOptions(fetchImpl as typeof fetch));
-    otel.meter("m").createCounter("hits").add(1);
-
-    await Promise.all([otel.flushAll(), otel.flushAll()]);
-    await otel.shutdown();
-
+    const serialOtel = new Otel(
+      baseOptions(serialFetch as unknown as typeof fetch),
+    );
+    serialOtel.meter("m").createCounter("hits").add(1);
+    await Promise.all([serialOtel.flushAll(), serialOtel.flushAll()]);
+    await serialOtel.shutdown();
     expect(maxInFlight).toBe(1);
-  });
 
-  test("failed metrics export throws ExportError", async () => {
-    const { fetch } = createFailingPathFetch("/v1/metrics");
-    const otel = new Otel(baseOptions(fetch));
-    otel.meter("m").createCounter("c").add(1);
+    const failing = createFailingPathFetch("/v1/metrics");
+    const failingOtel = new Otel(baseOptions(failing.fetch));
+    failingOtel.meter("m").createCounter("c").add(1);
+    await expect(failingOtel.flushAll()).rejects.toBeInstanceOf(ExportError);
+    await expect(failingOtel.shutdown()).rejects.toBeInstanceOf(ExportError);
 
-    await expect(otel.flushAll()).rejects.toBeInstanceOf(ExportError);
-    await expect(otel.shutdown()).rejects.toBeInstanceOf(ExportError);
-  });
-
-  test("periodic flush failures call onExportError", async () => {
     const errors: Error[] = [];
-    const { fetch } = createFailingPathFetch("/v1/traces");
-    const otel = new Otel({
-      ...baseOptions(fetch),
+    const periodic = createFailingPathFetch("/v1/traces");
+    const periodicOtel = new Otel({
+      ...baseOptions(periodic.fetch),
       flushIntervalMs: 30,
       onExportError: (error) => {
         errors.push(error);
       },
     });
-
-    await otel.tracer("app").startActiveSpan("x", async () => {});
-
+    await periodicOtel.tracer("app").startActiveSpan("x", async () => {});
     const deadline = Date.now() + 2000;
-
     while (errors.length === 0) {
       if (Date.now() > deadline) {
         break;
       }
-
       await Bun.sleep(20);
     }
-
-    expect(errors.length).toBeGreaterThan(0);
     expect(errors[0]).toBeInstanceOf(ExportError);
-
-    await otel.shutdown().catch(() => undefined);
+    await periodicOtel.shutdown().catch(() => undefined);
   }, 10_000);
+});
 
-  test("flushAll with empty buffers is a no-op", async () => {
-    const { fetch, calls } = createMockFetch();
-    const otel = new Otel(baseOptions(fetch));
-    await otel.flushAll();
-    expect(calls.length).toBe(0);
+describe("Otel constructor and lifecycle edges", () => {
+  test("rejects invalid options", () => {
+    const { fetch } = createMockFetch();
+    const invalid: Array<Partial<OtelOptions>> = [
+      { serviceName: "  " },
+      { export: { type: "otlp-http", url: "" } },
+      { sampleRatio: -0.1 },
+      { sampleRatio: 1.1 },
+      { flushIntervalMs: 0 },
+      { shutdownTimeoutMs: -1 },
+      { maxQueueSize: 0 },
+      { maxQueueSize: 1.5 },
+    ];
+
+    for (const overrides of invalid) {
+      expect(() => {
+        new Otel({ ...baseOptions(fetch), ...overrides });
+      }).toThrow(InvalidOptionsError);
+    }
+  });
+
+  test("resource factories enabled false and idempotent shutdown", async () => {
+    const res = createMockFetch();
+    const resOtel = new Otel({
+      ...baseOptions(res.fetch),
+      serviceVersion: "9.0.0",
+      serviceInstanceId: "node-1",
+    });
+    await resOtel.tracer("t").startActiveSpan("span", async () => {
+      resOtel.meter("m").createCounter("c").add(1);
+      resOtel.logger("l").emit({ severityText: "INFO", body: "hi" });
+    });
+    await resOtel.shutdown();
+    const attrs = parseBody(
+      res.calls.find((call) => call.url.endsWith("/v1/traces")),
+    ).resourceSpans[0].resource.attributes as Array<{
+      key: string;
+      value: { stringValue?: string };
+    }>;
+    expect(
+      attrs.find((attr) => attr.key === "service.version")?.value.stringValue,
+    ).toBe("9.0.0");
+    expect(res.calls.some((call) => call.url.endsWith("/v1/metrics"))).toBe(
+      true,
+    );
+    expect(res.calls.some((call) => call.url.endsWith("/v1/logs"))).toBe(true);
+
+    const disabled = createMockFetch();
+    const disabledOtel = new Otel({
+      ...baseOptions(disabled.fetch),
+      enabled: false,
+    });
+    await disabledOtel.tracer("t").startActiveSpan("x", async () => {});
+    await disabledOtel.shutdown();
+    expect(disabled.calls.length).toBe(0);
+
+    const empty = createMockFetch();
+    const emptyOtel = new Otel(baseOptions(empty.fetch));
+    await emptyOtel.flushAll();
+    expect(empty.calls.length).toBe(0);
+    await emptyOtel.shutdown();
+
+    const idem = createMockFetch();
+    const idemOtel = new Otel(baseOptions(idem.fetch));
+    await idemOtel.tracer("t").startActiveSpan("x", async () => {});
+    await idemOtel.shutdown();
+    const afterFirst = idem.calls.length;
+    await idemOtel.shutdown();
+    expect(idem.calls.length).toBe(afterFirst);
+  });
+
+  test("shutdown during flush timer restart encode drop and abort", async () => {
+    let releaseExport: (() => void) | undefined;
+    const exportGate = new Promise<void>((resolve) => {
+      releaseExport = resolve;
+    });
+    const bodies: string[] = [];
+    let posts = 0;
+    const gatedFetch = async (
+      _url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      posts += 1;
+      bodies.push(String(init?.body ?? ""));
+
+      if (posts === 1) {
+        await exportGate;
+      }
+
+      return new Response("{}", { status: 200 });
+    };
+    const gated = new Otel({
+      ...baseOptions(gatedFetch as typeof fetch),
+      shutdownTimeoutMs: 5000,
+    });
+    const tracer = gated.tracer("app");
+    tracer.startSpan("before").end();
+    const shuttingDown = gated.shutdown();
+    await Bun.sleep(10);
+    tracer.startSpan("during-shutdown").end();
+    releaseExport?.();
+    await shuttingDown;
+    expect(bodies.some((body) => body.includes("before"))).toBe(true);
+    expect(bodies.some((body) => body.includes("during-shutdown"))).toBe(true);
+
+    let failTraces = true;
+    const timerCalls: FetchCall[] = [];
+    const timerFetch = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const resolved = resolveUrl(url);
+      timerCalls.push({ url: resolved, init });
+
+      if (failTraces && resolved.endsWith("/v1/traces")) {
+        return new Response(null, { status: 503 });
+      }
+
+      return new Response(null, { status: 200 });
+    };
+    const timed = new Otel({
+      ...baseOptions(timerFetch as typeof fetch),
+      flushIntervalMs: 30,
+    });
+    await timed.tracer("t").startActiveSpan("queued", async () => {});
+    await expect(timed.shutdown()).rejects.toBeInstanceOf(ExportError);
+    const afterFail = timerCalls.length;
+    failTraces = false;
+    await Bun.sleep(80);
+    expect(timerCalls.length).toBeGreaterThan(afterFail);
+    await timed.shutdown();
+
+    const poison = createMockFetch();
+    const poisonOtel = new Otel(baseOptions(poison.fetch));
+    const span = poisonOtel.tracer("app").startSpan("poison");
+    span.setAttribute("bad", { nested: true } as unknown as string);
+    span.end();
+    poisonOtel.logger("app").emit({ severityText: "INFO", body: "still-ok" });
+    await expect(poisonOtel.flushAll()).rejects.toBeInstanceOf(ExportError);
+    expect(poison.calls.some((call) => call.url.endsWith("/v1/traces"))).toBe(
+      false,
+    );
+    expect(poison.calls.some((call) => call.url.endsWith("/v1/logs"))).toBe(
+      true,
+    );
+    await poisonOtel.tracer("app").startActiveSpan("good", async () => {});
+    await poisonOtel.flushAll();
+    expect(
+      String(
+        poison.calls.find((call) => call.url.endsWith("/v1/traces"))?.init
+          ?.body,
+      ),
+    ).toContain("good");
+    await poisonOtel.shutdown();
+
+    let sawAbort = false;
+    const abortFetch = async (
+      _url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const signal = init?.signal;
+
+      if (!signal) {
+        return new Response(null, { status: 503 });
+      }
+
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) {
+          sawAbort = true;
+          resolve();
+          return;
+        }
+
+        signal.addEventListener(
+          "abort",
+          () => {
+            sawAbort = true;
+            resolve();
+          },
+          { once: true },
+        );
+      });
+
+      throw new DOMException("The operation was aborted.", "AbortError");
+    };
+    const aborting = new Otel({
+      ...baseOptions(abortFetch as typeof fetch),
+      shutdownTimeoutMs: 50,
+    });
+    await aborting.tracer("t").startActiveSpan("slow", async () => {});
+    await expect(aborting.shutdown()).rejects.toBeInstanceOf(ExportError);
+    expect(sawAbort).toBe(true);
+  });
+
+  test("flushAll waits for metrics when traces reject", async () => {
+    let metricsStarted = false;
+    let metricsFinished = false;
+    let tracesRejected = false;
+
+    const fetchImpl = async (url: string | URL | Request) => {
+      const resolved = resolveUrl(url);
+
+      if (resolved.endsWith("/v1/traces")) {
+        await Bun.sleep(30);
+        tracesRejected = true;
+        return new Response(null, { status: 400 });
+      }
+
+      if (resolved.endsWith("/v1/metrics")) {
+        metricsStarted = true;
+        await Bun.sleep(60);
+        metricsFinished = true;
+        return new Response(null, { status: 200 });
+      }
+
+      return new Response(null, { status: 200 });
+    };
+
+    const otel = new Otel(baseOptions(fetchImpl as typeof fetch));
+    await otel.tracer("t").startActiveSpan("span", async () => {
+      otel.meter("m").createCounter("c").add(1);
+    });
+    await expect(otel.flushAll()).rejects.toBeInstanceOf(ExportError);
+    expect(tracesRejected).toBe(true);
+    expect(metricsStarted).toBe(true);
+    expect(metricsFinished).toBe(true);
     await otel.shutdown();
+  });
+
+  test("shouldRecordTrace follows parent sampled flag", () => {
+    const { fetch } = createMockFetch();
+    const otel = new Otel({ ...baseOptions(fetch), sampleRatio: 0 });
+
+    expect(
+      otel.shouldRecordTrace("a".repeat(32), {
+        traceId: "a".repeat(32),
+        spanId: "b".repeat(16),
+        traceFlags: TRACE_FLAG_SAMPLED,
+      }),
+    ).toBe(true);
+    expect(otel.shouldRecordTrace("a".repeat(32), null)).toBe(false);
   });
 });

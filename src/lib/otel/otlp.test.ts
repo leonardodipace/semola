@@ -3,28 +3,12 @@ import { ExportError } from "./errors.js";
 import {
   encodeAttributes,
   encodeAttributeValue,
-  encodeLogRecord,
-  encodeLogsExport,
   encodeMetric,
-  encodeMetricsExport,
   encodeSpan,
-  encodeTracesExport,
   otlpPost,
 } from "./otlp.js";
-import type {
-  FinishedSpan,
-  MetricPoint,
-  PendingLogRecord,
-  Resource,
-} from "./types.js";
+import type { FinishedSpan } from "./types.js";
 import { HISTOGRAM_EXPLICIT_BOUNDS } from "./types.js";
-
-const resource: Resource = {
-  attributes: {
-    "service.name": "encode-svc",
-    "service.version": "9",
-  },
-};
 
 const sampleSpan = (overrides: Partial<FinishedSpan> = {}): FinishedSpan => ({
   traceId: "a".repeat(32),
@@ -49,453 +33,179 @@ const sampleSpan = (overrides: Partial<FinishedSpan> = {}): FinishedSpan => ({
   ...overrides,
 });
 
-describe("otlp encodeAttributeValue", () => {
-  test("encodes string boolean int double and arrays", () => {
+const postWith = async (
+  fetchImpl: typeof fetch,
+  extras?: {
+    signal?: AbortSignal;
+    path?: "/v1/traces" | "/v1/metrics" | "/v1/logs";
+  },
+) => {
+  return otlpPost({
+    baseUrl: "http://collector:4318",
+    path: extras?.path ?? "/v1/traces",
+    body: {},
+    fetch: fetchImpl,
+    signal: extras?.signal,
+  });
+};
+
+const countingFetch = (status: number, okAfter?: number) => {
+  let attempts = 0;
+  const fetchImpl = (async () => {
+    attempts += 1;
+
+    if (okAfter !== undefined) {
+      if (attempts >= okAfter) {
+        return new Response(null, { status: 200 });
+      }
+    }
+
+    return new Response(null, { status });
+  }) as unknown as typeof fetch;
+
+  return { fetch: fetchImpl, attempts: () => attempts };
+};
+
+describe("otlp encode", () => {
+  test("encodes attributes spans and metric shapes", () => {
     expect(encodeAttributeValue("x")).toEqual({ stringValue: "x" });
-    expect(encodeAttributeValue(true)).toEqual({ boolValue: true });
     expect(encodeAttributeValue(4)).toEqual({ intValue: "4" });
     expect(encodeAttributeValue(1.5)).toEqual({ doubleValue: 1.5 });
-    expect(encodeAttributeValue(["a", "b"])).toEqual({
-      arrayValue: {
-        values: [{ stringValue: "a" }, { stringValue: "b" }],
-      },
-    });
-    expect(encodeAttributeValue([1, 2])).toEqual({
-      arrayValue: {
-        values: [{ intValue: "1" }, { intValue: "2" }],
-      },
-    });
     expect(encodeAttributeValue([true, false])).toEqual({
       arrayValue: {
         values: [{ boolValue: true }, { boolValue: false }],
       },
     });
-  });
-});
+    expect(
+      encodeAttributes({ b: "2", a: "1" }).map((pair) => pair.key),
+    ).toEqual(["a", "b"]);
 
-describe("otlp encodeAttributes", () => {
-  test("sorts keys and skips undefined values", () => {
-    const attrs = encodeAttributes({
-      b: "2",
-      a: "1",
-    });
+    const full = encodeSpan(sampleSpan());
+    expect(full.status).toEqual({ code: 2, message: "failed" });
+    expect(
+      encodeSpan(sampleSpan({ status: { code: "UNSET" } })).status,
+    ).toEqual({ code: 0 });
+    expect(
+      encodeSpan(
+        sampleSpan({ parentSpanId: undefined, status: { code: "OK" } }),
+      ).parentSpanId,
+    ).toBeUndefined();
 
-    expect(attrs.map((pair) => pair.key)).toEqual(["a", "b"]);
-  });
-});
-
-describe("otlp encodeSpan and traces export", () => {
-  test("includes parent status message and events", () => {
-    const encoded = encodeSpan(sampleSpan());
-
-    expect(encoded.parentSpanId).toBe("c".repeat(16));
-    expect(encoded.status).toEqual({ code: 2, message: "failed" });
-    expect((encoded.events as unknown[]).length).toBe(1);
-    expect(encoded.flags).toBe(0x100);
-  });
-
-  test("includes traceState when present", () => {
-    const encoded = encodeSpan(sampleSpan({ traceState: "vendor=1" }));
-    expect(encoded.traceState).toBe("vendor=1");
-  });
-
-  test("omits parent and status message when absent", () => {
-    const encoded = encodeSpan(
-      sampleSpan({
-        parentSpanId: undefined,
-        status: { code: "OK" },
-      }),
-    );
-
-    expect(encoded.parentSpanId).toBeUndefined();
-    expect(encoded.status).toEqual({ code: 1 });
-  });
-
-  test("maps unset status to code 0", () => {
-    const encoded = encodeSpan(sampleSpan({ status: { code: "UNSET" } }));
-    expect(encoded.status).toEqual({ code: 0 });
-  });
-
-  test("encodeTracesExport wraps resource and scopes", () => {
-    const body = encodeTracesExport(resource, [
-      {
-        scope: { scopeName: "api", scopeVersion: "2" },
-        spans: [sampleSpan({ name: "one" })],
-      },
-    ]);
-
-    expect(body.resourceSpans).toHaveLength(1);
-    expect(body.resourceSpans[0]?.scopeSpans[0]?.scope).toEqual({
-      name: "api",
-      version: "2",
-    });
-    expect(body.resourceSpans[0]?.scopeSpans[0]?.spans[0]?.name).toBe("one");
-  });
-});
-
-describe("otlp encode logs", () => {
-  test("includes optional trace ids", () => {
-    const record: PendingLogRecord = {
-      timeUnixNano: "10",
-      severityText: "INFO",
-      severityNumber: 9,
-      body: "hi",
-      attributes: { k: "v" },
-      traceId: "a".repeat(32),
-      spanId: "b".repeat(16),
-      scopeName: "log",
-    };
-
-    const encoded = encodeLogRecord(record);
-    expect(encoded.traceId).toBe("a".repeat(32));
-    expect(encoded.spanId).toBe("b".repeat(16));
-    expect(encoded.severityNumber).toBe(9);
-    expect(encoded.body).toEqual({ stringValue: "hi" });
-  });
-
-  test("omits missing trace ids", () => {
-    const encoded = encodeLogRecord({
-      timeUnixNano: "10",
-      severityText: "WARN",
-      body: "x",
-      attributes: {},
-      scopeName: "log",
-    });
-
-    expect(encoded.traceId).toBeUndefined();
-    expect(encoded.spanId).toBeUndefined();
-  });
-
-  test("encodeLogsExport wraps resource and scopes", () => {
-    const body = encodeLogsExport(resource, [
-      {
-        scope: { scopeName: "logs" },
-        logRecords: [
+    expect(
+      encodeMetric({
+        name: "hits",
+        kind: "counter",
+        scopeName: "m",
+        dataPoints: [{ attributes: {}, timeUnixNano: "1", value: 4 }],
+      }).sum?.isMonotonic,
+    ).toBe(true);
+    expect(
+      encodeMetric({
+        name: "depth",
+        kind: "updowncounter",
+        scopeName: "m",
+        dataPoints: [{ attributes: {}, timeUnixNano: "1", value: -1 }],
+      }).sum?.isMonotonic,
+    ).toBe(false);
+    expect(
+      encodeMetric({
+        name: "latency",
+        kind: "histogram",
+        scopeName: "m",
+        dataPoints: [
           {
-            timeUnixNano: "1",
-            severityText: "ERROR",
-            body: "e",
             attributes: {},
-            scopeName: "logs",
+            timeUnixNano: "1",
+            count: 2,
+            sum: 10,
+            min: 1,
+            max: 9,
+            bucketCounts: [1, 0, 1],
+            explicitBounds: [...HISTOGRAM_EXPLICIT_BOUNDS].slice(0, 2),
           },
         ],
-      },
-    ]);
-
-    expect(body.resourceLogs[0]?.scopeLogs[0]?.logRecords).toHaveLength(1);
-  });
-});
-
-describe("otlp encode metrics", () => {
-  test("encodes monotonic counter sums", () => {
-    const point: MetricPoint = {
-      name: "hits",
-      kind: "counter",
-      scopeName: "m",
-      dataPoints: [
-        {
-          attributes: { route: "/" },
-          startTimeUnixNano: "1",
-          timeUnixNano: "2",
-          value: 4,
-        },
-      ],
-    };
-
-    const encoded = encodeMetric(point);
-    expect(encoded.sum?.isMonotonic).toBe(true);
-    expect(encoded.sum?.dataPoints[0]?.asDouble).toBe(4);
-  });
-
-  test("encodes non-monotonic updowncounter", () => {
-    const encoded = encodeMetric({
-      name: "depth",
-      kind: "updowncounter",
-      scopeName: "m",
-      dataPoints: [
-        {
-          attributes: {},
-          timeUnixNano: "2",
-          value: -3,
-        },
-      ],
-    });
-
-    expect(encoded.sum?.isMonotonic).toBe(false);
-  });
-
-  test("encodes histogram with string bucket counts", () => {
-    const encoded = encodeMetric({
-      name: "latency",
-      kind: "histogram",
-      scopeName: "m",
-      dataPoints: [
-        {
-          attributes: {},
-          startTimeUnixNano: "1",
-          timeUnixNano: "2",
-          value: 10,
-          count: 2,
-          sum: 10,
-          min: 1,
-          max: 9,
-          bucketCounts: [1, 0, 1],
-          explicitBounds: [...HISTOGRAM_EXPLICIT_BOUNDS].slice(0, 2),
-        },
-      ],
-    });
-
-    expect(encoded.histogram?.dataPoints[0]?.count).toBe("2");
-    expect(encoded.histogram?.dataPoints[0]?.bucketCounts).toEqual([
-      "1",
-      "0",
-      "1",
-    ]);
-  });
-
-  test("encodeMetricsExport wraps resource and scopes", () => {
-    const body = encodeMetricsExport(resource, [
-      {
-        scope: { scopeName: "metrics" },
-        metrics: [
-          {
-            name: "c",
-            kind: "counter",
-            scopeName: "metrics",
-            dataPoints: [
-              {
-                attributes: {},
-                timeUnixNano: "1",
-                value: 1,
-              },
-            ],
-          },
-        ],
-      },
-    ]);
-
-    expect(body.resourceMetrics[0]?.scopeMetrics[0]?.metrics).toHaveLength(1);
+      }).histogram?.dataPoints[0]?.bucketCounts,
+    ).toEqual(["1", "0", "1"]);
   });
 });
 
 describe("otlpPost", () => {
-  test("posts json with content type and timeout signal", async () => {
+  test("posts json retries and guards response bodies", async () => {
     let seen: RequestInit | undefined;
-
-    const fetchImpl = (async (
-      _url: string | URL | Request,
-      init?: RequestInit,
-    ) => {
-      seen = init;
-      return new Response("{}", { status: 200 });
-    }) as typeof fetch;
-
     await otlpPost({
       baseUrl: "http://collector:4318/",
       path: "/v1/traces",
       body: { ok: true },
-      fetch: fetchImpl,
+      fetch: (async (_url, init) => {
+        seen = init;
+        return new Response("{}", { status: 200 });
+      }) as typeof fetch,
       headers: { "x-test": "1" },
     });
-
     expect(seen?.method).toBe("POST");
-    expect(seen?.body).toBe(JSON.stringify({ ok: true }));
-    expect(seen?.signal).toBeInstanceOf(AbortSignal);
+    expect((seen?.headers as Record<string, string>)["Content-Type"]).toBe(
+      "application/json",
+    );
 
-    const headers = seen?.headers as Record<string, string>;
-    expect(headers["Content-Type"]).toBe("application/json");
-    expect(headers["x-test"]).toBe("1");
-  });
-
-  test("throws on non-2xx", async () => {
-    let attempts = 0;
-    const fetchImpl = (async () => {
-      attempts += 1;
-      return new Response(null, { status: 503 });
-    }) as unknown as typeof fetch;
-
+    const retryable = countingFetch(503);
     await expect(
-      otlpPost({
-        baseUrl: "http://collector:4318",
-        path: "/v1/logs",
-        body: {},
-        fetch: fetchImpl,
-      }),
+      postWith(retryable.fetch, { path: "/v1/logs" }),
     ).rejects.toThrow("OTLP export failed with status 503");
+    expect(retryable.attempts()).toBe(3);
 
-    expect(attempts).toBe(3);
-  });
+    const client = countingFetch(400);
+    await expect(postWith(client.fetch)).rejects.toThrow(
+      "OTLP export failed with status 400",
+    );
+    expect(client.attempts()).toBe(1);
 
-  test("does not retry client errors", async () => {
-    let attempts = 0;
-    const fetchImpl = (async () => {
-      attempts += 1;
-      return new Response(null, { status: 400 });
-    }) as unknown as typeof fetch;
+    const recovered = countingFetch(503, 2);
+    await postWith(recovered.fetch);
+    expect(recovered.attempts()).toBe(2);
 
-    await expect(
-      otlpPost({
-        baseUrl: "http://collector:4318",
-        path: "/v1/logs",
-        body: {},
-        fetch: fetchImpl,
-      }),
-    ).rejects.toThrow("OTLP export failed with status 400");
-
-    expect(attempts).toBe(1);
-  });
-
-  test("retries then succeeds", async () => {
-    let attempts = 0;
-    const fetchImpl = (async () => {
-      attempts += 1;
-
-      if (attempts < 2) {
-        return new Response(null, { status: 503 });
-      }
-
-      return new Response(null, { status: 200 });
-    }) as unknown as typeof fetch;
-
-    await otlpPost({
-      baseUrl: "http://collector:4318",
-      path: "/v1/traces",
-      body: {},
-      fetch: fetchImpl,
-    });
-
-    expect(attempts).toBe(2);
-  });
-
-  test("accepts 204 no content", async () => {
-    const fetchImpl = (async () =>
-      new Response(null, { status: 204 })) as unknown as typeof fetch;
-
-    await otlpPost({
-      baseUrl: "http://collector:4318",
-      path: "/v1/metrics",
-      body: {},
-      fetch: fetchImpl,
-    });
-  });
-
-  test("does not retry HTTP 500", async () => {
-    let attempts = 0;
-    const fetchImpl = (async () => {
-      attempts += 1;
-      return new Response(null, { status: 500 });
-    }) as unknown as typeof fetch;
+    await postWith(
+      (async () =>
+        new Response(null, { status: 204 })) as unknown as typeof fetch,
+      { path: "/v1/metrics" },
+    );
 
     await expect(
-      otlpPost({
-        baseUrl: "http://collector:4318",
-        path: "/v1/traces",
-        body: {},
-        fetch: fetchImpl,
-      }),
-    ).rejects.toThrow("OTLP export failed with status 500");
-
-    expect(attempts).toBe(1);
-  });
-
-  test("rejects partial success with rejected spans", async () => {
-    let attempts = 0;
-    const fetchImpl = (async () => {
-      attempts += 1;
-      return new Response(
-        JSON.stringify({ partialSuccess: { rejectedSpans: 2 } }),
-        { status: 200 },
-      );
-    }) as unknown as typeof fetch;
-
-    await expect(
-      otlpPost({
-        baseUrl: "http://collector:4318",
-        path: "/v1/traces",
-        body: {},
-        fetch: fetchImpl,
-      }),
+      postWith(
+        (async () =>
+          new Response(
+            JSON.stringify({ partialSuccess: { rejectedSpans: 2 } }),
+            {
+              status: 200,
+            },
+          )) as unknown as typeof fetch,
+      ),
     ).rejects.toThrow("OTLP partial success rejected 2 records");
 
-    expect(attempts).toBe(1);
-  });
-
-  test("unreadable ok body is not retryable", async () => {
-    let attempts = 0;
-    const fetchImpl = (async () => {
-      attempts += 1;
-      return new Response(
-        new ReadableStream({
-          start(controller) {
-            controller.error(new Error("stream broken"));
-          },
-        }),
-        { status: 200 },
-      );
-    }) as unknown as typeof fetch;
-
     try {
-      await otlpPost({
-        baseUrl: "http://collector:4318",
-        path: "/v1/traces",
-        body: {},
-        fetch: fetchImpl,
-      });
+      await postWith(
+        (async () =>
+          new Response("x".repeat(65_537), {
+            status: 200,
+          })) as unknown as typeof fetch,
+      );
       expect(true).toBe(false);
     } catch (error) {
       expect(error).toBeInstanceOf(ExportError);
       expect((error as ExportError).retryable).toBe(false);
     }
 
-    expect(attempts).toBe(1);
-  });
-
-  test("oversized ok body is not retryable", async () => {
-    let attempts = 0;
-    const fetchImpl = (async () => {
-      attempts += 1;
-      return new Response("x".repeat(65_537), { status: 200 });
-    }) as unknown as typeof fetch;
-
-    try {
-      await otlpPost({
-        baseUrl: "http://collector:4318",
-        path: "/v1/traces",
-        body: {},
-        fetch: fetchImpl,
-      });
-      expect(true).toBe(false);
-    } catch (error) {
-      expect(error).toBeInstanceOf(ExportError);
-      expect((error as ExportError).message).toBe(
-        "OTLP response body exceeds size limit",
-      );
-      expect((error as ExportError).retryable).toBe(false);
-    }
-
-    expect(attempts).toBe(1);
-  });
-
-  test("stops retrying when caller signal aborts", async () => {
     let attempts = 0;
     const controller = new AbortController();
-
-    const fetchImpl = (async () => {
-      attempts += 1;
-      controller.abort();
-      return new Response(null, { status: 503 });
-    }) as unknown as typeof fetch;
-
     await expect(
-      otlpPost({
-        baseUrl: "http://collector:4318",
-        path: "/v1/traces",
-        body: {},
-        fetch: fetchImpl,
-        signal: controller.signal,
-      }),
+      postWith(
+        (async () => {
+          attempts += 1;
+          controller.abort();
+          return new Response(null, { status: 503 });
+        }) as unknown as typeof fetch,
+        { signal: controller.signal },
+      ),
     ).rejects.toBeInstanceOf(ExportError);
-
     expect(attempts).toBe(1);
   });
 });

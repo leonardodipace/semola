@@ -191,16 +191,6 @@ export type OtlpSpanStatus = {
   message?: string;
 };
 
-export type OtlpKeyValue = {
-  key: string;
-  value: OtlpAnyValue;
-};
-
-export type OtlpInstrumentationScope = {
-  name: string;
-  version?: string;
-};
-
 export type OtlpAnyValue = {
   stringValue?: string;
   intValue?: string;
@@ -214,11 +204,8 @@ export const HISTOGRAM_EXPLICIT_BOUNDS: readonly number[] = [
 ];
 
 export const DEFAULT_FLUSH_INTERVAL_MS = 5000;
-
 export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
-
 export const DEFAULT_MAX_QUEUE_SIZE = 2048;
-
 export const TRACE_FLAG_SAMPLED = 0x01;
 
 export type SumMetricBucket = {
