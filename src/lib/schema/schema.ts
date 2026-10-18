@@ -233,16 +233,6 @@ export abstract class Schema<Output = unknown>
       },
     );
   }
-
-  /** Emit inlined JS for object codegen, or null if not supported. */
-  public toInline(
-    _expr: string,
-    _pathPrefix: PropertyKey[],
-    _binds: unknown[],
-    _dynamicIndex?: string,
-  ): string | null {
-    return null;
-  }
 }
 
 class LeafSchema<Output> extends Schema<Output> {
@@ -294,7 +284,7 @@ export class StringSchema extends Schema<string> {
     });
   }
 
-  public override toInline(
+  public toInline(
     expr: string,
     pathPrefix: PropertyKey[],
     binds: unknown[],
@@ -457,7 +447,7 @@ export class NumberSchema extends Schema<number> {
     );
   }
 
-  public override toInline(
+  public toInline(
     expr: string,
     pathPrefix: PropertyKey[],
     _binds: unknown[],
@@ -530,7 +520,7 @@ export class BooleanSchema extends Schema<boolean> {
     );
   }
 
-  public override toInline(
+  public toInline(
     expr: string,
     pathPrefix: PropertyKey[],
     _binds: unknown[],
@@ -558,7 +548,6 @@ export class BigintSchema extends Schema<bigint> {
           throw new UnsupportedJsonSchemaConversionError("bigint");
         }
 
-        // ponytail: JSON Schema has no bigint; document as integer for output
         return { type: "integer" };
       },
     );
@@ -653,7 +642,7 @@ export class EnumSchema<T extends string> extends Schema<T> {
 export class OptionalSchema<Output> extends Schema<Output | undefined> {
   public readonly schemaType = "optional";
 
-  public constructor(public readonly inner: Schema<Output>) {
+  public constructor(public readonly inner: SchemaBase<Output>) {
     super(
       (value, path, issues) => {
         if (value === undefined) {
@@ -668,13 +657,13 @@ export class OptionalSchema<Output> extends Schema<Output | undefined> {
     );
   }
 
-  public override toInline(
+  public toInline(
     expr: string,
     pathPrefix: PropertyKey[],
     binds: unknown[],
     dynamicIndex?: string,
   ) {
-    const inner = this.inner.toInline(expr, pathPrefix, binds, dynamicIndex);
+    const inner = this.inner.toInline?.(expr, pathPrefix, binds, dynamicIndex);
 
     if (!inner) {
       return null;
@@ -687,7 +676,7 @@ export class OptionalSchema<Output> extends Schema<Output | undefined> {
 export class NullableSchema<Output> extends Schema<Output | null> {
   public readonly schemaType = "nullable";
 
-  public constructor(public readonly inner: Schema<Output>) {
+  public constructor(public readonly inner: SchemaBase<Output>) {
     super(
       (value, path, issues) => {
         if (value === null) {
@@ -708,7 +697,7 @@ export class NullableSchema<Output> extends Schema<Output | null> {
 export class NullishSchema<Output> extends Schema<Output | null | undefined> {
   public readonly schemaType = "nullish";
 
-  public constructor(public readonly inner: Schema<Output>) {
+  public constructor(public readonly inner: SchemaBase<Output>) {
     super(
       (value, path, issues) => {
         if (value === null) {
@@ -735,10 +724,10 @@ export class ArraySchema<Output> extends Schema<Output[]> {
 
   private readonly bounds: ReadonlyArray<ArrayBound>;
   private readonly jsonExtras: JsonSchema;
-  private readonly element: Schema<Output>;
+  private readonly element: SchemaBase<Output>;
 
   public constructor(
-    element: Schema<Output>,
+    element: SchemaBase<Output>,
     bounds: ReadonlyArray<ArrayBound> = [],
     jsonExtras: JsonSchema = {},
   ) {
@@ -808,7 +797,7 @@ export class ArraySchema<Output> extends Schema<Output[]> {
     });
   }
 
-  public override toInline(
+  public toInline(
     expr: string,
     pathPrefix: PropertyKey[],
     binds: unknown[],
@@ -818,7 +807,7 @@ export class ArraySchema<Output> extends Schema<Output[]> {
       return null;
     }
 
-    const elementInline = this.element.toInline(
+    const elementInline = this.element.toInline?.(
       "__el",
       pathPrefix,
       binds,
@@ -930,7 +919,10 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
           propertySchema.schemaType === "optional" ||
           propertySchema.schemaType === "nullish",
         toInline: (expr, pathPrefix, binds, dynamicIndex) => {
-          return propertySchema.toInline(expr, pathPrefix, binds, dynamicIndex);
+          return (
+            propertySchema.toInline?.(expr, pathPrefix, binds, dynamicIndex) ??
+            null
+          );
         },
       });
     }
@@ -1056,7 +1048,7 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
     }
   }
 
-  public override toInline(
+  public toInline(
     expr: string,
     pathPrefix: PropertyKey[],
     binds: unknown[],
@@ -1090,7 +1082,7 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
       const optional =
         propertySchema.schemaType === "optional" ||
         propertySchema.schemaType === "nullish";
-      const inline = propertySchema.toInline(access, childPrefix, binds);
+      const inline = propertySchema.toInline?.(access, childPrefix, binds);
 
       parts.push(`if(!Object.hasOwn(${expr},${keyLiteral})){`);
 
@@ -1276,7 +1268,7 @@ export const enumValues = <const T extends readonly [string, ...string[]]>(
   return new EnumSchema(values);
 };
 
-export const array = <Output>(element: Schema<Output>) => {
+export const array = <Output>(element: SchemaBase<Output>) => {
   return new ArraySchema(element);
 };
 
@@ -1300,16 +1292,16 @@ export const union = <
   return new UnionSchema(options);
 };
 
-export const optional = <Output>(schema: Schema<Output>) => {
-  return schema.optional();
+export const optional = <Output>(schema: SchemaBase<Output>) => {
+  return new OptionalSchema(schema);
 };
 
-export const nullable = <Output>(schema: Schema<Output>) => {
-  return schema.nullable();
+export const nullable = <Output>(schema: SchemaBase<Output>) => {
+  return new NullableSchema(schema);
 };
 
-export const nullish = <Output>(schema: Schema<Output>) => {
-  return schema.nullish();
+export const nullish = <Output>(schema: SchemaBase<Output>) => {
+  return new NullishSchema(schema);
 };
 
 export const any = () => {

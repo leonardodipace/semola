@@ -44,20 +44,16 @@ export interface SchemaBase<out Output = unknown> {
   parse(data: unknown): Output;
   safeParse(data: unknown): SafeParseResult<Output>;
   toJsonSchema(target?: StandardJSONSchemaV1.Target): JsonSchema;
+  /** Object codegen helper. Missing means the field cannot be inlined. */
+  toInline?(
+    expr: string,
+    pathPrefix: PropertyKey[],
+    binds: unknown[],
+    dynamicIndex?: string,
+  ): string | null;
 }
 
-/** Object fields are Schema instances; `toInline` feeds object codegen. */
-export type ObjectShape = Record<
-  string,
-  SchemaBase & {
-    toInline(
-      expr: string,
-      pathPrefix: PropertyKey[],
-      binds: unknown[],
-      dynamicIndex?: string,
-    ): string | null;
-  }
->;
+export type ObjectShape = Record<string, SchemaBase>;
 
 export type InferOutput<T> = T extends SchemaBase<infer O> ? O : never;
 
