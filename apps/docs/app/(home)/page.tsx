@@ -124,7 +124,7 @@ export default function HomePage() {
           />
 
           <h1 className="home-fade-up-delay-1 mb-5 max-w-3xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl lg:text-6xl">
-            Semola: type-safe building blocks for real backends.
+            Type-safe building blocks for real backends.
           </h1>
 
           <p className="home-fade-up-delay-2 mb-10 max-w-lg text-base text-fd-muted-foreground sm:text-lg">
