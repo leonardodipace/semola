@@ -187,6 +187,26 @@ api.defineSSERoute({
 
 String `data` is sent raw; other values are JSON-encoded. Omit `data` and set `comment` to write SSE comment lines (for example heartbeats): `{ comment: "keep-alive" }` becomes `: keep-alive\n\n`.
 
+`c.signal` aborts when the client disconnects (or when `c.raw.signal` aborts). `gen.return()` on cancel does not wake a suspended `await`, so race long waits against `c.signal` and return early - otherwise `finally` and subscription cleanup stay pending until that await settles.
+
+```typescript
+api.defineSSERoute({
+  path: "/live",
+  handler: async function* (c) {
+    try {
+      yield { event: "ready", data: "1" };
+
+      while (!c.signal.aborted) {
+        const event = await nextAppEvent({ signal: c.signal });
+        yield { data: event };
+      }
+    } finally {
+      // runs promptly when the client disconnects, if waits honor c.signal
+    }
+  },
+});
+```
+
 ## OpenAPI
 
 Route metadata (`summary`, `description`, `operationId`, `tags`) and schemas feed the spec:
