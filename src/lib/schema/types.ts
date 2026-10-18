@@ -44,33 +44,39 @@ export interface SchemaBase<out Output = unknown> {
   parse(data: unknown): Output;
   safeParse(data: unknown): SafeParseResult<Output>;
   toJsonSchema(target?: StandardJSONSchemaV1.Target): JsonSchema;
-  toInline(
-    expr: string,
-    pathPrefix: PropertyKey[],
-    binds: unknown[],
-    dynamicIndex?: string,
-  ): string | null;
 }
 
-export type ObjectShape = Record<string, SchemaBase>;
-
-export type SchemaLike = SchemaBase;
+/** Object fields are Schema instances; `toInline` feeds object codegen. */
+export type ObjectShape = Record<
+  string,
+  SchemaBase & {
+    toInline(
+      expr: string,
+      pathPrefix: PropertyKey[],
+      binds: unknown[],
+      dynamicIndex?: string,
+    ): string | null;
+  }
+>;
 
 export type InferOutput<T> = T extends SchemaBase<infer O> ? O : never;
 
 export type InferInput<T> = InferOutput<T>;
 
+type OptionalObjectKey<T> = T extends {
+  readonly schemaType: "optional" | "nullish";
+}
+  ? true
+  : false;
+
 export type InferObjectOutput<Shape extends ObjectShape> = {
-  [K in keyof Shape as Shape[K] extends { readonly schemaType: "optional" }
+  [K in keyof Shape as OptionalObjectKey<Shape[K]> extends true
     ? never
     : K]: InferOutput<Shape[K]>;
 } & {
-  [K in keyof Shape as Shape[K] extends { readonly schemaType: "optional" }
+  [K in keyof Shape as OptionalObjectKey<Shape[K]> extends true
     ? K
     : never]?: InferOutput<Shape[K]>;
 };
-
-export type InferObjectInput<Shape extends ObjectShape> =
-  InferObjectOutput<Shape>;
 
 export type LiteralValue = string | number | boolean | bigint | null;

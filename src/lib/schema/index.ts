@@ -51,7 +51,6 @@ export {
 } from "./schema.js";
 export type {
   InferInput,
-  InferObjectInput,
   InferObjectOutput,
   InferOutput,
   Issue,
@@ -63,7 +62,6 @@ export type {
   SafeParseResult,
   SafeParseSuccess,
   SchemaBase,
-  SchemaLike,
   StandardJSONSchemaV1,
   StandardSchemaV1,
   StandardTypedV1,

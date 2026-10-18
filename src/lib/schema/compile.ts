@@ -27,7 +27,7 @@ const IDENT_KEY_PATTERN = /^[A-Za-z_$][\w$]*$/;
 /** Space and ASCII control characters (rejected in emails). */
 const ASCII_SPACE_CODE = 32;
 
-export const isUuid = (value: string) => {
+const isUuid = (value: string) => {
   return UUID_PATTERN.test(value);
 };
 
@@ -53,7 +53,7 @@ export type ObjectField = {
   ) => string | null;
 };
 
-export const isEmail = (value: string) => {
+const isEmail = (value: string) => {
   const at = value.indexOf("@");
 
   if (at <= 0) {

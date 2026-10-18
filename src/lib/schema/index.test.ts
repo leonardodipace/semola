@@ -92,6 +92,7 @@ describe("semola/schema", () => {
     expect(nullable(string()).parse("x")).toBe("x");
     expect(nullish(string()).parse(undefined)).toBe(undefined);
     expect(nullish(string()).parse(null)).toBe(null);
+    expect(object({ note: nullish(string()) }).parse({})).toEqual({});
   });
 
   test("supports enums and refine", () => {

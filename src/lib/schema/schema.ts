@@ -263,7 +263,7 @@ export class StringSchema extends Schema<string> {
   private readonly rules: ReadonlyArray<StringRule>;
   private readonly jsonExtras: JsonSchema;
 
-  private constructor(
+  public constructor(
     rules: ReadonlyArray<StringRule> = [],
     jsonExtras: JsonSchema = {},
   ) {
@@ -284,10 +284,6 @@ export class StringSchema extends Schema<string> {
 
     this.rules = rules;
     this.jsonExtras = jsonExtras;
-  }
-
-  public static create() {
-    return new StringSchema();
   }
 
   private withRule(rule: StringRule, extras: JsonSchema) {
@@ -400,7 +396,7 @@ export class NumberSchema extends Schema<number> {
   private readonly integerOnly: boolean;
   private readonly integerMessage: string;
 
-  private constructor(
+  public constructor(
     rules: ReadonlyArray<NumberRule> = [],
     jsonExtras: JsonSchema = {},
     integerOnly = false,
@@ -436,10 +432,6 @@ export class NumberSchema extends Schema<number> {
     this.jsonExtras = jsonExtras;
     this.integerOnly = integerOnly;
     this.integerMessage = integerMessage;
-  }
-
-  public static create() {
-    return new NumberSchema();
   }
 
   private withRule(rule: NumberRule, extras: JsonSchema) {
@@ -719,7 +711,7 @@ export class ArraySchema<Output> extends Schema<Output[]> {
   private readonly jsonExtras: JsonSchema;
   private readonly element: Schema<Output>;
 
-  private constructor(
+  public constructor(
     element: Schema<Output>,
     bounds: ReadonlyArray<ArrayBound> = [],
     jsonExtras: JsonSchema = {},
@@ -781,10 +773,6 @@ export class ArraySchema<Output> extends Schema<Output[]> {
     this.element = element;
     this.bounds = bounds;
     this.jsonExtras = jsonExtras;
-  }
-
-  public static create<Output>(element: Schema<Output>) {
-    return new ArraySchema(element);
   }
 
   private withBound(bound: ArrayBound, extras: JsonSchema) {
@@ -1228,9 +1216,9 @@ export class UnionSchema<T extends readonly SchemaBase[]> extends Schema<
   }
 }
 
-export const string = () => StringSchema.create();
+export const string = () => new StringSchema();
 
-export const number = () => NumberSchema.create();
+export const number = () => new NumberSchema();
 
 export const int = (message?: string) => number().int(message);
 
@@ -1257,7 +1245,7 @@ export const enumValues = <const T extends readonly [string, ...string[]]>(
 };
 
 export const array = <Output>(element: Schema<Output>) => {
-  return ArraySchema.create(element);
+  return new ArraySchema(element);
 };
 
 export const object = <Shape extends ObjectShape>(shape: Shape) => {
