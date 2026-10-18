@@ -1,19 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { DialectSpec } from "./types.js";
-
-export const SQLITE_SPEC: DialectSpec = {
-  name: "sqlite",
-  formatPlaceholder: () => "?",
-  unlimitedOffsetKeyword: "LIMIT -1 OFFSET",
-  jsonObjectFunctionName: "json_object",
-  jsonArrayAggregateFunctionName: "json_group_array",
-  emptyJsonArrayLiteral: "'[]'",
-  formatDistinct: (quotedColumns) => ({
-    selectPrefix: "",
-    groupBy: quotedColumns.join(", "),
-    requiresOrderByPrefix: false,
-  }),
-};
+import type { DialectSpec, DialectTransactionFn } from "./types.js";
 
 const sqliteForeignKeysOn = new WeakMap<Bun.SQL, Promise<unknown>>();
 
@@ -28,13 +14,12 @@ export const enableSqliteForeignKeys = (sql: Bun.SQL) => {
   return next;
 };
 
-// ponytail: one writer per SQLite connection; queue begins instead of failing
 const sqliteBeginTail = new WeakMap<Bun.SQL, Promise<unknown>>();
 const sqliteBeginContext = new AsyncLocalStorage<Set<Bun.SQL>>();
 
 export const beginSqlite = <TResult>(
   sql: Bun.SQL,
-  run: (tx: Bun.TransactionSQL) => Promise<TResult>,
+  run: DialectTransactionFn<TResult>,
 ) => {
   if (sqliteBeginContext.getStore()?.has(sql)) {
     return sql.begin(run);
@@ -61,4 +46,24 @@ export const beginSqlite = <TResult>(
   );
 
   return next;
+};
+
+export const SQLITE_SPEC: DialectSpec = {
+  name: "sqlite",
+  formatPlaceholder: () => "?",
+  unlimitedOffsetKeyword: "LIMIT -1 OFFSET",
+  jsonObjectFunctionName: "json_object",
+  jsonArrayAggregateFunctionName: "json_group_array",
+  emptyJsonArrayLiteral: "'[]'",
+  formatDistinct: (quotedColumns) => ({
+    selectPrefix: "",
+    groupBy: quotedColumns.join(", "),
+    requiresOrderByPrefix: false,
+  }),
+  prepareConnection: enableSqliteForeignKeys,
+  begin: async (sql, run) => {
+    await enableSqliteForeignKeys(sql);
+
+    return beginSqlite(sql, run);
+  },
 };

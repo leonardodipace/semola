@@ -1,5 +1,5 @@
 import { mightThrowSync } from "../../errors/index.js";
-import { beginSqlite, enableSqliteForeignKeys } from "../dialect/sqlite.js";
+import { getDialectSpec } from "../dialect/index.js";
 import type { Table } from "../table/types.js";
 import { pickGlobalHooks } from "./hook-runner.js";
 import { TableClientImpl } from "./table-client.js";
@@ -141,13 +141,7 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
         return await callback(txClient);
       };
 
-      if (this.options.adapter === "sqlite") {
-        await enableSqliteForeignKeys(this.$raw);
-
-        return await beginSqlite(this.$raw, run);
-      }
-
-      return await this.$raw.begin(run);
+      return await getDialectSpec(this.options.adapter).begin(this.$raw, run);
     };
   }
 

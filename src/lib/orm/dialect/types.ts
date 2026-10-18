@@ -34,6 +34,15 @@ export type DistinctClause = {
   requiresOrderByPrefix: boolean;
 };
 
+export type DialectTransactionFn<TResult> = (
+  tx: Bun.TransactionSQL,
+) => Promise<TResult>;
+
+export type DialectBegin = <TResult>(
+  sql: Bun.SQL,
+  run: DialectTransactionFn<TResult>,
+) => Promise<TResult>;
+
 export type DialectSpec = {
   name: Adapter;
   // SQLite: ignores index, returns `?`. Postgres: returns `$${index}`.
@@ -52,6 +61,8 @@ export type DialectSpec = {
   emptyJsonArrayLiteral: string;
   // Postgres: DISTINCT ON (columns). SQLite: GROUP BY columns.
   formatDistinct: (quotedColumns: string[]) => DistinctClause;
+  prepareConnection?: (sql: Bun.SQL) => Promise<unknown>;
+  begin: DialectBegin;
 };
 
 export type SqlFragment = {

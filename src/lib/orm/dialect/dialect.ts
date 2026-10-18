@@ -17,7 +17,6 @@ import { foreignKeyResolver } from "./foreign-key.js";
 import { DialectQueryBuilder } from "./query-builder.js";
 import { RowParser } from "./row-parser.js";
 import { columnKey, primaryKeyOf } from "./sql-helpers.js";
-import { beginSqlite, enableSqliteForeignKeys } from "./sqlite.js";
 import type {
   CreateDialectInput,
   HasManyWriteInput,
@@ -200,13 +199,7 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
       return (sql as Bun.TransactionSQL).savepoint(run);
     }
 
-    if (this.name === "sqlite") {
-      await enableSqliteForeignKeys(sql);
-
-      return beginSqlite(sql, run);
-    }
-
-    return sql.begin(run);
+    return this.builder.spec.begin(sql, run);
   }
 
   private async applyHasOneWrite(
@@ -285,9 +278,7 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
   }
 
   private async executeQuery(sql: Bun.SQL, query: ReturningQuery) {
-    if (this.name === "sqlite") {
-      await enableSqliteForeignKeys(sql);
-    }
+    await this.builder.spec.prepareConnection?.(sql);
 
     return this.parser.executeQuery(sql, this.builder.table, query);
   }
