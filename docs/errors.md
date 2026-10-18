@@ -30,10 +30,12 @@ After the guard, `user` is narrowed. No optional chaining gymnastics.
 
 ## The pattern
 
-Every result is a two-element tuple:
+`ok` and `err` always use a two-element tuple:
 
 - Success: `[null, data]`
 - Failure: `[{ type, message }, null]`
+
+`mightThrow` and `mightThrowSync` use the same tuple shape, but the error slot is whatever was thrown or rejected (typed as `Error` by default), not `{ type, message }`.
 
 ## Wrap things that throw
 

@@ -120,8 +120,8 @@ await queue.enqueue({ to: "user@example.com", subject: "Hello" });
 import { PubSub } from "semola/pubsub";
 
 const pubsub = new PubSub({
-  subscriber: redisClient,
-  publisher: redisClient,
+  subscriber: redisSubscriber,
+  publisher: redisPublisher,
   channel: "notifications",
 });
 
@@ -277,22 +277,23 @@ async function sendFriendRequest(req: FriendRequest) {
   await sender(req);
 }
 
-const callable = createRetry(
-  async () => {
+const callable = createRetry({
+  input: async () => {
     await sendFriendRequest({ from: "user1@gmail.com", to: "user2@gmail.com" });
   },
-  {
-    maxRetries: 3,
-    onFailedAttempt: () => {
-      console.log(`Resending the request`);
-    },
-    onError: ({ error }) => {
-      console.error(error.message);
-    },
+  maxRetries: 3,
+  onFailedAttempt: () => {
+    console.log(`Resending the request`);
   },
-);
+  onError: ({ error }) => {
+    console.error(error.message);
+  },
+});
 
-await callable();
+const outcome = await callable();
+if (outcome.ok) {
+  console.log("sent");
+}
 ```
 
 ---
@@ -371,7 +372,7 @@ Run the docs site locally: `bun run docs:dev` (Fumadocs at http://localhost:3000
 - [Otel](./docs/otel.md) - Zero-dependency OTLP/HTTP JSON traces, metrics, and logs
 - [Prompts](./docs/prompts.md) - Interactive CLI prompts
 - [CLI](./docs/cli.md) - Non-interactive CLI builder
-- [ORM](./docs/orm.md) - Type-safe data layer with SQLite support
+- [ORM](./docs/orm.md) - Type-safe data layer with SQLite and Postgres
 - [Extra](./docs/extra.md) - A collection of tiny utilities
 
 ---
