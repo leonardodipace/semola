@@ -16,6 +16,7 @@
     "policy",
     "i18n",
     "---Utilities---",
+    "schema",
     "errors",
     "logging",
     "otel",
