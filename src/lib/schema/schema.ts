@@ -1229,6 +1229,8 @@ export const string = () => StringSchema.create();
 
 export const number = () => NumberSchema.create();
 
+export const int = () => number().int();
+
 export const boolean = () => new BooleanSchema();
 
 export const bigint = () => new BigintSchema();
@@ -1352,6 +1354,33 @@ export const parse = <Output>(schema: Schema<Output>, data: unknown) => {
 
 export const safeParse = <Output>(schema: Schema<Output>, data: unknown) => {
   return schema.safeParse(data);
+};
+
+/** Namespace of the same helpers. Prefer named imports when you want tree-shaking. */
+export const s = {
+  string,
+  number,
+  int,
+  boolean,
+  bigint,
+  date,
+  literal,
+  enum: enumValues,
+  array,
+  object,
+  record,
+  tuple,
+  union,
+  optional,
+  nullable,
+  nullish,
+  any,
+  unknown,
+  never,
+  null: nullType,
+  undefined: undefinedType,
+  parse,
+  safeParse,
 };
 
 export type { Path };

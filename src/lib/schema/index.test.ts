@@ -19,6 +19,7 @@ import {
   parse,
   record,
   SchemaError,
+  s,
   safeParse,
   string,
   tuple,
@@ -260,6 +261,20 @@ describe("semola/schema", () => {
 
     expect(schema.parse({ s: "a" })).toEqual({ s: "a" });
     expect(() => schema.parse({ s: "b" })).toThrow(SchemaError);
+  });
+
+  test("s namespace matches named helpers", () => {
+    const schema = s.object({
+      name: s.string(),
+      age: s.int().optional(),
+    });
+
+    expect(schema.parse({ name: "Ada" })).toEqual({ name: "Ada" });
+    expect(schema.parse({ name: "Ada", age: 36 })).toEqual({
+      name: "Ada",
+      age: 36,
+    });
+    expect(() => schema.parse({ name: "Ada", age: 1.5 })).toThrow(SchemaError);
   });
 
   test("success results are not overwritten by later validates", () => {

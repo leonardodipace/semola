@@ -7,10 +7,13 @@ Type-safe schemas for runtime validation. Compatible with [Standard Schema](http
 
 ## Import
 
+Named helpers tree-shake cleanly. `s` is the same API as one object (handy; less tree-shake friendly if you only need a few builders).
+
 ```typescript
 import {
   string,
   number,
+  int,
   boolean,
   object,
   array,
@@ -18,6 +21,9 @@ import {
   parse,
   safeParse,
 } from "semola/schema";
+
+// or
+import { s } from "semola/schema";
 ```
 
 ## Quick start
@@ -25,12 +31,12 @@ import {
 Define a shape, then `parse` (throws `SchemaError`) or `safeParse` (result object).
 
 ```typescript
-import { object, string, number, optional } from "semola/schema";
+import { s } from "semola/schema";
 
-const User = object({
-  email: string().email(),
-  age: number().int().min(0),
-  nickname: optional(string().min(1)),
+const User = s.object({
+  email: s.string().email(),
+  age: s.int().min(0),
+  nickname: s.string().min(1).optional(),
 });
 
 const user = User.parse({
