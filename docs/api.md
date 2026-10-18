@@ -180,11 +180,12 @@ api.defineSSERoute({
   handler: async function* (c) {
     yield { data: "hello" };
     yield { event: "ping", data: "1" };
+    yield { comment: "keep-alive" };
   },
 });
 ```
 
-String `data` is sent raw; other values are JSON-encoded.
+String `data` is sent raw; other values are JSON-encoded. Omit `data` and set `comment` to write SSE comment lines (for example heartbeats): `{ comment: "keep-alive" }` becomes `: keep-alive\n\n`.
 
 ## OpenAPI
 

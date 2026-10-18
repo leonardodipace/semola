@@ -1037,6 +1037,25 @@ describe("Api SSE", () => {
     );
   });
 
+  test("should write SSE comment lines for heartbeats", async () => {
+    const api = new Api();
+
+    api.defineSSERoute({
+      path: "/empty",
+      handler: async function* () {
+        yield { comment: "keep-alive" };
+        yield { comment: "line-a\nline-b", data: "ok" };
+      },
+    });
+
+    const res = await api.fetch(new Request("http://localhost/empty"));
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe(
+      ": keep-alive\n\n: line-a\n: line-b\ndata: ok\n\n",
+    );
+  });
+
   test("should validate request schema on SSE routes", async () => {
     const api = new Api();
 
