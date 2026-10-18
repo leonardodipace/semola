@@ -62,7 +62,9 @@ const toSSEResponse = (
   handler: SSERouteHandler,
   c: Pick<Context, "raw" | "req" | "get">,
 ) => {
-  const gen = handler(c as SSEContext);
+  const disconnect = new AbortController();
+  const signal = AbortSignal.any([c.raw.signal, disconnect.signal]);
+  const gen = handler({ ...c, signal } as SSEContext);
   const encoder = new TextEncoder();
 
   return new Response(
@@ -78,6 +80,7 @@ const toSSEResponse = (
         controller.enqueue(encoder.encode(formatSSEEvent(value)));
       },
       cancel() {
+        disconnect.abort();
         void gen.return(undefined);
       },
     }),

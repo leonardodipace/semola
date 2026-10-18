@@ -1155,4 +1155,53 @@ describe("Api SSE", () => {
 
     expect(cleanedUp).toBe(true);
   });
+
+  test("should abort c.signal on disconnect so handlers can clean up while awaiting", async () => {
+    const log: string[] = [];
+    const api = new Api();
+
+    api.defineSSERoute({
+      path: "/events",
+      handler: async function* (c) {
+        c.signal.addEventListener("abort", () => log.push("signal aborted"));
+
+        try {
+          yield { event: "ready", data: "1" };
+          await new Promise<void>((_resolve, reject) => {
+            if (c.signal.aborted) {
+              reject(c.signal.reason);
+              return;
+            }
+
+            c.signal.addEventListener("abort", () => reject(c.signal.reason), {
+              once: true,
+            });
+          });
+          yield { data: "never" };
+        } catch {
+          // client disconnect
+        } finally {
+          log.push("generator finally ran");
+        }
+      },
+    });
+
+    api.serve(0, (s) => {
+      server = s;
+    });
+
+    const ctrl = new AbortController();
+    const res = await fetch(`http://localhost:${server?.port}/events`, {
+      signal: ctrl.signal,
+    });
+    const reader = res.body?.getReader();
+
+    expect(reader).toBeDefined();
+    await reader?.read();
+    ctrl.abort();
+
+    await Bun.sleep(50);
+
+    expect(log).toEqual(["signal aborted", "generator finally ran"]);
+  });
 });

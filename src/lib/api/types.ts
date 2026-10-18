@@ -283,6 +283,7 @@ export type SSEContext<
     params: InferOutput<TReq["params"]>;
   };
   get: <K extends keyof TExt>(key: K) => TExt[K];
+  signal: AbortSignal;
 };
 
 export type SSERouteHandler<
