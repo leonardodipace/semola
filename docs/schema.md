@@ -158,10 +158,17 @@ number().refine((value) => value % 2 === 0, "Expected even");
 ## Infer types
 
 ```typescript
+import { s } from "semola/schema";
 import type { InferOutput, InferInput } from "semola/schema";
 
-type User = InferOutput<typeof User>;
-type UserInput = InferInput<typeof User>;
+const User = s.object({
+  email: s.email(),
+  id: s.uuid(),
+  age: s.int().min(0),
+});
+
+type UserOut = InferOutput<typeof User>;
+type UserIn = InferInput<typeof User>;
 ```
 
 ## Performance

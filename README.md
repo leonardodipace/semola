@@ -93,6 +93,8 @@ console.log("Success:", data);
 `mightThrow` and `mightThrowSync` default their error type to `Error`. If a promise or function can reject or throw non-Error values, pass a custom error generic.
 
 ```typescript
+import { mightThrow } from "semola/errors";
+
 const [customError] = await mightThrow<never, { code: string }>(
   Promise.reject({ code: "RATE_LIMITED" }),
 );
@@ -277,22 +279,23 @@ async function sendFriendRequest(req: FriendRequest) {
   await sender(req);
 }
 
-const callable = createRetry(
-  async () => {
+const callable = createRetry({
+  input: async () => {
     await sendFriendRequest({ from: "user1@gmail.com", to: "user2@gmail.com" });
   },
-  {
-    maxRetries: 3,
-    onFailedAttempt: () => {
-      console.log(`Resending the request`);
-    },
-    onError: ({ error }) => {
-      console.error(error.message);
-    },
+  maxRetries: 3,
+  onFailedAttempt: () => {
+    console.log(`Resending the request`);
   },
-);
+  onError: ({ error }) => {
+    console.error(error.message);
+  },
+});
 
-await callable();
+const outcome = await callable();
+if (outcome.ok) {
+  console.log("sent");
+}
 ```
 
 ---

@@ -192,6 +192,7 @@
     "docs:dev": "bun run --filter @semola/docs dev",
     "docs:build": "bun run --filter @semola/docs build",
     "docs:start": "bun run --filter @semola/docs start",
+    "docs:check": "bun scripts/check-docs-examples.ts",
     "prepublishOnly": "bun run build"
   },
   "keywords": [

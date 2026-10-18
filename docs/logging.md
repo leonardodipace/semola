@@ -116,11 +116,11 @@ Extending `AbstractLogger` lets a specialized logger define its own severity beh
 
 ```typescript
 class SilentLogger extends AbstractLogger {
-  public debug() {}
-  public info() {}
-  public warning() {}
-  public error() {}
-  public critical() {}
+  public debug(_msg: LogMessageType) {}
+  public info(_msg: LogMessageType) {}
+  public warning(_msg: LogMessageType) {}
+  public error(_msg: LogMessageType) {}
+  public critical(_msg: LogMessageType) {}
 }
 
 const log = new SilentLogger("app", [new ConsoleProvider()]);

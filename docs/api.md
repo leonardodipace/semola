@@ -220,7 +220,7 @@ const auth = new Middleware({
       return c.json(401, { error: "Unauthorized" });
     }
 
-    return { userId: parseToken(token) };
+    return { userId: parseToken(token).sub };
   },
 });
 

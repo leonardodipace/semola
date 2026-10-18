@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "ESNext",
+    "strict": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["bun"],
+    "paths": {
+      "semola": ["./dist/index.d.mts"],
+      "semola/*": ["./dist/lib/*/index.d.mts"]
+    }
+  },
+  "include": [".cache/docs-check/**/*.ts"]
+}

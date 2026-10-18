@@ -128,7 +128,9 @@ if (outcome.ok) {
 type Report = { name: string; completed: boolean; author: string };
 class ReportNotFoundError extends Error {}
 
-async function findReport(path: string, id: string) { ... }
+async function findReport(_path: string, _id: string) {
+  return null as Report | null;
+}
 
 const callable = createRetry({
   input: async () => {
@@ -162,6 +164,13 @@ try {
 `onFailedAttempt` receives the attempt number and calculated jitter delay after each failed call.
 
 ```typescript
+type Report = { name: string; author: string };
+class ReportNotFoundError extends Error {}
+
+async function findReport(_path: string, _id: string) {
+  return null as Report | null;
+}
+
 const callable = createRetry({
   input: async () => {
     const report = await findReport("/path/to/reports/folder/", "1");
@@ -186,7 +195,9 @@ const callable = createRetry({
 The `input` closure captures arguments while the returned callable keeps a zero-argument API.
 
 ```typescript
-async function execute(command: string) { ... }
+async function execute(_command: string) {
+  return undefined;
+}
 const callable = createRetry({
   input: async () => execute("fetch"),
   maxRetries: 5,
@@ -204,7 +215,9 @@ class InvalidArgumentError extends Error {}
 class CommandNotFoundError extends Error {}
 class ConnectionTimeOutError extends Error {}
 
-async function runCommand(command: string, args: string[]) { ... }
+async function runCommand(_command: string, _args: string[]) {
+  return undefined;
+}
 
 const callable = createRetry({
   input: async () => runCommand("push", ["origin", "main"]),
