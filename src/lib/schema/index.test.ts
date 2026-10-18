@@ -301,9 +301,16 @@ describe("semola/schema", () => {
     expect(string().regex(/foo/).toJsonSchema().pattern).toBe("foo");
     expect(string().regex(/foo/i).toJsonSchema().pattern).toBeUndefined();
     expect(string().regex(/foo/).regex(/bar/i).toJsonSchema().pattern).toBe(
-      undefined,
+      "foo",
     );
     expect(string().regex(/foo/i).parse("FOO")).toBe("FOO");
+  });
+
+  test("chained regex JSON Schema preserves patterns via allOf", () => {
+    const schema = string().regex(/^a/).regex(/b$/).toJsonSchema();
+
+    expect(schema.pattern).toBe("^a");
+    expect(schema.allOf).toEqual([{ pattern: "b$" }]);
   });
 
   test("rejects unsupported JSON Schema targets", () => {

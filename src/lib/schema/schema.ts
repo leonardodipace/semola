@@ -59,6 +59,18 @@ const childJsonSchema = (
   return schema["~standard"].jsonSchema.input({ target }) as JsonSchema;
 };
 
+const withPattern = (extras: JsonSchema, source: string): JsonSchema => {
+  if (extras.pattern === undefined) {
+    return { ...extras, pattern: source };
+  }
+
+  const existingAllOf = extras.allOf;
+  const allOf = Array.isArray(existingAllOf) ? [...existingAllOf] : [];
+  allOf.push({ pattern: source });
+
+  return { ...extras, allOf };
+};
+
 const isPlainObject = (value: unknown) => {
   if (typeof value !== "object") {
     return false;
@@ -341,18 +353,16 @@ export class StringSchema extends Schema<string> {
   public regex(pattern: RegExp, message = "Invalid string") {
     // JSON Schema patterns have no flags; g/y only affect lastIndex (reset at runtime).
     const jsonFlags = pattern.flags.replace(/[gy]/g, "");
-    const extras = { ...this.jsonExtras };
+    const rules = [...this.rules, { kind: "regex" as const, pattern, message }];
 
     if (jsonFlags.length === 0) {
-      extras.pattern = pattern.source;
-    } else {
-      delete extras.pattern;
+      return new StringSchema(
+        rules,
+        withPattern(this.jsonExtras, pattern.source),
+      );
     }
 
-    return new StringSchema(
-      [...this.rules, { kind: "regex", pattern, message }],
-      extras,
-    );
+    return new StringSchema(rules, { ...this.jsonExtras });
   }
 
   public email(message = "Invalid email") {
@@ -364,10 +374,10 @@ export class StringSchema extends Schema<string> {
   }
 
   public uuid(message = "Invalid uuid") {
-    return this.withRule(
-      { kind: "uuid", message },
-      { format: "uuid", pattern: UUID_PATTERN.source },
-    );
+    return new StringSchema([...this.rules, { kind: "uuid", message }], {
+      ...withPattern(this.jsonExtras, UUID_PATTERN.source),
+      format: "uuid",
+    });
   }
 
   public startsWith(prefix: string, message?: string) {
