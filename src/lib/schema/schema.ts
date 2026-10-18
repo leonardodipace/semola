@@ -1,5 +1,4 @@
 import {
-  type ArrayBound,
   applyNumberRules,
   applyStringRules,
   compileObjectValidate,
@@ -7,11 +6,7 @@ import {
   emitNumberRules,
   emitStringRules,
   formatPathExpr,
-  type NumberRule,
-  type ObjectField,
   pushIssue,
-  type RunFn,
-  type StringRule,
   UUID_PATTERN,
 } from "./compile.js";
 import {
@@ -21,17 +16,23 @@ import {
   UnsupportedJsonSchemaTargetError,
 } from "./errors.js";
 import type {
+  ArrayBound,
   InferObjectOutput,
   InferOutput,
   Issue,
   JsonSchema,
+  JsonSchemaFn,
   JsonSchemaMode,
   LiteralValue,
+  NumberRule,
+  ObjectField,
   ObjectShape,
+  RunFn,
   SafeParseResult,
   SchemaBase,
   StandardJSONSchemaV1,
   StandardSchemaV1,
+  StringRule,
 } from "./types.js";
 
 const VENDOR = "semola";
@@ -46,11 +47,6 @@ const assertJsonSchemaTarget = (target: StandardJSONSchemaV1.Target) => {
   throw new UnsupportedJsonSchemaTargetError(target);
 };
 
-type JsonSchemaFn = (
-  target: StandardJSONSchemaV1.Target,
-  mode: JsonSchemaMode,
-) => JsonSchema;
-
 const childJsonSchema = (
   schema: SchemaBase,
   target: StandardJSONSchemaV1.Target,
@@ -61,6 +57,22 @@ const childJsonSchema = (
   }
 
   return schema["~standard"].jsonSchema.input({ target }) as JsonSchema;
+};
+
+const isPlainObject = (value: unknown) => {
+  if (typeof value !== "object") {
+    return false;
+  }
+
+  if (value === null) {
+    return false;
+  }
+
+  if (Array.isArray(value)) {
+    return false;
+  }
+
+  return true;
 };
 
 /** Sync validation reuses these when not re-entrant. */
@@ -753,13 +765,7 @@ export class ArraySchema<Output> extends Schema<Output[]> {
           return list;
         }
 
-        for (let i = 0; i < bounds.length; i++) {
-          const bound = bounds[i];
-
-          if (!bound) {
-            continue;
-          }
-
+        for (const bound of bounds) {
           if (bound.kind === "min") {
             if (list.length < bound.length) {
               pushIssue(issues, bound.message, path);
@@ -830,13 +836,7 @@ export class ArraySchema<Output> extends Schema<Output[]> {
 
     let boundGate = "if";
 
-    for (let i = 0; i < this.bounds.length; i++) {
-      const bound = this.bounds[i];
-
-      if (!bound) {
-        continue;
-      }
-
+    for (const bound of this.bounds) {
       const msg = JSON.stringify(bound.message);
 
       if (bound.kind === "min") {
@@ -897,15 +897,8 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
 
   public constructor(shape: Shape) {
     const fields: ObjectField[] = [];
-    const keys = Object.keys(shape);
 
-    for (let i = 0; i < keys.length; i++) {
-      const key = keys[i];
-
-      if (key === undefined) {
-        continue;
-      }
-
+    for (const key of Object.keys(shape)) {
       const propertySchema = shape[key];
 
       if (!propertySchema) {
@@ -918,6 +911,7 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
         optional:
           propertySchema.schemaType === "optional" ||
           propertySchema.schemaType === "nullish",
+        schema: propertySchema,
         toInline: (expr, pathPrefix, binds, dynamicIndex) => {
           return (
             propertySchema.toInline?.(expr, pathPrefix, binds, dynamicIndex) ??
@@ -933,20 +927,8 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
       const properties: Record<string, JsonSchema> = {};
       const required: string[] = [];
 
-      for (let i = 0; i < fields.length; i++) {
-        const field = fields[i];
-
-        if (!field) {
-          continue;
-        }
-
-        const propertySchema = shape[field.key];
-
-        if (!propertySchema) {
-          continue;
-        }
-
-        properties[field.key] = childJsonSchema(propertySchema, target, mode);
+      for (const field of fields) {
+        properties[field.key] = childJsonSchema(field.schema, target, mode);
 
         if (field.optional) {
           continue;
@@ -973,13 +955,7 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
 
   private checkObject(value: unknown) {
     TLS_PATH.length = 0;
-
-    if (this.compiled.needsPath) {
-      this.compiled.run(value, TLS_PATH, TLS_ISSUES);
-      return;
-    }
-
-    this.compiled.check(value, TLS_PATH, TLS_ISSUES);
+    this.compiled.run(value, TLS_PATH, TLS_ISSUES);
   }
 
   public override validateStd(
@@ -1058,18 +1034,11 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
       return null;
     }
 
-    const keys = Object.keys(this.shape);
     const parts: string[] = [
       `if(typeof ${expr}!=='object'||${expr}===null||Array.isArray(${expr})){${emitIssue('"Expected object"', formatPathExpr(pathPrefix))}}else{`,
     ];
 
-    for (let i = 0; i < keys.length; i++) {
-      const key = keys[i];
-
-      if (key === undefined) {
-        continue;
-      }
-
+    for (const key of Object.keys(this.shape)) {
       const propertySchema = this.shape[key];
 
       if (!propertySchema) {
@@ -1111,31 +1080,14 @@ export class RecordSchema<Output> extends Schema<Record<string, Output>> {
 
     super(
       (value, path, issues) => {
-        if (typeof value !== "object") {
+        if (!isPlainObject(value)) {
           pushIssue(issues, "Expected object", path);
           return value as Record<string, Output>;
         }
 
-        if (value === null) {
-          pushIssue(issues, "Expected object", path);
-          return value as unknown as Record<string, Output>;
-        }
-
-        if (Array.isArray(value)) {
-          pushIssue(issues, "Expected object", path);
-          return value as unknown as Record<string, Output>;
-        }
-
         const record = value as Record<string, Output>;
-        const keys = Object.keys(record);
 
-        for (let i = 0; i < keys.length; i++) {
-          const key = keys[i];
-
-          if (key === undefined) {
-            continue;
-          }
-
+        for (const key of Object.keys(record)) {
           path.push(key);
           valueRun(record[key], path, issues);
           path.pop();
@@ -1213,13 +1165,7 @@ export class UnionSchema<T extends readonly SchemaBase[]> extends Schema<
       (value, path, issues) => {
         const localIssues: Issue[] = [];
 
-        for (let i = 0; i < optionRuns.length; i++) {
-          const optionRun = optionRuns[i];
-
-          if (!optionRun) {
-            continue;
-          }
-
+        for (const optionRun of optionRuns) {
           localIssues.length = 0;
           const output = optionRun(value, path, localIssues);
 

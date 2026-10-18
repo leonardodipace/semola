@@ -1,22 +1,18 @@
-import type { Issue } from "./types.js";
+import type {
+  Issue,
+  NumberRule,
+  ObjectField,
+  RunFn,
+  StringRule,
+} from "./types.js";
 
-export type RunFn<Output> = (
-  value: unknown,
-  path: PropertyKey[],
-  issues: Issue[],
-) => Output;
-
-export type StringRule =
-  | { kind: "min"; length: number; message: string }
-  | { kind: "max"; length: number; message: string }
-  | { kind: "length"; length: number; message: string }
-  | { kind: "regex"; pattern: RegExp; message: string }
-  | { kind: "email"; message: string }
-  | { kind: "url"; message: string }
-  | { kind: "uuid"; message: string }
-  | { kind: "startsWith"; prefix: string; message: string }
-  | { kind: "endsWith"; suffix: string; message: string }
-  | { kind: "includes"; search: string; message: string };
+export type {
+  ArrayBound,
+  NumberRule,
+  ObjectField,
+  RunFn,
+  StringRule,
+} from "./types.js";
 
 /** RFC 4122 / 9562 UUID (version 1-8, variant 10xx). Case-folded for JSON Schema. */
 export const UUID_PATTERN =
@@ -38,28 +34,6 @@ const isUrlString = (value: string) => {
   } catch {
     return false;
   }
-};
-
-export type NumberRule =
-  | { kind: "min"; value: number; message: string }
-  | { kind: "max"; value: number; message: string }
-  | { kind: "positive"; message: string }
-  | { kind: "nonnegative"; message: string };
-
-export type ArrayBound =
-  | { kind: "min"; length: number; message: string }
-  | { kind: "max"; length: number; message: string };
-
-export type ObjectField = {
-  key: string;
-  run: RunFn<unknown>;
-  optional: boolean;
-  toInline: (
-    expr: string,
-    pathPrefix: PropertyKey[],
-    binds: unknown[],
-    dynamicIndex?: string,
-  ) => string | null;
 };
 
 const isEmail = (value: string) => {
@@ -112,13 +86,7 @@ export const applyStringRules = (
   issues: Issue[],
   rules: ReadonlyArray<StringRule>,
 ) => {
-  for (let i = 0; i < rules.length; i++) {
-    const rule = rules[i];
-
-    if (!rule) {
-      continue;
-    }
-
+  for (const rule of rules) {
     if (rule.kind === "min") {
       if (value.length < rule.length) {
         pushIssue(issues, rule.message, path);
@@ -222,13 +190,7 @@ export const applyNumberRules = (
     }
   }
 
-  for (let i = 0; i < rules.length; i++) {
-    const rule = rules[i];
-
-    if (!rule) {
-      continue;
-    }
-
+  for (const rule of rules) {
     if (rule.kind === "min") {
       if (value < rule.value) {
         pushIssue(issues, rule.message, path);
@@ -307,13 +269,7 @@ export const emitStringRules = (
     `if(typeof ${expr}!=='string'){${emitIssue('"Expected string"', pathExpr)}}`,
   ];
 
-  for (let i = 0; i < rules.length; i++) {
-    const rule = rules[i];
-
-    if (!rule) {
-      continue;
-    }
-
+  for (const rule of rules) {
     const msg = JSON.stringify(rule.message);
 
     if (rule.kind === "min") {
@@ -416,13 +372,7 @@ export const emitNumberRules = (
     );
   }
 
-  for (let i = 0; i < rules.length; i++) {
-    const rule = rules[i];
-
-    if (!rule) {
-      continue;
-    }
-
+  for (const rule of rules) {
     const msg = JSON.stringify(rule.message);
 
     if (rule.kind === "min") {
@@ -451,19 +401,12 @@ export const emitNumberRules = (
 export const compileObjectValidate = <Output>(fields: ObjectField[]) => {
   const runs: RunFn<unknown>[] = [];
   const binds: unknown[] = [];
-  let needsPath = false;
 
   const lines = [
     `if(typeof value!=='object'||value===null||Array.isArray(value)){${emitIssue('"Expected object"', null)}return value;}`,
   ];
 
-  for (let i = 0; i < fields.length; i++) {
-    const field = fields[i];
-
-    if (!field) {
-      continue;
-    }
-
+  for (const field of fields) {
     const keyLiteral = JSON.stringify(field.key);
     const access = isIdentKey(field.key)
       ? `value.${field.key}`
@@ -484,7 +427,6 @@ export const compileObjectValidate = <Output>(fields: ObjectField[]) => {
       continue;
     }
 
-    needsPath = true;
     const runIndex = runs.length;
     runs.push(field.run);
     lines.push(
@@ -502,22 +444,7 @@ export const compileObjectValidate = <Output>(fields: ObjectField[]) => {
     `return function(value,path,issues){${lines.join("")}return value;}`,
   );
 
-  const run = factory(binds, runs) as RunFn<Output>;
-
-  if (needsPath) {
-    return {
-      needsPath: true as const,
-      run,
-    };
-  }
-
   return {
-    needsPath: false as const,
-    check: run as (
-      value: unknown,
-      path: PropertyKey[],
-      issues: Issue[],
-    ) => void,
-    run,
+    run: factory(binds, runs) as RunFn<Output>,
   };
 };
