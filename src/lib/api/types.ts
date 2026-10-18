@@ -264,7 +264,8 @@ export type RouteConfig<
 };
 
 export type SSEEvent = {
-  data: unknown;
+  data?: unknown;
+  comment?: string;
   event?: string;
   id?: string;
   retry?: number;

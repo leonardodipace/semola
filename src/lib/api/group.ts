@@ -41,18 +41,26 @@ const combinePrefix = (base: string | undefined, local: string | undefined) => {
 const formatSSEEvent = (event: SSEEvent) => {
   let message = "";
 
+  if (event.comment !== undefined) {
+    for (const line of event.comment.split("\n")) {
+      message += `: ${line}\n`;
+    }
+  }
+
   if (event.event !== undefined) message += `event: ${event.event}\n`;
   if (event.id !== undefined) message += `id: ${event.id}\n`;
   if (event.retry !== undefined) message += `retry: ${event.retry}\n`;
 
-  let data = JSON.stringify(event.data) ?? "";
+  if (event.data !== undefined) {
+    let data = JSON.stringify(event.data) ?? "";
 
-  if (typeof event.data === "string") {
-    data = event.data;
-  }
+    if (typeof event.data === "string") {
+      data = event.data;
+    }
 
-  for (const line of data.split("\n")) {
-    message += `data: ${line}\n`;
+    for (const line of data.split("\n")) {
+      message += `data: ${line}\n`;
+    }
   }
 
   return `${message}\n`;
