@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Install Semola and pick a module to start with
+description: Install Semola with Bun or npm and start building type-safe Bun backends
 ---
 
 ## Install

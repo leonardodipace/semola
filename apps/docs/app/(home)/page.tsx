@@ -5,13 +5,41 @@ import { HomeShowcase } from "@/components/home-showcase";
 import { InstallCommand } from "@/components/install-command";
 import { Reveal } from "@/components/reveal";
 import { featuredHomeModules, homeModules } from "@/lib/home-modules";
-import { appDescription, appName } from "@/lib/shared";
+import {
+  appDescription,
+  appName,
+  appTagline,
+  homeOgImagePath,
+  siteUrl,
+} from "@/lib/shared";
 
 export const metadata: Metadata = {
   title: {
-    absolute: `${appName} · Type-safe building blocks for real backends`,
+    absolute: `${appName} · ${appTagline}`,
   },
   description: appDescription,
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    title: `${appName} · ${appTagline}`,
+    description: appDescription,
+    url: siteUrl,
+    images: [
+      {
+        url: homeOgImagePath,
+        width: 1200,
+        height: 630,
+        alt: `${appName} - ${appTagline}`,
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: `${appName} · ${appTagline}`,
+    description: appDescription,
+    images: [homeOgImagePath],
+  },
 };
 
 const principles = [
@@ -89,7 +117,7 @@ export default function HomePage() {
         <div className="relative mx-auto flex w-full max-w-5xl flex-col items-center px-6 pt-16 pb-10 text-center sm:pt-24 sm:pb-14">
           <img
             src="/logo.png"
-            alt=""
+            alt="Semola"
             width={56}
             height={56}
             className="home-fade-up mb-8 size-14 rounded-xl shadow-[0_16px_40px_-18px_color-mix(in_oklab,var(--color-bran)_55%,transparent)]"
@@ -100,8 +128,8 @@ export default function HomePage() {
           </h1>
 
           <p className="home-fade-up-delay-2 mb-10 max-w-lg text-base text-fd-muted-foreground sm:text-lg">
-            APIs, queues, workflows, ORM, and more - with zero runtime
-            dependencies. Import only what you use.
+            Zero-dependency TypeScript toolkit for Bun. Typed APIs, Redis
+            queues, workflows, ORM, and more - import only what you use.
           </p>
 
           <div className="home-fade-up-delay-3 flex flex-wrap items-center justify-center gap-3">

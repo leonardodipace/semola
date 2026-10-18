@@ -1,6 +1,6 @@
 ---
 title: Introduction
-description: Zero-dependency TypeScript utilities for backends
+description: Semola is a zero-dependency TypeScript toolkit for Bun backends - typed APIs, queues, ORM, workflows, and more
 ---
 
 Semola is a toolkit of small, type-safe packages for building backends. Install once, then import only the pieces you need:

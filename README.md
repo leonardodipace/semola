@@ -4,12 +4,15 @@
 
 # Semola
 
-⚡ **Zero-dependency TypeScript utilities for modern Bun apps**
+⚡ **Zero-dependency TypeScript toolkit for Bun backends**
 
-Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable imports
+Typed REST APIs with OpenAPI, Redis queues, pub/sub, ORM, durable workflows, caching, auth policies, i18n, and more - tree-shakeable imports.
+
+**Docs:** [semo.la](https://semo.la) · **npm:** [semola](https://www.npmjs.com/package/semola)
 
 [![Tests](https://img.shields.io/github/actions/workflow/status/leonardodipace/semola/ci.yml?branch=main&style=flat-square&label=tests)](https://github.com/leonardodipace/semola/actions)
 [![npm version](https://img.shields.io/npm/v/semola.svg?style=flat-square)](https://www.npmjs.com/package/semola)
+[![Docs](https://img.shields.io/badge/docs-semo.la-0ea5e9?style=flat-square)](https://semo.la)
 [![Bun](https://img.shields.io/badge/Bun-1.1%2B-black?style=flat-square&logo=bun)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0%2B-blue?style=flat-square&logo=typescript)](https://www.typescriptlang.org)
 [![License](https://img.shields.io/npm/l/semola.svg?style=flat-square)](LICENSE)
@@ -356,24 +359,26 @@ _Higher is better for req/sec, lower is better for latency._
 
 ## 📖 Documentation
 
-Run the docs site locally: `bun run docs:dev` (Fumadocs at http://localhost:3000).
+Full docs: **[https://semo.la](https://semo.la)** · Getting started: **[https://semo.la/docs/getting-started](https://semo.la/docs/getting-started)**
 
-- [API Framework](./docs/api.md) - Type-safe REST API framework with OpenAPI
-- [Queue](./docs/queue.md) - Redis-backed job queue with timeouts & concurrency
-- [PubSub](./docs/pubsub.md) - Type-safe Redis pub/sub
-- [Cron](./docs/cron.md) - In-memory and OS cron scheduler for periodic task execution
-- [Workflow](./docs/workflow.md) - Durable and resumable workflows with retries and hooks
-- [Policy](./docs/policy.md) - Policy-based authorization
-- [i18n](./docs/i18n.md) - Type-safe internationalization
-- [Cache](./docs/cache.md) - Redis cache wrapper with TTL
-- [Schema](./docs/schema.md) - Standard Schema validation with JSON Schema output
-- [Errors](./docs/errors.md) - Result-based error handling
-- [Logging](./docs/logging.md) - Logging utility
-- [Otel](./docs/otel.md) - Zero-dependency OTLP/HTTP JSON traces, metrics, and logs
-- [Prompts](./docs/prompts.md) - Interactive CLI prompts
-- [CLI](./docs/cli.md) - Non-interactive CLI builder
-- [ORM](./docs/orm.md) - Type-safe data layer with SQLite and Postgres
-- [Extra](./docs/extra.md) - A collection of tiny utilities
+Run locally: `bun run docs:dev` (http://localhost:3000).
+
+- [API Framework](https://semo.la/docs/api) - Type-safe REST API framework with OpenAPI
+- [Queue](https://semo.la/docs/queue) - Redis-backed job queue with timeouts & concurrency
+- [PubSub](https://semo.la/docs/pubsub) - Type-safe Redis pub/sub
+- [Cron](https://semo.la/docs/cron) - In-memory and OS cron scheduler for periodic task execution
+- [Workflow](https://semo.la/docs/workflow) - Durable and resumable workflows with retries and hooks
+- [Policy](https://semo.la/docs/policy) - Policy-based authorization
+- [i18n](https://semo.la/docs/i18n) - Type-safe internationalization
+- [Cache](https://semo.la/docs/cache) - Redis cache wrapper with TTL
+- [Schema](https://semo.la/docs/schema) - Standard Schema validation with JSON Schema output
+- [Errors](https://semo.la/docs/errors) - Result-based error handling
+- [Logging](https://semo.la/docs/logging) - Logging utility
+- [Otel](https://semo.la/docs/otel) - Zero-dependency OTLP/HTTP JSON traces, metrics, and logs
+- [Prompts](https://semo.la/docs/prompts) - Interactive CLI prompts
+- [CLI](https://semo.la/docs/cli) - Non-interactive CLI builder
+- [ORM](https://semo.la/docs/orm) - Type-safe data layer with SQLite and Postgres
+- [Extra](https://semo.la/docs/extra) - A collection of tiny utilities
 
 ---
 

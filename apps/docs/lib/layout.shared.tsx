@@ -6,7 +6,7 @@ function Logo() {
     <span className="inline-flex items-center gap-2 font-medium">
       <img
         src="/logo.png"
-        alt=""
+        alt="Semola"
         width={28}
         height={28}
         className="size-7 rounded-md"
