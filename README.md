@@ -93,8 +93,6 @@ console.log("Success:", data);
 `mightThrow` and `mightThrowSync` default their error type to `Error`. If a promise or function can reject or throw non-Error values, pass a custom error generic.
 
 ```typescript
-import { mightThrow } from "semola/errors";
-
 const [customError] = await mightThrow<never, { code: string }>(
   Promise.reject({ code: "RATE_LIMITED" }),
 );
@@ -105,16 +103,11 @@ const [customError] = await mightThrow<never, { code: string }>(
 ```typescript
 import { Queue } from "semola/queue";
 
-declare const redisClient: Bun.RedisClient;
-declare function sendEmail(to: string, subject: string): Promise<void>;
-
-type EmailJob = { to: string; subject: string };
-
-const queue = new Queue<EmailJob>({
+const queue = new Queue({
   name: "emails",
   redis: redisClient,
   handler: async (data) => {
-    await sendEmail(data.to, data.subject);
+    await sendEmail(data);
   },
 });
 
@@ -126,12 +119,7 @@ await queue.enqueue({ to: "user@example.com", subject: "Hello" });
 ```typescript
 import { PubSub } from "semola/pubsub";
 
-declare const redisSubscriber: Bun.RedisClient;
-declare const redisPublisher: Bun.RedisClient;
-
-type Notification = { userId: number; text: string };
-
-const pubsub = new PubSub<Notification>({
+const pubsub = new PubSub({
   subscriber: redisSubscriber,
   publisher: redisPublisher,
   channel: "notifications",
@@ -384,7 +372,7 @@ Run the docs site locally: `bun run docs:dev` (Fumadocs at http://localhost:3000
 - [Otel](./docs/otel.md) - Zero-dependency OTLP/HTTP JSON traces, metrics, and logs
 - [Prompts](./docs/prompts.md) - Interactive CLI prompts
 - [CLI](./docs/cli.md) - Non-interactive CLI builder
-- [ORM](./docs/orm.md) - Type-safe data layer with SQLite support
+- [ORM](./docs/orm.md) - Type-safe data layer with SQLite and Postgres
 - [Extra](./docs/extra.md) - A collection of tiny utilities
 
 ---

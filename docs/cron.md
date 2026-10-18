@@ -44,7 +44,6 @@ This builds a Monday-Friday 09:00 expression and gives it to an in-process job.
 
 ```typescript
 import {
-  Cron,
   cronJobBuilder,
   any,
   list,

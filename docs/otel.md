@@ -60,17 +60,6 @@ Each process owns its own `Otel` instance, batches, and ALS context. That is the
 Pass `kind` as `internal` (default), `server`, `client`, `producer`, or `consumer`. Remote parents from `extract` set OTLP span `flags` so UIs can mark the parent edge as remote.
 
 ```typescript
-import { Otel } from "semola/otel";
-
-declare function charge(): Promise<void>;
-
-const otel = new Otel({
-  serviceName: "doc",
-  enabled: false,
-  export: { type: "otlp-http", url: "http://localhost:4318" },
-});
-const tracer = otel.tracer("doc");
-
 await tracer.startActiveSpan("work", async (span) => {
   span.setAttribute("key", "value");
   span.addEvent("step.done", { step: "validate" });
@@ -95,15 +84,6 @@ await tracer.startActiveSpan("risky", async (span) => {
 Manual spans (no active context switch):
 
 ```typescript
-import { Otel } from "semola/otel";
-
-const otel = new Otel({
-  serviceName: "doc",
-  enabled: false,
-  export: { type: "otlp-http", url: "http://localhost:4318" },
-});
-const tracer = otel.tracer("doc");
-
 const span = tracer.startSpan("background");
 span.end();
 ```

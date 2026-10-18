@@ -84,17 +84,6 @@ Combine helpers on fields:
 Both field conditions must match for the rule to allow `feature`.
 
 ```typescript
-import { Policy, eq, has } from "semola/policy";
-
-type Post = {
-  id: number;
-  authorId: number;
-  status: "draft" | "published";
-  tags: string[];
-};
-
-const posts = new Policy<Post>();
-
 posts.allow({
   action: "feature",
   conditions: {

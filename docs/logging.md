@@ -115,15 +115,12 @@ const log = new Logger("api", [
 Extending `AbstractLogger` lets a specialized logger define its own severity behavior.
 
 ```typescript
-import { AbstractLogger, ConsoleProvider } from "semola/logging";
-import type { LogMessageType } from "semola/logging";
-
 class SilentLogger extends AbstractLogger {
-  public debug(_msg: LogMessageType) {}
-  public info(_msg: LogMessageType) {}
-  public warning(_msg: LogMessageType) {}
-  public error(_msg: LogMessageType) {}
-  public critical(_msg: LogMessageType) {}
+  public debug() {}
+  public info() {}
+  public warning() {}
+  public error() {}
+  public critical() {}
 }
 
 const log = new SilentLogger("app", [new ConsoleProvider()]);

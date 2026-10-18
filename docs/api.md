@@ -212,13 +212,6 @@ Serve that JSON from a route if you want a public `/openapi.json`.
 The `auth` middleware runs first. It either returns `401` immediately or contributes `userId`, then the `/me` route builds the successful response.
 
 ```typescript
-import { Api, Middleware } from "semola/api";
-import { z } from "zod";
-
-declare function parseToken(token: string): string;
-
-const api = new Api();
-
 const auth = new Middleware({
   handler: async (c) => {
     const token = c.raw.headers.get("authorization");
