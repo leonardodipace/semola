@@ -25,6 +25,7 @@ import {
   tuple,
   UnsupportedJsonSchemaConversionError,
   UnsupportedJsonSchemaTargetError,
+  undefinedType,
   union,
   unknown,
 } from "./index.js";
@@ -213,6 +214,49 @@ describe("semola/schema", () => {
     expect(schema.safeParse("a").success).toBe(true);
   });
 
+  test("inlined string and array rules match top-level issue count", () => {
+    const nestedString = object({
+      name: string().min(5).includes("x"),
+    });
+    const topString = string().min(5).includes("x");
+
+    expect(nestedString.safeParse({ name: "ab" }).success).toBe(false);
+    expect(topString.safeParse("ab").success).toBe(false);
+
+    const nestedIssues = nestedString.safeParse({ name: "ab" });
+    const topIssues = topString.safeParse("ab");
+
+    if (nestedIssues.success || topIssues.success) {
+      throw new Error("expected failure");
+    }
+
+    expect(nestedIssues.error.issues.length).toBe(
+      topIssues.error.issues.length,
+    );
+
+    const nestedArray = object({ tags: array(string()).min(5) });
+    const topArray = array(string()).min(5);
+    const nestedArrayResult = nestedArray.safeParse({ tags: ["a", 1] });
+    const topArrayResult = topArray.safeParse(["a", 1]);
+
+    if (nestedArrayResult.success || topArrayResult.success) {
+      throw new Error("expected failure");
+    }
+
+    expect(nestedArrayResult.error.issues.length).toBe(
+      topArrayResult.error.issues.length,
+    );
+  });
+
+  test("regex JSON Schema omits pattern when flags would desync", () => {
+    expect(string().regex(/foo/).toJsonSchema().pattern).toBe("foo");
+    expect(string().regex(/foo/i).toJsonSchema().pattern).toBeUndefined();
+    expect(string().regex(/foo/).regex(/bar/i).toJsonSchema().pattern).toBe(
+      undefined,
+    );
+    expect(string().regex(/foo/i).parse("FOO")).toBe("FOO");
+  });
+
   test("rejects unsupported JSON Schema targets", () => {
     expect(() => string().toJsonSchema("draft-07")).toThrow(
       UnsupportedJsonSchemaTargetError,
@@ -289,6 +333,46 @@ describe("semola/schema", () => {
     expect(() => s.email().parse("bad")).toThrow(SchemaError);
     expect(() => s.uuid().parse("not-a-uuid")).toThrow(SchemaError);
     expect(() => s.int().parse(1.5)).toThrow(SchemaError);
+  });
+
+  test("object key presence uses own properties only", () => {
+    expect(object({ constructor: string() }).safeParse({}).success).toBe(false);
+    expect(object({ constructor: any() }).safeParse({}).success).toBe(false);
+    expect(object({ valueOf: number().optional() }).safeParse({}).success).toBe(
+      true,
+    );
+    expect(
+      object({ constructor: string() }).parse({ constructor: "ok" }),
+    ).toEqual({ constructor: "ok" });
+  });
+
+  test("uuid JSON Schema includes the runtime pattern", () => {
+    const schema = s.uuid().toJsonSchema();
+
+    expect(schema.format).toBe("uuid");
+    expect(schema.pattern).toBe(
+      "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+    );
+  });
+
+  test("literal uses Object.is and rejects non-JSON consts", () => {
+    expect(literal(Number.NaN).parse(Number.NaN)).toBe(Number.NaN);
+    expect(literal(-0).safeParse(0).success).toBe(false);
+    expect(literal(1n).parse(1n)).toBe(1n);
+
+    expect(() => literal(Number.NaN).toJsonSchema()).toThrow(
+      UnsupportedJsonSchemaConversionError,
+    );
+    expect(() => literal(1n).toJsonSchema()).toThrow(
+      UnsupportedJsonSchemaConversionError,
+    );
+    expect(literal("a").toJsonSchema()).toEqual({ const: "a" });
+  });
+
+  test("undefinedType rejects JSON Schema conversion", () => {
+    expect(() => undefinedType().toJsonSchema()).toThrow(
+      UnsupportedJsonSchemaConversionError,
+    );
   });
 
   test("success results are not overwritten by later validates", () => {

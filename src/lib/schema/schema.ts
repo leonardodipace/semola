@@ -12,6 +12,7 @@ import {
   pushIssue,
   type RunFn,
   type StringRule,
+  UUID_PATTERN,
 } from "./compile.js";
 import {
   formatIssues,
@@ -336,9 +337,19 @@ export class StringSchema extends Schema<string> {
   }
 
   public regex(pattern: RegExp, message = "Invalid string") {
-    return this.withRule(
-      { kind: "regex", pattern, message },
-      { pattern: pattern.source },
+    // JSON Schema patterns have no flags; g/y only affect lastIndex (reset at runtime).
+    const jsonFlags = pattern.flags.replace(/[gy]/g, "");
+    const extras = { ...this.jsonExtras };
+
+    if (jsonFlags.length === 0) {
+      extras.pattern = pattern.source;
+    } else {
+      delete extras.pattern;
+    }
+
+    return new StringSchema(
+      [...this.rules, { kind: "regex", pattern, message }],
+      extras,
     );
   }
 
@@ -351,7 +362,10 @@ export class StringSchema extends Schema<string> {
   }
 
   public uuid(message = "Invalid uuid") {
-    return this.withRule({ kind: "uuid", message }, { format: "uuid" });
+    return this.withRule(
+      { kind: "uuid", message },
+      { format: "uuid", pattern: UUID_PATTERN.source },
+    );
   }
 
   public startsWith(prefix: string, message?: string) {
@@ -585,13 +599,25 @@ export class LiteralSchema<T extends LiteralValue> extends Schema<T> {
   public constructor(expected: T) {
     super(
       (value, path, issues) => {
-        if (value !== expected) {
+        if (!Object.is(value, expected)) {
           pushIssue(issues, `Expected ${String(expected)}`, path);
         }
 
         return expected;
       },
       () => {
+        if (typeof expected === "bigint") {
+          throw new UnsupportedJsonSchemaConversionError("literal bigint");
+        }
+
+        if (typeof expected === "number") {
+          if (!Number.isFinite(expected)) {
+            throw new UnsupportedJsonSchemaConversionError(
+              "literal non-finite number",
+            );
+          }
+        }
+
         return { const: expected };
       },
     );
@@ -806,7 +832,14 @@ export class ArraySchema<Output> extends Schema<Output[]> {
     const pathExpr = formatPathExpr(pathPrefix);
     const parts = [
       `if(!Array.isArray(${expr})){${emitIssue('"Expected array"', pathExpr)}}else{`,
+      "const __before=issues.length;",
+      `for(let __i=0;__i<${expr}.length;__i++){const __el=${expr}[__i];`,
+      elementInline,
+      "}",
+      "if(issues.length===__before){",
     ];
+
+    let boundGate = "if";
 
     for (let i = 0; i < this.bounds.length; i++) {
       const bound = this.bounds[i];
@@ -819,21 +852,19 @@ export class ArraySchema<Output> extends Schema<Output[]> {
 
       if (bound.kind === "min") {
         parts.push(
-          `if(${expr}.length<${bound.length}){${emitIssue(msg, pathExpr)}}`,
+          `${boundGate}(${expr}.length<${bound.length}){${emitIssue(msg, pathExpr)}}`,
         );
+        boundGate = "else if";
         continue;
       }
 
       parts.push(
-        `if(${expr}.length>${bound.length}){${emitIssue(msg, pathExpr)}}`,
+        `${boundGate}(${expr}.length>${bound.length}){${emitIssue(msg, pathExpr)}}`,
       );
+      boundGate = "else if";
     }
 
-    parts.push(
-      `for(let __i=0;__i<${expr}.length;__i++){const __el=${expr}[__i];`,
-      elementInline,
-      "}}",
-    );
+    parts.push("}}");
 
     return parts.join("");
   }
@@ -1060,7 +1091,7 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
         propertySchema.schemaType === "nullish";
       const inline = propertySchema.toInline(access, childPrefix, binds);
 
-      parts.push(`if(!(${keyLiteral} in ${expr})){`);
+      parts.push(`if(!Object.hasOwn(${expr},${keyLiteral})){`);
 
       if (!optional) {
         parts.push(emitIssue('"Required"', formatPathExpr(childPrefix)));
@@ -1340,7 +1371,7 @@ export const undefinedType = () => {
       return undefined;
     },
     () => {
-      return {};
+      throw new UnsupportedJsonSchemaConversionError("undefined");
     },
   );
 };

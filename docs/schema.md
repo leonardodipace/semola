@@ -170,7 +170,7 @@ Validation is sync-only and allocation-light on the success path (shared path/is
 
 ## Standard Schema and JSON Schema
 
-Every schema exposes `~standard` (`version: 1`, `vendor: "semola"`, sync `validate`) and `~standard.jsonSchema` for `draft-2020-12`. `date()` and `bigint()` support output JSON Schema only - input conversion throws because JSON has no `Date` or `bigint`, including when nested under `object`, `array`, `union`, and the other composites.
+Every schema exposes `~standard` (`version: 1`, `vendor: "semola"`, sync `validate`) and `~standard.jsonSchema` for `draft-2020-12`. `date()` and `bigint()` support output JSON Schema only - input conversion throws because JSON has no `Date` or `bigint`, including when nested under `object`, `array`, `union`, and the other composites. `undefinedType()`, `literal(NaN)` / non-finite numbers, and `literal(bigint)` also throw on JSON Schema conversion. `regex()` with flags other than `g`/`y` omits `pattern` from JSON Schema (JSON Schema has no flags).
 
 ```typescript
 const result = User["~standard"].validate(user);

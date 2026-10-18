@@ -18,9 +18,9 @@ export type StringRule =
   | { kind: "endsWith"; suffix: string; message: string }
   | { kind: "includes"; search: string; message: string };
 
-/** RFC 4122 / 9562 UUID (version 1-8, variant 10xx). */
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+/** RFC 4122 / 9562 UUID (version 1-8, variant 10xx). Case-folded for JSON Schema. */
+export const UUID_PATTERN =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
 
 const IDENT_KEY_PATTERN = /^[A-Za-z_$][\w$]*$/;
 
@@ -29,6 +29,15 @@ const ASCII_SPACE_CODE = 32;
 
 const isUuid = (value: string) => {
   return UUID_PATTERN.test(value);
+};
+
+const isUrlString = (value: string) => {
+  try {
+    new URL(value);
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 export type NumberRule =
@@ -153,9 +162,7 @@ export const applyStringRules = (
     }
 
     if (rule.kind === "url") {
-      try {
-        new URL(value);
-      } catch {
+      if (!isUrlString(value)) {
         pushIssue(issues, rule.message, path);
         return;
       }
@@ -297,7 +304,7 @@ export const emitStringRules = (
 ) => {
   const pathExpr = formatPathExpr(pathPrefix, dynamicIndex);
   const parts = [
-    `if(typeof ${expr}!=='string'){${emitIssue('"Expected string"', pathExpr)}}else{`,
+    `if(typeof ${expr}!=='string'){${emitIssue('"Expected string"', pathExpr)}}`,
   ];
 
   for (let i = 0; i < rules.length; i++) {
@@ -311,21 +318,21 @@ export const emitStringRules = (
 
     if (rule.kind === "min") {
       parts.push(
-        `if(${expr}.length<${rule.length}){${emitIssue(msg, pathExpr)}}`,
+        `else if(${expr}.length<${rule.length}){${emitIssue(msg, pathExpr)}}`,
       );
       continue;
     }
 
     if (rule.kind === "max") {
       parts.push(
-        `if(${expr}.length>${rule.length}){${emitIssue(msg, pathExpr)}}`,
+        `else if(${expr}.length>${rule.length}){${emitIssue(msg, pathExpr)}}`,
       );
       continue;
     }
 
     if (rule.kind === "length") {
       parts.push(
-        `if(${expr}.length!==${rule.length}){${emitIssue(msg, pathExpr)}}`,
+        `else if(${expr}.length!==${rule.length}){${emitIssue(msg, pathExpr)}}`,
       );
       continue;
     }
@@ -334,7 +341,7 @@ export const emitStringRules = (
       const id = binds.length;
       binds.push(rule.pattern);
       parts.push(
-        `binds[${id}].lastIndex=0;if(!binds[${id}].test(${expr})){${emitIssue(msg, pathExpr)}}`,
+        `else if((binds[${id}].lastIndex=0,!binds[${id}].test(${expr}))){${emitIssue(msg, pathExpr)}}`,
       );
       continue;
     }
@@ -342,44 +349,51 @@ export const emitStringRules = (
     if (rule.kind === "email") {
       const id = binds.length;
       binds.push(isEmail);
-      parts.push(`if(!binds[${id}](${expr})){${emitIssue(msg, pathExpr)}}`);
+      parts.push(
+        `else if(!binds[${id}](${expr})){${emitIssue(msg, pathExpr)}}`,
+      );
       continue;
     }
 
     if (rule.kind === "url") {
-      parts.push(`try{new URL(${expr})}catch{${emitIssue(msg, pathExpr)}}`);
+      const id = binds.length;
+      binds.push(isUrlString);
+      parts.push(
+        `else if(!binds[${id}](${expr})){${emitIssue(msg, pathExpr)}}`,
+      );
       continue;
     }
 
     if (rule.kind === "uuid") {
       const id = binds.length;
       binds.push(isUuid);
-      parts.push(`if(!binds[${id}](${expr})){${emitIssue(msg, pathExpr)}}`);
+      parts.push(
+        `else if(!binds[${id}](${expr})){${emitIssue(msg, pathExpr)}}`,
+      );
       continue;
     }
 
     if (rule.kind === "startsWith") {
       parts.push(
-        `if(!${expr}.startsWith(${JSON.stringify(rule.prefix)})){${emitIssue(msg, pathExpr)}}`,
+        `else if(!${expr}.startsWith(${JSON.stringify(rule.prefix)})){${emitIssue(msg, pathExpr)}}`,
       );
       continue;
     }
 
     if (rule.kind === "endsWith") {
       parts.push(
-        `if(!${expr}.endsWith(${JSON.stringify(rule.suffix)})){${emitIssue(msg, pathExpr)}}`,
+        `else if(!${expr}.endsWith(${JSON.stringify(rule.suffix)})){${emitIssue(msg, pathExpr)}}`,
       );
       continue;
     }
 
     if (rule.kind === "includes") {
       parts.push(
-        `if(!${expr}.includes(${JSON.stringify(rule.search)})){${emitIssue(msg, pathExpr)}}`,
+        `else if(!${expr}.includes(${JSON.stringify(rule.search)})){${emitIssue(msg, pathExpr)}}`,
       );
     }
   }
 
-  parts.push("}");
   return parts.join("");
 };
 
@@ -455,11 +469,11 @@ export const compileObjectValidate = <Output>(fields: ObjectField[]) => {
     const access = isIdentKey(field.key)
       ? `value.${field.key}`
       : `value[${keyLiteral}]`;
-    const hasKey = `${keyLiteral} in value`;
+    const hasKey = `Object.hasOwn(value,${keyLiteral})`;
     const fieldPrefix: PropertyKey[] = [field.key];
     const requiredPath = formatPathExpr(fieldPrefix);
 
-    lines.push(`if(!(${hasKey})){`);
+    lines.push(`if(!${hasKey}){`);
 
     if (!field.optional) {
       lines.push(emitIssue('"Required"', requiredPath));
