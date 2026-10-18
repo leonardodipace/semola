@@ -207,6 +207,55 @@ describe("semola/schema", () => {
     expect(result.error.issues[0]?.path).toEqual(["user", "email"]);
   });
 
+  test("composites prefix paths for inlined object elements", () => {
+    const item = object({ name: string() });
+
+    const arrayResult = array(item).safeParse([{ name: 123 }]);
+    expect(arrayResult.success).toBe(false);
+    if (!arrayResult.success) {
+      expect(arrayResult.error.issues[0]?.path).toEqual([0, "name"]);
+    }
+
+    const notObject = array(item).safeParse([5]);
+    expect(notObject.success).toBe(false);
+    if (!notObject.success) {
+      expect(notObject.error.issues[0]?.path).toEqual([0]);
+    }
+
+    const nested = object({ items: array(item) }).safeParse({
+      items: [{ name: 123 }],
+    });
+    expect(nested.success).toBe(false);
+    if (!nested.success) {
+      expect(nested.error.issues[0]?.path).toEqual(["items", 0, "name"]);
+    }
+
+    const tupleResult = tuple([item]).safeParse([{ name: 123 }]);
+    expect(tupleResult.success).toBe(false);
+    if (!tupleResult.success) {
+      expect(tupleResult.error.issues[0]?.path).toEqual([0, "name"]);
+    }
+
+    const recordResult = record(item).safeParse({ a: { name: 123 } });
+    expect(recordResult.success).toBe(false);
+    if (!recordResult.success) {
+      expect(recordResult.error.issues[0]?.path).toEqual(["a", "name"]);
+    }
+
+    const mixed = array(object({ name: string(), d: date() }));
+    const mixedName = mixed.safeParse([{ name: 123, d: new Date() }]);
+    expect(mixedName.success).toBe(false);
+    if (!mixedName.success) {
+      expect(mixedName.error.issues[0]?.path).toEqual([0, "name"]);
+    }
+
+    const mixedDate = mixed.safeParse([{ name: "ok", d: "not-a-date" }]);
+    expect(mixedDate.success).toBe(false);
+    if (!mixedDate.success) {
+      expect(mixedDate.error.issues[0]?.path).toEqual([0, "d"]);
+    }
+  });
+
   test("regex validation resets lastIndex for global patterns", () => {
     const schema = string().regex(/a/g);
 

@@ -980,13 +980,14 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
   }
 
   private checkObject(value: unknown) {
+    TLS_PATH.length = 0;
+
     if (this.compiled.needsPath) {
-      TLS_PATH.length = 0;
       this.compiled.run(value, TLS_PATH, TLS_ISSUES);
       return;
     }
 
-    this.compiled.check(value, TLS_ISSUES);
+    this.compiled.check(value, TLS_PATH, TLS_ISSUES);
   }
 
   public override validateStd(

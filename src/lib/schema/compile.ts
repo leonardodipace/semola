@@ -266,33 +266,33 @@ const isIdentKey = (key: string) => {
   return IDENT_KEY_PATTERN.test(key);
 };
 
-/** Issue path as a JS expression, or null at the root. */
+/**
+ * Extra path segments relative to the runtime `path` cursor.
+ * `emitIssue` prepends `path` so composites keep their prefix.
+ */
 export const formatPathExpr = (
   prefix: PropertyKey[],
   dynamic?: string,
 ): string | null => {
-  if (dynamic === undefined) {
-    if (prefix.length === 0) {
-      return null;
-    }
+  const segments = prefix.map((part) => JSON.stringify(part));
 
-    return JSON.stringify(prefix);
+  if (dynamic !== undefined) {
+    segments.push(dynamic);
   }
 
-  if (prefix.length === 0) {
-    return `[${dynamic}]`;
+  if (segments.length === 0) {
+    return null;
   }
 
-  const head = prefix.map((part) => JSON.stringify(part)).join(",");
-  return `[${head},${dynamic}]`;
+  return segments.join(",");
 };
 
-export const emitIssue = (messageLit: string, pathExpr: string | null) => {
-  if (!pathExpr) {
-    return `issues.push({message:${messageLit}});`;
+export const emitIssue = (messageLit: string, segments: string | null) => {
+  if (!segments) {
+    return `issues.push(path.length===0?{message:${messageLit}}:{message:${messageLit},path:path.slice()});`;
   }
 
-  return `issues.push({message:${messageLit},path:${pathExpr}});`;
+  return `issues.push({message:${messageLit},path:[...path,${segments}]});`;
 };
 
 export const emitStringRules = (
@@ -451,11 +451,10 @@ export const emitNumberRules = (
 export const compileObjectValidate = <Output>(fields: ObjectField[]) => {
   const runs: RunFn<unknown>[] = [];
   const binds: unknown[] = [];
-  const pathExprRoot = formatPathExpr([]);
   let needsPath = false;
 
   const lines = [
-    `if(typeof value!=='object'||value===null||Array.isArray(value)){${emitIssue('"Expected object"', pathExprRoot)}return value;}`,
+    `if(typeof value!=='object'||value===null||Array.isArray(value)){${emitIssue('"Expected object"', null)}return value;}`,
   ];
 
   for (let i = 0; i < fields.length; i++) {
@@ -471,12 +470,11 @@ export const compileObjectValidate = <Output>(fields: ObjectField[]) => {
       : `value[${keyLiteral}]`;
     const hasKey = `Object.hasOwn(value,${keyLiteral})`;
     const fieldPrefix: PropertyKey[] = [field.key];
-    const requiredPath = formatPathExpr(fieldPrefix);
 
     lines.push(`if(!${hasKey}){`);
 
     if (!field.optional) {
-      lines.push(emitIssue('"Required"', requiredPath));
+      lines.push(emitIssue('"Required"', formatPathExpr(fieldPrefix)));
     }
 
     const inline = field.toInline(access, fieldPrefix, binds);
@@ -501,29 +499,25 @@ export const compileObjectValidate = <Output>(fields: ObjectField[]) => {
   const factory = new Function(
     "binds",
     "runs",
-    needsPath
-      ? `return function(value,path,issues){${lines.join("")}return value;}`
-      : `return function(value,issues){${lines.join("")}}`,
+    `return function(value,path,issues){${lines.join("")}return value;}`,
   );
+
+  const run = factory(binds, runs) as RunFn<Output>;
 
   if (needsPath) {
     return {
       needsPath: true as const,
-      run: factory(binds, runs) as RunFn<Output>,
+      run,
     };
   }
 
-  const check = factory(binds, runs) as (
-    value: unknown,
-    issues: Issue[],
-  ) => void;
-
   return {
     needsPath: false as const,
-    check,
-    run: ((value, _path, issues) => {
-      check(value, issues);
-      return value as Output;
-    }) as RunFn<Output>,
+    check: run as (
+      value: unknown,
+      path: PropertyKey[],
+      issues: Issue[],
+    ) => void,
+    run,
   };
 };
