@@ -27,7 +27,6 @@ import type {
   JsonSchemaMode,
   LiteralValue,
   ObjectShape,
-  Path,
   SafeParseResult,
   SchemaBase,
   StandardJSONSchemaV1,
@@ -35,9 +34,11 @@ import type {
 } from "./types.js";
 
 const VENDOR = "semola";
+const DEFAULT_JSON_SCHEMA_TARGET = "draft-2020-12" as const;
+const BIGINT_FAILURE = 0n;
 
 const assertJsonSchemaTarget = (target: StandardJSONSchemaV1.Target) => {
-  if (target === "draft-2020-12") {
+  if (target === DEFAULT_JSON_SCHEMA_TARGET) {
     return;
   }
 
@@ -61,7 +62,7 @@ const childJsonSchema = (
   return schema["~standard"].jsonSchema.input({ target }) as JsonSchema;
 };
 
-// Sync validation is single-threaded; reuse buffers when not re-entrant.
+/** Sync validation reuses these when not re-entrant. */
 const TLS_PATH: PropertyKey[] = [];
 const TLS_ISSUES: Issue[] = [];
 let tlsDepth = 0;
@@ -94,6 +95,20 @@ const runTopLevel = <Output>(run: RunFn<Output>, value: unknown) => {
   } finally {
     tlsDepth -= 1;
   }
+};
+
+const tryEnterObjectTls = () => {
+  if (tlsDepth !== 0) {
+    return false;
+  }
+
+  tlsDepth = 1;
+  TLS_ISSUES.length = 0;
+  return true;
+};
+
+const leaveObjectTls = () => {
+  tlsDepth = 0;
 };
 
 export abstract class Schema<Output = unknown>
@@ -169,7 +184,9 @@ export abstract class Schema<Output = unknown>
     return { success: true, data: result.output as Output };
   }
 
-  public toJsonSchema(target: StandardJSONSchemaV1.Target = "draft-2020-12") {
+  public toJsonSchema(
+    target: StandardJSONSchemaV1.Target = DEFAULT_JSON_SCHEMA_TARGET,
+  ) {
     assertJsonSchemaTarget(target);
     return this["~standard"].jsonSchema.output({ target });
   }
@@ -525,7 +542,7 @@ export class BigintSchema extends Schema<bigint> {
       (value, path, issues) => {
         if (typeof value !== "bigint") {
           pushIssue(issues, "Expected bigint", path);
-          return 0n;
+          return BIGINT_FAILURE;
         }
 
         return value;
@@ -783,7 +800,6 @@ export class ArraySchema<Output> extends Schema<Output[]> {
     binds: unknown[],
     dynamicIndex?: string,
   ) {
-    // Array under a dynamic index is rare; skip codegen.
     if (dynamicIndex !== undefined) {
       return null;
     }
@@ -944,24 +960,25 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
     this.shape = shape;
   }
 
+  private checkObject(value: unknown) {
+    if (this.compiled.needsPath) {
+      TLS_PATH.length = 0;
+      this.compiled.run(value, TLS_PATH, TLS_ISSUES);
+      return;
+    }
+
+    this.compiled.check(value, TLS_ISSUES);
+  }
+
   public override validateStd(
     value: unknown,
   ): StandardSchemaV1.Result<InferObjectOutput<Shape>> {
-    if (tlsDepth !== 0) {
+    if (!tryEnterObjectTls()) {
       return super.validateStd(value);
     }
 
-    tlsDepth = 1;
-
     try {
-      TLS_ISSUES.length = 0;
-
-      if (this.compiled.needsPath) {
-        TLS_PATH.length = 0;
-        this.compiled.run(value, TLS_PATH, TLS_ISSUES);
-      } else {
-        this.compiled.check(value, TLS_ISSUES);
-      }
+      this.checkObject(value);
 
       if (TLS_ISSUES.length > 0) {
         return { issues: TLS_ISSUES.slice() };
@@ -969,26 +986,17 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
 
       return { value: value as InferObjectOutput<Shape> };
     } finally {
-      tlsDepth = 0;
+      leaveObjectTls();
     }
   }
 
   public override parse(data: unknown): InferObjectOutput<Shape> {
-    if (tlsDepth !== 0) {
+    if (!tryEnterObjectTls()) {
       return super.parse(data);
     }
 
-    tlsDepth = 1;
-
     try {
-      TLS_ISSUES.length = 0;
-
-      if (this.compiled.needsPath) {
-        TLS_PATH.length = 0;
-        this.compiled.run(data, TLS_PATH, TLS_ISSUES);
-      } else {
-        this.compiled.check(data, TLS_ISSUES);
-      }
+      this.checkObject(data);
 
       if (TLS_ISSUES.length > 0) {
         throw new SchemaError(TLS_ISSUES.slice());
@@ -996,28 +1004,19 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
 
       return data as InferObjectOutput<Shape>;
     } finally {
-      tlsDepth = 0;
+      leaveObjectTls();
     }
   }
 
   public override safeParse(
     data: unknown,
   ): SafeParseResult<InferObjectOutput<Shape>> {
-    if (tlsDepth !== 0) {
+    if (!tryEnterObjectTls()) {
       return super.safeParse(data);
     }
 
-    tlsDepth = 1;
-
     try {
-      TLS_ISSUES.length = 0;
-
-      if (this.compiled.needsPath) {
-        TLS_PATH.length = 0;
-        this.compiled.run(data, TLS_PATH, TLS_ISSUES);
-      } else {
-        this.compiled.check(data, TLS_ISSUES);
-      }
+      this.checkObject(data);
 
       if (TLS_ISSUES.length > 0) {
         const issues = TLS_ISSUES.slice();
@@ -1033,7 +1032,7 @@ export class ObjectSchema<Shape extends ObjectShape> extends Schema<
         data: data as InferObjectOutput<Shape>,
       };
     } finally {
-      tlsDepth = 0;
+      leaveObjectTls();
     }
   }
 
@@ -1366,7 +1365,7 @@ export const safeParse = <Output>(schema: Schema<Output>, data: unknown) => {
   return schema.safeParse(data);
 };
 
-/** Namespace of the same helpers. Prefer named imports when you want tree-shaking. */
+/** Same helpers as a namespace. Prefer named imports for tree-shaking. */
 export const s = {
   string,
   number,
@@ -1395,5 +1394,3 @@ export const s = {
   parse,
   safeParse,
 };
-
-export type { Path };

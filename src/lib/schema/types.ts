@@ -32,10 +32,8 @@ export type JsonSchema = Record<string, unknown>;
 
 export type JsonSchemaMode = "input" | "output";
 
-/** Covariant schema surface for object/tuple/union composition. */
 export interface SchemaBase<out Output = unknown> {
   readonly schemaType: string;
-  /** Hot-path validator used by composite schemas. */
   readonly run: (
     value: unknown,
     path: PropertyKey[],

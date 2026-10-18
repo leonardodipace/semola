@@ -18,9 +18,14 @@ export type StringRule =
   | { kind: "endsWith"; suffix: string; message: string }
   | { kind: "includes"; search: string; message: string };
 
-/** RFC 4122 / 9562 UUID (version 1-8, variant 10xx). Fixed shape - no ReDoS. */
+/** RFC 4122 / 9562 UUID (version 1-8, variant 10xx). */
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const IDENT_KEY_PATTERN = /^[A-Za-z_$][\w$]*$/;
+
+/** Space and ASCII control characters (rejected in emails). */
+const ASCII_SPACE_CODE = 32;
 
 export const isUuid = (value: string) => {
   return UUID_PATTERN.test(value);
@@ -48,7 +53,6 @@ export type ObjectField = {
   ) => string | null;
 };
 
-/** Linear email check - no regex backtracking. */
 export const isEmail = (value: string) => {
   const at = value.indexOf("@");
 
@@ -72,7 +76,7 @@ export const isEmail = (value: string) => {
   }
 
   for (let i = 0; i < value.length; i++) {
-    if (value.charCodeAt(i) <= 32) {
+    if (value.charCodeAt(i) <= ASCII_SPACE_CODE) {
       return false;
     }
   }
@@ -185,6 +189,7 @@ export const applyStringRules = (
     if (rule.kind === "includes") {
       if (!value.includes(rule.search)) {
         pushIssue(issues, rule.message, path);
+        return;
       }
     }
   }
@@ -241,18 +246,20 @@ export const applyNumberRules = (
       continue;
     }
 
-    if (value < 0) {
-      pushIssue(issues, rule.message, path);
-      return;
+    if (rule.kind === "nonnegative") {
+      if (value < 0) {
+        pushIssue(issues, rule.message, path);
+        return;
+      }
     }
   }
 };
 
 const isIdentKey = (key: string) => {
-  return /^[A-Za-z_$][\w$]*$/.test(key);
+  return IDENT_KEY_PATTERN.test(key);
 };
 
-/** JS expression for an issue path. null = omit path (root). */
+/** Issue path as a JS expression, or null at the root. */
 export const formatPathExpr = (
   prefix: PropertyKey[],
   dynamic?: string,
@@ -419,13 +426,14 @@ export const emitNumberRules = (
       continue;
     }
 
-    parts.push(`else if(${expr}<0){${emitIssue(msg, pathExpr)}}`);
+    if (rule.kind === "nonnegative") {
+      parts.push(`else if(${expr}<0){${emitIssue(msg, pathExpr)}}`);
+    }
   }
 
   return parts.join("");
 };
 
-/** Compile a top-level validator that skips the path argument entirely when fully inlined. */
 export const compileObjectValidate = <Output>(fields: ObjectField[]) => {
   const runs: RunFn<unknown>[] = [];
   const binds: unknown[] = [];
@@ -485,14 +493,9 @@ export const compileObjectValidate = <Output>(fields: ObjectField[]) => {
   );
 
   if (needsPath) {
-    const run = factory(binds, runs) as RunFn<Output>;
-
     return {
       needsPath: true as const,
-      run,
-      check: (value: unknown, path: PropertyKey[], issues: Issue[]) => {
-        run(value, path, issues);
-      },
+      run: factory(binds, runs) as RunFn<Output>,
     };
   }
 
