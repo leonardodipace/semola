@@ -1,6 +1,6 @@
 ---
 title: Policy
-description: Allow / forbid rules with composable conditions
+description: Semola ABAC authorization - allow and forbid rules with composable conditions
 ---
 
 Express authorization as small rules over an object. Forbid always wins over allow. If no rule matches, the action is denied.

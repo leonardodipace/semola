@@ -1,6 +1,6 @@
 ---
 title: Workflow
-description: Durable multi-step jobs on Redis with resumable steps
+description: Semola durable workflows - multi-step Redis jobs with resumable steps and retries
 ---
 
 Durable workflows on Redis. Event history, deterministic replay, inline steps, multi-replica leases, and automatic orphan recovery.

@@ -1,6 +1,6 @@
 ---
 title: ORM
-description: Typed tables, queries, and SQL migrations on Bun SQL (SQLite or Postgres)
+description: Semola ORM - typed tables, queries, and migrations for Bun SQL (SQLite or Postgres)
 ---
 
 Define tables once, then use typed create, find, update, and delete helpers. Semola uses Bun's SQL client and supports SQLite and Postgres.

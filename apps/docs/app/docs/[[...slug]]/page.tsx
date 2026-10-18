@@ -57,13 +57,36 @@ export async function generateMetadata(
   const page = source.getPage(params.slug);
   if (!page) notFound();
 
+  const title = page.data.title;
+  const description = page.data.description;
+  const image = getPageImageUrl(page).url;
+  const canonical = page.url;
+
   return {
-    title: page.data.title,
-    description: page.data.description,
+    title,
+    description,
+    alternates: {
+      canonical,
+    },
     openGraph: {
-      title: page.data.title,
-      description: page.data.description,
-      images: getPageImageUrl(page).url,
+      type: "article",
+      title,
+      description,
+      url: canonical,
+      images: [
+        {
+          url: image,
+          width: 1200,
+          height: 630,
+          alt: `${title} · Semola`,
+        },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: [image],
     },
   };
 }

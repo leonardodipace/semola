@@ -1,6 +1,6 @@
 ---
 title: PubSub
-description: Typed Redis pub/sub channels
+description: Semola typed Redis pub/sub channels for real-time messaging
 ---
 
 Publish and subscribe to JSON messages on a Redis channel, with TypeScript checking the payload shape.

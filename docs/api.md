@@ -1,6 +1,6 @@
 ---
 title: API
-description: Typed HTTP routes, middleware, groups, and OpenAPI on Bun
+description: Build typed HTTP APIs on Bun with Semola - routes, middleware, groups, and OpenAPI
 ---
 
 Build HTTP APIs with validated requests and responses. Schemas use any [Standard Schema](https://standardschema.dev/) library ([`semola/schema`](/docs/schema), Zod, Valibot, ArkType, …). OpenAPI comes from the same route definitions.

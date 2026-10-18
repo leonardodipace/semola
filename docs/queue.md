@@ -1,6 +1,6 @@
 ---
 title: Queue
-description: Redis-backed background jobs with retries, reclaim, and concurrency
+description: Semola Redis job queue - background jobs with retries, reclaim, and concurrency
 ---
 
 Run work in the background with Redis. Jobs are JSON-serialized, claimed into an `inflight` ZSET with a visibility deadline, retried on a durable `retry` ZSET, and reclaimed if a worker dies before ack.

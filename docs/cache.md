@@ -1,6 +1,6 @@
 ---
 title: Cache
-description: Typed Redis cache with TTL and optional key prefix
+description: Semola typed Redis cache with TTL and optional key prefixes
 ---
 
 Store and load typed values in Redis. Values are JSON by default.
