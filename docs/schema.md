@@ -147,7 +147,7 @@ type UserInput = InferInput<typeof User>;
 
 ## Performance
 
-Validation is sync-only and allocation-light on the success path (shared path/issue buffers, compiled object checks, same-reference outputs).
+Validation is sync-only and allocation-light on the success path (shared path/issue buffers, compiled object checks). Object schemas return the input object; each `safeParse` / `~standard.validate` success result is a fresh wrapper.
 
 ## Standard Schema and JSON Schema
 
