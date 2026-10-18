@@ -30,22 +30,27 @@ export const enableSqliteForeignKeys = (sql: Bun.SQL) => {
 
 // ponytail: one writer per SQLite connection; queue begins instead of failing
 const sqliteBeginTail = new WeakMap<Bun.SQL, Promise<unknown>>();
-const sqliteBeginContext = new AsyncLocalStorage<true>();
+const sqliteBeginContext = new AsyncLocalStorage<Set<Bun.SQL>>();
 
 export const beginSqlite = <TResult>(
   sql: Bun.SQL,
   run: (tx: Bun.TransactionSQL) => Promise<TResult>,
 ) => {
-  if (sqliteBeginContext.getStore()) {
+  if (sqliteBeginContext.getStore()?.has(sql)) {
     return sql.begin(run);
   }
 
   const previous = sqliteBeginTail.get(sql) ?? Promise.resolve();
 
-  const next = previous.then(
-    () => sqliteBeginContext.run(true, () => sql.begin(run)),
-    () => sqliteBeginContext.run(true, () => sql.begin(run)),
-  );
+  const start = () => {
+    const active = sqliteBeginContext.getStore();
+    const nextActive = new Set(active);
+    nextActive.add(sql);
+
+    return sqliteBeginContext.run(nextActive, () => sql.begin(run));
+  };
+
+  const next = previous.then(start, start);
 
   sqliteBeginTail.set(
     sql,

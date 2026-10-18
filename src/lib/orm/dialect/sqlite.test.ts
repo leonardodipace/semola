@@ -50,4 +50,39 @@ describe("sqlite dialect", () => {
 
     await sql.close();
   });
+
+  test("beginSqlite continues the queue after a rejected transaction", async () => {
+    const sql = new Bun.SQL(":memory:");
+
+    const first = beginSqlite(sql, async () => {
+      throw new Error("boom");
+    });
+
+    const second = beginSqlite(sql, async () => "ok");
+
+    await expect(first).rejects.toThrow("boom");
+    expect(await second).toBe("ok");
+
+    await sql.close();
+  });
+
+  test("beginSqlite still queues a different connection from inside another transaction", async () => {
+    const outer = new Bun.SQL(":memory:");
+    const other = new Bun.SQL(":memory:");
+
+    const holdOther = beginSqlite(other, async () => {
+      await Bun.sleep(30);
+    });
+
+    await Bun.sleep(5);
+
+    await beginSqlite(outer, async () => {
+      expect(await beginSqlite(other, async () => "ok")).toBe("ok");
+    });
+
+    await holdOther;
+
+    await outer.close();
+    await other.close();
+  });
 });
