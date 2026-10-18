@@ -85,4 +85,40 @@ describe("sqlite dialect", () => {
     await outer.close();
     await other.close();
   });
+
+  test("beginSqlite queues detached work after the parent transaction ends", async () => {
+    const sql = new Bun.SQL(":memory:");
+    let releaseDetached!: () => void;
+    const detachedGate = new Promise<void>((resolve) => {
+      releaseDetached = resolve;
+    });
+    let detachedStarted!: () => void;
+    const detachedReady = new Promise<void>((resolve) => {
+      detachedStarted = resolve;
+    });
+
+    let detached!: Promise<string>;
+
+    await beginSqlite(sql, async () => {
+      detached = (async () => {
+        detachedStarted();
+        await detachedGate;
+
+        return beginSqlite(sql, async () => "detached");
+      })();
+    });
+
+    await detachedReady;
+
+    const hold = beginSqlite(sql, async () => {
+      releaseDetached();
+      await Bun.sleep(30);
+
+      return "hold";
+    });
+
+    expect(await Promise.all([hold, detached])).toEqual(["hold", "detached"]);
+
+    await sql.close();
+  });
 });
