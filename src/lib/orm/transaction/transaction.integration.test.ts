@@ -258,5 +258,36 @@ for (const live of integrationAdapters()) {
         await orm.$raw.close();
       },
     );
+
+    test.skipIf(live.adapter !== "sqlite")(
+      "serializes concurrent $transaction calls",
+      async () => {
+        const orm = await open();
+
+        const run = (id: string, email: string) =>
+          orm.$transaction(async (tx) => {
+            await tx.users.create({
+              data: {
+                id,
+                name: id,
+                email,
+              },
+            });
+            await Bun.sleep(10);
+          });
+
+        const results = await Promise.allSettled([
+          run(userId, "alice@example.com"),
+          run(userId2, "bob@example.com"),
+        ]);
+
+        expect(results.every((result) => result.status === "fulfilled")).toBe(
+          true,
+        );
+        expect(await orm.users.findMany()).toHaveLength(2);
+
+        await orm.$raw.close();
+      },
+    );
   });
 }

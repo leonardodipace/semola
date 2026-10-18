@@ -205,6 +205,39 @@ for (const live of integrationAdapters()) {
       await orm.$raw.close();
     });
 
+    test.skipIf(live.adapter !== "sqlite")(
+      "serializes concurrent relation writes that open a transaction",
+      async () => {
+        const orm = await open();
+        await createAda(orm);
+
+        const postId2 = "p2";
+        const results = await Promise.allSettled([
+          orm.posts.create({
+            data: {
+              id: postId,
+              title: "First",
+              author: { connect: { id } },
+            },
+          }),
+          orm.posts.create({
+            data: {
+              id: postId2,
+              title: "Second",
+              author: { connect: { id } },
+            },
+          }),
+        ]);
+
+        expect(results.every((result) => result.status === "fulfilled")).toBe(
+          true,
+        );
+        expect(await orm.posts.findMany()).toHaveLength(2);
+
+        await orm.$raw.close();
+      },
+    );
+
     test("$ping() resolves", async () => {
       const orm = await open();
 

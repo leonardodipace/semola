@@ -3,24 +3,33 @@ import type { Table } from "../table/types.js";
 import { SqlDialect } from "./dialect.js";
 import { POSTGRES_SPEC } from "./postgres.js";
 import { SQLITE_SPEC } from "./sqlite.js";
-import type { Adapter, Dialect, GetDialectInput } from "./types.js";
+import type {
+  Adapter,
+  Dialect,
+  DialectSpec,
+  GetDialectInput,
+} from "./types.js";
+
+export const getDialectSpec = (adapter: Adapter): DialectSpec => {
+  switch (adapter) {
+    case "sqlite":
+      return SQLITE_SPEC;
+    case "postgres":
+      return POSTGRES_SPEC;
+    default:
+      throw new Error(`Unsupported adapter: ${adapter}`);
+  }
+};
 
 export const getDialect = <T extends Table, R extends TableRelations>(
   input: GetDialectInput<T, R>,
 ): Dialect<T, R> => {
-  const dialectInput = {
-    ...input,
+  return new SqlDialect({
+    spec: getDialectSpec(input.adapter),
+    table: input.table,
+    relations: input.relations,
     tableRelationsMap: input.tableRelationsMap ?? new Map(),
-  };
-
-  switch (input.adapter) {
-    case "sqlite":
-      return new SqlDialect({ spec: SQLITE_SPEC, ...dialectInput });
-    case "postgres":
-      return new SqlDialect({ spec: POSTGRES_SPEC, ...dialectInput });
-    default:
-      throw new Error(`Unsupported adapter: ${input.adapter}`);
-  }
+  });
 };
 
 export type { Adapter, Dialect };

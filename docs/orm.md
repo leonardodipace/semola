@@ -483,6 +483,8 @@ await db.$transaction(async (tx) => {
 });
 ```
 
+On SQLite, overlapping `$transaction` calls (and nested relation writes that open a transaction) are queued per client so only one writer runs at a time. Nested `$transaction` calls from the root client inside an active transaction still fail.
+
 ## Reference
 
 ### `createOrm` options

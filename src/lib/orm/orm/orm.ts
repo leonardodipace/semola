@@ -1,5 +1,5 @@
 import { mightThrowSync } from "../../errors/index.js";
-import { enableSqliteForeignKeys } from "../dialect/sqlite.js";
+import { getDialectSpec } from "../dialect/index.js";
 import type { Table } from "../table/types.js";
 import { pickGlobalHooks } from "./hook-runner.js";
 import { TableClientImpl } from "./table-client.js";
@@ -131,11 +131,7 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
     return async <TResult>(
       callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
     ): Promise<TResult> => {
-      if (this.options.adapter === "sqlite") {
-        await enableSqliteForeignKeys(this.$raw);
-      }
-
-      return await this.$raw.begin(async (txSql) => {
+      const run = async (txSql: Bun.TransactionSQL) => {
         const txTableClients = this.buildTableClients(txSql);
         const txClient: TransactionClient<T, R> = {
           ...txTableClients,
@@ -143,7 +139,9 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
         };
 
         return await callback(txClient);
-      });
+      };
+
+      return await getDialectSpec(this.options.adapter).begin(this.$raw, run);
     };
   }
 

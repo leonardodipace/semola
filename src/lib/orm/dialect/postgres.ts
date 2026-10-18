@@ -12,4 +12,5 @@ export const POSTGRES_SPEC: DialectSpec = {
     groupBy: "",
     requiresOrderByPrefix: true,
   }),
+  begin: (sql, run) => sql.begin(run),
 };
