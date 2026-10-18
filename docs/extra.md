@@ -21,7 +21,6 @@ import type {
   ErrorMetadataType,
   HookContextType,
   OnFailedAttemptContextType,
-  RetryContext,
   RetryOnErrorContextType,
   RetryOptions,
   RetryOutcomeType,
