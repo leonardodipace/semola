@@ -28,6 +28,7 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 | **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`    |
 | **⏰ Cron**          | In-memory and OS cron scheduler for periodic task execution   | `semola/cron`     |
 | **🔁 Workflow**      | Durable resumable workflows with retries and hooks   | `semola/workflow` |
+| **📐 Schema**        | Standard Schema validation with JSON Schema output     | `semola/schema`   |
 | **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors`   |
 | **📃 Logging**       | A simple logging utility                               | `semola/logging`  |
 | **⌨️ Prompts**       | Interactive zero-dependency CLI prompts                | `semola/prompts`  |
@@ -346,7 +347,7 @@ _Higher is better for req/sec, lower is better for latency._
 - 🔒 **Type safety that actually works**: From request validation to response serialization, TypeScript catches errors before they hit production.
 - 📄 **Documentation writes itself**: Auto-generated OpenAPI specs from your code. No more stale docs.
 - 🚫 **Error handling reimagined**: No more try-catch spaghetti. Clean result tuples that compose beautifully.
-- ⚡ **Schema validation freedom**: Use Zod, Valibot, ArkType, or any Standard Schema library. Your choice.
+- ⚡ **Schema validation freedom**: Use `semola/schema`, Zod, Valibot, ArkType, or any Standard Schema library. Your choice.
 - 🔋 **Batteries included**: Everything you need in one cohesive toolkit. No 50 dependencies to audit.
 
 ---
@@ -363,6 +364,7 @@ Run the docs site locally: `bun run docs:dev` (Fumadocs at http://localhost:3000
 - [Policy](./docs/policy.md) - Policy-based authorization
 - [i18n](./docs/i18n.md) - Type-safe internationalization
 - [Cache](./docs/cache.md) - Redis cache wrapper with TTL
+- [Schema](./docs/schema.md) - Standard Schema validation with JSON Schema output
 - [Errors](./docs/errors.md) - Result-based error handling
 - [Logging](./docs/logging.md) - Logging utility
 - [Prompts](./docs/prompts.md) - Interactive CLI prompts
