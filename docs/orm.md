@@ -126,6 +126,23 @@ Use `.dbDefault()` when adding a `NOT NULL` column. `{ as: "sql" }` is for SQL e
 ### Relations
 
 ```typescript
+import {
+  createOrm,
+  defineTable,
+  many,
+  one,
+  string,
+  uuid,
+} from "semola/orm";
+
+const users = defineTable({
+  sqlName: "users",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    email: string("email").notNull(),
+  },
+});
+
 const posts = defineTable({
   sqlName: "posts",
   columns: {

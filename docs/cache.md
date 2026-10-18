@@ -58,6 +58,12 @@ Pass `serializer` / `deserializer` if JSON is not enough. Keep them inverse of e
 `set()` serializes the value, applies the configured TTL, and returns the original typed value.
 
 ```typescript
+import { Cache } from "semola/cache";
+
+declare const redisClient: Bun.RedisClient;
+
+const users = new Cache<{ name: string; email: string }>({ redis: redisClient });
+
 await users.set("1", { name: "Ada", email: "ada@example.com" });
 ```
 

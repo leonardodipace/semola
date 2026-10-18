@@ -105,11 +105,16 @@ const [customError] = await mightThrow<never, { code: string }>(
 ```typescript
 import { Queue } from "semola/queue";
 
-const queue = new Queue({
+declare const redisClient: Bun.RedisClient;
+declare function sendEmail(to: string, subject: string): Promise<void>;
+
+type EmailJob = { to: string; subject: string };
+
+const queue = new Queue<EmailJob>({
   name: "emails",
   redis: redisClient,
   handler: async (data) => {
-    await sendEmail(data);
+    await sendEmail(data.to, data.subject);
   },
 });
 
@@ -121,9 +126,14 @@ await queue.enqueue({ to: "user@example.com", subject: "Hello" });
 ```typescript
 import { PubSub } from "semola/pubsub";
 
-const pubsub = new PubSub({
-  subscriber: redisClient,
-  publisher: redisClient,
+declare const redisSubscriber: Bun.RedisClient;
+declare const redisPublisher: Bun.RedisClient;
+
+type Notification = { userId: number; text: string };
+
+const pubsub = new PubSub<Notification>({
+  subscriber: redisSubscriber,
+  publisher: redisPublisher,
   channel: "notifications",
 });
 

@@ -1,10 +1,16 @@
 {
   "compilerOptions": {
+    "lib": ["ESNext"],
+    "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "target": "ESNext",
-    "strict": false,
+    "strict": true,
     "skipLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
     "noEmit": true,
     "types": ["bun"],
     "paths": {

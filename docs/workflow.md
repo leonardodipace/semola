@@ -26,6 +26,8 @@ Also exported: `DuplicateWorkflowError`, `NonRetryableStepError`, `Serialization
 This registers embedded workers, starts one execution, then reads its current status. During replay, completed named steps are loaded from Redis instead of running again.
 
 ```typescript
+import { defineWorkflow } from "semola/workflow";
+
 const onboard = defineWorkflow<{ userId: string }, { ok: true }>({
   name: "onboard-user",
   redis: redisClient,

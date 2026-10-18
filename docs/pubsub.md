@@ -18,6 +18,11 @@ import { PubSub } from "semola/pubsub";
 This subscribes one handler, publishes a typed JSON message, then removes that handler.
 
 ```typescript
+import { PubSub } from "semola/pubsub";
+
+declare const redisSubscriber: Bun.RedisClient;
+declare const redisPublisher: Bun.RedisClient;
+
 type UserEvent = {
   userId: string;
   action: "login" | "logout";

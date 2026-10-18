@@ -20,6 +20,11 @@ import { Queue } from "semola/queue";
 Constructing the queue starts workers (default concurrency `1`). `enqueue()` stores the email job in Redis, and `stop()` later drains active work before shutdown.
 
 ```typescript
+import { Queue } from "semola/queue";
+
+declare const redisClient: Bun.RedisClient;
+declare function sendEmail(to: string, subject: string): Promise<void>;
+
 type EmailJob = {
   to: string;
   subject: string;
