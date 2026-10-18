@@ -28,8 +28,10 @@ Type-safe APIs, Redis queues, pub/sub, i18n, caching & auth with tree-shakeable 
 | **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`    |
 | **⏰ Cron**          | In-memory and OS cron scheduler for periodic task execution   | `semola/cron`     |
 | **🔁 Workflow**      | Durable resumable workflows with retries and hooks   | `semola/workflow` |
+| **📐 Schema**        | Standard Schema validation with JSON Schema output     | `semola/schema`   |
 | **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors`   |
 | **📃 Logging**       | A simple logging utility                               | `semola/logging`  |
+| **📊 Otel**          | Zero-dependency OTLP/HTTP JSON traces, metrics, and logs | `semola/otel`     |
 | **⌨️ Prompts**       | Interactive zero-dependency CLI prompts                | `semola/prompts`  |
 | **🖥️ CLI**           | Non-interactive CLI builder with schema validation     | `semola/cli`      |
 | **🗄️ ORM**           | Type-safe data layer with query APIs                   | `semola/orm`      |
@@ -51,7 +53,7 @@ npm install semola
 
 ```typescript
 import { Api } from "semola/api";
-import { z } from "zod";
+import { object, string } from "semola/schema";
 
 const api = new Api();
 
@@ -59,17 +61,17 @@ api.defineRoute({
   path: "/hello/:name",
   method: "GET",
   request: {
-    params: z.object({ name: z.string() }),
+    params: object({ name: string() }),
   },
   response: {
-    200: z.object({ message: z.string() }),
+    200: object({ message: string() }),
   },
   handler: async (ctx) => {
-    return ctx.json(200, { message: `Hello, ${ctx.params.name}!` });
+    return ctx.json(200, { message: `Hello, ${ctx.req.params.name}!` });
   },
 });
 
-api.listen(3000);
+api.serve(3000);
 console.log("Server running on http://localhost:3000");
 ```
 
@@ -298,11 +300,11 @@ await callable();
 ## 📦 Installation
 
 ```bash
-# Install core package
+# Install core package (validation built in via semola/schema)
 bun add semola
 
-# Optional: Install validation library (Zod, Valibot, ArkType)
-bun add zod
+# Optional: another Standard Schema library (Zod, Valibot, ArkType)
+# bun add zod
 ```
 
 ---
@@ -346,7 +348,7 @@ _Higher is better for req/sec, lower is better for latency._
 - 🔒 **Type safety that actually works**: From request validation to response serialization, TypeScript catches errors before they hit production.
 - 📄 **Documentation writes itself**: Auto-generated OpenAPI specs from your code. No more stale docs.
 - 🚫 **Error handling reimagined**: No more try-catch spaghetti. Clean result tuples that compose beautifully.
-- ⚡ **Schema validation freedom**: Use Zod, Valibot, ArkType, or any Standard Schema library. Your choice.
+- ⚡ **Schema validation freedom**: Use `semola/schema`, Zod, Valibot, ArkType, or any Standard Schema library. Your choice.
 - 🔋 **Batteries included**: Everything you need in one cohesive toolkit. No 50 dependencies to audit.
 
 ---
@@ -363,8 +365,10 @@ Run the docs site locally: `bun run docs:dev` (Fumadocs at http://localhost:3000
 - [Policy](./docs/policy.md) - Policy-based authorization
 - [i18n](./docs/i18n.md) - Type-safe internationalization
 - [Cache](./docs/cache.md) - Redis cache wrapper with TTL
+- [Schema](./docs/schema.md) - Standard Schema validation with JSON Schema output
 - [Errors](./docs/errors.md) - Result-based error handling
 - [Logging](./docs/logging.md) - Logging utility
+- [Otel](./docs/otel.md) - Zero-dependency OTLP/HTTP JSON traces, metrics, and logs
 - [Prompts](./docs/prompts.md) - Interactive CLI prompts
 - [CLI](./docs/cli.md) - Non-interactive CLI builder
 - [ORM](./docs/orm.md) - Type-safe data layer with SQLite support
