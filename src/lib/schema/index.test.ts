@@ -277,6 +277,19 @@ describe("semola/schema", () => {
     expect(() => schema.parse({ name: "Ada", age: 1.5 })).toThrow(SchemaError);
   });
 
+  test("top-level format helpers match method forms", () => {
+    const id = "550e8400-e29b-41d4-a716-446655440000";
+
+    expect(s.email().parse("a@b.c")).toBe("a@b.c");
+    expect(s.url().parse("https://example.com")).toBe("https://example.com");
+    expect(s.uuid().parse(id)).toBe(id);
+    expect(s.int().parse(3)).toBe(3);
+
+    expect(() => s.email().parse("bad")).toThrow(SchemaError);
+    expect(() => s.uuid().parse("not-a-uuid")).toThrow(SchemaError);
+    expect(() => s.int().parse(1.5)).toThrow(SchemaError);
+  });
+
   test("success results are not overwritten by later validates", () => {
     const schema = object({ id: number() });
     const first = schema.safeParse({ id: 1 });

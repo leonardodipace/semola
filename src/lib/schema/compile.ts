@@ -13,9 +13,18 @@ export type StringRule =
   | { kind: "regex"; pattern: RegExp; message: string }
   | { kind: "email"; message: string }
   | { kind: "url"; message: string }
+  | { kind: "uuid"; message: string }
   | { kind: "startsWith"; prefix: string; message: string }
   | { kind: "endsWith"; suffix: string; message: string }
   | { kind: "includes"; search: string; message: string };
+
+/** RFC 4122 / 9562 UUID (version 1-8, variant 10xx). Fixed shape - no ReDoS. */
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export const isUuid = (value: string) => {
+  return UUID_PATTERN.test(value);
+};
 
 export type NumberRule =
   | { kind: "min"; value: number; message: string }
@@ -149,6 +158,14 @@ export const applyStringRules = (
       continue;
     }
 
+    if (rule.kind === "uuid") {
+      if (!isUuid(value)) {
+        pushIssue(issues, rule.message, path);
+        return;
+      }
+      continue;
+    }
+
     if (rule.kind === "startsWith") {
       if (!value.startsWith(rule.prefix)) {
         pushIssue(issues, rule.message, path);
@@ -165,8 +182,10 @@ export const applyStringRules = (
       continue;
     }
 
-    if (!value.includes(rule.search)) {
-      pushIssue(issues, rule.message, path);
+    if (rule.kind === "includes") {
+      if (!value.includes(rule.search)) {
+        pushIssue(issues, rule.message, path);
+      }
     }
   }
 };
@@ -325,6 +344,13 @@ export const emitStringRules = (
       continue;
     }
 
+    if (rule.kind === "uuid") {
+      const id = binds.length;
+      binds.push(isUuid);
+      parts.push(`if(!binds[${id}](${expr})){${emitIssue(msg, pathExpr)}}`);
+      continue;
+    }
+
     if (rule.kind === "startsWith") {
       parts.push(
         `if(!${expr}.startsWith(${JSON.stringify(rule.prefix)})){${emitIssue(msg, pathExpr)}}`,
@@ -339,9 +365,11 @@ export const emitStringRules = (
       continue;
     }
 
-    parts.push(
-      `if(!${expr}.includes(${JSON.stringify(rule.search)})){${emitIssue(msg, pathExpr)}}`,
-    );
+    if (rule.kind === "includes") {
+      parts.push(
+        `if(!${expr}.includes(${JSON.stringify(rule.search)})){${emitIssue(msg, pathExpr)}}`,
+      );
+    }
   }
 
   parts.push("}");

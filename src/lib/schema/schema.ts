@@ -337,6 +337,10 @@ export class StringSchema extends Schema<string> {
     return this.withRule({ kind: "url", message }, { format: "uri" });
   }
 
+  public uuid(message = "Invalid uuid") {
+    return this.withRule({ kind: "uuid", message }, { format: "uuid" });
+  }
+
   public startsWith(prefix: string, message?: string) {
     return this.withRule(
       {
@@ -1229,7 +1233,13 @@ export const string = () => StringSchema.create();
 
 export const number = () => NumberSchema.create();
 
-export const int = () => number().int();
+export const int = (message?: string) => number().int(message);
+
+export const email = (message?: string) => string().email(message);
+
+export const url = (message?: string) => string().url(message);
+
+export const uuid = (message?: string) => string().uuid(message);
 
 export const boolean = () => new BooleanSchema();
 
@@ -1361,6 +1371,9 @@ export const s = {
   string,
   number,
   int,
+  email,
+  url,
+  uuid,
   boolean,
   bigint,
   date,

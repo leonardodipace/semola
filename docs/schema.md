@@ -14,6 +14,8 @@ import {
   string,
   number,
   int,
+  email,
+  uuid,
   boolean,
   object,
   array,
@@ -28,19 +30,21 @@ import { s } from "semola/schema";
 
 ## Quick start
 
-Define a shape, then `parse` (throws `SchemaError`) or `safeParse` (result object).
+Define a shape, then `parse` (throws `SchemaError`) or `safeParse` (result object). Format helpers (`email`, `url`, `uuid`, `int`) are top-level like Zod v4; method forms (`string().email()`) still work.
 
 ```typescript
 import { s } from "semola/schema";
 
 const User = s.object({
-  email: s.string().email(),
+  email: s.email(),
+  id: s.uuid(),
   age: s.int().min(0),
   nickname: s.string().min(1).optional(),
 });
 
 const user = User.parse({
   email: "ada@example.com",
+  id: "550e8400-e29b-41d4-a716-446655440000",
   age: 36,
 });
 ```
@@ -51,7 +55,7 @@ Pass schemas anywhere the API expects a Standard Schema (body, query, params, re
 
 ```typescript
 import { Api } from "semola/api";
-import { object, string } from "semola/schema";
+import { email, object, string } from "semola/schema";
 
 const api = new Api();
 
@@ -62,7 +66,7 @@ api.defineRoute({
     params: object({ id: string() }),
   },
   response: {
-    200: object({ id: string(), email: string().email() }),
+    200: object({ id: string(), email: email() }),
   },
   handler: async (c) => {
     return c.json(200, {
@@ -89,9 +93,18 @@ api.defineRoute({
 | `any()` / `unknown()` | `unknown` |
 | `never()` | never succeeds |
 
+### Formats (top-level)
+
+| Helper | Same as |
+| --- | --- |
+| `email()` | `string().email()` |
+| `url()` | `string().url()` |
+| `uuid()` | `string().uuid()` |
+| `int()` | `number().int()` |
+
 ### String checks
 
-Chain on `string()`: `min`, `max`, `length`, `regex`, `email`, `url`, `startsWith`, `endsWith`, `includes`.
+Chain on `string()`: `min`, `max`, `length`, `regex`, `email`, `url`, `uuid`, `startsWith`, `endsWith`, `includes`.
 
 ### Number checks
 

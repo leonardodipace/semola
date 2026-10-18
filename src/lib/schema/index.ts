@@ -15,6 +15,7 @@ export {
   DateSchema,
   date,
   EnumSchema,
+  email,
   enumValues,
   int,
   LiteralSchema,
@@ -45,6 +46,8 @@ export {
   undefinedType,
   union,
   unknown,
+  url,
+  uuid,
 } from "./schema.js";
 export type {
   InferInput,
