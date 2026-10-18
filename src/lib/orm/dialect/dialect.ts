@@ -17,7 +17,7 @@ import { foreignKeyResolver } from "./foreign-key.js";
 import { DialectQueryBuilder } from "./query-builder.js";
 import { RowParser } from "./row-parser.js";
 import { columnKey, primaryKeyOf } from "./sql-helpers.js";
-import { enableSqliteForeignKeys } from "./sqlite.js";
+import { beginSqlite, enableSqliteForeignKeys } from "./sqlite.js";
 import type {
   CreateDialectInput,
   HasManyWriteInput,
@@ -202,6 +202,8 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
 
     if (this.name === "sqlite") {
       await enableSqliteForeignKeys(sql);
+
+      return beginSqlite(sql, run);
     }
 
     return sql.begin(run);
