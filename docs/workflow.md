@@ -50,6 +50,8 @@ const execution = await onboard.get(executionId);
 
 `start()` enqueues work for embedded workers and returns `pending`. Poll `get(executionId)` for the eventual result. Call `stop()` on shutdown.
 
+`startSync()` starts (or attaches to) an execution and waits until it is terminal (`completed` / `failed` / `cancelled`). It does not throw on child failure: read `status` and `error`. Use it inside a parent `step` so replay reuses the memoized child result instead of waiting again.
+
 ## Durability model
 
 Each execution has an append-only event history in Redis. A single lease owner advances the workflow by:
@@ -101,6 +103,39 @@ console.log(execution.status, execution.result, execution.error);
 console.log(execution.steps);
 // steps: { name, completedAt }[] - return values stay in history, not on get()
 ```
+
+### Wait for a child workflow
+
+`startSync(input, { executionId?, partitionKey?, timeoutMs?, cancelOnTimeout? })` starts the run and waits through `pending` / `running` / `compensating` until a final status. If `executionId` already exists, it attaches and waits instead of throwing `WorkflowStoreError`.
+
+On failure, `error` is an `Error` whose message is the original forward failure (not a later compensate error). `get().error` is the same message as a string.
+
+```typescript
+const parent = defineWorkflow<{ userId: string }, { ok: true }>({
+  name: "parent",
+  redis: redisClient,
+  handler: async ({ input, step }) => {
+    const child = await step("onboard", async () => {
+      return onboard.startSync(
+        { userId: input.userId },
+        {
+          executionId: `onboard-${input.userId}`,
+          timeoutMs: 30_000,
+          cancelOnTimeout: true,
+        },
+      );
+    });
+
+    if (child.status !== "completed") {
+      throw new Error(`onboard ${child.status}`);
+    }
+
+    return { ok: true };
+  },
+});
+```
+
+`timeoutMs` returns `{ status: "timeout", result: null, error: null }`. With `cancelOnTimeout`, it calls `cancel()` first. Poll interval matches the workflow `pollInterval`.
 
 ### Cancel an execution
 
@@ -318,6 +353,8 @@ await onboard.stop();
 - **`pollInterval`** - idle poll backoff ms (default: 100)
 
 `start(input, { executionId?, partitionKey? })` - `partitionKey` overrides `partitionBy`. Custom `executionId` must be non-empty and must not contain `:`. Empty `partitionKey` throws.
+
+`startSync(input, { executionId?, partitionKey?, timeoutMs?, cancelOnTimeout? })` - same start options, then wait for a terminal status (or `timeout`). Existing `executionId` attaches instead of throwing. Failure returns an `Error` on `error`; does not throw.
 
 Without `partitionBy`, `partitionKey` is stored on meta but capacity stays on the global `*` pool. Empty keys throw. The resolved key is stored on execution meta so `resume` keeps the original partition.
 

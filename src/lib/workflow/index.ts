@@ -16,6 +16,8 @@ import type {
   WorkflowListOptions,
   WorkflowOptions,
   WorkflowStartOptions,
+  WorkflowStartSyncOptions,
+  WorkflowStartSyncResult,
   WorkflowStatus,
 } from "./types.js";
 
@@ -403,6 +405,90 @@ export const defineWorkflow = <TInput, TResult = void>(
     return snapshot();
   };
 
+  const startSync = async (
+    input: TInput,
+    syncOptions: WorkflowStartSyncOptions = {},
+  ): Promise<WorkflowStartSyncResult<TResult>> => {
+    const { timeoutMs, cancelOnTimeout, ...startOptions } = syncOptions;
+    const [startError, started] = await mightThrow(start(input, startOptions));
+
+    let executionId: string;
+
+    if (started) {
+      executionId = started.executionId;
+    } else {
+      if (!(startError instanceof WorkflowStoreError)) throw startError;
+      if (startOptions.executionId === undefined) throw startError;
+
+      executionId = startOptions.executionId;
+    }
+
+    const pollInterval = options.pollInterval ?? 100;
+    let deadline: number | undefined;
+
+    if (timeoutMs !== undefined) {
+      deadline = Date.now() + timeoutMs;
+    }
+
+    while (true) {
+      const execution = await get(executionId);
+
+      if (execution.status === "completed") {
+        return {
+          executionId,
+          status: "completed",
+          result: execution.result,
+          error: null,
+        };
+      }
+
+      if (execution.status === "cancelled") {
+        return {
+          executionId,
+          status: "cancelled",
+          result: null,
+          error: null,
+        };
+      }
+
+      if (execution.status === "failed") {
+        const view = parseHistory(await store.loadHistory(executionId));
+        let message = execution.error ?? "workflow failed";
+
+        if (view.compensation?.error) {
+          message = view.compensation.error;
+        } else if (view.terminal?.kind === "failed") {
+          message = view.terminal.error;
+        }
+
+        return {
+          executionId,
+          status: "failed",
+          result: null,
+          error: new Error(message),
+        };
+      }
+
+      if (deadline !== undefined) {
+        if (Date.now() >= deadline) {
+          if (cancelOnTimeout) await cancel(executionId);
+
+          return {
+            executionId,
+            status: "timeout",
+            result: null,
+            error: null,
+          };
+        }
+
+        await Bun.sleep(Math.min(pollInterval, deadline - Date.now()));
+        continue;
+      }
+
+      await Bun.sleep(pollInterval);
+    }
+  };
+
   const stop = async () => {
     await engine.stop();
     registry.delete(options.name);
@@ -413,6 +499,7 @@ export const defineWorkflow = <TInput, TResult = void>(
   return {
     name: options.name,
     start,
+    startSync,
     resume,
     get,
     cancel,
@@ -446,6 +533,9 @@ export type {
   WorkflowRetryBackoff,
   WorkflowStartOptions,
   WorkflowStartResult,
+  WorkflowStartSyncOptions,
+  WorkflowStartSyncResult,
+  WorkflowStartSyncStatus,
   WorkflowStatus,
   WorkflowStepErrorContext,
   WorkflowStepErrorRecord,

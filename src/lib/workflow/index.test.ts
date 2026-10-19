@@ -83,6 +83,25 @@ const waitStatus = async <TInput, TResult>(
   return wf.get(executionId);
 };
 
+const awaitStartSync = async <T>(promise: Promise<T>, timeoutMs = 3000) => {
+  const start = Date.now();
+  let settled: T | undefined;
+  let done = false;
+
+  void promise.then((value) => {
+    settled = value;
+    done = true;
+  });
+
+  while (Date.now() - start < timeoutMs) {
+    if (done) return settled as T;
+
+    await advanceTimersByTimeAsync(5);
+  }
+
+  throw new Error("awaitStartSync timeout");
+};
+
 const stop = async (wf: { stop: () => Promise<void> }) => {
   const done = wf.stop();
   await advanceTimersByTimeAsync(100);
@@ -5002,6 +5021,206 @@ describe("workflow", () => {
       expect(compensateAttempts).toBe(2);
       expect(execution.status).toBe("failed");
       expect(execution.error).toBe("provision failed");
+    });
+  });
+
+  describe("startSync", () => {
+    test("waits for completed result", async () => {
+      const redis = createRedis();
+
+      const wf = defineWorkflow<{ value: number }, { doubled: number }>({
+        name: `sync-ok-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        handler: async ({ input, step }) => {
+          const doubled = await step("double", async () => input.value * 2);
+          return { doubled };
+        },
+      });
+
+      const result = await awaitStartSync(wf.startSync({ value: 21 }));
+
+      expect(result.status).toBe("completed");
+      expect(result.result).toEqual({ doubled: 42 });
+      expect(result.error).toBeNull();
+
+      await stop(wf);
+    });
+
+    test("attaches to existing executionId instead of throwing", async () => {
+      const redis = createRedis();
+
+      const wf = defineWorkflow<{ value: number }, { doubled: number }>({
+        name: `sync-attach-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        handler: async ({ input, step }) => {
+          const doubled = await step("double", async () => input.value * 2);
+          return { doubled };
+        },
+      });
+
+      await wf.start({ value: 3 }, { executionId: "child-1" });
+
+      const result = await awaitStartSync(
+        wf.startSync({ value: 3 }, { executionId: "child-1" }),
+      );
+
+      expect(result.executionId).toBe("child-1");
+      expect(result.status).toBe("completed");
+      expect(result.result).toEqual({ doubled: 6 });
+
+      await stop(wf);
+    });
+
+    test("returns Error with failure message", async () => {
+      const redis = createRedis();
+
+      const wf = defineWorkflow({
+        name: `sync-fail-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("boom", async () => {
+            throw new NonRetryableStepError("hard stop");
+          });
+        },
+      });
+
+      const result = await awaitStartSync(wf.startSync({}));
+
+      expect(result.status).toBe("failed");
+      expect(result.result).toBeNull();
+      expect(result.error).toBeInstanceOf(Error);
+      expect(result.error?.message).toBe("hard stop");
+
+      await stop(wf);
+    });
+
+    test("returns original failure after compensation, not compensate error", async () => {
+      const redis = createRedis();
+
+      const wf = defineWorkflow({
+        name: `sync-comp-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("create", async () => "acct", {
+            compensate: async () => {
+              throw new Error("undo failed");
+            },
+          });
+
+          await step("provision", async () => {
+            throw new NonRetryableStepError("provision failed");
+          });
+        },
+      });
+
+      const result = await awaitStartSync(wf.startSync({}));
+
+      expect(result.status).toBe("failed");
+      expect(result.error).toBeInstanceOf(Error);
+      expect(result.error?.message).toBe("provision failed");
+
+      const execution = await wf.get(result.executionId);
+      expect(execution.error).toBe("undo failed");
+
+      await stop(wf);
+    });
+
+    test("timeout returns timeout and cancelOnTimeout requests cancel", async () => {
+      const redis = createRedis();
+
+      const wf = defineWorkflow({
+        name: `sync-timeout-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        handler: async ({ sleep }) => {
+          await sleep(60_000);
+        },
+      });
+
+      const result = await awaitStartSync(
+        wf.startSync(
+          {},
+          {
+            executionId: "slow-1",
+            timeoutMs: 40,
+            cancelOnTimeout: true,
+          },
+        ),
+      );
+
+      expect(result.status).toBe("timeout");
+      expect(result.result).toBeNull();
+      expect(result.error).toBeNull();
+
+      const execution = await waitStatus(wf, "slow-1", "cancelled");
+      expect(execution.status).toBe("cancelled");
+
+      await stop(wf);
+    });
+
+    test("parent step memoizes child startSync across replay", async () => {
+      const redis = createRedis();
+      let childStepRuns = 0;
+      let parentStepRuns = 0;
+
+      const child = defineWorkflow<{ n: number }, { n: number }>({
+        name: `sync-child-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        handler: async ({ input, step }) => {
+          await step("work", async () => {
+            childStepRuns++;
+            return input.n;
+          });
+          return { n: input.n };
+        },
+      });
+
+      const parent = defineWorkflow<Record<string, never>, { n: number }>({
+        name: `sync-parent-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        handler: async ({ step }) => {
+          return step("call-child", async () => {
+            parentStepRuns++;
+            const synced = await child.startSync(
+              { n: 7 },
+              { executionId: "memo-child" },
+            );
+
+            if (synced.status !== "completed") {
+              throw new Error(`child ${synced.status}`);
+            }
+
+            if (!synced.result) {
+              throw new Error("missing child result");
+            }
+
+            return synced.result;
+          });
+        },
+      });
+
+      const first = await awaitStartSync(parent.startSync({}));
+      expect(first.status).toBe("completed");
+      expect(first.result).toEqual({ n: 7 });
+      expect(childStepRuns).toBe(1);
+      expect(parentStepRuns).toBe(1);
+
+      expireLeases(redis);
+      await advanceTimersByTimeAsync(100);
+
+      expect(childStepRuns).toBe(1);
+      expect(parentStepRuns).toBe(1);
+
+      await stop(parent);
+      await stop(child);
     });
   });
 });
