@@ -5073,6 +5073,25 @@ describe("workflow", () => {
       await stop(wf);
     });
 
+    test("propagates validation errors instead of attaching", async () => {
+      const redis = createRedis();
+
+      const wf = defineWorkflow({
+        name: `sync-validate-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        handler: async () => "ok",
+      });
+
+      await wf.start({}, { executionId: "exists" });
+
+      await expect(
+        wf.startSync({}, { executionId: "exists", partitionKey: "" }),
+      ).rejects.toBeInstanceOf(WorkflowStoreError);
+
+      await stop(wf);
+    });
+
     test("returns Error with failure message", async () => {
       const redis = createRedis();
 

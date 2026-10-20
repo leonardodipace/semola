@@ -172,7 +172,7 @@ export const defineWorkflow = <TInput, TResult = void>(
   const engine = new WorkflowEngine(options, store);
   engine.start();
 
-  const start = async (
+  const createExecution = async (
     input: TInput,
     startOptions: WorkflowStartOptions = {},
   ) => {
@@ -197,9 +197,7 @@ export const defineWorkflow = <TInput, TResult = void>(
     });
 
     if (!created) {
-      throw new WorkflowStoreError(
-        `Workflow execution ${executionId} already exists`,
-      );
+      return { executionId, created: false as const };
     }
 
     await store.appendEvents({
@@ -215,6 +213,21 @@ export const defineWorkflow = <TInput, TResult = void>(
     });
 
     await store.enqueue(executionId);
+
+    return { executionId, created: true as const };
+  };
+
+  const start = async (
+    input: TInput,
+    startOptions: WorkflowStartOptions = {},
+  ) => {
+    const { executionId, created } = await createExecution(input, startOptions);
+
+    if (!created) {
+      throw new WorkflowStoreError(
+        `Workflow execution ${executionId} already exists`,
+      );
+    }
 
     return {
       executionId,
@@ -410,19 +423,7 @@ export const defineWorkflow = <TInput, TResult = void>(
     syncOptions: WorkflowStartSyncOptions = {},
   ): Promise<WorkflowStartSyncResult<TResult>> => {
     const { timeoutMs, cancelOnTimeout, ...startOptions } = syncOptions;
-    const [startError, started] = await mightThrow(start(input, startOptions));
-
-    let executionId: string;
-
-    if (started) {
-      executionId = started.executionId;
-    } else {
-      if (!(startError instanceof WorkflowStoreError)) throw startError;
-      if (startOptions.executionId === undefined) throw startError;
-
-      executionId = startOptions.executionId;
-    }
-
+    const { executionId } = await createExecution(input, startOptions);
     const pollInterval = options.pollInterval ?? 100;
     let deadline: number | undefined;
 

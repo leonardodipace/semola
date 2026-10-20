@@ -108,15 +108,15 @@ console.log(execution.steps);
 
 `startSync(input, { executionId?, partitionKey?, timeoutMs?, cancelOnTimeout? })` starts the run and waits through `pending` / `running` / `compensating` until a final status. If `executionId` already exists, it attaches and waits instead of throwing `WorkflowStoreError`.
 
-On failure, `error` is an `Error` whose message is the original forward failure (not a later compensate error). `get().error` is the same message as a string.
+On failure, `error` is an `Error` whose message is the original forward failure (not a later compensate error). If a compensate handler also fails, `get().error` holds the compensate error instead.
 
 ```typescript
 const parent = defineWorkflow<{ userId: string }, { ok: true }>({
   name: "parent",
   redis: redisClient,
   handler: async ({ input, step }) => {
-    const child = await step("onboard", async () => {
-      return onboard.startSync(
+    await step("onboard", async () => {
+      const child = await onboard.startSync(
         { userId: input.userId },
         {
           executionId: `onboard-${input.userId}`,
@@ -124,11 +124,13 @@ const parent = defineWorkflow<{ userId: string }, { ok: true }>({
           cancelOnTimeout: true,
         },
       );
-    });
 
-    if (child.status !== "completed") {
-      throw new Error(`onboard ${child.status}`);
-    }
+      if (child.status !== "completed") {
+        throw new Error(`onboard ${child.status}`);
+      }
+
+      return child.result;
+    });
 
     return { ok: true };
   },
