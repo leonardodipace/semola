@@ -80,11 +80,21 @@ export type ObjectField = {
   toInline: InlineFn;
 };
 
+export interface SchemaStandardPropsTypes<Output> {
+  readonly types: StandardSchemaV1.Types<Output, Output>;
+}
+
+export type SchemaStandardProps<Output> = Omit<
+  StandardSchemaV1.Props<Output, Output> &
+    StandardJSONSchemaV1.Props<Output, Output>,
+  "types"
+> &
+  SchemaStandardPropsTypes<Output>;
+
 export interface SchemaBase<out Output = unknown> {
   readonly schemaType: string;
   readonly run: RunFn<Output>;
-  readonly "~standard": StandardSchemaV1.Props<Output, Output> &
-    StandardJSONSchemaV1.Props<Output, Output>;
+  readonly "~standard": SchemaStandardProps<Output>;
   parse(data: unknown): Output;
   safeParse(data: unknown): SafeParseResult<Output>;
   toJsonSchema(target?: StandardJSONSchemaV1.Target): JsonSchema;
