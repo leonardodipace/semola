@@ -266,6 +266,41 @@ describe("ApiClient", () => {
     expect(headers.get("authorization")).toBe("Bearer override");
   });
 
+  test("skips nullish call headers", async () => {
+    const { calls, fetch } = captureFetch();
+    const api = new Api();
+
+    const ping = api.defineRoute({
+      path: "/ping",
+      method: "GET",
+      request: {
+        headers: z.object({
+          authorization: z.string().nullable().optional(),
+        }),
+      },
+      response: { 200: z.object({ ok: z.boolean() }) },
+      handler: () => ({ ok: true }),
+    });
+
+    const client = ApiClient({
+      router: { ping },
+      baseUrl: "http://localhost",
+      headers: { authorization: "Bearer t" },
+      fetch,
+    });
+
+    await client.ping({ headers: { authorization: undefined } });
+    await client.ping({ headers: { authorization: null } });
+
+    expect(calls.length).toBe(2);
+
+    for (const call of calls) {
+      expect(new Headers(call.init?.headers).get("authorization")).toBe(
+        "Bearer t",
+      );
+    }
+  });
+
   test("throws ApiClientError on non-2xx", async () => {
     const api = new Api();
 

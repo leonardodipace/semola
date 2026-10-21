@@ -84,7 +84,11 @@ const callRoute = async (
   const headers = new Headers(options.headers);
 
   for (const [key, value] of Object.entries(input?.headers ?? {})) {
-    headers.set(key, value);
+    if (value === undefined) continue;
+
+    if (value === null) continue;
+
+    headers.set(key, String(value));
   }
 
   const init: RequestInit = { method: route.method, headers };
