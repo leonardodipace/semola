@@ -134,6 +134,24 @@ export type WorkflowStartOptions = {
   partitionKey?: string;
 };
 
+export type WorkflowStartSyncOptions = WorkflowStartOptions & {
+  timeoutMs?: number;
+  cancelOnTimeout?: boolean;
+};
+
+export type WorkflowStartSyncStatus =
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "timeout";
+
+export type WorkflowStartSyncResult<TResult> = {
+  executionId: string;
+  status: WorkflowStartSyncStatus;
+  result: TResult | null;
+  error: Error | null;
+};
+
 export type WorkflowStartResult = {
   executionId: string;
   status: WorkflowStatus;
@@ -184,6 +202,10 @@ export type Workflow<TInput, TResult> = {
     input: TInput,
     options?: WorkflowStartOptions,
   ) => Promise<WorkflowStartResult>;
+  startSync: (
+    input: TInput,
+    options?: WorkflowStartSyncOptions,
+  ) => Promise<WorkflowStartSyncResult<TResult>>;
   resume: (executionId: string) => Promise<WorkflowStartResult>;
   get: (executionId: string) => Promise<WorkflowExecution<TInput, TResult>>;
   cancel: (executionId: string) => Promise<WorkflowCancelResult>;
