@@ -523,20 +523,31 @@ export type ClientRoute<
 
 type ClientPartInput<T> = T extends StandardSchemaV1 ? InferInput<T> : never;
 
+type ClientCallPart = Exclude<keyof RequestSchema, "cookies">;
+
 export type ClientCallInput<TReq extends RequestSchema | undefined> =
   TReq extends RequestSchema
     ? {
-        [K in keyof TReq as ClientPartInput<TReq[K]> extends never
-          ? never
-          : K]: ClientPartInput<TReq[K]>;
+        [K in keyof TReq as K extends ClientCallPart
+          ? ClientPartInput<TReq[K]> extends never
+            ? never
+            : K
+          : never]: ClientPartInput<TReq[K]>;
       }
     : {};
 
+type ClientOkStatus = 200 | 201 | 202 | 203 | 204 | 205 | 206 | 207 | 208 | 226;
+
+type ClientOkKeys<TRes extends ResponseSchema> = Extract<
+  keyof TRes & number,
+  ClientOkStatus
+>;
+
 export type InferClientData<TRes extends ResponseSchema | undefined> =
   TRes extends ResponseSchema
-    ? 200 extends keyof TRes
-      ? InferOutput<TRes[200]>
-      : InferOutput<TRes[keyof TRes & number]>
+    ? [ClientOkKeys<TRes>] extends [never]
+      ? unknown
+      : InferOutput<TRes[ClientOkKeys<TRes>]>
     : unknown;
 
 type ClientProcedureFn<

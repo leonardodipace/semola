@@ -4,7 +4,11 @@ import { Api } from "./api.js";
 import { ApiClient } from "./client.js";
 import { ApiClientError } from "./errors.js";
 import { Group } from "./group.js";
-import type { ApiClientFetch } from "./types.js";
+import type {
+  ApiClientFetch,
+  ClientCallInput,
+  InferClientData,
+} from "./types.js";
 
 const apiFetch =
   (api: Api): ApiClientFetch =>
@@ -145,6 +149,56 @@ describe("ApiClient", () => {
     await client.search({ query: { q: "hi", page: null } });
 
     expect(String(onlyCall(calls).input)).toBe("http://localhost/search?q=hi");
+  });
+
+  test("repeats array query params", async () => {
+    const { calls, fetch } = captureFetch();
+    const api = new Api();
+
+    const search = api.defineRoute({
+      path: "/search",
+      method: "GET",
+      request: {
+        query: z.object({
+          ids: z.array(z.string()),
+        }),
+      },
+      response: { 200: z.object({ ok: z.boolean() }) },
+      handler: () => ({ ok: true }),
+    });
+
+    const client = ApiClient({
+      router: { search },
+      baseUrl: "http://localhost",
+      fetch,
+    });
+
+    await client.search({ query: { ids: ["a", "b"] } });
+
+    expect(String(onlyCall(calls).input)).toBe(
+      "http://localhost/search?ids=a&ids=b",
+    );
+  });
+
+  test("InferClientData uses 2xx bodies only", () => {
+    const created = z.object({ id: z.string() });
+    const failed = z.object({ error: z.string() });
+
+    type Data = InferClientData<{ 201: typeof created; 400: typeof failed }>;
+
+    expectTypeOf<Data>().toEqualTypeOf<{ id: string }>();
+  });
+
+  test("ClientCallInput omits cookies", () => {
+    const cookies = z.object({ session: z.string() });
+    const query = z.object({ q: z.string() });
+
+    type Input = ClientCallInput<{
+      cookies: typeof cookies;
+      query: typeof query;
+    }>;
+
+    expectTypeOf<Input>().toEqualTypeOf<{ query: { q: string } }>();
   });
 
   test("encodes path params and sends JSON body", async () => {

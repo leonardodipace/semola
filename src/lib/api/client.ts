@@ -45,6 +45,26 @@ const fillPath = (template: string, params?: Record<string, unknown>) => {
   });
 };
 
+const appendQueryValue = (url: URL, key: string, value: unknown) => {
+  if (value === undefined) return;
+
+  if (value === null) return;
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (item === undefined) continue;
+
+      if (item === null) continue;
+
+      url.searchParams.append(key, String(item));
+    }
+
+    return;
+  }
+
+  url.searchParams.set(key, String(value));
+};
+
 const callRoute = async (
   route: ClientRoute,
   input: ClientCallInput<RequestSchema> | undefined,
@@ -58,11 +78,7 @@ const callRoute = async (
   const url = new URL(`${stripTrailingSlashes(options.baseUrl)}${suffix}`);
 
   for (const [key, value] of Object.entries(input?.query ?? {})) {
-    if (value === undefined) continue;
-
-    if (value === null) continue;
-
-    url.searchParams.set(key, String(value));
+    appendQueryValue(url, key, value);
   }
 
   const headers = new Headers(options.headers);
