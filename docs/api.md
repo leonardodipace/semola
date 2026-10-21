@@ -93,7 +93,7 @@ const user = await client.users.get({ params: { id: "1" } });
 const users = await client.users.list();
 ```
 
-Share `appRouter` (or the route handles) with callers. Path prefixes from `Api` / `Group` resolve when the client runs (mount groups before calling). Non-2xx responses throw `ApiClientError` with `status` and `body`. Pass `fetch` to point at `api.fetch` in tests. Optional `headers` merge onto every call; call-level `headers` / `cookies` / `query` / `body` / `params` follow the route request schema. Setting `Cookie` from `cookies` works in Bun/Node; browsers block the `Cookie` request header on `fetch`.
+Share `appRouter` (or the route handles) with callers. Mount groups before calling so path prefixes resolve. Non-2xx responses throw `ApiClientError` (`status`, `body`). Pass `fetch` (for example `api.fetch`) in tests. Optional client `headers` merge onto every call; per-call `params` / `query` / `body` / `headers` follow the route request schema.
 
 ## Request and response
 

@@ -521,12 +521,6 @@ export type ClientRoute<
   readonly getPath: () => string;
 };
 
-export type ClientRouter = {
-  readonly [key: string]:
-    | ClientRoute<RequestSchema | undefined, ResponseSchema | undefined>
-    | ClientRouter;
-};
-
 type ClientPartInput<T> = T extends StandardSchemaV1 ? InferInput<T> : never;
 
 export type ClientCallInput<TReq extends RequestSchema | undefined> =
@@ -538,30 +532,19 @@ export type ClientCallInput<TReq extends RequestSchema | undefined> =
       }
     : {};
 
-type SuccessStatus = 200 | 201 | 202 | 203 | 204 | 205 | 206 | 207 | 208 | 226;
-
 export type InferClientData<TRes extends ResponseSchema | undefined> =
   TRes extends ResponseSchema
-    ? {
-        [S in keyof TRes & number]: S extends SuccessStatus
-          ? InferOutput<TRes[S]>
-          : never;
-      }[keyof TRes & number]
+    ? 200 extends keyof TRes
+      ? InferOutput<TRes[200]>
+      : InferOutput<TRes[keyof TRes & number]>
     : unknown;
-
-type HasRequiredClientInput<TReq extends RequestSchema | undefined> =
-  TReq extends RequestSchema
-    ? [keyof ClientCallInput<TReq>] extends [never]
-      ? false
-      : true
-    : false;
 
 type ClientProcedureFn<
   TReq extends RequestSchema | undefined,
   TRes extends ResponseSchema | undefined,
-> = HasRequiredClientInput<TReq> extends true
-  ? (input: ClientCallInput<TReq>) => Promise<InferClientData<TRes>>
-  : (input?: ClientCallInput<TReq>) => Promise<InferClientData<TRes>>;
+> = [keyof ClientCallInput<TReq>] extends [never]
+  ? (input?: ClientCallInput<TReq>) => Promise<InferClientData<TRes>>
+  : (input: ClientCallInput<TReq>) => Promise<InferClientData<TRes>>;
 
 export type InferApiClient<T> = {
   [K in keyof T]: T[K] extends ClientRoute<infer TReq, infer TRes>
@@ -574,11 +557,9 @@ export type ApiClientFetch = (
   init?: RequestInit,
 ) => Response | Promise<Response>;
 
-export type ApiClientHeaders = Record<string, string> | Headers;
-
 export type ApiClientOptions<TRouter = unknown> = {
   router: TRouter;
   baseUrl: string;
   fetch?: ApiClientFetch;
-  headers?: ApiClientHeaders;
+  headers?: Record<string, string> | Headers;
 };

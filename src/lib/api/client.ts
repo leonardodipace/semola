@@ -1,6 +1,5 @@
 import { ApiClientError } from "./errors.js";
 import type {
-  ApiClientHeaders,
   ApiClientOptions,
   ClientCallInput,
   ClientRoute,
@@ -10,46 +9,7 @@ import type {
 } from "./types.js";
 
 const PATH_PARAM = /:([A-Za-z_][A-Za-z0-9_]*)/g;
-
-const asClientRoute = (value: unknown) => {
-  if (!value) return undefined;
-
-  if (typeof value !== "object") return undefined;
-
-  if ((value as ClientRoute).__kind !== "semola.api.route") return undefined;
-
-  return value as ClientRoute<
-    RequestSchema | undefined,
-    ResponseSchema | undefined
-  >;
-};
-
-const joinBaseUrl = (baseUrl: string, path: string) => {
-  const base = baseUrl.replace(/\/+$/, "");
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-
-  if (normalizedPath === "/") return base || "/";
-
-  return `${base}${normalizedPath}`;
-};
-
-const cookieHeader = (cookies: Record<string, unknown> | undefined) => {
-  if (!cookies) return undefined;
-
-  const parts: string[] = [];
-
-  for (const [key, value] of Object.entries(cookies)) {
-    if (value === undefined) continue;
-
-    if (value === null) continue;
-
-    parts.push(`${key}=${String(value)}`);
-  }
-
-  if (parts.length === 0) return undefined;
-
-  return parts.join("; ");
-};
+const ROUTE_KIND = "semola.api.route";
 
 const fillPath = (
   template: string,
@@ -70,53 +30,18 @@ const fillPath = (
   });
 };
 
-const appendQuery = (url: URL, query: Record<string, unknown> | undefined) => {
-  if (!query) return;
+const resolveUrl = (baseUrl: string, path: string) => {
+  const url = new URL(baseUrl);
+  const prefix = url.pathname.replace(/\/+$/, "");
+  const suffix = path.startsWith("/") ? path : `/${path}`;
 
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined) continue;
-
-    if (value === null) continue;
-
-    url.searchParams.set(key, String(value));
-  }
-};
-
-const mergeHeaders = (
-  base: ApiClientHeaders | undefined,
-  extra: Record<string, string> | undefined,
-) => {
-  const headers = new Headers(base);
-
-  if (!extra) return headers;
-
-  for (const [key, value] of Object.entries(extra)) {
-    headers.set(key, value);
+  if (suffix === "/") {
+    url.pathname = prefix || "/";
+  } else {
+    url.pathname = `${prefix}${suffix}`;
   }
 
-  return headers;
-};
-
-const parseResponseBody = async (response: Response) => {
-  const text = await response.text();
-
-  if (text.length === 0) return undefined;
-
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return text;
-  }
-};
-
-const assertOk = (response: Response, body: unknown) => {
-  if (response.ok) return;
-
-  throw new ApiClientError(
-    `Request failed with status ${response.status}`,
-    response.status,
-    body,
-  );
+  return url;
 };
 
 const callRoute = async (
@@ -124,25 +49,23 @@ const callRoute = async (
   input: ClientCallInput<RequestSchema> | undefined,
   options: ApiClientOptions<unknown>,
 ) => {
-  const path = fillPath(
-    route.getPath(),
-    input?.params as Record<string, unknown>,
-  );
-  const url = new URL(joinBaseUrl(options.baseUrl, path));
-
-  appendQuery(url, input?.query as Record<string, unknown> | undefined);
-
-  const headers = mergeHeaders(
-    options.headers,
-    input?.headers as Record<string, string> | undefined,
+  const url = resolveUrl(
+    options.baseUrl,
+    fillPath(route.getPath(), input?.params as Record<string, unknown>),
   );
 
-  const cookie = cookieHeader(
-    input?.cookies as Record<string, unknown> | undefined,
-  );
+  for (const [key, value] of Object.entries(input?.query ?? {})) {
+    if (value === undefined) continue;
 
-  if (cookie) {
-    headers.set("cookie", cookie);
+    if (value === null) continue;
+
+    url.searchParams.set(key, String(value));
+  }
+
+  const headers = new Headers(options.headers);
+
+  for (const [key, value] of Object.entries(input?.headers ?? {})) {
+    headers.set(key, value);
   }
 
   const init: RequestInit = {
@@ -155,11 +78,25 @@ const callRoute = async (
     init.body = JSON.stringify(input.body);
   }
 
-  const fetchFn = options.fetch ?? globalThis.fetch;
-  const response = await fetchFn(url, init);
-  const body = await parseResponseBody(response);
+  const response = await (options.fetch ?? fetch)(url, init);
+  const text = await response.text();
+  let body: unknown;
 
-  assertOk(response, body);
+  if (text.length > 0) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = text;
+    }
+  }
+
+  if (!response.ok) {
+    throw new ApiClientError(
+      `Request failed with status ${response.status}`,
+      response.status,
+      body,
+    );
+  }
 
   return body;
 };
@@ -168,9 +105,16 @@ const createRouterProxy = (
   node: unknown,
   options: ApiClientOptions<unknown>,
 ): unknown => {
-  const route = asClientRoute(node);
+  if (
+    node &&
+    typeof node === "object" &&
+    (node as ClientRoute).__kind === ROUTE_KIND
+  ) {
+    const route = node as ClientRoute<
+      RequestSchema | undefined,
+      ResponseSchema | undefined
+    >;
 
-  if (route) {
     return (input?: ClientCallInput<RequestSchema>) =>
       callRoute(route, input, options);
   }
@@ -197,13 +141,10 @@ const createRouterProxy = (
 
 export type ApiClient<TRouter = unknown> = InferApiClient<TRouter>;
 
-export interface ApiClientConstructor {
-  new <TRouter>(options: ApiClientOptions<TRouter>): ApiClient<TRouter>;
-  <TRouter>(options: ApiClientOptions<TRouter>): ApiClient<TRouter>;
-}
-
 export const ApiClient = function ApiClient<TRouter>(
   options: ApiClientOptions<TRouter>,
 ): ApiClient<TRouter> {
   return createRouterProxy(options.router, options) as ApiClient<TRouter>;
-} as ApiClientConstructor;
+} as unknown as {
+  new <TRouter>(options: ApiClientOptions<TRouter>): ApiClient<TRouter>;
+};

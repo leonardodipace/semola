@@ -5,12 +5,10 @@ export { Group } from "./group.js";
 export { Middleware } from "./middleware.js";
 export type {
   ApiClientFetch,
-  ApiClientHeaders,
   ApiClientOptions,
   ApiOptions,
   ClientCallInput,
   ClientRoute,
-  ClientRouter,
   Context,
   ExtractStatusCodes,
   GroupOptions,
