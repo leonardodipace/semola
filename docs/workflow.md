@@ -106,9 +106,9 @@ console.log(execution.steps);
 
 ### Wait for a child workflow
 
-`startSync(input, { executionId?, partitionKey?, timeoutMs?, cancelOnTimeout? })` starts the run and waits through `pending` / `running` / `compensating` until a final status. If `executionId` already exists, it attaches and waits instead of throwing `WorkflowStoreError`.
+`startSync(input, { executionId?, partitionKey?, timeoutMs?, cancelOnTimeout? })` starts the run and waits through `pending` / `running` / `compensating` until a final status. If `executionId` already exists, it attaches and waits instead of throwing `WorkflowStoreError`. Attach keeps the prior run's input and partition key; the new call's values are ignored.
 
-On failure, `error` is an `Error` whose message is the original forward failure (not a later compensate error). If a compensate handler also fails, `get().error` holds the compensate error instead.
+On failure, `error` is an `Error` whose message is the original forward failure (not a later compensate error). If a compensate handler also fails, `get().error` holds the compensate error instead. Cancel-triggered compensation that then fails surfaces the compensate error (there was no forward failure).
 
 ```typescript
 const parent = defineWorkflow<{ userId: string }, { ok: true }>({
@@ -137,7 +137,7 @@ const parent = defineWorkflow<{ userId: string }, { ok: true }>({
 });
 ```
 
-`timeoutMs` returns `{ status: "timeout", result: null, error: null }`. With `cancelOnTimeout`, it calls `cancel()` first. Poll interval matches the workflow `pollInterval`.
+`timeoutMs` must be a non-negative finite number. It returns `{ status: "timeout", result: null, error: null }`. With `cancelOnTimeout`, it calls `cancel()` first. Poll interval matches the workflow `pollInterval`.
 
 ### Cancel an execution
 
@@ -356,7 +356,7 @@ await onboard.stop();
 
 `start(input, { executionId?, partitionKey? })` - `partitionKey` overrides `partitionBy`. Custom `executionId` must be non-empty and must not contain `:`. Empty `partitionKey` throws.
 
-`startSync(input, { executionId?, partitionKey?, timeoutMs?, cancelOnTimeout? })` - same start options, then wait for a terminal status (or `timeout`). Existing `executionId` attaches instead of throwing. Failure returns an `Error` on `error`; does not throw.
+`startSync(input, { executionId?, partitionKey?, timeoutMs?, cancelOnTimeout? })` - same start options, then wait for a terminal status (or `timeout`). Existing `executionId` attaches instead of throwing (prior input/partition win). `timeoutMs` must be a non-negative finite number. Failure returns an `Error` on `error`; does not throw.
 
 Without `partitionBy`, `partitionKey` is stored on meta but capacity stays on the global `*` pool. Empty keys throw. The resolved key is stored on execution meta so `resume` keeps the original partition.
 

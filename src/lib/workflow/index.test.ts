@@ -5183,10 +5183,35 @@ describe("workflow", () => {
       await stop(wf);
     });
 
+    test("rejects invalid timeoutMs", async () => {
+      const redis = createRedis();
+      const name = `sync-timeout-bad-${crypto.randomUUID()}`;
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        handler: async () => "ok",
+      });
+
+      await expect(
+        wf.startSync({}, { timeoutMs: Number.NaN }),
+      ).rejects.toBeInstanceOf(WorkflowStoreError);
+      await expect(wf.startSync({}, { timeoutMs: -1 })).rejects.toBeInstanceOf(
+        WorkflowStoreError,
+      );
+
+      expect(await listWorkflows(redis, { name })).toEqual([]);
+
+      await stop(wf);
+    });
+
     test("parent step memoizes child startSync across replay", async () => {
       const redis = createRedis();
+      const parentName = `sync-parent-${crypto.randomUUID()}`;
       let childStepRuns = 0;
       let parentStepRuns = 0;
+      let release = false;
 
       const child = defineWorkflow<{ n: number }, { n: number }>({
         name: `sync-child-${crypto.randomUUID()}`,
@@ -5201,44 +5226,66 @@ describe("workflow", () => {
         },
       });
 
-      const parent = defineWorkflow<Record<string, never>, { n: number }>({
-        name: `sync-parent-${crypto.randomUUID()}`,
-        redis,
-        ...fast,
-        handler: async ({ step }) => {
-          return step("call-child", async () => {
-            parentStepRuns++;
-            const synced = await child.startSync(
-              { n: 7 },
-              { executionId: "memo-child" },
-            );
+      const makeParent = () =>
+        defineWorkflow<Record<string, never>, { n: number }>({
+          name: parentName,
+          redis,
+          ...fast,
+          lockTTL: 40,
+          handler: async ({ step }) => {
+            const synced = await step("call-child", async () => {
+              parentStepRuns++;
+              const result = await child.startSync(
+                { n: 7 },
+                { executionId: "memo-child" },
+              );
 
-            if (synced.status !== "completed") {
-              throw new Error(`child ${synced.status}`);
-            }
+              if (result.status !== "completed") {
+                throw new Error(`child ${result.status}`);
+              }
 
-            if (!synced.result) {
-              throw new Error("missing child result");
-            }
+              if (!result.result) {
+                throw new Error("missing child result");
+              }
 
-            return synced.result;
-          });
-        },
+              return result.result;
+            });
+
+            await step("hold", async ({ signal }) => {
+              while (!release && !signal.aborted) {
+                await sleep(10);
+              }
+
+              return "ok";
+            });
+
+            return synced;
+          },
+        });
+
+      const parent = makeParent();
+      const { executionId } = await parent.start({});
+
+      await waitFor(async () => {
+        const execution = await parent.get(executionId);
+        return execution.steps.some((step) => step.name === "call-child");
       });
-
-      const first = await awaitStartSync(parent.startSync({}));
-      expect(first.status).toBe("completed");
-      expect(first.result).toEqual({ n: 7 });
-      expect(childStepRuns).toBe(1);
-      expect(parentStepRuns).toBe(1);
-
-      expireLeases(redis);
-      await advanceTimersByTimeAsync(100);
 
       expect(childStepRuns).toBe(1);
       expect(parentStepRuns).toBe(1);
 
       await stop(parent);
+      redis.expireLeaseNow(`workflow:${parentName}:lease:${executionId}`);
+
+      release = true;
+      const parent2 = makeParent();
+      const execution = await waitStatus(parent2, executionId, "completed");
+
+      expect(execution.result).toEqual({ n: 7 });
+      expect(childStepRuns).toBe(1);
+      expect(parentStepRuns).toBe(1);
+
+      await stop(parent2);
       await stop(child);
     });
   });

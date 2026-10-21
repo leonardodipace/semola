@@ -423,9 +423,21 @@ export const defineWorkflow = <TInput, TResult = void>(
     syncOptions: WorkflowStartSyncOptions = {},
   ): Promise<WorkflowStartSyncResult<TResult>> => {
     const { timeoutMs, cancelOnTimeout, ...startOptions } = syncOptions;
+
+    if (timeoutMs !== undefined) {
+      if (!Number.isFinite(timeoutMs)) {
+        throw new WorkflowStoreError("timeoutMs must be a finite number");
+      }
+
+      if (timeoutMs < 0) {
+        throw new WorkflowStoreError("timeoutMs must be a non-negative number");
+      }
+    }
+
     const { executionId } = await createExecution(input, startOptions);
     const pollInterval = options.pollInterval ?? 100;
     let deadline: number | undefined;
+    let deadlineRechecked = false;
 
     if (timeoutMs !== undefined) {
       deadline = Date.now() + timeoutMs;
@@ -472,6 +484,13 @@ export const defineWorkflow = <TInput, TResult = void>(
 
       if (deadline !== undefined) {
         if (Date.now() >= deadline) {
+          // One more poll so a terminal transition that raced the deadline
+          // is not reported as timeout.
+          if (!deadlineRechecked) {
+            deadlineRechecked = true;
+            continue;
+          }
+
           if (cancelOnTimeout) await cancel(executionId);
 
           return {
