@@ -30,6 +30,7 @@ import type {
   RunFn,
   SafeParseResult,
   SchemaBase,
+  SchemaStandardProps,
   StandardJSONSchemaV1,
   StandardSchemaV1,
   StringRule,
@@ -147,12 +148,12 @@ export abstract class Schema<Output = unknown>
   /** Hot-path validator. On failure pushes to `issues` and return value is ignored. */
   public readonly run: RunFn<Output>;
 
-  public readonly "~standard": StandardJSONSchemaV1.Props<Output, Output> &
-    StandardSchemaV1.Props<Output, Output>;
+  public readonly "~standard": SchemaStandardProps<Output>;
 
   protected constructor(run: RunFn<Output>, buildJsonSchema: JsonSchemaFn) {
     this.run = run;
 
+    // ponytail: types is type-level only (SchemaStandardProps); omit at runtime
     this["~standard"] = {
       version: 1,
       vendor: VENDOR,
@@ -169,8 +170,7 @@ export abstract class Schema<Output = unknown>
           return buildJsonSchema(options.target, "output");
         },
       },
-      types: undefined as unknown as StandardSchemaV1.Types<Output, Output>,
-    };
+    } as SchemaStandardProps<Output>;
   }
 
   public validateStd(value: unknown): StandardSchemaV1.Result<Output> {

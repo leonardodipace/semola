@@ -159,9 +159,13 @@ number().refine((value) => value % 2 === 0, "Expected even");
 
 ```typescript
 import type { InferOutput, InferInput } from "semola/schema";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 type User = InferOutput<typeof User>;
 type UserInput = InferInput<typeof User>;
+
+// Same types via Standard Schema helpers (keys off ~standard.types)
+type UserStd = StandardSchemaV1.InferOutput<typeof User>;
 ```
 
 ## Performance
