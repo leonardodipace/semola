@@ -1,11 +1,21 @@
 export { Api } from "./api.js";
+export { ApiClient } from "./client.js";
+export { ApiClientError } from "./errors.js";
 export { Group } from "./group.js";
 export { Middleware } from "./middleware.js";
 export type {
+  ApiClientFetch,
+  ApiClientHeaders,
+  ApiClientOptions,
   ApiOptions,
+  ClientCallInput,
+  ClientRoute,
+  ClientRouter,
   Context,
   ExtractStatusCodes,
   GroupOptions,
+  InferApiClient,
+  InferClientData,
   InferInput,
   InferMiddlewareExtension,
   InferOutput,

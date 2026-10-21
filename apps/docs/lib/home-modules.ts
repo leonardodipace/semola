@@ -229,7 +229,7 @@ const db = createOrm({
 });
 
 const user = await db.users.findFirst({
-  where: { email: "hi@semola.dev" },
+  where: { email: "hi@semo.la" },
 });`,
   },
   {

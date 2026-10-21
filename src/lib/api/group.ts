@@ -1,6 +1,7 @@
 import type { Middleware } from "./middleware.js";
 import { getFullPath } from "./runtime.js";
 import type {
+  ClientRoute,
   Context,
   GroupOptions,
   RequestSchema,
@@ -113,10 +114,12 @@ export class Group<TMiddlewares extends readonly Middleware[] = readonly []> {
   }
 
   public defineRoute<
-    TReq extends RequestSchema = RequestSchema,
-    TRes extends ResponseSchema = ResponseSchema,
+    TReq extends RequestSchema | undefined = undefined,
+    TRes extends ResponseSchema | undefined = undefined,
     TRouteMiddlewares extends readonly Middleware[] = readonly [],
-  >(config: RouteConfig<TReq, TRes, TMiddlewares, TRouteMiddlewares>) {
+  >(
+    config: RouteConfig<TReq, TRes, TMiddlewares, TRouteMiddlewares>,
+  ): ClientRoute<TReq, TRes> {
     this.routes.push(
       config as RouteConfig<
         RequestSchema,
@@ -126,13 +129,26 @@ export class Group<TMiddlewares extends readonly Middleware[] = readonly []> {
       >,
     );
     this.onRoutesChanged();
+    const localPath = config.path;
+
+    return {
+      __kind: "semola.api.route",
+      method: config.method,
+      request: config.request,
+      response: config.response,
+      getPath: () =>
+        getFullPath({
+          prefix: this.resolvePrefix(),
+          path: localPath,
+        }),
+    };
   }
 
   public defineSSERoute<
     TReq extends RequestSchema = RequestSchema,
     TRouteMiddlewares extends readonly Middleware[] = readonly [],
   >(config: SSERouteConfig<TReq, TMiddlewares, TRouteMiddlewares>) {
-    this.defineRoute({
+    return this.defineRoute({
       path: config.path,
       method: "GET",
       request: config.request,
@@ -143,6 +159,12 @@ export class Group<TMiddlewares extends readonly Middleware[] = readonly []> {
       tags: config.tags,
       handler: (c) => toSSEResponse(config.handler as SSERouteHandler, c),
     });
+  }
+
+  protected resolvePrefix(): string | undefined {
+    if (!this.parent) return this.options.prefix;
+
+    return combinePrefix(this.parent.resolvePrefix(), this.options.prefix);
   }
 
   public mount(group: Group<readonly Middleware[]>) {

@@ -10,7 +10,7 @@ Needs Bun's HTTP server (`Bun.serve` under the hood via `api.serve`).
 ## Import
 
 ```typescript
-import { Api, Group, Middleware } from "semola/api";
+import { Api, ApiClient, Group, Middleware } from "semola/api";
 ```
 
 ## Quick start
@@ -35,7 +35,7 @@ api.defineRoute({
   handler: async (c) => {
     return c.json(200, {
       id: c.req.params.id,
-      email: "hi@semola.dev",
+      email: "hi@semo.la",
     });
   },
 });
@@ -44,6 +44,56 @@ api.serve(3000);
 ```
 
 For tests or embedding, call `api.fetch(request)` instead of serving.
+
+## Typed client
+
+`defineRoute` returns a handle. Nest handles into a router object, then pass that router to `ApiClient` for typed calls with no codegen:
+
+```typescript
+import { Api, ApiClient } from "semola/api";
+import { z } from "zod";
+
+const api = new Api();
+
+const getUser = api.defineRoute({
+  path: "/users/:id",
+  method: "GET",
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  response: {
+    200: z.object({ id: z.string(), email: z.string() }),
+  },
+  handler: (c) =>
+    c.json(200, { id: c.req.params.id, email: "hi@semo.la" }),
+});
+
+const listUsers = api.defineRoute({
+  path: "/users",
+  method: "GET",
+  response: {
+    200: z.object({ items: z.array(z.string()) }),
+  },
+  handler: () => ({ items: ["u_1"] }),
+});
+
+const appRouter = {
+  users: {
+    get: getUser,
+    list: listUsers,
+  },
+};
+
+const client = new ApiClient({
+  router: appRouter,
+  baseUrl: "http://localhost:3000",
+});
+
+const user = await client.users.get({ params: { id: "1" } });
+const users = await client.users.list();
+```
+
+Share `appRouter` (or the route handles) with callers. Path prefixes from `Api` / `Group` resolve when the client runs (mount groups before calling). Non-2xx responses throw `ApiClientError` with `status` and `body`. Pass `fetch` to point at `api.fetch` in tests. Optional `headers` merge onto every call; call-level `headers` / `cookies` / `query` / `body` / `params` follow the route request schema. Setting `Cookie` from `cookies` works in Bun/Node; browsers block the `Cookie` request header on `fetch`.
 
 ## Request and response
 
