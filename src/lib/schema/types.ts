@@ -80,7 +80,6 @@ export type ObjectField = {
   toInline: InlineFn;
 };
 
-/** Type-level only. Omitted at runtime, same as Zod / Standard Schema. */
 export interface SchemaStandardPropsTypes<Output> {
   readonly types: StandardSchemaV1.Types<Output, Output>;
 }

@@ -153,7 +153,6 @@ export abstract class Schema<Output = unknown>
   protected constructor(run: RunFn<Output>, buildJsonSchema: JsonSchemaFn) {
     this.run = run;
 
-    // ponytail: types is type-level only (SchemaStandardProps); omit at runtime
     this["~standard"] = {
       version: 1,
       vendor: VENDOR,
