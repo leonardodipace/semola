@@ -47,7 +47,7 @@ For tests or embedding, call `api.fetch(request)` instead of serving.
 
 ## Typed client
 
-`defineRoute` returns a handle. Nest handles into a router object, then pass that router to `ApiClient` for typed calls with no codegen:
+`defineRoute` returns a handle. Nest handles into a router object, then pass that router to `ApiClient(...)` for typed calls with no codegen:
 
 ```typescript
 import { Api, ApiClient } from "semola/api";
@@ -84,7 +84,7 @@ const appRouter = {
   },
 };
 
-const client = new ApiClient({
+const client = ApiClient({
   router: appRouter,
   baseUrl: "http://localhost:3000",
 });

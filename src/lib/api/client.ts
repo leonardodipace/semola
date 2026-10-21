@@ -5,16 +5,19 @@ import type {
   ClientRoute,
   InferApiClient,
   RequestSchema,
-  ResponseSchema,
 } from "./types.js";
 
 const PATH_PARAM = /:([A-Za-z_][A-Za-z0-9_]*)/g;
-const ROUTE_KIND = "semola.api.route";
 
-const fillPath = (
-  template: string,
-  params: Record<string, unknown> | undefined,
-) => {
+const isClientRoute = (value: unknown) => {
+  if (!value) return false;
+
+  if (typeof value !== "object") return false;
+
+  return (value as ClientRoute).__kind === "semola.api.route";
+};
+
+const fillPath = (template: string, params?: Record<string, unknown>) => {
   return template.replace(PATH_PARAM, (_match, name: string) => {
     const value = params?.[name];
 
@@ -30,28 +33,17 @@ const fillPath = (
   });
 };
 
-const resolveUrl = (baseUrl: string, path: string) => {
-  const url = new URL(baseUrl);
-  const prefix = url.pathname.replace(/\/+$/, "");
-  const suffix = path.startsWith("/") ? path : `/${path}`;
-
-  if (suffix === "/") {
-    url.pathname = prefix || "/";
-  } else {
-    url.pathname = `${prefix}${suffix}`;
-  }
-
-  return url;
-};
-
 const callRoute = async (
-  route: ClientRoute<RequestSchema | undefined, ResponseSchema | undefined>,
+  route: ClientRoute,
   input: ClientCallInput<RequestSchema> | undefined,
-  options: ApiClientOptions<unknown>,
+  options: ApiClientOptions,
 ) => {
-  const url = resolveUrl(
-    options.baseUrl,
-    fillPath(route.getPath(), input?.params as Record<string, unknown>),
+  const path = fillPath(
+    route.getPath(),
+    input?.params as Record<string, unknown> | undefined,
+  );
+  const url = new URL(
+    `${options.baseUrl.replace(/\/+$/, "")}${path.startsWith("/") ? path : `/${path}`}`,
   );
 
   for (const [key, value] of Object.entries(input?.query ?? {})) {
@@ -68,10 +60,7 @@ const callRoute = async (
     headers.set(key, value);
   }
 
-  const init: RequestInit = {
-    method: route.method,
-    headers,
-  };
+  const init: RequestInit = { method: route.method, headers };
 
   if (input?.body !== undefined) {
     headers.set("content-type", "application/json");
@@ -103,20 +92,11 @@ const callRoute = async (
 
 const createRouterProxy = (
   node: unknown,
-  options: ApiClientOptions<unknown>,
+  options: ApiClientOptions,
 ): unknown => {
-  if (
-    node &&
-    typeof node === "object" &&
-    (node as ClientRoute).__kind === ROUTE_KIND
-  ) {
-    const route = node as ClientRoute<
-      RequestSchema | undefined,
-      ResponseSchema | undefined
-    >;
-
+  if (isClientRoute(node)) {
     return (input?: ClientCallInput<RequestSchema>) =>
-      callRoute(route, input, options);
+      callRoute(node as ClientRoute, input, options);
   }
 
   if (!node) return undefined;
@@ -127,13 +107,12 @@ const createRouterProxy = (
     {},
     {
       get(_target, prop) {
-        if (typeof prop === "symbol") return undefined;
+        if (typeof prop !== "string") return undefined;
 
-        const child = (node as Record<string, unknown>)[prop];
-
-        if (child === undefined) return undefined;
-
-        return createRouterProxy(child, options);
+        return createRouterProxy(
+          (node as Record<string, unknown>)[prop],
+          options,
+        );
       },
     },
   );
@@ -141,10 +120,8 @@ const createRouterProxy = (
 
 export type ApiClient<TRouter = unknown> = InferApiClient<TRouter>;
 
-export const ApiClient = function ApiClient<TRouter>(
+export const ApiClient = <TRouter>(
   options: ApiClientOptions<TRouter>,
-): ApiClient<TRouter> {
+): ApiClient<TRouter> => {
   return createRouterProxy(options.router, options) as ApiClient<TRouter>;
-} as unknown as {
-  new <TRouter>(options: ApiClientOptions<TRouter>): ApiClient<TRouter>;
 };

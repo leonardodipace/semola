@@ -71,7 +71,7 @@ describe("ApiClient", () => {
       handler: (c) => c.json(201, { id: "u_1", email: c.req.body.email }),
     });
 
-    const client = new ApiClient({
+    const client = ApiClient({
       router: {
         users: {
           get: getUser,
@@ -110,7 +110,7 @@ describe("ApiClient", () => {
 
     api.mount(users);
 
-    const client = new ApiClient({
+    const client = ApiClient({
       router: { users: { list } },
       baseUrl: "http://localhost",
       fetch: apiFetch(api),
@@ -136,7 +136,7 @@ describe("ApiClient", () => {
       handler: () => ({ ok: true }),
     });
 
-    const client = new ApiClient({
+    const client = ApiClient({
       router: { search },
       baseUrl: "http://localhost///",
       fetch,
@@ -162,7 +162,7 @@ describe("ApiClient", () => {
       handler: () => ({ ok: true }),
     });
 
-    const client = new ApiClient({
+    const client = ApiClient({
       router: { create },
       baseUrl: "http://localhost",
       fetch,
@@ -197,7 +197,7 @@ describe("ApiClient", () => {
       handler: () => ({ ok: true }),
     });
 
-    const client = new ApiClient({
+    const client = ApiClient({
       router: { ping },
       baseUrl: "http://localhost",
       headers: { "x-client": "semola", authorization: "Bearer t" },
@@ -224,7 +224,7 @@ describe("ApiClient", () => {
       handler: (c) => c.json(400, { message: "nope" }),
     });
 
-    const client = new ApiClient({
+    const client = ApiClient({
       router: { fail },
       baseUrl: "http://localhost",
       fetch: apiFetch(api),
@@ -252,7 +252,7 @@ describe("ApiClient", () => {
       handler: () => ({ ok: true }),
     });
 
-    const client = new ApiClient({
+    const client = ApiClient({
       router: { getUser },
       baseUrl: "http://localhost",
       fetch: apiFetch(api),
@@ -280,7 +280,7 @@ describe("ApiClient", () => {
       handler: () => new Response(null, { status: 204 }),
     });
 
-    const client = new ApiClient({
+    const client = ApiClient({
       router: { remove },
       baseUrl: "http://localhost",
       fetch: apiFetch(api),
