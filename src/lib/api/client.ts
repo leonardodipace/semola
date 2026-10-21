@@ -103,10 +103,16 @@ const callRoute = async (
   let body: unknown;
 
   if (text.length > 0) {
-    try {
-      body = JSON.parse(text);
-    } catch {
-      body = text;
+    body = text;
+
+    const contentType = response.headers.get("content-type") ?? "";
+
+    if (contentType.includes("json")) {
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = text;
+      }
     }
   }
 

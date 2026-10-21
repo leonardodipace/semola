@@ -148,7 +148,7 @@ export class Group<TMiddlewares extends readonly Middleware[] = readonly []> {
     TReq extends RequestSchema = RequestSchema,
     TRouteMiddlewares extends readonly Middleware[] = readonly [],
   >(config: SSERouteConfig<TReq, TMiddlewares, TRouteMiddlewares>) {
-    return this.defineRoute({
+    this.defineRoute({
       path: config.path,
       method: "GET",
       request: config.request,

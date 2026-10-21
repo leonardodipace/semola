@@ -377,4 +377,56 @@ describe("ApiClient", () => {
 
     expect(await client.remove({ params: { id: "1" } })).toBeUndefined();
   });
+
+  test("keeps plain text body when content-type is not json", async () => {
+    const api = new Api();
+
+    const message = api.defineRoute({
+      path: "/message",
+      method: "GET",
+      handler: (c) => c.text(200, "42"),
+    });
+
+    const client = ApiClient({
+      router: { message },
+      baseUrl: "http://localhost",
+      fetch: apiFetch(api),
+    });
+
+    expect(await client.message()).toBe("42");
+  });
+
+  test("keeps plain text error body when content-type is not json", async () => {
+    const { fetch } = captureFetch(
+      new Response("true", {
+        status: 400,
+        headers: { "content-type": "text/plain" },
+      }),
+    );
+
+    const api = new Api();
+
+    const fail = api.defineRoute({
+      path: "/fail",
+      method: "GET",
+      handler: () => ({ ok: true }),
+    });
+
+    const client = ApiClient({
+      router: { fail },
+      baseUrl: "http://localhost",
+      fetch,
+    });
+
+    try {
+      await client.fail();
+      throw new Error("expected ApiClientError");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiClientError);
+
+      if (!(error instanceof ApiClientError)) return;
+
+      expect(error.body).toBe("true");
+    }
+  });
 });
