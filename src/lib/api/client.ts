@@ -17,6 +17,18 @@ const isClientRoute = (value: unknown) => {
   return (value as ClientRoute).__kind === "semola.api.route";
 };
 
+const stripTrailingSlashes = (value: string) => {
+  let end = value.length;
+
+  while (end > 0) {
+    if (value[end - 1] !== "/") break;
+
+    end -= 1;
+  }
+
+  return value.slice(0, end);
+};
+
 const fillPath = (template: string, params?: Record<string, unknown>) => {
   return template.replace(PATH_PARAM, (_match, name: string) => {
     const value = params?.[name];
@@ -42,9 +54,8 @@ const callRoute = async (
     route.getPath(),
     input?.params as Record<string, unknown> | undefined,
   );
-  const url = new URL(
-    `${options.baseUrl.replace(/\/+$/, "")}${path.startsWith("/") ? path : `/${path}`}`,
-  );
+  const suffix = path.startsWith("/") ? path : `/${path}`;
+  const url = new URL(`${stripTrailingSlashes(options.baseUrl)}${suffix}`);
 
   for (const [key, value] of Object.entries(input?.query ?? {})) {
     if (value === undefined) continue;
