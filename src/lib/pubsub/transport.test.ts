@@ -80,6 +80,89 @@ describe("memoryTransport", () => {
 
     expect(count).toBe(0);
   });
+
+  test("publish snapshots subscribers so mid-delivery subscribe is ignored", async () => {
+    const received: string[] = [];
+    const firstGate = Promise.withResolvers<void>();
+
+    const first: Handler = async (message) => {
+      received.push(`a:${message}`);
+      await firstGate.promise;
+    };
+
+    const late: Handler = (message) => {
+      received.push(`b:${message}`);
+    };
+
+    await memoryTransport.subscribe("hub-snapshot-add", first);
+
+    const publishPromise = memoryTransport.publish("hub-snapshot-add", "ping");
+
+    await Promise.resolve();
+    await memoryTransport.subscribe("hub-snapshot-add", late);
+
+    firstGate.resolve();
+
+    const count = await publishPromise;
+
+    expect(count).toBe(1);
+    expect(received).toEqual(["a:ping"]);
+
+    await memoryTransport.unsubscribe("hub-snapshot-add", first);
+    await memoryTransport.unsubscribe("hub-snapshot-add", late);
+  });
+
+  test("publish snapshots subscribers so mid-delivery unsubscribe still delivers", async () => {
+    const received: string[] = [];
+    const firstGate = Promise.withResolvers<void>();
+
+    const first: Handler = async (message) => {
+      received.push(`a:${message}`);
+      await firstGate.promise;
+    };
+
+    const second: Handler = (message) => {
+      received.push(`b:${message}`);
+    };
+
+    await memoryTransport.subscribe("hub-snapshot-del", first);
+    await memoryTransport.subscribe("hub-snapshot-del", second);
+
+    const publishPromise = memoryTransport.publish("hub-snapshot-del", "ping");
+
+    await Promise.resolve();
+    await memoryTransport.unsubscribe("hub-snapshot-del", second);
+
+    firstGate.resolve();
+
+    const count = await publishPromise;
+
+    expect(count).toBe(2);
+    expect(received).toEqual(["a:ping", "b:ping"]);
+
+    await memoryTransport.unsubscribe("hub-snapshot-del", first);
+  });
+
+  test("handler rejection does not stop sibling handlers or fail publish", async () => {
+    const received: string[] = [];
+    const bad: Handler = async () => {
+      throw new Error("boom");
+    };
+    const good: Handler = (message) => {
+      received.push(message);
+    };
+
+    await memoryTransport.subscribe("hub-reject", bad);
+    await memoryTransport.subscribe("hub-reject", good);
+
+    const count = await memoryTransport.publish("hub-reject", "ping");
+
+    expect(count).toBe(2);
+    expect(received).toEqual(["ping"]);
+
+    await memoryTransport.unsubscribe("hub-reject", bad);
+    await memoryTransport.unsubscribe("hub-reject", good);
+  });
 });
 
 describe("createRedisTransport", () => {

@@ -1,6 +1,6 @@
+import { mightThrow } from "../errors/index.js";
 import type { ChannelHandler, ChannelTransport } from "./types.js";
 
-// ponytail: process-wide hub; Redis when you need cross-process
 const memorySubscriptions = new Map<string, Set<ChannelHandler>>();
 
 export const memoryTransport: ChannelTransport = {
@@ -11,14 +11,13 @@ export const memoryTransport: ChannelTransport = {
       return 0;
     }
 
-    let count = 0;
+    const snapshot = [...handlers];
 
-    for (const handler of handlers) {
-      await handler(message, channel);
-      count += 1;
+    for (const handler of snapshot) {
+      await mightThrow(Promise.resolve().then(() => handler(message, channel)));
     }
 
-    return count;
+    return snapshot.length;
   },
 
   subscribe: async (channel, handler) => {
