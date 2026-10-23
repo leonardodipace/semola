@@ -14,3 +14,10 @@ export class InvalidResultError<TRetryResult> extends TypeError {
     this.name = "InvalidResultError";
   }
 }
+
+export class InvalidThresholdValueError extends RangeError {
+  public constructor(message: string) {
+    super(message);
+    this.name = "InvalidThresholdValueError";
+  }
+}
