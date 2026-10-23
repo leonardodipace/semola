@@ -9,8 +9,10 @@ export {
   string,
   uuid,
 } from "./column/index.js";
-export { OrmError } from "./errors.js";
+export { MigrationError, OrmError } from "./errors.js";
 export { index, uniqueIndex } from "./indexes/index.js";
+export { applyMigrations, loadConfig } from "./migrations/runner.js";
+export type { LoadedConfig } from "./migrations/types.js";
 export { createOrm, many, one } from "./orm/index.js";
 export type {
   CreateData,

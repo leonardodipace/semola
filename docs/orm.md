@@ -399,7 +399,7 @@ const db = createOrm({
 
 ## Migrations
 
-`createOrm()` never changes the physical database schema. Use the CLI to generate and apply SQL from your table definitions.
+`createOrm()` never changes the physical database schema. Generate SQL with the CLI, then apply with the CLI or the programmatic API. Both share the same history table, migration lock, and `up.sql` checksum checks.
 
 ### Configuration
 
@@ -423,6 +423,32 @@ bunx semola orm migrations create "add_user_roles"
 bunx semola orm migrations apply
 bunx semola orm migrations rollback
 ```
+
+### Programmatic apply
+
+```typescript
+import { applyMigrations, loadConfig } from "semola/orm";
+
+const config = await loadConfig();
+const applied = await applyMigrations(config);
+```
+
+`loadConfig(cwd?)` reads `semola.config.ts` and the schema module (same as the CLI). Pass a `LoadedConfig` yourself when you already know the adapter, URL, and migrations directory:
+
+```typescript
+import { applyMigrations } from "semola/orm";
+
+await applyMigrations({
+  migrationsDir: "./migrations",
+  orm: {
+    adapter: "sqlite",
+    url: "file:./dev.db",
+    tables: {},
+  },
+});
+```
+
+Apply opens its own connection and closes it when finished. Prefer a file URL over `:memory:` so the schema is visible to later clients.
 
 - Apply pending migrations before creating another one.
 - `create` fails when nothing changed.
@@ -507,3 +533,12 @@ On SQLite, overlapping `$transaction` calls (and nested relation writes that ope
 | `db.$transaction(cb)` | Run work in a transaction |
 | `db.$config` | Adapter, redacted URL, tables, and pool |
 | `db.$ping()` | Health check (`SELECT 1`) |
+
+### Migrations API
+
+| Export | Meaning |
+| --- | --- |
+| `loadConfig(cwd?)` | Load `semola.config.ts` and schema into a `LoadedConfig` |
+| `applyMigrations(config)` | Apply pending migrations (history, lock, checksum) |
+| `MigrationError` | Thrown on migration failures |
+| `LoadedConfig` | `{ migrationsDir, orm: { adapter, url, tables } }` |
