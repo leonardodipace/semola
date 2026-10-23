@@ -127,6 +127,120 @@ const createMockRedis = () => {
 };
 
 describe("PubSub", () => {
+  describe("Memory transport", () => {
+    test("should publish and receive without redis clients", async () => {
+      const pubsub = new PubSub<{ userId: string; action: string }>({
+        transport: "memory",
+        channel: "memory-user-events",
+      });
+
+      const messages: Array<{ userId: string; action: string }> = [];
+
+      const unsubscribeHandler = await pubsub.subscribe(async (message) => {
+        messages.push(message);
+      });
+
+      expect(typeof unsubscribeHandler).toBe("function");
+      expect(pubsub.isActive()).toBe(true);
+
+      const count = await pubsub.publish({
+        userId: "123",
+        action: "login",
+      });
+
+      expect(count).toBe(1);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(messages).toEqual([{ userId: "123", action: "login" }]);
+
+      await unsubscribeHandler();
+
+      expect(pubsub.isActive()).toBe(false);
+    });
+
+    test("should fan out across PubSub instances on the same channel", async () => {
+      const publisher = new PubSub<{ message: string }>({
+        transport: "memory",
+        channel: "memory-shared",
+      });
+
+      const subscriber = new PubSub<{ message: string }>({
+        transport: "memory",
+        channel: "memory-shared",
+      });
+
+      const messages: string[] = [];
+
+      await subscriber.subscribe(async (message) => {
+        messages.push(message.message);
+      });
+
+      const count = await publisher.publish({ message: "hello" });
+
+      expect(count).toBe(1);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(messages).toEqual(["hello"]);
+
+      await subscriber.unsubscribe();
+    });
+
+    test("should not receive messages from a different memory channel", async () => {
+      const listener = new PubSub<{ message: string }>({
+        transport: "memory",
+        channel: "memory-a",
+      });
+
+      const messages: string[] = [];
+
+      await listener.subscribe(async (message) => {
+        messages.push(message.message);
+      });
+
+      const other = new PubSub<{ message: string }>({
+        transport: "memory",
+        channel: "memory-b",
+      });
+
+      await other.publish({ message: "nope" });
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(messages).toHaveLength(0);
+
+      await listener.unsubscribe();
+    });
+
+    test("should support listen with abort on memory transport", async () => {
+      const pubsub = new PubSub<{ message: string }>({
+        transport: "memory",
+        channel: "memory-listen",
+      });
+
+      const controller = new AbortController();
+      const received: string[] = [];
+
+      const consumed = (async () => {
+        for await (const message of pubsub.listen({
+          signal: controller.signal,
+        })) {
+          received.push(message.message);
+        }
+      })();
+
+      await pubsub.publish({ message: "one" });
+
+      controller.abort();
+
+      await consumed;
+
+      expect(received).toEqual(["one"]);
+      expect(pubsub.isActive()).toBe(false);
+    });
+  });
+
   describe("Channel mode", () => {
     test("should publish and receive messages", async () => {
       const redis = createMockRedis();

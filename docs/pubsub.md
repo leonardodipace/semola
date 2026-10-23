@@ -1,11 +1,14 @@
 ---
 title: PubSub
-description: Semola typed Redis pub/sub channels for real-time messaging
+description: Semola typed pub/sub channels for real-time messaging
 ---
 
-Publish and subscribe to JSON messages on a Redis channel, with TypeScript checking the payload shape.
+Publish and subscribe to JSON messages on a channel, with TypeScript checking the payload shape.
 
-Needs **two** `Bun.RedisClient` connections (publisher and subscriber). Sharing one client for both is a common Redis footgun; Semola makes both explicit.
+Two transports:
+
+- **redis** (default) - needs **two** `Bun.RedisClient` connections (publisher and subscriber). Sharing one client for both is a common Redis footgun; Semola makes both explicit.
+- **memory** - process-local hub for single-process apps and tests. Same `publish` / `subscribe` / `listen` API; swap to Redis later by changing options.
 
 ## Import
 
@@ -41,6 +44,19 @@ await events.publish({
 await unsubscribe();
 ```
 
+### In-memory transport
+
+Same API, no Redis. Useful for SSE fan-out in one process, or tests.
+
+```typescript
+const events = new PubSub<UserEvent>({
+  transport: "memory",
+  channel: "user-events",
+});
+```
+
+Instances that share a channel name share the process hub. Cross-process delivery still needs Redis.
+
 ## Subscriptions
 
 `subscribe` returns an unsubscribe function for that handler. Or tear everything down with `events.unsubscribe()`.
@@ -49,11 +65,11 @@ await unsubscribe();
 await events.unsubscribe();
 ```
 
-This removes every local handler and the underlying Redis subscription.
+This removes every local handler and the underlying channel subscription.
 
-Messages are JSON-serialized. Payloads that fail to parse are dropped. Handler errors are swallowed. `isActive()` tells you whether the Redis subscription is live.
+Messages are JSON-serialized. Payloads that fail to parse are dropped. Handler errors are swallowed. `isActive()` tells you whether the channel subscription is live.
 
-Multiple handlers can share one channel; Redis unsubscribe runs when the last handler is removed.
+Multiple handlers can share one channel; the transport unsubscribe runs when the last handler is removed.
 
 ## Async iteration
 
@@ -81,7 +97,7 @@ for await (const message of events.listen({ signal: request.signal })) {
 
 ### Fan-out notifications
 
-Publishing once sends the notification to every subscribed handler on the Redis channel.
+Publishing once sends the notification to every subscribed handler on the channel.
 
 ```typescript
 const notify = new PubSub<{ userId: string; text: string }>({
@@ -111,7 +127,7 @@ const stop = await events.subscribe(async (message) => {
 
 ### Check subscription state
 
-`isActive()` is true when at least one handler is registered and the Redis subscription is live. `subscribe()` already skips a second Redis `SUBSCRIBE` while active; calling it again still adds the handler.
+`isActive()` is true when at least one handler is registered and the channel subscription is live. `subscribe()` already skips a second transport `subscribe` while active; calling it again still adds the handler.
 
 ```typescript
 await events.subscribe(handler);
@@ -146,9 +162,10 @@ Or iterate without a signal: `for await (const message of events) { ... }`.
 
 | Option | Meaning |
 | --- | --- |
-| `subscriber` | `Bun.RedisClient` used for subscribe |
-| `publisher` | `Bun.RedisClient` used for publish |
-| `channel` | Redis channel name |
+| `transport` | `"redis"` (default) or `"memory"` |
+| `subscriber` | `Bun.RedisClient` used for subscribe (redis only) |
+| `publisher` | `Bun.RedisClient` used for publish (redis only) |
+| `channel` | Channel name |
 
 ### Methods
 
@@ -158,5 +175,5 @@ Or iterate without a signal: `for await (const message of events) { ... }`.
 | `subscribe(handler)` | Add a handler; returns unsubscribe fn |
 | `listen({ signal? })` | Consume buffered messages as an async iterator |
 | `[Symbol.asyncIterator]()` | Iterate messages with `for await` |
-| `unsubscribe()` | Remove all handlers / Redis subscription |
-| `isActive()` | Whether the Redis subscription is live |
+| `unsubscribe()` | Remove all handlers / channel subscription |
+| `isActive()` | Whether the channel subscription is live |
