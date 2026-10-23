@@ -172,17 +172,23 @@ export type ApiRequest = Request & {
 };
 
 export type Context<
-  TReq extends RequestSchema = RequestSchema,
+  TReq extends RequestSchema | undefined = undefined,
   TRes extends ResponseSchema | undefined = undefined,
   TExt extends Record<string, unknown> = Record<string, unknown>,
 > = {
   raw: Request;
   req: {
-    body: InferOutput<TReq["body"]>;
-    query: InferOutput<TReq["query"]>;
-    headers: InferOutput<TReq["headers"]>;
-    cookies: InferOutput<TReq["cookies"]>;
-    params: InferOutput<TReq["params"]>;
+    body: InferOutput<TReq extends RequestSchema ? TReq["body"] : undefined>;
+    query: InferOutput<TReq extends RequestSchema ? TReq["query"] : undefined>;
+    headers: InferOutput<
+      TReq extends RequestSchema ? TReq["headers"] : undefined
+    >;
+    cookies: InferOutput<
+      TReq extends RequestSchema ? TReq["cookies"] : undefined
+    >;
+    params: InferOutput<
+      TReq extends RequestSchema ? TReq["params"] : undefined
+    >;
   };
   json: <
     S extends ExtractStatusCodesOrAny<TRes>,
@@ -218,7 +224,7 @@ export type RouteReturn =
   | unknown[];
 
 export type RouteHandler<
-  TReq extends RequestSchema = RequestSchema,
+  TReq extends RequestSchema | undefined = undefined,
   TRes extends ResponseSchema | undefined = undefined,
   TExt extends Record<string, unknown> = Record<string, unknown>,
 > = (c: Context<TReq, TRes, TExt>) => Response | Promise<Response>;
@@ -239,7 +245,7 @@ export type MethodRoutes = Record<
 >;
 
 export type RouteConfig<
-  TReq extends RequestSchema = RequestSchema,
+  TReq extends RequestSchema | undefined = undefined,
   TRes extends ResponseSchema | undefined = undefined,
   TGlobalMiddlewares extends readonly Middleware[] = readonly [],
   TRouteMiddlewares extends readonly Middleware[] = readonly [],
@@ -502,4 +508,69 @@ export type JsonSchema = {
   properties?: Record<string, unknown>;
   required?: string[];
   [key: string]: unknown;
+};
+
+export type ClientRoute<
+  TReq extends RequestSchema | undefined = RequestSchema | undefined,
+  TRes extends ResponseSchema | undefined = ResponseSchema | undefined,
+> = {
+  readonly __kind: "semola.api.route";
+  readonly method: HTTPMethod;
+  readonly request?: TReq;
+  readonly response?: TRes;
+  readonly getPath: () => string;
+};
+
+type ClientPartInput<T> = T extends StandardSchemaV1 ? InferInput<T> : never;
+
+type ClientCallPart = Exclude<keyof RequestSchema, "cookies">;
+
+export type ClientCallInput<TReq extends RequestSchema | undefined> =
+  TReq extends RequestSchema
+    ? {
+        [K in keyof TReq as K extends ClientCallPart
+          ? ClientPartInput<TReq[K]> extends never
+            ? never
+            : K
+          : never]: ClientPartInput<TReq[K]>;
+      }
+    : {};
+
+type ClientOkStatus = 200 | 201 | 202 | 203 | 204 | 205 | 206 | 207 | 208 | 226;
+
+type ClientOkKeys<TRes extends ResponseSchema> = Extract<
+  keyof TRes & number,
+  ClientOkStatus
+>;
+
+export type InferClientData<TRes extends ResponseSchema | undefined> =
+  TRes extends ResponseSchema
+    ? [ClientOkKeys<TRes>] extends [never]
+      ? unknown
+      : InferOutput<TRes[ClientOkKeys<TRes>]>
+    : unknown;
+
+type ClientProcedureFn<
+  TReq extends RequestSchema | undefined,
+  TRes extends ResponseSchema | undefined,
+> = [keyof ClientCallInput<TReq>] extends [never]
+  ? (input?: ClientCallInput<TReq>) => Promise<InferClientData<TRes>>
+  : (input: ClientCallInput<TReq>) => Promise<InferClientData<TRes>>;
+
+export type InferApiClient<T> = {
+  [K in keyof T]: T[K] extends ClientRoute<infer TReq, infer TRes>
+    ? ClientProcedureFn<TReq, TRes>
+    : InferApiClient<T[K]>;
+};
+
+export type ApiClientFetch = (
+  input: string | URL | Request,
+  init?: RequestInit,
+) => Response | Promise<Response>;
+
+export type ApiClientOptions<TRouter = unknown> = {
+  router: TRouter;
+  baseUrl: string;
+  fetch?: ApiClientFetch;
+  headers?: Record<string, string> | Headers;
 };

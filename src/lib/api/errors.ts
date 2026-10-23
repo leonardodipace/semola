@@ -25,3 +25,15 @@ export class DuplicateRouteError extends Error {
     this.name = "DuplicateRouteError";
   }
 }
+
+export class ApiClientError extends Error {
+  public readonly status: number;
+  public readonly body: unknown;
+
+  public constructor(message: string, status: number, body: unknown) {
+    super(message);
+    this.name = "ApiClientError";
+    this.status = status;
+    this.body = body;
+  }
+}

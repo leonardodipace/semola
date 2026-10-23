@@ -71,7 +71,7 @@ api.defineRoute({
   handler: async (c) => {
     return c.json(200, {
       id: c.req.params.id,
-      email: "hi@semola.dev",
+      email: "hi@semo.la",
     });
   },
 });
