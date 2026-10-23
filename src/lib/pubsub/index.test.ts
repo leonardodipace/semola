@@ -88,7 +88,7 @@ class MockRedisClient {
     return handlers.length;
   }
 
-  public async unsubscribe(channel: string) {
+  public async unsubscribe(channel: string, handler?: Handler) {
     if (this.unsubscribeGate) {
       await this.unsubscribeGate;
       this.unsubscribeGate = null;
@@ -102,7 +102,25 @@ class MockRedisClient {
 
     this.unsubscribeCalls.set(channel, unsubscribeCount + 1);
 
-    this.subscriptions.delete(channel);
+    if (!handler) {
+      this.subscriptions.delete(channel);
+      return;
+    }
+
+    const handlers = this.subscriptions.get(channel);
+
+    if (!handlers) {
+      return;
+    }
+
+    const remaining = handlers.filter((entry) => entry !== handler);
+
+    if (remaining.length === 0) {
+      this.subscriptions.delete(channel);
+      return;
+    }
+
+    this.subscriptions.set(channel, remaining);
   }
 
   public clear() {

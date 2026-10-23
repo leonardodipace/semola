@@ -27,8 +27,26 @@ class MockRedisClient {
     return handlers.length;
   }
 
-  public async unsubscribe(channel: string) {
-    this.subscriptions.delete(channel);
+  public async unsubscribe(channel: string, handler?: Handler) {
+    if (!handler) {
+      this.subscriptions.delete(channel);
+      return;
+    }
+
+    const handlers = this.subscriptions.get(channel);
+
+    if (!handlers) {
+      return;
+    }
+
+    const remaining = handlers.filter((entry) => entry !== handler);
+
+    if (remaining.length === 0) {
+      this.subscriptions.delete(channel);
+      return;
+    }
+
+    this.subscriptions.set(channel, remaining);
   }
 }
 
@@ -162,6 +180,65 @@ describe("memoryTransport", () => {
 
     await memoryTransport.unsubscribe("hub-reject", bad);
     await memoryTransport.unsubscribe("hub-reject", good);
+  });
+
+  test("publish delivers to handlers concurrently", async () => {
+    const started: string[] = [];
+    const firstGate = Promise.withResolvers<void>();
+    const secondStarted = Promise.withResolvers<void>();
+
+    const first: Handler = async (message) => {
+      started.push(`a:${message}`);
+      await firstGate.promise;
+    };
+
+    const second: Handler = async (message) => {
+      started.push(`b:${message}`);
+      secondStarted.resolve();
+    };
+
+    await memoryTransport.subscribe("hub-concurrent", first);
+    await memoryTransport.subscribe("hub-concurrent", second);
+
+    const publishPromise = memoryTransport.publish("hub-concurrent", "ping");
+
+    await secondStarted.promise;
+
+    expect(started).toEqual(["a:ping", "b:ping"]);
+
+    firstGate.resolve();
+
+    const count = await publishPromise;
+
+    expect(count).toBe(2);
+
+    await memoryTransport.unsubscribe("hub-concurrent", first);
+    await memoryTransport.unsubscribe("hub-concurrent", second);
+  });
+});
+
+describe("createRedisTransport unsubscribe", () => {
+  test("passes the listener to redis unsubscribe", async () => {
+    const calls: Array<{ channel: string; handler?: Handler }> = [];
+
+    const redis = {
+      async publish() {
+        return 0;
+      },
+      async subscribe() {
+        return 1;
+      },
+      async unsubscribe(channel: string, handler?: Handler) {
+        calls.push({ channel, handler });
+      },
+    } as unknown as Bun.RedisClient;
+
+    const transport = createRedisTransport(redis, redis);
+    const handler: Handler = () => {};
+
+    await transport.unsubscribe("redis-listener", handler);
+
+    expect(calls).toEqual([{ channel: "redis-listener", handler }]);
   });
 });
 

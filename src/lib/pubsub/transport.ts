@@ -13,9 +13,11 @@ export const memoryTransport: ChannelTransport = {
 
     const snapshot = [...handlers];
 
-    for (const handler of snapshot) {
-      await mightThrow(Promise.resolve().then(() => handler(message, channel)));
-    }
+    await Promise.all(
+      snapshot.map((handler) =>
+        mightThrow(Promise.resolve().then(() => handler(message, channel))),
+      ),
+    );
 
     return snapshot.length;
   },
@@ -51,6 +53,6 @@ export const createRedisTransport = (
   return {
     publish: (channel, message) => publisher.publish(channel, message),
     subscribe: (channel, handler) => subscriber.subscribe(channel, handler),
-    unsubscribe: (channel) => subscriber.unsubscribe(channel),
+    unsubscribe: (channel, handler) => subscriber.unsubscribe(channel, handler),
   };
 };
