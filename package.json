@@ -1,6 +1,6 @@
 {
   "name": "semola",
-  "version": "0.6.9-beta.3",
+  "version": "0.6.9",
   "description": "Zero-dependency TypeScript toolkit for Bun. Typed REST APIs with OpenAPI, Redis queues, pub/sub, ORM, durable workflows, caching, auth policies, i18n, and more.",
   "homepage": "https://semo.la",
   "bugs": {
