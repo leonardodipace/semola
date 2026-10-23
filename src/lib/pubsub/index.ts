@@ -6,10 +6,27 @@ import {
   SubscribeError,
   UnsubscribeError,
 } from "./errors.js";
-import type { ListenOptions, MessageHandler, PubSubOptions } from "./types.js";
+import { createRedisTransport, memoryTransport } from "./transport.js";
+import type {
+  ChannelHandler,
+  ChannelTransport,
+  ListenOptions,
+  MessageHandler,
+  PubSubOptions,
+} from "./types.js";
+
+const resolveTransport = (options: PubSubOptions): ChannelTransport => {
+  if (options.transport === "memory") {
+    return memoryTransport;
+  }
+
+  return createRedisTransport(options.publisher, options.subscriber);
+};
 
 export class PubSub<T extends Record<string, unknown>> {
-  private options: PubSubOptions;
+  private channel: string;
+  private transport: ChannelTransport;
+  private transportHandler: ChannelHandler | null = null;
   private isSubscribed = false;
   private nextHandlerId = 0;
   private handlers = new Map<number, MessageHandler<T>>();
@@ -21,7 +38,8 @@ export class PubSub<T extends Record<string, unknown>> {
   > | null = null;
 
   public constructor(options: PubSubOptions) {
-    this.options = options;
+    this.channel = options.channel;
+    this.transport = resolveTransport(options);
   }
 
   private async onMessage(message: string, channel: string) {
@@ -56,33 +74,40 @@ export class PubSub<T extends Record<string, unknown>> {
       return;
     }
 
+    const transportHandler = this.transportHandler;
+
+    if (!transportHandler) {
+      this.handlers.set(handlerId, handler);
+
+      throw new UnsubscribeError(`Unable to unsubscribe from ${this.channel}`);
+    }
+
     this.isSubscribed = false;
+    this.transportHandler = null;
 
     this.unsubscribeInFlight = mightThrow(
-      this.options.subscriber.unsubscribe(this.options.channel),
+      this.transport.unsubscribe(this.channel, transportHandler),
     );
 
     const unsubscribeInFlight = this.unsubscribeInFlight;
 
     if (!unsubscribeInFlight) {
       this.handlers.set(handlerId, handler);
+      this.transportHandler = transportHandler;
       this.isSubscribed = true;
 
-      throw new UnsubscribeError(
-        `Unable to unsubscribe from ${this.options.channel}`,
-      );
+      throw new UnsubscribeError(`Unable to unsubscribe from ${this.channel}`);
     }
 
     const [unsubscribeError] = await unsubscribeInFlight;
 
     if (unsubscribeError) {
       this.handlers.set(handlerId, handler);
+      this.transportHandler = transportHandler;
       this.isSubscribed = true;
       this.unsubscribeInFlight = null;
 
-      throw new UnsubscribeError(
-        `Unable to unsubscribe from ${this.options.channel}`,
-      );
+      throw new UnsubscribeError(`Unable to unsubscribe from ${this.channel}`);
     }
 
     this.unsubscribeInFlight = null;
@@ -98,11 +123,11 @@ export class PubSub<T extends Record<string, unknown>> {
     }
 
     const [publishError, count] = await mightThrow(
-      this.options.publisher.publish(this.options.channel, stringified),
+      this.transport.publish(this.channel, stringified),
     );
 
     if (publishError) {
-      throw new PublishError(`Unable to publish to ${this.options.channel}`);
+      throw new PublishError(`Unable to publish to ${this.channel}`);
     }
 
     return count;
@@ -199,29 +224,28 @@ export class PubSub<T extends Record<string, unknown>> {
       if (inFlightError || !this.isSubscribed) {
         this.handlers.delete(handlerId);
 
-        throw new SubscribeError(
-          `Unable to subscribe to ${this.options.channel}`,
-        );
+        throw new SubscribeError(`Unable to subscribe to ${this.channel}`);
       }
 
       return () => this.unsubscribeHandler(handlerId);
     }
 
+    const transportHandler: ChannelHandler = async (message, channel) =>
+      this.onMessage(message, channel);
+
+    this.transportHandler = transportHandler;
+
     this.subscribeInFlight = mightThrow(
-      this.options.subscriber.subscribe(
-        this.options.channel,
-        async (message, channel) => this.onMessage(message, channel),
-      ),
+      this.transport.subscribe(this.channel, transportHandler),
     );
 
     const subscribeInFlight = this.subscribeInFlight;
 
     if (!subscribeInFlight) {
       this.handlers.delete(handlerId);
+      this.transportHandler = null;
 
-      throw new SubscribeError(
-        `Unable to subscribe to ${this.options.channel}`,
-      );
+      throw new SubscribeError(`Unable to subscribe to ${this.channel}`);
     }
 
     const [subscribeError, count] = await subscribeInFlight;
@@ -230,18 +254,16 @@ export class PubSub<T extends Record<string, unknown>> {
 
     if (subscribeError) {
       this.handlers.delete(handlerId);
+      this.transportHandler = null;
 
-      throw new SubscribeError(
-        `Unable to subscribe to ${this.options.channel}`,
-      );
+      throw new SubscribeError(`Unable to subscribe to ${this.channel}`);
     }
 
     if (!count) {
       this.handlers.delete(handlerId);
+      this.transportHandler = null;
 
-      throw new SubscribeError(
-        `Unable to subscribe to ${this.options.channel}`,
-      );
+      throw new SubscribeError(`Unable to subscribe to ${this.channel}`);
     }
 
     this.isSubscribed = true;
@@ -260,37 +282,42 @@ export class PubSub<T extends Record<string, unknown>> {
       throw new UnsubscribeError("Not subscribed");
     }
 
+    const transportHandler = this.transportHandler;
+
+    if (!transportHandler) {
+      throw new UnsubscribeError(`Unable to unsubscribe from ${this.channel}`);
+    }
+
     const handlers = new Map(this.handlers);
 
     this.handlers.clear();
 
     this.isSubscribed = false;
+    this.transportHandler = null;
 
     this.unsubscribeInFlight = mightThrow(
-      this.options.subscriber.unsubscribe(this.options.channel),
+      this.transport.unsubscribe(this.channel, transportHandler),
     );
 
     const unsubscribeInFlight = this.unsubscribeInFlight;
 
     if (!unsubscribeInFlight) {
       this.handlers = handlers;
+      this.transportHandler = transportHandler;
       this.isSubscribed = true;
 
-      throw new UnsubscribeError(
-        `Unable to unsubscribe from ${this.options.channel}`,
-      );
+      throw new UnsubscribeError(`Unable to unsubscribe from ${this.channel}`);
     }
 
     const [unsubscribeError] = await unsubscribeInFlight;
 
     if (unsubscribeError) {
       this.handlers = handlers;
+      this.transportHandler = transportHandler;
       this.isSubscribed = true;
       this.unsubscribeInFlight = null;
 
-      throw new UnsubscribeError(
-        `Unable to unsubscribe from ${this.options.channel}`,
-      );
+      throw new UnsubscribeError(`Unable to unsubscribe from ${this.channel}`);
     }
 
     this.unsubscribeInFlight = null;
