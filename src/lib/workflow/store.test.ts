@@ -46,7 +46,12 @@ const commitFailed = async (
     retention,
   });
 
-  await store.releaseLease({ executionId, token: "owner", ttlMs: 60_000 });
+  await store.releaseLease({
+    executionId,
+    token: "owner",
+    ttlMs: 60_000,
+    dueAt: Date.now(),
+  });
 
   return committed;
 };

@@ -35,13 +35,13 @@ export const EXTEND_LEASE =
   "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('PEXPIRE', KEYS[1], ARGV[2]) redis.call('ZADD', KEYS[2], 'XX', ARGV[4], ARGV[3]) redis.call('ZADD', KEYS[3], 'XX', ARGV[4], ARGV[3]) return 1";
 
 // KEYS: lease, due, capacity
-// ARGV: token, executionId, due score ("" leaves it), slot expiry
+// ARGV: token, executionId, due score, slot expiry
 // Releases the lease and lowers (never raises) the due score, so a cancel
 // that lowered it after the last commit is kept. A held capacity slot is kept
 // until the slot expiry (due + lockTTL), so a sleeping execution keeps it with
 // nobody refreshing it.
 export const RELEASE_LEASE =
-  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) if ARGV[3] ~= '' then redis.call('ZADD', KEYS[2], 'XX', 'LT', ARGV[3], ARGV[2]) redis.call('ZADD', KEYS[3], 'XX', ARGV[4], ARGV[2]) end return 1";
+  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) redis.call('ZADD', KEYS[2], 'XX', 'LT', ARGV[3], ARGV[2]) redis.call('ZADD', KEYS[3], 'XX', ARGV[4], ARGV[2]) return 1";
 
 // KEYS: meta, history, due, terminal
 // ARGV: executionId, WorkflowStarted payload, now, meta field/value pairs...
@@ -314,9 +314,8 @@ export class WorkflowStore {
     return Number(result) === 1;
   }
 
-  // dueAt lowers the due score and keeps a held slot until dueAt + ttlMs;
-  // omit it to keep the visibility timeout.
-  public async releaseLease(input: LeaseInput) {
+  // dueAt lowers the due score and keeps a held slot until dueAt + ttlMs.
+  public async releaseLease(input: LeaseInput & { dueAt: number }) {
     const { executionId, token, ttlMs, capacityKey = "*", dueAt } = input;
 
     const [error] = await mightThrow(
@@ -328,8 +327,8 @@ export class WorkflowStore {
         keys.capacity(this.name, capacityKey),
         token,
         executionId,
-        dueAt === undefined ? "" : String(dueAt),
-        dueAt === undefined ? "" : String(dueAt + ttlMs),
+        String(dueAt),
+        String(dueAt + ttlMs),
       ]),
     );
 

@@ -55,7 +55,7 @@ Follow-ups from the review of `noah/timer-refactor`, after checking each claim a
   - Keep the cheap `isTerminalStatus(meta.status)` check in `runExecution`, on meta that's already loaded.
   - Delete the `if (view.terminal) return` loop guard. It's the only reader of `view.terminal`, so `view.terminal` tracking in history.ts and the `HistoryTerminal` type go too.
 
-- [ ] **6. Make `dueAt` required on `releaseLease`.**
+- [x] **6. Make `dueAt` required on `releaseLease`.**
   - Both engine callers pass it; only the store test helper omits it. Remove the `ARGV[3] ~= ''` branch in `RELEASE_LEASE`.
   - Split `LeaseInput` into extend and release input types, so `dueAt` exists only on release.
 

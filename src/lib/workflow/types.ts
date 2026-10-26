@@ -454,8 +454,6 @@ export type LeaseInput = {
   ttlMs: number;
   // Capacity key of the slot that follows the lease ("*" by default).
   capacityKey?: string;
-  // Release only: next due time; a held slot is kept until dueAt + ttlMs.
-  dueAt?: number;
 };
 
 export type CommitRetention = {
