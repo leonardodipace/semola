@@ -194,6 +194,8 @@ export type WorkflowMeta = {
   cancelledAt: string;
   partitionKey: string;
   partitionSlot: string;
+  // Set by cancel() while the execution is pending/running; cleared by resume.
+  cancelRequestedAt: string;
 };
 
 export type Workflow<TInput, TResult> = {
@@ -278,10 +280,6 @@ export type HistoryEvent =
   | {
       type: "TimerFired";
       timerId: string;
-      timestamp: number;
-    }
-  | {
-      type: "WorkflowCancelRequested";
       timestamp: number;
     }
   | {
@@ -392,7 +390,6 @@ export type HistoryView = {
   partitionKey: string;
   steps: Map<string, StepState>;
   timers: Map<string, TimerState>;
-  cancelRequested: boolean;
   terminal: HistoryTerminal | null;
   compensation: CompensationPhase | null;
 };
@@ -436,6 +433,7 @@ export type AdvanceInput<TInput, TResult> = {
   executionId: string;
   signal: AbortSignal;
   retries: number;
+  cancelRequested: boolean;
 };
 
 export type WithLeaseInput = {
@@ -452,7 +450,7 @@ export type ExecuteStepInput = {
   handler: StepHandler<unknown, unknown>;
   rawInput: string;
   partitionKey: string;
-  token: string;
+  run: LeaseRun;
 };
 
 export type HandleStepFailureInput = {
@@ -463,8 +461,7 @@ export type HandleStepFailureInput = {
   rawInput: string;
   partitionKey: string;
   stepError: Error;
-  view: HistoryView;
-  token: string;
+  run: LeaseRun;
 };
 
 export type FailAfterStepExhaustedInput = {
@@ -475,7 +472,7 @@ export type FailAfterStepExhaustedInput = {
   partitionKey: string;
   stepError: Error;
   errorHistory: WorkflowStepErrorRecord[];
-  token: string;
+  run: LeaseRun;
 };
 
 export type CompensationItem = {
@@ -501,7 +498,7 @@ export type MaybeStartCompensationInput = {
   executionId: string;
   reason: "failed" | "cancelled";
   error: string | null;
-  token: string;
+  run: LeaseRun;
 };
 
 export type CompensationStartResult =
@@ -511,10 +508,9 @@ export type CompensationStartResult =
 
 export type RunCompensationPhaseInput = {
   executionId: string;
-  view: HistoryView;
   rawInput: string;
   partitionKey: string;
-  token: string;
+  run: LeaseRun;
 };
 
 export type ExecuteCompensationInput = {
@@ -526,7 +522,7 @@ export type ExecuteCompensationInput = {
   compensate: StepCompensateHandler<unknown, unknown>;
   rawInput: string;
   partitionKey: string;
-  token: string;
+  run: LeaseRun;
 };
 
 export type FinishCompensationInput = {
@@ -609,12 +605,6 @@ export type PartitionKeyInput = {
   slot: number;
 };
 
-export type AppendEventsInput = {
-  executionId: string;
-  events: HistoryEvent[];
-  leaseToken?: string;
-};
-
 export type SetMetaInput = {
   executionId: string;
   fields: Partial<WorkflowMeta>;
@@ -679,6 +669,30 @@ export type CommitInput = {
   // Present only for terminal transitions: leave active + apply retention.
   retention?: CommitRetention;
 };
+
+export type CommitResult =
+  | { committed: false }
+  | { committed: true; cancelRequested: boolean };
+
+export type CancelRequestResult = {
+  accepted: boolean;
+  status: WorkflowStatus;
+  updatedAt: string;
+  cancelledAt: string;
+  createdAt: string;
+};
+
+// In-memory state of one lease: history is only written by the lease holder
+// while it holds the lease, so the view is loaded once and kept current by
+// applying each committed event. cancelRequested comes from meta at lease
+// start and from every commit afterwards.
+export type LeaseRun = {
+  token: string;
+  view: HistoryView;
+  cancelRequested: boolean;
+};
+
+export type RunCommitInput = Omit<CommitInput, "executionId" | "leaseToken">;
 
 export type ResumeExecutionInput = {
   executionId: string;

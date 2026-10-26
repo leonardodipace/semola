@@ -12,7 +12,12 @@ import {
   WorkflowStoreError,
 } from "./index.js";
 import { createRedis, type MockRedisClient } from "./redis.mock.js";
-import { RESUME_EXECUTION, WorkflowStore } from "./store.js";
+import {
+  CANCEL_EXECUTION,
+  COMMIT,
+  RESUME_EXECUTION,
+  WorkflowStore,
+} from "./store.js";
 
 const drainMicrotasks = async () => {
   await Promise.resolve();
@@ -778,6 +783,7 @@ describe("workflow", () => {
         cancelledAt: "",
         partitionKey: "*",
         partitionSlot: "",
+        cancelRequestedAt: "",
       });
     };
 
@@ -1531,6 +1537,7 @@ describe("workflow", () => {
     const redis = createRedis();
     let attempts = 0;
     const name = `resume-cancel-${crypto.randomUUID()}`;
+    const metaKey = (id: string) => `workflow:${name}:meta:${id}`;
 
     const wf = defineWorkflow({
       name,
@@ -1553,19 +1560,151 @@ describe("workflow", () => {
     const { executionId } = await wf.start({});
     await waitStatus(wf, executionId, "failed");
 
-    await redis.rpush(
-      `workflow:${name}:history:${executionId}`,
-      JSON.stringify({
-        type: "WorkflowCancelRequested",
-        timestamp: Date.now(),
-      }),
-    );
+    // A cancel accepted just before the run committed its failure.
+    await redis.hset(metaKey(executionId), "cancelRequestedAt", "1");
 
     await wf.resume(executionId);
+
+    expect((await redis.hgetall(metaKey(executionId))).cancelRequestedAt).toBe(
+      "",
+    );
+
     const execution = await waitStatus(wf, executionId, "completed");
 
     expect(execution.result).toBe("ok");
     expect(execution.status).toBe("completed");
+
+    await stop(wf);
+  });
+
+  test("lease holder reads history once per lease, not after its own writes", async () => {
+    const redis = createRedis();
+    const name = `single-read-${crypto.randomUUID()}`;
+    const historyKey = (id: string) => `workflow:${name}:history:${id}`;
+    const store = new WorkflowStore(redis, name);
+    let reads = 0;
+    let target = "";
+
+    const lrange = redis.lrange.bind(redis);
+    redis.lrange = async (key: string, start: number, stop: number) => {
+      if (key === historyKey(target)) reads++;
+
+      return lrange(key, start, stop);
+    };
+
+    const wf = defineWorkflow({
+      name,
+      redis,
+      ...fast,
+      lockTTL: 60_000,
+      handler: async ({ step }) => {
+        let total = 0;
+
+        for (let i = 0; i < 5; i++) {
+          total += await step(`s${i}`, async () => i);
+        }
+
+        return total;
+      },
+    });
+
+    target = "five-steps";
+    await wf.start({}, { executionId: target });
+
+    // Poll meta only: get() reads history itself.
+    await waitFor(
+      async () => (await store.getMeta(target))?.status === "completed",
+    );
+
+    expect((await store.getMeta(target))?.result).toBe("10");
+    expect(await store.loadHistory(target)).toHaveLength(17);
+    reads--; // the loadHistory call just above
+
+    expect(reads).toBe(1);
+
+    await stop(wf);
+  });
+
+  test("commit reports a cancel requested by another replica mid-step", async () => {
+    const redis = createRedis();
+    const name = `cancel-mid-step-${crypto.randomUUID()}`;
+    const other = new WorkflowStore(redis, name);
+    const ran: string[] = [];
+    let abortedDuringStep: boolean | undefined;
+
+    const wf = defineWorkflow({
+      name,
+      redis,
+      ...fast,
+      lockTTL: 60_000,
+      handler: async ({ step, executionId }) => {
+        await step("first", async ({ signal }) => {
+          ran.push("first");
+          // Another replica's cancel: meta flag only, no local abort here.
+          await other.requestCancel(executionId);
+          abortedDuringStep = signal.aborted;
+          return 1;
+        });
+
+        await step("second", async () => {
+          ran.push("second");
+          return 2;
+        });
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    const execution = await waitStatus(wf, executionId, "cancelled");
+
+    expect(abortedDuringStep).toBe(false);
+    expect(ran).toEqual(["first"]);
+    expect(execution.steps.map((s) => s.name)).toEqual(["first"]);
+
+    await stop(wf);
+  });
+
+  test("a cancel reported by StepStarted skips the step handler", async () => {
+    const redis = createRedis();
+    const name = `cancel-before-handler-${crypto.randomUUID()}`;
+    const other = new WorkflowStore(redis, name);
+    const ran: string[] = [];
+
+    const send = redis.send.bind(redis);
+    redis.send = async (command: string, args: string[]) => {
+      const startsSecond = args.some(
+        (arg) => arg.includes('"StepStarted"') && arg.includes('"a1"'),
+      );
+
+      if (command === "EVAL" && args[0] === COMMIT && startsSecond) {
+        await other.requestCancel(args[8] ?? "");
+      }
+
+      return send(command, args);
+    };
+
+    const wf = defineWorkflow({
+      name,
+      redis,
+      ...fast,
+      lockTTL: 60_000,
+      handler: async ({ step }) => {
+        await step("first", async () => {
+          ran.push("first");
+          return 1;
+        });
+
+        await step("second", async () => {
+          ran.push("second");
+          return 2;
+        });
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    const execution = await waitStatus(wf, executionId, "cancelled");
+
+    expect(ran).toEqual(["first"]);
+    expect(execution.steps.map((s) => s.name)).toEqual(["first"]);
 
     await stop(wf);
   });
@@ -1787,6 +1926,60 @@ describe("workflow", () => {
       expect(second.executionId).toBe(executionId);
 
       await stop(wf);
+    });
+
+    test("cancel is a no-op when the run turns terminal or compensating first", async () => {
+      for (const status of ["completed", "compensating"] as const) {
+        const redis = createRedis();
+        const name = `cancel-race-${status}-${crypto.randomUUID()}`;
+        const metaKey = (id: string) => `workflow:${name}:meta:${id}`;
+        let cancels = 0;
+
+        const wf = defineWorkflow({
+          name,
+          redis,
+          ...fast,
+          hooks: {
+            onCancel: () => {
+              cancels++;
+            },
+          },
+          handler: async ({ sleep: durableSleep }) => {
+            await durableSleep(60_000);
+          },
+        });
+
+        const { executionId } = await wf.start({});
+        await waitStatus(wf, executionId, "running");
+
+        // The run finishes (or starts unwinding) on another replica right
+        // before the cancel script executes.
+        const send = redis.send.bind(redis);
+        redis.send = async (command: string, args: string[]) => {
+          if (command === "EVAL" && args[0] === CANCEL_EXECUTION) {
+            await redis.hset(metaKey(executionId), "status", status);
+          }
+
+          return send(command, args);
+        };
+
+        const result = await wf.cancel(executionId);
+
+        expect(result.status).toBe(status);
+        expect(
+          (await redis.hgetall(metaKey(executionId))).cancelRequestedAt,
+        ).toBe("");
+        expect(redis.getList(`workflow:${name}:queue`)).not.toContain(
+          executionId,
+        );
+
+        await sleep(50);
+
+        expect((await wf.get(executionId)).status).toBe(status);
+        expect(cancels).toBe(0);
+
+        await stop(wf);
+      }
     });
 
     test("resume rejects non-failed executions", async () => {
@@ -2934,6 +3127,7 @@ describe("workflow", () => {
           cancelledAt: "",
           partitionKey,
           partitionSlot: "",
+          cancelRequestedAt: "",
         });
       };
 

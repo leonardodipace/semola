@@ -1775,6 +1775,9 @@ describe("workflow compensate adversarial", () => {
       await redis.rpush(historyKey, JSON.stringify(event));
     }
 
+    // History has one writer per lease: the current holder never re-reads
+    // it, so hand the corrupted history to the next lease holder.
+    expireLeases(redis);
     hang = false;
 
     const execution = await waitStatus(wf, executionId, "failed");
@@ -2062,6 +2065,9 @@ describe("workflow compensate adversarial", () => {
       await redis.rpush(historyKey, JSON.stringify(event));
     }
 
+    // History has one writer per lease: the current holder never re-reads
+    // it, so hand the corrupted history to the next lease holder.
+    expireLeases(redis);
     hang = false;
 
     const execution = await waitStatus(wf, executionId, "failed");
@@ -2151,6 +2157,9 @@ describe("workflow compensate adversarial", () => {
       await redis.rpush(historyKey, JSON.stringify(event));
     }
 
+    // History has one writer per lease: the current holder never re-reads
+    // it, so hand the corrupted history to the next lease holder.
+    expireLeases(redis);
     releaseFail?.();
 
     const execution = await waitStatus(wf, executionId, "failed");
@@ -2166,17 +2175,13 @@ describe("workflow compensate adversarial", () => {
     const redis = createRedis();
     const order: string[] = [];
     const name = `adv-missing-result-${crypto.randomUUID()}`;
-    let releaseFail: (() => void) | undefined;
-    const failGate = new Promise<void>((resolve) => {
-      releaseFail = resolve;
-    });
 
     const wf = defineWorkflow({
       name,
       redis,
       ...fast,
       retries: 0,
-      handler: async ({ step }) => {
+      handler: async ({ step, sleep: durableSleep }) => {
         await step(
           "a",
           async () => {
@@ -2203,10 +2208,7 @@ describe("workflow compensate adversarial", () => {
           },
         );
 
-        await step("gate", async ({ fail }) => {
-          await failGate;
-          fail(new Error("boom"));
-        });
+        await durableSleep(60_000);
       },
     });
 
@@ -2214,10 +2216,12 @@ describe("workflow compensate adversarial", () => {
 
     await waitFor(async () => {
       const execution = await wf.get(executionId);
-      return (
-        execution.steps.some((s) => s.name === "a") &&
-        execution.steps.some((s) => s.name === "b")
-      );
+      return execution.steps.length === 2;
+    });
+    // Durable sleep holds no lease, so the next lease holder loads this.
+    await waitFor(async () => {
+      const keys = redis.getStringKeys();
+      return !keys.includes(`workflow:${name}:lease:${executionId}`);
     });
 
     const historyKey = `workflow:${name}:history:${executionId}`;
@@ -2239,13 +2243,14 @@ describe("workflow compensate adversarial", () => {
       await redis.rpush(historyKey, JSON.stringify(event));
     }
 
-    releaseFail?.();
+    // Cancel goes straight to compensation collect without replaying steps.
+    await wf.cancel(executionId);
 
     const execution = await waitStatus(wf, executionId, "failed");
 
     expect(order).not.toContain("undo-a");
     expect(order).not.toContain("undo-b");
-    expect(execution.error).toBe("boom");
+    expect(execution.error).toMatch(/^nondeterminism: compensation collect/);
 
     await stop(wf);
   });

@@ -1,4 +1,5 @@
 import {
+  CANCEL_EXECUTION,
   CLAIM_DUE_TIMER,
   CLAIM_OR_REOWN_PARTITION,
   COMMIT,
@@ -568,7 +569,11 @@ export class MockRedisClient {
 
       if (payloads.length > 0) this.rpushSync(historyKey, ...payloads);
       if (fieldValues.length > 0) this.hsetSync(metaKey, fieldValues);
-      if (!terminal) return 1;
+
+      const cancel = this.hashes.get(metaKey)?.get("cancelRequestedAt");
+      const code = cancel ? 2 : 1;
+
+      if (!terminal) return code;
 
       this.sremSync(activeKey, executionId);
 
@@ -578,7 +583,7 @@ export class MockRedisClient {
         if (ttlMs <= 0) {
           this.delSync(metaKey, historyKey, leaseKey);
           this.zremSync(terminalKey, [executionId]);
-          return 1;
+          return code;
         }
 
         this.pexpireSync(metaKey, ttlMs);
@@ -589,7 +594,40 @@ export class MockRedisClient {
         this.zaddSync(terminalKey, Number(trackedAt), executionId);
       }
 
-      return 1;
+      return code;
+    }
+
+    if (script === CANCEL_EXECUTION) {
+      const [metaKey = "", queueKey = ""] = keyArgs;
+      const executionId = argv[0] ?? "";
+      const requestedAt = argv[1] ?? "";
+
+      this.sweep(metaKey);
+
+      const hash = this.hashes.get(metaKey);
+      const status = hash?.get("status");
+
+      if (!hash || status === undefined) return null;
+
+      const closed = ["completed", "failed", "cancelled", "compensating"];
+      let accepted = 0;
+
+      if (!closed.includes(status)) {
+        if (!hash.get("cancelRequestedAt")) {
+          this.hsetSync(metaKey, ["cancelRequestedAt", requestedAt]);
+        }
+
+        this.enqueueIfAbsentSync(queueKey, executionId);
+        accepted = 1;
+      }
+
+      return [
+        accepted,
+        status,
+        hash.get("updatedAt") ?? null,
+        hash.get("cancelledAt") ?? null,
+        hash.get("createdAt") ?? null,
+      ];
     }
 
     if (script === RESUME_EXECUTION) {
@@ -623,6 +661,8 @@ export class MockRedisClient {
         "error",
         "",
         "failedAt",
+        "",
+        "cancelRequestedAt",
         "",
         "updatedAt",
         updatedAt,

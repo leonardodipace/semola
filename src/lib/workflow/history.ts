@@ -1,7 +1,6 @@
 import { mightThrowSync } from "../errors/index.js";
 import { SerializationError } from "./errors.js";
 import type {
-  CompensationPhase,
   HistoryEvent,
   HistoryView,
   StepState,
@@ -16,16 +15,160 @@ export const isTerminalStatus = (status: string) => {
   return false;
 };
 
-export const parseHistory = (rawEvents: string[]): HistoryView => {
-  const events: HistoryEvent[] = [];
-  const steps = new Map<string, StepState>();
-  const timers = new Map<string, TimerState>();
+export const emptyHistoryView = (): HistoryView => ({
+  events: [],
+  input: "",
+  partitionKey: "",
+  steps: new Map<string, StepState>(),
+  timers: new Map<string, TimerState>(),
+  terminal: null,
+  compensation: null,
+});
 
-  let input = "";
-  let partitionKey = "";
-  let cancelRequested = false;
-  let terminal: HistoryView["terminal"] = null;
-  let compensation: CompensationPhase | null = null;
+// Applies one event to a view in place. parseHistory folds the stored list
+// through this; the lease holder applies its own committed events with it
+// instead of reloading history.
+export const applyHistoryEvent = (view: HistoryView, event: HistoryEvent) => {
+  const { steps, timers } = view;
+
+  view.events.push(event);
+
+  if (event.type === "WorkflowStarted") {
+    view.input = event.input;
+    view.partitionKey = event.partitionKey;
+    return;
+  }
+
+  if (event.type === "StepScheduled") {
+    steps.set(event.stepId, {
+      status: "scheduled",
+      stepName: event.stepName,
+      attempt: event.attempt,
+    });
+    return;
+  }
+
+  if (event.type === "StepStarted") {
+    const previous = steps.get(event.stepId);
+
+    steps.set(event.stepId, {
+      status: "started",
+      stepName: previous?.stepName ?? "",
+      attempt: event.attempt,
+    });
+    return;
+  }
+
+  if (event.type === "StepCompleted") {
+    steps.set(event.stepId, {
+      status: "completed",
+      stepName: event.stepName,
+      result: event.result,
+      completedAt: event.timestamp,
+    });
+    return;
+  }
+
+  if (event.type === "StepFailed") {
+    steps.set(event.stepId, {
+      status: "failed",
+      stepName: event.stepName,
+      error: event.error,
+      retryable: event.retryable,
+      attempt: event.attempt,
+    });
+    return;
+  }
+
+  if (event.type === "TimerStarted") {
+    timers.set(event.timerId, {
+      status: "started",
+      fireAt: event.fireAt,
+      delayMs: event.fireAt - event.timestamp,
+    });
+    return;
+  }
+
+  if (event.type === "TimerFired") {
+    const previous = timers.get(event.timerId);
+
+    timers.set(event.timerId, {
+      status: "fired",
+      delayMs: previous?.delayMs ?? 0,
+    });
+    return;
+  }
+
+  if (event.type === "WorkflowCancelled") {
+    view.terminal = { kind: "cancelled" };
+    return;
+  }
+
+  if (event.type === "WorkflowCompleted") {
+    view.terminal = { kind: "completed", result: event.result };
+    return;
+  }
+
+  if (event.type === "WorkflowFailed") {
+    view.terminal = { kind: "failed", error: event.error };
+    return;
+  }
+
+  if (event.type === "WorkflowResumed") {
+    view.terminal = null;
+    return;
+  }
+
+  if (event.type === "CompensationStarted") {
+    const stepIds = Array.isArray(event.stepIds) ? event.stepIds : [];
+
+    view.compensation = {
+      reason: event.reason,
+      error: event.error,
+      stepIds,
+      steps: new Map(),
+    };
+    return;
+  }
+
+  const compensation = view.compensation;
+
+  if (event.type === "CompensationScheduled") {
+    if (!compensation) return;
+
+    compensation.steps.set(event.stepId, {
+      status: "scheduled",
+      stepName: event.stepName,
+      attempt: event.attempt,
+    });
+    return;
+  }
+
+  if (event.type === "CompensationCompleted") {
+    if (!compensation) return;
+
+    compensation.steps.set(event.stepId, {
+      status: "completed",
+      stepName: event.stepName,
+    });
+    return;
+  }
+
+  if (event.type === "CompensationFailed") {
+    if (!compensation) return;
+
+    compensation.steps.set(event.stepId, {
+      status: "failed",
+      stepName: event.stepName,
+      error: event.error,
+      retryable: event.retryable,
+      attempt: event.attempt,
+    });
+  }
+};
+
+export const parseHistory = (rawEvents: string[]): HistoryView => {
+  const view = emptyHistoryView();
 
   for (const raw of rawEvents) {
     const [error, event] = mightThrowSync(
@@ -40,154 +183,8 @@ export const parseHistory = (rawEvents: string[]): HistoryView => {
       throw new SerializationError("Unable to parse history event");
     }
 
-    events.push(event);
-
-    if (event.type === "WorkflowStarted") {
-      input = event.input;
-      partitionKey = event.partitionKey;
-      continue;
-    }
-
-    if (event.type === "StepScheduled") {
-      steps.set(event.stepId, {
-        status: "scheduled",
-        stepName: event.stepName,
-        attempt: event.attempt,
-      });
-      continue;
-    }
-
-    if (event.type === "StepStarted") {
-      const previous = steps.get(event.stepId);
-
-      steps.set(event.stepId, {
-        status: "started",
-        stepName: previous?.stepName ?? "",
-        attempt: event.attempt,
-      });
-      continue;
-    }
-
-    if (event.type === "StepCompleted") {
-      steps.set(event.stepId, {
-        status: "completed",
-        stepName: event.stepName,
-        result: event.result,
-        completedAt: event.timestamp,
-      });
-      continue;
-    }
-
-    if (event.type === "StepFailed") {
-      steps.set(event.stepId, {
-        status: "failed",
-        stepName: event.stepName,
-        error: event.error,
-        retryable: event.retryable,
-        attempt: event.attempt,
-      });
-      continue;
-    }
-
-    if (event.type === "TimerStarted") {
-      timers.set(event.timerId, {
-        status: "started",
-        fireAt: event.fireAt,
-        delayMs: event.fireAt - event.timestamp,
-      });
-      continue;
-    }
-
-    if (event.type === "TimerFired") {
-      const previous = timers.get(event.timerId);
-
-      timers.set(event.timerId, {
-        status: "fired",
-        delayMs: previous?.delayMs ?? 0,
-      });
-      continue;
-    }
-
-    if (event.type === "WorkflowCancelRequested") {
-      cancelRequested = true;
-      continue;
-    }
-
-    if (event.type === "WorkflowCancelled") {
-      terminal = { kind: "cancelled" };
-      continue;
-    }
-
-    if (event.type === "WorkflowCompleted") {
-      terminal = { kind: "completed", result: event.result };
-      continue;
-    }
-
-    if (event.type === "WorkflowFailed") {
-      terminal = { kind: "failed", error: event.error };
-      continue;
-    }
-
-    if (event.type === "WorkflowResumed") {
-      terminal = null;
-      cancelRequested = false;
-      continue;
-    }
-
-    if (event.type === "CompensationStarted") {
-      const stepIds = Array.isArray(event.stepIds) ? event.stepIds : [];
-
-      compensation = {
-        reason: event.reason,
-        error: event.error,
-        stepIds,
-        steps: new Map(),
-      };
-      continue;
-    }
-
-    if (event.type === "CompensationScheduled") {
-      if (!compensation) continue;
-
-      compensation.steps.set(event.stepId, {
-        status: "scheduled",
-        stepName: event.stepName,
-        attempt: event.attempt,
-      });
-      continue;
-    }
-
-    if (event.type === "CompensationCompleted") {
-      if (!compensation) continue;
-
-      compensation.steps.set(event.stepId, {
-        status: "completed",
-        stepName: event.stepName,
-      });
-      continue;
-    }
-
-    if (event.type === "CompensationFailed") {
-      if (!compensation) continue;
-
-      compensation.steps.set(event.stepId, {
-        status: "failed",
-        stepName: event.stepName,
-        error: event.error,
-        retryable: event.retryable,
-        attempt: event.attempt,
-      });
-    }
+    applyHistoryEvent(view, event);
   }
 
-  return {
-    events,
-    input,
-    partitionKey,
-    steps,
-    timers,
-    cancelRequested,
-    terminal,
-    compensation,
-  };
+  return view;
 };

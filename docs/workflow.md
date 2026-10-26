@@ -71,7 +71,7 @@ N Bun processes may register the same workflow `name` against the same Redis. Wo
 
 If a replica dies mid-run, lease expiry lets another replica (or the same process after restart) reclaim the execution. You do not need to call `resume()` for crash recovery; workers reclaim from Redis automatically.
 
-History and status writes are lease-fenced (Redis compare-and-append / compare-and-set against the lease token). Each state transition is a single Redis script, so history and status never disagree after a crash: a terminal event, its final status, leaving the active set, and retention are written together, as are `CompensationStarted` and status `compensating`. A writer that loses the lease cannot write; the new owner continues from history. Client paths do not take a lease: `start` creates meta, the first history event, and the queue entry in one script; `resume` is one compare-and-set script; `cancel` appends a cancel request. Losing a lease aborts the local forward `signal` so the handler can stop; another replica may still re-run the step after reclaim (at-least-once).
+History and status writes are lease-fenced (Redis compare-and-append / compare-and-set against the lease token). Each state transition is a single Redis script, so history and status never disagree after a crash: a terminal event, its final status, leaving the active set, and retention are written together, as are `CompensationStarted` and status `compensating`. A writer that loses the lease cannot write; the new owner continues from history. While an execution is leased, the lease holder is the only writer of its history, so it loads history once per lease and keeps it in memory. Client paths do not take a lease: `start` creates meta, the first history event, and the queue entry in one script; `resume` is one compare-and-set script on a failed execution; `cancel` sets a flag on meta (never history), which the lease holder sees on its next write. Losing a lease aborts the local forward `signal` so the handler can stop; another replica may still re-run the step after reclaim (at-least-once).
 
 `resume(executionId)` re-queues a **failed** execution in one atomic step: only while meta status is still `failed` and history is unchanged since resume read it, it removes the retention TTL, appends a resume event, re-schedules failed steps, sets `pending`, marks the execution active, and enqueues it. `pending` / `running` / `compensating` / `completed` / `cancelled` executions reject, as do failed executions that already started compensation. Concurrent `resume` calls on the same execution apply once; the others reject. A later failure needs a new resume event even if an older `WorkflowResumed` is already in history.
 
@@ -141,7 +141,7 @@ const parent = defineWorkflow<{ userId: string }, { ok: true }>({
 
 ### Cancel an execution
 
-`cancel()` records the request and aborts local work. The return value may still be `pending`, `running`, or `compensating`. Poll until status is `cancelled`, or `failed` if compensation itself exhausts retries.
+`cancel()` records the request and aborts local work. The return value may still be `pending`, `running`, or `compensating`. Cancelling a `completed` / `failed` / `cancelled` or `compensating` execution changes nothing and returns its current status. Poll until status is `cancelled`, or `failed` if compensation itself exhausts retries.
 
 ```typescript
 const requested = await onboard.cancel(executionId);
@@ -362,7 +362,7 @@ Without `partitionBy`, `partitionKey` is stored on meta but capacity stays on th
 
 Failed steps retry with exponential backoff before the workflow is marked `failed`. Default `retries: 3` means 4 total attempts. `retries: 0` fails on the first error. The same retry policy applies to `compensate` handlers. `onRetry` fires only for forward step retries, not compensate retries.
 
-`cancel` is honored during retry backoff and `sleep`, not only between steps. Completed steps with `compensate` unwind before status becomes `cancelled`. After terminal failure, `resume(executionId)` re-queues the execution unless compensation already ran.
+`cancel` is honored during retry backoff and `sleep`, not only between steps. `cancel()` aborts the forward `signal` only on the replica that handles the call; a step running on another replica keeps going, its outcome is recorded, and the cancel is honored at that write. Completed steps with `compensate` unwind before status becomes `cancelled`. After terminal failure, `resume(executionId)` re-queues the execution unless compensation already ran.
 
 ### Hooks
 
@@ -380,8 +380,8 @@ Prefix: `workflow:`
 
 | Key | Purpose |
 |-----|---------|
-| `workflow:{name}:history:{executionId}` | append-only event list |
-| `workflow:{name}:meta:{executionId}` | status cache for `get()` |
+| `workflow:{name}:history:{executionId}` | append-only event list, written by `start`, `resume`, and the lease holder |
+| `workflow:{name}:meta:{executionId}` | status, result/error, timestamps, and `cancelRequestedAt` (set by `cancel`, cleared by `resume`) |
 | `workflow:{name}:lease:{executionId}` | owner token + TTL |
 | `workflow:{name}:queue` | workflow task queue |
 | `workflow:{name}:timers` | sorted set of due timers / retry delays |

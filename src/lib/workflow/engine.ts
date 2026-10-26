@@ -1,6 +1,10 @@
 import { mightThrow, mightThrowSync } from "../errors/index.js";
 import { NonRetryableStepError, Paused, WorkflowStoreError } from "./errors.js";
-import { isTerminalStatus, parseHistory } from "./history.js";
+import {
+  applyHistoryEvent,
+  isTerminalStatus,
+  parseHistory,
+} from "./history.js";
 import { fromJson, toJson } from "./json.js";
 import type { WorkflowStore } from "./store.js";
 import type {
@@ -26,7 +30,9 @@ import type {
   FireDurableTimerInput,
   HandleStepFailureInput,
   HistoryEvent,
+  LeaseRun,
   MaybeStartCompensationInput,
+  RunCommitInput,
   RunCompensationPhaseInput,
   StepCompensateHandler,
   StepHandler,
@@ -116,16 +122,17 @@ const timerDelayMismatch = (
 const advance = async <TInput, TResult>(
   input: AdvanceInput<TInput, TResult>,
 ): Promise<WorkflowDecision> => {
-  const { options, view, executionId, signal, retries } = input;
+  const { options, view, executionId, signal, retries, cancelRequested } =
+    input;
   const now = Date.now();
 
   if (view.terminal) {
     return { type: "waiting" };
   }
 
-  // Only history cancel requests end the run. stop() aborts the signal to
+  // Only cancel() requests end the run. stop() aborts the signal to
   // interrupt handlers but must not write WorkflowCancelled.
-  if (view.cancelRequested) {
+  if (cancelRequested) {
     return {
       type: "cancel",
       events: [{ type: "WorkflowCancelled", timestamp: now }],
@@ -268,7 +275,7 @@ const advance = async <TInput, TResult>(
     };
   }
 
-  if (view.cancelRequested) {
+  if (cancelRequested) {
     return {
       type: "cancel",
       events: [{ type: "WorkflowCancelled", timestamp: now }],
@@ -836,6 +843,31 @@ export class WorkflowEngine<TInput, TResult> {
     return held.get(key) ?? null;
   }
 
+  // Lease-holder write: commits, then applies the events to the in-memory
+  // view and picks up a cancel request reported by the same script, so the
+  // run never re-reads history while it holds the lease.
+  private async commitRun(
+    executionId: string,
+    run: LeaseRun,
+    input: RunCommitInput,
+  ) {
+    const result = await this.store.commit({
+      executionId,
+      leaseToken: run.token,
+      ...input,
+    });
+
+    if (!result.committed) return false;
+
+    for (const event of input.events ?? []) {
+      applyHistoryEvent(run.view, event);
+    }
+
+    if (result.cancelRequested) run.cancelRequested = true;
+
+    return true;
+  }
+
   private async runExecution(executionId: string, token: string) {
     const meta = await this.store.getMeta(executionId);
 
@@ -861,19 +893,22 @@ export class WorkflowEngine<TInput, TResult> {
 
     if (partitionSlot == null) return;
 
-    let view = parseHistory(await this.store.loadHistory(executionId));
+    // The only history read for this lease; commitRun keeps it current.
+    const run: LeaseRun = {
+      token,
+      view: parseHistory(await this.store.loadHistory(executionId)),
+      cancelRequested: Boolean(meta.cancelRequestedAt),
+    };
+    const { view } = run;
     const controller = this.abortController(executionId);
 
-    if (view.cancelRequested) {
+    if (run.cancelRequested) {
       controller.abort();
     }
 
     if (meta.status === "pending") {
-      const updated = await this.store.updateStatus({
-        executionId,
-        status: "running",
-        extra: {},
-        leaseToken: token,
+      const updated = await this.commitRun(executionId, run, {
+        fields: { status: "running", updatedAt: String(Date.now()) },
       });
 
       if (!updated) return;
@@ -891,8 +926,6 @@ export class WorkflowEngine<TInput, TResult> {
     while (this.shouldDrainExecution(executionId)) {
       if (!(await this.ownsLease(executionId, token))) return;
 
-      view = parseHistory(await this.store.loadHistory(executionId));
-
       // Terminal events are committed together with terminal meta, so meta
       // was non-terminal above means no terminal event exists. Guard anyway
       // so a stale view can never commit a second terminal transition.
@@ -901,10 +934,9 @@ export class WorkflowEngine<TInput, TResult> {
       if (view.compensation) {
         const cont = await this.runCompensationPhase({
           executionId,
-          view,
           rawInput: meta.input,
           partitionKey,
-          token,
+          run,
         });
 
         if (!cont) return;
@@ -912,7 +944,7 @@ export class WorkflowEngine<TInput, TResult> {
         continue;
       }
 
-      if (view.cancelRequested) {
+      if (run.cancelRequested) {
         controller.abort();
       }
 
@@ -922,6 +954,7 @@ export class WorkflowEngine<TInput, TResult> {
         executionId,
         signal: controller.signal,
         retries: this.retries,
+        cancelRequested: run.cancelRequested,
       });
 
       if (decision.type === "waiting") {
@@ -930,10 +963,8 @@ export class WorkflowEngine<TInput, TResult> {
 
       if (decision.type === "runStep") {
         if (decision.events.length > 0) {
-          const appended = await this.store.appendEvents({
-            executionId,
+          const appended = await this.commitRun(executionId, run, {
             events: decision.events,
-            leaseToken: token,
           });
 
           if (!appended) return;
@@ -947,7 +978,7 @@ export class WorkflowEngine<TInput, TResult> {
           handler: decision.handler,
           rawInput: meta.input,
           partitionKey,
-          token,
+          run,
         });
 
         if (!cont) return;
@@ -956,10 +987,8 @@ export class WorkflowEngine<TInput, TResult> {
       }
 
       if (decision.type === "sleep") {
-        const appended = await this.store.appendEvents({
-          executionId,
+        const appended = await this.commitRun(executionId, run, {
           events: decision.events,
-          leaseToken: token,
         });
 
         if (!appended) return;
@@ -989,7 +1018,7 @@ export class WorkflowEngine<TInput, TResult> {
           executionId,
           reason: "failed",
           error: decision.error,
-          token,
+          run,
         });
 
         if (compensating.type === "started") continue;
@@ -1008,7 +1037,7 @@ export class WorkflowEngine<TInput, TResult> {
         executionId,
         reason: "cancelled",
         error: null,
-        token,
+        run,
       });
 
       if (compensating.type === "started") continue;
@@ -1050,12 +1079,11 @@ export class WorkflowEngine<TInput, TResult> {
       handler,
       rawInput,
       partitionKey,
-      token,
+      run,
     } = input;
     const controller = this.abortController(executionId);
 
-    const started = await this.store.appendEvents({
-      executionId,
+    const started = await this.commitRun(executionId, run, {
       events: [
         {
           type: "StepStarted",
@@ -1064,10 +1092,12 @@ export class WorkflowEngine<TInput, TResult> {
           timestamp: Date.now(),
         },
       ],
-      leaseToken: token,
     });
 
     if (!started) return false;
+
+    // A cancel reported by this write is honored before the handler runs.
+    if (run.cancelRequested) return true;
 
     const workflowInput = fromJson<TInput>(rawInput, "input");
 
@@ -1081,7 +1111,7 @@ export class WorkflowEngine<TInput, TResult> {
       ),
     );
 
-    if (!(await this.ownsLease(executionId, token))) return false;
+    if (!(await this.ownsLease(executionId, run.token))) return false;
 
     if (!stepError) {
       const [serializeError, serialized] = mightThrowSync(() =>
@@ -1089,9 +1119,7 @@ export class WorkflowEngine<TInput, TResult> {
       );
 
       if (serializeError) {
-        const view = parseHistory(await this.store.loadHistory(executionId));
-
-        if (view.cancelRequested) {
+        if (run.cancelRequested) {
           await this.store.enqueue(executionId);
           return false;
         }
@@ -1106,13 +1134,11 @@ export class WorkflowEngine<TInput, TResult> {
           rawInput,
           partitionKey,
           stepError: new NonRetryableStepError(serializeError.message),
-          view,
-          token,
+          run,
         });
       }
 
-      const completed = await this.store.appendEvents({
-        executionId,
+      const completed = await this.commitRun(executionId, run, {
         events: [
           {
             type: "StepCompleted",
@@ -1122,24 +1148,19 @@ export class WorkflowEngine<TInput, TResult> {
             timestamp: Date.now(),
           },
         ],
-        leaseToken: token,
       });
 
       if (!completed) return false;
 
       // Persist success before honor cancel so side effects are in history.
-      const view = parseHistory(await this.store.loadHistory(executionId));
-
-      if (view.cancelRequested) {
+      if (run.cancelRequested) {
         await this.store.enqueue(executionId);
       }
 
       return true;
     }
 
-    const view = parseHistory(await this.store.loadHistory(executionId));
-
-    if (view.cancelRequested) {
+    if (run.cancelRequested) {
       await this.store.enqueue(executionId);
       return false;
     }
@@ -1154,8 +1175,7 @@ export class WorkflowEngine<TInput, TResult> {
       rawInput,
       partitionKey,
       stepError,
-      view,
-      token,
+      run,
     });
   }
 
@@ -1168,15 +1188,22 @@ export class WorkflowEngine<TInput, TResult> {
       rawInput,
       partitionKey,
       stepError,
-      view,
-      token,
+      run,
     } = input;
     const message = stepError.message;
     const retryable = !isNonRetryableStepError(stepError);
     const now = Date.now();
 
-    const appended = await this.store.appendEvents({
-      executionId,
+    const errorHistory = this.collectErrorHistory({
+      events: run.view.events,
+      stepId,
+      attempt,
+      error: message,
+      timestamp: now,
+      failedType: "StepFailed",
+    });
+
+    const appended = await this.commitRun(executionId, run, {
       events: [
         {
           type: "StepFailed",
@@ -1188,26 +1215,15 @@ export class WorkflowEngine<TInput, TResult> {
           timestamp: now,
         },
       ],
-      leaseToken: token,
     });
 
     if (!appended) return false;
 
-    const afterFail = parseHistory(await this.store.loadHistory(executionId));
-
-    if (afterFail.cancelRequested) {
+    // A cancel that arrived during the step is reported by this commit.
+    if (run.cancelRequested) {
       await this.store.enqueue(executionId);
       return false;
     }
-
-    const errorHistory = this.collectErrorHistory({
-      events: view.events,
-      stepId,
-      attempt,
-      error: message,
-      timestamp: now,
-      failedType: "StepFailed",
-    });
 
     if (retryable && attempt <= this.retries) {
       const delay = backoffDelay({
@@ -1250,7 +1266,7 @@ export class WorkflowEngine<TInput, TResult> {
       partitionKey,
       stepError,
       errorHistory,
-      token,
+      run,
     });
 
     return compensating;
@@ -1265,7 +1281,7 @@ export class WorkflowEngine<TInput, TResult> {
       partitionKey,
       stepError,
       errorHistory,
-      token,
+      run,
     } = input;
     const workflowInput = fromJson<TInput>(rawInput, "input");
     const message = stepError.message;
@@ -1285,7 +1301,7 @@ export class WorkflowEngine<TInput, TResult> {
       executionId,
       reason: "failed",
       error: message,
-      token,
+      run,
     });
 
     if (compensating.type === "started") return true;
@@ -1301,7 +1317,7 @@ export class WorkflowEngine<TInput, TResult> {
       ],
       error: message,
       partitionKey,
-      token,
+      token: run.token,
     });
 
     return false;
@@ -1310,8 +1326,8 @@ export class WorkflowEngine<TInput, TResult> {
   private async maybeStartCompensation(
     input: MaybeStartCompensationInput,
   ): Promise<CompensationStartResult> {
-    const { executionId, reason, error, token } = input;
-    const view = parseHistory(await this.store.loadHistory(executionId));
+    const { executionId, reason, error, run } = input;
+    const { view } = run;
 
     if (view.compensation) return { type: "started" };
     if (view.terminal) return { type: "none" };
@@ -1340,9 +1356,7 @@ export class WorkflowEngine<TInput, TResult> {
       fields.error = error;
     }
 
-    const committed = await this.store.commit({
-      executionId,
-      leaseToken: token,
+    const committed = await this.commitRun(executionId, run, {
       events: [
         {
           type: "CompensationStarted",
@@ -1364,7 +1378,8 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private async runCompensationPhase(input: RunCompensationPhaseInput) {
-    const { executionId, view, rawInput, partitionKey, token } = input;
+    const { executionId, rawInput, partitionKey, run } = input;
+    const { view, token } = run;
     const phase = view.compensation;
 
     if (!phase) return false;
@@ -1475,7 +1490,7 @@ export class WorkflowEngine<TInput, TResult> {
         compensate: item.compensate,
         rawInput,
         partitionKey,
-        token,
+        run,
       });
     }
 
@@ -1501,8 +1516,9 @@ export class WorkflowEngine<TInput, TResult> {
       compensate,
       rawInput,
       partitionKey,
-      token,
+      run,
     } = input;
+    const { token } = run;
     const workflowInput = fromJson<TInput>(rawInput, "input");
 
     const [compensateError] = await mightThrow(
@@ -1519,8 +1535,7 @@ export class WorkflowEngine<TInput, TResult> {
     if (!(await this.ownsLease(executionId, token))) return false;
 
     if (!compensateError) {
-      const completed = await this.store.appendEvents({
-        executionId,
+      const completed = await this.commitRun(executionId, run, {
         events: [
           {
             type: "CompensationCompleted",
@@ -1529,7 +1544,6 @@ export class WorkflowEngine<TInput, TResult> {
             timestamp: Date.now(),
           },
         ],
-        leaseToken: token,
       });
 
       if (!completed) return false;
@@ -1540,10 +1554,16 @@ export class WorkflowEngine<TInput, TResult> {
     const message = compensateError.message;
     const retryable = !isNonRetryableStepError(compensateError);
     const now = Date.now();
-    const viewBefore = parseHistory(await this.store.loadHistory(executionId));
+    const errorHistory = this.collectErrorHistory({
+      events: run.view.events,
+      stepId,
+      attempt,
+      error: message,
+      timestamp: now,
+      failedType: "CompensationFailed",
+    });
 
-    const appended = await this.store.appendEvents({
-      executionId,
+    const appended = await this.commitRun(executionId, run, {
       events: [
         {
           type: "CompensationFailed",
@@ -1555,7 +1575,6 @@ export class WorkflowEngine<TInput, TResult> {
           timestamp: now,
         },
       ],
-      leaseToken: token,
     });
 
     if (!appended) return false;
@@ -1578,15 +1597,6 @@ export class WorkflowEngine<TInput, TResult> {
 
       return false;
     }
-
-    const errorHistory = this.collectErrorHistory({
-      events: viewBefore.events,
-      stepId,
-      attempt,
-      error: message,
-      timestamp: now,
-      failedType: "CompensationFailed",
-    });
 
     await this.failFromCompensation({
       executionId,
@@ -1773,20 +1783,21 @@ export class WorkflowEngine<TInput, TResult> {
 
     if (isTerminalStatus(meta.status)) return;
 
-    const view = parseHistory(await this.store.loadHistory(executionId));
-
-    if (view.cancelRequested) {
+    if (meta.cancelRequestedAt) {
       await this.store.enqueue(executionId);
       return;
     }
+
+    const view = parseHistory(await this.store.loadHistory(executionId));
 
     if (view.timers.get(timerId)?.status === "fired") {
       await this.store.enqueue(executionId);
       return;
     }
 
-    const appended = await this.store.appendEvents({
+    const appended = await this.store.commit({
       executionId,
+      leaseToken: token,
       events: [
         {
           type: "TimerFired",
@@ -1794,10 +1805,9 @@ export class WorkflowEngine<TInput, TResult> {
           timestamp: Date.now(),
         },
       ],
-      leaseToken: token,
     });
 
-    if (!appended) return;
+    if (!appended.committed) return;
 
     await this.store.enqueue(executionId);
   }
@@ -1820,7 +1830,7 @@ export class WorkflowEngine<TInput, TResult> {
         return;
       }
 
-      if (view.cancelRequested) {
+      if (meta.cancelRequestedAt) {
         await this.store.enqueue(task.executionId);
         return;
       }
@@ -1856,13 +1866,13 @@ export class WorkflowEngine<TInput, TResult> {
       };
     }
 
-    const appended = await this.store.appendEvents({
+    const appended = await this.store.commit({
       executionId: task.executionId,
-      events: [event],
       leaseToken: token,
+      events: [event],
     });
 
-    if (!appended) return;
+    if (!appended.committed) return;
 
     await this.store.enqueue(task.executionId);
   }

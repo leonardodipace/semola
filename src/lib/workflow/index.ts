@@ -5,7 +5,7 @@ import {
   NotFoundError,
   WorkflowStoreError,
 } from "./errors.js";
-import { isTerminalStatus, parseHistory } from "./history.js";
+import { parseHistory } from "./history.js";
 import { fromJson, toJson } from "./json.js";
 import { WorkflowStore } from "./store.js";
 import type {
@@ -196,6 +196,7 @@ export const defineWorkflow = <TInput, TResult = void>(
       cancelledAt: "",
       partitionKey,
       partitionSlot: "",
+      cancelRequestedAt: "",
     });
 
     if (!created) {
@@ -329,40 +330,23 @@ export const defineWorkflow = <TInput, TResult = void>(
   };
 
   const cancel = async (executionId: string) => {
-    const meta = await requireMeta(store, executionId);
+    // One script decides and records the request, so a run that turns
+    // terminal or starts compensating concurrently is never overridden.
+    const request = await store.requestCancel(executionId);
 
-    const snapshot = (status = meta.status as WorkflowStatus) => ({
-      status,
+    if (!request) {
+      throw new NotFoundError(`Workflow execution ${executionId} not found`);
+    }
+
+    if (request.accepted) engine.requestAbort(executionId);
+
+    return {
+      status: request.status,
       executionId,
-      updatedAt: Number(meta.updatedAt),
-      cancelledAt: optionalTimestamp(meta.cancelledAt),
-      createdAt: Number(meta.createdAt),
-    });
-
-    if (isTerminalStatus(meta.status)) return snapshot();
-
-    if (meta.status === "compensating") return snapshot();
-
-    const view = parseHistory(await store.loadHistory(executionId));
-
-    if (view.compensation) return snapshot("compensating");
-
-    const now = Date.now();
-
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowCancelRequested",
-          timestamp: now,
-        },
-      ],
-    });
-
-    engine.requestAbort(executionId);
-    await store.enqueue(executionId);
-
-    return snapshot();
+      updatedAt: Number(request.updatedAt),
+      cancelledAt: optionalTimestamp(request.cancelledAt),
+      createdAt: Number(request.createdAt),
+    };
   };
 
   const startSync = async (
