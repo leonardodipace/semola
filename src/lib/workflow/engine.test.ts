@@ -309,8 +309,8 @@ describe("WorkflowEngine", () => {
     await waitFor(() => compensateAttempts >= 1);
 
     engineB.start();
-    redis.clearZset(`workflow:${name}:timers`);
-    await store.enqueue(executionId);
+    // Hand the compensate retry to engineB now instead of after A's backoff.
+    await redis.zadd(`workflow:${name}:due`, Date.now(), executionId);
 
     await waitFor(async () => {
       if (compensateAttempts < 2) return false;

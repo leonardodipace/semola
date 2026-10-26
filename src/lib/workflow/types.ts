@@ -214,27 +214,6 @@ export type Workflow<TInput, TResult> = {
   stop: () => Promise<void>;
 };
 
-export type TimerTask =
-  | {
-      kind: "timer";
-      executionId: string;
-      timerId: string;
-    }
-  | {
-      kind: "step-retry";
-      executionId: string;
-      stepId: string;
-      stepName: string;
-      attempt: number;
-    }
-  | {
-      kind: "compensation-retry";
-      executionId: string;
-      stepId: string;
-      stepName: string;
-      attempt: number;
-    };
-
 export type HistoryEvent =
   | {
       type: "WorkflowStarted";
@@ -348,6 +327,7 @@ export type StepState =
       error: string;
       retryable: boolean;
       attempt: number;
+      failedAt: number;
     };
 
 export type TimerState =
@@ -370,6 +350,7 @@ export type CompensationState =
       error: string;
       retryable: boolean;
       attempt: number;
+      failedAt: number;
     };
 
 export type CompensationPhase = {
@@ -409,13 +390,8 @@ export type WorkflowDecision =
       handler: StepHandler<unknown, unknown>;
       events: HistoryEvent[];
     }
-  | {
-      type: "sleep";
-      timerId: string;
-      fireAt: number;
-      events: HistoryEvent[];
-    }
-  | { type: "waiting" }
+  | { type: "record"; events: HistoryEvent[] }
+  | { type: "waiting"; until: number }
   | { type: "complete"; result: string; events: HistoryEvent[] }
   | { type: "fail"; error: string; events: HistoryEvent[] }
   | { type: "cancel"; events: HistoryEvent[] };
@@ -433,13 +409,8 @@ export type AdvanceInput<TInput, TResult> = {
   executionId: string;
   signal: AbortSignal;
   retries: number;
+  backoff: (attempt: number) => number;
   cancelRequested: boolean;
-};
-
-export type WithLeaseInput = {
-  executionId: string;
-  work: (token: string) => Promise<void>;
-  onBusy?: () => Promise<void>;
 };
 
 export type ExecuteStepInput = {
@@ -554,12 +525,6 @@ export type CollectErrorHistoryInput = {
   failedType: "StepFailed" | "CompensationFailed";
 };
 
-export type FireDurableTimerInput = {
-  executionId: string;
-  timerId: string;
-  token: string;
-};
-
 export type ClearExecutionLocalStateInput = {
   executionId: string;
   partitionKey: string;
@@ -605,18 +570,6 @@ export type PartitionKeyInput = {
   slot: number;
 };
 
-export type SetMetaInput = {
-  executionId: string;
-  fields: Partial<WorkflowMeta>;
-  leaseToken?: string;
-};
-
-export type AcquireLeaseInput = {
-  executionId: string;
-  token: string;
-  ttlMs: number;
-};
-
 export type ExtendLeaseInput = {
   executionId: string;
   token: string;
@@ -649,13 +602,6 @@ export type ReleaseOwnedPartitionsInput = {
   concurrency: number;
 };
 
-export type UpdateStatusInput = {
-  executionId: string;
-  status: WorkflowStatus;
-  extra?: Partial<WorkflowMeta>;
-  leaseToken?: string;
-};
-
 export type CommitRetention = {
   ttlMs?: number;
   trackedAt?: number;
@@ -666,7 +612,9 @@ export type CommitInput = {
   leaseToken: string;
   events?: HistoryEvent[];
   fields?: Partial<WorkflowMeta>;
-  // Present only for terminal transitions: leave active + apply retention.
+  // Next time the execution needs advancing (ignored when terminal).
+  dueAt?: number;
+  // Present only for terminal transitions: leave the due set + retention.
   retention?: CommitRetention;
 };
 
@@ -690,6 +638,8 @@ export type LeaseRun = {
   token: string;
   view: HistoryView;
   cancelRequested: boolean;
+  // Due score committed for this execution; released as-is when set.
+  dueAt?: number;
 };
 
 export type RunCommitInput = Omit<CommitInput, "executionId" | "leaseToken">;

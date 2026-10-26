@@ -76,6 +76,7 @@ export const applyHistoryEvent = (view: HistoryView, event: HistoryEvent) => {
       error: event.error,
       retryable: event.retryable,
       attempt: event.attempt,
+      failedAt: event.timestamp,
     });
     return;
   }
@@ -163,6 +164,7 @@ export const applyHistoryEvent = (view: HistoryView, event: HistoryEvent) => {
       error: event.error,
       retryable: event.retryable,
       attempt: event.attempt,
+      failedAt: event.timestamp,
     });
   }
 };

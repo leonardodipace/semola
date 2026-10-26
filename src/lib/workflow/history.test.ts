@@ -287,6 +287,7 @@ describe("parseHistory", () => {
       error: "undo failed",
       retryable: true,
       attempt: 1,
+      failedAt: now + 2,
     });
   });
 });

@@ -2,7 +2,6 @@ import { mightThrow } from "../errors/index.js";
 import { WorkflowStoreError } from "./errors.js";
 import { toJson } from "./json.js";
 import type {
-  AcquireLeaseInput,
   CancelRequestResult,
   ClaimPartitionInput,
   CommitInput,
@@ -14,9 +13,6 @@ import type {
   ReleaseOwnedPartitionsInput,
   ReleasePartitionInput,
   ResumeExecutionInput,
-  SetMetaInput,
-  TimerTask,
-  UpdateStatusInput,
   WorkflowMeta,
   WorkflowStatus,
 } from "./types.js";
@@ -30,57 +26,72 @@ export const EXTEND_IF_OWNER =
 export const CLAIM_OR_REOWN_PARTITION =
   "if redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2], 'NX') then return 1 end if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('PEXPIRE', KEYS[1], ARGV[2]) return 1 end return 0";
 
-export const CLAIM_DUE_TIMER =
-  "local m=redis.call('ZRANGEBYSCORE',KEYS[1],0,ARGV[1],'LIMIT',0,1) if #m==0 then return false end redis.call('ZREM',KEYS[1],m[1]) return m[1]";
+// KEYS: due
+// ARGV: now, lockTTL, token, lease key prefix, meta key prefix
+// Claims the first due execution whose lease is free: takes the lease and
+// pushes its due score out by lockTTL (visibility timeout, so a dead worker's
+// execution comes due again). Busy members are pushed to when their lease
+// expires; members without meta are dropped. Returns the id or nil.
+export const CLAIM_DUE =
+  "local now=tonumber(ARGV[1]) local ttl=tonumber(ARGV[2]) for _, id in ipairs(redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', now, 'LIMIT', 0, 10)) do local lease=ARGV[4] .. id if redis.call('EXISTS', ARGV[5] .. id) == 0 then redis.call('ZREM', KEYS[1], id) elseif redis.call('SET', lease, ARGV[3], 'PX', ttl, 'NX') then redis.call('ZADD', KEYS[1], now + ttl, id) return id else local left=redis.call('PTTL', lease) if left < 0 then left=ttl end redis.call('ZADD', KEYS[1], now + left, id) end end return false";
 
-// KEYS: meta, history, active, queue, terminal
-// ARGV: executionId, WorkflowStarted payload, meta field/value pairs...
-// Creates meta + first history event + active + queue entry in one step, so
-// an execution is never visible without its WorkflowStarted event. A leftover
+// KEYS: lease, due
+// ARGV: token, lockTTL, executionId, due score
+// Heartbeat: extends the lease and the visibility timeout together.
+export const EXTEND_LEASE =
+  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('PEXPIRE', KEYS[1], ARGV[2]) redis.call('ZADD', KEYS[2], 'XX', ARGV[4], ARGV[3]) return 1";
+
+// KEYS: lease, due
+// ARGV: token, executionId, due score ("" leaves it)
+// Releases the lease and lowers (never raises) the due score, so a cancel
+// that lowered it after the last commit is kept.
+export const RELEASE_LEASE =
+  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) if ARGV[3] ~= '' then redis.call('ZADD', KEYS[2], 'XX', 'LT', ARGV[3], ARGV[2]) end return 1";
+
+// KEYS: meta, history, due, terminal
+// ARGV: executionId, WorkflowStarted payload, now, meta field/value pairs...
+// Creates meta + first history event and makes the execution due now, so it
+// is never visible without its WorkflowStarted event. A leftover
 // terminal-zset member from an expired execution with the same id is dropped
 // so retentionMax trimming cannot unlink the new run.
 export const CREATE_EXECUTION =
-  "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end redis.call('HSET', KEYS[1], unpack(ARGV, 3)) redis.call('RPUSH', KEYS[2], ARGV[2]) redis.call('SADD', KEYS[3], ARGV[1]) redis.call('ZREM', KEYS[5], ARGV[1]) if not redis.call('LPOS', KEYS[4], ARGV[1]) then redis.call('LPUSH', KEYS[4], ARGV[1]) end return 1";
+  "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end redis.call('HSET', KEYS[1], unpack(ARGV, 4)) redis.call('RPUSH', KEYS[2], ARGV[2]) redis.call('ZADD', KEYS[3], ARGV[3], ARGV[1]) redis.call('ZREM', KEYS[4], ARGV[1]) return 1";
 
-// KEYS: lease, history, meta, active, terminal
-// ARGV: token, executionId, event count n, terminal flag, ttlMs, trackedAt,
+// KEYS: lease, history, meta, due, terminal
+// ARGV: token, executionId, event count n, due, ttlMs, trackedAt,
 //       n event payloads, meta field/value pairs...
-// Lease-fenced write of history events + meta fields. When the terminal flag
-// is "1" it also leaves the active set and applies retention: ttlMs "" keeps
-// keys, "0" unlinks meta/history/lease, otherwise PEXPIREs meta + history;
-// trackedAt "" skips the retentionMax zset.
+// Lease-fenced write of history events + meta fields. due "" leaves the due
+// score, a number sets it, "done" marks a terminal transition: leave the due
+// set and apply retention (ttlMs "" keeps keys, "0" unlinks
+// meta/history/lease, otherwise PEXPIREs meta + history; trackedAt "" skips
+// the retentionMax zset).
 // Returns 0 when the lease is not held, 2 when committed and meta carries a
 // cancel request, 1 when committed otherwise.
 export const COMMIT =
-  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end local n=tonumber(ARGV[3]) for i=7,6+n do redis.call('RPUSH', KEYS[2], ARGV[i]) end if #ARGV > 6+n then redis.call('HSET', KEYS[3], unpack(ARGV, 7+n)) end local r=1 local c=redis.call('HGET', KEYS[3], 'cancelRequestedAt') if c and c ~= '' then r=2 end if ARGV[4] ~= '1' then return r end redis.call('SREM', KEYS[4], ARGV[2]) local ttl=tonumber(ARGV[5]) if ttl then if ttl <= 0 then redis.call('UNLINK', KEYS[3], KEYS[2], KEYS[1]) redis.call('ZREM', KEYS[5], ARGV[2]) return r end redis.call('PEXPIRE', KEYS[3], ARGV[5]) redis.call('PEXPIRE', KEYS[2], ARGV[5]) end if ARGV[6] ~= '' then redis.call('ZADD', KEYS[5], ARGV[6], ARGV[2]) end return r";
+  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end local n=tonumber(ARGV[3]) for i=7,6+n do redis.call('RPUSH', KEYS[2], ARGV[i]) end if #ARGV > 6+n then redis.call('HSET', KEYS[3], unpack(ARGV, 7+n)) end local r=1 local c=redis.call('HGET', KEYS[3], 'cancelRequestedAt') if c and c ~= '' then r=2 end if ARGV[4] == '' then return r end if ARGV[4] ~= 'done' then redis.call('ZADD', KEYS[4], 'XX', ARGV[4], ARGV[2]) return r end redis.call('ZREM', KEYS[4], ARGV[2]) local ttl=tonumber(ARGV[5]) if ttl then if ttl <= 0 then redis.call('UNLINK', KEYS[3], KEYS[2], KEYS[1]) redis.call('ZREM', KEYS[5], ARGV[2]) return r end redis.call('PEXPIRE', KEYS[3], ARGV[5]) redis.call('PEXPIRE', KEYS[2], ARGV[5]) end if ARGV[6] ~= '' then redis.call('ZADD', KEYS[5], ARGV[6], ARGV[2]) end return r";
 
-// KEYS: meta, history, active, queue, terminal
-// ARGV: executionId, updatedAt, expected history length, event payloads...
+// KEYS: meta, history, due, terminal
+// ARGV: executionId, now, expected history length, event payloads...
 // Only resumes while status is still "failed" and history has not grown since
 // the caller computed the resume events. History is append-only and only
 // written while non-terminal, so an equal length rules out another resume
 // that ran and failed again (possibly after compensating) in between.
 // Clears any cancel request that landed before the failure.
 export const RESUME_EXECUTION =
-  "if redis.call('HGET', KEYS[1], 'status') ~= 'failed' then return 0 end if redis.call('LLEN', KEYS[2]) ~= tonumber(ARGV[3]) then return 0 end redis.call('PERSIST', KEYS[1]) redis.call('PERSIST', KEYS[2]) redis.call('ZREM', KEYS[5], ARGV[1]) for i=4,#ARGV do redis.call('RPUSH', KEYS[2], ARGV[i]) end redis.call('HSET', KEYS[1], 'status', 'pending', 'error', '', 'failedAt', '', 'cancelRequestedAt', '', 'updatedAt', ARGV[2]) redis.call('SADD', KEYS[3], ARGV[1]) if not redis.call('LPOS', KEYS[4], ARGV[1]) then redis.call('LPUSH', KEYS[4], ARGV[1]) end return 1";
+  "if redis.call('HGET', KEYS[1], 'status') ~= 'failed' then return 0 end if redis.call('LLEN', KEYS[2]) ~= tonumber(ARGV[3]) then return 0 end redis.call('PERSIST', KEYS[1]) redis.call('PERSIST', KEYS[2]) redis.call('ZREM', KEYS[4], ARGV[1]) for i=4,#ARGV do redis.call('RPUSH', KEYS[2], ARGV[i]) end redis.call('HSET', KEYS[1], 'status', 'pending', 'error', '', 'failedAt', '', 'cancelRequestedAt', '', 'updatedAt', ARGV[2]) redis.call('ZADD', KEYS[3], ARGV[2], ARGV[1]) return 1";
 
-// KEYS: meta, queue
-// ARGV: executionId, requestedAt
-// Records a cancel request on meta and enqueues the execution, unless it is
-// already terminal or compensating (then nothing is written). Returns nil when
-// meta is missing, else {accepted 0|1, status, updatedAt, cancelledAt,
-// createdAt} as read in the same script. Keeps the first request time.
+// KEYS: meta, due
+// ARGV: executionId, now
+// Records a cancel request on meta and makes the execution due now (only
+// ever lowering its score), unless it is already terminal or compensating
+// (then nothing is written). Returns nil when meta is missing, else
+// {accepted 0|1, status, updatedAt, cancelledAt, createdAt} as read in the
+// same script. Keeps the first request time.
 export const CANCEL_EXECUTION =
-  "local s=redis.call('HGET', KEYS[1], 'status') if not s then return false end local accepted=0 if s ~= 'completed' and s ~= 'failed' and s ~= 'cancelled' and s ~= 'compensating' then local c=redis.call('HGET', KEYS[1], 'cancelRequestedAt') if not c or c == '' then redis.call('HSET', KEYS[1], 'cancelRequestedAt', ARGV[2]) end if not redis.call('LPOS', KEYS[2], ARGV[1]) then redis.call('LPUSH', KEYS[2], ARGV[1]) end accepted=1 end local m=redis.call('HMGET', KEYS[1], 'updatedAt', 'cancelledAt', 'createdAt') return {accepted, s, m[1], m[2], m[3]}";
-
-export const SCHEDULE_TIMER_IF_ABSENT =
-  "if redis.call('ZSCORE', KEYS[1], ARGV[2]) ~= false then return 0 end redis.call('ZADD', KEYS[1], ARGV[1], ARGV[2]) return 1";
-
-export const ENQUEUE_IF_ABSENT =
-  "if redis.call('LPOS', KEYS[1], ARGV[1]) then return 0 end redis.call('LPUSH', KEYS[1], ARGV[1]) return 1";
+  "local s=redis.call('HGET', KEYS[1], 'status') if not s then return false end local accepted=0 if s ~= 'completed' and s ~= 'failed' and s ~= 'cancelled' and s ~= 'compensating' then local c=redis.call('HGET', KEYS[1], 'cancelRequestedAt') if not c or c == '' then redis.call('HSET', KEYS[1], 'cancelRequestedAt', ARGV[2]) end redis.call('ZADD', KEYS[2], 'XX', 'LT', ARGV[2], ARGV[1]) accepted=1 end local m=redis.call('HMGET', KEYS[1], 'updatedAt', 'cancelledAt', 'createdAt') return {accepted, s, m[1], m[2], m[3]}";
 
 export const TRIM_IF_MEMBER =
-  "if redis.call('ZREM', KEYS[1], ARGV[1]) == 0 then return 0 end redis.call('UNLINK', KEYS[2], KEYS[3], KEYS[4]) redis.call('SREM', KEYS[5], ARGV[1]) return 1";
+  "if redis.call('ZREM', KEYS[1], ARGV[1]) == 0 then return 0 end redis.call('UNLINK', KEYS[2], KEYS[3], KEYS[4]) return 1";
 
 export const keys = {
   history: (name: string, executionId: string) =>
@@ -89,10 +100,7 @@ export const keys = {
     `workflow:${name}:meta:${executionId}`,
   lease: (name: string, executionId: string) =>
     `workflow:${name}:lease:${executionId}`,
-  queue: (name: string) => `workflow:${name}:queue`,
-  timers: (name: string) => `workflow:${name}:timers`,
-  timerDead: (name: string) => `workflow:${name}:timer-dead`,
-  active: (name: string) => `workflow:${name}:active`,
+  due: (name: string) => `workflow:${name}:due`,
   terminal: (name: string) => `workflow:${name}:terminal`,
   partition: (input: PartitionKeyInput) => {
     const { name, partitionKey, slot } = input;
@@ -121,16 +129,16 @@ export class WorkflowStore {
 
   public async commit(input: CommitInput): Promise<CommitResult> {
     const { executionId, leaseToken, events = [], fields = {} } = input;
-    const { retention } = input;
+    const { retention, dueAt } = input;
     const payloads = events.map((event) =>
       toJson(event, `history event for ${executionId}`),
     );
-    let terminal = "0";
+    let due = dueAt === undefined ? "" : String(dueAt);
     let ttl = "";
     let trackedAt = "";
 
     if (retention) {
-      terminal = "1";
+      due = "done";
 
       if (retention.ttlMs !== undefined) {
         // PEXPIRE rejects fractions and huge values; a rejected call would
@@ -152,12 +160,12 @@ export class WorkflowStore {
         keys.lease(this.name, executionId),
         keys.history(this.name, executionId),
         keys.meta(this.name, executionId),
-        keys.active(this.name),
+        keys.due(this.name),
         keys.terminal(this.name),
         leaseToken,
         executionId,
         String(payloads.length),
-        terminal,
+        due,
         ttl,
         trackedAt,
         ...payloads,
@@ -184,7 +192,7 @@ export class WorkflowStore {
         CANCEL_EXECUTION,
         "2",
         keys.meta(this.name, executionId),
-        keys.queue(this.name),
+        keys.due(this.name),
         executionId,
         String(Date.now()),
       ]),
@@ -235,14 +243,14 @@ export class WorkflowStore {
     const [error, result] = await mightThrow(
       this.redis.send("EVAL", [
         CREATE_EXECUTION,
-        "5",
+        "4",
         keys.meta(this.name, executionId),
         keys.history(this.name, executionId),
-        keys.active(this.name),
-        keys.queue(this.name),
+        keys.due(this.name),
         keys.terminal(this.name),
         executionId,
         started,
+        String(Date.now()),
         ...metaEntries(fields),
       ]),
     );
@@ -252,29 +260,6 @@ export class WorkflowStore {
     }
 
     return Number(result) === 1;
-  }
-
-  public async setMeta(input: SetMetaInput) {
-    const { executionId, fields, leaseToken } = input;
-    const entries = metaEntries(fields);
-
-    if (entries.length === 0) return true;
-
-    if (leaseToken !== undefined) {
-      const result = await this.commit({ executionId, leaseToken, fields });
-
-      return result.committed;
-    }
-
-    const [error] = await mightThrow(
-      this.redis.send("HSET", [keys.meta(this.name, executionId), ...entries]),
-    );
-
-    if (error) {
-      throw new WorkflowStoreError(`Unable to update meta for ${executionId}`);
-    }
-
-    return true;
   }
 
   public async getMeta(executionId: string) {
@@ -293,140 +278,27 @@ export class WorkflowStore {
     return data as unknown as WorkflowMeta;
   }
 
-  public async enqueue(executionId: string) {
-    const [error] = await mightThrow(
+  public async claimDue(token: string, ttlMs: number) {
+    const [error, executionId] = await mightThrow(
       this.redis.send("EVAL", [
-        ENQUEUE_IF_ABSENT,
+        CLAIM_DUE,
         "1",
-        keys.queue(this.name),
-        executionId,
+        keys.due(this.name),
+        String(Date.now()),
+        String(ttlMs),
+        token,
+        keys.lease(this.name, ""),
+        keys.meta(this.name, ""),
       ]),
     );
 
     if (error) {
-      throw new WorkflowStoreError(
-        `Unable to enqueue workflow task for ${executionId}`,
-      );
+      throw new WorkflowStoreError("Unable to claim a due execution");
     }
-  }
 
-  public async dequeue() {
-    const [error, executionId] = await mightThrow(
-      this.redis.rpop(keys.queue(this.name)),
-    );
-
-    if (error) {
-      throw new WorkflowStoreError("Unable to dequeue workflow task");
-    }
+    if (typeof executionId !== "string") return null;
 
     return executionId;
-  }
-
-  public async scheduleTimer(fireAt: number, task: TimerTask) {
-    const raw = toJson(task, "timer task");
-
-    const [zaddError] = await mightThrow(
-      this.redis.zadd(keys.timers(this.name), fireAt, raw),
-    );
-
-    if (zaddError) {
-      throw new WorkflowStoreError("Unable to schedule timer");
-    }
-  }
-
-  public async scheduleTimerIfAbsent(fireAt: number, task: TimerTask) {
-    const raw = toJson(task, "timer task");
-
-    const [error, result] = await mightThrow(
-      this.redis.send("EVAL", [
-        SCHEDULE_TIMER_IF_ABSENT,
-        "1",
-        keys.timers(this.name),
-        String(fireAt),
-        raw,
-      ]),
-    );
-
-    if (error) {
-      throw new WorkflowStoreError("Unable to schedule timer");
-    }
-
-    return Number(result) === 1;
-  }
-
-  public async claimDueTimer(now: number) {
-    const [error, raw] = await mightThrow(
-      this.redis.send("EVAL", [
-        CLAIM_DUE_TIMER,
-        "1",
-        keys.timers(this.name),
-        String(now),
-      ]),
-    );
-
-    if (error) {
-      throw new WorkflowStoreError("Unable to claim due timer");
-    }
-
-    if (!raw) return null;
-
-    return String(raw);
-  }
-
-  public async deadLetterTimer(raw: string) {
-    const [error] = await mightThrow(
-      this.redis.lpush(keys.timerDead(this.name), raw),
-    );
-
-    if (error) {
-      throw new WorkflowStoreError("Unable to dead-letter timer");
-    }
-  }
-
-  public async markInactive(executionId: string) {
-    const [error] = await mightThrow(
-      this.redis.srem(keys.active(this.name), executionId),
-    );
-
-    if (error) {
-      throw new WorkflowStoreError(
-        `Unable to mark inactive execution ${executionId}`,
-      );
-    }
-  }
-
-  public async listActive() {
-    const [error, members] = await mightThrow(
-      this.redis.smembers(keys.active(this.name)),
-    );
-
-    if (error) {
-      throw new WorkflowStoreError("Unable to list active executions");
-    }
-
-    return members ?? [];
-  }
-
-  public async acquireLease(input: AcquireLeaseInput) {
-    const { executionId, token, ttlMs } = input;
-
-    const [error, result] = await mightThrow(
-      this.redis.set(
-        keys.lease(this.name, executionId),
-        token,
-        "PX",
-        String(ttlMs),
-        "NX",
-      ),
-    );
-
-    if (error) {
-      throw new WorkflowStoreError(
-        `Unable to acquire lease for ${executionId}`,
-      );
-    }
-
-    return result === "OK";
   }
 
   public async extendLease(input: ExtendLeaseInput) {
@@ -434,11 +306,14 @@ export class WorkflowStore {
 
     const [error, result] = await mightThrow(
       this.redis.send("EVAL", [
-        EXTEND_IF_OWNER,
-        "1",
+        EXTEND_LEASE,
+        "2",
         keys.lease(this.name, executionId),
+        keys.due(this.name),
         token,
         String(ttlMs),
+        executionId,
+        String(Date.now() + ttlMs),
       ]),
     );
 
@@ -449,13 +324,21 @@ export class WorkflowStore {
     return Number(result) === 1;
   }
 
-  public async releaseLease(executionId: string, token: string) {
+  // dueAt lowers the due score; omit it to keep the visibility timeout.
+  public async releaseLease(
+    executionId: string,
+    token: string,
+    dueAt?: number,
+  ) {
     const [error] = await mightThrow(
       this.redis.send("EVAL", [
-        RELEASE_IF_OWNER,
-        "1",
+        RELEASE_LEASE,
+        "2",
         keys.lease(this.name, executionId),
+        keys.due(this.name),
         token,
+        executionId,
+        dueAt === undefined ? "" : String(dueAt),
       ]),
     );
 
@@ -556,20 +439,6 @@ export class WorkflowStore {
     }
   }
 
-  public async updateStatus(input: UpdateStatusInput) {
-    const { executionId, status, extra = {}, leaseToken } = input;
-
-    return this.setMeta({
-      executionId,
-      fields: {
-        ...extra,
-        status,
-        updatedAt: String(Date.now()),
-      },
-      leaseToken,
-    });
-  }
-
   public async resumeExecution(input: ResumeExecutionInput) {
     const { executionId, historyLength, events } = input;
     const payloads = events.map((event) =>
@@ -579,11 +448,10 @@ export class WorkflowStore {
     const [error, result] = await mightThrow(
       this.redis.send("EVAL", [
         RESUME_EXECUTION,
-        "5",
+        "4",
         keys.meta(this.name, executionId),
         keys.history(this.name, executionId),
-        keys.active(this.name),
-        keys.queue(this.name),
+        keys.due(this.name),
         keys.terminal(this.name),
         executionId,
         String(Date.now()),
@@ -627,12 +495,11 @@ export class WorkflowStore {
       const [trimError] = await mightThrow(
         this.redis.send("EVAL", [
           TRIM_IF_MEMBER,
-          "5",
+          "4",
           terminalKey,
           keys.meta(this.name, id),
           keys.history(this.name, id),
           keys.lease(this.name, id),
-          keys.active(this.name),
           id,
         ]),
       );

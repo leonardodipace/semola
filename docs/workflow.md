@@ -67,13 +67,13 @@ Steps are **at-least-once**. `step` bodies must be idempotent; a crash mid-step 
 
 ## Multi-replica and automatic recovery
 
-N Bun processes may register the same workflow `name` against the same Redis. Work is distributed via one task queue and per-execution leases (`lockTTL`).
+N Bun processes may register the same workflow `name` against the same Redis. Work is distributed via one sorted set of executions scored by when each next needs advancing, plus per-execution leases (`lockTTL`). A worker claims a due execution by taking its lease and pushing its score `lockTTL` ahead; the heartbeat keeps pushing it while the run is alive. When the run stops it leaves the score at the next thing it waits for: a `sleep`'s fire time or a retry's backoff. Sleeping executions cost nothing until they are due.
 
-If a replica dies mid-run, lease expiry lets another replica (or the same process after restart) reclaim the execution. You do not need to call `resume()` for crash recovery; workers reclaim from Redis automatically.
+If a replica dies mid-run, its execution simply comes due again once `lockTTL` passes, and any replica (or the same process after restart) picks it up. There is no orphan scan, and you do not need to call `resume()` for crash recovery.
 
-History and status writes are lease-fenced (Redis compare-and-append / compare-and-set against the lease token). Each state transition is a single Redis script, so history and status never disagree after a crash: a terminal event, its final status, leaving the active set, and retention are written together, as are `CompensationStarted` and status `compensating`. A writer that loses the lease cannot write; the new owner continues from history. While an execution is leased, the lease holder is the only writer of its history, so it loads history once per lease and keeps it in memory. Client paths do not take a lease: `start` creates meta, the first history event, and the queue entry in one script; `resume` is one compare-and-set script on a failed execution; `cancel` sets a flag on meta (never history), which the lease holder sees on its next write. Losing a lease aborts the local forward `signal` so the handler can stop; another replica may still re-run the step after reclaim (at-least-once).
+History and status writes are lease-fenced (Redis compare-and-append / compare-and-set against the lease token). Each state transition is a single Redis script, so history and status never disagree after a crash: a terminal event, its final status, leaving the due set, and retention are written together, as are `CompensationStarted` and status `compensating`. A writer that loses the lease cannot write; the new owner continues from history. While an execution is leased, the lease holder is the only writer of its history, so it loads history once per lease and keeps it in memory. Client paths do not take a lease: `start` creates meta, the first history event, and the due entry in one script; `resume` is one compare-and-set script on a failed execution; `cancel` sets a flag on meta (never history), which the lease holder sees on its next write. Losing a lease aborts the local forward `signal` so the handler can stop; another replica may still re-run the step once the execution comes due again (at-least-once).
 
-`resume(executionId)` re-queues a **failed** execution in one atomic step: only while meta status is still `failed` and history is unchanged since resume read it, it removes the retention TTL, appends a resume event, re-schedules failed steps, sets `pending`, marks the execution active, and enqueues it. `pending` / `running` / `compensating` / `completed` / `cancelled` executions reject, as do failed executions that already started compensation. Concurrent `resume` calls on the same execution apply once; the others reject. A later failure needs a new resume event even if an older `WorkflowResumed` is already in history.
+`resume(executionId)` re-queues a **failed** execution in one atomic step: only while meta status is still `failed` and history is unchanged since resume read it, it removes the retention TTL, appends a resume event, re-schedules failed steps, sets `pending`, and makes it due now. `pending` / `running` / `compensating` / `completed` / `cancelled` executions reject, as do failed executions that already started compensation. Concurrent `resume` calls on the same execution apply once; the others reject. A later failure needs a new resume event even if an older `WorkflowResumed` is already in history.
 
 ## Examples
 
@@ -323,7 +323,7 @@ Pass `Infinity` to keep forever, or `0` to unlink immediately after terminal. Fa
 
 ### Graceful shutdown
 
-`stop()` ends polling, waits for in-flight work (including compensate unwind), and releases this process registration. Forward `signal` is aborted so handlers can exit; that abort does not write `WorkflowCancelled` or start compensation. Compensate `signal` is not aborted, so cleanup can finish. Other replicas keep reclaiming and running the same workflow name.
+`stop()` ends polling, waits for in-flight work (including compensate unwind), and releases this process registration. Forward `signal` is aborted so handlers can exit; that abort does not write `WorkflowCancelled` or start compensation. Compensate `signal` is not aborted, so cleanup can finish. Other replicas keep running the same workflow name; executions this process hands back are due again immediately.
 
 ```typescript
 await onboard.stop();
@@ -335,7 +335,7 @@ await onboard.stop();
 
 - `input`, `executionId`, `signal`
 - `step(name, handler, options?)` - durable side effect; handler gets `{ input, signal, fail }`. `options.compensate` undoes a completed step on later failure or cancel; it gets `{ input, result, signal, fail }`. Compensate `signal` is not the cancelled forward signal, so cleanup can finish after cancel.
-- `sleep(ms)` - durable timer (survives replay / reclaim)
+- `sleep(ms)` - durable timer (survives replay and restarts). It counts as fired once a lease holder sees its fire time pass and records `TimerFired`; it stays fired after that, even if replica clocks disagree.
 
 `fail(error)` inside a step marks a non-retryable failure and passes that `Error` to `onError`. Same inside `compensate`. History and status still store the message string. `throw new NonRetryableStepError(...)` remains non-retryable without going through `fail`.
 
@@ -347,7 +347,7 @@ await onboard.stop();
 - **`retries`** - step retries before workflow fails (default: 3; `0` = fail on first error)
 - **`retryBackoff`** - `{ baseDelay, multiplier, maxDelay }` (defaults: 1000 / 2x / 30000)
 - **`hooks`** - `onStart`, `onRetry`, `onError`, `onComplete`, `onCancel` (see [Hooks](#hooks))
-- **`lockTTL`** - execution lease TTL in ms (default: 300000); also used as capacity slot TTL. While a process holds an execution, it refreshes that execution's capacity slot for the full lifetime (including `sleep` and retry backoff). After process death, the Redis slot remains owned until TTL; the next reclaim re-attaches via the same `executionId`. Differing replica `concurrency` values mean the effective cap is the max.
+- **`lockTTL`** - execution lease TTL in ms (default: 300000); also used as capacity slot TTL. While a process holds an execution, it refreshes that execution's capacity slot for the full lifetime (including `sleep` and retry backoff). After process death, the Redis slot remains owned until TTL; the next run of the same `executionId` re-attaches it. Differing replica `concurrency` values mean the effective cap is the max.
 - **`retentionTTL`** - how long terminal executions (`completed` / `failed` / `cancelled`) stay in Redis, in ms (default: 86400000, 24h). `Infinity` keeps them forever. Any other value must be a non-negative number. `0` unlinks immediately after terminal. Pending, running, and compensating keys are never expired. Failed executions can be `resume`d only while they still exist. Retention is applied when the execution becomes terminal, using the replica's settings at that moment; changing `retentionTTL` later does not touch executions that are already terminal.
 - **`retentionMax`** - optional cap on terminal executions per workflow name. Must be a positive integer. Oldest are `UNLINK`ed when the cap is exceeded. Works with or without a finite `retentionTTL`.
 - **`concurrency`** - max parallel instances across replicas (default: 1). Without `partitionBy`, all executions share one Redis slot pool of size `concurrency` (key `*`) and this process runs that many pollers. With `partitionBy`, each key has its own pool of size `concurrency` (no global cap). If replicas disagree on `concurrency`, the effective cap is the max.
@@ -383,10 +383,7 @@ Prefix: `workflow:`
 | `workflow:{name}:history:{executionId}` | append-only event list, written by `start`, `resume`, and the lease holder |
 | `workflow:{name}:meta:{executionId}` | status, result/error, timestamps, and `cancelRequestedAt` (set by `cancel`, cleared by `resume`) |
 | `workflow:{name}:lease:{executionId}` | owner token + TTL |
-| `workflow:{name}:queue` | workflow task queue |
-| `workflow:{name}:timers` | sorted set of due timers / retry delays |
-| `workflow:{name}:timer-dead` | unparseable timer payloads (dead letter) |
-| `workflow:{name}:active` | non-terminal execution ids (reclaimer) |
+| `workflow:{name}:due` | sorted set of non-terminal execution ids, scored by when each next needs advancing (ms epoch) |
 | `workflow:{name}:terminal` | zset of terminal execution ids when `retentionMax` is set |
 | `workflow:{name}:partition:{key}:{slot}` | concurrency slots (`SET NX PX`, re-ownable by same execution). Key `*` is the unpartitioned pool; `partitionBy` keys are per-key pools |
 
