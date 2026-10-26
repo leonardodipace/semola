@@ -6,7 +6,7 @@ import {
   resetRedis,
   SEMOLA_REDIS_URL,
 } from "./integration-helpers.js";
-import { COMMIT, keys, WorkflowStore } from "./store.js";
+import { keys, TRIM_IF_MEMBER, WorkflowStore } from "./store.js";
 import type { CommitRetention, WorkflowMeta } from "./types.js";
 
 const baseMeta = (name: string) =>
@@ -105,7 +105,6 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     expect(await store.getMeta("exec-1")).toBeNull();
     expect(await store.loadHistory("exec-1")).toEqual([]);
     expect(await dueIds(redis, name)).toEqual([]);
-    expect(await dueIds(redis, name)).toEqual([]);
   });
 
   test("createExecution drops a stale terminal zset member for a reused id", async () => {
@@ -183,6 +182,22 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     expect(
       await redis.zrangebyscore(keys.due(name), 0, Date.now() + 60_000),
     ).toEqual(["e1"]);
+  });
+
+  test("claimDue pushes a busy execution out to its lease expiry", async () => {
+    const redis = createRedis();
+    const name = "store-claim-busy";
+    const store = new WorkflowStore(redis, name);
+
+    await store.createExecution("e1", baseMeta(name));
+    await redis.send("SET", [keys.lease(name, "e1"), "other", "PX", "5000"]);
+
+    expect(await store.claimDue("t1", 60_000)).toBeNull();
+
+    // Not retried on every poll while the other worker holds it.
+    const score = Number(await redis.zscore(keys.due(name), "e1"));
+    expect(score).toBeGreaterThan(Date.now() + 4_000);
+    expect(score).toBeLessThanOrEqual(Date.now() + 5_000);
   });
 
   test("concurrent createExecution creates once", async () => {
@@ -355,24 +370,31 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     expect(await redis.get(keys.lease(name, executionId))).toBe("owner");
   });
 
-  test("terminal commit sends an integer ttl so PEXPIRE cannot abort the script", async () => {
+  test("terminal commit accepts fractional and huge ttls without aborting the script", async () => {
     const redis = createRedis();
     const name = "store-commit-frac";
     const store = new WorkflowStore(redis, name);
-    const ttlArgs: string[] = [];
-    const send = redis.send.bind(redis);
 
-    redis.send = async (command: string, args: string[]) => {
-      if (command === "EVAL" && args[0] === COMMIT)
-        ttlArgs.push(args[12] ?? "");
+    // PEXPIRE rejects both; a rejected call would fail the commit after its
+    // history and meta writes already applied.
+    for (const [executionId, ttlMs] of [
+      ["exec-frac", 1500.5],
+      ["exec-huge", 1e300],
+    ] as const) {
+      await store.createExecution(executionId, baseMeta(name));
 
-      return send(command, args);
-    };
+      expect(await commitFailed(store, executionId, { ttlMs })).toEqual({
+        committed: true,
+        cancelRequested: false,
+      });
+      expect((await store.getMeta(executionId))?.status).toBe("failed");
+      expect(await redis.pttl(keys.meta(name, executionId))).toBeGreaterThan(0);
+    }
 
-    await store.createExecution("exec-frac", baseMeta(name));
-    await commitFailed(store, "exec-frac", { ttlMs: 1500.5 });
-
-    expect(ttlArgs).toEqual(["1501"]);
+    expect(await redis.pttl(keys.meta(name, "exec-frac"))).toBeLessThanOrEqual(
+      1501,
+    );
+    expect(await dueIds(redis, name)).toEqual([]);
   });
 
   test("resumeExecution resumes failed then rejects non-failed status", async () => {
@@ -660,17 +682,39 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     expect(await store.getMeta(executionId)).toBeNull();
   });
 
-  test("trim cannot delete execution after resumeExecution removes terminal member", async () => {
+  test("trim keeps an execution resumed after trim picked it", async () => {
+    const redis = createRedis();
     const name = "store-trim-race";
-    const store = new WorkflowStore(createRedis(), name);
+    const store = new WorkflowStore(redis, name);
 
     await createFailed(store, name, "old", { trackedAt: 1 });
     await createFailed(store, name, "newer", { trackedAt: 2 });
 
-    expect(await store.resumeExecution("old")).toBe("resumed");
+    // Resume lands between trim's ZRANGE (which picked "old") and the
+    // script that unlinks it.
+    const send = redis.send.bind(redis);
+    // Assigned in the patched send, which narrowing does not see.
+    let resumed = null as string | null;
+
+    redis.send = async (command: string, args: string[]) => {
+      if (
+        resumed === null &&
+        command === "EVAL" &&
+        args[0] === TRIM_IF_MEMBER
+      ) {
+        resumed = await store.resumeExecution("old");
+      }
+
+      return send(command, args);
+    };
+
     await store.trimTerminal(1);
 
+    expect(resumed).toBe("resumed");
     expect((await store.getMeta("old"))?.status).toBe("pending");
+    expect(parse(await store.loadHistory("old")).at(-1)?.type).toBe(
+      "WorkflowResumed",
+    );
     expect(await store.getMeta("newer")).not.toBeNull();
   });
 });

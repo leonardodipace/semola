@@ -3,6 +3,7 @@ import { WorkflowEngine } from "./engine.js";
 import {
   closeRedis,
   createRedis,
+  eventTypes,
   resetRedis,
   SEMOLA_REDIS_URL,
 } from "./integration-helpers.js";
@@ -83,12 +84,10 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowEngine", () => {
     expect(meta?.result).toBe("42");
     expect(calls).toEqual(["work"]);
 
-    const done = engine.stop();
-    await sleep(50);
-    await done;
+    await engine.stop();
   });
 
-  test("stop aborts in-flight work and ends polling", async () => {
+  test("stop aborts in-flight work without recording a failure and ends polling", async () => {
     const redis = createRedis();
     const name = `engine-stop-${crypto.randomUUID()}`;
     const store = new WorkflowStore(redis, name);
@@ -101,6 +100,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowEngine", () => {
         redis,
         pollInterval: 5,
         lockTTL: 60_000,
+        retries: 3,
         handler: async ({ step }) => {
           await step("hang", async ({ signal }) => {
             started = true;
@@ -123,12 +123,20 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowEngine", () => {
     await store.createExecution(executionId, baseMeta(name));
 
     await waitFor(() => started);
-
-    const done = engine.stop();
-    await sleep(100);
-    await done;
+    await engine.stop();
 
     expect(sawAbort).toBe(true);
+    // An interrupted attempt is not a failure: it must not use up a retry.
+    expect(await eventTypes(redis, name, executionId)).toEqual([
+      "WorkflowStarted",
+      "StepStarted",
+    ]);
+    expect((await store.getMeta(executionId))?.status).toBe("running");
+
+    await store.createExecution("e2-late", baseMeta(name));
+    await sleep(100);
+
+    expect((await store.getMeta("e2-late"))?.status).toBe("pending");
   });
 
   test("stop resolves before start, twice, and without waiting out an idle poll", async () => {
@@ -189,12 +197,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowEngine", () => {
     engine.requestAbort(executionId);
 
     await waitFor(() => aborted);
-
-    const done = engine.stop();
-    await sleep(50);
-    await done;
-
-    expect(aborted).toBe(true);
+    await engine.stop();
   });
 
   // cancel() calls requestAbort in whichever process handles the request.
@@ -232,9 +235,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowEngine", () => {
 
     expect(abortedAtStart).toEqual([false]);
 
-    const done = engine.stop();
-    await sleep(50);
-    await done;
+    await engine.stop();
   });
 
   test("durable sleep schedules timer then completes after fire", async () => {
@@ -272,9 +273,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowEngine", () => {
 
     expect((await store.getMeta(executionId))?.result).toBe('"slept"');
 
-    const done = engine.stop();
-    await sleep(50);
-    await done;
+    await engine.stop();
   });
 
   test("stop returns after another replica finishes compensation", async () => {
@@ -354,12 +353,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowEngine", () => {
     expect(meta?.status).toBe("failed");
     expect(meta?.error).toBe("provision failed");
 
-    const doneA = engineA.stop();
-    await sleep(100);
-    await doneA;
-
-    const doneB = engineB.stop();
-    await sleep(50);
-    await doneB;
+    await engineA.stop();
+    await engineB.stop();
   });
 });

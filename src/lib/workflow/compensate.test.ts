@@ -6,6 +6,7 @@ import {
   type Workflow,
 } from "./index.js";
 import {
+  beforeCommit,
   closeRedis,
   createRedis,
   expireLeases,
@@ -261,101 +262,6 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
     await wf.stop();
   });
 
-  test("cancel during running compensates completed steps then cancelled", async () => {
-    const redis = createRedis();
-    const order: string[] = [];
-    let gate: (() => void) | undefined;
-    const released = new Promise<void>((resolve) => {
-      gate = resolve;
-    });
-
-    const wf = defineWorkflow({
-      name: `adv-cancel-run-${crypto.randomUUID()}`,
-      redis,
-      ...fast,
-      retries: 0,
-      handler: async ({ step }) => {
-        await step(
-          "setup",
-          async () => {
-            order.push("setup");
-            return { id: "x" };
-          },
-          {
-            compensate: async ({ result }) => {
-              order.push(`undo:${result?.id}`);
-            },
-          },
-        );
-
-        await step("hang", async () => {
-          order.push("hang");
-          await released;
-          return 1;
-        });
-      },
-    });
-
-    const { executionId } = await wf.start({});
-
-    await waitFor(() => order.includes("hang"));
-    await wf.cancel(executionId);
-    gate?.();
-
-    const execution = await waitStatus(wf, executionId, "cancelled");
-
-    expect(execution.status).toBe("cancelled");
-    expect(order).toContain("undo:x");
-    expect(execution.cancelledAt).not.toBeNull();
-
-    await wf.stop();
-  });
-
-  test("cancel during durable sleep compensates then cancelled", async () => {
-    const redis = createRedis();
-    const order: string[] = [];
-
-    const wf = defineWorkflow({
-      name: `adv-cancel-sleep-${crypto.randomUUID()}`,
-      redis,
-      ...fast,
-      retries: 0,
-      handler: async ({ step, sleep: durableSleep }) => {
-        await step(
-          "book",
-          async () => {
-            order.push("book");
-            return "res-1";
-          },
-          {
-            compensate: async ({ result }) => {
-              order.push(`release:${result}`);
-            },
-          },
-        );
-
-        await durableSleep(50_000);
-        order.push("after-sleep");
-      },
-    });
-
-    const { executionId } = await wf.start({});
-
-    await waitFor(async () => {
-      const execution = await wf.get(executionId);
-      return execution.steps.some((s) => s.name === "book");
-    });
-
-    await wf.cancel(executionId);
-    const execution = await waitStatus(wf, executionId, "cancelled");
-
-    expect(execution.status).toBe("cancelled");
-    expect(order).toEqual(["book", "release:res-1"]);
-    expect(order).not.toContain("after-sleep");
-
-    await wf.stop();
-  });
-
   test("cancel during forward retry backoff compensates completed prior step", async () => {
     const redis = createRedis();
     const order: string[] = [];
@@ -393,9 +299,8 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
     await waitFor(() => order.includes("flaky"));
     await wf.cancel(executionId);
 
-    const execution = await waitStatus(wf, executionId, "cancelled");
+    await waitStatus(wf, executionId, "cancelled");
 
-    expect(execution.status).toBe("cancelled");
     expect(order).toContain("undo-prior");
 
     await wf.stop();
@@ -496,46 +401,6 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
     await wf.stop();
   });
 
-  test("compensating status visible via get during hang", async () => {
-    const redis = createRedis();
-    let hang = true;
-    const statuses: string[] = [];
-
-    const wf = defineWorkflow({
-      name: `adv-status-get-${crypto.randomUUID()}`,
-      redis,
-      ...fast,
-      retries: 0,
-      handler: async ({ step }) => {
-        await step("create", async () => 1, {
-          compensate: async () => {
-            while (hang) {
-              await sleep(10);
-            }
-          },
-        });
-
-        throw new Error("boom");
-      },
-    });
-
-    const { executionId } = await wf.start({});
-
-    await waitFor(async () => {
-      const execution = await wf.get(executionId);
-      statuses.push(execution.status);
-      return execution.status === "compensating";
-    });
-
-    expect(statuses).toContain("compensating");
-
-    hang = false;
-    const execution = await waitStatus(wf, executionId, "failed");
-    expect(execution.error).toBe("boom");
-
-    await wf.stop();
-  });
-
   test("listWorkflows includes compensating status", async () => {
     const redis = createRedis();
     let hang = true;
@@ -599,7 +464,9 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
     const { executionId } = await wf.start({});
     await waitStatus(wf, executionId, "compensating");
 
-    await expect(wf.resume(executionId)).rejects.toThrow();
+    await expect(wf.resume(executionId)).rejects.toThrow(
+      "cannot be resumed after compensation",
+    );
 
     hang = false;
     await waitStatus(wf, executionId, "failed");
@@ -855,8 +722,9 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
 
   test("compensate signal is not aborted when cancel aborts forward signal", async () => {
     const redis = createRedis();
-    let forwardAbortedDuringHang = false;
-    let compensateAborted = true;
+    let hangEntered = false;
+    let forwardAborted = false;
+    let compensateAborted: boolean | undefined;
     let hang = true;
 
     const wf = defineWorkflow({
@@ -864,13 +732,13 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
       redis,
       ...fast,
       retries: 0,
-      handler: async ({ step, signal, sleep: durableSleep }) => {
+      handler: async ({ step }) => {
         await step("create", async () => 1, {
-          compensate: async ({ signal: compSignal }) => {
-            compensateAborted = compSignal.aborted;
+          compensate: async ({ signal }) => {
+            compensateAborted = signal.aborted;
 
             while (hang) {
-              if (compSignal.aborted) {
+              if (signal.aborted) {
                 compensateAborted = true;
                 return;
               }
@@ -880,152 +748,34 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
           },
         });
 
-        await durableSleep(50_000);
-        forwardAbortedDuringHang = signal.aborted;
+        await step("hang", async ({ signal }) => {
+          hangEntered = true;
+
+          while (!signal.aborted) {
+            await sleep(10);
+          }
+
+          forwardAborted = true;
+          throw new Error("aborted");
+        });
       },
     });
 
     const { executionId } = await wf.start({});
 
-    await waitFor(async () => {
-      const execution = await wf.get(executionId);
-      return execution.steps.some((s) => s.name === "create");
-    });
-
+    await waitFor(() => hangEntered);
     await wf.cancel(executionId);
     await waitStatus(wf, executionId, "compensating");
 
+    expect(forwardAborted).toBe(true);
     expect(compensateAborted).toBe(false);
 
     hang = false;
     await waitStatus(wf, executionId, "cancelled");
 
-    expect(forwardAbortedDuringHang).toBe(false);
+    expect(compensateAborted).toBe(false);
 
     await wf.stop();
-  });
-
-  test("stop during compensate does not abort compensate signal", async () => {
-    const redis = createRedis();
-    let hang = true;
-    let sawAbort = false;
-    let finished = false;
-
-    const wf = defineWorkflow({
-      name: `adv-stop-signal-${crypto.randomUUID()}`,
-      redis,
-      ...fast,
-      retries: 0,
-      handler: async ({ step }) => {
-        await step("create", async () => 1, {
-          compensate: async ({ signal }) => {
-            while (hang) {
-              if (signal.aborted) {
-                sawAbort = true;
-                return;
-              }
-
-              await sleep(10);
-            }
-
-            finished = true;
-          },
-        });
-
-        throw new Error("boom");
-      },
-    });
-
-    const { executionId } = await wf.start({});
-    await waitStatus(wf, executionId, "compensating");
-
-    const done = wf.stop();
-    hang = false;
-    await sleep(100);
-    await done;
-
-    const execution = await wf.get(executionId);
-
-    // The undo step finished with its own signal; ending the unwind is left
-    // to whoever claims the execution next.
-    expect(sawAbort).toBe(false);
-    expect(finished).toBe(true);
-    expect(execution.status).toBe("compensating");
-  });
-
-  test("at-least-once re-entry if reclaim mid-compensate", async () => {
-    const redis = createRedis();
-    const name = `adv-reentry-${crypto.randomUUID()}`;
-    const order: string[] = [];
-    let hang = true;
-    let crashOnce = true;
-
-    const make = () =>
-      defineWorkflow({
-        name,
-        redis,
-        ...fast,
-        retries: 0,
-        lockTTL: 60,
-        handler: async ({ step }) => {
-          await step(
-            "a",
-            async () => {
-              order.push("a");
-              return 1;
-            },
-            {
-              compensate: async () => {
-                order.push("undo-a");
-              },
-            },
-          );
-
-          await step(
-            "b",
-            async () => {
-              order.push("b");
-              return 2;
-            },
-            {
-              compensate: async () => {
-                order.push("undo-b");
-
-                if (crashOnce) {
-                  crashOnce = false;
-
-                  while (hang) {
-                    await sleep(10);
-                  }
-
-                  throw new Error("reclaim me");
-                }
-              },
-            },
-          );
-
-          throw new Error("forward");
-        },
-      });
-
-    const wf1 = make();
-    const { executionId } = await wf1.start({});
-
-    await waitFor(() => order.includes("undo-b"));
-    await expireLeases(redis);
-    hang = false;
-    await wf1.stop();
-
-    const wf2 = make();
-    const execution = await waitStatus(wf2, executionId, "failed");
-
-    expect(execution.error).toBe("forward");
-    expect(order.filter((x) => x === "undo-b").length).toBeGreaterThanOrEqual(
-      2,
-    );
-    expect(order.filter((x) => x === "undo-a").length).toBe(1);
-
-    await wf2.stop();
   });
 
   test("cancel mid-handler records completed step and compensates", async () => {
@@ -1066,7 +816,6 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
 
     const execution = await waitStatus(wf, executionId, "cancelled");
 
-    expect(execution.status).toBe("cancelled");
     expect(execution.steps.some((s) => s.name === "create")).toBe(true);
     expect(execution.steps.some((s) => s.name === "later")).toBe(false);
     expect(order).toContain("create-end");
@@ -1098,7 +847,6 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
     const { executionId } = await wf.start({});
     const execution = await waitStatus(wf, executionId, "failed");
 
-    expect(execution.status).toBe("failed");
     expect(execution.error).toBe("keep me");
     expect(execution.failedAt).not.toBeNull();
     expect(execution.cancelledAt).toBeNull();
@@ -1156,7 +904,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
     await wf.stop();
   });
 
-  test("void step result compensate receives undefined-compatible result", async () => {
+  test("void step result reaches compensate as null", async () => {
     const redis = createRedis();
     let saw: unknown = "unset";
 
@@ -1185,7 +933,8 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
     const { executionId } = await wf.start({});
     await waitStatus(wf, executionId, "failed");
 
-    expect(saw === null || saw === undefined).toBe(true);
+    // undefined is stored as JSON null, so that is what comes back.
+    expect(saw).toBeNull();
 
     await wf.stop();
   });
@@ -1231,9 +980,8 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
 
     await Promise.all([wf.cancel(executionId), wf.cancel(executionId)]);
 
-    const execution = await waitStatus(wf, executionId, "cancelled");
+    await waitStatus(wf, executionId, "cancelled");
 
-    expect(execution.status).toBe("cancelled");
     expect(order.filter((x) => x === "undo-a").length).toBe(1);
 
     await wf.stop();
@@ -1466,7 +1214,9 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
     await wf.cancel(executionId);
     await waitStatus(wf, executionId, "cancelled");
 
-    await expect(wf.resume(executionId)).rejects.toThrow();
+    await expect(wf.resume(executionId)).rejects.toThrow(
+      "cannot be resumed after compensation",
+    );
 
     await wf.stop();
   });
@@ -1654,7 +1404,14 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
   test("missing compensate handlers after CompensationStarted fail closed", async () => {
     const redis = createRedis();
     const order: string[] = [];
-    let handlerPasses = 0;
+    let dropCompensate = false;
+
+    // The deploy that drops the handler lands once the unwind is recorded.
+    beforeCommit(({ events }) => {
+      if (events?.some((event) => event.type === "CompensationStarted")) {
+        dropCompensate = true;
+      }
+    });
 
     const wf = defineWorkflow({
       name: `adv-missing-comp-${crypto.randomUUID()}`,
@@ -1662,15 +1419,13 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
       ...fast,
       retries: 0,
       handler: async ({ step }) => {
-        handlerPasses++;
-
         let options: { compensate: () => Promise<void> } | undefined = {
           compensate: async () => {
             order.push("undo");
           },
         };
 
-        if (handlerPasses >= 3) {
+        if (dropCompensate) {
           options = undefined;
         }
 
@@ -1907,6 +1662,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
     const redis = createRedis();
     const order: string[] = [];
     const name = `adv-corrupt-result-${crypto.randomUUID()}`;
+    let gateEntered = false;
     let releaseFail: (() => void) | undefined;
     const failGate = new Promise<void>((resolve) => {
       releaseFail = resolve;
@@ -1945,6 +1701,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
         );
 
         await step("gate", async ({ fail }) => {
+          gateEntered = true;
           await failGate;
           fail(new Error("boom"));
         });
@@ -1953,13 +1710,9 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
 
     const { executionId } = await wf.start({});
 
-    await waitFor(async () => {
-      const execution = await wf.get(executionId);
-      return (
-        execution.steps.some((s) => s.name === "a") &&
-        execution.steps.some((s) => s.name === "b")
-      );
-    });
+    // The gate's StepStarted is committed before it runs, so history is
+    // quiet while it is rewritten below.
+    await waitFor(() => gateEntered);
 
     const historyKey = `workflow:${name}:history:${executionId}`;
     const raw = await redis.lrange(historyKey, 0, -1);
@@ -1988,7 +1741,8 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
 
     const execution = await waitStatus(wf, executionId, "failed");
 
-    expect(execution.error).toMatch(/Unable to deserialize step a|boom/);
+    // The old holder's "boom" is fenced off; the next holder diverges.
+    expect(execution.error).toBe("Unable to deserialize step a");
     expect(order).not.toContain("undo-a");
     expect(order).not.toContain("undo-b");
 
