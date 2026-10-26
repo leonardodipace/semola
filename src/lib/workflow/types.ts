@@ -284,7 +284,7 @@ export type HistoryEvent =
       type: "CompensationStarted";
       reason: "failed" | "cancelled";
       error: string | null;
-      stepIds?: string[];
+      stepIds: string[];
       timestamp: number;
     };
 

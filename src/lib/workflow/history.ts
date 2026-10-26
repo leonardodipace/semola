@@ -137,12 +137,10 @@ export const applyHistoryEvent = (view: HistoryView, event: HistoryEvent) => {
   }
 
   if (event.type === "CompensationStarted") {
-    const stepIds = Array.isArray(event.stepIds) ? event.stepIds : [];
-
     view.compensation = {
       reason: event.reason,
       error: event.error,
-      stepIds,
+      stepIds: event.stepIds,
     };
   }
 };

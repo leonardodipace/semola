@@ -904,10 +904,7 @@ export class WorkflowEngine<TInput, TResult> {
       .reverse();
     let error = replay.fatal;
 
-    if (
-      !error &&
-      (phase.stepIds.length === 0 || pending.some((id) => !handlers.has(id)))
-    ) {
+    if (!error && pending.some((id) => !handlers.has(id))) {
       error = "compensation handlers missing after CompensationStarted";
     }
 

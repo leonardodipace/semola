@@ -2324,8 +2324,6 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
         `workflow:${name}:history:${executionId}`,
         JSON.stringify({
           type: "WorkflowStarted",
-          input: "{}",
-          partitionKey: "",
           timestamp: Number(now),
         }),
       );
