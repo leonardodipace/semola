@@ -35,7 +35,7 @@ import type {
 } from "./types.js";
 
 const DEFAULT_RETRIES = 3;
-const DEFAULT_LOCK_TTL = 30_000;
+const DEFAULT_LOCK_TTL = 300_000;
 const DEFAULT_RETENTION_TTL = 86_400_000;
 const DEFAULT_CONCURRENCY = 1;
 const DEFAULT_POLL_INTERVAL = 100;
