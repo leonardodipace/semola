@@ -135,7 +135,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
 
     expect(first).toBe("e1");
     expect(second).toBeNull();
-    expect(await store.getLease("e1")).toBe("t1");
+    expect(await redis.get(keys.lease(name, "e1"))).toBe("t1");
     expect(await score("e1")).toBe(false);
     expect(await dueIds(redis, name)).toEqual(["e1"]);
 
@@ -156,7 +156,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
       ttlMs: 60_000,
       dueAt: Date.now(),
     });
-    expect(await store.getLease("e1")).toBe("t1");
+    expect(await redis.get(keys.lease(name, "e1"))).toBe("t1");
 
     await store.releaseLease({
       executionId: "e1",
@@ -164,7 +164,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
       ttlMs: 60_000,
       dueAt: Date.now(),
     });
-    expect(await store.getLease("e1")).toBeNull();
+    expect(await redis.get(keys.lease(name, "e1"))).toBeNull();
     expect(await score("e1")).toBe(true);
 
     // Release only ever lowers the score: it stays at the claim's +60s.
@@ -347,7 +347,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     expect(
       await redis.send("ZRANGE", [keys.terminal(name), "0", "-1"]),
     ).toEqual([executionId]);
-    expect(await store.getLease(executionId)).toBe("owner");
+    expect(await redis.get(keys.lease(name, executionId))).toBe("owner");
   });
 
   test("terminal commit sends an integer ttl so PEXPIRE cannot abort the script", async () => {
@@ -675,7 +675,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
 
     expect(await store.getMeta(executionId)).toBeNull();
     expect(await store.loadHistory(executionId)).toEqual([]);
-    expect(await store.getLease(executionId)).toBeNull();
+    expect(await redis.get(keys.lease(name, executionId))).toBeNull();
     expect(await dueIds(redis, name)).toEqual([]);
     expect(
       await store.resumeExecution({

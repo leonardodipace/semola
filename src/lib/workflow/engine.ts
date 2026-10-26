@@ -521,12 +521,6 @@ export class WorkflowEngine<TInput, TResult> {
     });
   }
 
-  private async ownsLease(executionId: string, run: LeaseRun) {
-    if (run.lost) return false;
-
-    return (await this.store.getLease(executionId)) === run.token;
-  }
-
   private capacityKey(partitionKey: string) {
     if (!this.options.partitionBy) return GLOBAL_CAPACITY_KEY;
 
@@ -620,8 +614,10 @@ export class WorkflowEngine<TInput, TResult> {
       }
     }
 
+    // Every write below is fenced by the lease in COMMIT, so a lease lost
+    // before the heartbeat notices still ends the run at its next commit.
     while (this.running) {
-      if (!(await this.ownsLease(executionId, run))) return;
+      if (run.lost) return;
 
       // Terminal events are committed together with terminal meta, so meta
       // was non-terminal above means no terminal event exists. Guard anyway
@@ -757,7 +753,7 @@ export class WorkflowEngine<TInput, TResult> {
       ),
     );
 
-    if (!(await this.ownsLease(executionId, run))) return false;
+    if (run.lost) return false;
 
     let stepError = handlerError;
 

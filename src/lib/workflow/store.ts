@@ -369,18 +369,6 @@ export class WorkflowStore {
     return Number(result) === 1;
   }
 
-  public async getLease(executionId: string) {
-    const [error, value] = await mightThrow(
-      this.redis.get(keys.lease(this.name, executionId)),
-    );
-
-    if (error) {
-      throw new WorkflowStoreError(`Unable to read lease for ${executionId}`);
-    }
-
-    return value;
-  }
-
   public async resumeExecution(input: ResumeExecutionInput) {
     const { executionId, historyLength, events } = input;
     const payloads = events.map((event) =>
