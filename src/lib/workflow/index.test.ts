@@ -245,9 +245,18 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
 
     const wf2 = make();
     const execution = await waitStatus(wf2, executionId, "completed");
+    const started = (
+      await new WorkflowStore(redis, name).loadHistory(executionId)
+    )
+      .map((raw) => JSON.parse(raw) as { type: string; attempt?: number })
+      .filter((event) => event.type === "StepStarted")
+      .map((event) => event.attempt);
 
     expect(attempts).toBeGreaterThanOrEqual(2);
     expect(execution.status).toBe("completed");
+    // The interrupted attempt runs again under the same number.
+    expect(started.length).toBe(attempts);
+    expect(started.every((attempt) => attempt === 1)).toBe(true);
 
     await wf2.stop();
   });
@@ -1495,7 +1504,8 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
     );
 
     expect((await store.getMeta(target))?.result).toBe("10");
-    expect(await store.loadHistory(target)).toHaveLength(17);
+    // WorkflowStarted, StepStarted + StepCompleted per step, WorkflowCompleted.
+    expect(await store.loadHistory(target)).toHaveLength(12);
     reads--; // the loadHistory call just above
 
     expect(reads).toBe(1);
@@ -1672,14 +1682,14 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
     const history = await new WorkflowStore(redis, name).loadHistory(
       executionId,
     );
-    const scheduled = history
+    const started = history
       .map((raw) => JSON.parse(raw) as { type: string; attempt?: number })
-      .filter((event) => event.type === "StepScheduled")
+      .filter((event) => event.type === "StepStarted")
       .map((event) => event.attempt);
 
     expect(execution.error).toBe("boom 3");
     expect(attempts).toBe(3);
-    expect(scheduled).toEqual([1, 2, 3]);
+    expect(started).toEqual([1, 2, 3]);
 
     await sleep(250);
     expect(attempts).toBe(3);
@@ -2147,8 +2157,8 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
         },
       });
 
-      // Another replica completes the execution after resume() read meta and
-      // history but before its resume script runs.
+      // Another replica completes the execution right before the resume
+      // script runs.
       const send = redis.send.bind(redis);
       redis.send = async (command: string, args: string[]) => {
         if (command === "EVAL" && args[0] === RESUME_EXECUTION) {
@@ -3428,6 +3438,39 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
       const execution = await waitStatus(wf, executionId, "failed");
 
       expect(execution.error).toContain("nondeterminism");
+
+      await wf.stop();
+    });
+
+    test("a failed step renamed before resume fails as nondeterminism", async () => {
+      const redis = createRedis();
+      let renamed = false;
+      let ran = 0;
+
+      const wf = defineWorkflow({
+        name: `nondet-resume-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step(renamed ? "beta" : "alpha", async () => {
+            ran++;
+            throw new Error("boom");
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "failed");
+
+      renamed = true;
+      await wf.resume(executionId);
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(execution.error).toBe(
+        'nondeterminism: step a0 expected "alpha", got "beta"',
+      );
+      expect(ran).toBe(1);
 
       await wf.stop();
     });

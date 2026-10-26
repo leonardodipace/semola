@@ -375,27 +375,11 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     const name = "store-resume";
     const store = new WorkflowStore(redis, name);
     const executionId = "exec-resume";
-    const resumeEvents = [
-      { type: "WorkflowResumed" as const, timestamp: 3 },
-      {
-        type: "StepScheduled" as const,
-        stepId: "a0",
-        stepName: "once",
-        attempt: 1,
-        timestamp: 3,
-      },
-    ];
 
     await createFailed(store, name, executionId);
     expect(await dueIds(redis, name)).toEqual([]);
 
-    const resumed = await store.resumeExecution({
-      executionId,
-      historyLength: 2,
-      events: resumeEvents,
-    });
-
-    expect(resumed).toBe(true);
+    expect(await store.resumeExecution(executionId)).toBe("resumed");
 
     const meta = await store.getMeta(executionId);
     expect(meta?.status).toBe("pending");
@@ -403,68 +387,50 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     expect(meta?.failedAt).toBe("");
     expect(
       parse(await store.loadHistory(executionId)).map((e) => e.type),
-    ).toEqual([
-      "WorkflowStarted",
-      "WorkflowFailed",
-      "WorkflowResumed",
-      "StepScheduled",
-    ]);
+    ).toEqual(["WorkflowStarted", "WorkflowFailed", "WorkflowResumed"]);
     expect(await dueIds(redis, name)).toEqual([executionId]);
 
-    const again = await store.resumeExecution({
-      executionId,
-      historyLength: 4,
-      events: resumeEvents,
-    });
-
-    expect(again).toBe(false);
-    expect(await store.loadHistory(executionId)).toHaveLength(4);
+    expect(await store.resumeExecution(executionId)).toBe("pending");
+    expect(await store.loadHistory(executionId)).toHaveLength(3);
   });
 
-  test("resumeExecution rejects when history grew since events were computed", async () => {
+  test("resumeExecution rejects an execution that started an unwind", async () => {
     const redis = createRedis();
-    const name = "store-resume-stale";
+    const name = "store-resume-unwound";
     const store = new WorkflowStore(redis, name);
-    const executionId = "exec-stale";
+    const executionId = "exec-unwound";
 
-    await createFailed(store, name, executionId, { ttlMs: 60_000 });
-
-    // Another caller resumes from the same read, the run compensates and
-    // fails again: status is "failed" once more, but history moved on.
-    expect(
-      await store.resumeExecution({
-        executionId,
-        historyLength: 2,
-        events: [{ type: "WorkflowResumed", timestamp: 3 }],
-      }),
-    ).toBe(true);
-    await store.claimDue("again", 60_000);
+    await store.createExecution(executionId, baseMeta(name));
+    await store.claimDue("owner", 60_000);
     await store.commit({
       executionId,
-      leaseToken: "again",
+      leaseToken: "owner",
       events: [
         {
           type: "CompensationStarted",
           reason: "failed",
           error: "boom",
-          stepIds: [],
-          timestamp: 4,
+          stepIds: ["a0"],
+          timestamp: 2,
         },
-        { type: "WorkflowFailed", error: "boom", timestamp: 5 },
       ],
-      fields: { status: "failed", error: "boom", failedAt: "5" },
+      fields: { status: "compensating", error: "boom", unwoundAt: "2" },
+    });
+
+    expect(await store.resumeExecution(executionId)).toBe("unwound");
+
+    await store.commit({
+      executionId,
+      leaseToken: "owner",
+      events: [{ type: "WorkflowFailed", error: "boom", timestamp: 3 }],
+      fields: { status: "failed", failedAt: "3" },
       retention: { ttlMs: 60_000 },
     });
 
-    const stale = await store.resumeExecution({
-      executionId,
-      historyLength: 2,
-      events: [{ type: "WorkflowResumed", timestamp: 6 }],
-    });
-
-    expect(stale).toBe(false);
+    // Failed again, but the unwind already undid completed steps.
+    expect(await store.resumeExecution(executionId)).toBe("unwound");
     expect((await store.getMeta(executionId))?.status).toBe("failed");
-    expect(await store.loadHistory(executionId)).toHaveLength(5);
+    expect(await store.loadHistory(executionId)).toHaveLength(3);
     expect(await redis.pttl(keys.meta(name, executionId))).toBeGreaterThan(0);
     expect(await dueIds(redis, name)).toEqual([]);
   });
@@ -539,12 +505,28 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     const after = await store.commit({
       executionId: "exec-1",
       leaseToken: "owner",
-      events: [{ type: "StepStarted", stepId: "a0", attempt: 1, timestamp: 2 }],
+      events: [
+        {
+          type: "StepStarted",
+          stepId: "a0",
+          stepName: "one",
+          attempt: 1,
+          timestamp: 2,
+        },
+      ],
     });
     const fenced = await store.commit({
       executionId: "exec-1",
       leaseToken: "intruder",
-      events: [{ type: "StepStarted", stepId: "a1", attempt: 1, timestamp: 3 }],
+      events: [
+        {
+          type: "StepStarted",
+          stepId: "a1",
+          stepName: "two",
+          attempt: 1,
+          timestamp: 3,
+        },
+      ],
     });
 
     expect(before).toEqual({ committed: true, cancelRequested: false });
@@ -562,11 +544,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
 
     expect((await store.getMeta("exec-1"))?.cancelRequestedAt).not.toBe("");
 
-    await store.resumeExecution({
-      executionId: "exec-1",
-      historyLength: 2,
-      events: [{ type: "WorkflowResumed", timestamp: 3 }],
-    });
+    await store.resumeExecution("exec-1");
 
     expect((await store.getMeta("exec-1"))?.cancelRequestedAt).toBe("");
   });
@@ -614,11 +592,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
 
     expect(await redis.pttl(keys.meta(name, executionId))).toBeGreaterThan(0);
 
-    await store.resumeExecution({
-      executionId,
-      historyLength: 2,
-      events: [{ type: "WorkflowResumed", timestamp: 3 }],
-    });
+    await store.resumeExecution(executionId);
 
     expect(await redis.pttl(keys.meta(name, executionId))).toBe(-1);
     expect(await redis.pttl(keys.history(name, executionId))).toBe(-1);
@@ -677,13 +651,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     expect(await store.loadHistory(executionId)).toEqual([]);
     expect(await redis.get(keys.lease(name, executionId))).toBeNull();
     expect(await dueIds(redis, name)).toEqual([]);
-    expect(
-      await store.resumeExecution({
-        executionId,
-        historyLength: 0,
-        events: [{ type: "WorkflowResumed", timestamp: 3 }],
-      }),
-    ).toBe(false);
+    expect(await store.resumeExecution(executionId)).toBeNull();
     expect(await store.getMeta(executionId)).toBeNull();
   });
 
@@ -694,13 +662,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     await createFailed(store, name, "old", { trackedAt: 1 });
     await createFailed(store, name, "newer", { trackedAt: 2 });
 
-    expect(
-      await store.resumeExecution({
-        executionId: "old",
-        historyLength: 2,
-        events: [{ type: "WorkflowResumed", timestamp: 3 }],
-      }),
-    ).toBe(true);
+    expect(await store.resumeExecution("old")).toBe("resumed");
     await store.trimTerminal(1);
 
     expect((await store.getMeta("old"))?.status).toBe("pending");

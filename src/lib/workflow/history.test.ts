@@ -28,7 +28,7 @@ describe("parseHistory", () => {
         timestamp: now,
       }),
       JSON.stringify({
-        type: "StepScheduled",
+        type: "StepStarted",
         stepId: "s1",
         stepName: "work",
         attempt: 1,
@@ -57,28 +57,54 @@ describe("parseHistory", () => {
     expect(view.terminal).toEqual({ kind: "completed", result: "42" });
   });
 
-  test("WorkflowResumed clears terminal", () => {
+  test("WorkflowResumed clears terminal and resets failed steps to attempt 1", () => {
     const now = 1_700_000_000_000;
-
-    const view = parseHistory([
-      JSON.stringify({
-        type: "WorkflowStarted",
-        input: "{}",
-        partitionKey: "",
+    const events: HistoryEvent[] = [
+      { type: "WorkflowStarted", timestamp: now },
+      {
+        type: "StepStarted",
+        stepId: "a0",
+        stepName: "one",
+        attempt: 1,
         timestamp: now,
-      }),
-      JSON.stringify({
-        type: "WorkflowFailed",
+      },
+      {
+        type: "StepCompleted",
+        stepId: "a0",
+        stepName: "one",
+        result: "1",
+        timestamp: now,
+      },
+      {
+        type: "StepStarted",
+        stepId: "a1",
+        stepName: "two",
+        attempt: 3,
+        timestamp: now + 1,
+      },
+      {
+        type: "StepFailed",
+        stepId: "a1",
+        stepName: "two",
         error: "boom",
-        timestamp: now + 2,
-      }),
-      JSON.stringify({
-        type: "WorkflowResumed",
-        timestamp: now + 3,
-      }),
-    ]);
+        retryable: true,
+        attempt: 3,
+        timestamp: now + 1,
+      },
+      { type: "WorkflowFailed", error: "boom", timestamp: now + 2 },
+      { type: "WorkflowResumed", timestamp: now + 3 },
+    ];
+
+    const view = parseHistory(events.map((event) => JSON.stringify(event)));
 
     expect(view.terminal).toBeNull();
+    expect(view.steps.get("a0")?.status).toBe("completed");
+    expect(view.steps.get("a1")).toEqual({
+      status: "started",
+      stepName: "two",
+      attempt: 1,
+    });
+    expect([...view.started]).toEqual(["a0", "a1"]);
   });
 
   test("applying events one by one matches parsing the stored list", () => {
@@ -89,13 +115,12 @@ describe("parseHistory", () => {
         timestamp: now,
       },
       {
-        type: "StepScheduled",
+        type: "StepStarted",
         stepId: "a0",
         stepName: "one",
         attempt: 1,
         timestamp: now,
       },
-      { type: "StepStarted", stepId: "a0", attempt: 1, timestamp: now },
       {
         type: "StepCompleted",
         stepId: "a0",
@@ -113,13 +138,12 @@ describe("parseHistory", () => {
         timestamp: now + 60,
       },
       {
-        type: "StepScheduled",
+        type: "StepStarted",
         stepId: "u0",
         stepName: "undo:one",
         attempt: 1,
         timestamp: now + 61,
       },
-      { type: "StepStarted", stepId: "u0", attempt: 1, timestamp: now + 61 },
       {
         type: "StepCompleted",
         stepId: "u0",
@@ -144,11 +168,9 @@ describe("parseHistory", () => {
 
     const view = parseHistory(
       [
-        { type: "StepScheduled", stepId: "a3", stepName: "one", attempt: 1 },
-        { type: "StepStarted", stepId: "a3", attempt: 1 },
+        { type: "StepStarted", stepId: "a3", stepName: "one", attempt: 1 },
         { type: "StepFailed", stepId: "a3", stepName: "one", error: "x" },
-        { type: "StepScheduled", stepId: "u3", stepName: "undo:one" },
-        { type: "StepStarted", stepId: "u3", attempt: 1 },
+        { type: "StepStarted", stepId: "u3", stepName: "undo:one", attempt: 1 },
         { type: "StepCompleted", stepId: "u3", stepName: "undo:one" },
       ].map((event) =>
         JSON.stringify({
@@ -168,7 +190,7 @@ describe("parseHistory", () => {
     expect(undoStepId("a3")).toBe("u3");
   });
 
-  test("TimerFired inherits delayMs and StepStarted inherits stepName", () => {
+  test("TimerFired inherits delayMs", () => {
     const now = 1_700_000_000_000;
     const delayMs = 5_000;
 
@@ -178,19 +200,6 @@ describe("parseHistory", () => {
         input: "{}",
         partitionKey: "",
         timestamp: now,
-      }),
-      JSON.stringify({
-        type: "StepScheduled",
-        stepId: "s1",
-        stepName: "work",
-        attempt: 1,
-        timestamp: now + 1,
-      }),
-      JSON.stringify({
-        type: "StepStarted",
-        stepId: "s1",
-        attempt: 1,
-        timestamp: now + 2,
       }),
       JSON.stringify({
         type: "TimerStarted",
@@ -205,11 +214,6 @@ describe("parseHistory", () => {
       }),
     ]);
 
-    expect(view.steps.get("s1")).toEqual({
-      status: "started",
-      stepName: "work",
-      attempt: 1,
-    });
     expect(view.timers.get("t1")).toEqual({
       status: "fired",
       delayMs,

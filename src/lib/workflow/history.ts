@@ -46,26 +46,14 @@ export const applyHistoryEvent = (view: HistoryView, event: HistoryEvent) => {
 
   view.events.push(event);
 
-  if (event.type === "StepScheduled") {
-    const { states, id } = stepSlot(view, event.stepId);
-
-    states.set(id, {
-      status: "scheduled",
-      stepName: event.stepName,
-      attempt: event.attempt,
-    });
-    return;
-  }
-
   if (event.type === "StepStarted") {
     const { states, id, undo } = stepSlot(view, event.stepId);
-    const previous = states.get(id);
 
     if (!undo) view.started.add(id);
 
     states.set(id, {
       status: "started",
-      stepName: previous?.stepName ?? "",
+      stepName: event.stepName,
       attempt: event.attempt,
     });
     return;
@@ -131,8 +119,20 @@ export const applyHistoryEvent = (view: HistoryView, event: HistoryEvent) => {
     return;
   }
 
+  // Failed forward steps run again from attempt 1. They stay in the view
+  // under their name, so replay still checks it.
   if (event.type === "WorkflowResumed") {
     view.terminal = null;
+
+    for (const [id, state] of view.steps) {
+      if (state.status !== "failed") continue;
+
+      view.steps.set(id, {
+        status: "started",
+        stepName: state.stepName,
+        attempt: 1,
+      });
+    }
     return;
   }
 

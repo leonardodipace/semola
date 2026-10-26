@@ -9,7 +9,6 @@ import { parseHistory } from "./history.js";
 import { fromJson, toJson } from "./json.js";
 import { WorkflowStore } from "./store.js";
 import type {
-  HistoryEvent,
   ResolvePartitionKeyInput,
   StepSnapshot,
   Workflow,
@@ -23,7 +22,6 @@ import type {
 } from "./types.js";
 
 const registry = new Set<string>();
-const RESUME_ATTEMPTS = 3;
 
 const optionalTimestamp = (raw: string) => {
   if (!raw) return null;
@@ -223,66 +221,31 @@ export const defineWorkflow = <TInput, TResult = void>(
     };
   };
 
-  const notResumable = (executionId: string, status: string) =>
-    new WorkflowStoreError(
-      `Workflow execution ${executionId} is ${status}, only failed executions can be resumed`,
-    );
-
+  // One script decides and applies the resume; replay restarts the failed
+  // steps at attempt 1 (see WorkflowResumed in history.ts).
   const resume = async (executionId: string) => {
-    // The resume script only applies if status is still failed and history
-    // has not grown since this read; otherwise re-read and decide again.
-    for (let attempt = 0; attempt < RESUME_ATTEMPTS; attempt++) {
-      const meta = await requireMeta(store, executionId);
-      const history = await store.loadHistory(executionId);
-      const view = parseHistory(history);
+    const outcome = await store.resumeExecution(executionId);
 
-      if (view.compensation) {
-        throw new WorkflowStoreError(
-          `Workflow execution ${executionId} cannot be resumed after compensation`,
-        );
-      }
-
-      if (meta.status !== "failed") {
-        throw notResumable(executionId, meta.status);
-      }
-
-      const now = Date.now();
-      const events: HistoryEvent[] = [
-        {
-          type: "WorkflowResumed",
-          timestamp: now,
-        },
-      ];
-
-      for (const [stepId, state] of view.steps) {
-        if (state.status !== "failed") continue;
-
-        events.push({
-          type: "StepScheduled",
-          stepId,
-          stepName: state.stepName,
-          attempt: 1,
-          timestamp: now,
-        });
-      }
-
-      const resumed = await store.resumeExecution({
-        executionId,
-        historyLength: history.length,
-        events,
-      });
-
-      if (resumed) {
-        return {
-          executionId,
-          status: "pending" as WorkflowStatus,
-        };
-      }
+    if (outcome === null) {
+      throw new NotFoundError(`Workflow execution ${executionId} not found`);
     }
 
-    throw new WorkflowStoreError(
-      `Workflow execution ${executionId} changed while resuming, try again`,
-    );
+    if (outcome === "unwound") {
+      throw new WorkflowStoreError(
+        `Workflow execution ${executionId} cannot be resumed after compensation`,
+      );
+    }
+
+    if (outcome !== "resumed") {
+      throw new WorkflowStoreError(
+        `Workflow execution ${executionId} is ${outcome}, only failed executions can be resumed`,
+      );
+    }
+
+    return {
+      executionId,
+      status: "pending" as WorkflowStatus,
+    };
   };
 
   const get = async (executionId: string) => {

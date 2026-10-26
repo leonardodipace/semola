@@ -131,11 +131,10 @@ const nextStep = (
     backoff: (attempt: number) => number;
   },
 ): WorkflowDecision => {
-  const { stepId, stepName } = step;
   const { now, retries, backoff } = policy;
 
-  if (state?.status === "scheduled" || state?.status === "started") {
-    return { type: "runStep", ...step, attempt: state.attempt, events: [] };
+  if (state?.status === "started") {
+    return { type: "runStep", ...step, attempt: state.attempt };
   }
 
   let attempt = 1;
@@ -152,14 +151,7 @@ const nextStep = (
     attempt = state.attempt + 1;
   }
 
-  return {
-    type: "runStep",
-    ...step,
-    attempt,
-    events: [
-      { type: "StepScheduled", stepId, stepName, attempt, timestamp: now },
-    ],
-  };
+  return { type: "runStep", ...step, attempt };
 };
 
 // Replays the workflow function against history once: decides the next move
@@ -654,24 +646,9 @@ export class WorkflowEngine<TInput, TResult> {
       }
 
       if (decision.type === "runStep") {
-        if (decision.events.length > 0) {
-          const appended = await this.commitRun(executionId, run, {
-            events: decision.events,
-          });
-
-          if (!appended) return;
+        if (!(await this.executeStep({ executionId, run, ...decision }))) {
+          return;
         }
-
-        const cont = await this.executeStep({
-          executionId,
-          stepId: decision.stepId,
-          stepName: decision.stepName,
-          attempt: decision.attempt,
-          handler: decision.handler,
-          run,
-        });
-
-        if (!cont) return;
 
         continue;
       }
@@ -723,6 +700,8 @@ export class WorkflowEngine<TInput, TResult> {
     return run.cancelRequested && !run.view.compensation;
   }
 
+  // The only writer of StepStarted: one event per attempt, written before
+  // the handler runs.
   private async executeStep(input: ExecuteStepInput<TInput>) {
     const { executionId, stepId, stepName, attempt, handler, run } = input;
     const { signal } = run.controller;
@@ -732,6 +711,7 @@ export class WorkflowEngine<TInput, TResult> {
         {
           type: "StepStarted",
           stepId,
+          stepName,
           attempt,
           timestamp: Date.now(),
         },
@@ -881,6 +861,7 @@ export class WorkflowEngine<TInput, TResult> {
     const fields: Partial<WorkflowMeta> = {
       status: "compensating",
       updatedAt: String(now),
+      unwoundAt: String(now),
     };
 
     // `error` becomes the undo's error if the unwind fails; startSync reports
@@ -951,20 +932,7 @@ export class WorkflowEngine<TInput, TResult> {
       }
 
       if (next.type === "runStep") {
-        const { events, stepId, stepName, attempt, handler } = next;
-
-        if (!(await this.commitRun(executionId, run, { events }))) {
-          return false;
-        }
-
-        return this.executeStep({
-          executionId,
-          stepId,
-          stepName,
-          attempt,
-          handler,
-          run,
-        });
+        return this.executeStep({ executionId, run, ...next });
       }
 
       if (next.type === "fail") error = next.error;

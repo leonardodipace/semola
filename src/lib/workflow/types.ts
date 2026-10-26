@@ -203,6 +203,8 @@ export type WorkflowMeta = {
   // The forward failure that started an unwind, kept when `error` is later
   // replaced by an undo's error. Absent when no failure started an unwind.
   originalError?: string;
+  // Set when an unwind starts; resume rejects the execution from then on.
+  unwoundAt?: string;
 };
 
 export type Workflow<TInput, TResult> = {
@@ -227,15 +229,9 @@ export type HistoryEvent =
       timestamp: number;
     }
   | {
-      type: "StepScheduled";
-      stepId: string;
-      stepName: string;
-      attempt: number;
-      timestamp: number;
-    }
-  | {
       type: "StepStarted";
       stepId: string;
+      stepName: string;
       attempt: number;
       timestamp: number;
     }
@@ -293,8 +289,9 @@ export type HistoryEvent =
     };
 
 export type StepState =
+  // `attempt` runs next: it started and never finished, or resume reset it.
   | {
-      status: "scheduled" | "started";
+      status: "started";
       stepName: string;
       attempt: number;
     }
@@ -354,7 +351,6 @@ export type WorkflowDecision =
       stepName: string;
       attempt: number;
       handler: StepHandler<unknown, unknown>;
-      events: HistoryEvent[];
     }
   | { type: "record"; events: HistoryEvent[] }
   | { type: "waiting"; until: number }
@@ -519,12 +515,6 @@ export type LeaseRun<TInput = unknown> = {
 };
 
 export type RunCommitInput = Omit<CommitInput, "executionId" | "leaseToken">;
-
-export type ResumeExecutionInput = {
-  executionId: string;
-  historyLength: number;
-  events: HistoryEvent[];
-};
 
 export type RedisZMember = {
   score: number;

@@ -7,7 +7,6 @@ import type {
   CommitResult,
   HistoryEvent,
   LeaseInput,
-  ResumeExecutionInput,
   WorkflowMeta,
   WorkflowStatus,
 } from "./types.js";
@@ -67,14 +66,13 @@ export const COMMIT =
   "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end local n=tonumber(ARGV[3]) for i=7,6+n do redis.call('RPUSH', KEYS[2], ARGV[i]) end if #ARGV > 6+n then redis.call('HSET', KEYS[3], unpack(ARGV, 7+n)) end local r=1 local c=redis.call('HGET', KEYS[3], 'cancelRequestedAt') if c and c ~= '' then r=2 end if ARGV[4] == '' then return r end if ARGV[4] ~= 'done' then redis.call('ZADD', KEYS[4], 'XX', ARGV[4], ARGV[2]) return r end redis.call('ZREM', KEYS[4], ARGV[2]) redis.call('ZREM', KEYS[6], ARGV[2]) local ttl=tonumber(ARGV[5]) if ttl then if ttl <= 0 then redis.call('UNLINK', KEYS[3], KEYS[2], KEYS[1]) redis.call('ZREM', KEYS[5], ARGV[2]) return r end redis.call('PEXPIRE', KEYS[3], ARGV[5]) redis.call('PEXPIRE', KEYS[2], ARGV[5]) end if ARGV[6] ~= '' then redis.call('ZADD', KEYS[5], ARGV[6], ARGV[2]) end return r";
 
 // KEYS: meta, history, due, terminal
-// ARGV: executionId, now, expected history length, event payloads...
-// Only resumes while status is still "failed" and history has not grown since
-// the caller computed the resume events. History is append-only and only
-// written while non-terminal, so an equal length rules out another resume
-// that ran and failed again (possibly after compensating) in between.
-// Clears any cancel request that landed before the failure.
+// ARGV: executionId, now, WorkflowResumed payload
+// Resumes only a failed execution that never started an unwind (`unwoundAt`
+// is set in the same commit as CompensationStarted). Clears any cancel
+// request that landed before the failure. Returns nil when meta is missing,
+// "unwound", the status when it is not "failed", or "resumed".
 export const RESUME_EXECUTION =
-  "if redis.call('HGET', KEYS[1], 'status') ~= 'failed' then return 0 end if redis.call('LLEN', KEYS[2]) ~= tonumber(ARGV[3]) then return 0 end redis.call('PERSIST', KEYS[1]) redis.call('PERSIST', KEYS[2]) redis.call('ZREM', KEYS[4], ARGV[1]) for i=4,#ARGV do redis.call('RPUSH', KEYS[2], ARGV[i]) end redis.call('HSET', KEYS[1], 'status', 'pending', 'error', '', 'failedAt', '', 'cancelRequestedAt', '', 'updatedAt', ARGV[2]) redis.call('ZADD', KEYS[3], ARGV[2], ARGV[1]) return 1";
+  "local s=redis.call('HGET', KEYS[1], 'status') if not s then return false end local u=redis.call('HGET', KEYS[1], 'unwoundAt') if u and u ~= '' then return 'unwound' end if s ~= 'failed' then return s end redis.call('PERSIST', KEYS[1]) redis.call('PERSIST', KEYS[2]) redis.call('ZREM', KEYS[4], ARGV[1]) redis.call('RPUSH', KEYS[2], ARGV[3]) redis.call('HSET', KEYS[1], 'status', 'pending', 'error', '', 'failedAt', '', 'cancelRequestedAt', '', 'updatedAt', ARGV[2]) redis.call('ZADD', KEYS[3], ARGV[2], ARGV[1]) return 'resumed'";
 
 // KEYS: meta, due
 // ARGV: executionId, now
@@ -369,10 +367,12 @@ export class WorkflowStore {
     return Number(result) === 1;
   }
 
-  public async resumeExecution(input: ResumeExecutionInput) {
-    const { executionId, historyLength, events } = input;
-    const payloads = events.map((event) =>
-      toJson(event, `history event for ${executionId}`),
+  // Returns the RESUME_EXECUTION outcome, or null when meta is missing.
+  public async resumeExecution(executionId: string) {
+    const now = Date.now();
+    const resumed = toJson(
+      { type: "WorkflowResumed", timestamp: now } satisfies HistoryEvent,
+      `history event for ${executionId}`,
     );
 
     const [error, result] = await mightThrow(
@@ -384,9 +384,8 @@ export class WorkflowStore {
         keys.due(this.name),
         keys.terminal(this.name),
         executionId,
-        String(Date.now()),
-        String(historyLength),
-        ...payloads,
+        String(now),
+        resumed,
       ]),
     );
 
@@ -394,7 +393,7 @@ export class WorkflowStore {
       throw new WorkflowStoreError(`Unable to resume execution ${executionId}`);
     }
 
-    return Number(result) === 1;
+    return typeof result === "string" ? result : null;
   }
 
   public async trimTerminal(max: number) {
