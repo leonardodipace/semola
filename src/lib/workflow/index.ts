@@ -217,7 +217,7 @@ export const defineWorkflow = <TInput, TResult = void>(
 
     return {
       executionId,
-      status: "pending" as WorkflowStatus,
+      status: "pending" as const,
     };
   };
 
@@ -244,7 +244,7 @@ export const defineWorkflow = <TInput, TResult = void>(
 
     return {
       executionId,
-      status: "pending" as WorkflowStatus,
+      status: "pending" as const,
     };
   };
 

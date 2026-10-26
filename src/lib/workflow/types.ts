@@ -159,7 +159,7 @@ export type WorkflowStartSyncResult<TResult> = {
 
 export type WorkflowStartResult = {
   executionId: string;
-  status: WorkflowStatus;
+  status: "pending";
 };
 
 export type WorkflowCancelResult = {
@@ -507,8 +507,3 @@ export type LeaseRun<TInput = unknown> = {
 };
 
 export type RunCommitInput = Omit<CommitInput, "executionId" | "leaseToken">;
-
-export type RedisZMember = {
-  score: number;
-  member: string;
-};

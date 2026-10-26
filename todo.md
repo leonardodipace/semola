@@ -68,7 +68,7 @@ Follow-ups from the review of `noah/timer-refactor`, after checking each claim a
   - Poll `store.getMeta`. On terminal status, build the result from meta: parse `result`, and take the failure message from `originalError || error`.
   - No history read or input parse per poll.
 
-- [ ] **9. Small cleanups.**
+- [x] **9. Small cleanups.**
   - Delete the unused `RedisZMember` type.
   - `parseHistory` uses `fromJson` for each event, keeping the "not an object" check. Update any test that asserts the old message.
   - `WorkflowStartResult.status` becomes the literal `"pending"`.

@@ -4,7 +4,6 @@ import { NonRetryableStepError, Paused, WorkflowStoreError } from "./errors.js";
 import {
   applyHistoryEvent,
   emptyHistoryView,
-  isTerminalStatus,
   parseHistory,
   undoStepId,
 } from "./history.js";
@@ -56,6 +55,14 @@ const failWith = (error: Error): never => {
 const isNonRetryableStepError = (error: Error) => {
   if (error instanceof NonRetryableStepError) return true;
   if (nonRetryableViaFail.has(error)) return true;
+  return false;
+};
+
+const isTerminalStatus = (status: string) => {
+  if (status === "completed") return true;
+  if (status === "failed") return true;
+  if (status === "cancelled") return true;
+
   return false;
 };
 

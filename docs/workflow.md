@@ -3,7 +3,7 @@ title: Workflow
 description: Semola durable workflows - multi-step Redis jobs with resumable steps and retries
 ---
 
-Durable workflows on Redis. Event history, deterministic replay, inline steps, multi-replica leases, and automatic orphan recovery.
+Durable workflows on Redis. Event history, deterministic replay, inline steps, multi-replica leases, and crashed or stalled runs that any replica picks up once `lockTTL` passes.
 Workflows run multi-step processes that survive restarts. Each named `step` caches its result in Redis, so replay and reclaim skip work that already succeeded.
 
 Needs a `Bun.RedisClient`. Workflow names must be unique in the process. Execution IDs must be unique per workflow name (Redis keys are `workflow:{name}:…`).
@@ -69,7 +69,7 @@ Steps are **at-least-once**. `step` bodies must be idempotent; a crash mid-step 
 
 N Bun processes may register the same workflow `name` against the same Redis. Work is distributed via one sorted set of executions scored by when each next needs advancing, plus per-execution leases (`lockTTL`). A worker claims a due execution by taking its lease and pushing its score `lockTTL` ahead; the heartbeat keeps pushing it while the run is alive. When the run stops it leaves the score at the next thing it waits for: a `sleep`'s fire time or a retry's backoff. Sleeping executions cost nothing until they are due.
 
-If a replica dies mid-run, its execution simply comes due again once `lockTTL` passes, and any replica (or the same process after restart) picks it up. If a run hits an internal error instead (for example a Redis failure), the replica hands the execution back to be retried after `retryBackoff.baseDelay`. There is no orphan scan, and you do not need to call `resume()` for crash recovery.
+If a replica dies mid-run, its execution simply comes due again once `lockTTL` passes, and any replica (or the same process after restart) picks it up. If a run hits an internal error instead (for example a Redis failure), the replica hands the execution back to be retried after `retryBackoff.baseDelay` (at least `pollInterval`). There is no orphan scan, and you do not need to call `resume()` for crash recovery.
 
 The heartbeat that keeps a lease alive runs on the same event loop as your steps. A step that blocks the event loop with synchronous work for longer than about 60% of `lockTTL` loses its lease, and another replica may start the same step while the first is still running. Keep steps async, or raise `lockTTL` for long synchronous work.
 

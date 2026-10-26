@@ -1,19 +1,11 @@
-import { mightThrowSync } from "../errors/index.js";
 import { SerializationError } from "./errors.js";
+import { fromJson } from "./json.js";
 import type {
   HistoryEvent,
   HistoryView,
   StepState,
   TimerState,
 } from "./types.js";
-
-export const isTerminalStatus = (status: string) => {
-  if (status === "completed") return true;
-  if (status === "failed") return true;
-  if (status === "cancelled") return true;
-
-  return false;
-};
 
 export const emptyHistoryView = (): HistoryView => ({
   events: [],
@@ -131,16 +123,10 @@ export const parseHistory = (rawEvents: string[]): HistoryView => {
   const view = emptyHistoryView();
 
   for (const raw of rawEvents) {
-    const [error, event] = mightThrowSync(
-      () => JSON.parse(raw) as HistoryEvent,
-    );
-
-    if (error) {
-      throw new SerializationError("Unable to parse history event");
-    }
+    const event = fromJson<HistoryEvent>(raw, "history event");
 
     if (event === null || typeof event !== "object") {
-      throw new SerializationError("Unable to parse history event");
+      throw new SerializationError("Unable to deserialize history event");
     }
 
     applyHistoryEvent(view, event);
