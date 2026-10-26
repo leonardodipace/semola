@@ -611,11 +611,6 @@ export class WorkflowEngine<TInput, TResult> {
     while (this.running) {
       if (run.lost) return;
 
-      // Terminal events are committed together with terminal meta, so meta
-      // was non-terminal above means no terminal event exists. Guard anyway
-      // so a stale view can never commit a second terminal transition.
-      if (view.terminal) return;
-
       const replay = await advance({
         options: this.options,
         view,

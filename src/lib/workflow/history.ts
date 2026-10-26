@@ -21,7 +21,6 @@ export const emptyHistoryView = (): HistoryView => ({
   undos: new Map<string, StepState>(),
   timers: new Map<string, TimerState>(),
   started: new Set<string>(),
-  terminal: null,
   compensation: null,
 });
 
@@ -104,26 +103,9 @@ export const applyHistoryEvent = (view: HistoryView, event: HistoryEvent) => {
     return;
   }
 
-  if (event.type === "WorkflowCancelled") {
-    view.terminal = { kind: "cancelled" };
-    return;
-  }
-
-  if (event.type === "WorkflowCompleted") {
-    view.terminal = { kind: "completed", result: event.result };
-    return;
-  }
-
-  if (event.type === "WorkflowFailed") {
-    view.terminal = { kind: "failed", error: event.error };
-    return;
-  }
-
   // Failed forward steps run again from attempt 1. They stay in the view
   // under their name, so replay still checks it.
   if (event.type === "WorkflowResumed") {
-    view.terminal = null;
-
     for (const [id, state] of view.steps) {
       if (state.status !== "failed") continue;
 

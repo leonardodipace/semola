@@ -50,7 +50,7 @@ Follow-ups from the review of `noah/timer-refactor`, after checking each claim a
   - **Fix:** when the wait commit reports a cancel and the run continues, restore `due = now + lockTTL` before unwinding. That's one extra round trip, only on this race.
   - **Tests:** add a deterministic regression test; the flaky test must then pass reliably.
 
-- [ ] **5. One terminal guard.**
+- [x] **5. One terminal guard.**
   - A terminal commit removes the execution from `due`, and every other script uses `ZADD XX` or only re-adds on resume, so `claimDue` can't return a terminal execution.
   - Keep the cheap `isTerminalStatus(meta.status)` check in `runExecution`, on meta that's already loaded.
   - Delete the `if (view.terminal) return` loop guard. It's the only reader of `view.terminal`, so `view.terminal` tracking in history.ts and the `HistoryTerminal` type go too.

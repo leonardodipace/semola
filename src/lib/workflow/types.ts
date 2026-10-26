@@ -320,11 +320,6 @@ export type CompensationPhase = {
   stepIds: string[];
 };
 
-export type HistoryTerminal =
-  | { kind: "completed"; result: string }
-  | { kind: "failed"; error: string }
-  | { kind: "cancelled" };
-
 export type HistoryView = {
   events: HistoryEvent[];
   // Forward steps by id (`a<N>`).
@@ -334,7 +329,6 @@ export type HistoryView = {
   timers: Map<string, TimerState>;
   // Forward step ids with a StepStarted event: the steps an unwind must undo.
   started: Set<string>;
-  terminal: HistoryTerminal | null;
   compensation: CompensationPhase | null;
 };
 

@@ -52,10 +52,9 @@ describe("parseHistory", () => {
       result: "42",
       completedAt: now + 2,
     });
-    expect(view.terminal).toEqual({ kind: "completed", result: "42" });
   });
 
-  test("WorkflowResumed clears terminal and resets failed steps to attempt 1", () => {
+  test("WorkflowResumed resets failed steps to attempt 1", () => {
     const now = 1_700_000_000_000;
     const events: HistoryEvent[] = [
       { type: "WorkflowStarted", timestamp: now },
@@ -95,7 +94,6 @@ describe("parseHistory", () => {
 
     const view = parseHistory(events.map((event) => JSON.stringify(event)));
 
-    expect(view.terminal).toBeNull();
     expect(view.steps.get("a0")?.status).toBe("completed");
     expect(view.steps.get("a1")).toEqual({
       status: "started",
