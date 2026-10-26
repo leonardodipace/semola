@@ -1,66 +1,75 @@
-# Workflow refactor leftovers
+# Workflow refactor: follow-up plan
 
-Leftovers from the workflow refactor on `noah/timer-refactor`. This branch can't pick up executions written by v0.6.9: there's no `due` set, the keys are different, and the old `Compensation*` / `WorkflowCancelRequested` events are gone. So code that tolerates old history formats isn't protecting anything.
+Follow-ups from the review of `noah/timer-refactor`, after checking each claim against the code.
 
-Suggested order: 3 and 4 first (they fix a bug and remove per-step Redis calls), then 1 and 2 together (they change the history format and the tests that depend on it).
+**Premise:** this branch can't pick up executions written by v0.6.9. They have no `due` entry, the keys are different, and the `Compensation*` / `WorkflowCancelRequested` events are gone. Code that tolerates old history formats protects nothing. The release must be marked as a breaking storage change: drain executions before upgrading.
 
-## Leftover concepts
+**Rules for every step:**
+- One step = one commit.
+- Net production lines should go down, except step 1, which is a bug fix.
+- Run `SEMOLA_REDIS_URL=redis://127.0.0.1:6391 bun test src/lib/workflow`, `bunx tsc --noEmit` and `bunx biome check .`.
+- The test helpers `FLUSHDB` the target database. Only ever point them at the throwaway `semola-test-redis` on port 6391, never at 6379.
 
-- [ ] **1. Merge `StepScheduled` and `StepStarted` into one event.**
-  In the old queue model a step was scheduled first and picked up by a worker later. Now `runStep` commits `StepScheduled`, and `executeStep` ([engine.ts:742](src/lib/workflow/engine.ts#L742)) commits `StepStarted` right after it on the same lease.
-  - Every step attempt makes two Redis round-trips instead of one.
-  - The step state has a `"scheduled"` status that `nextStep` ([engine.ts:137](src/lib/workflow/engine.ts#L137)) treats exactly like `"started"`.
-  - `StepStarted` doesn't carry `stepName`, so [history.ts:68](src/lib/workflow/history.ts#L68) falls back to `previous?.stepName ?? ""`.
-  - The only remaining non-trivial use of `StepScheduled` is `resume()` resetting attempt counts (see 2).
+## Steps
 
-- [ ] **2. Make `WorkflowResumed` reset failed steps, so `resume()` doesn't build step events.**
-  `resume()` ([index.ts:257-267](src/lib/workflow/index.ts#L257-L267)) loads history, writes a `StepScheduled` with `attempt: 1` for each failed step, then guards that with `historyLength`, the CAS in `RESUME_EXECUTION` and a 3-try loop (`RESUME_ATTEMPTS`). If `applyHistoryEvent` handled `WorkflowResumed` by resetting failed forward steps, `resume` would only append that one event. Most of the "history changed since read" machinery would go away; the read is still needed for the "already compensated" check.
+- [ ] **1. Fix the stale abort controller after a lost lease (bug).**
+  - **Problem:** `aborts` is keyed by execution and only cleared on a terminal commit. When the heartbeat loses a lease it aborts that controller, and the next run of the same execution in this process reuses it. Any failure is then dropped (`if (controller.signal.aborted) return false`), so the step re-runs every poll interval and ignores `retries`. Reproduced: one lost lease, 199 attempts in 2.5 s, 0 `StepFailed`, stuck `running`. Separately, `cancel()` → `requestAbort` creates a controller for executions this process isn't running, which leaks.
+  - **Fix:**
+    - `runClaimed` creates the controller and stores it on the run (`run.controller`). It's registered in a map only for the life of that run.
+    - `requestAbort` and `stop()` abort only registered, live runs.
+    - A `run.lost` flag replaces `lostLeases`.
+    - Delete `clearExecutionLocalState` and `abortController`.
+  - **Tests:** a regression test (lose the lease mid-step, the same process reclaims it, the failure is recorded and `retries` is respected) and a test that `cancel()` from a non-running process doesn't leak.
 
-- [ ] **3. Make the abort controller and lost-lease state per run, not per execution. This is a bug.**
-  - The heartbeat aborts `aborts.get(executionId)` when a lease is lost ([engine.ts:1073](src/lib/workflow/engine.ts#L1073)).
-  - That controller is only removed on a terminal commit (`clearExecutionLocalState`, [engine.ts:1079](src/lib/workflow/engine.ts#L1079)).
-  - If the same process claims that execution again later, the handler gets a signal that is already aborted. A failed attempt then hits `if (controller.signal.aborted) return false` and is never recorded, so it re-runs every poll interval.
-  - `requestAbort` from `cancel()` creates a controller for an execution this process isn't running, and it leaks.
+- [ ] **2. Drop the Redis `GET` in `ownsLease`.**
+  - Every write is fenced by the lease in `COMMIT`, and a handler only runs right after a successful fenced `StepStarted` commit, so a lost lease already shows up as `commitRun` returning `false`.
+  - Replace `ownsLease` with the local `run.lost` flag from step 1.
+  - Delete `store.getLease`; tests read the lease key directly.
 
-  Fix: create the controller in `runClaimed`, register it in a map only for the life of the run, and have `requestAbort` abort it only if it's there. `lostLeases` becomes a `run.lost` flag. `clearExecutionLocalState` is no longer needed.
+- [ ] **3. One event per step attempt, and atomic resume.**
+  - **Merge `StepScheduled` into `StepStarted`:**
+    - `StepStarted` carries `stepName` and `attempt`, and is the only event written when an attempt begins (one round trip instead of two).
+    - Remove the `"scheduled"` step status and the `previous?.stepName ?? ""` fallback.
+    - The `runStep` decision carries the `StepStarted` event, which `executeStep` commits.
+  - **`WorkflowResumed` resets failed forward steps in `applyHistoryEvent`,** so the next attempt starts at 1. `resume()` then appends only `WorkflowResumed`.
+  - **Make resume atomic without the read-then-CAS:**
+    - `startUnwind` sets a meta flag (for example `unwoundAt`) in the same commit as `CompensationStarted`.
+    - `RESUME_EXECUTION` checks `status == failed` and that the flag is absent, atomically.
+    - Delete the history read, the history-length CAS, and the `RESUME_ATTEMPTS` loop.
+  - **Keep:** "resume rejected after an unwind" and concurrent resumes applying exactly once.
 
-- [ ] **4. Drop the Redis `GET` in `ownsLease`.**
-  `ownsLease` ([engine.ts:515](src/lib/workflow/engine.ts#L515)) does a Redis `GET` on every loop iteration and after every step. Every write is already fenced by the lease in `COMMIT`, so a lost lease shows up as `commitRun` returning `false` anyway. Checking a local `run.lost` flag (see 3) is enough. `store.getLease` then has no production caller; it's only used in tests.
+- [ ] **4. Remove compatibility code for old history.**
+  - `CompensationStarted.stepIds` becomes required.
+  - Delete the `Array.isArray` normalisation in history.ts, the `stepIds.length === 0` branch in `unwind`, and the test "CompensationStarted without stepIds normalizes to empty list".
+  - Remove `input` / `partitionKey` from `WorkflowStarted` fixtures in history.test.ts and index.test.ts.
 
-- [ ] **5. Remove code that handles old `CompensationStarted` events without `stepIds`.**
-  - `stepIds?` is optional in [types.ts:288](src/lib/workflow/types.ts#L288).
-  - `Array.isArray(...)` normalises it in [history.ts:140](src/lib/workflow/history.ts#L140).
-  - `phase.stepIds.length === 0` is treated as "handlers missing" in [engine.ts:935](src/lib/workflow/engine.ts#L935). `startUnwind` never commits an empty list, so this can't happen.
-  - Test "CompensationStarted without stepIds normalizes to empty list" in [history.test.ts:219](src/lib/workflow/history.test.ts#L219).
+- [ ] **5. One terminal guard.**
+  - A terminal commit removes the execution from `due`, and every other script uses `ZADD XX` or only re-adds on resume, so `claimDue` can't return a terminal execution.
+  - Keep the cheap `isTerminalStatus(meta.status)` check in `runExecution`, on meta that's already loaded.
+  - Delete the `if (view.terminal) return` loop guard. It's the only reader of `view.terminal`, so `view.terminal` tracking in history.ts and the `HistoryTerminal` type go too.
 
-- [ ] **6. Remove `input` / `partitionKey` from `WorkflowStarted` test fixtures.**
-  They're in [history.test.ts](src/lib/workflow/history.test.ts) (lines 26, 66, 178, 225) and [index.test.ts:2266](src/lib/workflow/index.test.ts#L2266). Input and partition key live on meta now.
+- [ ] **6. Make `dueAt` required on `releaseLease`.**
+  - Both engine callers pass it; only the store test helper omits it. Remove the `ARGV[3] ~= ''` branch in `RELEASE_LEASE`.
+  - Split `LeaseInput` into extend and release input types, so `dueAt` exists only on release.
 
-## Code that can't run or isn't needed
+- [ ] **7. `stop()` awaits the poller loops.**
+  - `start()` keeps the `workflowLoop()` promises, and `stop()` aborts the live runs then awaits `Promise.all(...)`.
+  - Delete the `active` counter, the polling loop and `SHUTDOWN_POLL`.
+  - First wrap the release in the "stop() raced this claim" branch in `mightThrow`, so a Redis error can't reject a loop promise.
 
-- [ ] **7. Keep one terminal guard instead of several.**
-  A terminal commit removes the execution from `due` in the same script, and nothing re-adds a terminal one, so `claimDue` can't return it. Two guards are unreachable:
-  - `isTerminalStatus(meta.status)` in `runExecution` ([engine.ts:588](src/lib/workflow/engine.ts#L588)).
-  - `if (view.terminal) return` at the top of the run loop ([engine.ts:637](src/lib/workflow/engine.ts#L637)). The loop returns right after any terminal commit, so this only matters on the first pass, which the meta check already covers.
+- [ ] **8. `startSync` polls meta, not `get()`.**
+  - Poll `store.getMeta`. On terminal status, build the result from meta: parse `result`, and take the failure message from `originalError || error`.
+  - No history read or input parse per poll.
 
-  `HistoryTerminal.result` and `.error` are then barely read. The only other reader is the `startSync` failure path ([index.ts:403](src/lib/workflow/index.ts#L403)), and its `view.terminal.error` branch always equals `meta.error`.
+- [ ] **9. Small cleanups.**
+  - Delete the unused `RedisZMember` type.
+  - `parseHistory` uses `fromJson` for each event, keeping the "not an object" check. Update any test that asserts the old message.
+  - `WorkflowStartResult.status` becomes the literal `"pending"`.
+  - Move `isTerminalStatus` next to its only caller, if it's still in history.ts.
+  - Docs intro ([docs/workflow.md:6](docs/workflow.md#L6)): replace "automatic orphan recovery", which contradicts "There is no orphan scan" in the recovery section.
 
-- [ ] **8. Make `dueAt` required on `releaseLease`.**
-  The engine always passes `dueAt`; only a store test helper ([store.test.ts:49](src/lib/workflow/store.test.ts#L49)) omits it. Remove the `""` handling in `RELEASE_LEASE`. `LeaseInput` is also shared by extend and release even though `dueAt` only applies to release; split it.
+## Not doing
 
-- [ ] **9. Await the loop promises in `stop()` instead of polling `active`.**
-  `stop()` polls `active` every `SHUTDOWN_POLL` ms. `start()` could keep the `workflowLoop()` promises and `stop()` could `await Promise.all(...)` them. That removes the `active` counter and the polling.
-
-- [ ] **10. Poll meta, not `get()`, in `startSync`.**
-  `startSync` calls `get()` on every poll. Each call parses the input and the full history and builds `steps`, all thrown away until the run is terminal. Polling `getMeta` and reading history once at the end, for the failure message, is enough.
-
-## Smaller items
-
-- [ ] `RedisZMember` in [types.ts](src/lib/workflow/types.ts) is unused.
-- [ ] `finishCompensation`'s `error ?? "workflow failed"` fallback ([engine.ts:1002](src/lib/workflow/engine.ts#L1002)): when the reason is `"failed"`, `error` is never null.
-- [ ] `parseHistory` ([history.ts:154](src/lib/workflow/history.ts#L154)) reimplements `fromJson` from [json.ts](src/lib/workflow/json.ts).
-- [ ] `isTerminalStatus` sits in [history.ts](src/lib/workflow/history.ts) but is about meta status.
-- [ ] Single-use input types are applied unevenly. `FailExecutionInput` and `CommitTerminalInput` take `LeaseRun` without `TInput`, while their siblings take `LeaseRun<TInput>`.
-- [ ] `WorkflowStartResult.status` is always `"pending"`; it could be a literal type.
-- [ ] The `pending` → `running` commit ([engine.ts:614](src/lib/workflow/engine.ts#L614)) is a separate round-trip and could go in the first decision's commit.
-- [ ] Docs: the intro of [docs/workflow.md](docs/workflow.md#L6) still says "automatic orphan recovery" while line 72 says "There is no orphan scan".
+- **Uneven `LeaseRun<TInput>` across input types:** deliberate. Only signatures that read `run.input` need the type parameter, and a `LeaseRun<TInput>` is accepted where `LeaseRun` is expected.
+- **Fold the `pending` → `running` commit into the first decision's commit:** it saves one round trip per execution, not per step, and `onStart` ordering depends on it.
+- **`finishCompensation`'s unreachable `?? "workflow failed"`:** one line. Encoding it in the types would cost more than it saves.
