@@ -221,8 +221,6 @@ export type Workflow<TInput, TResult> = {
 export type HistoryEvent =
   | {
       type: "WorkflowStarted";
-      input: string;
-      partitionKey: string;
       timestamp: number;
     }
   | {
@@ -329,8 +327,6 @@ export type HistoryTerminal =
 
 export type HistoryView = {
   events: HistoryEvent[];
-  input: string;
-  partitionKey: string;
   // Forward steps by id (`a<N>`).
   steps: Map<string, StepState>;
   // Undo steps, keyed by the forward step id they undo.
@@ -381,6 +377,7 @@ export type BackoffDelayInput = {
 export type AdvanceInput<TInput, TResult> = {
   options: WorkflowOptions<TInput, TResult>;
   view: HistoryView;
+  input: TInput;
   executionId: string;
   signal: AbortSignal;
   retries: number;
@@ -388,24 +385,22 @@ export type AdvanceInput<TInput, TResult> = {
   cancelRequested: boolean;
 };
 
-export type ExecuteStepInput = {
+export type ExecuteStepInput<TInput = unknown> = {
   executionId: string;
   stepId: string;
   stepName: string;
   attempt: number;
   handler: StepHandler<unknown, unknown>;
-  rawInput: string;
-  run: LeaseRun;
+  run: LeaseRun<TInput>;
 };
 
-export type HandleStepFailureInput = {
+export type HandleStepFailureInput<TInput = unknown> = {
   executionId: string;
   stepId: string;
   stepName: string;
   attempt: number;
-  rawInput: string;
   stepError: Error;
-  run: LeaseRun;
+  run: LeaseRun<TInput>;
 };
 
 export type CompensationItem = {
@@ -417,12 +412,11 @@ export type CompensationItem = {
     | { completed: false; result: undefined };
 };
 
-export type FinishCompensationInput = {
+export type FinishCompensationInput<TInput = unknown> = {
   executionId: string;
   reason: "failed" | "cancelled";
   error: string | null;
-  rawInput: string;
-  run: LeaseRun;
+  run: LeaseRun<TInput>;
 };
 
 export type CollectErrorHistoryInput = {
@@ -433,12 +427,11 @@ export type CollectErrorHistoryInput = {
   timestamp: number;
 };
 
-export type CompleteExecutionInput = {
+export type CompleteExecutionInput<TInput = unknown> = {
   executionId: string;
   events: HistoryEvent[];
   result: string;
-  rawInput: string;
-  run: LeaseRun;
+  run: LeaseRun<TInput>;
 };
 
 export type FailExecutionInput = {
@@ -448,11 +441,10 @@ export type FailExecutionInput = {
   run: LeaseRun;
 };
 
-export type CancelExecutionInput = {
+export type CancelExecutionInput<TInput = unknown> = {
   executionId: string;
   events: HistoryEvent[];
-  rawInput: string;
-  run: LeaseRun;
+  run: LeaseRun<TInput>;
 };
 
 export type CommitTerminalInput = {
@@ -507,8 +499,10 @@ export type CancelRequestResult = {
 // while it holds the lease, so the view is loaded once and kept current by
 // applying each committed event. cancelRequested comes from meta at lease
 // start and from every commit afterwards.
-export type LeaseRun = {
+export type LeaseRun<TInput = unknown> = {
   token: string;
+  // Workflow input, parsed once from meta when the lease starts.
+  input: TInput;
   view: HistoryView;
   cancelRequested: boolean;
   // Due score committed for this execution; released as-is when set.

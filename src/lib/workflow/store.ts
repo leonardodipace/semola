@@ -226,8 +226,6 @@ export class WorkflowStore {
     const started = toJson(
       {
         type: "WorkflowStarted",
-        input: fields.input,
-        partitionKey: fields.partitionKey,
         timestamp: Number(fields.createdAt),
       } satisfies HistoryEvent,
       `history event for ${executionId}`,

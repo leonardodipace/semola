@@ -168,7 +168,7 @@ const advance = async <TInput, TResult>(
   input: AdvanceInput<TInput, TResult>,
 ): Promise<Replay> => {
   const { options, view, executionId, retries, backoff } = input;
-  const { cancelRequested } = input;
+  const { cancelRequested, input: workflowInput } = input;
   const now = Date.now();
   const policy = { now, retries, backoff };
   const consumed = {
@@ -181,8 +181,6 @@ const advance = async <TInput, TResult>(
   let fatal: Error | undefined;
   let stepSeq = 0;
   let timerSeq = 0;
-  const workflowInput = fromJson<TInput>(view.input, "input");
-
   // A replay that diverges from history fails the run without an unwind:
   // undo handlers collected from it cannot be trusted.
   const diverged = (error: Error): never => {
@@ -479,8 +477,10 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private async runClaimed(executionId: string, token: string) {
-    const run: LeaseRun = {
+    const run: LeaseRun<TInput> = {
       token,
+      // Placeholder until runExecution parses meta; nothing reads it earlier.
+      input: undefined as TInput,
       view: emptyHistoryView(),
       cancelRequested: false,
     };
@@ -579,7 +579,7 @@ export class WorkflowEngine<TInput, TResult> {
     return true;
   }
 
-  private async runExecution(executionId: string, run: LeaseRun) {
+  private async runExecution(executionId: string, run: LeaseRun<TInput>) {
     const { token } = run;
     const meta = await this.store.getMeta(executionId);
 
@@ -605,6 +605,7 @@ export class WorkflowEngine<TInput, TResult> {
     }
 
     // The only history read for this lease; commitRun keeps it current.
+    run.input = fromJson<TInput>(meta.input, "input");
     run.view = parseHistory(await this.store.loadHistory(executionId));
     run.cancelRequested = Boolean(meta.cancelRequestedAt);
     const { view } = run;
@@ -618,10 +619,11 @@ export class WorkflowEngine<TInput, TResult> {
       if (!updated) return;
 
       if (view.events.length === 1) {
-        const input = fromJson<TInput>(meta.input, "input");
-
         await runHook(() =>
-          this.options.hooks?.onStart?.({ executionId, input }),
+          this.options.hooks?.onStart?.({
+            executionId,
+            input: run.input,
+          }),
         );
       }
     }
@@ -637,6 +639,7 @@ export class WorkflowEngine<TInput, TResult> {
       const replay = await advance({
         options: this.options,
         view,
+        input: run.input,
         executionId,
         signal: controller.signal,
         retries: this.retries,
@@ -645,7 +648,7 @@ export class WorkflowEngine<TInput, TResult> {
       });
 
       if (view.compensation) {
-        if (!(await this.unwind(executionId, meta.input, run, replay))) return;
+        if (!(await this.unwind(executionId, run, replay))) return;
 
         continue;
       }
@@ -677,7 +680,6 @@ export class WorkflowEngine<TInput, TResult> {
           stepName: decision.stepName,
           attempt: decision.attempt,
           handler: decision.handler,
-          rawInput: meta.input,
           run,
         });
 
@@ -699,7 +701,6 @@ export class WorkflowEngine<TInput, TResult> {
           executionId,
           events: decision.events,
           result: decision.result,
-          rawInput: meta.input,
           run,
         });
         return;
@@ -723,7 +724,6 @@ export class WorkflowEngine<TInput, TResult> {
       await this.cancelExecution({
         executionId,
         events: decision.events,
-        rawInput: meta.input,
         run,
       });
       return;
@@ -735,9 +735,8 @@ export class WorkflowEngine<TInput, TResult> {
     return run.cancelRequested && !run.view.compensation;
   }
 
-  private async executeStep(input: ExecuteStepInput) {
-    const { executionId, stepId, stepName, attempt, handler, rawInput, run } =
-      input;
+  private async executeStep(input: ExecuteStepInput<TInput>) {
+    const { executionId, stepId, stepName, attempt, handler, run } = input;
     const controller = this.abortController(executionId);
 
     const started = await this.commitRun(executionId, run, {
@@ -756,12 +755,10 @@ export class WorkflowEngine<TInput, TResult> {
     // A cancel reported by this write is honored before the handler runs.
     if (this.cancelPending(run)) return true;
 
-    const workflowInput = fromJson<TInput>(rawInput, "input");
-
     const [handlerError, value] = await mightThrow(
       Promise.resolve().then(() =>
         handler({
-          input: workflowInput,
+          input: run.input,
           signal: controller.signal,
           fail: failWith,
         }),
@@ -808,15 +805,13 @@ export class WorkflowEngine<TInput, TResult> {
       stepId,
       stepName,
       attempt,
-      rawInput,
       stepError,
       run,
     });
   }
 
-  private async handleStepFailure(input: HandleStepFailureInput) {
-    const { executionId, stepId, stepName, attempt, rawInput, stepError, run } =
-      input;
+  private async handleStepFailure(input: HandleStepFailureInput<TInput>) {
+    const { executionId, stepId, stepName, attempt, stepError, run } = input;
     const message = stepError.message;
     const retryable = !isNonRetryableStepError(stepError);
     const now = Date.now();
@@ -848,8 +843,6 @@ export class WorkflowEngine<TInput, TResult> {
     // A cancel that arrived during the step is reported by this commit.
     if (this.cancelPending(run)) return true;
 
-    const workflowInput = fromJson<TInput>(rawInput, "input");
-
     // Either way replay takes over: it waits out the backoff and runs the
     // next attempt, or turns the exhausted step into a failure (or the end
     // of an unwind).
@@ -859,7 +852,7 @@ export class WorkflowEngine<TInput, TResult> {
       await runHook(() =>
         this.options.hooks?.onRetry?.({
           executionId,
-          input: workflowInput,
+          input: run.input,
           stepName,
           error: message,
           attempt,
@@ -874,7 +867,7 @@ export class WorkflowEngine<TInput, TResult> {
     await runHook(() =>
       this.options.hooks?.onError?.({
         executionId,
-        input: workflowInput,
+        input: run.input,
         stepName,
         error: stepError,
         totalAttempts: attempt,
@@ -923,8 +916,7 @@ export class WorkflowEngine<TInput, TResult> {
   // closed when a snapshotted handler is gone (for example after a deploy).
   private async unwind(
     executionId: string,
-    rawInput: string,
-    run: LeaseRun,
+    run: LeaseRun<TInput>,
     replay: Replay,
   ) {
     const { view } = run;
@@ -978,7 +970,6 @@ export class WorkflowEngine<TInput, TResult> {
           stepName,
           attempt,
           handler,
-          rawInput,
           run,
         });
       }
@@ -990,21 +981,19 @@ export class WorkflowEngine<TInput, TResult> {
       executionId,
       reason: error ? "failed" : phase.reason,
       error: error ?? phase.error,
-      rawInput,
       run,
     });
 
     return false;
   }
 
-  private async finishCompensation(input: FinishCompensationInput) {
-    const { executionId, reason, error, rawInput, run } = input;
+  private async finishCompensation(input: FinishCompensationInput<TInput>) {
+    const { executionId, reason, error, run } = input;
 
     if (reason === "cancelled") {
       await this.cancelExecution({
         executionId,
         events: [{ type: "WorkflowCancelled", timestamp: Date.now() }],
-        rawInput,
         run,
       });
       return;
@@ -1134,8 +1123,8 @@ export class WorkflowEngine<TInput, TResult> {
     await this.store.trimTerminal(this.retentionMax);
   }
 
-  private async completeExecution(input: CompleteExecutionInput) {
-    const { executionId, events, result, rawInput, run } = input;
+  private async completeExecution(input: CompleteExecutionInput<TInput>) {
+    const { executionId, events, result, run } = input;
     const now = Date.now();
 
     const committed = await this.commitTerminal({
@@ -1153,12 +1142,10 @@ export class WorkflowEngine<TInput, TResult> {
 
     if (!committed) return;
 
-    const workflowInput = fromJson<TInput>(rawInput, "input");
-
     await runHook(() =>
       this.options.hooks?.onComplete?.({
         executionId,
-        input: workflowInput,
+        input: run.input,
         result: fromJson<TResult>(result, "result"),
       }),
     );
@@ -1187,8 +1174,8 @@ export class WorkflowEngine<TInput, TResult> {
     await this.trimRetained();
   }
 
-  private async cancelExecution(input: CancelExecutionInput) {
-    const { executionId, events, rawInput, run } = input;
+  private async cancelExecution(input: CancelExecutionInput<TInput>) {
+    const { executionId, events, run } = input;
     const now = Date.now();
 
     const committed = await this.commitTerminal({
@@ -1205,10 +1192,11 @@ export class WorkflowEngine<TInput, TResult> {
 
     if (!committed) return;
 
-    const workflowInput = fromJson<TInput>(rawInput, "input");
-
     await runHook(() =>
-      this.options.hooks?.onCancel?.({ executionId, input: workflowInput }),
+      this.options.hooks?.onCancel?.({
+        executionId,
+        input: run.input,
+      }),
     );
 
     await this.trimRetained();

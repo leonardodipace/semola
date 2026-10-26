@@ -48,8 +48,6 @@ describe("parseHistory", () => {
       }),
     ]);
 
-    expect(view.input).toBe('{"x":1}');
-    expect(view.partitionKey).toBe("p1");
     expect(view.steps.get("s1")).toEqual({
       status: "completed",
       stepName: "work",
@@ -88,8 +86,6 @@ describe("parseHistory", () => {
     const events: HistoryEvent[] = [
       {
         type: "WorkflowStarted",
-        input: '{"a":1}',
-        partitionKey: "p",
         timestamp: now,
       },
       {

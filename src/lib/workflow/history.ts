@@ -17,8 +17,6 @@ export const isTerminalStatus = (status: string) => {
 
 export const emptyHistoryView = (): HistoryView => ({
   events: [],
-  input: "",
-  partitionKey: "",
   steps: new Map<string, StepState>(),
   undos: new Map<string, StepState>(),
   timers: new Map<string, TimerState>(),
@@ -47,12 +45,6 @@ export const applyHistoryEvent = (view: HistoryView, event: HistoryEvent) => {
   const { timers } = view;
 
   view.events.push(event);
-
-  if (event.type === "WorkflowStarted") {
-    view.input = event.input;
-    view.partitionKey = event.partitionKey;
-    return;
-  }
 
   if (event.type === "StepScheduled") {
     const { states, id } = stepSlot(view, event.stepId);

@@ -79,15 +79,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     expect((await store.getMeta("exec-1"))?.input).toBe('{"a":1}');
     expect(
       (await store.loadHistory("exec-1")).map((raw) => JSON.parse(raw)),
-    ).toEqual([
-      {
-        type: "WorkflowStarted",
-        input: '{"a":1}',
-        partitionKey: "p",
-        timestamp: Number(meta.createdAt),
-      },
-    ]);
-    expect(await dueIds(redis, name)).toEqual(["exec-1"]);
+    ).toEqual([{ type: "WorkflowStarted", timestamp: Number(meta.createdAt) }]);
     expect(await dueIds(redis, name)).toEqual(["exec-1"]);
   });
 
