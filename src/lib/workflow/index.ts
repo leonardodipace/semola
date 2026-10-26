@@ -395,14 +395,9 @@ export const defineWorkflow = <TInput, TResult = void>(
       }
 
       if (execution.status === "failed") {
-        const view = parseHistory(await store.loadHistory(executionId));
-        let message = execution.error ?? "workflow failed";
-
-        if (view.compensation?.error) {
-          message = view.compensation.error;
-        } else if (view.terminal?.kind === "failed") {
-          message = view.terminal.error;
-        }
+        const meta = await store.getMeta(executionId);
+        const message =
+          meta?.originalError || execution.error || "workflow failed";
 
         return {
           executionId,

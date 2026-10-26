@@ -895,7 +895,12 @@ export class WorkflowEngine<TInput, TResult> {
       updatedAt: String(now),
     };
 
-    if (error) fields.error = error;
+    // `error` becomes the undo's error if the unwind fails; startSync reports
+    // the forward failure from `originalError`.
+    if (error) {
+      fields.error = error;
+      fields.originalError = error;
+    }
 
     return this.commitRun(executionId, run, {
       events: [

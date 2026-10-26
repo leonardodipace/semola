@@ -200,6 +200,9 @@ export type WorkflowMeta = {
   partitionKey: string;
   // Set by cancel() while the execution is pending/running; cleared by resume.
   cancelRequestedAt: string;
+  // The forward failure that started an unwind, kept when `error` is later
+  // replaced by an undo's error. Absent when no failure started an unwind.
+  originalError?: string;
 };
 
 export type Workflow<TInput, TResult> = {
