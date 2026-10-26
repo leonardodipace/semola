@@ -43,8 +43,18 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       SEMOLA_POSTGRES_URL: postgres://semola:semola@localhost:5432/semola
+      SEMOLA_REDIS_URL: redis://localhost:6379
     steps:
       - name: Checkout code
         uses: actions/checkout@v5

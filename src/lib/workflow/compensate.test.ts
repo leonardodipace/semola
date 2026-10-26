@@ -1,51 +1,20 @@
-import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   defineWorkflow,
   listWorkflows,
   NonRetryableStepError,
   type Workflow,
 } from "./index.js";
-import { createRedis, type MockRedisClient } from "./redis.mock.js";
+import {
+  closeRedis,
+  createRedis,
+  expireLeases,
+  leaseKeys,
+  resetRedis,
+  SEMOLA_REDIS_URL,
+} from "./integration-helpers.js";
 
-const drainMicrotasks = async () => {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-};
-
-let advancing = false;
-
-const advanceTimersByTimeAsync = async (ms: number) => {
-  if (advancing) {
-    await new Promise<void>((resolve) => setTimeout(resolve, ms));
-    return;
-  }
-
-  advancing = true;
-
-  try {
-    const done = new Promise<void>((resolve) => setTimeout(resolve, ms));
-    const end = Date.now() + ms;
-
-    while (Date.now() < end) {
-      if (jest.getTimerCount() === 0) {
-        jest.advanceTimersByTime(end - Date.now());
-        await drainMicrotasks();
-        break;
-      }
-
-      const step = Math.min(5, end - Date.now());
-      jest.advanceTimersByTime(step);
-      await drainMicrotasks();
-    }
-
-    await done;
-  } finally {
-    advancing = false;
-  }
-};
-
-const sleep = advanceTimersByTimeAsync;
+const sleep = (ms: number) => Bun.sleep(ms);
 
 const waitFor = async (
   predicate: () => boolean | Promise<boolean>,
@@ -56,7 +25,7 @@ const waitFor = async (
   while (Date.now() - start < timeoutMs) {
     if (await predicate()) return;
 
-    await advanceTimersByTimeAsync(5);
+    await sleep(5);
   }
 
   throw new Error("waitFor timeout");
@@ -76,32 +45,15 @@ const waitStatus = async <TInput, TResult>(
   return wf.get(executionId);
 };
 
-const stop = async (wf: { stop: () => Promise<void> }) => {
-  const done = wf.stop();
-  await advanceTimersByTimeAsync(100);
-  await done;
-};
-
-const expireLeases = (redis: MockRedisClient) => {
-  for (const key of redis.getStringKeys()) {
-    if (key.includes(":lease:")) redis.expireLeaseNow(key);
-  }
-};
-
 const fast = {
-  pollInterval: 5,
-  lockTTL: 40,
-  retryBackoff: { baseDelay: 5, multiplier: 2, maxDelay: 20 },
+  pollInterval: 10,
+  lockTTL: 200,
+  retryBackoff: { baseDelay: 10, multiplier: 2, maxDelay: 40 },
 };
 
-describe("workflow compensate adversarial", () => {
-  beforeEach(() => {
-    jest.useFakeTimers({ now: Date.now() });
-  });
-
-  afterEach(() => {
-    jest.useRealTimers();
-  });
+describe.skipIf(!SEMOLA_REDIS_URL)("workflow compensate adversarial", () => {
+  beforeEach(resetRedis);
+  afterEach(closeRedis);
 
   test("LIFO unwinds four compensated steps newest-first", async () => {
     const redis = createRedis();
@@ -149,7 +101,7 @@ describe("workflow compensate adversarial", () => {
       "comp:1",
     ]);
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("LIFO with three compensated steps and mixed skip", async () => {
@@ -215,7 +167,7 @@ describe("workflow compensate adversarial", () => {
 
     expect(order).toEqual(["a", "b", "c", "d", "undo-d", "undo-c", "undo-a"]);
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("a failing step's own compensate runs first with completed false", async () => {
@@ -269,7 +221,7 @@ describe("workflow compensate adversarial", () => {
       { completed: true, result: "ok" },
     ]);
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("a never-started step is not undone", async () => {
@@ -306,7 +258,7 @@ describe("workflow compensate adversarial", () => {
     expect(execution.error).toBe("b failed");
     expect(order).toEqual(["a", "undo-a"]);
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("cancel during running compensates completed steps then cancelled", async () => {
@@ -356,7 +308,7 @@ describe("workflow compensate adversarial", () => {
     expect(order).toContain("undo:x");
     expect(execution.cancelledAt).not.toBeNull();
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("cancel during durable sleep compensates then cancelled", async () => {
@@ -401,7 +353,7 @@ describe("workflow compensate adversarial", () => {
     expect(order).toEqual(["book", "release:res-1"]);
     expect(order).not.toContain("after-sleep");
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("cancel during forward retry backoff compensates completed prior step", async () => {
@@ -446,7 +398,7 @@ describe("workflow compensate adversarial", () => {
     expect(execution.status).toBe("cancelled");
     expect(order).toContain("undo-prior");
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("compensate retries:0 fails on first compensate error", async () => {
@@ -478,7 +430,7 @@ describe("workflow compensate adversarial", () => {
     expect(attempts).toBe(1);
     expect(execution.error).toBe("undo fail");
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("compensate default retries means four attempts then compensation error", async () => {
@@ -511,7 +463,7 @@ describe("workflow compensate adversarial", () => {
     expect(attempts).toBe(4);
     expect(execution.error).toBe("always undo fail");
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("thrown NonRetryableStepError in compensate skips retries", async () => {
@@ -541,7 +493,7 @@ describe("workflow compensate adversarial", () => {
     expect(attempts).toBe(1);
     expect(execution.error).toBe("hard undo");
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("compensating status visible via get during hang", async () => {
@@ -581,7 +533,7 @@ describe("workflow compensate adversarial", () => {
     const execution = await waitStatus(wf, executionId, "failed");
     expect(execution.error).toBe("boom");
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("listWorkflows includes compensating status", async () => {
@@ -619,7 +571,7 @@ describe("workflow compensate adversarial", () => {
 
     hang = false;
     await waitStatus(wf, executionId, "failed");
-    await stop(wf);
+    await wf.stop();
   });
 
   test("resume rejected while status is compensating", async () => {
@@ -651,7 +603,7 @@ describe("workflow compensate adversarial", () => {
 
     hang = false;
     await waitStatus(wf, executionId, "failed");
-    await stop(wf);
+    await wf.stop();
   });
 
   test("resume allowed when completed steps had no compensate option", async () => {
@@ -687,7 +639,7 @@ describe("workflow compensate adversarial", () => {
     expect(execution.result).toBe("ok");
     expect(attempts).toBe(2);
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("onRetry fires for undo retries as undo:<name>", async () => {
@@ -730,7 +682,7 @@ describe("workflow compensate adversarial", () => {
     expect(retrySteps).toEqual(["undo:create", "undo:create"]);
     expect(execution.steps.map((s) => s.name)).toEqual(["create"]);
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("onError fires for forward fail() before successful compensate unwind", async () => {
@@ -778,7 +730,7 @@ describe("workflow compensate adversarial", () => {
     expect(onCancelCalls).toBe(0);
     expect(onCompleteCalls).toBe(0);
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("onError includes compensation error when compensate exhausts after forward fail", async () => {
@@ -821,7 +773,7 @@ describe("workflow compensate adversarial", () => {
     expect(errors).toContain("comp err");
     expect(compensateHistories).toEqual([1]);
 
-    await stop(wf);
+    await wf.stop();
   });
   test("onCancel fires after successful cancel-driven compensate", async () => {
     const redis = createRedis();
@@ -863,7 +815,7 @@ describe("workflow compensate adversarial", () => {
     expect(onCancelCalls).toBe(1);
     expect(onErrorCalls).toBe(0);
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("compensate receives workflow input and step result", async () => {
@@ -898,7 +850,7 @@ describe("workflow compensate adversarial", () => {
     expect(seenInput).toEqual({ userId: "u42" });
     expect(seenResult).toEqual({ accountId: "acc-u42" });
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("compensate signal is not aborted when cancel aborts forward signal", async () => {
@@ -950,7 +902,7 @@ describe("workflow compensate adversarial", () => {
 
     expect(forwardAbortedDuringHang).toBe(false);
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("stop during compensate does not abort compensate signal", async () => {
@@ -989,7 +941,7 @@ describe("workflow compensate adversarial", () => {
 
     const done = wf.stop();
     hang = false;
-    await advanceTimersByTimeAsync(100);
+    await sleep(100);
     await done;
 
     const execution = await wf.get(executionId);
@@ -1060,9 +1012,9 @@ describe("workflow compensate adversarial", () => {
     const { executionId } = await wf1.start({});
 
     await waitFor(() => order.includes("undo-b"));
-    expireLeases(redis);
+    await expireLeases(redis);
     hang = false;
-    await stop(wf1);
+    await wf1.stop();
 
     const wf2 = make();
     const execution = await waitStatus(wf2, executionId, "failed");
@@ -1073,7 +1025,7 @@ describe("workflow compensate adversarial", () => {
     );
     expect(order.filter((x) => x === "undo-a").length).toBe(1);
 
-    await stop(wf2);
+    await wf2.stop();
   });
 
   test("cancel mid-handler records completed step and compensates", async () => {
@@ -1121,7 +1073,7 @@ describe("workflow compensate adversarial", () => {
     expect(order).toContain("undo:x");
     expect(laterRan).toBe(false);
 
-    await stop(wf);
+    await wf.stop();
   });
   test("successful compensate unwind keeps original forward error", async () => {
     const redis = createRedis();
@@ -1151,7 +1103,7 @@ describe("workflow compensate adversarial", () => {
     expect(execution.failedAt).not.toBeNull();
     expect(execution.cancelledAt).toBeNull();
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("partial compensate success then later compensate fail uses later error", async () => {
@@ -1201,7 +1153,7 @@ describe("workflow compensate adversarial", () => {
     expect(order).toEqual(["a", "b", "undo-b", "undo-a"]);
     expect(execution.error).toBe("a undo fail");
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("void step result compensate receives undefined-compatible result", async () => {
@@ -1235,7 +1187,7 @@ describe("workflow compensate adversarial", () => {
 
     expect(saw === null || saw === undefined).toBe(true);
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("concurrent cancel race after completed compensate-capable step", async () => {
@@ -1284,7 +1236,7 @@ describe("workflow compensate adversarial", () => {
     expect(execution.status).toBe("cancelled");
     expect(order.filter((x) => x === "undo-a").length).toBe(1);
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("compensating then terminal failed clears compensating from list active filter", async () => {
@@ -1318,7 +1270,7 @@ describe("workflow compensate adversarial", () => {
     const failed = await listWorkflows(redis, { name, status: "failed" });
     expect(failed.some((item) => item.id === executionId)).toBe(true);
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("cancel mid-second-step: if handler finishes, that step is completed and compensated", async () => {
@@ -1377,7 +1329,7 @@ describe("workflow compensate adversarial", () => {
       order.indexOf("undo-done"),
     );
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("cancel while a step is in flight undoes that step", async () => {
@@ -1434,7 +1386,7 @@ describe("workflow compensate adversarial", () => {
     expect(order).toEqual(["done", "running", "undo-running", "undo-done"]);
     expect(runningUndo).toBe(false);
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("sleep between compensated steps still LIFO on failure", async () => {
@@ -1484,7 +1436,7 @@ describe("workflow compensate adversarial", () => {
 
     expect(order).toEqual(["a", "b", "undo-b", "undo-a"]);
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("resume rejected after cancel-driven successful compensate", async () => {
@@ -1516,7 +1468,7 @@ describe("workflow compensate adversarial", () => {
 
     await expect(wf.resume(executionId)).rejects.toThrow();
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("nondeterminism during compensate collect does not partial-unwind", async () => {
@@ -1578,7 +1530,7 @@ describe("workflow compensate adversarial", () => {
     expect(order).not.toContain("undo-a");
     expect(order).not.toContain("undo-b");
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("early return mid collect does not partial-unwind", async () => {
@@ -1636,7 +1588,7 @@ describe("workflow compensate adversarial", () => {
     expect(order).not.toContain("undo-a");
     expect(order).not.toContain("undo-b");
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("handler throw mid collect does not partial-unwind", async () => {
@@ -1696,7 +1648,7 @@ describe("workflow compensate adversarial", () => {
     expect(order).not.toContain("undo-a");
     expect(order).not.toContain("undo-b");
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("missing compensate handlers after CompensationStarted fail closed", async () => {
@@ -1744,7 +1696,7 @@ describe("workflow compensate adversarial", () => {
     expect(order).toEqual(["a"]);
     expect(order).not.toContain("undo");
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("CompensationStarted without stepIds does not stick compensating", async () => {
@@ -1801,7 +1753,7 @@ describe("workflow compensate adversarial", () => {
 
     // History has one writer per lease: the current holder never re-reads
     // it, so hand the corrupted history to the next lease holder.
-    expireLeases(redis);
+    await expireLeases(redis);
     hang = false;
 
     const execution = await waitStatus(wf, executionId, "failed");
@@ -1811,7 +1763,7 @@ describe("workflow compensate adversarial", () => {
     );
     expect(order).toEqual(["a", "undo"]);
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("missing sibling compensate after partial unwind fail closed", async () => {
@@ -1882,7 +1834,7 @@ describe("workflow compensate adversarial", () => {
     expect(order).toEqual(["a", "b", "undo-b"]);
     expect(order).not.toContain("undo-a");
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("compensate added after CompensationStarted is not run", async () => {
@@ -1950,7 +1902,7 @@ describe("workflow compensate adversarial", () => {
     expect(order).toEqual(["a", "b", "undo-a"]);
     expect(order).not.toContain("undo-b");
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("corrupt CompensationStarted.stepIds empty array fails closed", async () => {
@@ -2022,9 +1974,9 @@ describe("workflow compensate adversarial", () => {
       await redis.rpush(historyKey, JSON.stringify(event));
     }
 
-    expireLeases(redis);
+    await expireLeases(redis);
     hangB = false;
-    await stop(wf1);
+    await wf1.stop();
 
     const wf2 = make();
     const execution = await waitStatus(wf2, executionId, "failed");
@@ -2035,7 +1987,7 @@ describe("workflow compensate adversarial", () => {
     expect(order).toContain("undo-b");
     expect(order).not.toContain("undo-a");
 
-    await stop(wf2);
+    await wf2.stop();
   });
 
   test("corrupt CompensationStarted.stepIds with phantom id fails closed", async () => {
@@ -2091,7 +2043,7 @@ describe("workflow compensate adversarial", () => {
 
     // History has one writer per lease: the current holder never re-reads
     // it, so hand the corrupted history to the next lease holder.
-    expireLeases(redis);
+    await expireLeases(redis);
     hang = false;
 
     const execution = await waitStatus(wf, executionId, "failed");
@@ -2100,7 +2052,7 @@ describe("workflow compensate adversarial", () => {
       "compensation handlers missing after CompensationStarted",
     );
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("corrupt StepCompleted result before collect skips partial unwind", async () => {
@@ -2183,7 +2135,7 @@ describe("workflow compensate adversarial", () => {
 
     // History has one writer per lease: the current holder never re-reads
     // it, so hand the corrupted history to the next lease holder.
-    expireLeases(redis);
+    await expireLeases(redis);
     releaseFail?.();
 
     const execution = await waitStatus(wf, executionId, "failed");
@@ -2192,7 +2144,7 @@ describe("workflow compensate adversarial", () => {
     expect(order).not.toContain("undo-a");
     expect(order).not.toContain("undo-b");
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("delete StepCompleted event before collect skips partial unwind", async () => {
@@ -2244,7 +2196,7 @@ describe("workflow compensate adversarial", () => {
     });
     // Durable sleep holds no lease, so the next lease holder loads this.
     await waitFor(async () => {
-      const keys = redis.getStringKeys();
+      const keys = await leaseKeys(redis);
       return !keys.includes(`workflow:${name}:lease:${executionId}`);
     });
 
@@ -2276,7 +2228,7 @@ describe("workflow compensate adversarial", () => {
     expect(order).not.toContain("undo-b");
     expect(execution.error).toMatch(/^nondeterminism: /);
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("cancel during compensate retry backoff still ends failed with compensate error", async () => {
@@ -2319,7 +2271,7 @@ describe("workflow compensate adversarial", () => {
     expect(execution.error).toBe("undo busy");
     expect(onCancelCalls).toBe(0);
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("cancel races with forward fail near hang step", async () => {
@@ -2374,7 +2326,7 @@ describe("workflow compensate adversarial", () => {
     expect(order).toContain("undo-a");
     expect(order.filter((x) => x === "undo-a").length).toBe(1);
 
-    await stop(wf);
+    await wf.stop();
   });
 
   test("onError errorHistory lists each failed undo attempt", async () => {
@@ -2418,6 +2370,6 @@ describe("workflow compensate adversarial", () => {
     expect(histories.length).toBe(1);
     expect(histories[0]).toEqual(["undo fail 1", "undo fail 2", "undo fail 3"]);
 
-    await stop(wf);
+    await wf.stop();
   });
 });

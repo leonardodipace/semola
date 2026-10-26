@@ -1,5 +1,11 @@
-import { describe, expect, test } from "bun:test";
-import { createRedis, type MockRedisClient } from "./redis.mock.js";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  closeRedis,
+  createRedis,
+  failNext,
+  resetRedis,
+  SEMOLA_REDIS_URL,
+} from "./integration-helpers.js";
 import { COMMIT, keys, WorkflowStore } from "./store.js";
 import type { CommitRetention, WorkflowMeta } from "./types.js";
 
@@ -19,8 +25,8 @@ const baseMeta = (name: string) =>
     cancelRequestedAt: "",
   }) satisfies WorkflowMeta;
 
-const dueIds = (redis: MockRedisClient, name: string) =>
-  redis.zrangebyscore(keys.due(name), -Infinity, Infinity);
+const dueIds = (redis: Bun.RedisClient, name: string) =>
+  redis.zrangebyscore(keys.due(name), "-inf", "+inf");
 
 const parse = (rows: string[]) =>
   rows.map((raw) => JSON.parse(raw) as { type: string });
@@ -55,7 +61,10 @@ const createFailed = async (
   await commitFailed(store, executionId, retention);
 };
 
-describe("WorkflowStore", () => {
+describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
+  beforeEach(resetRedis);
+  afterEach(closeRedis);
+
   test("createExecution writes meta, WorkflowStarted and a due entry together", async () => {
     const redis = createRedis();
     const name = "store-create";
@@ -87,7 +96,7 @@ describe("WorkflowStore", () => {
     const name = "store-create-fail";
     const store = new WorkflowStore(redis, name);
 
-    redis.failNext("send");
+    failNext(redis, "send");
 
     await expect(
       store.createExecution("exec-1", baseMeta(name)),
@@ -216,7 +225,7 @@ describe("WorkflowStore", () => {
     const name = "store-capacity-terminal";
     const store = new WorkflowStore(redis, name);
     const slots = () =>
-      redis.zrangebyscore(keys.capacity(name, "k"), -Infinity, Infinity);
+      redis.zrangebyscore(keys.capacity(name, "k"), "-inf", "+inf");
 
     await store.createExecution("e1", baseMeta(name));
     await store.claimDue("owner", 60_000);
@@ -250,7 +259,7 @@ describe("WorkflowStore", () => {
     const store = new WorkflowStore(redis, name);
     const dueAt = Date.now() + 10_000;
     const slotsUntil = (at: number) =>
-      redis.zrangebyscore(keys.capacity(name, "k"), at, Infinity);
+      redis.zrangebyscore(keys.capacity(name, "k"), at, "+inf");
 
     await store.createExecution("e1", baseMeta(name));
     await store.claimDue("owner", 60_000);
@@ -580,7 +589,7 @@ describe("WorkflowStore", () => {
     const redis = createRedis();
     const store = new WorkflowStore(redis, "store-meta-fail");
 
-    redis.failNext("hgetall");
+    failNext(redis, "hgetall");
 
     await expect(store.getMeta("exec-x")).rejects.toMatchObject({
       name: "WorkflowStoreError",
@@ -592,7 +601,7 @@ describe("WorkflowStore", () => {
     const redis = createRedis();
     const store = new WorkflowStore(redis, "store-history-fail");
 
-    redis.failNext("lrange");
+    failNext(redis, "lrange");
 
     await expect(store.loadHistory("exec-y")).rejects.toMatchObject({
       name: "WorkflowStoreError",
