@@ -108,19 +108,7 @@ describe("WorkflowEngine", () => {
     engine.start();
 
     const executionId = "e1";
-    await store.tryCreateMetaAndActive(executionId, baseMeta(name));
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowStarted",
-          input: "{}",
-          partitionKey: "",
-          timestamp: Date.now(),
-        },
-      ],
-    });
-    await store.enqueue(executionId);
+    await store.createExecution(executionId, baseMeta(name));
 
     await waitFor(async () => {
       const meta = await store.getMeta(executionId);
@@ -168,19 +156,7 @@ describe("WorkflowEngine", () => {
     engine.start();
 
     const executionId = "e2";
-    await store.tryCreateMetaAndActive(executionId, baseMeta(name));
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowStarted",
-          input: "{}",
-          partitionKey: "",
-          timestamp: Date.now(),
-        },
-      ],
-    });
-    await store.enqueue(executionId);
+    await store.createExecution(executionId, baseMeta(name));
 
     await waitFor(() => started);
 
@@ -220,19 +196,7 @@ describe("WorkflowEngine", () => {
     engine.start();
 
     const executionId = "e3";
-    await store.tryCreateMetaAndActive(executionId, baseMeta(name));
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowStarted",
-          input: "{}",
-          partitionKey: "",
-          timestamp: Date.now(),
-        },
-      ],
-    });
-    await store.enqueue(executionId);
+    await store.createExecution(executionId, baseMeta(name));
 
     await advanceTimersByTimeAsync(20);
     engine.requestAbort(executionId);
@@ -268,19 +232,7 @@ describe("WorkflowEngine", () => {
     engine.start();
 
     const executionId = "e4";
-    await store.tryCreateMetaAndActive(executionId, baseMeta(name));
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowStarted",
-          input: "{}",
-          partitionKey: "",
-          timestamp: Date.now(),
-        },
-      ],
-    });
-    await store.enqueue(executionId);
+    await store.createExecution(executionId, baseMeta(name));
 
     await advanceTimersByTimeAsync(20);
 
@@ -349,19 +301,7 @@ describe("WorkflowEngine", () => {
     );
 
     const executionId = "e-stale";
-    await store.tryCreateMetaAndActive(executionId, baseMeta(name));
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowStarted",
-          input: "{}",
-          partitionKey: "",
-          timestamp: Date.now(),
-        },
-      ],
-    });
-    await store.enqueue(executionId);
+    await store.createExecution(executionId, baseMeta(name));
 
     engineA.start();
 

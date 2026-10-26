@@ -9,6 +9,7 @@ import { isTerminalStatus, parseHistory } from "./history.js";
 import { fromJson, toJson } from "./json.js";
 import { WorkflowStore } from "./store.js";
 import type {
+  HistoryEvent,
   ResolvePartitionKeyInput,
   StepSnapshot,
   Workflow,
@@ -22,6 +23,7 @@ import type {
 } from "./types.js";
 
 const registry = new Set<string>();
+const RESUME_ATTEMPTS = 3;
 
 const optionalTimestamp = (raw: string) => {
   if (!raw) return null;
@@ -181,7 +183,7 @@ export const defineWorkflow = <TInput, TResult = void>(
     const serializedInput = toJson(input, "input");
     const now = Date.now();
 
-    const created = await store.tryCreateMetaAndActive(executionId, {
+    const created = await store.createExecution(executionId, {
       name: options.name,
       status: "pending",
       input: serializedInput,
@@ -199,20 +201,6 @@ export const defineWorkflow = <TInput, TResult = void>(
     if (!created) {
       return { executionId, created: false as const };
     }
-
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowStarted",
-          input: serializedInput,
-          partitionKey,
-          timestamp: now,
-        },
-      ],
-    });
-
-    await store.enqueue(executionId);
 
     return { executionId, created: true as const };
   };
@@ -235,99 +223,66 @@ export const defineWorkflow = <TInput, TResult = void>(
     };
   };
 
+  const notResumable = (executionId: string, status: string) =>
+    new WorkflowStoreError(
+      `Workflow execution ${executionId} is ${status}, only failed executions can be resumed`,
+    );
+
   const resume = async (executionId: string) => {
-    const meta = await requireMeta(store, executionId);
-    const view = parseHistory(await store.loadHistory(executionId));
+    // The resume script only applies if status is still failed and history
+    // has not grown since this read; otherwise re-read and decide again.
+    for (let attempt = 0; attempt < RESUME_ATTEMPTS; attempt++) {
+      const meta = await requireMeta(store, executionId);
+      const history = await store.loadHistory(executionId);
+      const view = parseHistory(history);
 
-    if (view.compensation) {
-      throw new WorkflowStoreError(
-        `Workflow execution ${executionId} cannot be resumed after compensation`,
-      );
-    }
-
-    let hasResume = false;
-
-    for (const event of view.events) {
-      if (event.type !== "WorkflowResumed") continue;
-
-      hasResume = true;
-      break;
-    }
-
-    if (meta.status !== "failed") {
-      if (meta.status !== "pending") {
+      if (view.compensation) {
         throw new WorkflowStoreError(
-          `Workflow execution ${executionId} is ${meta.status}, only failed executions can be resumed`,
+          `Workflow execution ${executionId} cannot be resumed after compensation`,
         );
       }
 
-      if (view.terminal?.kind !== "failed") {
-        if (!hasResume) {
-          throw new WorkflowStoreError(
-            `Workflow execution ${executionId} is ${meta.status}, only failed executions can be resumed`,
-          );
-        }
+      if (meta.status !== "failed") {
+        throw notResumable(executionId, meta.status);
       }
-    }
 
-    if (meta.status === "failed") {
-      const persisted = await store.persistExecution(executionId);
-
-      if (!persisted) {
-        const latest = await store.getMeta(executionId);
-
-        if (!latest) {
-          throw new NotFoundError(
-            `Workflow execution ${executionId} not found`,
-          );
-        }
-
-        throw new WorkflowStoreError(
-          `Workflow execution ${executionId} is ${latest.status}, only failed executions can be resumed`,
-        );
-      }
-    }
-
-    const now = Date.now();
-    const events = [];
-
-    if (view.terminal?.kind === "failed") {
-      events.push({
-        type: "WorkflowResumed" as const,
-        timestamp: now,
-      });
+      const now = Date.now();
+      const events: HistoryEvent[] = [
+        {
+          type: "WorkflowResumed",
+          timestamp: now,
+        },
+      ];
 
       for (const [stepId, state] of view.steps) {
         if (state.status !== "failed") continue;
 
         events.push({
-          type: "StepScheduled" as const,
+          type: "StepScheduled",
           stepId,
           stepName: state.stepName,
           attempt: 1,
           timestamp: now,
         });
       }
-    }
 
-    const claimed = await store.resumeIfPending({ executionId, events });
+      const resumed = await store.resumeExecution({
+        executionId,
+        historyLength: history.length,
+        events,
+      });
 
-    if (!claimed) {
-      const latest = await store.getMeta(executionId);
-
-      if (!latest) {
-        throw new NotFoundError(`Workflow execution ${executionId} not found`);
+      if (resumed) {
+        return {
+          executionId,
+          status: "pending" as WorkflowStatus,
+        };
       }
-
-      throw new WorkflowStoreError(
-        `Workflow execution ${executionId} is ${latest.status}, only failed executions can be resumed`,
-      );
     }
 
-    return {
-      executionId,
-      status: "pending" as WorkflowStatus,
-    };
+    throw new WorkflowStoreError(
+      `Workflow execution ${executionId} changed while resuming, try again`,
+    );
   };
 
   const get = async (executionId: string) => {
@@ -357,18 +312,10 @@ export const defineWorkflow = <TInput, TResult = void>(
       error = meta.error;
     }
 
-    let status = meta.status as WorkflowStatus;
-
-    if (!isTerminalStatus(meta.status)) {
-      if (view.compensation) {
-        status = "compensating";
-      }
-    }
-
     return {
       id: executionId,
       name: meta.name,
-      status,
+      status: meta.status as WorkflowStatus,
       input,
       result,
       error,

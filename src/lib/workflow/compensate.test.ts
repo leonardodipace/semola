@@ -1926,48 +1926,6 @@ describe("workflow compensate adversarial", () => {
     await stop(wf);
   });
 
-  test("get reports compensating when meta status lags history", async () => {
-    const redis = createRedis();
-    const name = `adv-status-lag-${crypto.randomUUID()}`;
-    let hang = true;
-
-    const wf = defineWorkflow({
-      name,
-      redis,
-      ...fast,
-      retries: 0,
-      handler: async ({ step }) => {
-        await step("create", async () => 1, {
-          compensate: async () => {
-            while (hang) {
-              await sleep(10);
-            }
-          },
-        });
-
-        throw new Error("boom");
-      },
-    });
-
-    const { executionId } = await wf.start({});
-    await waitStatus(wf, executionId, "compensating");
-
-    await redis.hset(
-      `workflow:${name}:meta:${executionId}`,
-      "status",
-      "running",
-    );
-
-    const lagged = await wf.get(executionId);
-    expect(lagged.status).toBe("compensating");
-
-    hang = false;
-    const execution = await waitStatus(wf, executionId, "failed");
-    expect(execution.error).toBe("boom");
-
-    await stop(wf);
-  });
-
   test("corrupt CompensationStarted.stepIds empty array fails closed", async () => {
     const redis = createRedis();
     const order: string[] = [];

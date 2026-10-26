@@ -571,6 +571,7 @@ export type ClearExecutionLocalStateInput = {
 
 export type CompleteExecutionInput = {
   executionId: string;
+  events: HistoryEvent[];
   result: string;
   rawInput: string;
   partitionKey: string;
@@ -579,6 +580,7 @@ export type CompleteExecutionInput = {
 
 export type FailExecutionInput = {
   executionId: string;
+  events: HistoryEvent[];
   error: string;
   partitionKey: string;
   token: string;
@@ -586,15 +588,18 @@ export type FailExecutionInput = {
 
 export type CancelExecutionInput = {
   executionId: string;
+  events: HistoryEvent[];
   rawInput: string;
   partitionKey: string;
   token: string;
 };
 
-export type FinalizeFromTerminalInput = {
+export type CommitTerminalInput = {
   executionId: string;
-  terminal: HistoryTerminal;
-  rawInput: string;
+  events: HistoryEvent[];
+  fields: Partial<WorkflowMeta>;
+  endedAt: number;
+  partitionKey: string;
   token: string;
 };
 
@@ -661,8 +666,23 @@ export type UpdateStatusInput = {
   leaseToken?: string;
 };
 
-export type ResumeIfPendingInput = {
+export type CommitRetention = {
+  ttlMs?: number;
+  trackedAt?: number;
+};
+
+export type CommitInput = {
   executionId: string;
+  leaseToken: string;
+  events?: HistoryEvent[];
+  fields?: Partial<WorkflowMeta>;
+  // Present only for terminal transitions: leave active + apply retention.
+  retention?: CommitRetention;
+};
+
+export type ResumeExecutionInput = {
+  executionId: string;
+  historyLength: number;
   events: HistoryEvent[];
 };
 

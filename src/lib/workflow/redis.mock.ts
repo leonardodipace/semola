@@ -1,18 +1,14 @@
 import {
-  APPEND_IF_LEASE,
   CLAIM_DUE_TIMER,
   CLAIM_OR_REOWN_PARTITION,
-  CREATE_META_AND_ACTIVE,
+  COMMIT,
+  CREATE_EXECUTION,
   ENQUEUE_IF_ABSENT,
   EXTEND_IF_OWNER,
-  HSET_IF_LEASE,
-  PERSIST_EXECUTION,
   RELEASE_IF_OWNER,
-  RESUME_IF_PENDING,
-  RETAIN_IF_TERMINAL,
+  RESUME_EXECUTION,
   SCHEDULE_TIMER_IF_ABSENT,
   TRIM_IF_MEMBER,
-  UPDATE_META_AND_ACTIVE,
 } from "./store.js";
 import type { RedisZMember } from "./types.js";
 
@@ -374,6 +370,18 @@ export class MockRedisClient {
     return list.length;
   }
 
+  private enqueueIfAbsentSync(key: string, member: string) {
+    this.sweep(key);
+
+    const list = this.lists.get(key) ?? [];
+
+    if (list.includes(member)) return 0;
+
+    list.unshift(member);
+    this.lists.set(key, list);
+    return 1;
+  }
+
   private zaddSync(key: string, score: number, member: string) {
     this.sweep(key);
 
@@ -525,52 +533,89 @@ export class MockRedisClient {
     }
 
     if (script === ENQUEUE_IF_ABSENT) {
-      this.sweep(key);
-
-      const list = this.lists.get(key) ?? [];
-
-      if (list.includes(token)) return 0;
-
-      list.unshift(token);
-      this.lists.set(key, list);
-      return 1;
+      return this.enqueueIfAbsentSync(key, token);
     }
 
-    if (script === CREATE_META_AND_ACTIVE) {
-      const metaKey = keyArgs[0] ?? "";
-      const activeKey = keyArgs[1] ?? "";
+    if (script === CREATE_EXECUTION) {
+      const [metaKey = "", historyKey = "", activeKey = "", queueKey = ""] =
+        keyArgs;
+      const terminalKey = keyArgs[4] ?? "";
       const executionId = argv[0] ?? "";
 
       if (this.existsSync(metaKey)) return 0;
 
-      this.hsetSync(metaKey, argv.slice(1));
+      this.hsetSync(metaKey, argv.slice(2));
+      this.rpushSync(historyKey, argv[1] ?? "");
       this.saddSync(activeKey, executionId);
+      this.zremSync(terminalKey, [executionId]);
+      this.enqueueIfAbsentSync(queueKey, executionId);
       return 1;
     }
 
-    if (script === UPDATE_META_AND_ACTIVE) {
-      const metaKey = keyArgs[0] ?? "";
-      const activeKey = keyArgs[1] ?? "";
-      const executionId = argv[0] ?? "";
+    if (script === COMMIT) {
+      const [leaseKey = "", historyKey = "", metaKey = ""] = keyArgs;
+      const activeKey = keyArgs[3] ?? "";
+      const terminalKey = keyArgs[4] ?? "";
+      const executionId = argv[1] ?? "";
+      const count = Number(argv[2]);
+      const terminal = argv[3] === "1";
+      const ttlRaw = argv[4] ?? "";
+      const trackedAt = argv[5] ?? "";
+      const payloads = argv.slice(6, 6 + count);
+      const fieldValues = argv.slice(6 + count);
 
-      this.hsetSync(metaKey, argv.slice(1));
-      this.saddSync(activeKey, executionId);
+      if (this.getSync(leaseKey) !== token) return 0;
+
+      if (payloads.length > 0) this.rpushSync(historyKey, ...payloads);
+      if (fieldValues.length > 0) this.hsetSync(metaKey, fieldValues);
+      if (!terminal) return 1;
+
+      this.sremSync(activeKey, executionId);
+
+      if (ttlRaw !== "") {
+        const ttlMs = Number(ttlRaw);
+
+        if (ttlMs <= 0) {
+          this.delSync(metaKey, historyKey, leaseKey);
+          this.zremSync(terminalKey, [executionId]);
+          return 1;
+        }
+
+        this.pexpireSync(metaKey, ttlMs);
+        this.pexpireSync(historyKey, ttlMs);
+      }
+
+      if (trackedAt !== "") {
+        this.zaddSync(terminalKey, Number(trackedAt), executionId);
+      }
+
       return 1;
     }
 
-    if (script === RESUME_IF_PENDING) {
-      const metaKey = keyArgs[0] ?? "";
-      const historyKey = keyArgs[1] ?? "";
-      const activeKey = keyArgs[2] ?? "";
-      const queueKey = keyArgs[3] ?? "";
+    if (script === RESUME_EXECUTION) {
+      const [metaKey = "", historyKey = "", activeKey = "", queueKey = ""] =
+        keyArgs;
+      const terminalKey = keyArgs[4] ?? "";
       const executionId = argv[0] ?? "";
       const updatedAt = argv[1] ?? "";
+      const expectedLength = Number(argv[2]);
 
       this.sweep(metaKey);
+      this.sweep(historyKey);
 
-      const status = this.hashes.get(metaKey)?.get("status");
+      if (this.hashes.get(metaKey)?.get("status") !== "failed") return 0;
 
-      if (status !== "pending") return 0;
+      if ((this.lists.get(historyKey)?.length ?? 0) !== expectedLength) {
+        return 0;
+      }
+
+      this.persistSync(metaKey);
+      this.persistSync(historyKey);
+      this.zremSync(terminalKey, [executionId]);
+
+      const payloads = argv.slice(3);
+
+      if (payloads.length > 0) this.rpushSync(historyKey, ...payloads);
 
       this.hsetSync(metaKey, [
         "status",
@@ -583,42 +628,7 @@ export class MockRedisClient {
         updatedAt,
       ]);
       this.saddSync(activeKey, executionId);
-
-      const payloads = argv.slice(2);
-
-      if (payloads.length > 0) {
-        this.rpushSync(historyKey, ...payloads);
-      }
-
-      this.sweep(queueKey);
-
-      const list = this.lists.get(queueKey) ?? [];
-
-      if (!list.includes(executionId)) {
-        list.unshift(executionId);
-        this.lists.set(queueKey, list);
-      }
-
-      return 1;
-    }
-
-    if (script === APPEND_IF_LEASE) {
-      const historyKey = keyArgs[1] ?? "";
-      const current = this.getSync(key);
-
-      if (current !== token) return 0;
-
-      this.rpushSync(historyKey, ...argv.slice(1));
-      return 1;
-    }
-
-    if (script === HSET_IF_LEASE) {
-      const metaKey = keyArgs[1] ?? "";
-      const current = this.getSync(key);
-
-      if (current !== token) return 0;
-
-      this.hsetSync(metaKey, argv.slice(1));
+      this.enqueueIfAbsentSync(queueKey, executionId);
       return 1;
     }
 
@@ -653,80 +663,6 @@ export class MockRedisClient {
       if (current !== token) return 0;
 
       return this.pexpireSync(key, Number(argv[1]));
-    }
-
-    if (script === PERSIST_EXECUTION) {
-      const metaKey = keyArgs[0] ?? "";
-      const historyKey = keyArgs[1] ?? "";
-      const terminalKey = keyArgs[2] ?? "";
-      const executionId = argv[0] ?? "";
-      const updatedAt = argv[1] ?? "";
-
-      if (!this.existsSync(metaKey)) return 0;
-
-      const status = this.hashes.get(metaKey)?.get("status");
-
-      if (status !== "failed") return 0;
-
-      this.persistSync(metaKey);
-      this.persistSync(historyKey);
-      this.zremSync(terminalKey, [executionId]);
-      this.hsetSync(metaKey, [
-        "status",
-        "pending",
-        "error",
-        "",
-        "failedAt",
-        "",
-        "updatedAt",
-        updatedAt,
-      ]);
-      return 1;
-    }
-
-    if (script === RETAIN_IF_TERMINAL) {
-      const metaKey = keyArgs[0] ?? "";
-      const historyKey = keyArgs[1] ?? "";
-      const leaseKey = keyArgs[2] ?? "";
-      const activeKey = keyArgs[3] ?? "";
-      const terminalKey = keyArgs[4] ?? "";
-      const executionId = argv[0] ?? "";
-      const endedAt = argv[2] ?? "";
-
-      this.sweep(metaKey);
-
-      const status = this.hashes.get(metaKey)?.get("status");
-
-      if (status !== "completed") {
-        if (status !== "failed") {
-          if (status !== "cancelled") return 0;
-        }
-      }
-
-      const ttlRaw = argv[1] ?? "";
-
-      if (ttlRaw !== "") {
-        const ttlMs = Number(ttlRaw);
-        const pttl = this.pttlSync(metaKey);
-
-        if (pttl <= 0) {
-          if (ttlMs <= 0) {
-            this.delSync(metaKey, historyKey, leaseKey);
-            this.sremSync(activeKey, executionId);
-            this.zremSync(terminalKey, [executionId]);
-            return 1;
-          }
-
-          this.pexpireSync(metaKey, ttlMs);
-          this.pexpireSync(historyKey, ttlMs);
-        }
-      }
-
-      if (endedAt !== "") {
-        this.zaddSync(terminalKey, Number(endedAt), executionId);
-      }
-
-      return 1;
     }
 
     if (script === TRIM_IF_MEMBER) {

@@ -10,6 +10,8 @@ import type {
   ClearExecutionLocalStateInput,
   CollectCompensationsInput,
   CollectErrorHistoryInput,
+  CommitRetention,
+  CommitTerminalInput,
   CompensationHandlersMissingInput,
   CompensationItem,
   CompensationStartResult,
@@ -20,7 +22,6 @@ import type {
   FailAfterStepExhaustedInput,
   FailExecutionInput,
   FailFromCompensationInput,
-  FinalizeFromTerminalInput,
   FinishCompensationInput,
   FireDurableTimerInput,
   HandleStepFailureInput,
@@ -482,7 +483,6 @@ export class WorkflowEngine<TInput, TResult> {
   private readonly compensating = new Set<string>();
   private readonly capacitySlots = new Map<string, Map<string, number>>();
   private readonly lostLeases = new Set<string>();
-  private sweepCursor = "0";
 
   public constructor(
     options: WorkflowOptions<TInput, TResult>,
@@ -653,7 +653,6 @@ export class WorkflowEngine<TInput, TResult> {
       try {
         await mightThrow(this.reclaimOrphans());
         await mightThrow(this.refreshHeldPartitions());
-        await mightThrow(this.sweepRetention());
       } finally {
         this.active--;
       }
@@ -840,39 +839,16 @@ export class WorkflowEngine<TInput, TResult> {
   private async runExecution(executionId: string, token: string) {
     const meta = await this.store.getMeta(executionId);
 
-    if (!meta) {
-      await this.store.markInactive(executionId);
-      return;
-    }
+    // Queue entries can outlive the run (cancel/stop re-enqueue), and ttl 0
+    // unlinks meta at terminal commit.
+    if (!meta) return;
 
     if (isTerminalStatus(meta.status)) {
       await this.clearExecutionLocalState({
         executionId,
         partitionKey: meta.partitionKey,
       });
-      await this.retainTerminal(executionId);
       return;
-    }
-
-    let history = await this.store.loadHistory(executionId);
-
-    if (history.length === 0) {
-      const appended = await this.store.appendEvents({
-        executionId,
-        events: [
-          {
-            type: "WorkflowStarted",
-            input: meta.input,
-            partitionKey: meta.partitionKey,
-            timestamp: Number(meta.createdAt) || Date.now(),
-          },
-        ],
-        leaseToken: token,
-      });
-
-      if (!appended) return;
-
-      history = await this.store.loadHistory(executionId);
     }
 
     const partitionKey = meta.partitionKey || GLOBAL_CAPACITY_KEY;
@@ -885,18 +861,7 @@ export class WorkflowEngine<TInput, TResult> {
 
     if (partitionSlot == null) return;
 
-    let view = parseHistory(history);
-
-    if (view.terminal) {
-      await this.finalizeFromTerminal({
-        executionId,
-        terminal: view.terminal,
-        rawInput: meta.input,
-        token,
-      });
-      return;
-    }
-
+    let view = parseHistory(await this.store.loadHistory(executionId));
     const controller = this.abortController(executionId);
 
     if (view.cancelRequested) {
@@ -926,18 +891,12 @@ export class WorkflowEngine<TInput, TResult> {
     while (this.shouldDrainExecution(executionId)) {
       if (!(await this.ownsLease(executionId, token))) return;
 
-      history = await this.store.loadHistory(executionId);
-      view = parseHistory(history);
+      view = parseHistory(await this.store.loadHistory(executionId));
 
-      if (view.terminal) {
-        await this.finalizeFromTerminal({
-          executionId,
-          terminal: view.terminal,
-          rawInput: meta.input,
-          token,
-        });
-        return;
-      }
+      // Terminal events are committed together with terminal meta, so meta
+      // was non-terminal above means no terminal event exists. Guard anyway
+      // so a stale view can never commit a second terminal transition.
+      if (view.terminal) return;
 
       if (view.compensation) {
         const cont = await this.runCompensationPhase({
@@ -1014,16 +973,9 @@ export class WorkflowEngine<TInput, TResult> {
       }
 
       if (decision.type === "complete") {
-        const appended = await this.store.appendEvents({
-          executionId,
-          events: decision.events,
-          leaseToken: token,
-        });
-
-        if (!appended) return;
-
         await this.completeExecution({
           executionId,
+          events: decision.events,
           result: decision.result,
           rawInput: meta.input,
           partitionKey,
@@ -1042,16 +994,9 @@ export class WorkflowEngine<TInput, TResult> {
 
         if (compensating.type === "started") continue;
 
-        const appended = await this.store.appendEvents({
-          executionId,
-          events: decision.events,
-          leaseToken: token,
-        });
-
-        if (!appended) return;
-
         await this.failExecution({
           executionId,
+          events: decision.events,
           error: decision.error,
           partitionKey,
           token,
@@ -1069,24 +1014,15 @@ export class WorkflowEngine<TInput, TResult> {
       if (compensating.type === "started") continue;
 
       if (compensating.type === "failed") {
-        const failedEvents: HistoryEvent[] = [
-          {
-            type: "WorkflowFailed",
-            error: compensating.error,
-            timestamp: Date.now(),
-          },
-        ];
-
-        const appended = await this.store.appendEvents({
-          executionId,
-          events: failedEvents,
-          leaseToken: token,
-        });
-
-        if (!appended) return;
-
         await this.failExecution({
           executionId,
+          events: [
+            {
+              type: "WorkflowFailed",
+              error: compensating.error,
+              timestamp: Date.now(),
+            },
+          ],
           error: compensating.error,
           partitionKey,
           token,
@@ -1094,16 +1030,9 @@ export class WorkflowEngine<TInput, TResult> {
         return;
       }
 
-      const appended = await this.store.appendEvents({
-        executionId,
-        events: decision.events,
-        leaseToken: token,
-      });
-
-      if (!appended) return;
-
       await this.cancelExecution({
         executionId,
+        events: decision.events,
         rawInput: meta.input,
         partitionKey,
         token,
@@ -1361,7 +1290,7 @@ export class WorkflowEngine<TInput, TResult> {
 
     if (compensating.type === "started") return true;
 
-    const appended = await this.store.appendEvents({
+    await this.failExecution({
       executionId,
       events: [
         {
@@ -1370,13 +1299,6 @@ export class WorkflowEngine<TInput, TResult> {
           timestamp: Date.now(),
         },
       ],
-      leaseToken: token,
-    });
-
-    if (!appended) return false;
-
-    await this.failExecution({
-      executionId,
       error: message,
       partitionKey,
       token,
@@ -1408,37 +1330,35 @@ export class WorkflowEngine<TInput, TResult> {
 
     if (items.length === 0) return { type: "none" };
 
-    const appended = await this.store.appendEvents({
+    const now = Date.now();
+    const fields: Partial<WorkflowMeta> = {
+      status: "compensating",
+      updatedAt: String(now),
+    };
+
+    if (error) {
+      fields.error = error;
+    }
+
+    const committed = await this.store.commit({
       executionId,
+      leaseToken: token,
       events: [
         {
           type: "CompensationStarted",
           reason,
           error,
           stepIds: items.map((item) => item.stepId),
-          timestamp: Date.now(),
+          timestamp: now,
         },
       ],
-      leaseToken: token,
+      fields,
     });
 
-    if (!appended) return { type: "none" };
+    if (!committed) return { type: "none" };
 
     this.aborts.delete(executionId);
     this.compensating.add(executionId);
-
-    const extra: Partial<WorkflowMeta> = {};
-
-    if (error) {
-      extra.error = error;
-    }
-
-    await this.store.updateStatus({
-      executionId,
-      status: "compensating",
-      extra,
-      leaseToken: token,
-    });
 
     return { type: "started" };
   }
@@ -1720,16 +1640,9 @@ export class WorkflowEngine<TInput, TResult> {
     const { executionId, reason, error, rawInput, partitionKey, token } = input;
 
     if (reason === "cancelled") {
-      const appended = await this.store.appendEvents({
-        executionId,
-        events: [{ type: "WorkflowCancelled", timestamp: Date.now() }],
-        leaseToken: token,
-      });
-
-      if (!appended) return;
-
       await this.cancelExecution({
         executionId,
+        events: [{ type: "WorkflowCancelled", timestamp: Date.now() }],
         rawInput,
         partitionKey,
         token,
@@ -1739,7 +1652,7 @@ export class WorkflowEngine<TInput, TResult> {
 
     const message = error ?? "workflow failed";
 
-    const failed = await this.store.appendEvents({
+    await this.failExecution({
       executionId,
       events: [
         {
@@ -1748,13 +1661,6 @@ export class WorkflowEngine<TInput, TResult> {
           timestamp: Date.now(),
         },
       ],
-      leaseToken: token,
-    });
-
-    if (!failed) return;
-
-    await this.failExecution({
-      executionId,
       error: message,
       partitionKey,
       token,
@@ -1967,6 +1873,9 @@ export class WorkflowEngine<TInput, TResult> {
     for (const executionId of active) {
       const meta = await this.store.getMeta(executionId);
 
+      // Create, terminal commit and trim keep the active set in step with
+      // meta atomically, so these only catch ids left by older versions or
+      // keys edited outside the engine.
       if (!meta) {
         await this.store.markInactive(executionId);
         continue;
@@ -1977,7 +1886,7 @@ export class WorkflowEngine<TInput, TResult> {
           executionId,
           partitionKey: meta.partitionKey,
         });
-        await this.retainTerminal(executionId);
+        await this.store.markInactive(executionId);
         continue;
       }
 
@@ -1998,63 +1907,10 @@ export class WorkflowEngine<TInput, TResult> {
         (async () => {
           const view = parseHistory(await this.store.loadHistory(executionId));
 
-          if (view.compensation) {
-            if (meta.status !== "compensating") {
-              const extra: Partial<WorkflowMeta> = {};
-
-              if (view.compensation.error) {
-                extra.error = view.compensation.error;
-              }
-
-              await this.store.updateStatus({
-                executionId,
-                status: "compensating",
-                extra,
-                leaseToken: reclaimToken,
-              });
-            }
-          }
-
-          let lastResumeIdx = -1;
-
-          for (let i = 0; i < view.events.length; i++) {
-            if (view.events[i]?.type === "WorkflowResumed") lastResumeIdx = i;
-          }
-
           for (const [stepId, state] of view.steps) {
             if (state.status === "completed") continue;
 
             if (state.status === "failed") {
-              if (lastResumeIdx >= 0) {
-                let scheduledAfterResume = false;
-
-                for (let i = lastResumeIdx + 1; i < view.events.length; i++) {
-                  const event = view.events[i];
-
-                  if (event?.type !== "StepScheduled") continue;
-                  if (event.stepId !== stepId) continue;
-
-                  scheduledAfterResume = true;
-                  break;
-                }
-
-                if (!scheduledAfterResume) {
-                  await this.store.appendEvents({
-                    executionId,
-                    events: [
-                      {
-                        type: "StepScheduled",
-                        stepId,
-                        stepName: state.stepName,
-                        attempt: 1,
-                        timestamp: Date.now(),
-                      },
-                    ],
-                    leaseToken: reclaimToken,
-                  });
-                }
-              }
-
               if (!view.compensation) {
                 if (state.retryable && state.attempt <= this.retries) {
                   const added = await this.store.scheduleTimerIfAbsent(
@@ -2218,34 +2074,86 @@ export class WorkflowEngine<TInput, TResult> {
       });
     }
 
-    await this.store.markInactive(executionId);
     this.aborts.delete(executionId);
     this.compensationAborts.delete(executionId);
     this.compensating.delete(executionId);
     this.capacitySlots.delete(executionId);
   }
 
-  private async completeExecution(input: CompleteExecutionInput) {
-    const { executionId, result, rawInput, partitionKey, token } = input;
+  private retention(endedAt: number) {
+    const retention: CommitRetention = {};
 
-    const updated = await this.store.updateStatus({
+    if (Number.isFinite(this.retentionTTL)) {
+      retention.ttlMs = this.retentionTTL;
+    }
+
+    if (this.retentionMax !== undefined) {
+      if (retention.ttlMs !== 0) {
+        retention.trackedAt = endedAt;
+      }
+    }
+
+    return retention;
+  }
+
+  // One lease-fenced script appends the terminal event, writes terminal meta,
+  // leaves the active set and applies retention. Partition slots and local
+  // state are released afterwards; a crash in between only leaves the slot
+  // until its lockTTL expires.
+  private async commitTerminal(input: CommitTerminalInput) {
+    const { executionId, events, fields, endedAt, partitionKey, token } = input;
+
+    const committed = await this.store.commit({
       executionId,
-      status: "completed",
-      extra: {
-        result,
-        completedAt: String(Date.now()),
-        error: "",
-        partitionSlot: "",
-      },
       leaseToken: token,
+      events,
+      fields: {
+        ...fields,
+        partitionSlot: "",
+        updatedAt: String(endedAt),
+      },
+      retention: this.retention(endedAt),
     });
 
-    if (!updated) return;
+    if (!committed) return false;
 
     await this.clearExecutionLocalState({
       executionId,
       partitionKey,
     });
+
+    return true;
+  }
+
+  // retentionMax trimming stays a follow-up call: it is idempotent, and a
+  // crash before it only leaves extra terminal rows until the next terminal
+  // commit trims them.
+  private async trimRetained() {
+    if (this.retentionMax === undefined) return;
+
+    await this.store.trimTerminal(this.retentionMax);
+  }
+
+  private async completeExecution(input: CompleteExecutionInput) {
+    const { executionId, events, result, rawInput, partitionKey, token } =
+      input;
+    const now = Date.now();
+
+    const committed = await this.commitTerminal({
+      executionId,
+      events,
+      fields: {
+        status: "completed",
+        result,
+        completedAt: String(now),
+        error: "",
+      },
+      endedAt: now,
+      partitionKey,
+      token,
+    });
+
+    if (!committed) return;
 
     const workflowInput = fromJson<TInput>(rawInput, "input");
 
@@ -2257,53 +2165,49 @@ export class WorkflowEngine<TInput, TResult> {
       }),
     );
 
-    await this.retainTerminal(executionId);
+    await this.trimRetained();
   }
 
   private async failExecution(input: FailExecutionInput) {
-    const { executionId, error, partitionKey, token } = input;
+    const { executionId, events, error, partitionKey, token } = input;
+    const now = Date.now();
 
-    const updated = await this.store.updateStatus({
+    const committed = await this.commitTerminal({
       executionId,
-      status: "failed",
-      extra: {
+      events,
+      fields: {
+        status: "failed",
         error,
-        failedAt: String(Date.now()),
-        partitionSlot: "",
+        failedAt: String(now),
       },
-      leaseToken: token,
-    });
-
-    if (!updated) return;
-
-    await this.clearExecutionLocalState({
-      executionId,
+      endedAt: now,
       partitionKey,
+      token,
     });
 
-    await this.retainTerminal(executionId);
+    if (!committed) return;
+
+    await this.trimRetained();
   }
 
   private async cancelExecution(input: CancelExecutionInput) {
-    const { executionId, rawInput, partitionKey, token } = input;
+    const { executionId, events, rawInput, partitionKey, token } = input;
+    const now = Date.now();
 
-    const updated = await this.store.updateStatus({
+    const committed = await this.commitTerminal({
       executionId,
-      status: "cancelled",
-      extra: {
-        cancelledAt: String(Date.now()),
+      events,
+      fields: {
+        status: "cancelled",
+        cancelledAt: String(now),
         error: "",
-        partitionSlot: "",
       },
-      leaseToken: token,
-    });
-
-    if (!updated) return;
-
-    await this.clearExecutionLocalState({
-      executionId,
+      endedAt: now,
       partitionKey,
+      token,
     });
+
+    if (!committed) return;
 
     const workflowInput = fromJson<TInput>(rawInput, "input");
 
@@ -2311,98 +2215,6 @@ export class WorkflowEngine<TInput, TResult> {
       this.options.hooks?.onCancel?.({ executionId, input: workflowInput }),
     );
 
-    await this.retainTerminal(executionId);
-  }
-
-  private async retainTerminal(executionId: string) {
-    const meta = await this.store.getMeta(executionId);
-
-    if (!meta) return;
-
-    if (!isTerminalStatus(meta.status)) return;
-
-    const infiniteTtl = !Number.isFinite(this.retentionTTL);
-
-    if (infiniteTtl) {
-      if (this.retentionMax === undefined) return;
-    }
-
-    const endedAt =
-      Number(meta.completedAt) ||
-      Number(meta.failedAt) ||
-      Number(meta.cancelledAt) ||
-      Number(meta.updatedAt) ||
-      Date.now();
-
-    let ttlMs: number | undefined;
-    let trackedAt: number | undefined;
-
-    if (!infiniteTtl) {
-      ttlMs = Math.max(0, endedAt + this.retentionTTL - Date.now());
-    }
-
-    if (this.retentionMax !== undefined) {
-      if (ttlMs !== 0) {
-        trackedAt = endedAt;
-      }
-    }
-
-    await this.store.retainIfTerminal({
-      executionId,
-      ttlMs,
-      endedAt: trackedAt,
-    });
-
-    if (this.retentionMax !== undefined) {
-      await this.store.trimTerminal(this.retentionMax);
-    }
-  }
-
-  private async sweepRetention() {
-    if (!Number.isFinite(this.retentionTTL)) {
-      if (this.retentionMax === undefined) return;
-    }
-
-    const scanned = await this.store.scanMetaIds(this.sweepCursor);
-
-    this.sweepCursor = scanned.cursor;
-
-    for (const executionId of scanned.ids) {
-      await this.retainTerminal(executionId);
-    }
-  }
-
-  private async finalizeFromTerminal(input: FinalizeFromTerminalInput) {
-    const { executionId, terminal, rawInput, token } = input;
-    const meta = await this.store.getMeta(executionId);
-    const partitionKey = meta?.partitionKey ?? "";
-
-    if (terminal.kind === "completed") {
-      await this.completeExecution({
-        executionId,
-        result: terminal.result,
-        rawInput,
-        partitionKey,
-        token,
-      });
-      return;
-    }
-
-    if (terminal.kind === "failed") {
-      await this.failExecution({
-        executionId,
-        error: terminal.error,
-        partitionKey,
-        token,
-      });
-      return;
-    }
-
-    await this.cancelExecution({
-      executionId,
-      rawInput,
-      partitionKey,
-      token,
-    });
+    await this.trimRetained();
   }
 }
