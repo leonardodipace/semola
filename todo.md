@@ -64,7 +64,7 @@ Follow-ups from the review of `noah/timer-refactor`, after checking each claim a
   - Delete the `active` counter, the polling loop and `SHUTDOWN_POLL`.
   - First wrap the release in the "stop() raced this claim" branch in `mightThrow`, so a Redis error can't reject a loop promise.
 
-- [ ] **8. `startSync` polls meta, not `get()`.**
+- [x] **8. `startSync` polls meta, not `get()`.**
   - Poll `store.getMeta`. On terminal status, build the result from meta: parse `result`, and take the failure message from `originalError || error`.
   - No history read or input parse per poll.
 

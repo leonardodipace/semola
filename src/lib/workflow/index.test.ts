@@ -5302,5 +5302,54 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
       await parent2.stop();
       await child.stop();
     });
+
+    test("polls meta without reading history", async () => {
+      const redis = createRedis();
+      const name = `sync-meta-poll-${crypto.randomUUID()}`;
+      const historyKey = `workflow:${name}:history:polled`;
+      let reads = 0;
+      let entered = false;
+      let release = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      const lrange = redis.lrange.bind(redis);
+      redis.lrange = async (key: string, start: number, stop: number) => {
+        if (key === historyKey) reads++;
+
+        return lrange(key, start, stop);
+      };
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        lockTTL: 60_000,
+        handler: async ({ step }) => {
+          return step("gated", async () => {
+            entered = true;
+            await gate;
+            return "done";
+          });
+        },
+      });
+
+      const pending = wf.startSync({}, { executionId: "polled" });
+
+      await waitFor(() => entered);
+      // Several poll intervals pass while the step is blocked.
+      await sleep(100);
+      release();
+
+      const result = await awaitStartSync(pending);
+
+      expect(result.status).toBe("completed");
+      expect(result.result).toBe("done");
+      // Only the lease holder's single read at claim time.
+      expect(reads).toBe(1);
+
+      await wf.stop();
+    });
   });
 });

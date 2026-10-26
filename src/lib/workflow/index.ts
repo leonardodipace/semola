@@ -337,18 +337,19 @@ export const defineWorkflow = <TInput, TResult = void>(
     }
 
     while (true) {
-      const execution = await get(executionId);
+      // Meta alone decides the outcome; get() would also load the history.
+      const meta = await requireMeta(store, executionId);
 
-      if (execution.status === "completed") {
+      if (meta.status === "completed") {
         return {
           executionId,
           status: "completed",
-          result: execution.result,
+          result: meta.result ? fromJson<TResult>(meta.result, "result") : null,
           error: null,
         };
       }
 
-      if (execution.status === "cancelled") {
+      if (meta.status === "cancelled") {
         return {
           executionId,
           status: "cancelled",
@@ -357,16 +358,14 @@ export const defineWorkflow = <TInput, TResult = void>(
         };
       }
 
-      if (execution.status === "failed") {
-        const meta = await store.getMeta(executionId);
-        const message =
-          meta?.originalError || execution.error || "workflow failed";
-
+      if (meta.status === "failed") {
         return {
           executionId,
           status: "failed",
           result: null,
-          error: new Error(message),
+          error: new Error(
+            meta.originalError || meta.error || "workflow failed",
+          ),
         };
       }
 
