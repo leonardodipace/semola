@@ -143,7 +143,7 @@ const advance = async <TInput, TResult>(
   const workflowInput = fromJson<TInput>(view.input, "input");
 
   const [handlerError, result] = await mightThrow(
-    Promise.resolve(
+    Promise.resolve().then(() =>
       options.handler({
         input: workflowInput,
         executionId,
@@ -369,7 +369,7 @@ const collectCompensations = async <TInput, TResult>(
   let fatal: Error | undefined;
 
   const [handlerError] = await mightThrow(
-    Promise.resolve(
+    Promise.resolve().then(() =>
       options.handler({
         input: workflowInput,
         executionId,
@@ -1103,7 +1103,7 @@ export class WorkflowEngine<TInput, TResult> {
     const workflowInput = fromJson<TInput>(rawInput, "input");
 
     const [stepError, stepResult] = await mightThrow(
-      Promise.resolve(
+      Promise.resolve().then(() =>
         handler({
           input: workflowInput,
           signal: controller.signal,
@@ -1504,7 +1504,7 @@ export class WorkflowEngine<TInput, TResult> {
     const workflowInput = fromJson<TInput>(rawInput, "input");
 
     const [compensateError] = await mightThrow(
-      Promise.resolve(
+      Promise.resolve().then(() =>
         compensate({
           input: workflowInput,
           result,

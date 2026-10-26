@@ -494,6 +494,62 @@ describe("workflow", () => {
     await stop(wf);
   });
 
+  test("synchronous throws from steps and compensations are step failures", async () => {
+    const redis = createRedis();
+    let attempts = 0;
+    let undone = 0;
+
+    const wf = defineWorkflow({
+      name: `sync-throw-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      retries: 1,
+      handler: async ({ step }) => {
+        await step("flaky", () => {
+          attempts++;
+          if (attempts === 1) throw new Error("sync boom");
+          return "ok";
+        });
+        await step("undoable", () => "made", {
+          compensate: ({ fail }) => {
+            undone++;
+            fail(new Error("undo refused"));
+          },
+        });
+        await step("stop", ({ fail }) => fail(new Error("hard stop")));
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    const execution = await waitStatus(wf, executionId, "failed");
+
+    expect(attempts).toBe(2);
+    expect(undone).toBe(1);
+    expect(execution.error).toBe("undo refused");
+
+    await stop(wf);
+  });
+
+  test("synchronous throw from the workflow handler fails the run", async () => {
+    const redis = createRedis();
+
+    const wf = defineWorkflow({
+      name: `sync-handler-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      handler: () => {
+        throw new Error("sync handler boom");
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    const execution = await waitStatus(wf, executionId, "failed");
+
+    expect(execution.error).toBe("sync handler boom");
+
+    await stop(wf);
+  });
+
   test("cancel during run", async () => {
     const redis = createRedis();
 
