@@ -641,6 +641,14 @@ export class WorkflowEngine<TInput, TResult> {
         // A cancel reported by that commit is handled now, not at wake-up.
         if (!run.cancelRequested) return;
 
+        // That commit overwrote the visibility timeout with `until`; restore
+        // it, so a crash mid-unwind comes due after lockTTL, not at `until`.
+        const visibleAt = Date.now() + this.lockTTL;
+
+        if (!(await this.commitRun(executionId, run, { dueAt: visibleAt }))) {
+          return;
+        }
+
         run.dueAt = undefined;
         continue;
       }

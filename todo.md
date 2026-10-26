@@ -43,7 +43,7 @@ Follow-ups from the review of `noah/timer-refactor`, after checking each claim a
   - Delete the `Array.isArray` normalisation in history.ts, the `stepIds.length === 0` branch in `unwind`, and the test "CompensationStarted without stepIds normalizes to empty list".
   - Remove `input` / `partitionKey` from `WorkflowStarted` fixtures in history.test.ts and index.test.ts.
 
-- [ ] **4b. Restore the visibility timeout when a wait commit reports a cancel (bug).**
+- [x] **4b. Restore the visibility timeout when a wait commit reports a cancel (bug).**
   - **Found:** the flaky test "cancel during sleep then crash still compensates without waiting leftover sleep".
   - **Cause:** in `runExecution`'s `waiting` branch, `waitUntil` commits `due = fireAt`. If that commit reports a cancel, the run continues straight into the unwind on the same lease, but the due score stays at `fireAt`. The cancel's own `ZADD XX LT now` landed before the commit and was overwritten.
   - **Impact:** if the worker dies before its first heartbeat (12 s at the default `lockTTL`), the mid-unwind execution isn't reclaimed until the sleep's fire time, which could be days, instead of after `lockTTL`.

@@ -4776,6 +4776,72 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
       await wf2.stop();
     });
 
+    test("a cancel reported by the sleep's wait commit keeps the visibility timeout during the unwind", async () => {
+      const redis = createRedis();
+      const name = `saga-sleep-cancel-race-${crypto.randomUUID()}`;
+      const other = new WorkflowStore(redis, name);
+      const lockTTL = 60_000;
+      const sleepMs = 60 * 60_000;
+      let cancelled = false;
+      let dueDuringUndo: { score: number; limit: number } | undefined;
+
+      // The cancel lands right before the commit of due = fireAt, so that
+      // commit overwrites the cancel's own due score and reports the cancel.
+      // lockTTL is long, so no heartbeat runs while the test is going.
+      const send = redis.send.bind(redis);
+      redis.send = async (command: string, args: string[]) => {
+        const dueAt = Number(args[11]);
+
+        if (
+          command === "EVAL" &&
+          args[0] === COMMIT &&
+          !cancelled &&
+          dueAt > Date.now() + lockTTL
+        ) {
+          cancelled = true;
+          await other.requestCancel(args[9] ?? "");
+        }
+
+        return send(command, args);
+      };
+
+      const wf = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        lockTTL,
+        handler: async ({ step, sleep: durableSleep, executionId }) => {
+          await step("create-vm", async () => ({ id: "vm-1" }), {
+            compensate: async () => {
+              const score = await redis.zscore(
+                `workflow:${name}:due`,
+                executionId,
+              );
+
+              dueDuringUndo = {
+                score: Number(score),
+                limit: Date.now() + lockTTL,
+              };
+            },
+          });
+
+          await durableSleep(sleepMs);
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      const execution = await waitStatus(wf, executionId, "cancelled");
+
+      expect(cancelled).toBe(true);
+      expect(execution.status).toBe("cancelled");
+      expect(dueDuringUndo).toBeDefined();
+      expect(dueDuringUndo?.score).toBeLessThanOrEqual(
+        dueDuringUndo?.limit ?? 0,
+      );
+
+      await wf.stop();
+    });
+
     test("fail() inside compensate is non-retryable", async () => {
       const redis = createRedis();
       let compensateAttempts = 0;
