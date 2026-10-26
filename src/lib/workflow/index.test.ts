@@ -3247,6 +3247,44 @@ describe("workflow", () => {
   });
 
   describe("determinism", () => {
+    test("handler that swallows errors still runs its steps and sleeps", async () => {
+      const redis = createRedis();
+      const calls: string[] = [];
+
+      const wf = defineWorkflow({
+        name: `swallow-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        handler: async ({ step, sleep: durableSleep }) => {
+          try {
+            await step("charge", async () => {
+              calls.push("charge");
+            });
+            await durableSleep(10);
+          } catch {}
+
+          try {
+            await step("notify", async () => {
+              calls.push("notify");
+            });
+          } catch (error) {
+            throw new Error(`wrapped: ${(error as Error).message}`);
+          }
+
+          return "done";
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      const execution = await waitStatus(wf, executionId, "completed");
+
+      expect(execution.result).toBe("done");
+      expect(execution.steps.map((s) => s.name)).toEqual(["charge", "notify"]);
+      expect(calls).toEqual(["charge", "notify"]);
+
+      await stop(wf);
+    });
+
     test("nondeterminism fails when step name mismatches history", async () => {
       const redis = createRedis();
       let useAltName = false;

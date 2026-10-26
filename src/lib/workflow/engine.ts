@@ -265,11 +265,12 @@ const advance = async <TInput, TResult>(
     ),
   );
 
-  if (handlerError) {
-    if (handlerError instanceof Paused && decision) {
-      return decision;
-    }
+  // A recorded decision wins however the handler ended: user code may catch
+  // Paused and return or rethrow something else, which must not complete or
+  // fail the run before that step or sleep happens.
+  if (decision) return decision;
 
+  if (handlerError) {
     return {
       type: "fail",
       error: handlerError.message,
