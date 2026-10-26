@@ -4,6 +4,7 @@ import {
   applyHistoryEvent,
   emptyHistoryView,
   parseHistory,
+  undoStepId,
 } from "./history.js";
 import type { HistoryEvent } from "./types.js";
 
@@ -140,6 +141,35 @@ describe("parseHistory", () => {
     const parsed = parseHistory(events.map((event) => JSON.stringify(event)));
 
     expect(incremental).toEqual(parsed);
+  });
+
+  test("undo step events are filed under the forward step they undo", () => {
+    const now = 1_700_000_000_000;
+
+    const view = parseHistory(
+      [
+        { type: "StepScheduled", stepId: "a3", stepName: "one", attempt: 1 },
+        { type: "StepStarted", stepId: "a3", attempt: 1 },
+        { type: "StepFailed", stepId: "a3", stepName: "one", error: "x" },
+        { type: "StepScheduled", stepId: "u3", stepName: "undo:one" },
+        { type: "StepStarted", stepId: "u3", attempt: 1 },
+        { type: "StepCompleted", stepId: "u3", stepName: "undo:one" },
+      ].map((event) =>
+        JSON.stringify({
+          retryable: false,
+          result: "null",
+          ...event,
+          timestamp: now,
+        }),
+      ),
+    );
+
+    expect([...view.steps.keys()]).toEqual(["a3"]);
+    expect(view.steps.get("a3")?.status).toBe("failed");
+    expect([...view.undos.keys()]).toEqual(["a3"]);
+    expect(view.undos.get("a3")?.status).toBe("completed");
+    expect([...view.started]).toEqual(["a3"]);
+    expect(undoStepId("a3")).toBe("u3");
   });
 
   test("TimerFired inherits delayMs and StepStarted inherits stepName", () => {

@@ -291,9 +291,7 @@ export const defineWorkflow = <TInput, TResult = void>(
     const view = parseHistory(await store.loadHistory(executionId));
     const steps: StepSnapshot[] = [];
 
-    // Forward steps only; undo steps (`u<N>`) are internal to an unwind.
-    for (const [stepId, state] of view.steps) {
-      if (!stepId.startsWith("a")) continue;
+    for (const state of view.steps.values()) {
       if (state.status !== "completed") continue;
 
       steps.push({

@@ -5,6 +5,7 @@ import {
   emptyHistoryView,
   isTerminalStatus,
   parseHistory,
+  undoStepId,
 } from "./history.js";
 import { fromJson, toJson } from "./json.js";
 import type { WorkflowStore } from "./store.js";
@@ -305,7 +306,7 @@ const advance = async <TInput, TResult>(
 
   // Every recorded step and timer must be replayed; skipping one diverges.
   for (const stepId of view.steps.keys()) {
-    if (!stepId.startsWith("a") || consumed.steps.has(stepId)) continue;
+    if (consumed.steps.has(stepId)) continue;
 
     fatal ??= new Error(
       `nondeterminism: historical step ${stepId} was not replayed`,
@@ -918,7 +919,7 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   // Runs the undo of each snapshotted step newest first, as ordinary steps
-  // (`u<N>` undoes `a<N>`) with their own retries, then ends the run. Fails
+  // (see undoStepId) with their own retries, then ends the run. Fails
   // closed when a snapshotted handler is gone (for example after a deploy).
   private async unwind(
     executionId: string,
@@ -933,7 +934,7 @@ export class WorkflowEngine<TInput, TResult> {
 
     const handlers = new Map(replay.undo.map((item) => [item.stepId, item]));
     const pending = phase.stepIds
-      .filter((id) => view.steps.get(`u${id.slice(1)}`)?.status !== "completed")
+      .filter((id) => view.undos.get(id)?.status !== "completed")
       .reverse();
     let error = replay.fatal;
 
@@ -949,9 +950,9 @@ export class WorkflowEngine<TInput, TResult> {
     if (!error && item) {
       const signal = new AbortController().signal;
       const next = nextStep(
-        view.steps.get(`u${item.stepId.slice(1)}`),
+        view.undos.get(item.stepId),
         {
-          stepId: `u${item.stepId.slice(1)}`,
+          stepId: undoStepId(item.stepId),
           stepName: `undo:${item.stepName}`,
           handler: ({ input, fail }) =>
             item.compensate({ input, fail, signal, ...item.outcome }),

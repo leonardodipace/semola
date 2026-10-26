@@ -20,17 +20,31 @@ export const emptyHistoryView = (): HistoryView => ({
   input: "",
   partitionKey: "",
   steps: new Map<string, StepState>(),
+  undos: new Map<string, StepState>(),
   timers: new Map<string, TimerState>(),
   started: new Set<string>(),
   terminal: null,
   compensation: null,
 });
 
+// History records the undo of forward step `a<N>` as step `u<N>`. This is the
+// only place that id format is known: the view files undo steps under the
+// forward step id they undo.
+export const undoStepId = (stepId: string) => `u${stepId.slice(1)}`;
+
+const stepSlot = (view: HistoryView, stepId: string) => {
+  if (stepId.startsWith("u")) {
+    return { states: view.undos, id: `a${stepId.slice(1)}`, undo: true };
+  }
+
+  return { states: view.steps, id: stepId, undo: false };
+};
+
 // Applies one event to a view in place. parseHistory folds the stored list
 // through this; the lease holder applies its own committed events with it
 // instead of reloading history.
 export const applyHistoryEvent = (view: HistoryView, event: HistoryEvent) => {
-  const { steps, timers } = view;
+  const { timers } = view;
 
   view.events.push(event);
 
@@ -41,7 +55,9 @@ export const applyHistoryEvent = (view: HistoryView, event: HistoryEvent) => {
   }
 
   if (event.type === "StepScheduled") {
-    steps.set(event.stepId, {
+    const { states, id } = stepSlot(view, event.stepId);
+
+    states.set(id, {
       status: "scheduled",
       stepName: event.stepName,
       attempt: event.attempt,
@@ -50,11 +66,12 @@ export const applyHistoryEvent = (view: HistoryView, event: HistoryEvent) => {
   }
 
   if (event.type === "StepStarted") {
-    const previous = steps.get(event.stepId);
+    const { states, id, undo } = stepSlot(view, event.stepId);
+    const previous = states.get(id);
 
-    view.started.add(event.stepId);
+    if (!undo) view.started.add(id);
 
-    steps.set(event.stepId, {
+    states.set(id, {
       status: "started",
       stepName: previous?.stepName ?? "",
       attempt: event.attempt,
@@ -63,7 +80,9 @@ export const applyHistoryEvent = (view: HistoryView, event: HistoryEvent) => {
   }
 
   if (event.type === "StepCompleted") {
-    steps.set(event.stepId, {
+    const { states, id } = stepSlot(view, event.stepId);
+
+    states.set(id, {
       status: "completed",
       stepName: event.stepName,
       result: event.result,
@@ -73,7 +92,9 @@ export const applyHistoryEvent = (view: HistoryView, event: HistoryEvent) => {
   }
 
   if (event.type === "StepFailed") {
-    steps.set(event.stepId, {
+    const { states, id } = stepSlot(view, event.stepId);
+
+    states.set(id, {
       status: "failed",
       stepName: event.stepName,
       error: event.error,

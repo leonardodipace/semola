@@ -331,9 +331,12 @@ export type HistoryView = {
   events: HistoryEvent[];
   input: string;
   partitionKey: string;
+  // Forward steps by id (`a<N>`).
   steps: Map<string, StepState>;
+  // Undo steps, keyed by the forward step id they undo.
+  undos: Map<string, StepState>;
   timers: Map<string, TimerState>;
-  // Step ids with a StepStarted event: the steps an unwind must undo.
+  // Forward step ids with a StepStarted event: the steps an unwind must undo.
   started: Set<string>;
   terminal: HistoryTerminal | null;
   compensation: CompensationPhase | null;
