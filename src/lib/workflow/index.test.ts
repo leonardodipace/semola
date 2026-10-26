@@ -252,6 +252,57 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
     await wf2.stop();
   });
 
+  test("lease lost mid-step and reclaimed by the same process still records failures and honors retries", async () => {
+    const redis = createRedis();
+    const name = `lost-lease-${crypto.randomUUID()}`;
+    const abortedAtStart: boolean[] = [];
+
+    const wf = defineWorkflow({
+      name,
+      redis,
+      ...fast,
+      retries: 2,
+      handler: async ({ step }) => {
+        await step("fragile", async ({ signal }) => {
+          abortedAtStart.push(signal.aborted);
+
+          // The first call hangs until the heartbeat notices the lost lease.
+          if (abortedAtStart.length === 1) {
+            while (!signal.aborted) {
+              await sleep(10);
+            }
+          }
+
+          throw new Error(`boom ${abortedAtStart.length}`);
+        });
+      },
+    });
+
+    const { executionId } = await wf.start({});
+
+    await waitFor(() => abortedAtStart.length === 1);
+    await expireLeases(redis);
+
+    const execution = await waitStatus(wf, executionId, "failed");
+    const failed = (
+      await new WorkflowStore(redis, name).loadHistory(executionId)
+    )
+      .map((raw) => JSON.parse(raw) as { type: string; attempt?: number })
+      .filter((event) => event.type === "StepFailed")
+      .map((event) => event.attempt);
+
+    // The run that lost the lease records nothing; the reclaimed runs record
+    // retries + 1 attempts, none starting with an aborted signal.
+    expect(failed).toEqual([1, 2, 3]);
+    expect(abortedAtStart).toEqual([false, false, false, false]);
+    expect(execution.error).toBe("boom 4");
+
+    await sleep(250);
+    expect(abortedAtStart).toHaveLength(4);
+
+    await wf.stop();
+  });
+
   test("multi-worker concurrency drains without double-complete", async () => {
     const redis = createRedis();
     let runs = 0;

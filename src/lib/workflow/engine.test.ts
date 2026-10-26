@@ -135,6 +135,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowEngine", () => {
     const redis = createRedis();
     const name = `engine-abort-${crypto.randomUUID()}`;
     const store = new WorkflowStore(redis, name);
+    let started = false;
     let aborted = false;
 
     const engine = new WorkflowEngine(
@@ -145,6 +146,8 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowEngine", () => {
         lockTTL: 60_000,
         handler: async ({ step }) => {
           await step("hang", async ({ signal }) => {
+            started = true;
+
             while (!signal.aborted) {
               await sleep(10);
             }
@@ -162,7 +165,8 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowEngine", () => {
     const executionId = "e3";
     await store.createExecution(executionId, baseMeta(name));
 
-    await sleep(20);
+    // Only a run in flight in this engine can be aborted.
+    await waitFor(() => started);
     engine.requestAbort(executionId);
 
     await waitFor(() => aborted);
@@ -172,6 +176,46 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowEngine", () => {
     await done;
 
     expect(aborted).toBe(true);
+  });
+
+  // cancel() calls requestAbort in whichever process handles the request.
+  test("requestAbort for an execution this engine is not running leaves nothing behind", async () => {
+    const redis = createRedis();
+    const name = `engine-abort-idle-${crypto.randomUUID()}`;
+    const store = new WorkflowStore(redis, name);
+    const abortedAtStart: boolean[] = [];
+
+    const engine = new WorkflowEngine(
+      {
+        name,
+        redis,
+        pollInterval: 5,
+        lockTTL: 60_000,
+        handler: async ({ step }) => {
+          await step("work", async ({ signal }) => {
+            abortedAtStart.push(signal.aborted);
+          });
+        },
+      },
+      store,
+    );
+
+    const executionId = "e-idle";
+    engine.requestAbort(executionId);
+
+    await store.createExecution(executionId, baseMeta(name));
+    engine.start();
+
+    await waitFor(async () => {
+      const meta = await store.getMeta(executionId);
+      return meta?.status === "completed";
+    });
+
+    expect(abortedAtStart).toEqual([false]);
+
+    const done = engine.stop();
+    await sleep(50);
+    await done;
   });
 
   test("durable sleep schedules timer then completes after fire", async () => {

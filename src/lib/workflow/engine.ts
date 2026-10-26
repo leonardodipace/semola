@@ -380,8 +380,8 @@ export class WorkflowEngine<TInput, TResult> {
   private readonly retryBaseDelay: number;
   private readonly retryMultiplier: number;
   private readonly retryMaxDelay: number;
+  // Controllers of the runs in flight in this process, by execution.
   private readonly aborts = new Map<string, AbortController>();
-  private readonly lostLeases = new Set<string>();
 
   public constructor(
     options: WorkflowOptions<TInput, TResult>,
@@ -418,8 +418,10 @@ export class WorkflowEngine<TInput, TResult> {
     this.retryMaxDelay = options.retryBackoff?.maxDelay ?? DEFAULT_RETRY_MAX;
   }
 
+  // A no-op unless this process is running the execution right now; a later
+  // run picks up the cancel request from meta.
   public requestAbort(executionId: string) {
-    this.abortController(executionId).abort();
+    this.aborts.get(executionId)?.abort();
   }
 
   public start() {
@@ -483,14 +485,21 @@ export class WorkflowEngine<TInput, TResult> {
       input: undefined as TInput,
       view: emptyHistoryView(),
       cancelRequested: false,
+      controller: new AbortController(),
+      lost: false,
     };
 
-    this.lostLeases.delete(executionId);
+    this.aborts.set(executionId, run.controller);
     const heartbeat = this.startHeartbeat(executionId, run);
     const [error] = await mightThrow(this.runExecution(executionId, run));
 
     clearInterval(heartbeat);
-    this.lostLeases.delete(executionId);
+
+    // After a lost lease another poller here may already run the execution
+    // again; leave its controller in place.
+    if (this.aborts.get(executionId) === run.controller) {
+      this.aborts.delete(executionId);
+    }
 
     // Without a committed due time the execution is due again after one poll
     // interval (never a hot loop). After an error this worker is still alive,
@@ -512,21 +521,10 @@ export class WorkflowEngine<TInput, TResult> {
     });
   }
 
-  private async ownsLease(executionId: string, token: string) {
-    if (this.lostLeases.has(executionId)) return false;
+  private async ownsLease(executionId: string, run: LeaseRun) {
+    if (run.lost) return false;
 
-    return (await this.store.getLease(executionId)) === token;
-  }
-
-  private abortController(executionId: string) {
-    let controller = this.aborts.get(executionId);
-
-    if (!controller) {
-      controller = new AbortController();
-      this.aborts.set(executionId, controller);
-    }
-
-    return controller;
+    return (await this.store.getLease(executionId)) === run.token;
   }
 
   private capacityKey(partitionKey: string) {
@@ -580,15 +578,10 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private async runExecution(executionId: string, run: LeaseRun<TInput>) {
-    const { token } = run;
     const meta = await this.store.getMeta(executionId);
 
     if (!meta) return;
-
-    if (isTerminalStatus(meta.status)) {
-      this.clearExecutionLocalState(executionId);
-      return;
-    }
+    if (isTerminalStatus(meta.status)) return;
 
     run.capacityKey = this.capacityKey(meta.partitionKey);
 
@@ -609,7 +602,6 @@ export class WorkflowEngine<TInput, TResult> {
     run.view = parseHistory(await this.store.loadHistory(executionId));
     run.cancelRequested = Boolean(meta.cancelRequestedAt);
     const { view } = run;
-    const controller = this.abortController(executionId);
 
     if (meta.status === "pending") {
       const updated = await this.commitRun(executionId, run, {
@@ -629,7 +621,7 @@ export class WorkflowEngine<TInput, TResult> {
     }
 
     while (this.running) {
-      if (!(await this.ownsLease(executionId, token))) return;
+      if (!(await this.ownsLease(executionId, run))) return;
 
       // Terminal events are committed together with terminal meta, so meta
       // was non-terminal above means no terminal event exists. Guard anyway
@@ -641,7 +633,7 @@ export class WorkflowEngine<TInput, TResult> {
         view,
         input: run.input,
         executionId,
-        signal: controller.signal,
+        signal: run.controller.signal,
         retries: this.retries,
         backoff: this.backoff,
         cancelRequested: this.cancelPending(run),
@@ -737,7 +729,7 @@ export class WorkflowEngine<TInput, TResult> {
 
   private async executeStep(input: ExecuteStepInput<TInput>) {
     const { executionId, stepId, stepName, attempt, handler, run } = input;
-    const controller = this.abortController(executionId);
+    const { signal } = run.controller;
 
     const started = await this.commitRun(executionId, run, {
       events: [
@@ -759,13 +751,13 @@ export class WorkflowEngine<TInput, TResult> {
       Promise.resolve().then(() =>
         handler({
           input: run.input,
-          signal: controller.signal,
+          signal,
           fail: failWith,
         }),
       ),
     );
 
-    if (!(await this.ownsLease(executionId, run.token))) return false;
+    if (!(await this.ownsLease(executionId, run))) return false;
 
     let stepError = handlerError;
 
@@ -797,7 +789,7 @@ export class WorkflowEngine<TInput, TResult> {
     if (!run.view.compensation) {
       if (run.cancelRequested) return true;
 
-      if (controller.signal.aborted) return false;
+      if (signal.aborted) return false;
     }
 
     return this.handleStepFailure({
@@ -1074,15 +1066,11 @@ export class WorkflowEngine<TInput, TResult> {
         );
 
         if (error || !ok) {
-          this.lostLeases.add(executionId);
-          this.aborts.get(executionId)?.abort();
+          run.lost = true;
+          run.controller.abort();
         }
       })();
     }, interval);
-  }
-
-  private clearExecutionLocalState(executionId: string) {
-    this.aborts.delete(executionId);
   }
 
   private retention(endedAt: number) {
@@ -1106,17 +1094,11 @@ export class WorkflowEngine<TInput, TResult> {
   private async commitTerminal(input: CommitTerminalInput) {
     const { executionId, events, fields, endedAt, run } = input;
 
-    const committed = await this.commitRun(executionId, run, {
+    return this.commitRun(executionId, run, {
       events,
       fields: { ...fields, updatedAt: String(endedAt) },
       retention: this.retention(endedAt),
     });
-
-    if (!committed) return false;
-
-    this.clearExecutionLocalState(executionId);
-
-    return true;
   }
 
   // retentionMax trimming stays a follow-up call: it is idempotent, and a
