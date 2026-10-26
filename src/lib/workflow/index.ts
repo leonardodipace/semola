@@ -195,7 +195,6 @@ export const defineWorkflow = <TInput, TResult = void>(
       failedAt: "",
       cancelledAt: "",
       partitionKey,
-      partitionSlot: "",
       cancelRequestedAt: "",
     });
 

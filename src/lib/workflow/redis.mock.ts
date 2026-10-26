@@ -1,12 +1,10 @@
 import {
+  ACQUIRE_CAPACITY,
   CANCEL_EXECUTION,
   CLAIM_DUE,
-  CLAIM_OR_REOWN_PARTITION,
   COMMIT,
   CREATE_EXECUTION,
-  EXTEND_IF_OWNER,
   EXTEND_LEASE,
-  RELEASE_IF_OWNER,
   RELEASE_LEASE,
   RESUME_EXECUTION,
   TRIM_IF_MEMBER,
@@ -419,6 +417,7 @@ export class MockRedisClient {
 
       this.pexpireSync(key, Number(argv[1]));
       this.zupdateSync(keyArgs[1] ?? "", Number(argv[3]), argv[2] ?? "");
+      this.zupdateSync(keyArgs[2] ?? "", Number(argv[3]), argv[2] ?? "");
       return 1;
     }
 
@@ -434,8 +433,25 @@ export class MockRedisClient {
           argv[1] ?? "",
           true,
         );
+        this.zupdateSync(keyArgs[2] ?? "", Number(argv[3]), argv[1] ?? "");
       }
 
+      return 1;
+    }
+
+    if (script === ACQUIRE_CAPACITY) {
+      const [id = "", limit, now, expiry] = argv;
+      const holders = (this.zsets.get(key) ?? []).filter(
+        (row) => row.score > Number(now),
+      );
+
+      this.zsets.set(key, holders);
+
+      const held = holders.some((row) => row.member === id);
+
+      if (!held && holders.length >= Number(limit)) return 0;
+
+      this.zaddSync(key, Number(expiry), id);
       return 1;
     }
 
@@ -481,6 +497,7 @@ export class MockRedisClient {
       }
 
       this.zremSync(dueKey, [executionId]);
+      this.zremSync(keyArgs[5] ?? "", [executionId]);
 
       if (ttlRaw !== "") {
         const ttlMs = Number(ttlRaw);
@@ -573,39 +590,6 @@ export class MockRedisClient {
       ]);
       this.zaddSync(dueKey, Number(updatedAt), executionId);
       return 1;
-    }
-
-    if (script === CLAIM_OR_REOWN_PARTITION) {
-      const ttlMs = Number(argv[1]);
-      const owned = this.getSync(key);
-
-      if (owned === token) {
-        this.pexpireSync(key, ttlMs);
-        return 1;
-      }
-
-      const result = this.setSync(key, token, "PX", String(ttlMs), "NX");
-
-      if (result === "OK") return 1;
-
-      return 0;
-    }
-
-    if (script === RELEASE_IF_OWNER) {
-      const current = this.getSync(key);
-
-      if (current !== token) return 0;
-
-      this.delSync(key);
-      return 1;
-    }
-
-    if (script === EXTEND_IF_OWNER) {
-      const current = this.getSync(key);
-
-      if (current !== token) return 0;
-
-      return this.pexpireSync(key, Number(argv[1]));
     }
 
     if (script === TRIM_IF_MEMBER) {

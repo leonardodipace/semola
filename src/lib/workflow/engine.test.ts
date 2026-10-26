@@ -69,7 +69,6 @@ const baseMeta = (name: string, input = "{}"): WorkflowMeta => ({
   failedAt: "",
   cancelledAt: "",
   partitionKey: "",
-  partitionSlot: "",
   cancelRequestedAt: "",
 });
 

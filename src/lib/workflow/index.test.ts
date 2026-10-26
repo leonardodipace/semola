@@ -9,6 +9,7 @@ import {
   NotFoundError,
   SerializationError,
   type Workflow,
+  type WorkflowHandlerContext,
   WorkflowStoreError,
 } from "./index.js";
 import { createRedis, type MockRedisClient } from "./redis.mock.js";
@@ -646,37 +647,63 @@ describe("workflow", () => {
 
   test("partitionBy concurrency is per key not global", async () => {
     const redis = createRedis();
+    const name = `part-global-${crypto.randomUUID()}`;
     let concurrent = 0;
     let maxConcurrent = 0;
 
-    const wf = defineWorkflow<{ key: string }, boolean>({
-      name: `part-global-${crypto.randomUUID()}`,
+    // One process runs at most `concurrency` handlers, so two replicas show
+    // that different keys do not share the cap.
+    const options = {
+      name,
       redis,
       ...fast,
       concurrency: 1,
-      partitionBy: (input) => input.key,
-      handler: async ({ step }) => {
+      partitionBy: (input: { key: string }) => input.key,
+      handler: async ({ step }: WorkflowHandlerContext<{ key: string }>) => {
         await step("work", async () => {
           concurrent++;
           maxConcurrent = Math.max(maxConcurrent, concurrent);
           await sleep(20);
           concurrent--;
-          return true;
         });
-
-        return true;
       },
+    };
+    const store = new WorkflowStore(redis, name);
+    const engines = [
+      new WorkflowEngine(options, store),
+      new WorkflowEngine(options, new WorkflowStore(redis, name)),
+    ];
+
+    for (const key of ["a", "b"]) {
+      const now = String(Date.now());
+
+      await store.createExecution(`pg-${key}`, {
+        name,
+        status: "pending",
+        input: JSON.stringify({ key }),
+        result: "",
+        error: "",
+        createdAt: now,
+        updatedAt: now,
+        completedAt: "",
+        failedAt: "",
+        cancelledAt: "",
+        partitionKey: key,
+        cancelRequestedAt: "",
+      });
+    }
+
+    for (const engine of engines) engine.start();
+
+    await waitFor(async () => {
+      const a = await store.getMeta("pg-a");
+      const b = await store.getMeta("pg-b");
+      return a?.status === "completed" && b?.status === "completed";
     });
-
-    await wf.start({ key: "a" }, { executionId: "pg-a" });
-    await wf.start({ key: "b" }, { executionId: "pg-b" });
-
-    await waitStatus(wf, "pg-a", "completed");
-    await waitStatus(wf, "pg-b", "completed");
 
     expect(maxConcurrent).toBe(2);
 
-    await stop(wf);
+    for (const engine of engines) await engine.stop();
   });
 
   test("global concurrency caps parallel instances", async () => {
@@ -797,7 +824,6 @@ describe("workflow", () => {
         failedAt: "",
         cancelledAt: "",
         partitionKey: "*",
-        partitionSlot: "",
         cancelRequestedAt: "",
       });
     };
@@ -1052,7 +1078,7 @@ describe("workflow", () => {
     await stop(wf);
   });
 
-  test("partition slot survives holder stop during sleep until reclaim", async () => {
+  test("partition slot survives holder stop during sleep until it runs again", async () => {
     const redis = createRedis();
     const name = `part-death-${crypto.randomUUID()}`;
     let concurrent = 0;
@@ -1097,6 +1123,73 @@ describe("workflow", () => {
     expect(order).toEqual(["holder", "waiter"]);
 
     await stop(wf2);
+  });
+
+  test("a sleeping execution keeps its slot with no process alive until due + lockTTL", async () => {
+    const redis = createRedis();
+    const name = `slot-orphan-${crypto.randomUUID()}`;
+    const store = new WorkflowStore(redis, name);
+
+    const wf = defineWorkflow({
+      name,
+      redis,
+      ...fast,
+      concurrency: 1,
+      lockTTL: 1000,
+      handler: async ({ sleep: durableSleep }) => {
+        await durableSleep(2000);
+      },
+    });
+
+    const { executionId } = await wf.start({});
+    const startedAt = Date.now();
+
+    await waitStatus(wf, executionId, "running");
+    await sleep(50);
+    await stop(wf);
+
+    // Nobody refreshes the slot, yet the cap still holds until fireAt + lockTTL.
+    expect(await store.acquireCapacity("*", "probe", 1, 1000)).toBe(false);
+
+    await sleep(startedAt + 2000 + 1000 - 100 - Date.now());
+    expect(await store.acquireCapacity("*", "probe", 1, 1000)).toBe(false);
+
+    await sleep(200);
+    expect(await store.acquireCapacity("*", "probe", 1, 1000)).toBe(true);
+  });
+
+  test("partitionBy with many keys never exceeds concurrency handlers in one process", async () => {
+    const redis = createRedis();
+    let inFlight = 0;
+    let maxInFlight = 0;
+
+    const wf = defineWorkflow<{ key: string }, void>({
+      name: `bounded-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      concurrency: 2,
+      partitionBy: (input) => input.key,
+      handler: async ({ step }) => {
+        await step("work", async () => {
+          inFlight++;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          await sleep(20);
+          inFlight--;
+        });
+      },
+    });
+
+    const ids: string[] = [];
+
+    for (let i = 0; i < 8; i++) {
+      ids.push((await wf.start({ key: `k${i}` })).executionId);
+    }
+
+    for (const id of ids) await waitStatus(wf, id, "completed");
+
+    expect(maxInFlight).toBe(2);
+
+    await stop(wf);
   });
 
   test("timer claim crash restored from history", async () => {
@@ -1454,7 +1547,6 @@ describe("workflow", () => {
       failedAt: "",
       cancelledAt: "",
       partitionKey: "",
-      partitionSlot: "",
       cancelRequestedAt: "",
     });
     // A worker claims it and dies without heartbeat or release.
@@ -1513,10 +1605,12 @@ describe("workflow", () => {
     const name = `idle-sleep-${crypto.randomUUID()}`;
     let reads = 0;
 
+    // Sleepers keep their capacity slot, so the cap must fit all of them.
     const wf = defineWorkflow({
       name,
       redis,
       ...fast,
+      concurrency: 50,
       handler: async ({ sleep: durableSleep }) => {
         await durableSleep(60_000);
       },
@@ -1641,7 +1735,7 @@ describe("workflow", () => {
       );
 
       if (command === "EVAL" && args[0] === COMMIT && startsSecond) {
-        await other.requestCancel(args[8] ?? "");
+        await other.requestCancel(args[9] ?? "");
       }
 
       return send(command, args);
@@ -2211,8 +2305,6 @@ describe("workflow", () => {
         "cancelledAt",
         "",
         "partitionKey",
-        "",
-        "partitionSlot",
         "",
       );
       await redis.rpush(
@@ -3093,7 +3185,6 @@ describe("workflow", () => {
           failedAt: "",
           cancelledAt: "",
           partitionKey,
-          partitionSlot: "",
           cancelRequestedAt: "",
         });
       };
@@ -3172,41 +3263,6 @@ describe("workflow", () => {
       await expect(
         wf.start({ key: "x" }, { partitionKey: "" }),
       ).rejects.toBeInstanceOf(WorkflowStoreError);
-
-      await stop(wf);
-    });
-
-    test("allows overlap across different partition keys", async () => {
-      const redis = createRedis();
-      let maxGlobal = 0;
-      let currentGlobal = 0;
-
-      const wf = defineWorkflow<{ envId: string }, string>({
-        name: `po-${crypto.randomUUID()}`,
-        redis,
-        ...fast,
-        concurrency: 1,
-        partitionBy: (input) => input.envId,
-        handler: async ({ step }) => {
-          await step("work", async () => {
-            currentGlobal++;
-            maxGlobal = Math.max(maxGlobal, currentGlobal);
-            await sleep(20);
-            currentGlobal--;
-            return "ok";
-          });
-
-          return "done";
-        },
-      });
-
-      await wf.start({ envId: "a" }, { executionId: "po-a1" });
-      await wf.start({ envId: "b" }, { executionId: "po-b1" });
-
-      await waitStatus(wf, "po-a1", "completed");
-      await waitStatus(wf, "po-b1", "completed");
-
-      expect(maxGlobal).toBe(2);
 
       await stop(wf);
     });

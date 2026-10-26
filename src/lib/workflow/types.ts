@@ -193,7 +193,6 @@ export type WorkflowMeta = {
   failedAt: string;
   cancelledAt: string;
   partitionKey: string;
-  partitionSlot: string;
   // Set by cancel() while the execution is pending/running; cleared by resume.
   cancelRequestedAt: string;
 };
@@ -420,7 +419,6 @@ export type ExecuteStepInput = {
   attempt: number;
   handler: StepHandler<unknown, unknown>;
   rawInput: string;
-  partitionKey: string;
   run: LeaseRun;
 };
 
@@ -430,7 +428,6 @@ export type HandleStepFailureInput = {
   stepName: string;
   attempt: number;
   rawInput: string;
-  partitionKey: string;
   stepError: Error;
   run: LeaseRun;
 };
@@ -440,7 +437,6 @@ export type FailAfterStepExhaustedInput = {
   stepName: string;
   attempt: number;
   rawInput: string;
-  partitionKey: string;
   stepError: Error;
   errorHistory: WorkflowStepErrorRecord[];
   run: LeaseRun;
@@ -480,7 +476,6 @@ export type CompensationStartResult =
 export type RunCompensationPhaseInput = {
   executionId: string;
   rawInput: string;
-  partitionKey: string;
   run: LeaseRun;
 };
 
@@ -492,7 +487,6 @@ export type ExecuteCompensationInput = {
   result: unknown;
   compensate: StepCompensateHandler<unknown, unknown>;
   rawInput: string;
-  partitionKey: string;
   run: LeaseRun;
 };
 
@@ -501,8 +495,7 @@ export type FinishCompensationInput = {
   reason: "failed" | "cancelled";
   error: string | null;
   rawInput: string;
-  partitionKey: string;
-  token: string;
+  run: LeaseRun;
 };
 
 export type FailFromCompensationInput = {
@@ -512,8 +505,7 @@ export type FailFromCompensationInput = {
   error: Error;
   errorHistory: WorkflowStepErrorRecord[];
   rawInput: string;
-  partitionKey: string;
-  token: string;
+  run: LeaseRun;
 };
 
 export type CollectErrorHistoryInput = {
@@ -525,34 +517,26 @@ export type CollectErrorHistoryInput = {
   failedType: "StepFailed" | "CompensationFailed";
 };
 
-export type ClearExecutionLocalStateInput = {
-  executionId: string;
-  partitionKey: string;
-};
-
 export type CompleteExecutionInput = {
   executionId: string;
   events: HistoryEvent[];
   result: string;
   rawInput: string;
-  partitionKey: string;
-  token: string;
+  run: LeaseRun;
 };
 
 export type FailExecutionInput = {
   executionId: string;
   events: HistoryEvent[];
   error: string;
-  partitionKey: string;
-  token: string;
+  run: LeaseRun;
 };
 
 export type CancelExecutionInput = {
   executionId: string;
   events: HistoryEvent[];
   rawInput: string;
-  partitionKey: string;
-  token: string;
+  run: LeaseRun;
 };
 
 export type CommitTerminalInput = {
@@ -560,46 +544,17 @@ export type CommitTerminalInput = {
   events: HistoryEvent[];
   fields: Partial<WorkflowMeta>;
   endedAt: number;
-  partitionKey: string;
-  token: string;
+  run: LeaseRun;
 };
 
-export type PartitionKeyInput = {
-  name: string;
-  partitionKey: string;
-  slot: number;
-};
-
-export type ExtendLeaseInput = {
+export type LeaseInput = {
   executionId: string;
   token: string;
   ttlMs: number;
-};
-
-export type ClaimPartitionInput = {
-  partitionKey: string;
-  executionId: string;
-  concurrency: number;
-  ttlMs: number;
-};
-
-export type RefreshPartitionInput = {
-  partitionKey: string;
-  slot: number;
-  executionId: string;
-  ttlMs: number;
-};
-
-export type ReleasePartitionInput = {
-  partitionKey: string;
-  slot: number;
-  executionId: string;
-};
-
-export type ReleaseOwnedPartitionsInput = {
-  partitionKey: string;
-  executionId: string;
-  concurrency: number;
+  // Capacity key of the slot that follows the lease ("*" by default).
+  capacityKey?: string;
+  // Release only: next due time; a held slot is kept until dueAt + ttlMs.
+  dueAt?: number;
 };
 
 export type CommitRetention = {
@@ -614,6 +569,8 @@ export type CommitInput = {
   fields?: Partial<WorkflowMeta>;
   // Next time the execution needs advancing (ignored when terminal).
   dueAt?: number;
+  // Capacity key whose slot a terminal commit frees ("*" by default).
+  capacityKey?: string;
   // Present only for terminal transitions: leave the due set + retention.
   retention?: CommitRetention;
 };
@@ -640,6 +597,8 @@ export type LeaseRun = {
   cancelRequested: boolean;
   // Due score committed for this execution; released as-is when set.
   dueAt?: number;
+  // Capacity key this run was admitted under.
+  capacityKey?: string;
 };
 
 export type RunCommitInput = Omit<CommitInput, "executionId" | "leaseToken">;
@@ -653,11 +612,4 @@ export type ResumeExecutionInput = {
 export type RedisZMember = {
   score: number;
   member: string;
-};
-
-export type EnsureCapacityInput = {
-  executionId: string;
-  token: string;
-  partitionKey: string;
-  meta: WorkflowMeta;
 };

@@ -3,28 +3,14 @@ import { WorkflowStoreError } from "./errors.js";
 import { toJson } from "./json.js";
 import type {
   CancelRequestResult,
-  ClaimPartitionInput,
   CommitInput,
   CommitResult,
-  ExtendLeaseInput,
   HistoryEvent,
-  PartitionKeyInput,
-  RefreshPartitionInput,
-  ReleaseOwnedPartitionsInput,
-  ReleasePartitionInput,
+  LeaseInput,
   ResumeExecutionInput,
   WorkflowMeta,
   WorkflowStatus,
 } from "./types.js";
-
-export const RELEASE_IF_OWNER =
-  "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end";
-
-export const EXTEND_IF_OWNER =
-  "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('PEXPIRE', KEYS[1], ARGV[2]) else return 0 end";
-
-export const CLAIM_OR_REOWN_PARTITION =
-  "if redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2], 'NX') then return 1 end if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('PEXPIRE', KEYS[1], ARGV[2]) return 1 end return 0";
 
 // KEYS: due
 // ARGV: now, lockTTL, token, lease key prefix, meta key prefix
@@ -35,18 +21,28 @@ export const CLAIM_OR_REOWN_PARTITION =
 export const CLAIM_DUE =
   "local now=tonumber(ARGV[1]) local ttl=tonumber(ARGV[2]) for _, id in ipairs(redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', now, 'LIMIT', 0, 10)) do local lease=ARGV[4] .. id if redis.call('EXISTS', ARGV[5] .. id) == 0 then redis.call('ZREM', KEYS[1], id) elseif redis.call('SET', lease, ARGV[3], 'PX', ttl, 'NX') then redis.call('ZADD', KEYS[1], now + ttl, id) return id else local left=redis.call('PTTL', lease) if left < 0 then left=ttl end redis.call('ZADD', KEYS[1], now + left, id) end end return false";
 
-// KEYS: lease, due
-// ARGV: token, lockTTL, executionId, due score
-// Heartbeat: extends the lease and the visibility timeout together.
-export const EXTEND_LEASE =
-  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('PEXPIRE', KEYS[1], ARGV[2]) redis.call('ZADD', KEYS[2], 'XX', ARGV[4], ARGV[3]) return 1";
+// KEYS: capacity
+// ARGV: executionId, limit, now, expiry
+// Counting semaphore: drops expired holders, then refreshes this execution's
+// slot or takes a free one. Returns 1 when admitted, 0 when the key is full.
+export const ACQUIRE_CAPACITY =
+  "redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[3]) if redis.call('ZSCORE', KEYS[1], ARGV[1]) or redis.call('ZCARD', KEYS[1]) < tonumber(ARGV[2]) then redis.call('ZADD', KEYS[1], ARGV[4], ARGV[1]) return 1 end return 0";
 
-// KEYS: lease, due
-// ARGV: token, executionId, due score ("" leaves it)
+// KEYS: lease, due, capacity
+// ARGV: token, lockTTL, executionId, now + lockTTL
+// Heartbeat: extends the lease, the visibility timeout and the capacity slot
+// (if held) together.
+export const EXTEND_LEASE =
+  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('PEXPIRE', KEYS[1], ARGV[2]) redis.call('ZADD', KEYS[2], 'XX', ARGV[4], ARGV[3]) redis.call('ZADD', KEYS[3], 'XX', ARGV[4], ARGV[3]) return 1";
+
+// KEYS: lease, due, capacity
+// ARGV: token, executionId, due score ("" leaves it), slot expiry
 // Releases the lease and lowers (never raises) the due score, so a cancel
-// that lowered it after the last commit is kept.
+// that lowered it after the last commit is kept. A held capacity slot is kept
+// until the slot expiry (due + lockTTL), so a sleeping execution keeps it with
+// nobody refreshing it.
 export const RELEASE_LEASE =
-  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) if ARGV[3] ~= '' then redis.call('ZADD', KEYS[2], 'XX', 'LT', ARGV[3], ARGV[2]) end return 1";
+  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) if ARGV[3] ~= '' then redis.call('ZADD', KEYS[2], 'XX', 'LT', ARGV[3], ARGV[2]) redis.call('ZADD', KEYS[3], 'XX', ARGV[4], ARGV[2]) end return 1";
 
 // KEYS: meta, history, due, terminal
 // ARGV: executionId, WorkflowStarted payload, now, meta field/value pairs...
@@ -57,18 +53,18 @@ export const RELEASE_LEASE =
 export const CREATE_EXECUTION =
   "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end redis.call('HSET', KEYS[1], unpack(ARGV, 4)) redis.call('RPUSH', KEYS[2], ARGV[2]) redis.call('ZADD', KEYS[3], ARGV[3], ARGV[1]) redis.call('ZREM', KEYS[4], ARGV[1]) return 1";
 
-// KEYS: lease, history, meta, due, terminal
+// KEYS: lease, history, meta, due, terminal, capacity
 // ARGV: token, executionId, event count n, due, ttlMs, trackedAt,
 //       n event payloads, meta field/value pairs...
 // Lease-fenced write of history events + meta fields. due "" leaves the due
 // score, a number sets it, "done" marks a terminal transition: leave the due
-// set and apply retention (ttlMs "" keeps keys, "0" unlinks
+// set and the capacity key and apply retention (ttlMs "" keeps keys, "0" unlinks
 // meta/history/lease, otherwise PEXPIREs meta + history; trackedAt "" skips
 // the retentionMax zset).
 // Returns 0 when the lease is not held, 2 when committed and meta carries a
 // cancel request, 1 when committed otherwise.
 export const COMMIT =
-  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end local n=tonumber(ARGV[3]) for i=7,6+n do redis.call('RPUSH', KEYS[2], ARGV[i]) end if #ARGV > 6+n then redis.call('HSET', KEYS[3], unpack(ARGV, 7+n)) end local r=1 local c=redis.call('HGET', KEYS[3], 'cancelRequestedAt') if c and c ~= '' then r=2 end if ARGV[4] == '' then return r end if ARGV[4] ~= 'done' then redis.call('ZADD', KEYS[4], 'XX', ARGV[4], ARGV[2]) return r end redis.call('ZREM', KEYS[4], ARGV[2]) local ttl=tonumber(ARGV[5]) if ttl then if ttl <= 0 then redis.call('UNLINK', KEYS[3], KEYS[2], KEYS[1]) redis.call('ZREM', KEYS[5], ARGV[2]) return r end redis.call('PEXPIRE', KEYS[3], ARGV[5]) redis.call('PEXPIRE', KEYS[2], ARGV[5]) end if ARGV[6] ~= '' then redis.call('ZADD', KEYS[5], ARGV[6], ARGV[2]) end return r";
+  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end local n=tonumber(ARGV[3]) for i=7,6+n do redis.call('RPUSH', KEYS[2], ARGV[i]) end if #ARGV > 6+n then redis.call('HSET', KEYS[3], unpack(ARGV, 7+n)) end local r=1 local c=redis.call('HGET', KEYS[3], 'cancelRequestedAt') if c and c ~= '' then r=2 end if ARGV[4] == '' then return r end if ARGV[4] ~= 'done' then redis.call('ZADD', KEYS[4], 'XX', ARGV[4], ARGV[2]) return r end redis.call('ZREM', KEYS[4], ARGV[2]) redis.call('ZREM', KEYS[6], ARGV[2]) local ttl=tonumber(ARGV[5]) if ttl then if ttl <= 0 then redis.call('UNLINK', KEYS[3], KEYS[2], KEYS[1]) redis.call('ZREM', KEYS[5], ARGV[2]) return r end redis.call('PEXPIRE', KEYS[3], ARGV[5]) redis.call('PEXPIRE', KEYS[2], ARGV[5]) end if ARGV[6] ~= '' then redis.call('ZADD', KEYS[5], ARGV[6], ARGV[2]) end return r";
 
 // KEYS: meta, history, due, terminal
 // ARGV: executionId, now, expected history length, event payloads...
@@ -102,11 +98,7 @@ export const keys = {
     `workflow:${name}:lease:${executionId}`,
   due: (name: string) => `workflow:${name}:due`,
   terminal: (name: string) => `workflow:${name}:terminal`,
-  partition: (input: PartitionKeyInput) => {
-    const { name, partitionKey, slot } = input;
-
-    return `workflow:${name}:partition:${partitionKey}:${slot}`;
-  },
+  capacity: (name: string, key: string) => `workflow:${name}:capacity:${key}`,
 };
 
 const metaEntries = (fields: Partial<WorkflowMeta>) => {
@@ -129,7 +121,7 @@ export class WorkflowStore {
 
   public async commit(input: CommitInput): Promise<CommitResult> {
     const { executionId, leaseToken, events = [], fields = {} } = input;
-    const { retention, dueAt } = input;
+    const { retention, dueAt, capacityKey = "*" } = input;
     const payloads = events.map((event) =>
       toJson(event, `history event for ${executionId}`),
     );
@@ -156,12 +148,13 @@ export class WorkflowStore {
     const [error, result] = await mightThrow(
       this.redis.send("EVAL", [
         COMMIT,
-        "5",
+        "6",
         keys.lease(this.name, executionId),
         keys.history(this.name, executionId),
         keys.meta(this.name, executionId),
         keys.due(this.name),
         keys.terminal(this.name),
+        keys.capacity(this.name, capacityKey),
         leaseToken,
         executionId,
         String(payloads.length),
@@ -301,15 +294,16 @@ export class WorkflowStore {
     return executionId;
   }
 
-  public async extendLease(input: ExtendLeaseInput) {
-    const { executionId, token, ttlMs } = input;
+  public async extendLease(input: LeaseInput) {
+    const { executionId, token, ttlMs, capacityKey = "*" } = input;
 
     const [error, result] = await mightThrow(
       this.redis.send("EVAL", [
         EXTEND_LEASE,
-        "2",
+        "3",
         keys.lease(this.name, executionId),
         keys.due(this.name),
+        keys.capacity(this.name, capacityKey),
         token,
         String(ttlMs),
         executionId,
@@ -324,21 +318,22 @@ export class WorkflowStore {
     return Number(result) === 1;
   }
 
-  // dueAt lowers the due score; omit it to keep the visibility timeout.
-  public async releaseLease(
-    executionId: string,
-    token: string,
-    dueAt?: number,
-  ) {
+  // dueAt lowers the due score and keeps a held slot until dueAt + ttlMs;
+  // omit it to keep the visibility timeout.
+  public async releaseLease(input: LeaseInput) {
+    const { executionId, token, ttlMs, capacityKey = "*", dueAt } = input;
+
     const [error] = await mightThrow(
       this.redis.send("EVAL", [
         RELEASE_LEASE,
-        "2",
+        "3",
         keys.lease(this.name, executionId),
         keys.due(this.name),
+        keys.capacity(this.name, capacityKey),
         token,
         executionId,
         dueAt === undefined ? "" : String(dueAt),
+        dueAt === undefined ? "" : String(dueAt + ttlMs),
       ]),
     );
 
@@ -347,6 +342,33 @@ export class WorkflowStore {
         `Unable to release lease for ${executionId}`,
       );
     }
+  }
+
+  public async acquireCapacity(
+    capacityKey: string,
+    executionId: string,
+    limit: number,
+    ttlMs: number,
+  ) {
+    const now = Date.now();
+
+    const [error, result] = await mightThrow(
+      this.redis.send("EVAL", [
+        ACQUIRE_CAPACITY,
+        "1",
+        keys.capacity(this.name, capacityKey),
+        executionId,
+        String(limit),
+        String(now),
+        String(now + ttlMs),
+      ]),
+    );
+
+    if (error) {
+      throw new WorkflowStoreError(`Unable to acquire capacity ${capacityKey}`);
+    }
+
+    return Number(result) === 1;
   }
 
   public async getLease(executionId: string) {
@@ -359,84 +381,6 @@ export class WorkflowStore {
     }
 
     return value;
-  }
-
-  public async claimPartition(input: ClaimPartitionInput) {
-    const { partitionKey, executionId, concurrency, ttlMs } = input;
-
-    for (let slot = 0; slot < concurrency; slot++) {
-      const key = keys.partition({ name: this.name, partitionKey, slot });
-      const [error, result] = await mightThrow(
-        this.redis.send("EVAL", [
-          CLAIM_OR_REOWN_PARTITION,
-          "1",
-          key,
-          executionId,
-          String(ttlMs),
-        ]),
-      );
-
-      if (error) {
-        throw new WorkflowStoreError(
-          `Unable to claim partition ${partitionKey}`,
-        );
-      }
-
-      if (Number(result) === 1) {
-        return slot;
-      }
-    }
-
-    return null;
-  }
-
-  public async refreshPartition(input: RefreshPartitionInput) {
-    const { partitionKey, slot, executionId, ttlMs } = input;
-
-    const [error, result] = await mightThrow(
-      this.redis.send("EVAL", [
-        EXTEND_IF_OWNER,
-        "1",
-        keys.partition({ name: this.name, partitionKey, slot }),
-        executionId,
-        String(ttlMs),
-      ]),
-    );
-
-    if (error) {
-      throw new WorkflowStoreError(
-        `Unable to refresh partition ${partitionKey}`,
-      );
-    }
-
-    return Number(result) === 1;
-  }
-
-  public async releasePartition(input: ReleasePartitionInput) {
-    const { partitionKey, slot, executionId } = input;
-
-    const [error] = await mightThrow(
-      this.redis.send("EVAL", [
-        RELEASE_IF_OWNER,
-        "1",
-        keys.partition({ name: this.name, partitionKey, slot }),
-        executionId,
-      ]),
-    );
-
-    if (error) {
-      throw new WorkflowStoreError(
-        `Unable to release partition ${partitionKey}`,
-      );
-    }
-  }
-
-  public async releaseOwnedPartitions(input: ReleaseOwnedPartitionsInput) {
-    const { partitionKey, executionId, concurrency } = input;
-
-    for (let slot = 0; slot < concurrency; slot++) {
-      await this.releasePartition({ partitionKey, slot, executionId });
-    }
   }
 
   public async resumeExecution(input: ResumeExecutionInput) {

@@ -12,7 +12,6 @@ import type {
   AdvanceInput,
   BackoffDelayInput,
   CancelExecutionInput,
-  ClearExecutionLocalStateInput,
   CollectCompensationsInput,
   CollectErrorHistoryInput,
   CommitRetention,
@@ -21,7 +20,6 @@ import type {
   CompensationItem,
   CompensationStartResult,
   CompleteExecutionInput,
-  EnsureCapacityInput,
   ExecuteCompensationInput,
   ExecuteStepInput,
   FailAfterStepExhaustedInput,
@@ -497,7 +495,6 @@ export class WorkflowEngine<TInput, TResult> {
   private readonly aborts = new Map<string, AbortController>();
   private readonly compensationAborts = new Map<string, AbortController>();
   private readonly compensating = new Set<string>();
-  private readonly capacitySlots = new Map<string, Map<string, number>>();
   private readonly lostLeases = new Set<string>();
 
   public constructor(
@@ -543,8 +540,6 @@ export class WorkflowEngine<TInput, TResult> {
     for (let i = 0; i < this.concurrency; i++) {
       void this.workflowLoop();
     }
-
-    void this.partitionLoop();
   }
 
   public async stop() {
@@ -616,41 +611,23 @@ export class WorkflowEngine<TInput, TResult> {
 
       // After stop(), hand everything but compensate unwind back at once.
       if (!this.shouldDrainExecution(executionId)) {
-        await this.store.releaseLease(executionId, token, Date.now());
+        await this.store.releaseLease({
+          executionId,
+          token,
+          ttlMs: this.lockTTL,
+          dueAt: Date.now(),
+        });
         await sleepMs(this.pollInterval);
         continue;
       }
 
+      // Each of the `concurrency` pollers runs one execution at a time, so a
+      // process never has more than `concurrency` handlers in flight.
       this.active++;
 
-      const run = mightThrow(this.runClaimed(executionId, token)).finally(
-        () => {
-          this.active--;
-        },
-      );
+      await mightThrow(this.runClaimed(executionId, token));
 
-      if (this.options.partitionBy) {
-        void run;
-        continue;
-      }
-
-      await run;
-    }
-  }
-
-  // Keeps capacity slots alive for executions this process holds while no
-  // lease is held (durable sleep, retry backoff).
-  private async partitionLoop() {
-    while (this.running) {
-      this.active++;
-
-      try {
-        await mightThrow(this.refreshHeldPartitions());
-      } finally {
-        this.active--;
-      }
-
-      await sleepMs(Math.max(this.pollInterval, 200));
+      this.active--;
     }
   }
 
@@ -662,15 +639,11 @@ export class WorkflowEngine<TInput, TResult> {
     };
 
     this.lostLeases.delete(executionId);
-    const heartbeat = this.startHeartbeat(executionId, token);
+    const heartbeat = this.startHeartbeat(executionId, run);
     const [error] = await mightThrow(this.runExecution(executionId, run));
 
     clearInterval(heartbeat);
-
-    if (this.lostLeases.has(executionId)) {
-      this.lostLeases.delete(executionId);
-      this.capacitySlots.delete(executionId);
-    }
+    this.lostLeases.delete(executionId);
 
     // Without a committed due time the execution is due again after one poll
     // interval (never a hot loop). After an error this worker is still alive,
@@ -683,7 +656,13 @@ export class WorkflowEngine<TInput, TResult> {
       ? retryAt
       : (run.dueAt ?? Date.now() + this.pollInterval);
 
-    await this.store.releaseLease(executionId, token, dueAt);
+    await this.store.releaseLease({
+      executionId,
+      token,
+      ttlMs: this.lockTTL,
+      capacityKey: run.capacityKey,
+      dueAt,
+    });
   }
 
   private async ownsLease(executionId: string, token: string) {
@@ -715,116 +694,9 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private capacityKey(partitionKey: string) {
-    if (this.options.partitionBy) {
-      return partitionKey || GLOBAL_CAPACITY_KEY;
-    }
+    if (!this.options.partitionBy) return GLOBAL_CAPACITY_KEY;
 
-    return GLOBAL_CAPACITY_KEY;
-  }
-
-  private parseSlot(raw: string | undefined) {
-    if (!raw) return undefined;
-
-    const slot = Number(raw);
-
-    if (!Number.isInteger(slot)) return undefined;
-
-    if (slot < 0) return undefined;
-
-    return slot;
-  }
-
-  private slotsFromMeta(meta: WorkflowMeta | null, partitionKey: string) {
-    const slots = new Map<string, number>();
-
-    if (!meta) return slots;
-
-    const partitionSlot = this.parseSlot(meta.partitionSlot);
-
-    if (partitionSlot !== undefined) {
-      const key = this.capacityKey(
-        partitionKey || meta.partitionKey || GLOBAL_CAPACITY_KEY,
-      );
-      slots.set(key, partitionSlot);
-    }
-
-    return slots;
-  }
-
-  private heldSlots(executionId: string, meta: WorkflowMeta | null) {
-    const local = this.capacitySlots.get(executionId);
-
-    if (local && local.size > 0) return local;
-
-    return this.slotsFromMeta(meta, meta?.partitionKey ?? "");
-  }
-
-  private async ensureCapacity(input: EnsureCapacityInput) {
-    const { executionId, token, partitionKey, meta } = input;
-    const held = new Map(this.heldSlots(executionId, meta));
-
-    const persistHeld = () => {
-      if (held.size === 0) {
-        this.capacitySlots.delete(executionId);
-        return;
-      }
-
-      this.capacitySlots.set(executionId, held);
-    };
-
-    const key = this.capacityKey(partitionKey);
-    let slot = held.get(key);
-
-    if (
-      slot !== undefined &&
-      !(await this.store.refreshPartition({
-        partitionKey: key,
-        slot,
-        executionId,
-        ttlMs: this.lockTTL,
-      }))
-    ) {
-      held.delete(key);
-      slot = undefined;
-    }
-
-    if (slot === undefined) {
-      const claimed = await this.store.claimPartition({
-        partitionKey: key,
-        executionId,
-        concurrency: this.concurrency,
-        ttlMs: this.lockTTL,
-      });
-
-      if (claimed === null) {
-        persistHeld();
-        return null;
-      }
-
-      const recorded = await this.store.commit({
-        executionId,
-        leaseToken: token,
-        fields: { partitionSlot: String(claimed) },
-      });
-
-      if (!recorded.committed) {
-        // Meta not durable. Release the Redis claim so refresh cannot pin the slot.
-        await this.store.releasePartition({
-          partitionKey: key,
-          slot: claimed,
-          executionId,
-        });
-        persistHeld();
-        return null;
-      }
-
-      held.set(key, claimed);
-    } else {
-      held.set(key, slot);
-    }
-
-    persistHeld();
-    return held.get(key) ?? null;
+    return partitionKey || GLOBAL_CAPACITY_KEY;
   }
 
   // Lease-holder write: commits, then applies the events to the in-memory
@@ -838,6 +710,7 @@ export class WorkflowEngine<TInput, TResult> {
     const result = await this.store.commit({
       executionId,
       leaseToken: run.token,
+      capacityKey: run.capacityKey,
       ...input,
     });
 
@@ -877,22 +750,20 @@ export class WorkflowEngine<TInput, TResult> {
     if (!meta) return;
 
     if (isTerminalStatus(meta.status)) {
-      await this.clearExecutionLocalState({
-        executionId,
-        partitionKey: meta.partitionKey,
-      });
+      this.clearExecutionLocalState(executionId);
       return;
     }
 
-    const partitionKey = meta.partitionKey || GLOBAL_CAPACITY_KEY;
-    const partitionSlot = await this.ensureCapacity({
-      executionId,
-      token,
-      partitionKey,
-      meta,
-    });
+    run.capacityKey = this.capacityKey(meta.partitionKey);
 
-    if (partitionSlot == null) {
+    const admitted = await this.store.acquireCapacity(
+      run.capacityKey,
+      executionId,
+      this.concurrency,
+      this.lockTTL,
+    );
+
+    if (!admitted) {
       run.dueAt = Date.now() + this.pollInterval;
       return;
     }
@@ -936,7 +807,6 @@ export class WorkflowEngine<TInput, TResult> {
         const cont = await this.runCompensationPhase({
           executionId,
           rawInput: meta.input,
-          partitionKey,
           run,
         });
 
@@ -985,7 +855,6 @@ export class WorkflowEngine<TInput, TResult> {
           attempt: decision.attempt,
           handler: decision.handler,
           rawInput: meta.input,
-          partitionKey,
           run,
         });
 
@@ -1008,8 +877,7 @@ export class WorkflowEngine<TInput, TResult> {
           events: decision.events,
           result: decision.result,
           rawInput: meta.input,
-          partitionKey,
-          token,
+          run,
         });
         return;
       }
@@ -1028,8 +896,7 @@ export class WorkflowEngine<TInput, TResult> {
           executionId,
           events: decision.events,
           error: decision.error,
-          partitionKey,
-          token,
+          run,
         });
         return;
       }
@@ -1054,8 +921,7 @@ export class WorkflowEngine<TInput, TResult> {
             },
           ],
           error: compensating.error,
-          partitionKey,
-          token,
+          run,
         });
         return;
       }
@@ -1064,24 +930,15 @@ export class WorkflowEngine<TInput, TResult> {
         executionId,
         events: decision.events,
         rawInput: meta.input,
-        partitionKey,
-        token,
+        run,
       });
       return;
     }
   }
 
   private async executeStep(input: ExecuteStepInput) {
-    const {
-      executionId,
-      stepId,
-      stepName,
-      attempt,
-      handler,
-      rawInput,
-      partitionKey,
-      run,
-    } = input;
+    const { executionId, stepId, stepName, attempt, handler, rawInput, run } =
+      input;
     const controller = this.abortController(executionId);
 
     const started = await this.commitRun(executionId, run, {
@@ -1130,7 +987,6 @@ export class WorkflowEngine<TInput, TResult> {
           stepName,
           attempt,
           rawInput,
-          partitionKey,
           stepError: new NonRetryableStepError(serializeError.message),
           run,
         });
@@ -1162,23 +1018,14 @@ export class WorkflowEngine<TInput, TResult> {
       stepName,
       attempt,
       rawInput,
-      partitionKey,
       stepError,
       run,
     });
   }
 
   private async handleStepFailure(input: HandleStepFailureInput) {
-    const {
-      executionId,
-      stepId,
-      stepName,
-      attempt,
-      rawInput,
-      partitionKey,
-      stepError,
-      run,
-    } = input;
+    const { executionId, stepId, stepName, attempt, rawInput, stepError, run } =
+      input;
     const message = stepError.message;
     const retryable = !isNonRetryableStepError(stepError);
     const now = Date.now();
@@ -1236,7 +1083,6 @@ export class WorkflowEngine<TInput, TResult> {
       stepName,
       attempt,
       rawInput,
-      partitionKey,
       stepError,
       errorHistory,
       run,
@@ -1251,7 +1097,6 @@ export class WorkflowEngine<TInput, TResult> {
       stepName,
       attempt,
       rawInput,
-      partitionKey,
       stepError,
       errorHistory,
       run,
@@ -1289,8 +1134,7 @@ export class WorkflowEngine<TInput, TResult> {
         },
       ],
       error: message,
-      partitionKey,
-      token: run.token,
+      run,
     });
 
     return false;
@@ -1351,8 +1195,8 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private async runCompensationPhase(input: RunCompensationPhaseInput) {
-    const { executionId, rawInput, partitionKey, run } = input;
-    const { view, token } = run;
+    const { executionId, rawInput, run } = input;
+    const { view } = run;
     const phase = view.compensation;
 
     if (!phase) return false;
@@ -1373,8 +1217,7 @@ export class WorkflowEngine<TInput, TResult> {
         reason: "failed",
         error: collectError.message,
         rawInput,
-        partitionKey,
-        token,
+        run,
       });
       return false;
     }
@@ -1392,8 +1235,7 @@ export class WorkflowEngine<TInput, TResult> {
         reason: "failed",
         error: "compensation handlers missing after CompensationStarted",
         rawInput,
-        partitionKey,
-        token,
+        run,
       });
       return false;
     }
@@ -1431,8 +1273,7 @@ export class WorkflowEngine<TInput, TResult> {
             error: new Error(state.error),
             errorHistory,
             rawInput,
-            partitionKey,
-            token,
+            run,
           });
           return false;
         }
@@ -1471,7 +1312,6 @@ export class WorkflowEngine<TInput, TResult> {
         result: item.result,
         compensate: item.compensate,
         rawInput,
-        partitionKey,
         run,
       });
     }
@@ -1481,8 +1321,7 @@ export class WorkflowEngine<TInput, TResult> {
       reason: phase.reason,
       error: phase.error,
       rawInput,
-      partitionKey,
-      token,
+      run,
     });
 
     return false;
@@ -1497,7 +1336,6 @@ export class WorkflowEngine<TInput, TResult> {
       result,
       compensate,
       rawInput,
-      partitionKey,
       run,
     } = input;
     const { token } = run;
@@ -1571,8 +1409,7 @@ export class WorkflowEngine<TInput, TResult> {
       error: compensateError,
       errorHistory,
       rawInput,
-      partitionKey,
-      token,
+      run,
     });
 
     return false;
@@ -1586,8 +1423,7 @@ export class WorkflowEngine<TInput, TResult> {
       error,
       errorHistory,
       rawInput,
-      partitionKey,
-      token,
+      run,
     } = input;
     const workflowInput = fromJson<TInput>(rawInput, "input");
 
@@ -1607,21 +1443,19 @@ export class WorkflowEngine<TInput, TResult> {
       reason: "failed",
       error: error.message,
       rawInput,
-      partitionKey,
-      token,
+      run,
     });
   }
 
   private async finishCompensation(input: FinishCompensationInput) {
-    const { executionId, reason, error, rawInput, partitionKey, token } = input;
+    const { executionId, reason, error, rawInput, run } = input;
 
     if (reason === "cancelled") {
       await this.cancelExecution({
         executionId,
         events: [{ type: "WorkflowCancelled", timestamp: Date.now() }],
         rawInput,
-        partitionKey,
-        token,
+        run,
       });
       return;
     }
@@ -1638,8 +1472,7 @@ export class WorkflowEngine<TInput, TResult> {
         },
       ],
       error: message,
-      partitionKey,
-      token,
+      run,
     });
   }
 
@@ -1682,39 +1515,7 @@ export class WorkflowEngine<TInput, TResult> {
     return history;
   }
 
-  private async refreshHeldPartitions() {
-    for (const [executionId, held] of this.capacitySlots) {
-      const meta = await this.store.getMeta(executionId);
-
-      if (!meta) {
-        this.capacitySlots.delete(executionId);
-        continue;
-      }
-
-      if (isTerminalStatus(meta.status)) {
-        await this.clearExecutionLocalState({
-          executionId,
-          partitionKey: meta.partitionKey,
-        });
-        continue;
-      }
-
-      for (const [partitionKey, slot] of held) {
-        const refreshed = await this.store.refreshPartition({
-          partitionKey,
-          slot,
-          executionId,
-          ttlMs: this.lockTTL,
-        });
-
-        if (!refreshed) held.delete(partitionKey);
-      }
-
-      if (held.size === 0) this.capacitySlots.delete(executionId);
-    }
-  }
-
-  private startHeartbeat(executionId: string, token: string) {
+  private startHeartbeat(executionId: string, run: LeaseRun) {
     const interval = Math.max(50, Math.floor(this.lockTTL * HEARTBEAT_RATIO));
 
     return setInterval(() => {
@@ -1722,65 +1523,24 @@ export class WorkflowEngine<TInput, TResult> {
         const [error, ok] = await mightThrow(
           this.store.extendLease({
             executionId,
-            token,
+            token: run.token,
             ttlMs: this.lockTTL,
+            capacityKey: run.capacityKey,
           }),
         );
 
         if (error || !ok) {
           this.lostLeases.add(executionId);
-          this.capacitySlots.delete(executionId);
           this.aborts.get(executionId)?.abort();
-          return;
         }
-
-        const held = this.capacitySlots.get(executionId);
-
-        if (!held) return;
-
-        for (const [partitionKey, slot] of held) {
-          const [refreshError, refreshed] = await mightThrow(
-            this.store.refreshPartition({
-              partitionKey,
-              slot,
-              executionId,
-              ttlMs: this.lockTTL,
-            }),
-          );
-
-          if (refreshError) return;
-
-          if (!refreshed) held.delete(partitionKey);
-        }
-
-        if (held.size === 0) this.capacitySlots.delete(executionId);
       })();
     }, interval);
   }
 
-  private async clearExecutionLocalState(input: ClearExecutionLocalStateInput) {
-    const { executionId, partitionKey } = input;
-    const meta = await this.store.getMeta(executionId);
-    const held = this.heldSlots(executionId, meta);
-    const key = partitionKey || meta?.partitionKey || GLOBAL_CAPACITY_KEY;
-    const keys = new Set([this.capacityKey(key)]);
-
-    for (const heldKey of held.keys()) {
-      keys.add(heldKey);
-    }
-
-    for (const capacityKey of keys) {
-      await this.store.releaseOwnedPartitions({
-        partitionKey: capacityKey,
-        executionId,
-        concurrency: this.concurrency,
-      });
-    }
-
+  private clearExecutionLocalState(executionId: string) {
     this.aborts.delete(executionId);
     this.compensationAborts.delete(executionId);
     this.compensating.delete(executionId);
-    this.capacitySlots.delete(executionId);
   }
 
   private retention(endedAt: number) {
@@ -1800,30 +1560,19 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   // One lease-fenced script appends the terminal event, writes terminal meta,
-  // leaves the due set and applies retention. Partition slots and local
-  // state are released afterwards; a crash in between only leaves the slot
-  // until its lockTTL expires.
+  // leaves the due set, frees the capacity slot and applies retention.
   private async commitTerminal(input: CommitTerminalInput) {
-    const { executionId, events, fields, endedAt, partitionKey, token } = input;
+    const { executionId, events, fields, endedAt, run } = input;
 
-    const committed = await this.store.commit({
-      executionId,
-      leaseToken: token,
+    const committed = await this.commitRun(executionId, run, {
       events,
-      fields: {
-        ...fields,
-        partitionSlot: "",
-        updatedAt: String(endedAt),
-      },
+      fields: { ...fields, updatedAt: String(endedAt) },
       retention: this.retention(endedAt),
     });
 
-    if (!committed.committed) return false;
+    if (!committed) return false;
 
-    await this.clearExecutionLocalState({
-      executionId,
-      partitionKey,
-    });
+    this.clearExecutionLocalState(executionId);
 
     return true;
   }
@@ -1838,8 +1587,7 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private async completeExecution(input: CompleteExecutionInput) {
-    const { executionId, events, result, rawInput, partitionKey, token } =
-      input;
+    const { executionId, events, result, rawInput, run } = input;
     const now = Date.now();
 
     const committed = await this.commitTerminal({
@@ -1852,8 +1600,7 @@ export class WorkflowEngine<TInput, TResult> {
         error: "",
       },
       endedAt: now,
-      partitionKey,
-      token,
+      run,
     });
 
     if (!committed) return;
@@ -1872,7 +1619,7 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private async failExecution(input: FailExecutionInput) {
-    const { executionId, events, error, partitionKey, token } = input;
+    const { executionId, events, error, run } = input;
     const now = Date.now();
 
     const committed = await this.commitTerminal({
@@ -1884,8 +1631,7 @@ export class WorkflowEngine<TInput, TResult> {
         failedAt: String(now),
       },
       endedAt: now,
-      partitionKey,
-      token,
+      run,
     });
 
     if (!committed) return;
@@ -1894,7 +1640,7 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private async cancelExecution(input: CancelExecutionInput) {
-    const { executionId, events, rawInput, partitionKey, token } = input;
+    const { executionId, events, rawInput, run } = input;
     const now = Date.now();
 
     const committed = await this.commitTerminal({
@@ -1906,8 +1652,7 @@ export class WorkflowEngine<TInput, TResult> {
         error: "",
       },
       endedAt: now,
-      partitionKey,
-      token,
+      run,
     });
 
     if (!committed) return;

@@ -16,7 +16,6 @@ const baseMeta = (name: string) =>
     failedAt: "",
     cancelledAt: "",
     partitionKey: "",
-    partitionSlot: "",
     cancelRequestedAt: "",
   }) satisfies WorkflowMeta;
 
@@ -41,7 +40,7 @@ const commitFailed = async (
     retention,
   });
 
-  await store.releaseLease(executionId, "owner");
+  await store.releaseLease({ executionId, token: "owner", ttlMs: 60_000 });
 
   return committed;
 };
@@ -150,16 +149,31 @@ describe("WorkflowStore", () => {
       }),
     ).toBe(true);
 
-    await store.releaseLease("e1", "t2", Date.now());
+    await store.releaseLease({
+      executionId: "e1",
+      token: "t2",
+      ttlMs: 60_000,
+      dueAt: Date.now(),
+    });
     expect(await store.getLease("e1")).toBe("t1");
 
-    await store.releaseLease("e1", "t1", Date.now());
+    await store.releaseLease({
+      executionId: "e1",
+      token: "t1",
+      ttlMs: 60_000,
+      dueAt: Date.now(),
+    });
     expect(await store.getLease("e1")).toBeNull();
     expect(await score("e1")).toBe(true);
 
     // Release only ever lowers the score: it stays at the claim's +60s.
     await store.claimDue("t3", 60_000);
-    await store.releaseLease("e1", "t3", Date.now() + 120_000);
+    await store.releaseLease({
+      executionId: "e1",
+      token: "t3",
+      ttlMs: 60_000,
+      dueAt: Date.now() + 120_000,
+    });
     expect(
       await redis.zrangebyscore(keys.due(name), 0, Date.now() + 60_000),
     ).toEqual(["e1"]);
@@ -184,59 +198,73 @@ describe("WorkflowStore", () => {
     expect(await dueIds(redis, name)).toEqual([executionId]);
   });
 
-  test("partition claim refresh reown and release", async () => {
-    const store = new WorkflowStore(createRedis(), "store-part");
+  test("acquireCapacity admits up to the limit, refreshes holders, drops expired", async () => {
+    const store = new WorkflowStore(createRedis(), "store-capacity");
 
-    const slot = await store.claimPartition({
-      partitionKey: "env-a",
-      executionId: "exec-a",
-      concurrency: 1,
+    expect(await store.acquireCapacity("k", "e1", 1, 60_000)).toBe(true);
+    expect(await store.acquireCapacity("k", "e2", 1, 60_000)).toBe(false);
+    expect(await store.acquireCapacity("k", "e2", 2, 60_000)).toBe(true);
+    // A holder re-acquiring is a refresh, even when the key is full.
+    expect(await store.acquireCapacity("k", "e1", 1, -1)).toBe(true);
+    // e1 now expired, so a full key at limit 2 frees up for e3.
+    expect(await store.acquireCapacity("k", "e3", 2, 60_000)).toBe(true);
+    expect(await store.acquireCapacity("other", "e4", 1, 60_000)).toBe(true);
+  });
+
+  test("terminal commit frees the capacity slot in the same call", async () => {
+    const redis = createRedis();
+    const name = "store-capacity-terminal";
+    const store = new WorkflowStore(redis, name);
+    const slots = () =>
+      redis.zrangebyscore(keys.capacity(name, "k"), -Infinity, Infinity);
+
+    await store.createExecution("e1", baseMeta(name));
+    await store.claimDue("owner", 60_000);
+    await store.acquireCapacity("k", "e1", 1, 60_000);
+
+    expect(await slots()).toEqual(["e1"]);
+
+    const sends: string[] = [];
+    const send = redis.send.bind(redis);
+    redis.send = async (command: string, args: string[]) => {
+      sends.push(command);
+      return send(command, args);
+    };
+
+    await store.commit({
+      executionId: "e1",
+      leaseToken: "owner",
+      capacityKey: "k",
+      events: [{ type: "WorkflowCompleted", result: '"ok"', timestamp: 2 }],
+      fields: { status: "completed", result: '"ok"' },
+      retention: {},
+    });
+
+    expect(sends).toEqual(["EVAL"]);
+    expect(await slots()).toEqual([]);
+  });
+
+  test("releasing with a due time keeps the slot until due + ttl", async () => {
+    const redis = createRedis();
+    const name = "store-capacity-release";
+    const store = new WorkflowStore(redis, name);
+    const dueAt = Date.now() + 10_000;
+    const slotsUntil = (at: number) =>
+      redis.zrangebyscore(keys.capacity(name, "k"), at, Infinity);
+
+    await store.createExecution("e1", baseMeta(name));
+    await store.claimDue("owner", 60_000);
+    await store.acquireCapacity("k", "e1", 1, 60_000);
+    await store.releaseLease({
+      executionId: "e1",
+      token: "owner",
       ttlMs: 60_000,
+      capacityKey: "k",
+      dueAt,
     });
 
-    expect(slot).toBe(0);
-
-    expect(
-      await store.claimPartition({
-        partitionKey: "env-a",
-        executionId: "exec-b",
-        concurrency: 1,
-        ttlMs: 60_000,
-      }),
-    ).toBeNull();
-
-    expect(
-      await store.refreshPartition({
-        partitionKey: "env-a",
-        slot: 0,
-        executionId: "exec-a",
-        ttlMs: 60_000,
-      }),
-    ).toBe(true);
-
-    expect(
-      await store.claimPartition({
-        partitionKey: "env-a",
-        executionId: "exec-a",
-        concurrency: 1,
-        ttlMs: 60_000,
-      }),
-    ).toBe(0);
-
-    await store.releasePartition({
-      partitionKey: "env-a",
-      slot: 0,
-      executionId: "exec-a",
-    });
-
-    expect(
-      await store.claimPartition({
-        partitionKey: "env-a",
-        executionId: "exec-b",
-        concurrency: 1,
-        ttlMs: 60_000,
-      }),
-    ).toBe(0);
+    expect(await slotsUntil(dueAt + 60_000)).toEqual(["e1"]);
+    expect(await slotsUntil(dueAt + 60_001)).toEqual([]);
   });
 
   test("commit writes events and meta only while holding the lease", async () => {
@@ -330,7 +358,7 @@ describe("WorkflowStore", () => {
 
     redis.send = async (command: string, args: string[]) => {
       if (command === "EVAL" && args[0] === COMMIT)
-        ttlArgs.push(args[11] ?? "");
+        ttlArgs.push(args[12] ?? "");
 
       return send(command, args);
     };
