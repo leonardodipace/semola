@@ -42,7 +42,7 @@ import type {
 } from "./types.js";
 
 const DEFAULT_RETRIES = 3;
-const DEFAULT_LOCK_TTL = 300_000;
+const DEFAULT_LOCK_TTL = 30_000;
 const DEFAULT_RETENTION_TTL = 86_400_000;
 const DEFAULT_CONCURRENCY = 1;
 const DEFAULT_POLL_INTERVAL = 100;
@@ -672,10 +672,15 @@ export class WorkflowEngine<TInput, TResult> {
     }
 
     // Without a committed due time the execution is due again after one poll
-    // interval (never a hot loop); after an error it keeps the visibility
-    // timeout.
-    const next = run.dueAt ?? Date.now() + this.pollInterval;
-    const dueAt = error ? undefined : next;
+    // interval (never a hot loop). After an error this worker is still alive,
+    // so retry after a short delay instead of waiting out the visibility
+    // timeout; if Redis itself is down the release fails and that timeout
+    // remains the fallback.
+    const retryAt =
+      Date.now() + Math.max(this.retryBaseDelay, this.pollInterval);
+    const dueAt = error
+      ? retryAt
+      : (run.dueAt ?? Date.now() + this.pollInterval);
 
     await this.store.releaseLease(executionId, token, dueAt);
   }

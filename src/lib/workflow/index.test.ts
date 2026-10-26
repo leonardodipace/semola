@@ -1351,6 +1351,34 @@ describe("workflow", () => {
     await stop(wf);
   });
 
+  test("an internal error mid-run retries after a short delay, not lockTTL", async () => {
+    const redis = createRedis();
+
+    const wf = defineWorkflow({
+      name: `run-error-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      lockTTL: 60_000,
+      handler: async ({ step }) => {
+        await step("work", () => "ok");
+        return "done";
+      },
+    });
+
+    // The first run's history read fails after the execution is claimed.
+    // Let the engine hit it before get() (which also reads history) polls.
+    redis.failNext("lrange");
+
+    const { executionId } = await wf.start({});
+    await sleep(50);
+
+    const execution = await waitStatus(wf, executionId, "completed", 1000);
+
+    expect(execution.result).toBe("done");
+
+    await stop(wf);
+  });
+
   test("a crashed worker's execution runs again after lockTTL", async () => {
     const redis = createRedis();
     const name = `crash-${crypto.randomUUID()}`;
