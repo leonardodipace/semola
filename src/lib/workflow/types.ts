@@ -36,12 +36,17 @@ export type StepHandler<TInput, TStep> = (
   context: StepContext<TInput>,
 ) => TStep | Promise<TStep>;
 
+// `completed` tells whether the step finished. A step that failed, was cut
+// short by cancel, or never got to run its handler is undone with
+// `completed: false` and no result.
 export type StepCompensateContext<TInput, TStep> = {
   input: TInput;
-  result: TStep;
   signal: AbortSignal;
   fail: (error: Error) => never;
-};
+} & (
+  | { completed: true; result: TStep }
+  | { completed: false; result: undefined }
+);
 
 export type StepCompensateHandler<TInput, TStep> = (
   context: StepCompensateContext<TInput, TStep>,
@@ -284,28 +289,6 @@ export type HistoryEvent =
       error: string | null;
       stepIds?: string[];
       timestamp: number;
-    }
-  | {
-      type: "CompensationScheduled";
-      stepId: string;
-      stepName: string;
-      attempt: number;
-      timestamp: number;
-    }
-  | {
-      type: "CompensationCompleted";
-      stepId: string;
-      stepName: string;
-      timestamp: number;
-    }
-  | {
-      type: "CompensationFailed";
-      stepId: string;
-      stepName: string;
-      error: string;
-      retryable: boolean;
-      attempt: number;
-      timestamp: number;
     };
 
 export type StepState =
@@ -333,30 +316,10 @@ export type TimerState =
   | { status: "started"; fireAt: number; delayMs: number }
   | { status: "fired"; delayMs: number };
 
-export type CompensationState =
-  | {
-      status: "scheduled";
-      stepName: string;
-      attempt: number;
-    }
-  | {
-      status: "completed";
-      stepName: string;
-    }
-  | {
-      status: "failed";
-      stepName: string;
-      error: string;
-      retryable: boolean;
-      attempt: number;
-      failedAt: number;
-    };
-
 export type CompensationPhase = {
   reason: "failed" | "cancelled";
   error: string | null;
   stepIds: string[];
-  steps: Map<string, CompensationState>;
 };
 
 export type HistoryTerminal =
@@ -370,6 +333,8 @@ export type HistoryView = {
   partitionKey: string;
   steps: Map<string, StepState>;
   timers: Map<string, TimerState>;
+  // Step ids with a StepStarted event: the steps an unwind must undo.
+  started: Set<string>;
   terminal: HistoryTerminal | null;
   compensation: CompensationPhase | null;
 };
@@ -394,6 +359,14 @@ export type WorkflowDecision =
   | { type: "complete"; result: string; events: HistoryEvent[] }
   | { type: "fail"; error: string; events: HistoryEvent[] }
   | { type: "cancel"; events: HistoryEvent[] };
+
+export type Replay = {
+  decision: WorkflowDecision;
+  // Undo handlers of started steps, in start order.
+  undo: CompensationItem[];
+  // Set when the replay diverged from history (no unwind is attempted).
+  fatal?: string;
+};
 
 export type BackoffDelayInput = {
   attempt: number;
@@ -432,62 +405,13 @@ export type HandleStepFailureInput = {
   run: LeaseRun;
 };
 
-export type FailAfterStepExhaustedInput = {
-  executionId: string;
-  stepName: string;
-  attempt: number;
-  rawInput: string;
-  stepError: Error;
-  errorHistory: WorkflowStepErrorRecord[];
-  run: LeaseRun;
-};
-
 export type CompensationItem = {
   stepId: string;
   stepName: string;
-  result: unknown;
   compensate: StepCompensateHandler<unknown, unknown>;
-};
-
-export type CollectCompensationsInput<TInput, TResult> = {
-  options: WorkflowOptions<TInput, TResult>;
-  view: HistoryView;
-  executionId: string;
-};
-
-export type CompensationHandlersMissingInput = {
-  expectedIds: string[];
-  collectedIds: Set<string>;
-  phaseSteps: Map<string, CompensationState>;
-};
-
-export type MaybeStartCompensationInput = {
-  executionId: string;
-  reason: "failed" | "cancelled";
-  error: string | null;
-  run: LeaseRun;
-};
-
-export type CompensationStartResult =
-  | { type: "started" }
-  | { type: "none" }
-  | { type: "failed"; error: string };
-
-export type RunCompensationPhaseInput = {
-  executionId: string;
-  rawInput: string;
-  run: LeaseRun;
-};
-
-export type ExecuteCompensationInput = {
-  executionId: string;
-  stepId: string;
-  stepName: string;
-  attempt: number;
-  result: unknown;
-  compensate: StepCompensateHandler<unknown, unknown>;
-  rawInput: string;
-  run: LeaseRun;
+  outcome:
+    | { completed: true; result: unknown }
+    | { completed: false; result: undefined };
 };
 
 export type FinishCompensationInput = {
@@ -498,23 +422,12 @@ export type FinishCompensationInput = {
   run: LeaseRun;
 };
 
-export type FailFromCompensationInput = {
-  executionId: string;
-  stepName: string;
-  attempt: number;
-  error: Error;
-  errorHistory: WorkflowStepErrorRecord[];
-  rawInput: string;
-  run: LeaseRun;
-};
-
 export type CollectErrorHistoryInput = {
   events: HistoryEvent[];
   stepId: string;
   attempt: number;
   error: string;
   timestamp: number;
-  failedType: "StepFailed" | "CompensationFailed";
 };
 
 export type CompleteExecutionInput = {

@@ -4267,7 +4267,7 @@ describe("workflow", () => {
             },
             {
               compensate: async ({ result }) => {
-                order.push(`terminate:${result.id}`);
+                order.push(`terminate:${result?.id}`);
               },
             },
           );
@@ -4280,7 +4280,7 @@ describe("workflow", () => {
             },
             {
               compensate: async ({ result }) => {
-                order.push(`detach:${result.id}`);
+                order.push(`detach:${result?.id}`);
               },
             },
           );
@@ -4361,7 +4361,7 @@ describe("workflow", () => {
               },
               {
                 compensate: async ({ result }) => {
-                  order.push(`terminate:${result.id}`);
+                  order.push(`terminate:${result?.id}`);
                 },
               },
             );
@@ -4374,7 +4374,7 @@ describe("workflow", () => {
               },
               {
                 compensate: async ({ result }) => {
-                  order.push(`detach:${result.id}`);
+                  order.push(`detach:${result?.id}`);
 
                   if (hangDetach) {
                     hangDetach = false;
@@ -4504,7 +4504,7 @@ describe("workflow", () => {
             {
               compensate: async ({ result, signal }) => {
                 compensateSignalAborted = signal.aborted;
-                order.push(`terminate:${result.id}`);
+                order.push(`terminate:${result?.id}`);
               },
             },
           );
@@ -4646,7 +4646,7 @@ describe("workflow", () => {
             },
             {
               compensate: async ({ result }) => {
-                order.push(`terminate:${result.id}`);
+                order.push(`terminate:${result?.id}`);
               },
             },
           );
@@ -4687,7 +4687,7 @@ describe("workflow", () => {
               },
               {
                 compensate: async ({ result }) => {
-                  order.push(`terminate:${result.id}`);
+                  order.push(`terminate:${result?.id}`);
 
                   if (hangTerminate) {
                     hangTerminate = false;
@@ -4851,97 +4851,57 @@ describe("workflow", () => {
       await stop(wf);
     });
 
-    test("stop during compensate still finishes unwind", async () => {
+    test("stop during an unwind returns after the current undo step", async () => {
       const redis = createRedis();
-      let hang = true;
-      let compensateDone = false;
-
-      const wf = defineWorkflow({
-        name: `saga-stop-${crypto.randomUUID()}`,
-        redis,
-        ...fast,
-        retries: 0,
-        handler: async ({ step }) => {
-          await step("create-vm", async () => ({ id: "vm-1" }), {
-            compensate: async () => {
-              while (hang) {
-                await sleep(10);
-              }
-
-              compensateDone = true;
-            },
-          });
-
-          await step("provision", async () => {
-            throw new Error("provision failed");
-          });
-        },
-      });
-
-      const { executionId } = await wf.start({});
-      await waitStatus(wf, executionId, "compensating");
-
-      const done = wf.stop();
-      hang = false;
-      await advanceTimersByTimeAsync(100);
-      await done;
-
-      const execution = await wf.get(executionId);
-
-      expect(compensateDone).toBe(true);
-      expect(execution.status).toBe("failed");
-      expect(execution.error).toBe("provision failed");
-    });
-
-    test("stop during first compensate still runs remaining LIFO", async () => {
-      const redis = createRedis();
+      const name = `saga-stop-lifo-${crypto.randomUUID()}`;
       let hang = true;
       const order: string[] = [];
 
-      const wf = defineWorkflow({
-        name: `saga-stop-lifo-${crypto.randomUUID()}`,
-        redis,
-        ...fast,
-        retries: 0,
-        handler: async ({ step }) => {
-          await step(
-            "create-vm",
-            async () => {
-              order.push("create-vm");
-              return { id: "vm-1" };
-            },
-            {
-              compensate: async () => {
-                order.push("terminate");
+      const make = () =>
+        defineWorkflow({
+          name,
+          redis,
+          ...fast,
+          retries: 0,
+          handler: async ({ step }) => {
+            await step(
+              "create-vm",
+              async () => {
+                order.push("create-vm");
+                return { id: "vm-1" };
               },
-            },
-          );
-
-          await step(
-            "attach-volume",
-            async () => {
-              order.push("attach-volume");
-              return { id: "vol-1" };
-            },
-            {
-              compensate: async () => {
-                order.push("detach");
-
-                while (hang) {
-                  await sleep(10);
-                }
+              {
+                compensate: async () => {
+                  order.push("terminate");
+                },
               },
-            },
-          );
+            );
 
-          await step("provision", async () => {
-            throw new Error("provision failed");
-          });
-        },
-      });
+            await step(
+              "attach-volume",
+              async () => {
+                order.push("attach-volume");
+                return { id: "vol-1" };
+              },
+              {
+                compensate: async () => {
+                  order.push("detach");
 
+                  while (hang) {
+                    await sleep(10);
+                  }
+                },
+              },
+            );
+
+            await step("provision", async () => {
+              throw new Error("provision failed");
+            });
+          },
+        });
+
+      const wf = make();
       const { executionId } = await wf.start({});
-      await waitStatus(wf, executionId, "compensating");
       await waitFor(() => order.includes("detach"));
 
       const done = wf.stop();
@@ -4949,7 +4909,12 @@ describe("workflow", () => {
       await advanceTimersByTimeAsync(100);
       await done;
 
-      const execution = await wf.get(executionId);
+      // stop() waited for the running undo only; the unwind is unfinished.
+      expect(order).toEqual(["create-vm", "attach-volume", "detach"]);
+      expect((await wf.get(executionId)).status).toBe("compensating");
+
+      const next = make();
+      const execution = await waitStatus(next, executionId, "failed");
 
       expect(order).toEqual([
         "create-vm",
@@ -4957,48 +4922,9 @@ describe("workflow", () => {
         "detach",
         "terminate",
       ]);
-      expect(execution.status).toBe("failed");
       expect(execution.error).toBe("provision failed");
-    });
 
-    test("stop during compensate retry still finishes unwind", async () => {
-      const redis = createRedis();
-      let compensateAttempts = 0;
-
-      const wf = defineWorkflow({
-        name: `saga-stop-retry-${crypto.randomUUID()}`,
-        redis,
-        ...fast,
-        retries: 1,
-        handler: async ({ step }) => {
-          await step("create-vm", async () => ({ id: "vm-1" }), {
-            compensate: async () => {
-              compensateAttempts++;
-
-              if (compensateAttempts < 2) {
-                throw new Error("terminate busy");
-              }
-            },
-          });
-
-          await step("provision", async () => {
-            throw new Error("provision failed");
-          });
-        },
-      });
-
-      const { executionId } = await wf.start({});
-      await waitFor(() => compensateAttempts >= 1);
-
-      const done = wf.stop();
-      await advanceTimersByTimeAsync(100);
-      await done;
-
-      const execution = await wf.get(executionId);
-
-      expect(compensateAttempts).toBe(2);
-      expect(execution.status).toBe("failed");
-      expect(execution.error).toBe("provision failed");
+      await stop(next);
     });
   });
 

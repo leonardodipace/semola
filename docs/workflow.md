@@ -196,9 +196,11 @@ for (const item of failed) {
 
 Results are lightweight `WorkflowListItem` snapshots. Use instance `get()` for input, result, error, and step details. Filter `name` with a string or string array; resume through the matching workflow instance.
 
-### Compensate completed steps
+### Compensate steps
 
-Pass `compensate` on a step to undo its side effects if a later step fails for good, or if the execution is cancelled. Compensations run in reverse order of completion (LIFO), use the same retry policy as forward steps, and must be idempotent. Only **completed** steps are compensated.
+Pass `compensate` on a step to undo its side effects when the execution fails for good or is cancelled. The undo is registered as soon as the step **starts**, so it runs for every step that started: completed, failed (including exhausted retries or `fail()`), or still in flight or backing off when cancel arrived. Steps that never started are not undone. Undos run newest first (LIFO), so a failing step's own undo runs before earlier steps' undos.
+
+`compensate` gets `completed`: with `completed: true`, `result` is the step's result; with `completed: false`, `result` is `undefined` and the step may have had partial effects or none at all (its handler may not even have run). Undos are at-least-once and must be idempotent.
 
 ```typescript
 const onboard = defineWorkflow<{ userId: string }, { ok: true }>({
@@ -209,8 +211,14 @@ const onboard = defineWorkflow<{ userId: string }, { ok: true }>({
       "create-account",
       async () => createAccount(input.userId),
       {
-        compensate: async ({ result }) => {
-          await deleteAccount(result.id);
+        compensate: async ({ completed, result }) => {
+          if (completed) {
+            await deleteAccount(result.id);
+            return;
+          }
+
+          // The step failed or was interrupted: undo whatever it managed.
+          await deleteAccountIfExists(input.userId);
         },
       },
     );
@@ -224,7 +232,7 @@ const onboard = defineWorkflow<{ userId: string }, { ok: true }>({
 });
 ```
 
-Status is `compensating` while unwind runs. A successful unwind still ends as `failed` (original error) or `cancelled`. If a compensation itself exhausts retries, the execution is `failed` with that compensation error. If compensation collect hits nondeterminism, cannot load step results, or the handler throws before every completed step is replayed, unwind does not start with a partial list. If `compensate` handlers disappear after `CompensationStarted` (for example a rolling deploy), including only some of them, the execution fails closed instead of finishing without undo. Unwind follows the `stepIds` snapshot on that event, so handlers added after start are not run.
+Status is `compensating` while unwind runs. Each undo is an ordinary durable step named `undo:<step name>`, with the same retry policy, backoff, `fail()` and `NonRetryableStepError` handling as forward steps. A successful unwind still ends as `failed` (original error) or `cancelled`. If an undo exhausts its retries, the execution is `failed` with that undo's error and the remaining undos do not run. If the replay diverges from history (nondeterminism, an unreadable step result, or the workflow function returning or throwing before every recorded step), the execution fails without running any undo. If `compensate` handlers disappear after `CompensationStarted` (for example a rolling deploy), including only some of them, the execution fails closed instead of finishing without undo. Unwind follows the `stepIds` snapshot on that event, so handlers added after start are not run.
 
 `resume()` is rejected after compensation has started. Completed step results would be wrong after undo; start a new execution. Failed executions that never compensated can still be resumed.
 
@@ -325,7 +333,7 @@ Pass `Infinity` to keep forever, or `0` to unlink immediately after terminal. Fa
 
 ### Graceful shutdown
 
-`stop()` ends polling, waits for in-flight work (including compensate unwind), and releases this process registration. Forward `signal` is aborted so handlers can exit; that abort does not write `WorkflowCancelled` or start compensation. Compensate `signal` is not aborted, so cleanup can finish. Other replicas keep running the same workflow name; executions this process hands back are due again immediately.
+`stop()` ends polling, waits for the runs in flight, and releases this process registration. Forward `signal` is aborted so handlers can exit; that abort does not write `WorkflowCancelled` or start compensation. Compensate `signal` is not aborted, so an undo step that is running finishes; the run then stops, and the rest of the unwind continues on whichever replica (or this process after a restart) picks the execution up next. Other replicas keep running the same workflow name; executions this process hands back are due again shortly.
 
 ```typescript
 await onboard.stop();
@@ -336,7 +344,7 @@ await onboard.stop();
 ### Handler context
 
 - `input`, `executionId`, `signal`
-- `step(name, handler, options?)` - durable side effect; handler gets `{ input, signal, fail }`. `options.compensate` undoes a completed step on later failure or cancel; it gets `{ input, result, signal, fail }`. Compensate `signal` is not the cancelled forward signal, so cleanup can finish after cancel.
+- `step(name, handler, options?)` - durable side effect; handler gets `{ input, signal, fail }`. `options.compensate` undoes a started step on failure or cancel; it gets `{ input, completed, result, signal, fail }` (`result` only when `completed`). Compensate `signal` is never aborted by cancel or `stop()`, so cleanup can finish.
 - `sleep(ms)` - durable timer (survives replay and restarts). It counts as fired once a lease holder sees its fire time pass and records `TimerFired`; it stays fired after that, even if replica clocks disagree.
 
 `fail(error)` inside a step marks a non-retryable failure and passes that `Error` to `onError`. Same inside `compensate`. History and status still store the message string. `throw new NonRetryableStepError(...)` remains non-retryable without going through `fail`.
@@ -362,17 +370,17 @@ await onboard.stop();
 
 Without `partitionBy`, `partitionKey` is stored on meta but capacity stays on the global `*` pool. Empty keys throw. The resolved key is stored on execution meta so `resume` keeps the original partition.
 
-Failed steps retry with exponential backoff before the workflow is marked `failed`. Default `retries: 3` means 4 total attempts. `retries: 0` fails on the first error. The same retry policy applies to `compensate` handlers. `onRetry` fires only for forward step retries, not compensate retries.
+Failed steps retry with exponential backoff before the workflow is marked `failed`. Default `retries: 3` means 4 total attempts. `retries: 0` fails on the first error. The same retry policy applies to `compensate` handlers, and `onRetry` / `onError` fire for them too with step name `undo:<name>`.
 
-`cancel` is honored during retry backoff and `sleep`, not only between steps. `cancel()` aborts the forward `signal` only on the replica that handles the call; a step running on another replica keeps going, its outcome is recorded, and the cancel is honored at that write. Completed steps with `compensate` unwind before status becomes `cancelled`. After terminal failure, `resume(executionId)` re-queues the execution unless compensation already ran.
+`cancel` is honored during retry backoff and `sleep`, not only between steps. `cancel()` aborts the forward `signal` only on the replica that handles the call; a step running on another replica keeps going, its outcome is recorded, and the cancel is honored at that write. Started steps with `compensate` unwind before status becomes `cancelled`. After terminal failure, `resume(executionId)` re-queues the execution unless compensation already ran.
 
 ### Hooks
 
 Optional lifecycle callbacks. Errors in hooks never fail the workflow. Hooks fire on real transitions, not every history replay.
 
 - `onStart` - once when the execution first moves `pending` → `running`
-- `onRetry` - before each forward step retry backoff (`attempt`, `nextRetryDelayMs`, `retriesRemaining`, …). Not fired for `compensate` retries.
-- `onError` - forward-step retries exhausted, immediately after `fail()`, or when a `compensate` handler exhausts retries (may fire twice if both happen). `error` is the thrown/`fail()` `Error` instance (use `instanceof` for typed branches). Compensate calls pass `errorHistory` from `CompensationFailed` attempts only (messages as strings).
+- `onRetry` - before each step retry backoff (`attempt`, `nextRetryDelayMs`, `retriesRemaining`, …), including undo steps (`stepName` is `undo:<name>`).
+- `onError` - a step's retries are exhausted or it called `fail()`, including undo steps (`undo:<name>`; may fire for both the forward step and an undo). `error` is the thrown/`fail()` `Error` instance (use `instanceof` for typed branches). `errorHistory` lists that step's failed attempts since the last resume (messages as strings).
 - `onComplete` - terminal success
 - `onCancel` - terminal cancel
 
@@ -398,7 +406,7 @@ Terminal `meta` and `history` keys receive `PEXPIRE` from `retentionTTL` in the 
 - Workers run embedded in your Bun process against Redis, not as a separate matching service.
 - `get().steps` is `{ name, completedAt }[]` from completed history events (not a separate meta cache). Step return values are not exposed on `get()`.
 - Successful step results are written to history even if cancel arrives mid-handler; the next advance then honors cancel.
-- `compensate` runs only for completed steps, in reverse completion order. Compensations are at-least-once and must be idempotent. `resume()` after compensation throws.
+- `compensate` runs for every started step (completed or not), newest first. Undos are at-least-once and must be idempotent and tolerate partial or no effects. `resume()` after compensation throws.
 
 ### Statuses
 

@@ -21,6 +21,7 @@ export const emptyHistoryView = (): HistoryView => ({
   partitionKey: "",
   steps: new Map<string, StepState>(),
   timers: new Map<string, TimerState>(),
+  started: new Set<string>(),
   terminal: null,
   compensation: null,
 });
@@ -50,6 +51,8 @@ export const applyHistoryEvent = (view: HistoryView, event: HistoryEvent) => {
 
   if (event.type === "StepStarted") {
     const previous = steps.get(event.stepId);
+
+    view.started.add(event.stepId);
 
     steps.set(event.stepId, {
       status: "started",
@@ -127,45 +130,7 @@ export const applyHistoryEvent = (view: HistoryView, event: HistoryEvent) => {
       reason: event.reason,
       error: event.error,
       stepIds,
-      steps: new Map(),
     };
-    return;
-  }
-
-  const compensation = view.compensation;
-
-  if (event.type === "CompensationScheduled") {
-    if (!compensation) return;
-
-    compensation.steps.set(event.stepId, {
-      status: "scheduled",
-      stepName: event.stepName,
-      attempt: event.attempt,
-    });
-    return;
-  }
-
-  if (event.type === "CompensationCompleted") {
-    if (!compensation) return;
-
-    compensation.steps.set(event.stepId, {
-      status: "completed",
-      stepName: event.stepName,
-    });
-    return;
-  }
-
-  if (event.type === "CompensationFailed") {
-    if (!compensation) return;
-
-    compensation.steps.set(event.stepId, {
-      status: "failed",
-      stepName: event.stepName,
-      error: event.error,
-      retryable: event.retryable,
-      attempt: event.attempt,
-      failedAt: event.timestamp,
-    });
   }
 };
 

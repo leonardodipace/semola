@@ -12,27 +12,21 @@ import type {
   AdvanceInput,
   BackoffDelayInput,
   CancelExecutionInput,
-  CollectCompensationsInput,
   CollectErrorHistoryInput,
   CommitRetention,
   CommitTerminalInput,
-  CompensationHandlersMissingInput,
   CompensationItem,
-  CompensationStartResult,
   CompleteExecutionInput,
-  ExecuteCompensationInput,
   ExecuteStepInput,
-  FailAfterStepExhaustedInput,
   FailExecutionInput,
-  FailFromCompensationInput,
   FinishCompensationInput,
   HandleStepFailureInput,
   LeaseRun,
-  MaybeStartCompensationInput,
+  Replay,
   RunCommitInput,
-  RunCompensationPhaseInput,
   StepCompensateHandler,
   StepHandler,
+  StepState,
   WorkflowDecision,
   WorkflowMeta,
   WorkflowOptions,
@@ -114,31 +108,90 @@ const timerDelayMismatch = (
   );
 };
 
-const advance = async <TInput, TResult>(
-  input: AdvanceInput<TInput, TResult>,
-): Promise<WorkflowDecision> => {
-  const { options, view, executionId, signal, retries, backoff } = input;
-  const { cancelRequested } = input;
-  const now = Date.now();
+const failDecision = (error: string, now: number): WorkflowDecision => ({
+  type: "fail",
+  error,
+  events: [{ type: "WorkflowFailed", error, timestamp: now }],
+});
 
-  // Only cancel() requests end the run. stop() aborts the signal to
-  // interrupt handlers but must not write WorkflowCancelled.
-  if (cancelRequested) {
-    return {
-      type: "cancel",
-      events: [{ type: "WorkflowCancelled", timestamp: now }],
-    };
+// Next move for a step that has not completed: run it (first attempt, or the
+// next one once the backoff has elapsed), wait out the backoff, or fail with
+// its error once retries are spent. Forward and undo steps share this.
+const nextStep = (
+  state: StepState | undefined,
+  step: {
+    stepId: string;
+    stepName: string;
+    handler: StepHandler<unknown, unknown>;
+  },
+  policy: {
+    now: number;
+    retries: number;
+    backoff: (attempt: number) => number;
+  },
+): WorkflowDecision => {
+  const { stepId, stepName } = step;
+  const { now, retries, backoff } = policy;
+
+  if (state?.status === "scheduled" || state?.status === "started") {
+    return { type: "runStep", ...step, attempt: state.attempt, events: [] };
   }
 
+  let attempt = 1;
+
+  if (state?.status === "failed") {
+    if (!state.retryable || state.attempt > retries) {
+      return failDecision(state.error, now);
+    }
+
+    const retryAt = state.failedAt + backoff(state.attempt);
+
+    if (now < retryAt) return { type: "waiting", until: retryAt };
+
+    attempt = state.attempt + 1;
+  }
+
+  return {
+    type: "runStep",
+    ...step,
+    attempt,
+    events: [
+      { type: "StepScheduled", stepId, stepName, attempt, timestamp: now },
+    ],
+  };
+};
+
+// Replays the workflow function against history once: decides the next move
+// and collects the undo handler of every started step, in start order.
+const advance = async <TInput, TResult>(
+  input: AdvanceInput<TInput, TResult>,
+): Promise<Replay> => {
+  const { options, view, executionId, retries, backoff } = input;
+  const { cancelRequested } = input;
+  const now = Date.now();
+  const policy = { now, retries, backoff };
   const consumed = {
     steps: new Set<string>(),
     timers: new Set<string>(),
   };
+  const undo: CompensationItem[] = [];
 
   let decision: WorkflowDecision | null = null;
+  let fatal: Error | undefined;
   let stepSeq = 0;
   let timerSeq = 0;
   const workflowInput = fromJson<TInput>(view.input, "input");
+
+  // A replay that diverges from history fails the run without an unwind:
+  // undo handlers collected from it cannot be trusted.
+  const diverged = (error: Error): never => {
+    fatal ??= error;
+    throw error;
+  };
+
+  // On cancel the replay only collects undo handlers, so workflow code must
+  // not see an aborted signal and cut it short.
+  const signal = cancelRequested ? new AbortController().signal : input.signal;
 
   const [handlerError, result] = await mightThrow(
     Promise.resolve().then(() =>
@@ -146,71 +199,58 @@ const advance = async <TInput, TResult>(
         input: workflowInput,
         executionId,
         signal,
-        step: async (name, handler) => {
+        step: async (name, handler, stepOptions) => {
           const stepId = `a${stepSeq++}`;
           consumed.steps.add(stepId);
 
           const state = view.steps.get(stepId);
-
           const nameError = stepNameMismatch(stepId, state?.stepName, name);
 
-          if (nameError) throw nameError;
+          if (nameError) diverged(nameError);
+
+          let outcome: CompensationItem["outcome"] = {
+            completed: false,
+            result: undefined,
+          };
 
           if (state?.status === "completed") {
-            return fromJson(state.result, `step ${name}`) as never;
+            const [parseError, parsed] = mightThrowSync(() =>
+              fromJson(state.result, `step ${name}`),
+            );
+
+            if (parseError) diverged(parseError);
+
+            outcome = { completed: true, result: parsed };
           }
+
+          // A started step's undo is queued whatever its outcome.
+          if (stepOptions?.compensate && view.started.has(stepId)) {
+            undo.push({
+              stepId,
+              stepName: name,
+              compensate: stepOptions.compensate as StepCompensateHandler<
+                unknown,
+                unknown
+              >,
+              outcome,
+            });
+          }
+
+          if (outcome.completed) return outcome.result as never;
 
           if (decision) {
             throw new Paused();
           }
 
-          if (state?.status === "scheduled" || state?.status === "started") {
-            decision = {
-              type: "runStep",
+          decision = nextStep(
+            state,
+            {
               stepId,
               stepName: name,
-              attempt: state.attempt,
               handler: handler as StepHandler<unknown, unknown>,
-              events: [],
-            };
-            throw new Paused();
-          }
-
-          let attempt = 1;
-
-          // A failed retryable step runs again once its backoff has elapsed.
-          if (state?.status === "failed") {
-            if (!state.retryable || state.attempt > retries) {
-              throw new Error(state.error);
-            }
-
-            const retryAt = state.failedAt + backoff(state.attempt);
-
-            if (now < retryAt) {
-              decision = { type: "waiting", until: retryAt };
-              throw new Paused();
-            }
-
-            attempt = state.attempt + 1;
-          }
-
-          decision = {
-            type: "runStep",
-            stepId,
-            stepName: name,
-            attempt,
-            handler: handler as StepHandler<unknown, unknown>,
-            events: [
-              {
-                type: "StepScheduled",
-                stepId,
-                stepName: name,
-                attempt,
-                timestamp: now,
-              },
-            ],
-          };
-
+            },
+            policy,
+          );
           throw new Paused();
         },
         sleep: async (ms) => {
@@ -224,7 +264,7 @@ const advance = async <TInput, TResult>(
           const state = view.timers.get(timerId);
           const delayMismatch = timerDelayMismatch(timerId, state?.delayMs, ms);
 
-          if (delayMismatch) throw delayMismatch;
+          if (delayMismatch) diverged(delayMismatch);
 
           if (state?.status === "fired") return;
 
@@ -263,219 +303,68 @@ const advance = async <TInput, TResult>(
     ),
   );
 
-  // A recorded decision wins however the handler ended: user code may catch
-  // Paused and return or rethrow something else, which must not complete or
-  // fail the run before that step or sleep happens.
-  if (decision) return decision;
-
-  if (handlerError) {
-    return {
-      type: "fail",
-      error: handlerError.message,
-      events: [
-        {
-          type: "WorkflowFailed",
-          error: handlerError.message,
-          timestamp: now,
-        },
-      ],
-    };
-  }
-
-  if (cancelRequested) {
-    return {
-      type: "cancel",
-      events: [{ type: "WorkflowCancelled", timestamp: now }],
-    };
-  }
-
+  // Every recorded step and timer must be replayed; skipping one diverges.
   for (const stepId of view.steps.keys()) {
-    if (consumed.steps.has(stepId)) continue;
+    if (!stepId.startsWith("a") || consumed.steps.has(stepId)) continue;
 
-    return {
-      type: "fail",
-      error: `nondeterminism: historical step ${stepId} was not replayed`,
-      events: [
-        {
-          type: "WorkflowFailed",
-          error: `nondeterminism: historical step ${stepId} was not replayed`,
-          timestamp: now,
-        },
-      ],
-    };
+    fatal ??= new Error(
+      `nondeterminism: historical step ${stepId} was not replayed`,
+    );
   }
 
   for (const timerId of view.timers.keys()) {
     if (consumed.timers.has(timerId)) continue;
 
+    fatal ??= new Error(
+      `nondeterminism: historical timer ${timerId} was not replayed`,
+    );
+  }
+
+  if (fatal) {
     return {
-      type: "fail",
-      error: `nondeterminism: historical timer ${timerId} was not replayed`,
-      events: [
-        {
-          type: "WorkflowFailed",
-          error: `nondeterminism: historical timer ${timerId} was not replayed`,
-          timestamp: now,
-        },
-      ],
+      decision: failDecision(fatal.message, now),
+      undo: [],
+      fatal: fatal.message,
     };
+  }
+
+  // Only cancel() requests end the run. stop() aborts the signal to
+  // interrupt handlers but must not write WorkflowCancelled.
+  if (cancelRequested) {
+    return {
+      decision: {
+        type: "cancel",
+        events: [{ type: "WorkflowCancelled", timestamp: now }],
+      },
+      undo,
+    };
+  }
+
+  // A recorded decision wins however the handler ended: user code may catch
+  // Paused and return or rethrow something else, which must not complete or
+  // fail the run before that step or sleep happens.
+  if (decision) return { decision, undo };
+
+  if (handlerError) {
+    return { decision: failDecision(handlerError.message, now), undo };
   }
 
   const serialized = toJson(result as TResult, "result");
 
   return {
-    type: "complete",
-    result: serialized,
-    events: [
-      {
-        type: "WorkflowCompleted",
-        result: serialized,
-        timestamp: now,
-      },
-    ],
-  };
-};
-
-const compensationHandlersMissing = (
-  input: CompensationHandlersMissingInput,
-) => {
-  const { expectedIds, collectedIds, phaseSteps } = input;
-
-  // Corrupt/legacy CompensationStarted without a stepIds snapshot.
-  if (expectedIds.length === 0) return true;
-
-  for (const stepId of expectedIds) {
-    if (phaseSteps.get(stepId)?.status === "completed") continue;
-    if (collectedIds.has(stepId)) continue;
-
-    return true;
-  }
-
-  return false;
-};
-
-const collectCompensations = async <TInput, TResult>(
-  input: CollectCompensationsInput<TInput, TResult>,
-) => {
-  const { options, view, executionId } = input;
-  const items: CompensationItem[] = [];
-  const visitedCompleted = new Set<string>();
-  const workflowInput = fromJson<TInput>(view.input, "input");
-  const signal = new AbortController().signal;
-  let stepSeq = 0;
-  let timerSeq = 0;
-  let fatal: Error | undefined;
-
-  const [handlerError] = await mightThrow(
-    Promise.resolve().then(() =>
-      options.handler({
-        input: workflowInput,
-        executionId,
-        signal,
-        step: async (name, _handler, stepOptions) => {
-          const stepId = `a${stepSeq++}`;
-          const state = view.steps.get(stepId);
-
-          const nameError = stepNameMismatch(stepId, state?.stepName, name);
-
-          if (nameError) {
-            fatal = nameError;
-            throw fatal;
-          }
-
-          if (state?.status === "completed") {
-            const [parseError, result] = mightThrowSync(() =>
-              fromJson(state.result, `step ${name}`),
-            );
-
-            if (parseError) {
-              fatal = parseError;
-              throw fatal;
-            }
-
-            visitedCompleted.add(stepId);
-
-            if (stepOptions?.compensate) {
-              items.push({
-                stepId,
-                stepName: name,
-                result,
-                compensate: stepOptions.compensate as StepCompensateHandler<
-                  unknown,
-                  unknown
-                >,
-              });
-            }
-
-            return result as never;
-          }
-
-          throw new Paused();
+    decision: {
+      type: "complete",
+      result: serialized,
+      events: [
+        {
+          type: "WorkflowCompleted",
+          result: serialized,
+          timestamp: now,
         },
-        sleep: async (ms) => {
-          const delayError = invalidSleepDelay(ms);
-
-          if (delayError) {
-            fatal = delayError;
-            throw fatal;
-          }
-
-          const timerId = `t${timerSeq++}`;
-          const state = view.timers.get(timerId);
-          const delayMismatch = timerDelayMismatch(timerId, state?.delayMs, ms);
-
-          if (delayMismatch) {
-            fatal = delayMismatch;
-            throw fatal;
-          }
-
-          if (state?.status === "fired") return;
-
-          throw new Paused();
-        },
-      }),
-    ),
-  );
-
-  if (fatal) throw fatal;
-
-  const hasUnvisitedCompleted = () => {
-    for (const [stepId, state] of view.steps) {
-      if (state.status !== "completed") continue;
-      if (visitedCompleted.has(stepId)) continue;
-
-      return true;
-    }
-
-    return false;
+      ],
+    },
+    undo,
   };
-
-  if (handlerError) {
-    if (handlerError instanceof Paused) {
-      if (hasUnvisitedCompleted()) {
-        throw new Error(
-          "nondeterminism: compensation collect paused before every completed step was replayed",
-        );
-      }
-
-      return items;
-    }
-
-    for (const [stepId, state] of view.steps) {
-      if (state.status !== "completed") continue;
-      if (visitedCompleted.has(stepId)) continue;
-
-      throw handlerError;
-    }
-  }
-
-  if (hasUnvisitedCompleted()) {
-    throw new Error(
-      "nondeterminism: compensation collect returned before every completed step was replayed",
-    );
-  }
-
-  return items;
 };
 
 export class WorkflowEngine<TInput, TResult> {
@@ -493,8 +382,6 @@ export class WorkflowEngine<TInput, TResult> {
   private readonly retryMultiplier: number;
   private readonly retryMaxDelay: number;
   private readonly aborts = new Map<string, AbortController>();
-  private readonly compensationAborts = new Map<string, AbortController>();
-  private readonly compensating = new Set<string>();
   private readonly lostLeases = new Set<string>();
 
   public constructor(
@@ -542,63 +429,23 @@ export class WorkflowEngine<TInput, TResult> {
     }
   }
 
+  // Forward handlers are aborted; an undo step uses its own signal, so it
+  // finishes before its run exits. Whoever claims the execution next
+  // continues an interrupted unwind.
   public async stop() {
     this.running = false;
 
-    for (const [executionId, controller] of this.aborts) {
-      if (this.compensating.has(executionId)) continue;
-
+    for (const controller of this.aborts.values()) {
       controller.abort();
     }
 
-    while (this.hasInFlightWork()) {
-      await this.pruneSettledCompensations();
-
-      if (!this.hasInFlightWork()) break;
-
+    while (this.active > 0) {
       await sleepMs(SHUTDOWN_POLL);
     }
   }
 
-  private async pruneSettledCompensations() {
-    for (const executionId of this.compensating) {
-      const [error, meta] = await mightThrow(this.store.getMeta(executionId));
-
-      if (!error) {
-        if (meta) {
-          if (!isTerminalStatus(meta.status)) continue;
-        }
-      }
-
-      this.aborts.delete(executionId);
-      this.compensationAborts.delete(executionId);
-      this.compensating.delete(executionId);
-    }
-  }
-
-  private shouldKeepPolling() {
-    if (this.running) return true;
-    if (this.compensating.size > 0) return true;
-
-    return false;
-  }
-
-  private hasInFlightWork() {
-    if (this.active > 0) return true;
-    if (this.compensating.size > 0) return true;
-
-    return false;
-  }
-
-  private shouldDrainExecution(executionId: string) {
-    if (this.running) return true;
-    if (this.compensating.has(executionId)) return true;
-
-    return false;
-  }
-
   private async workflowLoop() {
-    while (this.shouldKeepPolling()) {
+    while (this.running) {
       const token = crypto.randomUUID();
       const [error, executionId] = await mightThrow(
         this.store.claimDue(token, this.lockTTL),
@@ -609,15 +456,14 @@ export class WorkflowEngine<TInput, TResult> {
         continue;
       }
 
-      // After stop(), hand everything but compensate unwind back at once.
-      if (!this.shouldDrainExecution(executionId)) {
+      // stop() raced this claim: hand the execution straight back.
+      if (!this.running) {
         await this.store.releaseLease({
           executionId,
           token,
           ttlMs: this.lockTTL,
           dueAt: Date.now(),
         });
-        await sleepMs(this.pollInterval);
         continue;
       }
 
@@ -677,17 +523,6 @@ export class WorkflowEngine<TInput, TResult> {
     if (!controller) {
       controller = new AbortController();
       this.aborts.set(executionId, controller);
-    }
-
-    return controller;
-  }
-
-  private compensationAbortController(executionId: string) {
-    let controller = this.compensationAborts.get(executionId);
-
-    if (!controller) {
-      controller = new AbortController();
-      this.compensationAborts.set(executionId, controller);
     }
 
     return controller;
@@ -774,10 +609,6 @@ export class WorkflowEngine<TInput, TResult> {
     const { view } = run;
     const controller = this.abortController(executionId);
 
-    if (run.cancelRequested) {
-      controller.abort();
-    }
-
     if (meta.status === "pending") {
       const updated = await this.commitRun(executionId, run, {
         fields: { status: "running", updatedAt: String(Date.now()) },
@@ -794,8 +625,7 @@ export class WorkflowEngine<TInput, TResult> {
       }
     }
 
-    // After stop(), keep draining compensate unwind for this execution.
-    while (this.shouldDrainExecution(executionId)) {
+    while (this.running) {
       if (!(await this.ownsLease(executionId, token))) return;
 
       // Terminal events are committed together with terminal meta, so meta
@@ -803,31 +633,23 @@ export class WorkflowEngine<TInput, TResult> {
       // so a stale view can never commit a second terminal transition.
       if (view.terminal) return;
 
-      if (view.compensation) {
-        const cont = await this.runCompensationPhase({
-          executionId,
-          rawInput: meta.input,
-          run,
-        });
-
-        if (!cont) return;
-
-        continue;
-      }
-
-      if (run.cancelRequested) {
-        controller.abort();
-      }
-
-      const decision = await advance({
+      const replay = await advance({
         options: this.options,
         view,
         executionId,
         signal: controller.signal,
         retries: this.retries,
         backoff: this.backoff,
-        cancelRequested: run.cancelRequested,
+        cancelRequested: this.cancelPending(run),
       });
+
+      if (view.compensation) {
+        if (!(await this.unwind(executionId, meta.input, run, replay))) return;
+
+        continue;
+      }
+
+      const { decision } = replay;
 
       if (decision.type === "waiting") {
         if (!(await this.waitUntil(executionId, run, decision.until))) return;
@@ -882,45 +704,16 @@ export class WorkflowEngine<TInput, TResult> {
         return;
       }
 
+      // Fail or cancel: undo the started steps first when any has a handler.
+      if (await this.startUnwind(executionId, run, decision, replay.undo)) {
+        continue;
+      }
+
       if (decision.type === "fail") {
-        const compensating = await this.maybeStartCompensation({
-          executionId,
-          reason: "failed",
-          error: decision.error,
-          run,
-        });
-
-        if (compensating.type === "started") continue;
-
         await this.failExecution({
           executionId,
           events: decision.events,
           error: decision.error,
-          run,
-        });
-        return;
-      }
-
-      const compensating = await this.maybeStartCompensation({
-        executionId,
-        reason: "cancelled",
-        error: null,
-        run,
-      });
-
-      if (compensating.type === "started") continue;
-
-      if (compensating.type === "failed") {
-        await this.failExecution({
-          executionId,
-          events: [
-            {
-              type: "WorkflowFailed",
-              error: compensating.error,
-              timestamp: Date.now(),
-            },
-          ],
-          error: compensating.error,
           run,
         });
         return;
@@ -934,6 +727,11 @@ export class WorkflowEngine<TInput, TResult> {
       });
       return;
     }
+  }
+
+  // Cancel only interrupts the forward path; an unwind always runs to its end.
+  private cancelPending(run: LeaseRun) {
+    return run.cancelRequested && !run.view.compensation;
   }
 
   private async executeStep(input: ExecuteStepInput) {
@@ -955,11 +753,11 @@ export class WorkflowEngine<TInput, TResult> {
     if (!started) return false;
 
     // A cancel reported by this write is honored before the handler runs.
-    if (run.cancelRequested) return true;
+    if (this.cancelPending(run)) return true;
 
     const workflowInput = fromJson<TInput>(rawInput, "input");
 
-    const [stepError, stepResult] = await mightThrow(
+    const [handlerError, value] = await mightThrow(
       Promise.resolve().then(() =>
         handler({
           input: workflowInput,
@@ -971,46 +769,38 @@ export class WorkflowEngine<TInput, TResult> {
 
     if (!(await this.ownsLease(executionId, run.token))) return false;
 
+    let stepError = handlerError;
+
     if (!stepError) {
       const [serializeError, serialized] = mightThrowSync(() =>
-        toJson(stepResult, `step ${stepName}`),
+        toJson(value, `step ${stepName}`),
       );
 
-      if (serializeError) {
-        if (run.cancelRequested) return true;
-
-        if (controller.signal.aborted) return false;
-
-        return this.handleStepFailure({
-          executionId,
-          stepId,
-          stepName,
-          attempt,
-          rawInput,
-          stepError: new NonRetryableStepError(serializeError.message),
-          run,
+      // Success is in history before a pending cancel is honored.
+      if (!serializeError) {
+        return this.commitRun(executionId, run, {
+          events: [
+            {
+              type: "StepCompleted",
+              stepId,
+              stepName,
+              result: serialized,
+              timestamp: Date.now(),
+            },
+          ],
         });
       }
 
-      const completed = await this.commitRun(executionId, run, {
-        events: [
-          {
-            type: "StepCompleted",
-            stepId,
-            stepName,
-            result: serialized,
-            timestamp: Date.now(),
-          },
-        ],
-      });
-
-      // Success is in history before a pending cancel is honored.
-      return completed;
+      stepError = new NonRetryableStepError(serializeError.message);
     }
 
-    if (run.cancelRequested) return true;
+    // Cancel and stop() interrupt forward steps only; an undo step records
+    // its failure and retries like any step.
+    if (!run.view.compensation) {
+      if (run.cancelRequested) return true;
 
-    if (controller.signal.aborted) return false;
+      if (controller.signal.aborted) return false;
+    }
 
     return this.handleStepFailure({
       executionId,
@@ -1036,7 +826,6 @@ export class WorkflowEngine<TInput, TResult> {
       attempt,
       error: message,
       timestamp: now,
-      failedType: "StepFailed",
     });
 
     const appended = await this.commitRun(executionId, run, {
@@ -1056,12 +845,15 @@ export class WorkflowEngine<TInput, TResult> {
     if (!appended) return false;
 
     // A cancel that arrived during the step is reported by this commit.
-    if (run.cancelRequested) return true;
+    if (this.cancelPending(run)) return true;
 
-    // Replay then waits out the backoff and runs the next attempt.
+    const workflowInput = fromJson<TInput>(rawInput, "input");
+
+    // Either way replay takes over: it waits out the backoff and runs the
+    // next attempt, or turns the exhausted step into a failure (or the end
+    // of an unwind).
     if (retryable && attempt <= this.retries) {
       const delay = this.backoff(attempt);
-      const workflowInput = fromJson<TInput>(rawInput, "input");
 
       await runHook(() =>
         this.options.hooks?.onRetry?.({
@@ -1078,32 +870,6 @@ export class WorkflowEngine<TInput, TResult> {
       return true;
     }
 
-    const compensating = await this.failAfterStepExhausted({
-      executionId,
-      stepName,
-      attempt,
-      rawInput,
-      stepError,
-      errorHistory,
-      run,
-    });
-
-    return compensating;
-  }
-
-  private async failAfterStepExhausted(input: FailAfterStepExhaustedInput) {
-    const {
-      executionId,
-      stepName,
-      attempt,
-      rawInput,
-      stepError,
-      errorHistory,
-      run,
-    } = input;
-    const workflowInput = fromJson<TInput>(rawInput, "input");
-    const message = stepError.message;
-
     await runHook(() =>
       this.options.hooks?.onError?.({
         executionId,
@@ -1115,336 +881,119 @@ export class WorkflowEngine<TInput, TResult> {
       }),
     );
 
-    const compensating = await this.maybeStartCompensation({
-      executionId,
-      reason: "failed",
-      error: message,
-      run,
-    });
-
-    if (compensating.type === "started") return true;
-
-    await this.failExecution({
-      executionId,
-      events: [
-        {
-          type: "WorkflowFailed",
-          error: message,
-          timestamp: Date.now(),
-        },
-      ],
-      error: message,
-      run,
-    });
-
-    return false;
+    return true;
   }
 
-  private async maybeStartCompensation(
-    input: MaybeStartCompensationInput,
-  ): Promise<CompensationStartResult> {
-    const { executionId, reason, error, run } = input;
-    const { view } = run;
+  // Records the unwind: status `compensating` plus the snapshot of started
+  // steps to undo. False when nothing needs undoing or the lease is gone.
+  private async startUnwind(
+    executionId: string,
+    run: LeaseRun,
+    decision: Extract<WorkflowDecision, { type: "fail" | "cancel" }>,
+    undo: CompensationItem[],
+  ) {
+    if (undo.length === 0) return false;
 
-    if (view.compensation) return { type: "started" };
-    if (view.terminal) return { type: "none" };
-
-    const [collectError, items] = await mightThrow(
-      collectCompensations({
-        options: this.options,
-        view,
-        executionId,
-      }),
-    );
-
-    if (collectError) {
-      return { type: "failed", error: collectError.message };
-    }
-
-    if (items.length === 0) return { type: "none" };
-
+    const error = decision.type === "fail" ? decision.error : null;
     const now = Date.now();
     const fields: Partial<WorkflowMeta> = {
       status: "compensating",
       updatedAt: String(now),
     };
 
-    if (error) {
-      fields.error = error;
-    }
+    if (error) fields.error = error;
 
-    const committed = await this.commitRun(executionId, run, {
+    return this.commitRun(executionId, run, {
       events: [
         {
           type: "CompensationStarted",
-          reason,
+          reason: decision.type === "fail" ? "failed" : "cancelled",
           error,
-          stepIds: items.map((item) => item.stepId),
+          stepIds: undo.map((item) => item.stepId),
           timestamp: now,
         },
       ],
       fields,
     });
-
-    if (!committed) return { type: "none" };
-
-    this.aborts.delete(executionId);
-    this.compensating.add(executionId);
-
-    return { type: "started" };
   }
 
-  private async runCompensationPhase(input: RunCompensationPhaseInput) {
-    const { executionId, rawInput, run } = input;
+  // Runs the undo of each snapshotted step newest first, as ordinary steps
+  // (`u<N>` undoes `a<N>`) with their own retries, then ends the run. Fails
+  // closed when a snapshotted handler is gone (for example after a deploy).
+  private async unwind(
+    executionId: string,
+    rawInput: string,
+    run: LeaseRun,
+    replay: Replay,
+  ) {
     const { view } = run;
     const phase = view.compensation;
 
     if (!phase) return false;
 
-    this.compensating.add(executionId);
+    const handlers = new Map(replay.undo.map((item) => [item.stepId, item]));
+    const pending = phase.stepIds
+      .filter((id) => view.steps.get(`u${id.slice(1)}`)?.status !== "completed")
+      .reverse();
+    let error = replay.fatal;
 
-    const [collectError, items] = await mightThrow(
-      collectCompensations({
-        options: this.options,
-        view,
-        executionId,
-      }),
-    );
-
-    if (collectError) {
-      await this.finishCompensation({
-        executionId,
-        reason: "failed",
-        error: collectError.message,
-        rawInput,
-        run,
-      });
-      return false;
+    if (
+      !error &&
+      (phase.stepIds.length === 0 || pending.some((id) => !handlers.has(id)))
+    ) {
+      error = "compensation handlers missing after CompensationStarted";
     }
 
-    const collectedIds = new Set(items.map((item) => item.stepId));
-    const missingHandlers = compensationHandlersMissing({
-      expectedIds: phase.stepIds,
-      collectedIds,
-      phaseSteps: phase.steps,
-    });
+    const item = handlers.get(pending[0] ?? "");
 
-    if (missingHandlers) {
-      await this.finishCompensation({
-        executionId,
-        reason: "failed",
-        error: "compensation handlers missing after CompensationStarted",
-        rawInput,
-        run,
-      });
-      return false;
-    }
+    if (!error && item) {
+      const signal = new AbortController().signal;
+      const next = nextStep(
+        view.steps.get(`u${item.stepId.slice(1)}`),
+        {
+          stepId: `u${item.stepId.slice(1)}`,
+          stepName: `undo:${item.stepName}`,
+          handler: ({ input, fail }) =>
+            item.compensate({ input, fail, signal, ...item.outcome }),
+        },
+        { now: Date.now(), retries: this.retries, backoff: this.backoff },
+      );
 
-    const byId = new Map(items.map((item) => [item.stepId, item]));
+      if (next.type === "waiting") {
+        await this.waitUntil(executionId, run, next.until);
+        return false;
+      }
 
-    for (let index = phase.stepIds.length - 1; index >= 0; index--) {
-      const stepId = phase.stepIds[index];
+      if (next.type === "runStep") {
+        const { events, stepId, stepName, attempt, handler } = next;
 
-      if (!stepId) continue;
-
-      const item = byId.get(stepId);
-
-      if (!item) continue;
-
-      const state = phase.steps.get(item.stepId);
-
-      if (state?.status === "completed") continue;
-
-      if (state?.status === "failed") {
-        if (!state.retryable || state.attempt > this.retries) {
-          const errorHistory = this.collectErrorHistory({
-            events: view.events,
-            stepId: item.stepId,
-            attempt: state.attempt,
-            error: state.error,
-            timestamp: Date.now(),
-            failedType: "CompensationFailed",
-          });
-
-          await this.failFromCompensation({
-            executionId,
-            stepName: item.stepName,
-            attempt: state.attempt,
-            error: new Error(state.error),
-            errorHistory,
-            rawInput,
-            run,
-          });
+        if (!(await this.commitRun(executionId, run, { events }))) {
           return false;
         }
 
-        const retryAt = state.failedAt + this.backoff(state.attempt);
-
-        if (Date.now() < retryAt) {
-          await this.waitUntil(executionId, run, retryAt);
-          return false;
-        }
-
-        return this.commitRun(executionId, run, {
-          events: [
-            {
-              type: "CompensationScheduled",
-              stepId: item.stepId,
-              stepName: item.stepName,
-              attempt: state.attempt + 1,
-              timestamp: Date.now(),
-            },
-          ],
+        return this.executeStep({
+          executionId,
+          stepId,
+          stepName,
+          attempt,
+          handler,
+          rawInput,
+          run,
         });
       }
 
-      let attempt = 1;
-
-      if (state) {
-        attempt = state.attempt;
-      }
-
-      return this.executeCompensation({
-        executionId,
-        stepId: item.stepId,
-        stepName: item.stepName,
-        attempt,
-        result: item.result,
-        compensate: item.compensate,
-        rawInput,
-        run,
-      });
+      if (next.type === "fail") error = next.error;
     }
 
     await this.finishCompensation({
       executionId,
-      reason: phase.reason,
-      error: phase.error,
+      reason: error ? "failed" : phase.reason,
+      error: error ?? phase.error,
       rawInput,
       run,
     });
 
     return false;
-  }
-
-  private async executeCompensation(input: ExecuteCompensationInput) {
-    const {
-      executionId,
-      stepId,
-      stepName,
-      attempt,
-      result,
-      compensate,
-      rawInput,
-      run,
-    } = input;
-    const { token } = run;
-    const workflowInput = fromJson<TInput>(rawInput, "input");
-
-    const [compensateError] = await mightThrow(
-      Promise.resolve().then(() =>
-        compensate({
-          input: workflowInput,
-          result,
-          signal: this.compensationAbortController(executionId).signal,
-          fail: failWith,
-        }),
-      ),
-    );
-
-    if (!(await this.ownsLease(executionId, token))) return false;
-
-    if (!compensateError) {
-      const completed = await this.commitRun(executionId, run, {
-        events: [
-          {
-            type: "CompensationCompleted",
-            stepId,
-            stepName,
-            timestamp: Date.now(),
-          },
-        ],
-      });
-
-      if (!completed) return false;
-
-      return true;
-    }
-
-    const message = compensateError.message;
-    const retryable = !isNonRetryableStepError(compensateError);
-    const now = Date.now();
-    const errorHistory = this.collectErrorHistory({
-      events: run.view.events,
-      stepId,
-      attempt,
-      error: message,
-      timestamp: now,
-      failedType: "CompensationFailed",
-    });
-
-    const appended = await this.commitRun(executionId, run, {
-      events: [
-        {
-          type: "CompensationFailed",
-          stepId,
-          stepName,
-          error: message,
-          retryable,
-          attempt,
-          timestamp: now,
-        },
-      ],
-    });
-
-    if (!appended) return false;
-
-    // The compensation phase waits out the backoff and retries.
-    if (retryable && attempt <= this.retries) return true;
-
-    await this.failFromCompensation({
-      executionId,
-      stepName,
-      attempt,
-      error: compensateError,
-      errorHistory,
-      rawInput,
-      run,
-    });
-
-    return false;
-  }
-
-  private async failFromCompensation(input: FailFromCompensationInput) {
-    const {
-      executionId,
-      stepName,
-      attempt,
-      error,
-      errorHistory,
-      rawInput,
-      run,
-    } = input;
-    const workflowInput = fromJson<TInput>(rawInput, "input");
-
-    await runHook(() =>
-      this.options.hooks?.onError?.({
-        executionId,
-        input: workflowInput,
-        stepName,
-        error,
-        totalAttempts: attempt,
-        errorHistory,
-      }),
-    );
-
-    await this.finishCompensation({
-      executionId,
-      reason: "failed",
-      error: error.message,
-      rawInput,
-      run,
-    });
   }
 
   private async finishCompensation(input: FinishCompensationInput) {
@@ -1477,7 +1026,7 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private collectErrorHistory(input: CollectErrorHistoryInput) {
-    const { events, stepId, attempt, error, timestamp, failedType } = input;
+    const { events, stepId, attempt, error, timestamp } = input;
     const history: WorkflowStepErrorRecord[] = [];
     let afterResume = 0;
 
@@ -1491,7 +1040,7 @@ export class WorkflowEngine<TInput, TResult> {
       const event = events[i];
 
       if (!event) continue;
-      if (event.type !== failedType) continue;
+      if (event.type !== "StepFailed") continue;
       if (event.stepId !== stepId) continue;
 
       history.push({
@@ -1539,8 +1088,6 @@ export class WorkflowEngine<TInput, TResult> {
 
   private clearExecutionLocalState(executionId: string) {
     this.aborts.delete(executionId);
-    this.compensationAborts.delete(executionId);
-    this.compensating.delete(executionId);
   }
 
   private retention(endedAt: number) {

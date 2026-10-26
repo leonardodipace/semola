@@ -122,7 +122,7 @@ describe("workflow compensate adversarial", () => {
             },
             {
               compensate: async ({ result }) => {
-                order.push(`comp:${result.n}`);
+                order.push(`comp:${result?.n}`);
               },
             },
           );
@@ -218,9 +218,10 @@ describe("workflow compensate adversarial", () => {
     await stop(wf);
   });
 
-  test("incomplete failed forward step is not compensated", async () => {
+  test("a failing step's own compensate runs first with completed false", async () => {
     const redis = createRedis();
     const order: string[] = [];
+    const seen: { completed: boolean; result: unknown }[] = [];
 
     const wf = defineWorkflow({
       name: `adv-fail-fwd-${crypto.randomUUID()}`,
@@ -235,8 +236,9 @@ describe("workflow compensate adversarial", () => {
             return "ok";
           },
           {
-            compensate: async () => {
+            compensate: async ({ completed, result }) => {
               order.push("undo-ok");
+              seen.push({ completed, result });
             },
           },
         );
@@ -248,8 +250,9 @@ describe("workflow compensate adversarial", () => {
             throw new Error("fragile boom");
           },
           {
-            compensate: async () => {
+            compensate: async ({ completed, result }) => {
               order.push("undo-fragile");
+              seen.push({ completed, result });
             },
           },
         );
@@ -260,42 +263,48 @@ describe("workflow compensate adversarial", () => {
     const execution = await waitStatus(wf, executionId, "failed");
 
     expect(execution.error).toBe("fragile boom");
-    expect(order).toEqual(["ok", "fragile", "undo-ok"]);
-    expect(order).not.toContain("undo-fragile");
+    expect(order).toEqual(["ok", "fragile", "undo-fragile", "undo-ok"]);
+    expect(seen).toEqual([
+      { completed: false, result: undefined },
+      { completed: true, result: "ok" },
+    ]);
 
     await stop(wf);
   });
 
-  test("first step fail means nothing to compensate", async () => {
+  test("a never-started step is not undone", async () => {
     const redis = createRedis();
-    let compensateCalls = 0;
+    const order: string[] = [];
 
     const wf = defineWorkflow({
-      name: `adv-first-fail-${crypto.randomUUID()}`,
+      name: `adv-never-started-${crypto.randomUUID()}`,
       redis,
       ...fast,
       retries: 0,
       handler: async ({ step }) => {
-        await step(
-          "only",
-          async () => {
-            throw new Error("first fail");
+        await step("a", async () => order.push("a"), {
+          compensate: async () => {
+            order.push("undo-a");
           },
-          {
-            compensate: async () => {
-              compensateCalls++;
-            },
+        });
+
+        await step("b", async () => {
+          throw new Error("b failed");
+        });
+
+        await step("c", async () => order.push("c"), {
+          compensate: async () => {
+            order.push("undo-c");
           },
-        );
+        });
       },
     });
 
     const { executionId } = await wf.start({});
     const execution = await waitStatus(wf, executionId, "failed");
 
-    expect(execution.error).toBe("first fail");
-    expect(compensateCalls).toBe(0);
-    expect(execution.status).toBe("failed");
+    expect(execution.error).toBe("b failed");
+    expect(order).toEqual(["a", "undo-a"]);
 
     await stop(wf);
   });
@@ -322,7 +331,7 @@ describe("workflow compensate adversarial", () => {
           },
           {
             compensate: async ({ result }) => {
-              order.push(`undo:${result.id}`);
+              order.push(`undo:${result?.id}`);
             },
           },
         );
@@ -681,7 +690,7 @@ describe("workflow compensate adversarial", () => {
     await stop(wf);
   });
 
-  test("onRetry not called for compensate retries", async () => {
+  test("onRetry fires for undo retries as undo:<name>", async () => {
     const redis = createRedis();
     const retrySteps: string[] = [];
     let compensateAttempts = 0;
@@ -714,10 +723,12 @@ describe("workflow compensate adversarial", () => {
     });
 
     const { executionId } = await wf.start({});
-    await waitStatus(wf, executionId, "failed");
+    const execution = await waitStatus(wf, executionId, "failed");
 
+    expect(execution.error).toBe("later");
     expect(compensateAttempts).toBe(3);
-    expect(retrySteps).toEqual([]);
+    expect(retrySteps).toEqual(["undo:create", "undo:create"]);
+    expect(execution.steps.map((s) => s.name)).toEqual(["create"]);
 
     await stop(wf);
   });
@@ -784,7 +795,7 @@ describe("workflow compensate adversarial", () => {
         onError: ({ error, stepName, errorHistory }) => {
           errors.push(error.message);
 
-          if (stepName === "create") {
+          if (stepName === "undo:create") {
             compensateHistories.push(errorHistory.length);
           }
         },
@@ -983,9 +994,11 @@ describe("workflow compensate adversarial", () => {
 
     const execution = await wf.get(executionId);
 
+    // The undo step finished with its own signal; ending the unwind is left
+    // to whoever claims the execution next.
     expect(sawAbort).toBe(false);
     expect(finished).toBe(true);
-    expect(execution.status).toBe("failed");
+    expect(execution.status).toBe("compensating");
   });
 
   test("at-least-once re-entry if reclaim mid-compensate", async () => {
@@ -1085,7 +1098,7 @@ describe("workflow compensate adversarial", () => {
           },
           {
             compensate: async ({ result }) => {
-              order.push(`undo:${result.id}`);
+              order.push(`undo:${result?.id}`);
             },
           },
         );
@@ -1367,9 +1380,10 @@ describe("workflow compensate adversarial", () => {
     await stop(wf);
   });
 
-  test("incomplete second step that aborts without result is not compensated", async () => {
+  test("cancel while a step is in flight undoes that step", async () => {
     const redis = createRedis();
     const order: string[] = [];
+    let runningUndo: boolean | undefined;
 
     const wf = defineWorkflow({
       name: `adv-abort-incomplete-${crypto.randomUUID()}`,
@@ -1402,8 +1416,9 @@ describe("workflow compensate adversarial", () => {
             throw new NonRetryableStepError("aborted");
           },
           {
-            compensate: async () => {
+            compensate: async ({ completed }) => {
               order.push("undo-running");
+              runningUndo = completed;
             },
           },
         );
@@ -1416,8 +1431,8 @@ describe("workflow compensate adversarial", () => {
 
     await waitStatus(wf, executionId, "cancelled");
 
-    expect(order).toContain("undo-done");
-    expect(order).not.toContain("undo-running");
+    expect(order).toEqual(["done", "running", "undo-running", "undo-done"]);
+    expect(runningUndo).toBe(false);
 
     await stop(wf);
   });
@@ -1555,7 +1570,10 @@ describe("workflow compensate adversarial", () => {
     const { executionId } = await wf.start({});
     const execution = await waitStatus(wf, executionId, "failed");
 
-    expect(execution.error).toBe("boom");
+    // The diverged replay is caught before any undo runs.
+    expect(execution.error).toBe(
+      'nondeterminism: step a1 expected "b", got "b-renamed"',
+    );
     expect(order).toEqual(["a", "b"]);
     expect(order).not.toContain("undo-a");
     expect(order).not.toContain("undo-b");
@@ -1610,7 +1628,10 @@ describe("workflow compensate adversarial", () => {
     const { executionId } = await wf.start({});
     const execution = await waitStatus(wf, executionId, "failed");
 
-    expect(execution.error).toBe("boom");
+    // The diverged replay is caught before any undo runs.
+    expect(execution.error).toBe(
+      "nondeterminism: historical step a1 was not replayed",
+    );
     expect(order).toEqual(["a", "b"]);
     expect(order).not.toContain("undo-a");
     expect(order).not.toContain("undo-b");
@@ -1667,7 +1688,10 @@ describe("workflow compensate adversarial", () => {
     const { executionId } = await wf.start({});
     const execution = await waitStatus(wf, executionId, "failed");
 
-    expect(execution.error).toBe("boom");
+    // The diverged replay is caught before any undo runs.
+    expect(execution.error).toBe(
+      "nondeterminism: historical step a1 was not replayed",
+    );
     expect(order).toEqual(["a", "b"]);
     expect(order).not.toContain("undo-a");
     expect(order).not.toContain("undo-b");
@@ -1694,7 +1718,7 @@ describe("workflow compensate adversarial", () => {
           },
         };
 
-        if (handlerPasses >= 4) {
+        if (handlerPasses >= 3) {
           options = undefined;
         }
 
@@ -2250,7 +2274,7 @@ describe("workflow compensate adversarial", () => {
 
     expect(order).not.toContain("undo-a");
     expect(order).not.toContain("undo-b");
-    expect(execution.error).toMatch(/^nondeterminism: compensation collect/);
+    expect(execution.error).toMatch(/^nondeterminism: /);
 
     await stop(wf);
   });
@@ -2353,7 +2377,7 @@ describe("workflow compensate adversarial", () => {
     await stop(wf);
   });
 
-  test("onError errorHistory lists each CompensationFailed attempt message", async () => {
+  test("onError errorHistory lists each failed undo attempt", async () => {
     const redis = createRedis();
     const histories: string[][] = [];
     let attempts = 0;
@@ -2367,7 +2391,7 @@ describe("workflow compensate adversarial", () => {
       retryBackoff: { baseDelay: 5, multiplier: 1, maxDelay: 5 },
       hooks: {
         onError: ({ stepName, errorHistory }) => {
-          if (stepName === "create") {
+          if (stepName === "undo:create") {
             histories.push(errorHistory.map((entry) => entry.error));
           }
         },
