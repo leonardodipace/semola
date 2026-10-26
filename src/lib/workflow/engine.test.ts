@@ -131,6 +131,25 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowEngine", () => {
     expect(sawAbort).toBe(true);
   });
 
+  test("stop resolves before start, twice, and without waiting out an idle poll", async () => {
+    const redis = createRedis();
+    const name = `engine-stop-idle-${crypto.randomUUID()}`;
+
+    const create = () =>
+      new WorkflowEngine(
+        { name, redis, pollInterval: 60_000, handler: async () => {} },
+        new WorkflowStore(redis, name),
+      );
+
+    await create().stop();
+
+    const engine = create();
+    engine.start();
+    await sleep(20);
+    await engine.stop();
+    await engine.stop();
+  });
+
   test("requestAbort aborts the execution signal", async () => {
     const redis = createRedis();
     const name = `engine-abort-${crypto.randomUUID()}`;

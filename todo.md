@@ -59,7 +59,7 @@ Follow-ups from the review of `noah/timer-refactor`, after checking each claim a
   - Both engine callers pass it; only the store test helper omits it. Remove the `ARGV[3] ~= ''` branch in `RELEASE_LEASE`.
   - Split `LeaseInput` into extend and release input types, so `dueAt` exists only on release.
 
-- [ ] **7. `stop()` awaits the poller loops.**
+- [x] **7. `stop()` awaits the poller loops.**
   - `start()` keeps the `workflowLoop()` promises, and `stop()` aborts the live runs then awaits `Promise.all(...)`.
   - Delete the `active` counter, the polling loop and `SHUTDOWN_POLL`.
   - First wrap the release in the "stop() raced this claim" branch in `mightThrow`, so a Redis error can't reject a loop promise.

@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { mightThrow, mightThrowSync } from "../errors/index.js";
 import { NonRetryableStepError, Paused, WorkflowStoreError } from "./errors.js";
 import {
@@ -43,7 +44,6 @@ const DEFAULT_RETRY_BASE = 1000;
 const DEFAULT_RETRY_MULTIPLIER = 2;
 const DEFAULT_RETRY_MAX = 30_000;
 const HEARTBEAT_RATIO = 0.4;
-const SHUTDOWN_POLL = 10;
 const GLOBAL_CAPACITY_KEY = "*";
 
 const nonRetryableViaFail = new WeakSet<Error>();
@@ -71,9 +71,6 @@ const backoffDelay = (input: BackoffDelayInput) => {
 
   return Math.min(base * multiplier ** (attempt - 1), max);
 };
-
-const sleepMs = (ms: number) =>
-  new Promise((resolve) => setTimeout(resolve, ms));
 
 const invalidSleepDelay = (ms: number) => {
   if (!Number.isFinite(ms) || ms < 0) {
@@ -359,8 +356,8 @@ const advance = async <TInput, TResult>(
 };
 
 export class WorkflowEngine<TInput, TResult> {
-  private running = true;
-  private active = 0;
+  private readonly stopping = new AbortController();
+  private readonly loops: Promise<void>[] = [];
   private readonly options: WorkflowOptions<TInput, TResult>;
   private readonly store: WorkflowStore;
   private readonly retries: number;
@@ -418,7 +415,7 @@ export class WorkflowEngine<TInput, TResult> {
 
   public start() {
     for (let i = 0; i < this.concurrency; i++) {
-      void this.workflowLoop();
+      this.loops.push(this.workflowLoop());
     }
   }
 
@@ -426,47 +423,46 @@ export class WorkflowEngine<TInput, TResult> {
   // finishes before its run exits. Whoever claims the execution next
   // continues an interrupted unwind.
   public async stop() {
-    this.running = false;
+    this.stopping.abort();
 
     for (const controller of this.aborts.values()) {
       controller.abort();
     }
 
-    while (this.active > 0) {
-      await sleepMs(SHUTDOWN_POLL);
-    }
+    await Promise.all(this.loops);
   }
 
   private async workflowLoop() {
-    while (this.running) {
+    while (!this.stopping.signal.aborted) {
       const token = crypto.randomUUID();
       const [error, executionId] = await mightThrow(
         this.store.claimDue(token, this.lockTTL),
       );
 
       if (error || !executionId) {
-        await sleepMs(this.pollInterval);
+        // stop() cuts the idle wait short.
+        await mightThrow(
+          delay(this.pollInterval, undefined, { signal: this.stopping.signal }),
+        );
         continue;
       }
 
       // stop() raced this claim: hand the execution straight back.
-      if (!this.running) {
-        await this.store.releaseLease({
-          executionId,
-          token,
-          ttlMs: this.lockTTL,
-          dueAt: Date.now(),
-        });
+      if (this.stopping.signal.aborted) {
+        await mightThrow(
+          this.store.releaseLease({
+            executionId,
+            token,
+            ttlMs: this.lockTTL,
+            dueAt: Date.now(),
+          }),
+        );
         continue;
       }
 
       // Each of the `concurrency` pollers runs one execution at a time, so a
       // process never has more than `concurrency` handlers in flight.
-      this.active++;
-
       await mightThrow(this.runClaimed(executionId, token));
-
-      this.active--;
     }
   }
 
@@ -608,7 +604,7 @@ export class WorkflowEngine<TInput, TResult> {
 
     // Every write below is fenced by the lease in COMMIT, so a lease lost
     // before the heartbeat notices still ends the run at its next commit.
-    while (this.running) {
+    while (!this.stopping.signal.aborted) {
       if (run.lost) return;
 
       const replay = await advance({
