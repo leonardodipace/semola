@@ -7,6 +7,7 @@ import type {
   CommitResult,
   HistoryEvent,
   LeaseInput,
+  ReleaseLeaseInput,
   WorkflowMeta,
   WorkflowStatus,
 } from "./types.js";
@@ -315,7 +316,7 @@ export class WorkflowStore {
   }
 
   // dueAt lowers the due score and keeps a held slot until dueAt + ttlMs.
-  public async releaseLease(input: LeaseInput & { dueAt: number }) {
+  public async releaseLease(input: ReleaseLeaseInput) {
     const { executionId, token, ttlMs, capacityKey = "*", dueAt } = input;
 
     const [error] = await mightThrow(

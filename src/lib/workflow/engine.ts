@@ -23,11 +23,14 @@ import type {
   FinishCompensationInput,
   HandleStepFailureInput,
   LeaseRun,
+  NextStepTarget,
   Replay,
+  RetryPolicy,
   RunCommitInput,
   StepCompensateHandler,
   StepHandler,
   StepState,
+  TerminalDecision,
   WorkflowDecision,
   WorkflowMeta,
   WorkflowOptions,
@@ -124,16 +127,8 @@ const failDecision = (error: string, now: number): WorkflowDecision => ({
 // its error once retries are spent. Forward and undo steps share this.
 const nextStep = (
   state: StepState | undefined,
-  step: {
-    stepId: string;
-    stepName: string;
-    handler: StepHandler<unknown, unknown>;
-  },
-  policy: {
-    now: number;
-    retries: number;
-    backoff: (attempt: number) => number;
-  },
+  step: NextStepTarget,
+  policy: RetryPolicy,
 ): WorkflowDecision => {
   const { now, retries, backoff } = policy;
 
@@ -849,7 +844,7 @@ export class WorkflowEngine<TInput, TResult> {
   private async startUnwind(
     executionId: string,
     run: LeaseRun,
-    decision: Extract<WorkflowDecision, { type: "fail" | "cancel" }>,
+    decision: TerminalDecision,
     undo: CompensationItem[],
   ) {
     if (undo.length === 0) return false;

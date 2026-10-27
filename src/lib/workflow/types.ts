@@ -352,6 +352,23 @@ export type WorkflowDecision =
   | { type: "fail"; error: string; events: HistoryEvent[] }
   | { type: "cancel"; events: HistoryEvent[] };
 
+export type TerminalDecision = Extract<
+  WorkflowDecision,
+  { type: "fail" | "cancel" }
+>;
+
+export type NextStepTarget = {
+  stepId: string;
+  stepName: string;
+  handler: StepHandler<unknown, unknown>;
+};
+
+export type RetryPolicy = {
+  now: number;
+  retries: number;
+  backoff: (attempt: number) => number;
+};
+
 export type Replay = {
   decision: WorkflowDecision;
   // Undo handlers of started steps, in start order.
@@ -455,6 +472,8 @@ export type LeaseInput = {
   // Capacity key of the slot that follows the lease ("*" by default).
   capacityKey?: string;
 };
+
+export type ReleaseLeaseInput = LeaseInput & { dueAt: number };
 
 export type CommitRetention = {
   ttlMs?: number;
