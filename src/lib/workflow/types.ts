@@ -489,6 +489,9 @@ export type CommitInput = {
   dueAt?: number;
   // Capacity key whose slot a terminal commit frees ("*" by default).
   capacityKey?: string;
+  // With dueAt, keeps a held capacity slot until dueAt + slotTtlMs, so a
+  // crash before releaseLease still holds the slot through the wait.
+  slotTtlMs?: number;
   // Present only for terminal transitions: leave the due set + retention.
   retention?: CommitRetention;
 };

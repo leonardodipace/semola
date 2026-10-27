@@ -31,9 +31,10 @@ export const ACQUIRE_CAPACITY =
 // KEYS: lease, due, capacity
 // ARGV: token, lockTTL, executionId, now + lockTTL
 // Heartbeat: extends the lease, the visibility timeout and the capacity slot
-// (if held) together.
+// (if held) together. The slot is never lowered, so a heartbeat landing after
+// a wait's commit keeps the slot through the wait.
 export const EXTEND_LEASE =
-  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('PEXPIRE', KEYS[1], ARGV[2]) redis.call('ZADD', KEYS[2], 'XX', ARGV[4], ARGV[3]) redis.call('ZADD', KEYS[3], 'XX', ARGV[4], ARGV[3]) return 1";
+  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('PEXPIRE', KEYS[1], ARGV[2]) redis.call('ZADD', KEYS[2], 'XX', ARGV[4], ARGV[3]) redis.call('ZADD', KEYS[3], 'XX', 'GT', ARGV[4], ARGV[3]) return 1";
 
 // KEYS: lease, due, capacity
 // ARGV: token, executionId, due score, slot expiry
@@ -55,16 +56,17 @@ export const CREATE_EXECUTION =
 
 // KEYS: lease, history, meta, due, terminal, capacity
 // ARGV: token, executionId, event count n, due, ttlMs, trackedAt,
-//       n event payloads, meta field/value pairs...
+//       slot expiry, n event payloads, meta field/value pairs...
 // Lease-fenced write of history events + meta fields. due "" leaves the due
-// score, a number sets it, "done" marks a terminal transition: leave the due
-// set and the capacity key and apply retention (ttlMs "" keeps keys, "0" unlinks
+// score, a number sets it (and a held slot's expiry, unless slot expiry is
+// ""), "done" marks a terminal transition: leave the due set and the
+// capacity key and apply retention (ttlMs "" keeps keys, "0" unlinks
 // meta/history/lease, otherwise PEXPIREs meta + history; trackedAt "" skips
 // the retentionMax zset).
 // Returns 0 when the lease is not held, 2 when committed and meta carries a
 // cancel request, 1 when committed otherwise.
 export const COMMIT =
-  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end local n=tonumber(ARGV[3]) for i=7,6+n do redis.call('RPUSH', KEYS[2], ARGV[i]) end if #ARGV > 6+n then redis.call('HSET', KEYS[3], unpack(ARGV, 7+n)) end local r=1 local c=redis.call('HGET', KEYS[3], 'cancelRequestedAt') if c and c ~= '' then r=2 end if ARGV[4] == '' then return r end if ARGV[4] ~= 'done' then redis.call('ZADD', KEYS[4], 'XX', ARGV[4], ARGV[2]) return r end redis.call('ZREM', KEYS[4], ARGV[2]) redis.call('ZREM', KEYS[6], ARGV[2]) local ttl=tonumber(ARGV[5]) if ttl then if ttl <= 0 then redis.call('UNLINK', KEYS[3], KEYS[2], KEYS[1]) redis.call('ZREM', KEYS[5], ARGV[2]) return r end redis.call('PEXPIRE', KEYS[3], ARGV[5]) redis.call('PEXPIRE', KEYS[2], ARGV[5]) end if ARGV[6] ~= '' then redis.call('ZADD', KEYS[5], ARGV[6], ARGV[2]) end return r";
+  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end local n=tonumber(ARGV[3]) for i=8,7+n do redis.call('RPUSH', KEYS[2], ARGV[i]) end if #ARGV > 7+n then redis.call('HSET', KEYS[3], unpack(ARGV, 8+n)) end local r=1 local c=redis.call('HGET', KEYS[3], 'cancelRequestedAt') if c and c ~= '' then r=2 end if ARGV[4] == '' then return r end if ARGV[4] ~= 'done' then redis.call('ZADD', KEYS[4], 'XX', ARGV[4], ARGV[2]) if ARGV[7] ~= '' then redis.call('ZADD', KEYS[6], 'XX', ARGV[7], ARGV[2]) end return r end redis.call('ZREM', KEYS[4], ARGV[2]) redis.call('ZREM', KEYS[6], ARGV[2]) local ttl=tonumber(ARGV[5]) if ttl then if ttl <= 0 then redis.call('UNLINK', KEYS[3], KEYS[2], KEYS[1]) redis.call('ZREM', KEYS[5], ARGV[2]) return r end redis.call('PEXPIRE', KEYS[3], ARGV[5]) redis.call('PEXPIRE', KEYS[2], ARGV[5]) end if ARGV[6] ~= '' then redis.call('ZADD', KEYS[5], ARGV[6], ARGV[2]) end return r";
 
 // KEYS: meta, history, due, terminal
 // ARGV: executionId, now, WorkflowResumed payload
@@ -120,13 +122,18 @@ export class WorkflowStore {
 
   public async commit(input: CommitInput): Promise<CommitResult> {
     const { executionId, leaseToken, events = [], fields = {} } = input;
-    const { retention, dueAt, capacityKey = "*" } = input;
+    const { retention, dueAt, capacityKey = "*", slotTtlMs } = input;
     const payloads = events.map((event) =>
       toJson(event, `history event for ${executionId}`),
     );
     let due = dueAt === undefined ? "" : String(dueAt);
     let ttl = "";
     let trackedAt = "";
+    let slotExpiry = "";
+
+    if (dueAt !== undefined) {
+      if (slotTtlMs !== undefined) slotExpiry = String(dueAt + slotTtlMs);
+    }
 
     if (retention) {
       due = "done";
@@ -160,6 +167,7 @@ export class WorkflowStore {
         due,
         ttl,
         trackedAt,
+        slotExpiry,
         ...payloads,
         ...metaEntries(fields),
       ]),

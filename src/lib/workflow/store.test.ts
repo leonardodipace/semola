@@ -288,6 +288,75 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     expect(await slotsUntil(dueAt + 60_001)).toEqual([]);
   });
 
+  test("committing a due time keeps the slot until due + slot ttl without a release", async () => {
+    const redis = createRedis();
+    const name = "store-capacity-commit";
+    const store = new WorkflowStore(redis, name);
+    const dueAt = Date.now() + 10_000;
+    const slotsUntil = (at: number) =>
+      redis.zrangebyscore(keys.capacity(name, "k"), at, "+inf");
+
+    await store.createExecution("e1", baseMeta(name));
+    await store.claimDue("owner", 60_000);
+    await store.acquireCapacity("k", "e1", 1, 60_000);
+    await store.commit({
+      executionId: "e1",
+      leaseToken: "owner",
+      capacityKey: "k",
+      dueAt,
+      slotTtlMs: 60_000,
+    });
+
+    expect(await slotsUntil(dueAt + 60_000)).toEqual(["e1"]);
+    expect(await slotsUntil(dueAt + 60_001)).toEqual([]);
+  });
+
+  test("committing a due time does not take a slot the execution does not hold", async () => {
+    const redis = createRedis();
+    const name = "store-capacity-commit-unheld";
+    const store = new WorkflowStore(redis, name);
+
+    await store.createExecution("e1", baseMeta(name));
+    await store.claimDue("owner", 60_000);
+    await store.commit({
+      executionId: "e1",
+      leaseToken: "owner",
+      capacityKey: "k",
+      dueAt: Date.now() + 10_000,
+      slotTtlMs: 60_000,
+    });
+
+    expect(await redis.zcard(keys.capacity(name, "k"))).toBe(0);
+  });
+
+  test("a heartbeat after a wait's commit does not shorten the slot", async () => {
+    const redis = createRedis();
+    const name = "store-capacity-heartbeat";
+    const store = new WorkflowStore(redis, name);
+    const dueAt = Date.now() + 10_000;
+    const slotsUntil = (at: number) =>
+      redis.zrangebyscore(keys.capacity(name, "k"), at, "+inf");
+
+    await store.createExecution("e1", baseMeta(name));
+    await store.claimDue("owner", 60_000);
+    await store.acquireCapacity("k", "e1", 1, 60_000);
+    await store.commit({
+      executionId: "e1",
+      leaseToken: "owner",
+      capacityKey: "k",
+      dueAt,
+      slotTtlMs: 60_000,
+    });
+    await store.extendLease({
+      executionId: "e1",
+      token: "owner",
+      ttlMs: 60_000,
+      capacityKey: "k",
+    });
+
+    expect(await slotsUntil(dueAt + 60_000)).toEqual(["e1"]);
+  });
+
   test("commit writes events and meta only while holding the lease", async () => {
     const redis = createRedis();
     const name = "store-commit-fence";

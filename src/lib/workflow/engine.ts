@@ -521,6 +521,7 @@ export class WorkflowEngine<TInput, TResult> {
       executionId,
       leaseToken: run.token,
       capacityKey: run.capacityKey,
+      slotTtlMs: this.lockTTL,
       ...input,
     });
 
