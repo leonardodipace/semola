@@ -2991,6 +2991,34 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
 
       await wf.stop();
     });
+
+    test("fails and compensates when the workflow result cannot be serialized", async () => {
+      const redis = createRedis();
+      let undone = 0;
+
+      const wf = defineWorkflow({
+        name: `ser-result-err-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        handler: async ({ step }) => {
+          await step("made", async () => "made", {
+            compensate: async () => {
+              undone++;
+            },
+          });
+
+          return 10n;
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      const execution = await waitStatus(wf, executionId, "failed");
+
+      expect(execution.error).toBe("Unable to serialize result");
+      expect(undone).toBe(1);
+
+      await wf.stop();
+    });
   });
 
   describe("partitions", () => {

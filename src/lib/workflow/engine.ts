@@ -340,7 +340,13 @@ const advance = async <TInput, TResult>(
     return { decision: failDecision(handlerError.message, now), undo };
   }
 
-  const serialized = toJson(result as TResult, "result");
+  const [serializeError, serialized] = mightThrowSync(() =>
+    toJson(result as TResult, "result"),
+  );
+
+  if (serializeError) {
+    return { decision: failDecision(serializeError.message, now), undo };
+  }
 
   return {
     decision: {

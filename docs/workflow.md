@@ -63,7 +63,7 @@ Each execution has an append-only event history in Redis. A single lease owner a
 
 Side effects belong inside `step`. Workflow code outside `step` / `sleep` must be deterministic relative to history: no raw `Date.now()`, `Math.random()`, network, or unseeded nondeterminism.
 
-Steps are **at-least-once**. `step` bodies must be idempotent; a crash mid-step may re-run the handler. Input, result, and step outputs are always JSON (`JSON.stringify` / `JSON.parse`).
+Steps are **at-least-once**. `step` bodies must be idempotent; a crash mid-step may re-run the handler. Input, result, and step outputs are always JSON (`JSON.stringify` / `JSON.parse`). A step output or workflow result that cannot be serialized (a `BigInt`, a circular object) fails the run without retrying, and compensates the steps that already started.
 
 ## Multi-replica and automatic recovery
 
