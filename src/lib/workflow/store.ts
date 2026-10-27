@@ -18,23 +18,61 @@ import type {
 // pushes its due score out by lockTTL (visibility timeout, so a dead worker's
 // execution comes due again). Busy members are pushed to when their lease
 // expires; members without meta are dropped. Returns the id or nil.
-export const CLAIM_DUE =
-  "local now=tonumber(ARGV[1]) local ttl=tonumber(ARGV[2]) for _, id in ipairs(redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', now, 'LIMIT', 0, 10)) do local lease=ARGV[4] .. id if redis.call('EXISTS', ARGV[5] .. id) == 0 then redis.call('ZREM', KEYS[1], id) elseif redis.call('SET', lease, ARGV[3], 'PX', ttl, 'NX') then redis.call('ZADD', KEYS[1], now + ttl, id) return id else local left=redis.call('PTTL', lease) if left < 0 then left=ttl end redis.call('ZADD', KEYS[1], now + left, id) end end return false";
+export const CLAIM_DUE = `
+local now = tonumber(ARGV[1])
+local ttl = tonumber(ARGV[2])
+
+for _, id in ipairs(redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', now, 'LIMIT', 0, 10)) do
+  local lease = ARGV[4] .. id
+
+  if redis.call('EXISTS', ARGV[5] .. id) == 0 then
+    redis.call('ZREM', KEYS[1], id)
+  elseif redis.call('SET', lease, ARGV[3], 'PX', ttl, 'NX') then
+    redis.call('ZADD', KEYS[1], now + ttl, id)
+    return id
+  else
+    local left = redis.call('PTTL', lease)
+    if left < 0 then
+      left = ttl
+    end
+    redis.call('ZADD', KEYS[1], now + left, id)
+  end
+end
+
+return false
+`;
 
 // KEYS: capacity
 // ARGV: executionId, limit, now, expiry
 // Counting semaphore: drops expired holders, then refreshes this execution's
 // slot or takes a free one. Returns 1 when admitted, 0 when the key is full.
-export const ACQUIRE_CAPACITY =
-  "redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[3]) if redis.call('ZSCORE', KEYS[1], ARGV[1]) or redis.call('ZCARD', KEYS[1]) < tonumber(ARGV[2]) then redis.call('ZADD', KEYS[1], ARGV[4], ARGV[1]) return 1 end return 0";
+export const ACQUIRE_CAPACITY = `
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[3])
+
+if redis.call('ZSCORE', KEYS[1], ARGV[1]) or redis.call('ZCARD', KEYS[1]) < tonumber(ARGV[2]) then
+  redis.call('ZADD', KEYS[1], ARGV[4], ARGV[1])
+  return 1
+end
+
+return 0
+`;
 
 // KEYS: lease, due, capacity
 // ARGV: token, lockTTL, executionId, now + lockTTL
 // Heartbeat: extends the lease, the visibility timeout and the capacity slot
 // (if held) together. The slot is never lowered, so a heartbeat landing after
 // a wait's commit keeps the slot through the wait.
-export const EXTEND_LEASE =
-  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('PEXPIRE', KEYS[1], ARGV[2]) redis.call('ZADD', KEYS[2], 'XX', ARGV[4], ARGV[3]) redis.call('ZADD', KEYS[3], 'XX', 'GT', ARGV[4], ARGV[3]) return 1";
+export const EXTEND_LEASE = `
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+  return 0
+end
+
+redis.call('PEXPIRE', KEYS[1], ARGV[2])
+redis.call('ZADD', KEYS[2], 'XX', ARGV[4], ARGV[3])
+redis.call('ZADD', KEYS[3], 'XX', 'GT', ARGV[4], ARGV[3])
+
+return 1
+`;
 
 // KEYS: lease, due, capacity
 // ARGV: token, executionId, due score, slot expiry
@@ -42,8 +80,17 @@ export const EXTEND_LEASE =
 // that lowered it after the last commit is kept. A held capacity slot is kept
 // until the slot expiry (due + lockTTL), so a sleeping execution keeps it with
 // nobody refreshing it.
-export const RELEASE_LEASE =
-  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) redis.call('ZADD', KEYS[2], 'XX', 'LT', ARGV[3], ARGV[2]) redis.call('ZADD', KEYS[3], 'XX', ARGV[4], ARGV[2]) return 1";
+export const RELEASE_LEASE = `
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+  return 0
+end
+
+redis.call('DEL', KEYS[1])
+redis.call('ZADD', KEYS[2], 'XX', 'LT', ARGV[3], ARGV[2])
+redis.call('ZADD', KEYS[3], 'XX', ARGV[4], ARGV[2])
+
+return 1
+`;
 
 // KEYS: meta, history, due, terminal
 // ARGV: executionId, WorkflowStarted payload, now, meta field/value pairs...
@@ -51,8 +98,18 @@ export const RELEASE_LEASE =
 // is never visible without its WorkflowStarted event. A leftover
 // terminal-zset member from an expired execution with the same id is dropped
 // so retentionMax trimming cannot unlink the new run.
-export const CREATE_EXECUTION =
-  "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end redis.call('HSET', KEYS[1], unpack(ARGV, 4)) redis.call('RPUSH', KEYS[2], ARGV[2]) redis.call('ZADD', KEYS[3], ARGV[3], ARGV[1]) redis.call('ZREM', KEYS[4], ARGV[1]) return 1";
+export const CREATE_EXECUTION = `
+if redis.call('EXISTS', KEYS[1]) == 1 then
+  return 0
+end
+
+redis.call('HSET', KEYS[1], unpack(ARGV, 4))
+redis.call('RPUSH', KEYS[2], ARGV[2])
+redis.call('ZADD', KEYS[3], ARGV[3], ARGV[1])
+redis.call('ZREM', KEYS[4], ARGV[1])
+
+return 1
+`;
 
 // KEYS: lease, history, meta, due, terminal, capacity
 // ARGV: token, executionId, event count n, due, ttlMs, trackedAt,
@@ -65,8 +122,59 @@ export const CREATE_EXECUTION =
 // the retentionMax zset).
 // Returns 0 when the lease is not held, 2 when committed and meta carries a
 // cancel request, 1 when committed otherwise.
-export const COMMIT =
-  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end local n=tonumber(ARGV[3]) for i=8,7+n do redis.call('RPUSH', KEYS[2], ARGV[i]) end if #ARGV > 7+n then redis.call('HSET', KEYS[3], unpack(ARGV, 8+n)) end local r=1 local c=redis.call('HGET', KEYS[3], 'cancelRequestedAt') if c and c ~= '' then r=2 end if ARGV[4] == '' then return r end if ARGV[4] ~= 'done' then redis.call('ZADD', KEYS[4], 'XX', ARGV[4], ARGV[2]) if ARGV[7] ~= '' then redis.call('ZADD', KEYS[6], 'XX', ARGV[7], ARGV[2]) end return r end redis.call('ZREM', KEYS[4], ARGV[2]) redis.call('ZREM', KEYS[6], ARGV[2]) local ttl=tonumber(ARGV[5]) if ttl then if ttl <= 0 then redis.call('UNLINK', KEYS[3], KEYS[2], KEYS[1]) redis.call('ZREM', KEYS[5], ARGV[2]) return r end redis.call('PEXPIRE', KEYS[3], ARGV[5]) redis.call('PEXPIRE', KEYS[2], ARGV[5]) end if ARGV[6] ~= '' then redis.call('ZADD', KEYS[5], ARGV[6], ARGV[2]) end return r";
+export const COMMIT = `
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+  return 0
+end
+
+local n = tonumber(ARGV[3])
+for i = 8, 7 + n do
+  redis.call('RPUSH', KEYS[2], ARGV[i])
+end
+
+if #ARGV > 7 + n then
+  redis.call('HSET', KEYS[3], unpack(ARGV, 8 + n))
+end
+
+local r = 1
+local c = redis.call('HGET', KEYS[3], 'cancelRequestedAt')
+if c and c ~= '' then
+  r = 2
+end
+
+if ARGV[4] == '' then
+  return r
+end
+
+if ARGV[4] ~= 'done' then
+  redis.call('ZADD', KEYS[4], 'XX', ARGV[4], ARGV[2])
+  if ARGV[7] ~= '' then
+    redis.call('ZADD', KEYS[6], 'XX', ARGV[7], ARGV[2])
+  end
+  return r
+end
+
+redis.call('ZREM', KEYS[4], ARGV[2])
+redis.call('ZREM', KEYS[6], ARGV[2])
+
+local ttl = tonumber(ARGV[5])
+if ttl then
+  if ttl <= 0 then
+    redis.call('UNLINK', KEYS[3], KEYS[2], KEYS[1])
+    redis.call('ZREM', KEYS[5], ARGV[2])
+    return r
+  end
+
+  redis.call('PEXPIRE', KEYS[3], ARGV[5])
+  redis.call('PEXPIRE', KEYS[2], ARGV[5])
+end
+
+if ARGV[6] ~= '' then
+  redis.call('ZADD', KEYS[5], ARGV[6], ARGV[2])
+end
+
+return r
+`;
 
 // KEYS: meta, history, due, terminal
 // ARGV: executionId, now, WorkflowResumed payload
@@ -74,8 +182,30 @@ export const COMMIT =
 // is set in the same commit as CompensationStarted). Clears any cancel
 // request that landed before the failure. Returns nil when meta is missing,
 // "unwound", the status when it is not "failed", or "resumed".
-export const RESUME_EXECUTION =
-  "local s=redis.call('HGET', KEYS[1], 'status') if not s then return false end local u=redis.call('HGET', KEYS[1], 'unwoundAt') if u and u ~= '' then return 'unwound' end if s ~= 'failed' then return s end redis.call('PERSIST', KEYS[1]) redis.call('PERSIST', KEYS[2]) redis.call('ZREM', KEYS[4], ARGV[1]) redis.call('RPUSH', KEYS[2], ARGV[3]) redis.call('HSET', KEYS[1], 'status', 'pending', 'error', '', 'failedAt', '', 'cancelRequestedAt', '', 'updatedAt', ARGV[2]) redis.call('ZADD', KEYS[3], ARGV[2], ARGV[1]) return 'resumed'";
+export const RESUME_EXECUTION = `
+local s = redis.call('HGET', KEYS[1], 'status')
+if not s then
+  return false
+end
+
+local u = redis.call('HGET', KEYS[1], 'unwoundAt')
+if u and u ~= '' then
+  return 'unwound'
+end
+
+if s ~= 'failed' then
+  return s
+end
+
+redis.call('PERSIST', KEYS[1])
+redis.call('PERSIST', KEYS[2])
+redis.call('ZREM', KEYS[4], ARGV[1])
+redis.call('RPUSH', KEYS[2], ARGV[3])
+redis.call('HSET', KEYS[1], 'status', 'pending', 'error', '', 'failedAt', '', 'cancelRequestedAt', '', 'updatedAt', ARGV[2])
+redis.call('ZADD', KEYS[3], ARGV[2], ARGV[1])
+
+return 'resumed'
+`;
 
 // KEYS: meta, due
 // ARGV: executionId, now
@@ -84,11 +214,37 @@ export const RESUME_EXECUTION =
 // (then nothing is written). Returns nil when meta is missing, else
 // {accepted 0|1, status, updatedAt, cancelledAt, createdAt} as read in the
 // same script. Keeps the first request time.
-export const CANCEL_EXECUTION =
-  "local s=redis.call('HGET', KEYS[1], 'status') if not s then return false end local accepted=0 if s ~= 'completed' and s ~= 'failed' and s ~= 'cancelled' and s ~= 'compensating' then local c=redis.call('HGET', KEYS[1], 'cancelRequestedAt') if not c or c == '' then redis.call('HSET', KEYS[1], 'cancelRequestedAt', ARGV[2]) end redis.call('ZADD', KEYS[2], 'XX', 'LT', ARGV[2], ARGV[1]) accepted=1 end local m=redis.call('HMGET', KEYS[1], 'updatedAt', 'cancelledAt', 'createdAt') return {accepted, s, m[1], m[2], m[3]}";
+export const CANCEL_EXECUTION = `
+local s = redis.call('HGET', KEYS[1], 'status')
+if not s then
+  return false
+end
 
-export const TRIM_IF_MEMBER =
-  "if redis.call('ZREM', KEYS[1], ARGV[1]) == 0 then return 0 end redis.call('UNLINK', KEYS[2], KEYS[3], KEYS[4]) return 1";
+local accepted = 0
+if s ~= 'completed' and s ~= 'failed' and s ~= 'cancelled' and s ~= 'compensating' then
+  local c = redis.call('HGET', KEYS[1], 'cancelRequestedAt')
+  if not c or c == '' then
+    redis.call('HSET', KEYS[1], 'cancelRequestedAt', ARGV[2])
+  end
+
+  redis.call('ZADD', KEYS[2], 'XX', 'LT', ARGV[2], ARGV[1])
+  accepted = 1
+end
+
+local m = redis.call('HMGET', KEYS[1], 'updatedAt', 'cancelledAt', 'createdAt')
+
+return {accepted, s, m[1], m[2], m[3]}
+`;
+
+export const TRIM_IF_MEMBER = `
+if redis.call('ZREM', KEYS[1], ARGV[1]) == 0 then
+  return 0
+end
+
+redis.call('UNLINK', KEYS[2], KEYS[3], KEYS[4])
+
+return 1
+`;
 
 export const keys = {
   history: (name: string, executionId: string) =>
