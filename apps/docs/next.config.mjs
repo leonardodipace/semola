@@ -1,11 +1,13 @@
-import { createMDX } from 'fumadocs-mdx/next';
+import { createMDX } from "fumadocs-mdx/next";
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
 const withMDX = createMDX();
 
 /** @type {import('next').NextConfig} */
 const config = {
   reactStrictMode: true,
-  output: "standalone",
 };
 
 export default withMDX(config);
+
+initOpenNextCloudflareForDev();

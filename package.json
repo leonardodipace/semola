@@ -196,6 +196,8 @@
     "docs:dev": "bun run --filter @semola/docs dev",
     "docs:build": "bun run --filter @semola/docs build",
     "docs:start": "bun run --filter @semola/docs start",
+    "docs:preview": "bun run --filter @semola/docs preview",
+    "docs:deploy": "bun run --filter @semola/docs deploy",
     "prepublishOnly": "bun run build"
   },
   "keywords": [
