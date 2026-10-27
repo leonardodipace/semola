@@ -8,7 +8,9 @@ dist
 
 # docs site
 apps/docs/.next
+apps/docs/.open-next
 apps/docs/.source
+apps/docs/.wrangler
 
 # code coverage
 coverage
@@ -36,3 +38,5 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Finder (MacOS) folder config
 .DS_Store
+
+apps/docs/.dev.vars

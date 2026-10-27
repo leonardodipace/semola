@@ -196,6 +196,11 @@
     "docs:dev": "bun run --filter @semola/docs dev",
     "docs:build": "bun run --filter @semola/docs build",
     "docs:start": "bun run --filter @semola/docs start",
+    "docs:preview": "bun run --filter @semola/docs preview",
+    "docs:deploy": "bun run --filter @semola/docs deploy",
+    "docs:cf-build": "cd apps/docs && bunx opennextjs-cloudflare build",
+    "docs:cf-deploy": "cd apps/docs && bunx opennextjs-cloudflare deploy",
+    "docs:cf-preview": "cd apps/docs && bunx wrangler preview",
     "prepublishOnly": "bun run build"
   },
   "keywords": [
