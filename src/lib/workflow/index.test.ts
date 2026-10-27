@@ -15,6 +15,7 @@ import {
 } from "./index.js";
 import {
   beforeCommit,
+  beforeReleaseLease,
   closeRedis,
   createRedis,
   eventTypes,
@@ -795,6 +796,58 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
     await waitStatus(wf, "ps-2", "completed", 5000);
 
     expect(maxActive).toBe(1);
+
+    await wf.stop();
+  });
+
+  // The sleep's due time is committed, then the worker dies before
+  // releaseLease, so nothing pushes the slot past the last heartbeat.
+  test("a slot is held across durable sleep when the worker crashes before release", async () => {
+    const redis = createRedis();
+    const lockTTL = 40;
+    const sleepMs = 300;
+    const order: string[] = [];
+    let crashed = false;
+
+    beforeReleaseLease(({ executionId, dueAt }) => {
+      if (crashed) return;
+      if (executionId !== "crash-sleeper") return;
+      if (dueAt <= Date.now() + lockTTL) return;
+
+      crashed = true;
+      throw new Error("crashed");
+    });
+
+    const wf = defineWorkflow({
+      name: `crash-sleep-slot-${crypto.randomUUID()}`,
+      redis,
+      ...fast,
+      concurrency: 1,
+      lockTTL,
+      handler: async ({ executionId, sleep: durableSleep, step }) => {
+        await step("enter", async () => {
+          order.push(`enter:${executionId}`);
+        });
+        await durableSleep(sleepMs);
+        await step("exit", async () => {
+          order.push(`exit:${executionId}`);
+        });
+      },
+    });
+
+    await wf.start({}, { executionId: "crash-sleeper" });
+    await waitFor(() => crashed);
+    await wf.start({}, { executionId: "next" });
+
+    await waitStatus(wf, "crash-sleeper", "completed", 5000);
+    await waitStatus(wf, "next", "completed", 5000);
+
+    expect(order).toEqual([
+      "enter:crash-sleeper",
+      "exit:crash-sleeper",
+      "enter:next",
+      "exit:next",
+    ]);
 
     await wf.stop();
   });

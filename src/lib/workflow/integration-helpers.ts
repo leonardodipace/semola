@@ -1,5 +1,5 @@
 import { WorkflowStore } from "./store.js";
-import type { CommitInput } from "./types.js";
+import type { CommitInput, ReleaseLeaseInput } from "./types.js";
 
 export const SEMOLA_REDIS_URL = process.env.SEMOLA_REDIS_URL;
 
@@ -19,6 +19,22 @@ export const beforeCommit = (
   };
   restores.push(() => {
     WorkflowStore.prototype.commit = commit;
+  });
+};
+
+// Runs `hook` before every releaseLease until restorePatches(). A hook that
+// throws leaves Redis as a worker crashing right before the release would.
+export const beforeReleaseLease = (
+  hook: (input: ReleaseLeaseInput) => void | Promise<void>,
+) => {
+  const releaseLease = WorkflowStore.prototype.releaseLease;
+
+  WorkflowStore.prototype.releaseLease = async function (input) {
+    await hook(input);
+    return releaseLease.call(this, input);
+  };
+  restores.push(() => {
+    WorkflowStore.prototype.releaseLease = releaseLease;
   });
 };
 
