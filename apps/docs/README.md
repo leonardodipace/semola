@@ -14,13 +14,16 @@ bun run docs:deploy    # OpenNext build + deploy (needs `wrangler login`)
 
 ## Cloudflare Git deploy (monorepo)
 
-Create a Worker connected to this repo:
+Worker name in the dashboard must match `wrangler.jsonc` (`semola`). Suggested Build settings:
 
 | Setting | Value |
 |---------|--------|
 | Root directory | `apps/docs` |
 | Build command | `cd ../.. && bun install && cd apps/docs && bunx opennextjs-cloudflare build` |
 | Deploy command | `bunx opennextjs-cloudflare deploy` |
+| Preview command | `bunx opennextjs-cloudflare upload` |
 | Watch paths | `apps/docs/**`, `docs/**`, `package.json`, `bun.lock` |
+
+If GitHub shows `Preview creation failed: Authentication error`, open the Worker → Settings → Build and regenerate the build API token (Workers Scripts edit). Then retry the build.
 
 Point `semo.la` at the Worker after the first deploy.
