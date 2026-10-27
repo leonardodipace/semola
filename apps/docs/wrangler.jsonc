@@ -10,5 +10,7 @@
   },
   "observability": {
     "enabled": true
-  }
+  },
+  "previews": {},
+  "preview_urls": true
 }
