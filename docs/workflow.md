@@ -143,7 +143,7 @@ const parent = defineWorkflow<{ userId: string }, { ok: true }>({
 
 ### Cancel an execution
 
-`cancel()` records the request and aborts local work. The return value may still be `pending`, `running`, or `compensating`. Cancelling a `completed` / `failed` / `cancelled` or `compensating` execution changes nothing and returns its current status. Poll until status is `cancelled`, or `failed` if compensation itself exhausts retries.
+`cancel()` records the request; it does not abort a step that is running. The return value may still be `pending`, `running`, or `compensating`. Cancelling a `completed` / `failed` / `cancelled` or `compensating` execution changes nothing and returns its current status. Poll until status is `cancelled`, or `failed` if compensation itself exhausts retries.
 
 ```typescript
 const requested = await onboard.cancel(executionId);
@@ -344,7 +344,7 @@ await onboard.stop();
 ### Handler context
 
 - `input`, `executionId`, `signal`
-- `step(name, handler, options?)` - durable side effect; handler gets `{ input, signal, fail }`. `options.compensate` undoes a started step on failure or cancel; it gets `{ input, completed, result, signal, fail }` (`result` only when `completed`). Compensate `signal` is never aborted by cancel or `stop()`, so cleanup can finish.
+- `step(name, handler, options?)` - durable side effect; handler gets `{ input, signal, fail }`. `options.compensate` undoes a started step on failure or cancel; it gets `{ input, completed, result, signal, fail }` (`result` only when `completed`). Forward `signal` is aborted only by `stop()` or a lost lease. Compensate `signal` is never aborted, so cleanup can finish.
 - `sleep(ms)` - durable timer (survives replay and restarts). It counts as fired once a lease holder sees its fire time pass and records `TimerFired`; it stays fired after that, even if replica clocks disagree.
 
 `fail(error)` inside a step marks a non-retryable failure and passes that `Error` to `onError`. Same inside `compensate`. History and status still store the message string. `throw new NonRetryableStepError(...)` remains non-retryable without going through `fail`.
@@ -372,7 +372,7 @@ Without `partitionBy`, `partitionKey` is stored on meta but capacity stays on th
 
 Failed steps retry with exponential backoff before the workflow is marked `failed`. Default `retries: 3` means 4 total attempts. `retries: 0` fails on the first error. The same retry policy applies to `compensate` handlers, and `onRetry` / `onError` fire for them too with step name `undo:<name>`.
 
-`cancel` is honored during retry backoff and `sleep`, not only between steps. `cancel()` aborts the forward `signal` only on the replica that handles the call; a step running on another replica keeps going, its outcome is recorded, and the cancel is honored at that write. Started steps with `compensate` unwind before status becomes `cancelled`. After terminal failure, `resume(executionId)` re-queues the execution unless compensation already ran.
+`cancel` is honored during retry backoff and `sleep`, not only between steps. A step that is running when `cancel()` is called keeps going, its outcome is recorded, and the cancel is honored at that write; the forward `signal` is not aborted by cancel. Started steps with `compensate` unwind before status becomes `cancelled`. After terminal failure, `resume(executionId)` re-queues the execution unless compensation already ran.
 
 ### Hooks
 

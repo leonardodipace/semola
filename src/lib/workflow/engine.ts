@@ -184,16 +184,12 @@ const advance = async <TInput, TResult>(
     throw error;
   };
 
-  // On cancel the replay only collects undo handlers, so workflow code must
-  // not see an aborted signal and cut it short.
-  const signal = cancelRequested ? new AbortController().signal : input.signal;
-
   const [handlerError, result] = await mightThrow(
     Promise.resolve().then(() =>
       options.handler({
         input: workflowInput,
         executionId,
-        signal,
+        signal: input.signal,
         step: async (name, handler, stepOptions) => {
           const stepId = `a${stepSeq++}`;
           consumed.steps.add(stepId);
@@ -376,8 +372,8 @@ export class WorkflowEngine<TInput, TResult> {
   private readonly retryBaseDelay: number;
   private readonly retryMultiplier: number;
   private readonly retryMaxDelay: number;
-  // Controllers of the runs in flight in this process, by execution.
-  private readonly aborts = new Map<string, AbortController>();
+  // Controllers of the runs in flight in this process, aborted by stop().
+  private readonly running = new Set<AbortController>();
 
   public constructor(
     options: WorkflowOptions<TInput, TResult>,
@@ -414,12 +410,6 @@ export class WorkflowEngine<TInput, TResult> {
     this.retryMaxDelay = options.retryBackoff?.maxDelay ?? DEFAULT_RETRY_MAX;
   }
 
-  // A no-op unless this process is running the execution right now; a later
-  // run picks up the cancel request from meta.
-  public requestAbort(executionId: string) {
-    this.aborts.get(executionId)?.abort();
-  }
-
   public start() {
     for (let i = 0; i < this.concurrency; i++) {
       this.loops.push(this.workflowLoop());
@@ -432,7 +422,7 @@ export class WorkflowEngine<TInput, TResult> {
   public async stop() {
     this.stopping.abort();
 
-    for (const controller of this.aborts.values()) {
+    for (const controller of this.running) {
       controller.abort();
     }
 
@@ -484,17 +474,13 @@ export class WorkflowEngine<TInput, TResult> {
       lost: false,
     };
 
-    this.aborts.set(executionId, run.controller);
+    this.running.add(run.controller);
     const heartbeat = this.startHeartbeat(executionId, run);
     const [error] = await mightThrow(this.runExecution(executionId, run));
 
     clearInterval(heartbeat);
 
-    // After a lost lease another poller here may already run the execution
-    // again; leave its controller in place.
-    if (this.aborts.get(executionId) === run.controller) {
-      this.aborts.delete(executionId);
-    }
+    this.running.delete(run.controller);
 
     // Without a committed due time the execution is due again after one poll
     // interval (never a hot loop). After an error this worker is still alive,

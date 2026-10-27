@@ -100,20 +100,18 @@ const replica = <TInput, TResult>(
   return engine;
 };
 
-// One step that runs until its signal is aborted, so a test cancels it
+// One step that runs until the test releases it, so a test cancels it
 // mid-step once `entered` is set instead of racing a timer.
-const abortableStep = () => {
-  const state = { entered: false };
+const blockingStep = () => {
+  const state = { entered: false, released: false };
 
   const handler = async ({ step }: WorkflowHandlerContext<unknown>) => {
-    await step("long", async ({ signal }) => {
+    await step("long", async () => {
       state.entered = true;
 
-      while (!signal.aborted) {
+      while (!state.released) {
         await sleep(5);
       }
-
-      throw new NonRetryableStepError("aborted");
     });
   };
 
@@ -543,7 +541,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
 
   test("cancel during run", async () => {
     const redis = createRedis();
-    const { state, handler } = abortableStep();
+    const { state, handler } = blockingStep();
 
     const wf = defineWorkflow({
       name: `cancel-run-${crypto.randomUUID()}`,
@@ -555,16 +553,18 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
     const { executionId } = await wf.start({});
     await waitFor(() => state.entered);
     const cancelResult = await wf.cancel(executionId);
+    state.released = true;
 
     expect(cancelResult.status).toBe("running");
     expect(cancelResult.cancelledAt).toBeNull();
 
     const execution = await waitStatus(wf, executionId, "cancelled");
 
-    // The interrupted step is not recorded as a failure.
+    // The in-flight step finishes and is recorded; cancel is honored at
+    // that write.
     expect(execution.error).toBeNull();
-    expect(await eventTypes(redis, wf.name, executionId)).not.toContain(
-      "StepFailed",
+    expect(await eventTypes(redis, wf.name, executionId)).toContain(
+      "StepCompleted",
     );
 
     await wf.stop();
@@ -1900,7 +1900,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
 
     test("cancel on cancelled returns terminal status", async () => {
       const redis = createRedis();
-      const { state, handler } = abortableStep();
+      const { state, handler } = blockingStep();
 
       const wf = defineWorkflow({
         name: `cancel-twice-${crypto.randomUUID()}`,
@@ -1912,6 +1912,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
       const { executionId } = await wf.start({});
       await waitFor(() => state.entered);
       await wf.cancel(executionId);
+      state.released = true;
       await waitStatus(wf, executionId, "cancelled");
 
       const second = await wf.cancel(executionId);
@@ -2316,7 +2317,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
 
     test("resume rejects cancelled executions", async () => {
       const redis = createRedis();
-      const { state, handler } = abortableStep();
+      const { state, handler } = blockingStep();
 
       const wf = defineWorkflow({
         name: `resume-cancelled-${crypto.randomUUID()}`,
@@ -2328,6 +2329,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
       const { executionId } = await wf.start({});
       await waitFor(() => state.entered);
       await wf.cancel(executionId);
+      state.released = true;
       await waitStatus(wf, executionId, "cancelled");
 
       await expect(wf.resume(executionId)).rejects.toMatchObject({
@@ -2368,7 +2370,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
 
     test("get returns cancelledAt on cancelled workflow", async () => {
       const redis = createRedis();
-      const { state, handler } = abortableStep();
+      const { state, handler } = blockingStep();
 
       const wf = defineWorkflow({
         name: `get-cancelled-${crypto.randomUUID()}`,
@@ -2380,6 +2382,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
       const { executionId } = await wf.start({});
       await waitFor(() => state.entered);
       await wf.cancel(executionId);
+      state.released = true;
 
       const execution = await waitStatus(wf, executionId, "cancelled");
 
@@ -2622,7 +2625,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
 
     test("calls lifecycle hooks on start, complete, and cancel", async () => {
       const redis = createRedis();
-      const { state, handler } = abortableStep();
+      const { state, handler } = blockingStep();
       const events: string[] = [];
 
       const wfCancel = defineWorkflow({
@@ -2646,6 +2649,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
       const { executionId: cancelId } = await wfCancel.start({});
       await waitFor(() => state.entered);
       await wfCancel.cancel(cancelId);
+      state.released = true;
       await waitStatus(wfCancel, cancelId, "cancelled");
 
       expect(events).toEqual(["start", "cancel"]);
@@ -2738,7 +2742,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
 
     test("onCancel hook errors do not change cancel outcome", async () => {
       const redis = createRedis();
-      const { state, handler } = abortableStep();
+      const { state, handler } = blockingStep();
 
       const wf = defineWorkflow({
         name: `hook-cancel-error-${crypto.randomUUID()}`,
@@ -2755,6 +2759,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
       const { executionId } = await wf.start({});
       await waitFor(() => state.entered);
       await wf.cancel(executionId);
+      state.released = true;
 
       await waitStatus(wf, executionId, "cancelled");
 
@@ -3146,40 +3151,6 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
       await waitStatus(wf, "pr-2", "completed");
 
       expect(maxActive).toBe(1);
-
-      await wf.stop();
-    });
-  });
-
-  describe("abort signal", () => {
-    test("signal is aborted when step detects cancellation", async () => {
-      const redis = createRedis();
-      let signalAborted = false;
-
-      const wf = defineWorkflow({
-        name: `abort-${crypto.randomUUID()}`,
-        redis,
-        ...fast,
-        handler: async ({ executionId, step, signal }) => {
-          signal.addEventListener("abort", () => {
-            signalAborted = true;
-          });
-
-          await step("cancel-self", async () => {
-            await wf.cancel(executionId);
-            return "ok";
-          });
-
-          await step("detect-cancel", async () => "ok");
-
-          return "done";
-        },
-      });
-
-      const { executionId } = await wf.start({});
-      await waitStatus(wf, executionId, "cancelled");
-
-      expect(signalAborted).toBe(true);
 
       await wf.stop();
     });

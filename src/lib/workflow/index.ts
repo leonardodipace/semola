@@ -300,8 +300,6 @@ export const defineWorkflow = <TInput, TResult = void>(
       throw new NotFoundError(`Workflow execution ${executionId} not found`);
     }
 
-    if (request.accepted) engine.requestAbort(executionId);
-
     return {
       status: request.status,
       executionId,

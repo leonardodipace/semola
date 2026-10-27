@@ -500,7 +500,7 @@ export type LeaseRun<TInput = unknown> = {
   dueAt?: number;
   // Capacity key this run was admitted under.
   capacityKey?: string;
-  // Aborts this run's forward steps: on cancel, stop() or a lost lease.
+  // Aborts this run's forward steps: on stop() or a lost lease.
   controller: AbortController;
   // Set by the heartbeat once the lease could not be extended.
   lost: boolean;
