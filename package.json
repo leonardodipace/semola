@@ -1,7 +1,7 @@
 {
   "name": "semola",
   "version": "0.6.9",
-  "description": "Zero-dependency TypeScript toolkit for Bun. Typed REST APIs with OpenAPI, Redis queues, pub/sub, ORM, durable workflows, caching, auth policies, i18n, and more.",
+  "description": "Type-safe TypeScript backend toolkit with zero dependencies. REST APIs and OpenAPI, Redis queues, durable workflows, SQL, auth, cache, and more - one package, per-module imports.",
   "homepage": "https://semo.la",
   "bugs": {
     "url": "https://github.com/leonardodipace/semola/issues"
@@ -204,16 +204,19 @@
     "prepublishOnly": "bun run build"
   },
   "keywords": [
-    "bun",
     "typescript",
+    "bun",
     "type-safe",
     "zero-dependency",
     "openapi",
     "rest-api",
     "api-framework",
     "orm",
+    "sqlite",
+    "postgres",
     "redis",
     "queue",
+    "job-queue",
     "pubsub",
     "caching",
     "workflow",
@@ -225,12 +228,14 @@
     "authorization",
     "policy",
     "otel",
+    "opentelemetry",
     "observability",
     "cli",
     "standard-schema",
     "backend",
     "middleware",
-    "validation"
+    "validation",
+    "tree-shakeable"
   ],
   "author": "Leonardo Dipace",
   "license": "MIT",

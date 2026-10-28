@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { JetBrains_Mono, Outfit } from "next/font/google";
+import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
 import { JsonLd } from "@/components/json-ld";
 import { Providers } from "@/components/providers";
 import {
@@ -13,14 +13,21 @@ import {
 } from "@/lib/shared";
 import "./global.css";
 
-const outfit = Outfit({
+const geist = Geist({
   subsets: ["latin"],
-  variable: "--font-outfit",
+  variable: "--font-geist",
 });
 
-const jetbrains = JetBrains_Mono({
+const geistMono = Geist_Mono({
   subsets: ["latin"],
-  variable: "--font-jetbrains",
+  variable: "--font-geist-mono",
+});
+
+const instrumentSerif = Instrument_Serif({
+  subsets: ["latin"],
+  weight: "400",
+  style: "italic",
+  variable: "--font-instrument",
 });
 
 export const metadata: Metadata = {
@@ -34,15 +41,21 @@ export const metadata: Metadata = {
   category: "technology",
   keywords: [
     "Semola",
-    "Bun",
     "TypeScript",
+    "TypeScript backend toolkit",
     "type-safe API",
-    "OpenAPI",
+    "typed API client",
+    "OpenAPI TypeScript",
+    "Standard Schema",
     "Redis queue",
-    "ORM",
+    "TypeScript ORM",
+    "Postgres",
+    "SQLite",
     "durable workflows",
-    "zero dependency",
-    "backend toolkit",
+    "auth policy",
+    "OpenTelemetry",
+    "zero dependency TypeScript",
+    "tree-shakeable",
   ],
   icons: {
     icon: [{ url: "/logo.png", type: "image/png" }],
@@ -96,7 +109,7 @@ export default function Layout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${outfit.variable} ${jetbrains.variable}`}
+      className={`${geist.variable} ${geistMono.variable} ${instrumentSerif.variable}`}
       suppressHydrationWarning
     >
       <body className="flex min-h-screen flex-col font-sans">
