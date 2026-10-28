@@ -1,7 +1,13 @@
-import { describe, expect, test } from "bun:test";
-import { createRedis } from "./redis.mock.js";
-import { keys, WorkflowStore } from "./store.js";
-import type { WorkflowMeta } from "./types.js";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  closeRedis,
+  createRedis,
+  failNext,
+  resetRedis,
+  SEMOLA_REDIS_URL,
+} from "./integration-helpers.js";
+import { keys, TRIM_IF_MEMBER, WorkflowStore } from "./store.js";
+import type { CommitRetention, WorkflowMeta } from "./types.js";
 
 const baseMeta = (name: string) =>
   ({
@@ -16,444 +22,627 @@ const baseMeta = (name: string) =>
     failedAt: "",
     cancelledAt: "",
     partitionKey: "",
-    partitionSlot: "",
+    cancelRequestedAt: "",
   }) satisfies WorkflowMeta;
 
-const failedMeta = (name: string) => ({
-  ...baseMeta(name),
-  status: "failed" as const,
-  failedAt: String(Date.now()),
-});
+const dueIds = (redis: Bun.RedisClient, name: string) =>
+  redis.zrangebyscore(keys.due(name), "-inf", "+inf");
 
-describe("WorkflowStore", () => {
-  test("tryCreateMetaAndActive creates once then rejects duplicate", async () => {
+const parse = (rows: string[]) =>
+  rows.map((raw) => JSON.parse(raw) as { type: string });
+
+const commitFailed = async (
+  store: WorkflowStore,
+  executionId: string,
+  retention: CommitRetention = {},
+) => {
+  await store.claimDue("owner", 60_000);
+
+  const committed = await store.commit({
+    executionId,
+    leaseToken: "owner",
+    events: [{ type: "WorkflowFailed", error: "boom", timestamp: 2 }],
+    fields: { status: "failed", error: "boom", failedAt: "2" },
+    retention,
+  });
+
+  await store.releaseLease({
+    executionId,
+    token: "owner",
+    ttlMs: 60_000,
+    dueAt: Date.now(),
+  });
+
+  return committed;
+};
+
+const createFailed = async (
+  store: WorkflowStore,
+  name: string,
+  executionId: string,
+  retention: CommitRetention = {},
+) => {
+  await store.createExecution(executionId, baseMeta(name));
+  await commitFailed(store, executionId, retention);
+};
+
+describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
+  beforeEach(resetRedis);
+  afterEach(closeRedis);
+
+  test("createExecution writes meta, WorkflowStarted and a due entry together", async () => {
     const redis = createRedis();
-    const store = new WorkflowStore(redis, "store-create");
-    const executionId = "exec-1";
+    const name = "store-create";
+    const store = new WorkflowStore(redis, name);
+    const meta = { ...baseMeta(name), input: '{"a":1}', partitionKey: "p" };
 
-    const first = await store.tryCreateMetaAndActive(
-      executionId,
-      baseMeta("store-create"),
-    );
-    const second = await store.tryCreateMetaAndActive(
-      executionId,
-      baseMeta("store-create"),
-    );
-
-    expect(first).toBe(true);
-    expect(second).toBe(false);
-
-    const meta = await store.getMeta(executionId);
-    expect(meta?.status).toBe("pending");
-
-    const active = await store.listActive();
-    expect(active).toContain(executionId);
-  });
-
-  test("appendEvents without lease and loadHistory roundtrip", async () => {
-    const store = new WorkflowStore(createRedis(), "store-history");
-    const executionId = "exec-2";
-
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowStarted",
-          input: "{}",
-          partitionKey: "",
-          timestamp: 1,
-        },
-      ],
-    });
-
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowCompleted",
-          result: '"ok"',
-          timestamp: 2,
-        },
-      ],
-    });
-
-    const history = await store.loadHistory(executionId);
-
-    expect(history).toHaveLength(2);
-    expect(JSON.parse(history[0] ?? "{}").type).toBe("WorkflowStarted");
-    expect(JSON.parse(history[1] ?? "{}").type).toBe("WorkflowCompleted");
-  });
-
-  test("appendEvents with lease fences wrong token", async () => {
-    const store = new WorkflowStore(createRedis(), "store-fence");
-    const executionId = "exec-3";
-
-    await store.acquireLease({
-      executionId,
-      token: "owner",
-      ttlMs: 60_000,
-    });
-
-    const ok = await store.appendEvents({
-      executionId,
-      leaseToken: "owner",
-      events: [
-        {
-          type: "WorkflowStarted",
-          input: "{}",
-          partitionKey: "",
-          timestamp: 1,
-        },
-      ],
-    });
-
-    const blocked = await store.appendEvents({
-      executionId,
-      leaseToken: "intruder",
-      events: [
-        {
-          type: "WorkflowFailed",
-          error: "nope",
-          timestamp: 2,
-        },
-      ],
-    });
-
-    expect(ok).toBe(true);
-    expect(blocked).toBe(false);
-    expect(await store.loadHistory(executionId)).toHaveLength(1);
-  });
-
-  test("enqueue and dequeue are FIFO via lpush/rpop", async () => {
-    const store = new WorkflowStore(createRedis(), "store-queue");
-
-    await store.enqueue("a");
-    await store.enqueue("b");
-
-    expect(await store.dequeue()).toBe("a");
-    expect(await store.dequeue()).toBe("b");
-    expect(await store.dequeue()).toBeNull();
-  });
-
-  test("enqueue skips when executionId is already queued", async () => {
-    const redis = createRedis();
-    const store = new WorkflowStore(redis, "store-queue-dedup");
-
-    await store.enqueue("a");
-    await store.enqueue("a");
-    await store.enqueue("b");
-    await store.enqueue("a");
-
-    expect(redis.getList(keys.queue("store-queue-dedup"))).toEqual(["b", "a"]);
-    expect(await store.dequeue()).toBe("a");
-    expect(await store.dequeue()).toBe("b");
-    expect(await store.dequeue()).toBeNull();
-
-    await store.enqueue("a");
-    expect(await store.dequeue()).toBe("a");
-  });
-
-  test("lease acquire extend release and ownership", async () => {
-    const store = new WorkflowStore(createRedis(), "store-lease");
-    const executionId = "exec-4";
-
+    expect(await store.createExecution("exec-1", meta)).toBe(true);
     expect(
-      await store.acquireLease({
-        executionId,
-        token: "t1",
-        ttlMs: 60_000,
-      }),
-    ).toBe(true);
-
-    expect(
-      await store.acquireLease({
-        executionId,
-        token: "t2",
-        ttlMs: 60_000,
-      }),
+      await store.createExecution("exec-1", { ...meta, input: '{"a":2}' }),
     ).toBe(false);
 
-    expect(await store.getLease(executionId)).toBe("t1");
-
+    expect((await store.getMeta("exec-1"))?.input).toBe('{"a":1}');
     expect(
-      await store.extendLease({
-        executionId,
-        token: "t1",
-        ttlMs: 60_000,
-      }),
-    ).toBe(true);
-
-    expect(
-      await store.extendLease({
-        executionId,
-        token: "t2",
-        ttlMs: 60_000,
-      }),
-    ).toBe(false);
-
-    await store.releaseLease(executionId, "t2");
-    expect(await store.getLease(executionId)).toBe("t1");
-
-    await store.releaseLease(executionId, "t1");
-    expect(await store.getLease(executionId)).toBeNull();
+      (await store.loadHistory("exec-1")).map((raw) => JSON.parse(raw)),
+    ).toEqual([{ type: "WorkflowStarted", timestamp: Number(meta.createdAt) }]);
+    expect(await dueIds(redis, name)).toEqual(["exec-1"]);
   });
 
-  test("timers schedule claim and scheduleIfAbsent", async () => {
+  test("createExecution writes nothing when redis rejects the script", async () => {
     const redis = createRedis();
-    const store = new WorkflowStore(redis, "store-timers");
-    const task = {
-      kind: "timer" as const,
-      executionId: "exec-5",
-      timerId: "t0",
-    };
+    const name = "store-create-fail";
+    const store = new WorkflowStore(redis, name);
 
-    await store.scheduleTimer(Date.now() - 1, task);
+    failNext(redis, "send");
 
-    const claimed = await store.claimDueTimer(Date.now());
-    expect(claimed).toBe(JSON.stringify(task));
-    expect(await store.claimDueTimer(Date.now())).toBeNull();
+    await expect(
+      store.createExecution("exec-1", baseMeta(name)),
+    ).rejects.toMatchObject({
+      name: "WorkflowStoreError",
+      message: "Unable to create execution exec-1",
+    });
 
-    const added = await store.scheduleTimerIfAbsent(Date.now() + 1000, task);
-    const again = await store.scheduleTimerIfAbsent(Date.now() + 2000, task);
-
-    expect(added).toBe(true);
-    expect(again).toBe(false);
+    expect(await store.getMeta("exec-1")).toBeNull();
+    expect(await store.loadHistory("exec-1")).toEqual([]);
+    expect(await dueIds(redis, name)).toEqual([]);
   });
 
-  test("concurrent claimDueTimer never returns the same timer twice", async () => {
-    const store = new WorkflowStore(createRedis(), "store-timer-race");
-    const now = Date.now();
-    const taskA = {
-      kind: "timer" as const,
-      executionId: "exec-a",
-      timerId: "t0",
-    };
-    const taskB = {
-      kind: "timer" as const,
-      executionId: "exec-b",
-      timerId: "t1",
+  test("createExecution drops a stale terminal zset member for a reused id", async () => {
+    const redis = createRedis();
+    const name = "store-create-reuse";
+    const store = new WorkflowStore(redis, name);
+
+    await redis.zadd(keys.terminal(name), 1, "exec-1");
+    await store.createExecution("exec-1", baseMeta(name));
+    await store.trimTerminal(0);
+
+    expect(await store.getMeta("exec-1")).not.toBeNull();
+    expect(await dueIds(redis, name)).toEqual(["exec-1"]);
+  });
+
+  test("claimDue leases one due execution and pushes its due score out", async () => {
+    const redis = createRedis();
+    const name = "store-claim";
+    const store = new WorkflowStore(redis, name);
+    const score = async (id: string) => {
+      const rows = await redis.zrangebyscore(keys.due(name), 0, Date.now());
+      return rows.includes(id);
     };
 
-    await store.scheduleTimer(now - 2, taskA);
-    await store.scheduleTimer(now - 1, taskB);
+    await store.createExecution("e1", baseMeta(name));
+    await redis.zadd(keys.due(name), 1, "ghost");
 
-    const results = await Promise.all([
-      store.claimDueTimer(now),
-      store.claimDueTimer(now),
-      store.claimDueTimer(now),
+    const [first, second] = await Promise.all([
+      store.claimDue("t1", 60_000),
+      store.claimDue("t2", 60_000),
     ]);
 
-    const claimed = results.filter((value) => value !== null);
+    expect(first).toBe("e1");
+    expect(second).toBeNull();
+    expect(await redis.get(keys.lease(name, "e1"))).toBe("t1");
+    expect(await score("e1")).toBe(false);
+    expect(await dueIds(redis, name)).toEqual(["e1"]);
 
-    expect(claimed).toHaveLength(2);
-    expect(new Set(claimed).size).toBe(2);
-    expect(await store.claimDueTimer(now)).toBeNull();
+    expect(
+      await store.extendLease({ executionId: "e1", token: "t2", ttlMs: 1 }),
+    ).toBe(false);
+    expect(
+      await store.extendLease({
+        executionId: "e1",
+        token: "t1",
+        ttlMs: 60_000,
+      }),
+    ).toBe(true);
+
+    await store.releaseLease({
+      executionId: "e1",
+      token: "t2",
+      ttlMs: 60_000,
+      dueAt: Date.now(),
+    });
+    expect(await redis.get(keys.lease(name, "e1"))).toBe("t1");
+
+    await store.releaseLease({
+      executionId: "e1",
+      token: "t1",
+      ttlMs: 60_000,
+      dueAt: Date.now(),
+    });
+    expect(await redis.get(keys.lease(name, "e1"))).toBeNull();
+    expect(await score("e1")).toBe(true);
+
+    // Release only ever lowers the score: it stays at the claim's +60s.
+    await store.claimDue("t3", 60_000);
+    await store.releaseLease({
+      executionId: "e1",
+      token: "t3",
+      ttlMs: 60_000,
+      dueAt: Date.now() + 120_000,
+    });
+    expect(
+      await redis.zrangebyscore(keys.due(name), 0, Date.now() + 60_000),
+    ).toEqual(["e1"]);
   });
 
-  test("concurrent tryCreateMetaAndActive creates once", async () => {
-    const store = new WorkflowStore(createRedis(), "store-create-race");
+  test("claimDue pushes a busy execution out to its lease expiry", async () => {
+    const redis = createRedis();
+    const name = "store-claim-busy";
+    const store = new WorkflowStore(redis, name);
+
+    await store.createExecution("e1", baseMeta(name));
+    await redis.send("SET", [keys.lease(name, "e1"), "other", "PX", "5000"]);
+
+    expect(await store.claimDue("t1", 60_000)).toBeNull();
+
+    // Not retried on every poll while the other worker holds it.
+    const score = Number(await redis.zscore(keys.due(name), "e1"));
+    expect(score).toBeGreaterThan(Date.now() + 4_000);
+    expect(score).toBeLessThanOrEqual(Date.now() + 5_000);
+  });
+
+  test("concurrent createExecution creates once", async () => {
+    const redis = createRedis();
+    const name = "store-create-race";
+    const store = new WorkflowStore(redis, name);
     const executionId = "exec-race";
-    const meta = baseMeta("store-create-race");
+    const meta = baseMeta(name);
 
     const results = await Promise.all([
-      store.tryCreateMetaAndActive(executionId, meta),
-      store.tryCreateMetaAndActive(executionId, meta),
-      store.tryCreateMetaAndActive(executionId, meta),
+      store.createExecution(executionId, meta),
+      store.createExecution(executionId, meta),
+      store.createExecution(executionId, meta),
     ]);
 
     expect(results.filter((value) => value)).toHaveLength(1);
     expect(await store.getMeta(executionId)).not.toBeNull();
+    expect(await store.loadHistory(executionId)).toHaveLength(1);
+    expect(await dueIds(redis, name)).toEqual([executionId]);
   });
 
-  test("deadLetterTimer stores corrupt payloads", async () => {
+  test("acquireCapacity admits up to the limit, refreshes holders, drops expired", async () => {
+    const store = new WorkflowStore(createRedis(), "store-capacity");
+
+    expect(await store.acquireCapacity("k", "e1", 1, 60_000)).toBe(true);
+    expect(await store.acquireCapacity("k", "e2", 1, 60_000)).toBe(false);
+    expect(await store.acquireCapacity("k", "e2", 2, 60_000)).toBe(true);
+    // A holder re-acquiring is a refresh, even when the key is full.
+    expect(await store.acquireCapacity("k", "e1", 1, -1)).toBe(true);
+    // e1 now expired, so a full key at limit 2 frees up for e3.
+    expect(await store.acquireCapacity("k", "e3", 2, 60_000)).toBe(true);
+    expect(await store.acquireCapacity("other", "e4", 1, 60_000)).toBe(true);
+  });
+
+  test("terminal commit frees the capacity slot in the same call", async () => {
     const redis = createRedis();
-    const store = new WorkflowStore(redis, "store-dead");
+    const name = "store-capacity-terminal";
+    const store = new WorkflowStore(redis, name);
+    const slots = () =>
+      redis.zrangebyscore(keys.capacity(name, "k"), "-inf", "+inf");
 
-    await store.deadLetterTimer("not-json");
+    await store.createExecution("e1", baseMeta(name));
+    await store.claimDue("owner", 60_000);
+    await store.acquireCapacity("k", "e1", 1, 60_000);
 
-    expect(redis.getList(keys.timerDead("store-dead"))).toEqual(["not-json"]);
+    expect(await slots()).toEqual(["e1"]);
+
+    const sends: string[] = [];
+    const send = redis.send.bind(redis);
+    redis.send = async (command: string, args: string[]) => {
+      sends.push(command);
+      return send(command, args);
+    };
+
+    await store.commit({
+      executionId: "e1",
+      leaseToken: "owner",
+      capacityKey: "k",
+      events: [{ type: "WorkflowCompleted", result: '"ok"', timestamp: 2 }],
+      fields: { status: "completed", result: '"ok"' },
+      retention: {},
+    });
+
+    expect(sends).toEqual(["EVAL"]);
+    expect(await slots()).toEqual([]);
   });
 
-  test("partition claim refresh reown and release", async () => {
-    const store = new WorkflowStore(createRedis(), "store-part");
+  test("releasing with a due time keeps the slot until due + ttl", async () => {
+    const redis = createRedis();
+    const name = "store-capacity-release";
+    const store = new WorkflowStore(redis, name);
+    const dueAt = Date.now() + 10_000;
+    const slotsUntil = (at: number) =>
+      redis.zrangebyscore(keys.capacity(name, "k"), at, "+inf");
 
-    const slot = await store.claimPartition({
-      partitionKey: "env-a",
-      executionId: "exec-a",
-      concurrency: 1,
-      ttlMs: 60_000,
-    });
-
-    expect(slot).toBe(0);
-
-    expect(
-      await store.claimPartition({
-        partitionKey: "env-a",
-        executionId: "exec-b",
-        concurrency: 1,
-        ttlMs: 60_000,
-      }),
-    ).toBeNull();
-
-    expect(
-      await store.refreshPartition({
-        partitionKey: "env-a",
-        slot: 0,
-        executionId: "exec-a",
-        ttlMs: 60_000,
-      }),
-    ).toBe(true);
-
-    expect(
-      await store.claimPartition({
-        partitionKey: "env-a",
-        executionId: "exec-a",
-        concurrency: 1,
-        ttlMs: 60_000,
-      }),
-    ).toBe(0);
-
-    await store.releasePartition({
-      partitionKey: "env-a",
-      slot: 0,
-      executionId: "exec-a",
-    });
-
-    expect(
-      await store.claimPartition({
-        partitionKey: "env-a",
-        executionId: "exec-b",
-        concurrency: 1,
-        ttlMs: 60_000,
-      }),
-    ).toBe(0);
-  });
-
-  test("setMeta and updateStatus with and without lease", async () => {
-    const store = new WorkflowStore(createRedis(), "store-meta");
-    const executionId = "exec-6";
-
-    await store.tryCreateMetaAndActive(executionId, baseMeta("store-meta"));
-
-    await store.setMeta({
-      executionId,
-      fields: { error: "boom" },
-    });
-
-    expect((await store.getMeta(executionId))?.error).toBe("boom");
-
-    await store.acquireLease({
-      executionId,
+    await store.createExecution("e1", baseMeta(name));
+    await store.claimDue("owner", 60_000);
+    await store.acquireCapacity("k", "e1", 1, 60_000);
+    await store.releaseLease({
+      executionId: "e1",
       token: "owner",
       ttlMs: 60_000,
+      capacityKey: "k",
+      dueAt,
     });
 
-    expect(
-      await store.updateStatus({
-        executionId,
-        status: "running",
-        leaseToken: "owner",
-      }),
-    ).toBe(true);
-
-    expect(
-      await store.updateStatus({
-        executionId,
-        status: "failed",
-        leaseToken: "intruder",
-        extra: { error: "hacked" },
-      }),
-    ).toBe(false);
-
-    const meta = await store.getMeta(executionId);
-    expect(meta?.status).toBe("running");
-    expect(meta?.error).toBe("boom");
+    expect(await slotsUntil(dueAt + 60_000)).toEqual(["e1"]);
+    expect(await slotsUntil(dueAt + 60_001)).toEqual([]);
   });
 
-  test("updateStatusAndMarkActive flips status and adds to active", async () => {
+  test("committing a due time keeps the slot until due + slot ttl without a release", async () => {
     const redis = createRedis();
-    const store = new WorkflowStore(redis, "store-resume-active");
+    const name = "store-capacity-commit";
+    const store = new WorkflowStore(redis, name);
+    const dueAt = Date.now() + 10_000;
+    const slotsUntil = (at: number) =>
+      redis.zrangebyscore(keys.capacity(name, "k"), at, "+inf");
+
+    await store.createExecution("e1", baseMeta(name));
+    await store.claimDue("owner", 60_000);
+    await store.acquireCapacity("k", "e1", 1, 60_000);
+    await store.commit({
+      executionId: "e1",
+      leaseToken: "owner",
+      capacityKey: "k",
+      dueAt,
+      slotTtlMs: 60_000,
+    });
+
+    expect(await slotsUntil(dueAt + 60_000)).toEqual(["e1"]);
+    expect(await slotsUntil(dueAt + 60_001)).toEqual([]);
+  });
+
+  test("committing a due time does not take a slot the execution does not hold", async () => {
+    const redis = createRedis();
+    const name = "store-capacity-commit-unheld";
+    const store = new WorkflowStore(redis, name);
+
+    await store.createExecution("e1", baseMeta(name));
+    await store.claimDue("owner", 60_000);
+    await store.commit({
+      executionId: "e1",
+      leaseToken: "owner",
+      capacityKey: "k",
+      dueAt: Date.now() + 10_000,
+      slotTtlMs: 60_000,
+    });
+
+    expect(await redis.zcard(keys.capacity(name, "k"))).toBe(0);
+  });
+
+  test("a heartbeat after a wait's commit does not shorten the slot", async () => {
+    const redis = createRedis();
+    const name = "store-capacity-heartbeat";
+    const store = new WorkflowStore(redis, name);
+    const dueAt = Date.now() + 10_000;
+    const slotsUntil = (at: number) =>
+      redis.zrangebyscore(keys.capacity(name, "k"), at, "+inf");
+
+    await store.createExecution("e1", baseMeta(name));
+    await store.claimDue("owner", 60_000);
+    await store.acquireCapacity("k", "e1", 1, 60_000);
+    await store.commit({
+      executionId: "e1",
+      leaseToken: "owner",
+      capacityKey: "k",
+      dueAt,
+      slotTtlMs: 60_000,
+    });
+    await store.extendLease({
+      executionId: "e1",
+      token: "owner",
+      ttlMs: 60_000,
+      capacityKey: "k",
+    });
+
+    expect(await slotsUntil(dueAt + 60_000)).toEqual(["e1"]);
+  });
+
+  test("commit writes events and meta only while holding the lease", async () => {
+    const redis = createRedis();
+    const name = "store-commit-fence";
+    const store = new WorkflowStore(redis, name);
+    const executionId = "exec-fence";
+
+    await store.createExecution(executionId, baseMeta(name));
+    await store.claimDue("owner", 60_000);
+
+    const blocked = await store.commit({
+      executionId,
+      leaseToken: "intruder",
+      events: [{ type: "WorkflowCompleted", result: '"x"', timestamp: 2 }],
+      fields: { status: "completed", result: '"x"' },
+      retention: { ttlMs: 0 },
+    });
+
+    expect(blocked).toEqual({ committed: false });
+    expect((await store.getMeta(executionId))?.status).toBe("pending");
+    expect(await store.loadHistory(executionId)).toHaveLength(1);
+    expect(await dueIds(redis, name)).toEqual([executionId]);
+
+    const ok = await store.commit({
+      executionId,
+      leaseToken: "owner",
+      events: [
+        {
+          type: "CompensationStarted",
+          reason: "failed",
+          error: "boom",
+          stepIds: ["a0"],
+          timestamp: 2,
+        },
+      ],
+      fields: { status: "compensating", error: "boom" },
+    });
+
+    expect(ok).toEqual({ committed: true, cancelRequested: false });
+    expect((await store.getMeta(executionId))?.status).toBe("compensating");
+    expect(parse(await store.loadHistory(executionId)).at(-1)?.type).toBe(
+      "CompensationStarted",
+    );
+    expect(await dueIds(redis, name)).toEqual([executionId]);
+    expect(await redis.pttl(keys.meta(name, executionId))).toBe(-1);
+  });
+
+  test("terminal commit appends, updates meta, leaves the due set and retains in one call", async () => {
+    const redis = createRedis();
+    const name = "store-commit-terminal";
+    const store = new WorkflowStore(redis, name);
+    const executionId = "exec-done";
+
+    await store.createExecution(executionId, baseMeta(name));
+    await store.claimDue("owner", 60_000);
+
+    const committed = await store.commit({
+      executionId,
+      leaseToken: "owner",
+      events: [{ type: "WorkflowCompleted", result: '"ok"', timestamp: 5 }],
+      fields: { status: "completed", result: '"ok"', completedAt: "5" },
+      retention: { ttlMs: 60_000, trackedAt: 5 },
+    });
+
+    expect(committed).toEqual({ committed: true, cancelRequested: false });
+
+    const meta = await store.getMeta(executionId);
+    expect(meta?.status).toBe("completed");
+    expect(meta?.result).toBe('"ok"');
+    expect(
+      parse(await store.loadHistory(executionId)).map((e) => e.type),
+    ).toEqual(["WorkflowStarted", "WorkflowCompleted"]);
+    expect(await dueIds(redis, name)).toEqual([]);
+    expect(await redis.pttl(keys.meta(name, executionId))).toBeGreaterThan(0);
+    expect(await redis.pttl(keys.history(name, executionId))).toBeGreaterThan(
+      0,
+    );
+    expect(
+      await redis.send("ZRANGE", [keys.terminal(name), "0", "-1"]),
+    ).toEqual([executionId]);
+    expect(await redis.get(keys.lease(name, executionId))).toBe("owner");
+  });
+
+  test("terminal commit accepts fractional and huge ttls without aborting the script", async () => {
+    const redis = createRedis();
+    const name = "store-commit-frac";
+    const store = new WorkflowStore(redis, name);
+
+    // PEXPIRE rejects both; a rejected call would fail the commit after its
+    // history and meta writes already applied.
+    for (const [executionId, ttlMs] of [
+      ["exec-frac", 1500.5],
+      ["exec-huge", 1e300],
+    ] as const) {
+      await store.createExecution(executionId, baseMeta(name));
+
+      expect(await commitFailed(store, executionId, { ttlMs })).toEqual({
+        committed: true,
+        cancelRequested: false,
+      });
+      expect((await store.getMeta(executionId))?.status).toBe("failed");
+      expect(await redis.pttl(keys.meta(name, executionId))).toBeGreaterThan(0);
+    }
+
+    expect(await redis.pttl(keys.meta(name, "exec-frac"))).toBeLessThanOrEqual(
+      1501,
+    );
+    expect(await dueIds(redis, name)).toEqual([]);
+  });
+
+  test("resumeExecution resumes failed then rejects non-failed status", async () => {
+    const redis = createRedis();
+    const name = "store-resume";
+    const store = new WorkflowStore(redis, name);
     const executionId = "exec-resume";
 
-    await store.tryCreateMetaAndActive(executionId, {
-      ...baseMeta("store-resume-active"),
-      status: "failed",
-      failedAt: String(Date.now()),
-    });
+    await createFailed(store, name, executionId);
+    expect(await dueIds(redis, name)).toEqual([]);
 
-    await store.markInactive(executionId);
-
-    await store.updateStatusAndMarkActive({
-      executionId,
-      status: "pending",
-      extra: {
-        error: "",
-        failedAt: "",
-      },
-    });
+    expect(await store.resumeExecution(executionId)).toBe("resumed");
 
     const meta = await store.getMeta(executionId);
     expect(meta?.status).toBe("pending");
+    expect(meta?.error).toBe("");
     expect(meta?.failedAt).toBe("");
-    expect(await store.listActive()).toContain(executionId);
+    expect(
+      parse(await store.loadHistory(executionId)).map((e) => e.type),
+    ).toEqual(["WorkflowStarted", "WorkflowFailed", "WorkflowResumed"]);
+    expect(await dueIds(redis, name)).toEqual([executionId]);
+
+    expect(await store.resumeExecution(executionId)).toBe("pending");
+    expect(await store.loadHistory(executionId)).toHaveLength(3);
   });
 
-  test("resumeIfPending claims pending then rejects terminal status", async () => {
+  test("resumeExecution rejects an execution that started an unwind", async () => {
     const redis = createRedis();
-    const name = "store-resume-if-pending";
+    const name = "store-resume-unwound";
     const store = new WorkflowStore(redis, name);
-    const executionId = "exec-resume-cas";
+    const executionId = "exec-unwound";
 
-    await store.tryCreateMetaAndActive(executionId, {
-      ...baseMeta(name),
-      status: "pending",
-      error: "boom",
-      failedAt: String(Date.now()),
-    });
-    await store.markInactive(executionId);
-
-    const claimed = await store.resumeIfPending({
+    await store.createExecution(executionId, baseMeta(name));
+    await store.claimDue("owner", 60_000);
+    await store.commit({
       executionId,
+      leaseToken: "owner",
       events: [
         {
-          type: "WorkflowResumed",
-          timestamp: Date.now(),
+          type: "CompensationStarted",
+          reason: "failed",
+          error: "boom",
+          stepIds: ["a0"],
+          timestamp: 2,
+        },
+      ],
+      fields: { status: "compensating", error: "boom", unwoundAt: "2" },
+    });
+
+    expect(await store.resumeExecution(executionId)).toBe("unwound");
+
+    await store.commit({
+      executionId,
+      leaseToken: "owner",
+      events: [{ type: "WorkflowFailed", error: "boom", timestamp: 3 }],
+      fields: { status: "failed", failedAt: "3" },
+      retention: { ttlMs: 60_000 },
+    });
+
+    // Failed again, but the unwind already undid completed steps.
+    expect(await store.resumeExecution(executionId)).toBe("unwound");
+    expect((await store.getMeta(executionId))?.status).toBe("failed");
+    expect(await store.loadHistory(executionId)).toHaveLength(3);
+    expect(await redis.pttl(keys.meta(name, executionId))).toBeGreaterThan(0);
+    expect(await dueIds(redis, name)).toEqual([]);
+  });
+
+  test("requestCancel flags pending/running executions and makes them due", async () => {
+    const redis = createRedis();
+    const name = "store-cancel";
+    const store = new WorkflowStore(redis, name);
+
+    await store.createExecution("exec-c", baseMeta(name));
+
+    const first = await store.requestCancel("exec-c");
+    const firstAt = (await store.getMeta("exec-c"))?.cancelRequestedAt;
+    const second = await store.requestCancel("exec-c");
+
+    expect(first?.accepted).toBe(true);
+    expect(first?.status).toBe("pending");
+    expect(second?.accepted).toBe(true);
+    expect(firstAt).not.toBe("");
+    expect((await store.getMeta("exec-c"))?.cancelRequestedAt).toBe(firstAt);
+    expect(await dueIds(redis, name)).toEqual(["exec-c"]);
+    expect(await store.loadHistory("exec-c")).toHaveLength(1);
+    expect(await store.requestCancel("missing")).toBeNull();
+  });
+
+  test("requestCancel writes nothing on terminal or compensating executions", async () => {
+    const redis = createRedis();
+    const name = "store-cancel-closed";
+    const store = new WorkflowStore(redis, name);
+
+    await createFailed(store, name, "exec-failed");
+    await store.createExecution("exec-comp", baseMeta(name));
+    await store.claimDue("owner", 60_000);
+    await store.commit({
+      executionId: "exec-comp",
+      leaseToken: "owner",
+      fields: { status: "compensating" },
+    });
+
+    for (const [executionId, status] of [
+      ["exec-failed", "failed"],
+      ["exec-comp", "compensating"],
+    ] as const) {
+      const result = await store.requestCancel(executionId);
+
+      expect(result?.accepted).toBe(false);
+      expect(result?.status).toBe(status);
+      expect((await store.getMeta(executionId))?.cancelRequestedAt).toBe("");
+    }
+
+    // exec-comp keeps its claimed visibility timeout; nothing became due.
+    expect(await redis.zrangebyscore(keys.due(name), 0, Date.now())).toEqual(
+      [],
+    );
+  });
+
+  test("commit reports a cancel requested while the lease was held", async () => {
+    const name = "store-commit-cancel";
+    const store = new WorkflowStore(createRedis(), name);
+
+    await store.createExecution("exec-1", baseMeta(name));
+    await store.claimDue("owner", 60_000);
+
+    const before = await store.commit({
+      executionId: "exec-1",
+      leaseToken: "owner",
+      fields: { status: "running" },
+    });
+
+    await store.requestCancel("exec-1");
+
+    const after = await store.commit({
+      executionId: "exec-1",
+      leaseToken: "owner",
+      events: [
+        {
+          type: "StepStarted",
+          stepId: "a0",
+          stepName: "one",
+          attempt: 1,
+          timestamp: 2,
+        },
+      ],
+    });
+    const fenced = await store.commit({
+      executionId: "exec-1",
+      leaseToken: "intruder",
+      events: [
+        {
+          type: "StepStarted",
+          stepId: "a1",
+          stepName: "two",
+          attempt: 1,
+          timestamp: 3,
         },
       ],
     });
 
-    expect(claimed).toBe(true);
-    expect((await store.getMeta(executionId))?.status).toBe("pending");
-    expect((await store.getMeta(executionId))?.error).toBe("");
-    expect(await store.listActive()).toContain(executionId);
-    expect(await store.loadHistory(executionId)).toHaveLength(1);
-    expect(await store.dequeue()).toBe(executionId);
+    expect(before).toEqual({ committed: true, cancelRequested: false });
+    expect(after).toEqual({ committed: true, cancelRequested: true });
+    expect(fenced).toEqual({ committed: false });
+  });
 
-    await store.updateStatus({
-      executionId,
-      status: "completed",
-      extra: {
-        completedAt: String(Date.now()),
-        result: '"ok"',
-      },
-    });
-    await store.markInactive(executionId);
+  test("resumeExecution clears a cancel request that landed before the failure", async () => {
+    const name = "store-resume-cancel";
+    const store = new WorkflowStore(createRedis(), name);
 
-    const again = await store.resumeIfPending({
-      executionId,
-      events: [
-        {
-          type: "WorkflowResumed",
-          timestamp: Date.now(),
-        },
-      ],
-    });
+    await store.createExecution("exec-1", baseMeta(name));
+    await store.requestCancel("exec-1");
+    await commitFailed(store, "exec-1");
 
-    expect(again).toBe(false);
-    expect((await store.getMeta(executionId))?.status).toBe("completed");
-    expect(await store.listActive()).not.toContain(executionId);
-    expect(await store.loadHistory(executionId)).toHaveLength(1);
-    expect(await store.dequeue()).toBeNull();
+    expect((await store.getMeta("exec-1"))?.cancelRequestedAt).not.toBe("");
+
+    await store.resumeExecution("exec-1");
+
+    expect((await store.getMeta("exec-1"))?.cancelRequestedAt).toBe("");
   });
 
   test("getMeta returns null when the execution is missing", async () => {
@@ -462,34 +651,11 @@ describe("WorkflowStore", () => {
     expect(await store.getMeta("missing")).toBeNull();
   });
 
-  test("markInactive removes an execution from the active set", async () => {
-    const store = new WorkflowStore(createRedis(), "store-inactive");
-
-    await store.tryCreateMetaAndActive("x", baseMeta("store-inactive"));
-    expect(await store.listActive()).toEqual(["x"]);
-
-    await store.markInactive("x");
-    expect(await store.listActive()).toEqual([]);
-  });
-
-  test("appendEvents with empty list is a no-op success", async () => {
-    const store = new WorkflowStore(createRedis(), "store-empty");
-
-    expect(
-      await store.appendEvents({
-        executionId: "exec-7",
-        events: [],
-      }),
-    ).toBe(true);
-
-    expect(await store.loadHistory("exec-7")).toEqual([]);
-  });
-
   test("getMeta wraps redis read failures", async () => {
     const redis = createRedis();
     const store = new WorkflowStore(redis, "store-meta-fail");
 
-    redis.failNext("hgetall");
+    failNext(redis, "hgetall");
 
     await expect(store.getMeta("exec-x")).rejects.toMatchObject({
       name: "WorkflowStoreError",
@@ -501,7 +667,7 @@ describe("WorkflowStore", () => {
     const redis = createRedis();
     const store = new WorkflowStore(redis, "store-history-fail");
 
-    redis.failNext("lrange");
+    failNext(redis, "lrange");
 
     await expect(store.loadHistory("exec-y")).rejects.toMatchObject({
       name: "WorkflowStoreError",
@@ -509,214 +675,115 @@ describe("WorkflowStore", () => {
     });
   });
 
-  test("enqueue wraps redis write failures", async () => {
+  test("resumeExecution persists retained keys and leaves the terminal zset", async () => {
     const redis = createRedis();
-    const store = new WorkflowStore(redis, "store-enqueue-fail");
-
-    redis.failNext("send");
-
-    await expect(store.enqueue("exec-z")).rejects.toMatchObject({
-      name: "WorkflowStoreError",
-      message: "Unable to enqueue workflow task for exec-z",
-    });
-  });
-
-  test("persistExecution only transitions status failed to pending", async () => {
-    const redis = createRedis();
-    const store = new WorkflowStore(redis, "store-persist-cas");
-    const executionId = "exec-cas";
-
-    await store.tryCreateMetaAndActive(executionId, {
-      ...baseMeta("store-persist-cas"),
-      status: "completed",
-      completedAt: String(Date.now()),
-    });
-
-    expect(await store.persistExecution(executionId)).toBe(false);
-    expect((await store.getMeta(executionId))?.status).toBe("completed");
-
-    await store.updateStatusAndMarkActive({
-      executionId,
-      status: "failed",
-      extra: { error: "boom", failedAt: String(Date.now()) },
-    });
-
-    expect(await store.persistExecution(executionId)).toBe(true);
-    expect((await store.getMeta(executionId))?.status).toBe("pending");
-  });
-
-  test("persistExecution removes TTL without marking active", async () => {
-    const redis = createRedis();
-    const store = new WorkflowStore(redis, "store-persist");
+    const name = "store-persist";
+    const store = new WorkflowStore(redis, name);
     const executionId = "exec-persist";
 
-    await store.tryCreateMetaAndActive(
-      executionId,
-      failedMeta("store-persist"),
-    );
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowStarted",
-          input: "{}",
-          partitionKey: "",
-          timestamp: 1,
-        },
-      ],
+    await createFailed(store, name, executionId, {
+      ttlMs: 60_000,
+      trackedAt: 2,
     });
-    await store.markInactive(executionId);
-    await store.retainIfTerminal({ executionId, ttlMs: 60_000 });
-    await store.persistExecution(executionId);
 
-    expect(await redis.pttl(keys.meta("store-persist", executionId))).toBe(-1);
-    expect(await redis.pttl(keys.history("store-persist", executionId))).toBe(
-      -1,
-    );
-    expect(await store.listActive()).not.toContain(executionId);
+    expect(await redis.pttl(keys.meta(name, executionId))).toBeGreaterThan(0);
+
+    await store.resumeExecution(executionId);
+
+    expect(await redis.pttl(keys.meta(name, executionId))).toBe(-1);
+    expect(await redis.pttl(keys.history(name, executionId))).toBe(-1);
+    expect(await redis.send("ZCARD", [keys.terminal(name)])).toBe(0);
   });
 
-  test("retainIfTerminal without ttl does not expire", async () => {
+  test("terminal commit without ttl keeps keys and leaves the due set", async () => {
     const redis = createRedis();
-    const store = new WorkflowStore(redis, "store-retain-none");
+    const name = "store-retain-none";
+    const store = new WorkflowStore(redis, name);
     const executionId = "exec-keep";
 
-    await store.tryCreateMetaAndActive(executionId, {
-      ...baseMeta("store-retain-none"),
-      status: "completed",
-      completedAt: String(Date.now()),
-    });
+    await store.createExecution(executionId, baseMeta(name));
+    await commitFailed(store, executionId, { trackedAt: 1 });
 
-    expect(
-      await store.retainIfTerminal({
-        executionId,
-        endedAt: 1,
-      }),
-    ).toBe(true);
-
-    expect(await redis.pttl(keys.meta("store-retain-none", executionId))).toBe(
-      -1,
-    );
+    expect(await redis.pttl(keys.meta(name, executionId))).toBe(-1);
     expect(await store.getMeta(executionId)).not.toBeNull();
+    expect(await dueIds(redis, name)).toEqual([]);
   });
 
   test("trimTerminal unlinks oldest executions over max", async () => {
-    const store = new WorkflowStore(createRedis(), "store-trim");
+    const name = "store-trim";
+    const store = new WorkflowStore(createRedis(), name);
 
-    await store.tryCreateMetaAndActive("old", failedMeta("store-trim"));
-    await store.tryCreateMetaAndActive("mid", failedMeta("store-trim"));
-    await store.tryCreateMetaAndActive("new", failedMeta("store-trim"));
-
-    await store.retainIfTerminal({ executionId: "old", endedAt: 1 });
-    await store.retainIfTerminal({ executionId: "mid", endedAt: 2 });
-    await store.retainIfTerminal({ executionId: "new", endedAt: 3 });
+    await createFailed(store, name, "old", { trackedAt: 1 });
+    await createFailed(store, name, "mid", { trackedAt: 2 });
+    await createFailed(store, name, "new", { trackedAt: 3 });
     await store.trimTerminal(2);
 
     expect(await store.getMeta("old")).toBeNull();
+    expect(await store.loadHistory("old")).toEqual([]);
     expect(await store.getMeta("mid")).not.toBeNull();
     expect(await store.getMeta("new")).not.toBeNull();
   });
 
-  test("scheduleTimerIfAbsent after timer zset expiry reschedules", async () => {
+  test("terminal commit with ttl 0 unlinks keys so resume finds nothing", async () => {
     const redis = createRedis();
-    const store = new WorkflowStore(redis, "store-timer-expire");
-    const task = {
-      kind: "timer" as const,
-      executionId: "exec-t",
-      timerId: "t0",
-    };
-
-    expect(await store.scheduleTimerIfAbsent(Date.now() + 1000, task)).toBe(
-      true,
-    );
-    expect(await store.scheduleTimerIfAbsent(Date.now() + 2000, task)).toBe(
-      false,
-    );
-
-    await redis.pexpire(keys.timers("store-timer-expire"), 0);
-
-    expect(await store.scheduleTimerIfAbsent(Date.now() + 1000, task)).toBe(
-      true,
-    );
-  });
-
-  test("scanMetaIds keeps id when workflow name contains :meta:", async () => {
-    const name = "has:meta:in-name";
-    const store = new WorkflowStore(createRedis(), name);
-
-    await store.tryCreateMetaAndActive("exec-1", baseMeta(name));
-
-    const scanned = await store.scanMetaIds("0");
-
-    expect(scanned.ids).toEqual(["exec-1"]);
-  });
-
-  test("retainIfTerminal skips after persistExecution leaves terminal status", async () => {
-    const redis = createRedis();
-    const store = new WorkflowStore(redis, "store-retain-race");
-    const executionId = "exec-race";
-
-    await store.tryCreateMetaAndActive(
-      executionId,
-      failedMeta("store-retain-race"),
-    );
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowStarted",
-          input: "{}",
-          partitionKey: "",
-          timestamp: 1,
-        },
-      ],
-    });
-
-    expect(await store.persistExecution(executionId)).toBe(true);
-    expect(
-      await store.retainIfTerminal({
-        executionId,
-        ttlMs: 0,
-      }),
-    ).toBe(false);
-
-    expect(await store.getMeta(executionId)).not.toBeNull();
-    expect((await store.getMeta(executionId))?.status).toBe("pending");
-  });
-
-  test("retainIfTerminal ttl 0 unlinks before persistExecution", async () => {
-    const store = new WorkflowStore(createRedis(), "store-retain-first");
+    const name = "store-retain-zero";
+    const store = new WorkflowStore(redis, name);
     const executionId = "exec-gone";
 
-    await store.tryCreateMetaAndActive(
-      executionId,
-      failedMeta("store-retain-first"),
-    );
+    await store.createExecution(executionId, baseMeta(name));
+    await store.claimDue("owner", 60_000);
 
     expect(
-      await store.retainIfTerminal({
+      await store.commit({
         executionId,
-        ttlMs: 0,
+        leaseToken: "owner",
+        events: [{ type: "WorkflowFailed", error: "boom", timestamp: 2 }],
+        fields: { status: "failed", error: "boom", failedAt: "2" },
+        retention: { ttlMs: 0 },
       }),
-    ).toBe(true);
+    ).toEqual({ committed: true, cancelRequested: false });
 
-    expect(await store.persistExecution(executionId)).toBe(false);
+    expect(await store.getMeta(executionId)).toBeNull();
+    expect(await store.loadHistory(executionId)).toEqual([]);
+    expect(await redis.get(keys.lease(name, executionId))).toBeNull();
+    expect(await dueIds(redis, name)).toEqual([]);
+    expect(await store.resumeExecution(executionId)).toBeNull();
     expect(await store.getMeta(executionId)).toBeNull();
   });
 
-  test("trim cannot delete execution after persistExecution removes terminal member", async () => {
-    const store = new WorkflowStore(createRedis(), "store-trim-race");
+  test("trim keeps an execution resumed after trim picked it", async () => {
+    const redis = createRedis();
+    const name = "store-trim-race";
+    const store = new WorkflowStore(redis, name);
 
-    await store.tryCreateMetaAndActive("old", failedMeta("store-trim-race"));
-    await store.tryCreateMetaAndActive("newer", failedMeta("store-trim-race"));
-    await store.retainIfTerminal({ executionId: "old", endedAt: 1 });
-    await store.retainIfTerminal({ executionId: "newer", endedAt: 2 });
+    await createFailed(store, name, "old", { trackedAt: 1 });
+    await createFailed(store, name, "newer", { trackedAt: 2 });
 
-    expect(await store.persistExecution("old")).toBe(true);
+    // Resume lands between trim's ZRANGE (which picked "old") and the
+    // script that unlinks it.
+    const send = redis.send.bind(redis);
+    // Assigned in the patched send, which narrowing does not see.
+    let resumed = null as string | null;
+
+    redis.send = async (command: string, args: string[]) => {
+      if (
+        resumed === null &&
+        command === "EVAL" &&
+        args[0] === TRIM_IF_MEMBER
+      ) {
+        resumed = await store.resumeExecution("old");
+      }
+
+      return send(command, args);
+    };
+
     await store.trimTerminal(1);
 
-    expect(await store.getMeta("old")).not.toBeNull();
+    expect(resumed).toBe("resumed");
     expect((await store.getMeta("old"))?.status).toBe("pending");
+    expect(parse(await store.loadHistory("old")).at(-1)?.type).toBe(
+      "WorkflowResumed",
+    );
     expect(await store.getMeta("newer")).not.toBeNull();
   });
 });

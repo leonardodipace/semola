@@ -3,7 +3,7 @@ title: Workflow
 description: Semola durable workflows - multi-step Redis jobs with resumable steps and retries
 ---
 
-Durable workflows on Redis. Event history, deterministic replay, inline steps, multi-replica leases, and automatic orphan recovery.
+Durable workflows on Redis. Event history, deterministic replay, inline steps, multi-replica leases, and crashed or stalled runs that any replica picks up once `lockTTL` passes.
 Workflows run multi-step processes that survive restarts. Each named `step` caches its result in Redis, so replay and reclaim skip work that already succeeded.
 
 Needs a `Bun.RedisClient`. Workflow names must be unique in the process. Execution IDs must be unique per workflow name (Redis keys are `workflow:{name}:…`).
@@ -63,17 +63,19 @@ Each execution has an append-only event history in Redis. A single lease owner a
 
 Side effects belong inside `step`. Workflow code outside `step` / `sleep` must be deterministic relative to history: no raw `Date.now()`, `Math.random()`, network, or unseeded nondeterminism.
 
-Steps are **at-least-once**. `step` bodies must be idempotent; a crash mid-step may re-run the handler. Input, result, and step outputs are always JSON (`JSON.stringify` / `JSON.parse`).
+Steps are **at-least-once**. `step` bodies must be idempotent; a crash mid-step may re-run the handler. Input, result, and step outputs are always JSON (`JSON.stringify` / `JSON.parse`). A step output or workflow result that cannot be serialized (a `BigInt`, a circular object) fails the run without retrying, and compensates the steps that already started.
 
 ## Multi-replica and automatic recovery
 
-N Bun processes may register the same workflow `name` against the same Redis. Work is distributed via one task queue and per-execution leases (`lockTTL`).
+N Bun processes may register the same workflow `name` against the same Redis. Work is distributed via one sorted set of executions scored by when each next needs advancing, plus per-execution leases (`lockTTL`). A worker claims a due execution by taking its lease and pushing its score `lockTTL` ahead; the heartbeat keeps pushing it while the run is alive. When the run stops it leaves the score at the next thing it waits for: a `sleep`'s fire time or a retry's backoff. Sleeping executions cost nothing until they are due.
 
-If a replica dies mid-run, lease expiry lets another replica (or the same process after restart) reclaim the execution. You do not need to call `resume()` for crash recovery; workers reclaim from Redis automatically.
+If a replica dies mid-run, its execution simply comes due again once `lockTTL` passes, and any replica (or the same process after restart) picks it up. If a run hits an internal error instead (for example a Redis failure), the replica hands the execution back to be retried after `retryBackoff.baseDelay` (at least `pollInterval`). There is no orphan scan, and you do not need to call `resume()` for crash recovery.
 
-History and status writes are lease-fenced (Redis compare-and-append / compare-and-set against the lease token). A writer that loses the lease cannot append; the new owner continues from history. Client paths (`start` / cancel / resume) append without a lease. Losing a lease aborts the local forward `signal` so the handler can stop; another replica may still re-run the step after reclaim (at-least-once).
+The heartbeat that keeps a lease alive runs on the same event loop as your steps. A step that blocks the event loop with synchronous work for longer than about 60% of `lockTTL` loses its lease, and another replica may start the same step while the first is still running. Keep steps async, or raise `lockTTL` for long synchronous work.
 
-`resume(executionId)` re-queues a **failed** execution: atomically persist only while meta status is still `failed`, append a resume event, re-schedule failed steps, then mark active. It also finishes an interrupted resume (`pending` after persist, or after resume events but before active) without re-running that compare-and-set. Plain `pending` / `running` / `compensating` / `completed` / `cancelled` executions reject, as do failed executions that already started compensation. A later failure needs a new resume event even if an older `WorkflowResumed` is already in history.
+History and status writes are lease-fenced (Redis compare-and-append / compare-and-set against the lease token). Each state transition is a single Redis script, so history and status never disagree after a crash: a terminal event, its final status, leaving the due set, and retention are written together, as are `CompensationStarted` and status `compensating`. A writer that loses the lease cannot write; the new owner continues from history. While an execution is leased, the lease holder is the only writer of its history, so it loads history once per lease and keeps it in memory. Client paths do not take a lease: `start` creates meta, the first history event, and the due entry in one script; `resume` is one compare-and-set script on a failed execution; `cancel` sets a flag on meta (never history), which the lease holder sees on its next write. Losing a lease aborts the local forward `signal` so the handler can stop; another replica may still re-run the step once the execution comes due again (at-least-once).
+
+`resume(executionId)` re-queues a **failed** execution in one atomic step: only while meta status is still `failed` and no unwind has started, it removes the retention TTL, appends a resume event (replay restarts failed steps at attempt 1), sets `pending`, and makes it due now. `pending` / `running` / `compensating` / `completed` / `cancelled` executions reject, as do failed executions that already started compensation. Concurrent `resume` calls on the same execution apply once; the others reject. A later failure needs a new resume event even if an older `WorkflowResumed` is already in history.
 
 ## Examples
 
@@ -141,7 +143,7 @@ const parent = defineWorkflow<{ userId: string }, { ok: true }>({
 
 ### Cancel an execution
 
-`cancel()` records the request and aborts local work. The return value may still be `pending`, `running`, or `compensating`. Poll until status is `cancelled`, or `failed` if compensation itself exhausts retries.
+`cancel()` records the request; it does not abort a step that is running. The return value may still be `pending`, `running`, or `compensating`. Cancelling a `completed` / `failed` / `cancelled` or `compensating` execution changes nothing and returns its current status. Poll until status is `cancelled`, or `failed` if compensation itself exhausts retries.
 
 ```typescript
 const requested = await onboard.cancel(executionId);
@@ -162,7 +164,7 @@ console.log(execution.cancelledAt);
 
 ### Resume a failed execution
 
-`resume()` re-queues a failed execution and returns `pending`. Completed steps stay cached and are not repeated. Non-failed statuses reject unless an interrupted resume is already in progress. If another worker finishes the run before resume claims it, resume rejects and leaves the terminal status alone.
+`resume()` re-queues a failed execution and returns `pending`. Completed steps stay cached and are not repeated. Non-failed statuses reject. If another caller resumes the run (and a worker finishes it) before this resume applies, resume rejects and leaves that status alone.
 
 ```typescript
 const execution = await onboard.get(executionId);
@@ -194,9 +196,11 @@ for (const item of failed) {
 
 Results are lightweight `WorkflowListItem` snapshots. Use instance `get()` for input, result, error, and step details. Filter `name` with a string or string array; resume through the matching workflow instance.
 
-### Compensate completed steps
+### Compensate steps
 
-Pass `compensate` on a step to undo its side effects if a later step fails for good, or if the execution is cancelled. Compensations run in reverse order of completion (LIFO), use the same retry policy as forward steps, and must be idempotent. Only **completed** steps are compensated.
+Pass `compensate` on a step to undo its side effects when the execution fails for good or is cancelled. The undo is registered as soon as the step **starts**, so it runs for every step that started: completed, failed (including exhausted retries or `fail()`), or still in flight or backing off when cancel arrived. Steps that never started are not undone. Undos run newest first (LIFO), so a failing step's own undo runs before earlier steps' undos.
+
+`compensate` gets `completed`: with `completed: true`, `result` is the step's result; with `completed: false`, `result` is `undefined` and the step may have had partial effects or none at all (its handler may not even have run). Undos are at-least-once and must be idempotent.
 
 ```typescript
 const onboard = defineWorkflow<{ userId: string }, { ok: true }>({
@@ -207,8 +211,14 @@ const onboard = defineWorkflow<{ userId: string }, { ok: true }>({
       "create-account",
       async () => createAccount(input.userId),
       {
-        compensate: async ({ result }) => {
-          await deleteAccount(result.id);
+        compensate: async ({ completed, result }) => {
+          if (completed) {
+            await deleteAccount(result.id);
+            return;
+          }
+
+          // The step failed or was interrupted: undo whatever it managed.
+          await deleteAccountIfExists(input.userId);
         },
       },
     );
@@ -222,7 +232,7 @@ const onboard = defineWorkflow<{ userId: string }, { ok: true }>({
 });
 ```
 
-Status is `compensating` while unwind runs. A successful unwind still ends as `failed` (original error) or `cancelled`. If a compensation itself exhausts retries, the execution is `failed` with that compensation error. If compensation collect hits nondeterminism, cannot load step results, or the handler throws before every completed step is replayed, unwind does not start with a partial list. If `compensate` handlers disappear after `CompensationStarted` (for example a rolling deploy), including only some of them, the execution fails closed instead of finishing without undo. Unwind follows the `stepIds` snapshot on that event, so handlers added after start are not run.
+Status is `compensating` while unwind runs. Each undo is an ordinary durable step named `undo:<step name>`, with the same retry policy, backoff, `fail()` and `NonRetryableStepError` handling as forward steps. A successful unwind still ends as `failed` (original error) or `cancelled`. If an undo exhausts its retries, the execution is `failed` with that undo's error and the remaining undos do not run. If the replay diverges from history (nondeterminism, an unreadable step result, or the workflow function returning or throwing before every recorded step), the execution fails without running any undo. If `compensate` handlers disappear after `CompensationStarted` (for example a rolling deploy), including only some of them, the execution fails closed instead of finishing without undo. Unwind follows the `stepIds` snapshot on that event, so handlers added after start are not run.
 
 `resume()` is rejected after compensation has started. Completed step results would be wrong after undo; start a new execution. Failed executions that never compensated can still be resumed.
 
@@ -300,7 +310,7 @@ await deploy.start({ envId: "production" });
 await deploy.start({ envId: "staging" }, { partitionKey: "shared" });
 ```
 
-Different keys do not share the cap. Same-key executions are limited to `concurrency`.
+Different keys do not share the cap. Same-key executions are limited to `concurrency` across all replicas. Each process also runs at most `concurrency` handlers at a time, whatever the number of keys, so cross-key parallelism comes from running more replicas (or raising `concurrency`).
 
 ### Keep terminal history
 
@@ -323,7 +333,7 @@ Pass `Infinity` to keep forever, or `0` to unlink immediately after terminal. Fa
 
 ### Graceful shutdown
 
-`stop()` ends polling, waits for in-flight work (including compensate unwind), and releases this process registration. Forward `signal` is aborted so handlers can exit; that abort does not write `WorkflowCancelled` or start compensation. Compensate `signal` is not aborted, so cleanup can finish. Other replicas keep reclaiming and running the same workflow name.
+`stop()` ends polling, waits for the runs in flight, and releases this process registration. Forward `signal` is aborted so handlers can exit; that abort does not write `WorkflowCancelled` or start compensation. Compensate `signal` is not aborted, so an undo step that is running finishes; the run then stops, and the rest of the unwind continues on whichever replica (or this process after a restart) picks the execution up next. Other replicas keep running the same workflow name; executions this process hands back are due again shortly.
 
 ```typescript
 await onboard.stop();
@@ -334,8 +344,8 @@ await onboard.stop();
 ### Handler context
 
 - `input`, `executionId`, `signal`
-- `step(name, handler, options?)` - durable side effect; handler gets `{ input, signal, fail }`. `options.compensate` undoes a completed step on later failure or cancel; it gets `{ input, result, signal, fail }`. Compensate `signal` is not the cancelled forward signal, so cleanup can finish after cancel.
-- `sleep(ms)` - durable timer (survives replay / reclaim)
+- `step(name, handler, options?)` - durable side effect; handler gets `{ input, signal, fail }`. `options.compensate` undoes a started step on failure or cancel; it gets `{ input, completed, result, signal, fail }` (`result` only when `completed`). Forward `signal` is aborted only by `stop()` or a lost lease. Compensate `signal` is never aborted, so cleanup can finish.
+- `sleep(ms)` - durable timer (survives replay and restarts). It counts as fired once a lease holder sees its fire time pass and records `TimerFired`; it stays fired after that, even if replica clocks disagree.
 
 `fail(error)` inside a step marks a non-retryable failure and passes that `Error` to `onError`. Same inside `compensate`. History and status still store the message string. `throw new NonRetryableStepError(...)` remains non-retryable without going through `fail`.
 
@@ -347,10 +357,10 @@ await onboard.stop();
 - **`retries`** - step retries before workflow fails (default: 3; `0` = fail on first error)
 - **`retryBackoff`** - `{ baseDelay, multiplier, maxDelay }` (defaults: 1000 / 2x / 30000)
 - **`hooks`** - `onStart`, `onRetry`, `onError`, `onComplete`, `onCancel` (see [Hooks](#hooks))
-- **`lockTTL`** - execution lease TTL in ms (default: 300000); also used as capacity slot TTL. While a process holds an execution, it refreshes that execution's capacity slot for the full lifetime (including `sleep` and retry backoff). After process death, the Redis slot remains owned until TTL; the next reclaim re-attaches via the same `executionId`. Differing replica `concurrency` values mean the effective cap is the max.
-- **`retentionTTL`** - how long terminal executions (`completed` / `failed` / `cancelled`) stay in Redis, in ms (default: 86400000, 24h). `Infinity` keeps them forever. Any other value must be a non-negative number. `0` unlinks immediately after terminal. Pending, running, and compensating keys are never expired. Failed executions can be `resume`d only while they still exist. A background sweep also expires leftover terminal keys with no TTL.
+- **`lockTTL`** - execution lease TTL in ms (default: 300000); also how long a crashed replica's execution waits before another replica picks it up, and the grace period on capacity slots. The lease and the slot are renewed every 40% of `lockTTL` while a step runs. When a run stops to wait (`sleep`, retry backoff) the slot is kept until the wait ends plus `lockTTL`, with no process refreshing it; whoever runs the execution next renews it. If every replica is gone, the slot frees itself `lockTTL` after the execution was due. Terminal executions free their slot in the same write that records the final status.
+- **`retentionTTL`** - how long terminal executions (`completed` / `failed` / `cancelled`) stay in Redis, in ms (default: 86400000, 24h). `Infinity` keeps them forever. Any other value must be a non-negative number. `0` unlinks immediately after terminal. Pending, running, and compensating keys are never expired. Failed executions can be `resume`d only while they still exist. Retention is applied when the execution becomes terminal, using the replica's settings at that moment; changing `retentionTTL` later does not touch executions that are already terminal.
 - **`retentionMax`** - optional cap on terminal executions per workflow name. Must be a positive integer. Oldest are `UNLINK`ed when the cap is exceeded. Works with or without a finite `retentionTTL`.
-- **`concurrency`** - max parallel instances across replicas (default: 1). Without `partitionBy`, all executions share one Redis slot pool of size `concurrency` (key `*`) and this process runs that many pollers. With `partitionBy`, each key has its own pool of size `concurrency` (no global cap). If replicas disagree on `concurrency`, the effective cap is the max.
+- **`concurrency`** - max running or waiting executions per capacity key across replicas (default: 1), and the number of handlers one process runs at a time. Without `partitionBy`, all executions share one pool (key `*`). With `partitionBy`, each key has its own pool of size `concurrency` (no global cap). Each replica admits against its own `concurrency`, so if replicas disagree the effective cap is the max.
 - **`partitionBy`** - `(input) => string` for per-key concurrency across replicas. Empty keys throw. Cap applies for the whole execution, including durable waits. Replaces the global `concurrency` cap. The key `*` is reserved for the unpartitioned pool.
 - **`pollInterval`** - idle poll backoff ms (default: 100)
 
@@ -360,17 +370,17 @@ await onboard.stop();
 
 Without `partitionBy`, `partitionKey` is stored on meta but capacity stays on the global `*` pool. Empty keys throw. The resolved key is stored on execution meta so `resume` keeps the original partition.
 
-Failed steps retry with exponential backoff before the workflow is marked `failed`. Default `retries: 3` means 4 total attempts. `retries: 0` fails on the first error. The same retry policy applies to `compensate` handlers. `onRetry` fires only for forward step retries, not compensate retries.
+Failed steps retry with exponential backoff before the workflow is marked `failed`. Default `retries: 3` means 4 total attempts. `retries: 0` fails on the first error. The same retry policy applies to `compensate` handlers, and `onRetry` / `onError` fire for them too with step name `undo:<name>`.
 
-`cancel` is honored during retry backoff and `sleep`, not only between steps. Completed steps with `compensate` unwind before status becomes `cancelled`. After terminal failure, `resume(executionId)` re-queues the execution unless compensation already ran.
+`cancel` is honored during retry backoff and `sleep`, not only between steps. A step that is running when `cancel()` is called keeps going, its outcome is recorded, and the cancel is honored at that write; the forward `signal` is not aborted by cancel. Started steps with `compensate` unwind before status becomes `cancelled`. After terminal failure, `resume(executionId)` re-queues the execution unless compensation already ran.
 
 ### Hooks
 
 Optional lifecycle callbacks. Errors in hooks never fail the workflow. Hooks fire on real transitions, not every history replay.
 
 - `onStart` - once when the execution first moves `pending` → `running`
-- `onRetry` - before each forward step retry backoff (`attempt`, `nextRetryDelayMs`, `retriesRemaining`, …). Not fired for `compensate` retries.
-- `onError` - forward-step retries exhausted, immediately after `fail()`, or when a `compensate` handler exhausts retries (may fire twice if both happen). `error` is the thrown/`fail()` `Error` instance (use `instanceof` for typed branches). Compensate calls pass `errorHistory` from `CompensationFailed` attempts only (messages as strings).
+- `onRetry` - before each step retry backoff (`attempt`, `nextRetryDelayMs`, `retriesRemaining`, …), including undo steps (`stepName` is `undo:<name>`).
+- `onError` - a step's retries are exhausted or it called `fail()`, including undo steps (`undo:<name>`; may fire for both the forward step and an undo). `error` is the thrown/`fail()` `Error` instance (use `instanceof` for typed branches). `errorHistory` lists that step's failed attempts since the last resume (messages as strings).
 - `onComplete` - terminal success
 - `onCancel` - terminal cancel
 
@@ -380,17 +390,14 @@ Prefix: `workflow:`
 
 | Key | Purpose |
 |-----|---------|
-| `workflow:{name}:history:{executionId}` | append-only event list |
-| `workflow:{name}:meta:{executionId}` | status cache for `get()` |
+| `workflow:{name}:history:{executionId}` | append-only event list, written by `start`, `resume`, and the lease holder |
+| `workflow:{name}:meta:{executionId}` | status, result/error, timestamps, and `cancelRequestedAt` (set by `cancel`, cleared by `resume`) |
 | `workflow:{name}:lease:{executionId}` | owner token + TTL |
-| `workflow:{name}:queue` | workflow task queue |
-| `workflow:{name}:timers` | sorted set of due timers / retry delays |
-| `workflow:{name}:timer-dead` | unparseable timer payloads (dead letter) |
-| `workflow:{name}:active` | non-terminal execution ids (reclaimer) |
+| `workflow:{name}:due` | sorted set of non-terminal execution ids, scored by when each next needs advancing (ms epoch) |
 | `workflow:{name}:terminal` | zset of terminal execution ids when `retentionMax` is set |
-| `workflow:{name}:partition:{key}:{slot}` | concurrency slots (`SET NX PX`, re-ownable by same execution). Key `*` is the unpartitioned pool; `partitionBy` keys are per-key pools |
+| `workflow:{name}:capacity:{key}` | sorted set of execution ids holding a capacity slot, scored by slot expiry (ms epoch). Key `*` is the unpartitioned pool; `partitionBy` keys are per-key pools |
 
-Terminal `meta` and `history` keys receive `PEXPIRE` from `retentionTTL` (or are `UNLINK`ed when the TTL has already elapsed). Leases and partition slots keep using `lockTTL`. `listWorkflows` skips empty SCAN hits (expired tombstones).
+Terminal `meta` and `history` keys receive `PEXPIRE` from `retentionTTL` in the same script that records the terminal status (or are `UNLINK`ed there when `retentionTTL` is `0`). `retentionMax` trimming runs right after that terminal write. Leases and capacity slots keep using `lockTTL`. `listWorkflows` skips empty SCAN hits (expired tombstones).
 
 ### Notes
 
@@ -399,7 +406,7 @@ Terminal `meta` and `history` keys receive `PEXPIRE` from `retentionTTL` (or are
 - Workers run embedded in your Bun process against Redis, not as a separate matching service.
 - `get().steps` is `{ name, completedAt }[]` from completed history events (not a separate meta cache). Step return values are not exposed on `get()`.
 - Successful step results are written to history even if cancel arrives mid-handler; the next advance then honors cancel.
-- `compensate` runs only for completed steps, in reverse completion order. Compensations are at-least-once and must be idempotent. `resume()` after compensation throws.
+- `compensate` runs for every started step (completed or not), newest first. Undos are at-least-once and must be idempotent and tolerate partial or no effects. `resume()` after compensation throws.
 
 ### Statuses
 

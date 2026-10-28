@@ -36,12 +36,17 @@ export type StepHandler<TInput, TStep> = (
   context: StepContext<TInput>,
 ) => TStep | Promise<TStep>;
 
+// `completed` tells whether the step finished. A step that failed, was cut
+// short by cancel, or never got to run its handler is undone with
+// `completed: false` and no result.
 export type StepCompensateContext<TInput, TStep> = {
   input: TInput;
-  result: TStep;
   signal: AbortSignal;
   fail: (error: Error) => never;
-};
+} & (
+  | { completed: true; result: TStep }
+  | { completed: false; result: undefined }
+);
 
 export type StepCompensateHandler<TInput, TStep> = (
   context: StepCompensateContext<TInput, TStep>,
@@ -154,7 +159,7 @@ export type WorkflowStartSyncResult<TResult> = {
 
 export type WorkflowStartResult = {
   executionId: string;
-  status: WorkflowStatus;
+  status: "pending";
 };
 
 export type WorkflowCancelResult = {
@@ -193,7 +198,13 @@ export type WorkflowMeta = {
   failedAt: string;
   cancelledAt: string;
   partitionKey: string;
-  partitionSlot: string;
+  // Set by cancel() while the execution is pending/running; cleared by resume.
+  cancelRequestedAt: string;
+  // The forward failure that started an unwind, kept when `error` is later
+  // replaced by an undo's error. Absent when no failure started an unwind.
+  originalError?: string;
+  // Set when an unwind starts; resume rejects the execution from then on.
+  unwoundAt?: string;
 };
 
 export type Workflow<TInput, TResult> = {
@@ -212,44 +223,15 @@ export type Workflow<TInput, TResult> = {
   stop: () => Promise<void>;
 };
 
-export type TimerTask =
-  | {
-      kind: "timer";
-      executionId: string;
-      timerId: string;
-    }
-  | {
-      kind: "step-retry";
-      executionId: string;
-      stepId: string;
-      stepName: string;
-      attempt: number;
-    }
-  | {
-      kind: "compensation-retry";
-      executionId: string;
-      stepId: string;
-      stepName: string;
-      attempt: number;
-    };
-
 export type HistoryEvent =
   | {
       type: "WorkflowStarted";
-      input: string;
-      partitionKey: string;
-      timestamp: number;
-    }
-  | {
-      type: "StepScheduled";
-      stepId: string;
-      stepName: string;
-      attempt: number;
       timestamp: number;
     }
   | {
       type: "StepStarted";
       stepId: string;
+      stepName: string;
       attempt: number;
       timestamp: number;
     }
@@ -281,10 +263,6 @@ export type HistoryEvent =
       timestamp: number;
     }
   | {
-      type: "WorkflowCancelRequested";
-      timestamp: number;
-    }
-  | {
       type: "WorkflowCancelled";
       timestamp: number;
     }
@@ -306,35 +284,14 @@ export type HistoryEvent =
       type: "CompensationStarted";
       reason: "failed" | "cancelled";
       error: string | null;
-      stepIds?: string[];
-      timestamp: number;
-    }
-  | {
-      type: "CompensationScheduled";
-      stepId: string;
-      stepName: string;
-      attempt: number;
-      timestamp: number;
-    }
-  | {
-      type: "CompensationCompleted";
-      stepId: string;
-      stepName: string;
-      timestamp: number;
-    }
-  | {
-      type: "CompensationFailed";
-      stepId: string;
-      stepName: string;
-      error: string;
-      retryable: boolean;
-      attempt: number;
+      stepIds: string[];
       timestamp: number;
     };
 
 export type StepState =
+  // `attempt` runs next: it started and never finished, or resume reset it.
   | {
-      status: "scheduled" | "started";
+      status: "started";
       stepName: string;
       attempt: number;
     }
@@ -350,50 +307,28 @@ export type StepState =
       error: string;
       retryable: boolean;
       attempt: number;
+      failedAt: number;
     };
 
 export type TimerState =
   | { status: "started"; fireAt: number; delayMs: number }
   | { status: "fired"; delayMs: number };
 
-export type CompensationState =
-  | {
-      status: "scheduled";
-      stepName: string;
-      attempt: number;
-    }
-  | {
-      status: "completed";
-      stepName: string;
-    }
-  | {
-      status: "failed";
-      stepName: string;
-      error: string;
-      retryable: boolean;
-      attempt: number;
-    };
-
 export type CompensationPhase = {
   reason: "failed" | "cancelled";
   error: string | null;
   stepIds: string[];
-  steps: Map<string, CompensationState>;
 };
-
-export type HistoryTerminal =
-  | { kind: "completed"; result: string }
-  | { kind: "failed"; error: string }
-  | { kind: "cancelled" };
 
 export type HistoryView = {
   events: HistoryEvent[];
-  input: string;
-  partitionKey: string;
+  // Forward steps by id (`a<N>`).
   steps: Map<string, StepState>;
+  // Undo steps, keyed by the forward step id they undo.
+  undos: Map<string, StepState>;
   timers: Map<string, TimerState>;
-  cancelRequested: boolean;
-  terminal: HistoryTerminal | null;
+  // Forward step ids with a StepStarted event: the steps an unwind must undo.
+  started: Set<string>;
   compensation: CompensationPhase | null;
 };
 
@@ -410,18 +345,37 @@ export type WorkflowDecision =
       stepName: string;
       attempt: number;
       handler: StepHandler<unknown, unknown>;
-      events: HistoryEvent[];
     }
-  | {
-      type: "sleep";
-      timerId: string;
-      fireAt: number;
-      events: HistoryEvent[];
-    }
-  | { type: "waiting" }
+  | { type: "record"; events: HistoryEvent[] }
+  | { type: "waiting"; until: number }
   | { type: "complete"; result: string; events: HistoryEvent[] }
   | { type: "fail"; error: string; events: HistoryEvent[] }
   | { type: "cancel"; events: HistoryEvent[] };
+
+export type TerminalDecision = Extract<
+  WorkflowDecision,
+  { type: "fail" | "cancel" }
+>;
+
+export type NextStepTarget = {
+  stepId: string;
+  stepName: string;
+  handler: StepHandler<unknown, unknown>;
+};
+
+export type RetryPolicy = {
+  now: number;
+  retries: number;
+  backoff: (attempt: number) => number;
+};
+
+export type Replay = {
+  decision: WorkflowDecision;
+  // Undo handlers of started steps, in start order.
+  undo: CompensationItem[];
+  // Set when the replay diverged from history (no unwind is attempted).
+  fatal?: string;
+};
 
 export type BackoffDelayInput = {
   attempt: number;
@@ -433,120 +387,46 @@ export type BackoffDelayInput = {
 export type AdvanceInput<TInput, TResult> = {
   options: WorkflowOptions<TInput, TResult>;
   view: HistoryView;
+  input: TInput;
   executionId: string;
   signal: AbortSignal;
   retries: number;
+  backoff: (attempt: number) => number;
+  cancelRequested: boolean;
 };
 
-export type WithLeaseInput = {
-  executionId: string;
-  work: (token: string) => Promise<void>;
-  onBusy?: () => Promise<void>;
-};
-
-export type ExecuteStepInput = {
+export type ExecuteStepInput<TInput = unknown> = {
   executionId: string;
   stepId: string;
   stepName: string;
   attempt: number;
   handler: StepHandler<unknown, unknown>;
-  rawInput: string;
-  partitionKey: string;
-  token: string;
+  run: LeaseRun<TInput>;
 };
 
-export type HandleStepFailureInput = {
+export type HandleStepFailureInput<TInput = unknown> = {
   executionId: string;
   stepId: string;
   stepName: string;
   attempt: number;
-  rawInput: string;
-  partitionKey: string;
   stepError: Error;
-  view: HistoryView;
-  token: string;
-};
-
-export type FailAfterStepExhaustedInput = {
-  executionId: string;
-  stepName: string;
-  attempt: number;
-  rawInput: string;
-  partitionKey: string;
-  stepError: Error;
-  errorHistory: WorkflowStepErrorRecord[];
-  token: string;
+  run: LeaseRun<TInput>;
 };
 
 export type CompensationItem = {
   stepId: string;
   stepName: string;
-  result: unknown;
   compensate: StepCompensateHandler<unknown, unknown>;
+  outcome:
+    | { completed: true; result: unknown }
+    | { completed: false; result: undefined };
 };
 
-export type CollectCompensationsInput<TInput, TResult> = {
-  options: WorkflowOptions<TInput, TResult>;
-  view: HistoryView;
-  executionId: string;
-};
-
-export type CompensationHandlersMissingInput = {
-  expectedIds: string[];
-  collectedIds: Set<string>;
-  phaseSteps: Map<string, CompensationState>;
-};
-
-export type MaybeStartCompensationInput = {
+export type FinishCompensationInput<TInput = unknown> = {
   executionId: string;
   reason: "failed" | "cancelled";
   error: string | null;
-  token: string;
-};
-
-export type CompensationStartResult =
-  | { type: "started" }
-  | { type: "none" }
-  | { type: "failed"; error: string };
-
-export type RunCompensationPhaseInput = {
-  executionId: string;
-  view: HistoryView;
-  rawInput: string;
-  partitionKey: string;
-  token: string;
-};
-
-export type ExecuteCompensationInput = {
-  executionId: string;
-  stepId: string;
-  stepName: string;
-  attempt: number;
-  result: unknown;
-  compensate: StepCompensateHandler<unknown, unknown>;
-  rawInput: string;
-  partitionKey: string;
-  token: string;
-};
-
-export type FinishCompensationInput = {
-  executionId: string;
-  reason: "failed" | "cancelled";
-  error: string | null;
-  rawInput: string;
-  partitionKey: string;
-  token: string;
-};
-
-export type FailFromCompensationInput = {
-  executionId: string;
-  stepName: string;
-  attempt: number;
-  error: Error;
-  errorHistory: WorkflowStepErrorRecord[];
-  rawInput: string;
-  partitionKey: string;
-  token: string;
+  run: LeaseRun<TInput>;
 };
 
 export type CollectErrorHistoryInput = {
@@ -555,125 +435,97 @@ export type CollectErrorHistoryInput = {
   attempt: number;
   error: string;
   timestamp: number;
-  failedType: "StepFailed" | "CompensationFailed";
 };
 
-export type FireDurableTimerInput = {
+export type CompleteExecutionInput<TInput = unknown> = {
   executionId: string;
-  timerId: string;
-  token: string;
-};
-
-export type ClearExecutionLocalStateInput = {
-  executionId: string;
-  partitionKey: string;
-};
-
-export type CompleteExecutionInput = {
-  executionId: string;
+  events: HistoryEvent[];
   result: string;
-  rawInput: string;
-  partitionKey: string;
-  token: string;
+  run: LeaseRun<TInput>;
 };
 
 export type FailExecutionInput = {
   executionId: string;
+  events: HistoryEvent[];
   error: string;
-  partitionKey: string;
-  token: string;
+  run: LeaseRun;
 };
 
-export type CancelExecutionInput = {
-  executionId: string;
-  rawInput: string;
-  partitionKey: string;
-  token: string;
-};
-
-export type FinalizeFromTerminalInput = {
-  executionId: string;
-  terminal: HistoryTerminal;
-  rawInput: string;
-  token: string;
-};
-
-export type PartitionKeyInput = {
-  name: string;
-  partitionKey: string;
-  slot: number;
-};
-
-export type AppendEventsInput = {
+export type CancelExecutionInput<TInput = unknown> = {
   executionId: string;
   events: HistoryEvent[];
-  leaseToken?: string;
+  run: LeaseRun<TInput>;
 };
 
-export type SetMetaInput = {
+export type CommitTerminalInput = {
   executionId: string;
+  events: HistoryEvent[];
   fields: Partial<WorkflowMeta>;
-  leaseToken?: string;
+  endedAt: number;
+  run: LeaseRun;
 };
 
-export type AcquireLeaseInput = {
+export type LeaseInput = {
   executionId: string;
   token: string;
   ttlMs: number;
+  // Capacity key of the slot that follows the lease ("*" by default).
+  capacityKey?: string;
 };
 
-export type ExtendLeaseInput = {
-  executionId: string;
-  token: string;
-  ttlMs: number;
+export type ReleaseLeaseInput = LeaseInput & { dueAt: number };
+
+export type CommitRetention = {
+  ttlMs?: number;
+  trackedAt?: number;
 };
 
-export type ClaimPartitionInput = {
-  partitionKey: string;
+export type CommitInput = {
   executionId: string;
-  concurrency: number;
-  ttlMs: number;
+  leaseToken: string;
+  events?: HistoryEvent[];
+  fields?: Partial<WorkflowMeta>;
+  // Next time the execution needs advancing (ignored when terminal).
+  dueAt?: number;
+  // Capacity key whose slot a terminal commit frees ("*" by default).
+  capacityKey?: string;
+  // With dueAt, keeps a held capacity slot until dueAt + slotTtlMs, so a
+  // crash before releaseLease still holds the slot through the wait.
+  slotTtlMs?: number;
+  // Present only for terminal transitions: leave the due set + retention.
+  retention?: CommitRetention;
 };
 
-export type RefreshPartitionInput = {
-  partitionKey: string;
-  slot: number;
-  executionId: string;
-  ttlMs: number;
-};
+export type CommitResult =
+  | { committed: false }
+  | { committed: true; cancelRequested: boolean };
 
-export type ReleasePartitionInput = {
-  partitionKey: string;
-  slot: number;
-  executionId: string;
-};
-
-export type ReleaseOwnedPartitionsInput = {
-  partitionKey: string;
-  executionId: string;
-  concurrency: number;
-};
-
-export type UpdateStatusInput = {
-  executionId: string;
+export type CancelRequestResult = {
+  accepted: boolean;
   status: WorkflowStatus;
-  extra?: Partial<WorkflowMeta>;
-  leaseToken?: string;
+  updatedAt: string;
+  cancelledAt: string;
+  createdAt: string;
 };
 
-export type ResumeIfPendingInput = {
-  executionId: string;
-  events: HistoryEvent[];
-};
-
-export type RedisZMember = {
-  score: number;
-  member: string;
-};
-
-export type EnsureCapacityInput = {
-  executionId: string;
+// In-memory state of one lease: history is only written by the lease holder
+// while it holds the lease, so the view is loaded once and kept current by
+// applying each committed event. cancelRequested comes from meta at lease
+// start and from every commit afterwards.
+export type LeaseRun<TInput = unknown> = {
   token: string;
-  partitionKey: string;
-  meta: WorkflowMeta;
+  // Workflow input, parsed once from meta when the lease starts.
+  input: TInput;
+  view: HistoryView;
+  cancelRequested: boolean;
+  // Due score committed for this execution; released as-is when set.
+  dueAt?: number;
+  // Capacity key this run was admitted under.
+  capacityKey?: string;
+  // Aborts this run's forward steps: on stop() or a lost lease.
+  controller: AbortController;
+  // Set by the heartbeat once the lease could not be extended.
+  lost: boolean;
 };
+
+export type RunCommitInput = Omit<CommitInput, "executionId" | "leaseToken">;

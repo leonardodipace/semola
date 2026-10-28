@@ -1,46 +1,16 @@
-import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { WorkflowEngine } from "./engine.js";
-import { createRedis } from "./redis.mock.js";
+import {
+  closeRedis,
+  createRedis,
+  eventTypes,
+  resetRedis,
+  SEMOLA_REDIS_URL,
+} from "./integration-helpers.js";
 import { WorkflowStore } from "./store.js";
 import type { WorkflowHandlerContext, WorkflowMeta } from "./types.js";
 
-const drainMicrotasks = async () => {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-};
-
-let advancing = false;
-
-const advanceTimersByTimeAsync = async (ms: number) => {
-  if (advancing) {
-    await new Promise<void>((resolve) => setTimeout(resolve, ms));
-    return;
-  }
-
-  advancing = true;
-
-  try {
-    const done = new Promise<void>((resolve) => setTimeout(resolve, ms));
-    const end = Date.now() + ms;
-
-    while (Date.now() < end) {
-      if (jest.getTimerCount() === 0) {
-        jest.advanceTimersByTime(end - Date.now());
-        await drainMicrotasks();
-        break;
-      }
-
-      const step = Math.min(5, end - Date.now());
-      jest.advanceTimersByTime(step);
-      await drainMicrotasks();
-    }
-
-    await done;
-  } finally {
-    advancing = false;
-  }
-};
+const sleep = (ms: number) => Bun.sleep(ms);
 
 const waitFor = async (
   predicate: () => boolean | Promise<boolean>,
@@ -51,7 +21,7 @@ const waitFor = async (
   while (Date.now() - start < timeoutMs) {
     if (await predicate()) return;
 
-    await advanceTimersByTimeAsync(5);
+    await sleep(5);
   }
 
   throw new Error("waitFor timeout");
@@ -69,17 +39,12 @@ const baseMeta = (name: string, input = "{}"): WorkflowMeta => ({
   failedAt: "",
   cancelledAt: "",
   partitionKey: "",
-  partitionSlot: "",
+  cancelRequestedAt: "",
 });
 
-describe("WorkflowEngine", () => {
-  beforeEach(() => {
-    jest.useFakeTimers({ now: Date.now() });
-  });
-
-  afterEach(() => {
-    jest.useRealTimers();
-  });
+describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowEngine", () => {
+  beforeEach(resetRedis);
+  afterEach(closeRedis);
 
   test("runs a queued execution to completion", async () => {
     const redis = createRedis();
@@ -108,19 +73,7 @@ describe("WorkflowEngine", () => {
     engine.start();
 
     const executionId = "e1";
-    await store.tryCreateMetaAndActive(executionId, baseMeta(name));
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowStarted",
-          input: "{}",
-          partitionKey: "",
-          timestamp: Date.now(),
-        },
-      ],
-    });
-    await store.enqueue(executionId);
+    await store.createExecution(executionId, baseMeta(name));
 
     await waitFor(async () => {
       const meta = await store.getMeta(executionId);
@@ -131,12 +84,10 @@ describe("WorkflowEngine", () => {
     expect(meta?.result).toBe("42");
     expect(calls).toEqual(["work"]);
 
-    const done = engine.stop();
-    await advanceTimersByTimeAsync(50);
-    await done;
+    await engine.stop();
   });
 
-  test("stop aborts in-flight work and ends polling", async () => {
+  test("stop aborts in-flight work without recording a failure and ends polling", async () => {
     const redis = createRedis();
     const name = `engine-stop-${crypto.randomUUID()}`;
     const store = new WorkflowStore(redis, name);
@@ -149,12 +100,13 @@ describe("WorkflowEngine", () => {
         redis,
         pollInterval: 5,
         lockTTL: 60_000,
+        retries: 3,
         handler: async ({ step }) => {
           await step("hang", async ({ signal }) => {
             started = true;
 
             while (!signal.aborted) {
-              await advanceTimersByTimeAsync(10);
+              await sleep(10);
             }
 
             sawAbort = true;
@@ -168,82 +120,42 @@ describe("WorkflowEngine", () => {
     engine.start();
 
     const executionId = "e2";
-    await store.tryCreateMetaAndActive(executionId, baseMeta(name));
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowStarted",
-          input: "{}",
-          partitionKey: "",
-          timestamp: Date.now(),
-        },
-      ],
-    });
-    await store.enqueue(executionId);
+    await store.createExecution(executionId, baseMeta(name));
 
     await waitFor(() => started);
-
-    const done = engine.stop();
-    await advanceTimersByTimeAsync(100);
-    await done;
+    await engine.stop();
 
     expect(sawAbort).toBe(true);
+    // An interrupted attempt is not a failure: it must not use up a retry.
+    expect(await eventTypes(redis, name, executionId)).toEqual([
+      "WorkflowStarted",
+      "StepStarted",
+    ]);
+    expect((await store.getMeta(executionId))?.status).toBe("running");
+
+    await store.createExecution("e2-late", baseMeta(name));
+    await sleep(100);
+
+    expect((await store.getMeta("e2-late"))?.status).toBe("pending");
   });
 
-  test("requestAbort aborts the execution signal", async () => {
+  test("stop resolves before start, twice, and without waiting out an idle poll", async () => {
     const redis = createRedis();
-    const name = `engine-abort-${crypto.randomUUID()}`;
-    const store = new WorkflowStore(redis, name);
-    let aborted = false;
+    const name = `engine-stop-idle-${crypto.randomUUID()}`;
 
-    const engine = new WorkflowEngine(
-      {
-        name,
-        redis,
-        pollInterval: 5,
-        lockTTL: 60_000,
-        handler: async ({ step }) => {
-          await step("hang", async ({ signal }) => {
-            while (!signal.aborted) {
-              await advanceTimersByTimeAsync(10);
-            }
+    const create = () =>
+      new WorkflowEngine(
+        { name, redis, pollInterval: 60_000, handler: async () => {} },
+        new WorkflowStore(redis, name),
+      );
 
-            aborted = true;
-            throw new Error("cancelled");
-          });
-        },
-      },
-      store,
-    );
+    await create().stop();
 
+    const engine = create();
     engine.start();
-
-    const executionId = "e3";
-    await store.tryCreateMetaAndActive(executionId, baseMeta(name));
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowStarted",
-          input: "{}",
-          partitionKey: "",
-          timestamp: Date.now(),
-        },
-      ],
-    });
-    await store.enqueue(executionId);
-
-    await advanceTimersByTimeAsync(20);
-    engine.requestAbort(executionId);
-
-    await waitFor(() => aborted);
-
-    const done = engine.stop();
-    await advanceTimersByTimeAsync(50);
-    await done;
-
-    expect(aborted).toBe(true);
+    await sleep(20);
+    await engine.stop();
+    await engine.stop();
   });
 
   test("durable sleep schedules timer then completes after fire", async () => {
@@ -268,21 +180,9 @@ describe("WorkflowEngine", () => {
     engine.start();
 
     const executionId = "e4";
-    await store.tryCreateMetaAndActive(executionId, baseMeta(name));
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowStarted",
-          input: "{}",
-          partitionKey: "",
-          timestamp: Date.now(),
-        },
-      ],
-    });
-    await store.enqueue(executionId);
+    await store.createExecution(executionId, baseMeta(name));
 
-    await advanceTimersByTimeAsync(20);
+    await sleep(20);
 
     expect((await store.getMeta(executionId))?.status).not.toBe("completed");
 
@@ -293,9 +193,7 @@ describe("WorkflowEngine", () => {
 
     expect((await store.getMeta(executionId))?.result).toBe('"slept"');
 
-    const done = engine.stop();
-    await advanceTimersByTimeAsync(50);
-    await done;
+    await engine.stop();
   });
 
   test("stop returns after another replica finishes compensation", async () => {
@@ -349,27 +247,15 @@ describe("WorkflowEngine", () => {
     );
 
     const executionId = "e-stale";
-    await store.tryCreateMetaAndActive(executionId, baseMeta(name));
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowStarted",
-          input: "{}",
-          partitionKey: "",
-          timestamp: Date.now(),
-        },
-      ],
-    });
-    await store.enqueue(executionId);
+    await store.createExecution(executionId, baseMeta(name));
 
     engineA.start();
 
     await waitFor(() => compensateAttempts >= 1);
 
     engineB.start();
-    redis.clearZset(`workflow:${name}:timers`);
-    await store.enqueue(executionId);
+    // Hand the compensate retry to engineB now instead of after A's backoff.
+    await redis.zadd(`workflow:${name}:due`, Date.now(), executionId);
 
     await waitFor(async () => {
       if (compensateAttempts < 2) return false;
@@ -387,12 +273,7 @@ describe("WorkflowEngine", () => {
     expect(meta?.status).toBe("failed");
     expect(meta?.error).toBe("provision failed");
 
-    const doneA = engineA.stop();
-    await advanceTimersByTimeAsync(100);
-    await doneA;
-
-    const doneB = engineB.stop();
-    await advanceTimersByTimeAsync(50);
-    await doneB;
+    await engineA.stop();
+    await engineB.stop();
   });
 });

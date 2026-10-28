@@ -5,7 +5,7 @@ import {
   NotFoundError,
   WorkflowStoreError,
 } from "./errors.js";
-import { isTerminalStatus, parseHistory } from "./history.js";
+import { parseHistory } from "./history.js";
 import { fromJson, toJson } from "./json.js";
 import { WorkflowStore } from "./store.js";
 import type {
@@ -181,7 +181,7 @@ export const defineWorkflow = <TInput, TResult = void>(
     const serializedInput = toJson(input, "input");
     const now = Date.now();
 
-    const created = await store.tryCreateMetaAndActive(executionId, {
+    const created = await store.createExecution(executionId, {
       name: options.name,
       status: "pending",
       input: serializedInput,
@@ -193,26 +193,12 @@ export const defineWorkflow = <TInput, TResult = void>(
       failedAt: "",
       cancelledAt: "",
       partitionKey,
-      partitionSlot: "",
+      cancelRequestedAt: "",
     });
 
     if (!created) {
       return { executionId, created: false as const };
     }
-
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowStarted",
-          input: serializedInput,
-          partitionKey,
-          timestamp: now,
-        },
-      ],
-    });
-
-    await store.enqueue(executionId);
 
     return { executionId, created: true as const };
   };
@@ -231,102 +217,34 @@ export const defineWorkflow = <TInput, TResult = void>(
 
     return {
       executionId,
-      status: "pending" as WorkflowStatus,
+      status: "pending" as const,
     };
   };
 
+  // One script decides and applies the resume; replay restarts the failed
+  // steps at attempt 1 (see WorkflowResumed in history.ts).
   const resume = async (executionId: string) => {
-    const meta = await requireMeta(store, executionId);
-    const view = parseHistory(await store.loadHistory(executionId));
+    const outcome = await store.resumeExecution(executionId);
 
-    if (view.compensation) {
+    if (outcome === null) {
+      throw new NotFoundError(`Workflow execution ${executionId} not found`);
+    }
+
+    if (outcome === "unwound") {
       throw new WorkflowStoreError(
         `Workflow execution ${executionId} cannot be resumed after compensation`,
       );
     }
 
-    let hasResume = false;
-
-    for (const event of view.events) {
-      if (event.type !== "WorkflowResumed") continue;
-
-      hasResume = true;
-      break;
-    }
-
-    if (meta.status !== "failed") {
-      if (meta.status !== "pending") {
-        throw new WorkflowStoreError(
-          `Workflow execution ${executionId} is ${meta.status}, only failed executions can be resumed`,
-        );
-      }
-
-      if (view.terminal?.kind !== "failed") {
-        if (!hasResume) {
-          throw new WorkflowStoreError(
-            `Workflow execution ${executionId} is ${meta.status}, only failed executions can be resumed`,
-          );
-        }
-      }
-    }
-
-    if (meta.status === "failed") {
-      const persisted = await store.persistExecution(executionId);
-
-      if (!persisted) {
-        const latest = await store.getMeta(executionId);
-
-        if (!latest) {
-          throw new NotFoundError(
-            `Workflow execution ${executionId} not found`,
-          );
-        }
-
-        throw new WorkflowStoreError(
-          `Workflow execution ${executionId} is ${latest.status}, only failed executions can be resumed`,
-        );
-      }
-    }
-
-    const now = Date.now();
-    const events = [];
-
-    if (view.terminal?.kind === "failed") {
-      events.push({
-        type: "WorkflowResumed" as const,
-        timestamp: now,
-      });
-
-      for (const [stepId, state] of view.steps) {
-        if (state.status !== "failed") continue;
-
-        events.push({
-          type: "StepScheduled" as const,
-          stepId,
-          stepName: state.stepName,
-          attempt: 1,
-          timestamp: now,
-        });
-      }
-    }
-
-    const claimed = await store.resumeIfPending({ executionId, events });
-
-    if (!claimed) {
-      const latest = await store.getMeta(executionId);
-
-      if (!latest) {
-        throw new NotFoundError(`Workflow execution ${executionId} not found`);
-      }
-
+    if (outcome !== "resumed") {
       throw new WorkflowStoreError(
-        `Workflow execution ${executionId} is ${latest.status}, only failed executions can be resumed`,
+        `Workflow execution ${executionId} is ${outcome}, only failed executions can be resumed`,
       );
     }
 
     return {
       executionId,
-      status: "pending" as WorkflowStatus,
+      status: "pending" as const,
     };
   };
 
@@ -357,18 +275,10 @@ export const defineWorkflow = <TInput, TResult = void>(
       error = meta.error;
     }
 
-    let status = meta.status as WorkflowStatus;
-
-    if (!isTerminalStatus(meta.status)) {
-      if (view.compensation) {
-        status = "compensating";
-      }
-    }
-
     return {
       id: executionId,
       name: meta.name,
-      status,
+      status: meta.status as WorkflowStatus,
       input,
       result,
       error,
@@ -382,40 +292,21 @@ export const defineWorkflow = <TInput, TResult = void>(
   };
 
   const cancel = async (executionId: string) => {
-    const meta = await requireMeta(store, executionId);
+    // One script decides and records the request, so a run that turns
+    // terminal or starts compensating concurrently is never overridden.
+    const request = await store.requestCancel(executionId);
 
-    const snapshot = (status = meta.status as WorkflowStatus) => ({
-      status,
+    if (!request) {
+      throw new NotFoundError(`Workflow execution ${executionId} not found`);
+    }
+
+    return {
+      status: request.status,
       executionId,
-      updatedAt: Number(meta.updatedAt),
-      cancelledAt: optionalTimestamp(meta.cancelledAt),
-      createdAt: Number(meta.createdAt),
-    });
-
-    if (isTerminalStatus(meta.status)) return snapshot();
-
-    if (meta.status === "compensating") return snapshot();
-
-    const view = parseHistory(await store.loadHistory(executionId));
-
-    if (view.compensation) return snapshot("compensating");
-
-    const now = Date.now();
-
-    await store.appendEvents({
-      executionId,
-      events: [
-        {
-          type: "WorkflowCancelRequested",
-          timestamp: now,
-        },
-      ],
-    });
-
-    engine.requestAbort(executionId);
-    await store.enqueue(executionId);
-
-    return snapshot();
+      updatedAt: Number(request.updatedAt),
+      cancelledAt: optionalTimestamp(request.cancelledAt),
+      createdAt: Number(request.createdAt),
+    };
   };
 
   const startSync = async (
@@ -444,18 +335,19 @@ export const defineWorkflow = <TInput, TResult = void>(
     }
 
     while (true) {
-      const execution = await get(executionId);
+      // Meta alone decides the outcome; get() would also load the history.
+      const meta = await requireMeta(store, executionId);
 
-      if (execution.status === "completed") {
+      if (meta.status === "completed") {
         return {
           executionId,
           status: "completed",
-          result: execution.result,
+          result: meta.result ? fromJson<TResult>(meta.result, "result") : null,
           error: null,
         };
       }
 
-      if (execution.status === "cancelled") {
+      if (meta.status === "cancelled") {
         return {
           executionId,
           status: "cancelled",
@@ -464,21 +356,14 @@ export const defineWorkflow = <TInput, TResult = void>(
         };
       }
 
-      if (execution.status === "failed") {
-        const view = parseHistory(await store.loadHistory(executionId));
-        let message = execution.error ?? "workflow failed";
-
-        if (view.compensation?.error) {
-          message = view.compensation.error;
-        } else if (view.terminal?.kind === "failed") {
-          message = view.terminal.error;
-        }
-
+      if (meta.status === "failed") {
         return {
           executionId,
           status: "failed",
           result: null,
-          error: new Error(message),
+          error: new Error(
+            meta.originalError || meta.error || "workflow failed",
+          ),
         };
       }
 
