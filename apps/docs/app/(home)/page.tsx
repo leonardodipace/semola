@@ -194,9 +194,11 @@ export default function HomePage() {
           </p>
 
           <h1 className="home-enter home-enter-1 home-display mt-4 text-[clamp(2.6rem,6.2vw,5.75rem)] font-semibold">
-            Stop wiring half
+            One package
             <br />
-            <span className="home-serif">a backend together.</span>
+            for your backend,
+            <br />
+            <span className="home-serif">typed end to end.</span>
           </h1>
 
           <div className="mt-10 flex flex-col gap-8 lg:mt-12 lg:flex-row lg:items-end lg:justify-between">
