@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Reveal } from "@/components/reveal";
-import { getModuleGroups } from "@/lib/home-modules";
+import { listModulePackages } from "@/lib/home-modules";
 import { packageVersion } from "@/lib/shared";
 
 const validatorRows = [
@@ -9,11 +9,6 @@ const validatorRows = [
   { code: "v.pipe(v.string(), v.email())", source: "valibot" },
   { code: 'type("string.email")', source: "arktype" },
 ];
-
-const listModulePackages = () =>
-  getModuleGroups().flatMap((group) =>
-    group.modules.map((module) => module.pkg),
-  );
 
 function PrincipleCard({
   title,

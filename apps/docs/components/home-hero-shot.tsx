@@ -94,7 +94,6 @@ export function HomeHeroShot() {
           sidebar={<Explorer />}
           errorMessage={error.message}
           errorLocation={error.location}
-          version={packageVersion}
         />
       </div>
     </div>

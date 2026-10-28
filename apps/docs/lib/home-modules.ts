@@ -71,3 +71,19 @@ export const getModuleGroups = () => {
 
   return groups.filter((group) => group.modules.length > 0);
 };
+
+export const listGridModules = () => {
+  return getModuleGroups().flatMap((group) =>
+    group.modules.map((module) => ({
+      ...module,
+      slug: module.pkg.replace("semola/", ""),
+      group: group.title,
+    })),
+  );
+};
+
+export const listModulePackages = () => {
+  return getModuleGroups().flatMap((group) =>
+    group.modules.map((module) => module.pkg),
+  );
+};

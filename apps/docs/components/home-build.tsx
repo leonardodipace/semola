@@ -1,7 +1,6 @@
 import { HoverCode } from "@/components/hover-code";
 import { HomeComposer } from "@/components/home-composer";
 import { composerBase, composerModules } from "@/lib/home-code";
-import { packageVersion } from "@/lib/shared";
 
 const plain = (code: string) => <HoverCode sample={{ code, hovers: [] }} />;
 
@@ -27,7 +26,6 @@ export function HomeBuild() {
       baseEnd={plain(composerBase.end)}
       moduleImports={moduleImports}
       moduleCode={moduleCode}
-      version={packageVersion}
     />
   );
 }

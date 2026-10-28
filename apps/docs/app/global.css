@@ -520,7 +520,7 @@ html > body[data-scroll-locked] {
   color: var(--color-wheat);
 }
 
-.home-story-slide {
+.home-fade-slide {
   opacity: 0;
   transform: translateY(10px);
   filter: blur(4px);
@@ -531,7 +531,7 @@ html > body[data-scroll-locked] {
   pointer-events: none;
 }
 
-.home-story-slide[data-active="true"] {
+.home-fade-slide[data-active="true"] {
   opacity: 1;
   transform: translateY(0);
   filter: blur(0);
@@ -1126,8 +1126,8 @@ html > body[data-scroll-locked] {
     will-change: auto;
   }
 
-  .home-story-slide,
-  .home-story-slide[data-active="true"],
+  .home-fade-slide,
+  .home-fade-slide[data-active="true"],
   .home-stage-slide,
   .home-stage-slide[data-active="true"] {
     transform: none;

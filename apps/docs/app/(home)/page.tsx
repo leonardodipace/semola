@@ -12,7 +12,7 @@ import { HomePrinciples } from "@/components/home-principles";
 import { HomeStory } from "@/components/home-story";
 import { InstallCommand } from "@/components/install-command";
 import { Reveal } from "@/components/reveal";
-import { getModuleGroups } from "@/lib/home-modules";
+import { listGridModules } from "@/lib/home-modules";
 import {
   appDescription,
   appName,
@@ -97,16 +97,6 @@ const primaryButtonClass =
 
 const textLinkClass =
   "home-press home-ease mt-8 inline-flex items-center gap-1.5 text-sm font-medium text-wheat transition-transform";
-
-const listGridModules = () => {
-  return getModuleGroups().flatMap((group) =>
-    group.modules.map((module) => ({
-      ...module,
-      slug: module.pkg.replace("semola/", ""),
-      group: group.title,
-    })),
-  );
-};
 
 function FooterLink({ href, label }: { href: string; label: string }) {
   const className = "home-hover-fg home-ease transition-colors";

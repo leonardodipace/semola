@@ -45,21 +45,21 @@ const webSite = {
   },
 };
 
+export function JsonLdScript({ data }: { data: unknown }) {
+  return (
+    <script
+      type="application/ld+json"
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: static JSON-LD for SEO
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }}
+    />
+  );
+}
+
 export function JsonLd() {
   return (
     <>
-      <script
-        type="application/ld+json"
-        // biome-ignore lint/security/noDangerouslySetInnerHtml: static JSON-LD for SEO
-        dangerouslySetInnerHTML={{
-          __html: JSON.stringify(softwareApplication),
-        }}
-      />
-      <script
-        type="application/ld+json"
-        // biome-ignore lint/security/noDangerouslySetInnerHtml: static JSON-LD for SEO
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(webSite) }}
-      />
+      <JsonLdScript data={softwareApplication} />
+      <JsonLdScript data={webSite} />
     </>
   );
 }

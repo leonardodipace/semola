@@ -104,6 +104,7 @@ export function HomeModuleGrid({ modules }: { modules: GridModule[] }) {
 
   const needle = query.trim().toLowerCase();
   const matches = rankModules(modules, needle);
+  const matchSet = new Set(matches);
   const current = matches[Math.min(selected, matches.length - 1)];
   const ghost = readGhostText(current, needle);
   let inputWidth = PLACEHOLDER.length;
@@ -201,7 +202,7 @@ export function HomeModuleGrid({ modules }: { modules: GridModule[] }) {
           const Icon = readModuleIcon(module.slug);
           let dimmed = false;
 
-          if (needle) dimmed = !matches.includes(module);
+          if (needle) dimmed = !matchSet.has(module);
 
           return (
             <li key={module.slug}>

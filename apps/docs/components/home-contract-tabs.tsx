@@ -1,6 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useInView } from "@/lib/use-in-view";
 
 const ADVANCE_MS = 7000;
 
@@ -15,23 +16,8 @@ export type ContractTab = {
 export function HomeContractTabs({ tabs }: { tabs: ContractTab[] }) {
   const [active, setActive] = useState(0);
   const [autoplay, setAutoplay] = useState(true);
-  const [inView, setInView] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const element = rootRef.current;
-
-    if (!element) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => setInView(entry?.isIntersecting ?? false),
-      { threshold: 0.3 },
-    );
-
-    observer.observe(element);
-
-    return () => observer.disconnect();
-  }, []);
+  const inView = useInView(rootRef, { threshold: 0.3 });
 
   useEffect(() => {
     if (!autoplay) return;
@@ -122,7 +108,7 @@ export function HomeContractTabs({ tabs }: { tabs: ContractTab[] }) {
               role="tabpanel"
               data-active={index === active}
               inert={index !== active}
-              className="home-story-slide overflow-auto py-3 [grid-area:1/1]"
+              className="home-fade-slide overflow-auto py-3 [grid-area:1/1]"
             >
               {tab.code}
             </div>

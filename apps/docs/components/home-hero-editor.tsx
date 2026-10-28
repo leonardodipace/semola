@@ -9,6 +9,7 @@ import {
   WrenchIcon,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { packageVersion } from "@/lib/shared";
 
 export function HomeHeroEditor({
   code,
@@ -16,14 +17,12 @@ export function HomeHeroEditor({
   sidebar,
   errorMessage,
   errorLocation,
-  version,
 }: {
   code: ReactNode;
   brokenCode: ReactNode;
   sidebar: ReactNode;
   errorMessage: string;
   errorLocation: string;
-  version: string;
 }) {
   const [broken, setBroken] = useState(false);
 
@@ -76,7 +75,7 @@ export function HomeHeroEditor({
             <TriangleAlertIcon className="size-3" />0
           </span>
           <span className="max-sm:hidden">TypeScript</span>
-          <span>semola {version}</span>
+          <span>semola {packageVersion}</span>
         </div>
       </figure>
 

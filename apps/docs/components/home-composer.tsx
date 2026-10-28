@@ -4,6 +4,8 @@ import { RotateCcwIcon } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { composerBase, composerModules } from "@/lib/home-code";
 import { readModuleIcon } from "@/lib/module-icons";
+import { packageVersion } from "@/lib/shared";
+import { useInView } from "@/lib/use-in-view";
 
 const AUTOPLAY_IDS = ["queue", "cron", "cache"];
 const AUTOPLAY_STEP_MS = 750;
@@ -15,7 +17,7 @@ const baseLineCount =
   countLines(composerBase.start) +
   countLines(composerBase.end);
 
-function Grow({
+const Grow = ({
   on,
   fresh,
   children,
@@ -23,13 +25,11 @@ function Grow({
   on: boolean;
   fresh: boolean;
   children: ReactNode;
-}) {
-  return (
-    <span data-on={on} data-fresh={fresh} inert={!on} className="home-grow">
-      {children}
-    </span>
-  );
-}
+}) => (
+  <span data-on={on} data-fresh={fresh} inert={!on} className="home-grow">
+    {children}
+  </span>
+);
 
 export function HomeComposer({
   baseImport,
@@ -37,14 +37,12 @@ export function HomeComposer({
   baseEnd,
   moduleImports,
   moduleCode,
-  version,
 }: {
   baseImport: ReactNode;
   baseStart: ReactNode;
   baseEnd: ReactNode;
   moduleImports: Record<string, ReactNode>;
   moduleCode: Record<string, ReactNode>;
-  version: string;
 }) {
   const [enabled, setEnabled] = useState<string[]>([]);
   const [lastAdded, setLastAdded] = useState("");
@@ -52,46 +50,28 @@ export function HomeComposer({
   const touched = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const inView = useInView(rootRef, { threshold: 0.35, once: true });
 
   useEffect(() => {
-    const element = rootRef.current;
+    if (!inView) return;
 
-    if (!element) return;
+    const timers = AUTOPLAY_IDS.map((id, index) =>
+      window.setTimeout(
+        () => {
+          if (touched.current) return;
 
-    const timers: number[] = [];
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry?.isIntersecting) return;
-
-        observer.disconnect();
-
-        AUTOPLAY_IDS.forEach((id, index) => {
-          const timer = window.setTimeout(
-            () => {
-              if (touched.current) return;
-
-              setEnabled((current) => [...current, id]);
-              setLastAdded(id);
-              setChanges((count) => count + 1);
-            },
-            AUTOPLAY_STEP_MS * (index + 1),
-          );
-
-          timers.push(timer);
-        });
-      },
-      { threshold: 0.35 },
+          setEnabled((current) => [...current, id]);
+          setLastAdded(id);
+          setChanges((count) => count + 1);
+        },
+        AUTOPLAY_STEP_MS * (index + 1),
+      ),
     );
 
-    observer.observe(element);
-
     return () => {
-      observer.disconnect();
-
       for (const timer of timers) window.clearTimeout(timer);
     };
-  }, []);
+  }, [inView]);
 
   useEffect(() => {
     if (!lastAdded) return;
@@ -231,7 +211,7 @@ export function HomeComposer({
               className="home-dep-line -mx-2 rounded-md pr-2 pl-[calc(2rem+0.5rem)]"
             >
               <span className="text-wheat">"semola"</span>:{" "}
-              <span className="text-crust">"^{version}"</span>
+              <span className="text-crust">"^{packageVersion}"</span>
             </p>
             <p className="pl-4">{"}"}</p>
             <p>{"}"}</p>

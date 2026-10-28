@@ -1,4 +1,5 @@
 import { PlusIcon } from "lucide-react";
+import { JsonLdScript } from "@/components/json-ld";
 import { packageVersion } from "@/lib/shared";
 
 const faqs = [
@@ -54,11 +55,7 @@ const faqJsonLd = {
 export function HomeFaq() {
   return (
     <>
-      <script
-        type="application/ld+json"
-        // biome-ignore lint/security/noDangerouslySetInnerHtml: static JSON-LD for SEO
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
-      />
+      <JsonLdScript data={faqJsonLd} />
       <div className="border-t border-fd-border">
         {faqs.map((faq, index) => (
           <details
