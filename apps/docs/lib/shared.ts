@@ -1,7 +1,10 @@
+import rootPackage from "../../../package.json";
+
 export const appName = "Semola";
-export const appTagline = "Type-safe building blocks for real backends";
+export const packageVersion = rootPackage.version;
+export const appTagline = "The type-safe backend toolkit for TypeScript";
 export const appDescription =
-  "Zero-dependency TypeScript toolkit for Bun. Typed REST APIs with OpenAPI, Redis queues, pub/sub, ORM, durable workflows, caching, auth policies, i18n, and more.";
+  "Semola is a zero-dependency TypeScript backend toolkit with typed routes, OpenAPI, queues, durable workflows, an ORM, and more. Built for Bun.";
 export const siteUrl = new URL(
   process.env.NEXT_PUBLIC_SITE_URL ?? "https://semo.la",
 ).origin;

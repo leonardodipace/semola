@@ -49,7 +49,8 @@ export function GET() {
           {appTagline}
         </div>
         <div style={{ fontSize: 28, color: "#c9bba6", maxWidth: 860 }}>
-          Zero-dependency TypeScript utilities for Bun backends
+          Typed APIs, queues, workflows, and an ORM. One install, zero
+          dependencies.
         </div>
       </div>
       <div style={{ fontSize: 24, color: "#a8967e" }}>

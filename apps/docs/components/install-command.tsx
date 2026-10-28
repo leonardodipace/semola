@@ -5,11 +5,7 @@ import { useRef, useState } from "react";
 
 const COMMAND = "bun add semola";
 
-export function InstallCommand({
-  variant = "pill",
-}: {
-  variant?: "pill" | "solid";
-}) {
+export function InstallCommand() {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<number>(undefined);
 
@@ -33,14 +29,10 @@ export function InstallCommand({
     <button
       type="button"
       onClick={onCopy}
-      className={
-        variant === "solid"
-          ? "home-press home-ease inline-flex items-center gap-3 rounded-lg border border-fd-border bg-fd-background px-5 py-3 font-mono text-sm transition-[background-color,transform]"
-          : "home-press home-hover-bg home-ease inline-flex items-center gap-3 rounded-full border border-fd-border bg-fd-secondary/50 px-4 py-2 font-mono text-sm transition-[background-color,transform]"
-      }
+      className="home-press home-secondary-btn home-ease inline-flex h-11 items-center gap-3 rounded-full px-5 font-mono text-[13px] transition-[background-color,transform]"
       aria-label="Copy install command"
     >
-      <span className="text-wheat">$</span>
+      <span className="select-none text-fd-muted-foreground">$</span>
       <code>{COMMAND}</code>
       <span
         className={`relative size-3.5 transition-[color,filter,opacity] duration-150 ease-[var(--ease-out)] ${
