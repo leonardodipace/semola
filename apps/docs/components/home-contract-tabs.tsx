@@ -1,6 +1,12 @@
 "use client";
 
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useInView } from "@/lib/use-in-view";
 
 const ADVANCE_MS = 7000;
@@ -17,6 +23,7 @@ export function HomeContractTabs({ tabs }: { tabs: ContractTab[] }) {
   const [active, setActive] = useState(0);
   const [autoplay, setAutoplay] = useState(true);
   const rootRef = useRef<HTMLDivElement>(null);
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const inView = useInView(rootRef, { threshold: 0.3 });
 
   useEffect(() => {
@@ -33,6 +40,21 @@ export function HomeContractTabs({ tabs }: { tabs: ContractTab[] }) {
   const choose = (index: number) => {
     setAutoplay(false);
     setActive(index);
+  };
+
+  const onTabListKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    let step = 0;
+
+    if (event.key === "ArrowRight") step = 1;
+    if (event.key === "ArrowLeft") step = -1;
+    if (step === 0) return;
+
+    event.preventDefault();
+
+    const next = (active + step + tabs.length) % tabs.length;
+
+    choose(next);
+    tabRefs.current[next]?.focus();
   };
 
   return (
@@ -78,6 +100,7 @@ export function HomeContractTabs({ tabs }: { tabs: ContractTab[] }) {
         <div
           role="tablist"
           aria-label="Contract files"
+          onKeyDown={onTabListKeyDown}
           className="home-window-bar flex h-11 items-center gap-1 overflow-x-auto px-3 font-mono text-xs"
         >
           <div aria-hidden className="home-traffic mr-3 pl-1">
@@ -85,20 +108,31 @@ export function HomeContractTabs({ tabs }: { tabs: ContractTab[] }) {
             <span />
             <span />
           </div>
-          {tabs.map((tab, index) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={index === active}
-              aria-controls={`contract-panel-${tab.id}`}
-              data-active={index === active}
-              onClick={() => choose(index)}
-              className="home-file-tab home-ease shrink-0 rounded-md px-2.5 py-1 transition-[background-color,color]"
-            >
-              {tab.file}
-            </button>
-          ))}
+          {tabs.map((tab, index) => {
+            const selected = index === active;
+            let tabIndex = -1;
+
+            if (selected) tabIndex = 0;
+
+            return (
+              <button
+                key={tab.id}
+                ref={(element) => {
+                  tabRefs.current[index] = element;
+                }}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                aria-controls={`contract-panel-${tab.id}`}
+                tabIndex={tabIndex}
+                data-active={selected}
+                onClick={() => choose(index)}
+                className="home-file-tab home-ease shrink-0 rounded-md px-2.5 py-1 transition-[background-color,color]"
+              >
+                {tab.file}
+              </button>
+            );
+          })}
         </div>
         <div className="grid h-[28rem] overflow-hidden sm:h-[32rem]">
           {tabs.map((tab, index) => (
