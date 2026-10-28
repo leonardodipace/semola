@@ -11,7 +11,6 @@ apps/docs/.next
 apps/docs/.open-next
 apps/docs/.source
 apps/docs/.wrangler
-.wrangler
 
 # code coverage
 coverage

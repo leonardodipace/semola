@@ -190,7 +190,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "bun scripts/build.ts",
+    "build": "tsdown",
     "check": "biome check --write . && tsc --noEmit",
     "test": "bun test",
     "docs:dev": "bun run --filter @semola/docs dev",
@@ -250,7 +250,6 @@
     "tsdown": "^0.22.14",
     "typescript": "^7",
     "valibot": "^1.4.1",
-    "wrangler": "^4.153.0",
     "zod": "^4.3.6"
   }
 }
