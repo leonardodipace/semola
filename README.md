@@ -4,11 +4,11 @@
 
 # Semola
 
-⚡ **Zero-dependency TypeScript toolkit for Bun backends**
+**Type-safe backend toolkit, zero dependencies**
 
-Typed REST APIs with OpenAPI, Redis queues, pub/sub, ORM, durable workflows, caching, auth policies, i18n, and more - tree-shakeable imports.
+Most backends end up stitching a router, a queue, an ORM, and a validator - each with its own types. Semola is one TypeScript package instead: REST APIs with OpenAPI, Redis queues, durable workflows, SQL, auth, cache, i18n, and more. Empty `dependencies` field. Import only what you use (`semola/api`, `semola/queue`, `semola/orm`, ...).
 
-**Docs:** [semo.la](https://semo.la) · **npm:** [semola](https://www.npmjs.com/package/semola)
+**Docs:** [semo.la](https://semo.la) · **npm:** [semola](https://www.npmjs.com/package/semola) · **Install:** `bun add semola`
 
 [![Tests](https://img.shields.io/github/actions/workflow/status/leonardodipace/semola/ci.yml?branch=main&style=flat-square&label=tests)](https://github.com/leonardodipace/semola/actions)
 [![npm version](https://img.shields.io/npm/v/semola.svg?style=flat-square)](https://www.npmjs.com/package/semola)
@@ -19,40 +19,38 @@ Typed REST APIs with OpenAPI, Redis queues, pub/sub, ORM, durable workflows, cac
 
 </div>
 
-## ✨ Features
+## Modules
 
-| Module               | Description                                            | Import            |
-| -------------------- | ------------------------------------------------------ | ----------------- |
-| **🚀 API Framework** | Type-safe REST API with OpenAPI & Bun-native routing   | `semola/api`      |
-| **📬 Queue**         | Redis-backed job queue with timeouts & concurrency     | `semola/queue`    |
-| **📡 PubSub**        | Type-safe Redis pub/sub for real-time messaging        | `semola/pubsub`   |
-| **🔐 Policy**        | Policy-based authorization with type-safe guards       | `semola/policy`   |
-| **🌍 i18n**          | Compile-time validated internationalization            | `semola/i18n`     |
-| **💾 Cache**         | Redis cache wrapper with TTL & automatic serialization | `semola/cache`    |
-| **⏰ Cron**          | In-memory and OS cron scheduler for periodic task execution   | `semola/cron`     |
-| **🔁 Workflow**      | Durable resumable workflows with retries and hooks   | `semola/workflow` |
-| **📐 Schema**        | Standard Schema validation with JSON Schema output     | `semola/schema`   |
-| **⚠️ Errors**        | Result-based error handling without try/catch          | `semola/errors`   |
-| **📃 Logging**       | A simple logging utility                               | `semola/logging`  |
-| **📊 Otel**          | Zero-dependency OTLP/HTTP JSON traces, metrics, and logs | `semola/otel`     |
-| **⌨️ Prompts**       | Interactive zero-dependency CLI prompts                | `semola/prompts`  |
-| **🖥️ CLI**           | Non-interactive CLI builder with schema validation     | `semola/cli`      |
-| **🗄️ ORM**           | Type-safe data layer with query APIs                   | `semola/orm`      |
-| **💡 Extra**         | A collection of tiny utilities                      | `semola/extra`      |
+| Module | What it does | Import |
+| ------ | ------------ | ------ |
+| **API** | Typed REST routes, OpenAPI, typed client | `semola/api` |
+| **Queue** | Redis jobs with retries, timeouts, reclaim | `semola/queue` |
+| **PubSub** | Typed channels on Redis or in memory | `semola/pubsub` |
+| **Workflow** | Multi-step work that resumes after a crash | `semola/workflow` |
+| **ORM** | Tables, queries, migrations for SQLite and Postgres | `semola/orm` |
+| **Cache** | Typed Redis values with TTL | `semola/cache` |
+| **Cron** | In-process or OS-level schedules | `semola/cron` |
+| **Policy** | Allow / forbid auth rules | `semola/policy` |
+| **i18n** | Translation keys the compiler can reject | `semola/i18n` |
+| **Schema** | Built-in Standard Schema + JSON Schema | `semola/schema` |
+| **Errors** | `[error, data]` tuples instead of try/catch nests | `semola/errors` |
+| **Logging** | Prefixed loggers to console or files | `semola/logging` |
+| **Otel** | OTLP traces, metrics, and logs over HTTP JSON | `semola/otel` |
+| **CLI** | Commands and flags with schema validation | `semola/cli` |
+| **Prompts** | Interactive terminal prompts | `semola/prompts` |
+| **Extra** | Backoff retries and small helpers | `semola/extra` |
 
 ---
 
-## 🚀 Quick Start
+## Quick start
 
 ```bash
-# With Bun (recommended)
 bun add semola
 
-# With npm
-npm install semola
+# or: npm install semola
 ```
 
-### Build a Type-Safe API
+### Typed API
 
 ```typescript
 import { Api } from "semola/api";

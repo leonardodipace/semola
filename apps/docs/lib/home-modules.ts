@@ -2,22 +2,22 @@ import rootPackage from "../../../package.json";
 import { source } from "@/lib/source";
 
 const moduleBlurbs: Record<string, string> = {
-  api: "Typed routes, OpenAPI, and a typed client",
-  queue: "Redis jobs with retries and reclaim",
-  pubsub: "Typed channels over Redis or in memory",
-  cron: "Schedules in-process or at the OS level",
-  workflow: "Multi-step jobs that resume after a crash",
-  orm: "Typed tables, queries, and migrations",
-  cache: "Typed Redis cache with TTL",
-  policy: "Allow and forbid rules, forbid wins",
-  i18n: "Translation keys checked at compile time",
-  schema: "Standard Schema validation with JSON Schema output",
-  errors: "Result tuples instead of nested try/catch",
-  logging: "Prefixed loggers with console and file outputs",
-  otel: "OTLP traces, metrics, and logs",
-  prompts: "Interactive terminal prompts",
-  cli: "Typed commands, arguments, and options",
-  extra: "Retries with backoff and other small helpers",
+  api: "REST routes, OpenAPI, and a typed client from one definition",
+  queue: "Redis jobs with retries, timeouts, and reclaim",
+  pubsub: "Typed channels on Redis or in memory",
+  cron: "In-process or OS-level schedules",
+  workflow: "Multi-step work that resumes after a crash",
+  orm: "Tables, queries, and migrations for SQLite and Postgres",
+  cache: "Redis values with a TypeScript type and a TTL",
+  policy: "Readable allow / forbid rules - forbid wins",
+  i18n: "Translation keys the compiler can reject",
+  schema: "Built-in Standard Schema with JSON Schema output",
+  errors: "[error, data] tuples instead of nested try / catch",
+  logging: "Prefixed loggers to console or files",
+  otel: "OTLP traces, metrics, and logs over HTTP JSON",
+  prompts: "Interactive prompts for terminal tools",
+  cli: "Commands, flags, and options with schema validation",
+  extra: "Backoff retries and other small helpers",
 };
 
 const DESCRIPTION_PREFIX = /^Semola [^-]+ - /;

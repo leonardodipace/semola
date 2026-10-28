@@ -218,13 +218,13 @@ export function HomeComposer({
           </div>
 
           <div className="relative mt-auto">
-            <p className="home-label">Dependencies added</p>
+            <p className="home-label">Extra packages pulled in</p>
             <p className="mt-2 flex items-baseline gap-3">
               <span className="font-mono text-5xl font-semibold tracking-tight">
                 0
               </span>
               <span className="text-sm text-fd-muted-foreground">
-                no matter how many you pick
+                still zero after every toggle
               </span>
             </p>
             <span

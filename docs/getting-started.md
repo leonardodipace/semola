@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Install Semola with Bun or npm and start building type-safe Bun backends
+description: Install Semola with bun add or npm, then ship a typed REST API with OpenAPI in a few lines
 ---
 
 ## Install
@@ -9,7 +9,9 @@ description: Install Semola with Bun or npm and start building type-safe Bun bac
 npm install semola
 ```
 
-Some packages need runtime-native clients (HTTP server, Redis, SQL, cron). Each package page calls that out when it matters.
+`bun add semola` works the same. npm, pnpm, and yarn too.
+
+Some modules use runtime-native clients (HTTP, Redis, SQL, cron). Each module page calls that out when it matters. You can start with `semola/api` and add the rest later.
 
 ## Where to go next
 
@@ -18,3 +20,4 @@ Some packages need runtime-native clients (HTTP server, Redis, SQL, cron). Each 
 - [Errors](/docs/errors) - result tuples and `mightThrow`
 - [Queue](/docs/queue) - Redis-backed background jobs
 - [ORM](/docs/orm) - typed tables and queries
+

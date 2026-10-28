@@ -57,8 +57,8 @@ const releasesUrl = `${githubUrl}/releases`;
 
 const heroFacts = [
   "Zero dependencies",
-  "Standard Schema",
   "Per-module imports",
+  "Standard Schema",
   "MIT licensed",
 ];
 
@@ -185,22 +185,27 @@ export default function HomePage() {
             <span className="rounded-full bg-fd-foreground px-2 py-0.5 font-mono text-[11px] text-fd-background">
               v{packageVersion}
             </span>
-            <span className="text-fd-muted-foreground">Release notes</span>
+            <span className="text-fd-muted-foreground">What's new</span>
             <ArrowRightIcon className="home-arrow size-3 text-fd-muted-foreground" />
           </a>
 
-          <h1 className="home-enter home-enter-1 home-display mt-8 text-[clamp(2.6rem,6.2vw,5.75rem)] font-semibold">
-            Ship the backend,
+          <p className="home-enter home-enter-1 home-label mt-8 text-wheat">
+            Semola
+          </p>
+
+          <h1 className="home-enter home-enter-1 home-display mt-4 text-[clamp(2.6rem,6.2vw,5.75rem)] font-semibold">
+            Stop wiring half
             <br />
-            <span className="home-serif">not the glue.</span>
+            <span className="home-serif">a backend together.</span>
           </h1>
 
           <div className="mt-10 flex flex-col gap-8 lg:mt-12 lg:flex-row lg:items-end lg:justify-between">
             <div className="home-enter home-enter-2 max-w-xl">
               <p className="text-lg leading-relaxed text-fd-muted-foreground">
-                Semola is one type-safe toolkit for routes with OpenAPI, queues,
-                workflows, an ORM, auth policies, and the small tools around
-                them. Designed together, typed end to end.
+                Most backends are a stack of libraries that almost agree on
+                types. Semola is one zero-dependency TypeScript package instead:
+                APIs, jobs, workflows, SQL, auth, and the rest - same patterns
+                throughout.
               </p>
               <ul className="home-label home-facts mt-6 flex flex-wrap items-center gap-y-1">
                 {heroFacts.map((fact) => (
@@ -210,7 +215,7 @@ export default function HomePage() {
             </div>
             <div className="home-enter home-enter-3 flex flex-wrap items-center gap-3">
               <Link href="/docs/getting-started" className={primaryButtonClass}>
-                Start building
+                Open the docs
                 <ArrowRightIcon className="home-arrow size-4" />
               </Link>
               <InstallCommand />
@@ -226,17 +231,17 @@ export default function HomePage() {
       <section className="mx-auto w-full max-w-7xl px-6 pt-8 pb-28 sm:pb-36">
         <SectionHeader
           index="01"
-          label="Composable"
+          label="Composition"
           title={
             <>
-              Add features,{" "}
-              <span className="home-serif">not dependencies.</span>
+              server.ts can grow.{" "}
+              <span className="home-serif">package.json should not.</span>
             </>
           }
         >
           <SectionAside>
-            Pick what this service needs. server.ts grows with every import.
-            package.json does not.
+            Flip on a queue, a cron, a cache - each one is another import from
+            Semola. Your lockfile still lists a single package.
           </SectionAside>
         </SectionHeader>
         <Reveal>
@@ -248,17 +253,18 @@ export default function HomePage() {
         <div className="mx-auto w-full max-w-7xl px-6 py-28 sm:py-36">
           <SectionHeader
             index="02"
-            label="One definition"
+            label="Contract"
             title={
               <>
-                Write the route once.{" "}
-                <span className="home-serif">Use it everywhere.</span>
+                Define the route once.{" "}
+                <span className="home-serif">Collect the rest for free.</span>
               </>
             }
           >
             <SectionAside>
-              One route definition validates requests, types the handler, and
-              feeds a client, an OpenAPI document, and your tests.
+              Validation, handler types, a typed client, OpenAPI, and in-memory
+              tests all come from the same defineRoute call. No second schema
+              file to keep honest.
             </SectionAside>
           </SectionHeader>
           <HomeContract />
@@ -268,10 +274,11 @@ export default function HomePage() {
       <section className="mx-auto w-full max-w-7xl px-6 py-28 sm:py-36">
         <SectionHeader
           index="03"
-          label="Principles"
+          label="Rules"
           title={
             <>
-              Built on a few <span className="home-serif">stubborn rules.</span>
+              A few things we{" "}
+              <span className="home-serif">will not compromise on.</span>
             </>
           }
         />
@@ -284,17 +291,17 @@ export default function HomePage() {
       >
         <SectionHeader
           index="04"
-          label="In practice"
+          label="Elsewhere"
           title={
             <>
-              The rest of the backend,{" "}
-              <span className="home-serif">same shape.</span>
+              Jobs, tables, workflows -{" "}
+              <span className="home-serif">same instincts.</span>
             </>
           }
         >
           <SectionAside>
-            A constructor, a few options, and types that follow your data. Learn
-            one module and the next one reads the same way.
+            Learn how one module feels and the next one is familiar. Break
+            something on purpose and watch TypeScript catch it.
           </SectionAside>
         </SectionHeader>
         <Reveal>
@@ -309,16 +316,17 @@ export default function HomePage() {
         <div className="mx-auto w-full max-w-7xl px-6 py-28 sm:py-36">
           <SectionHeader
             index="05"
-            label="Modules"
+            label="Catalog"
             title={
               <>
-                Every module. <span className="home-serif">One install.</span>
+                Every module.{" "}
+                <span className="home-serif">Still one dependency.</span>
               </>
             }
           >
             <SectionAside>
-              Each module has its own import path, so a service only loads what
-              it uses. Start typing to find the one you need.
+              Type a path like semola/queue or semola/orm. Only that entry point
+              loads. Hit enter to open the docs for it.
             </SectionAside>
           </SectionHeader>
           <Reveal>
@@ -332,11 +340,12 @@ export default function HomePage() {
           <Reveal className="lg:sticky lg:top-28 lg:self-start">
             <SectionLabel index="06" label="FAQ" />
             <h2 className="home-title mt-5 text-4xl font-semibold sm:text-6xl">
-              Before you <span className="home-serif">commit.</span>
+              The questions{" "}
+              <span className="home-serif">before install.</span>
             </h2>
             <p className="mt-6 max-w-sm text-lg leading-relaxed text-fd-muted-foreground">
-              Straight answers about runtimes, infrastructure, and what pre-1.0
-              means here.
+              Runtimes, Redis, databases, validators, tree-shaking, and what
+              pre-1.0 actually means for you.
             </p>
             <a
               href={`${githubUrl}/issues`}
@@ -344,7 +353,7 @@ export default function HomePage() {
               rel="noreferrer"
               className={textLinkClass}
             >
-              Ask on GitHub
+              Still stuck? Open an issue
               <ArrowRightIcon className="home-arrow size-3.5" />
             </a>
           </Reveal>
@@ -368,16 +377,17 @@ export default function HomePage() {
             className="mb-10 size-16 drop-shadow-[0_18px_30px_color-mix(in_oklab,var(--color-crust)_40%,transparent)]"
           />
           <h2 className="home-display text-5xl font-semibold sm:text-7xl">
-            Start with <span className="home-serif">one import.</span>
+            Install once.{" "}
+            <span className="home-serif">Import what you need.</span>
           </h2>
           <HomeImportTicker />
           <p className="mt-6 max-w-md text-lg text-balance text-fd-muted-foreground">
-            Add the package, use the module you need today, and leave the rest
-            for the day you need it.
+            You do not have to adopt the whole toolkit. Start with the API, add
+            a queue next week, leave the ORM until you need SQL.
           </p>
           <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
             <Link href="/docs/getting-started" className={primaryButtonClass}>
-              Start building
+              Open the docs
               <ArrowRightIcon className="home-arrow size-4" />
             </Link>
             <InstallCommand />
@@ -403,8 +413,8 @@ export default function HomePage() {
                 Semola
               </Link>
               <p className="mt-4 max-w-xs text-sm leading-relaxed text-fd-muted-foreground">
-                The type-safe backend toolkit for TypeScript. Made from durum
-                wheat and strict mode.
+                Type-safe backend toolkit with an empty dependencies field.
+                Named after durum wheat. Built under strict mode.
               </p>
             </div>
 

@@ -16,12 +16,13 @@ export function HomeContract() {
         {
           id: "route",
           file: "server.ts",
-          title: "The route is the contract",
+          title: "One defineRoute. Runtime and types.",
           body: (
             <>
-              <code className={inlineCodeClass}>defineRoute()</code> validates
-              the request at runtime and types the handler. The response schema
-              checks what you send back.
+              <code className={inlineCodeClass}>defineRoute()</code> checks the
+              request when it arrives and types the handler from the same
+              schemas. The response schema is not documentation - it is what
+              you are allowed to send back.
             </>
           ),
           code: (
@@ -33,8 +34,8 @@ export function HomeContract() {
         {
           id: "client",
           file: "client.ts",
-          title: "A typed client, no codegen step",
-          body: "Import the route handle and call it. Bodies and responses are typed from the route, so a typo shows up in your editor.",
+          title: "A client with no codegen ceremony",
+          body: "Import the route handle and call it like a function. Bodies and responses are already typed from the server definition - a typo fails before you hit send.",
           code: (
             <CodePre>
               <HoverCode sample={clientSample} />
@@ -44,11 +45,13 @@ export function HomeContract() {
         {
           id: "openapi",
           file: "openapi.json",
-          title: "An OpenAPI document that cannot drift",
+          title: "OpenAPI that cannot lie about the API",
           body: (
             <>
               <code className={inlineCodeClass}>api.getOpenApiSpec()</code>{" "}
-              builds the spec from the same schemas the route validates with.
+              builds the document from the schemas the route already validates
+              with. Change the route, the spec changes - there is no parallel
+              YAML to forget.
             </>
           ),
           code: (
@@ -60,12 +63,12 @@ export function HomeContract() {
         {
           id: "test",
           file: "server.test.ts",
-          title: "Validation you can test in memory",
+          title: "Full pipeline tests, no open port",
           body: (
             <>
               <code className={inlineCodeClass}>api.fetch()</code> runs a
-              request through the whole pipeline without opening a port. Bad
-              input gets a 400 before your handler runs.
+              Request through middleware, validation, and the handler in
+              process. Bad input gets a 400 before your code runs.
             </>
           ),
           code: (

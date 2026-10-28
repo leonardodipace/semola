@@ -1,9 +1,9 @@
 ---
 title: Introduction
-description: Semola is a zero-dependency TypeScript toolkit for Bun backends - typed APIs, queues, ORM, workflows, and more
+description: Semola replaces a stack of backend libraries with one zero-dependency TypeScript package - typed APIs, queues, ORM, workflows, and more
 ---
 
-Semola is a toolkit of small, type-safe packages for building backends. Install once, then import only the pieces you need:
+Most backends start as a pile of packages: a router, a queue, an ORM, a validator, maybe an OpenAPI generator. Types almost line up. Semola is the alternative - one TypeScript package with an empty dependencies field. Install once, import only what you need:
 
 ```typescript
 import { Api } from "semola/api";
@@ -11,7 +11,7 @@ import { mightThrow } from "semola/errors";
 import { Queue } from "semola/queue";
 ```
 
-No runtime dependencies. Validation works with [`semola/schema`](/docs/schema) or any other [Standard Schema](https://standardschema.dev/) library (Zod, Valibot, ArkType, and others).
+Validation works with [`semola/schema`](/docs/schema) or any [Standard Schema](https://standardschema.dev/) library (Zod, Valibot, ArkType, and others).
 
 ## What you can build with
 

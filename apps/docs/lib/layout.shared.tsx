@@ -33,9 +33,15 @@ function NpmIcon() {
 
 const navLinks: LinkItemType[] = [
   {
-    text: "Documentation",
+    text: "Docs",
     url: "/docs",
     active: "nested-url",
+    on: "nav",
+  },
+  {
+    text: "Modules",
+    url: "/#modules",
+    active: "none",
     on: "nav",
   },
   {

@@ -150,29 +150,29 @@ export function HomePrinciples() {
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
       <PrincipleCard
         className="lg:col-span-7"
-        title="Responses are typed, not just requests"
-        body="Handlers can only return what the response schema declares. A misspelled field shows up in your editor, not in a bug report."
+        title="Wrong response? Your editor complains first"
+        body="Request bodies are typed - that part everyone does. Semola also types what you return. A typo in a field name dies in the editor, not in a 2am bug report."
         visual={<TypeErrorVisual />}
       />
       <PrincipleCard
         className="lg:col-span-5"
         delayMs={80}
-        title="Bring any Standard Schema validator"
-        body="Start with the built-in semola/schema, or pass Zod, Valibot, or ArkType schemas to the same slots. Switching later is a refactor, not a rewrite."
+        title="Keep Zod. Or don't."
+        body="Slots take any Standard Schema library: Zod, Valibot, ArkType, or the built-in semola/schema. Swap later without rewriting the app."
         visual={<ValidatorsVisual />}
       />
       <PrincipleCard
         className="lg:col-span-5"
         delayMs={160}
-        title="Zero dependencies, on purpose"
-        body="Semola has no dependencies field. Installing it adds one package to your lockfile and nothing else to audit or patch."
+        title="The dependencies field is empty"
+        body="On purpose. bun add semola puts one line in package.json. No transitive tree to audit, pin, or wake up for on a CVE Friday."
         visual={<PackageJsonVisual />}
       />
       <PrincipleCard
         className="lg:col-span-7"
         delayMs={240}
-        title="Import a module, not the toolkit"
-        body="Each module has its own entry point. Using the queue does not pull in the ORM, the CLI, or anything else you did not import."
+        title="Pay only for what you import"
+        body="semola/queue is not a back door into the ORM or the CLI. Each module is its own entry point, so unused code stays out of the process."
         visual={<ImportsVisual />}
       />
     </div>

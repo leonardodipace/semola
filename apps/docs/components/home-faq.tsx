@@ -4,38 +4,53 @@ import { packageVersion } from "@/lib/shared";
 
 const faqs = [
   {
-    question: "Does Semola work on Node.js?",
+    question: "What is Semola?",
     answer:
-      "Semola is built for Bun. Modules that serve HTTP or talk to Redis or SQL use Bun's built-in clients. Modules like schema, errors, policy, and i18n are plain TypeScript and do not call Bun APIs.",
+      "Semola is a TypeScript backend toolkit. Instead of installing a router, a queue, an ORM, and three helper libraries, you install one package with an empty dependencies field. Modules cover typed REST APIs with OpenAPI, Redis queues, durable workflows, SQL, auth policies, caching, i18n, and smaller utilities - each imported on its own path like semola/api or semola/queue.",
   },
   {
-    question: "Do I need Redis or a database?",
+    question: "How do I install it?",
     answer:
-      "Only for the modules that store state. queue, workflow, cache, and the Redis transport of pubsub need Redis, and orm needs SQLite or Postgres. api, policy, i18n, and in-process cron run with no infrastructure at all.",
+      "bun add semola. npm, pnpm, and yarn work too. Then import only the modules you need. The getting started guide builds a small typed API from scratch.",
   },
   {
-    question: "Which validation libraries can I use?",
+    question: "Is this a framework?",
     answer:
-      "Any library that implements Standard Schema, including Zod, Valibot, and ArkType. semola/schema ships in the package, so you can start without installing a validator. OpenAPI output needs schemas that can describe themselves as JSON Schema, which semola/schema and Zod 4 both do.",
+      "No. There is no app shell you have to live inside. You import the pieces you want, compose them in your own server.ts, and leave the rest out. It is closer to a set of libraries that share types and habits than to a framework with opinions about folders.",
   },
   {
-    question: "Will unused modules end up in my app?",
+    question: "Does it run on Node.js?",
     answer:
-      "No. Every module is a separate entry point such as semola/api or semola/queue, and only the modules you import are loaded.",
+      "Some modules currently use Bun APIs for HTTP, Redis, and SQL, so those need Bun today. Schema, errors, policy, and i18n are plain TypeScript and do not call Bun. Check each module page for what it needs.",
   },
   {
-    question: "Is Semola stable?",
-    answer: `Semola is pre-1.0 (currently v${packageVersion}). APIs can still change between minor versions, so pin your version and read the release notes before upgrading.`,
+    question: "Do I need Redis or a database on day one?",
+    answer:
+      "Only if you use the modules that store state. Queue, workflow, cache, and Redis pub/sub need Redis. The ORM needs SQLite or Postgres. API routes, policies, i18n, and in-process cron run with nothing extra.",
   },
   {
-    question: "How is it licensed?",
+    question: "Can I keep using Zod?",
     answer:
-      "MIT. Use it in commercial and open source projects, fork it, and ship it.",
+      "Yes. Anything that implements Standard Schema works - Zod, Valibot, ArkType, and the built-in semola/schema. Drop schemas into the same slots. For OpenAPI you need schemas that can emit JSON Schema; semola/schema and Zod 4 both do.",
   },
   {
-    question: "Can AI coding tools read the docs?",
+    question: "Will unused modules bloat my bundle?",
     answer:
-      "Yes. The full documentation is served as plain text at /llms.txt and /llms-full.txt, and every docs page has a button that copies it as Markdown.",
+      "No. Each module is its own entry point. Importing semola/api does not load the ORM, the CLI, or anything else. What you do not import is not there.",
+  },
+  {
+    question: "How stable is it?",
+    answer: `Pre-1.0 - currently v${packageVersion}. APIs can still move between minor versions. Pin the version you ship with and read the release notes before you bump.`,
+  },
+  {
+    question: "What about the license?",
+    answer:
+      "MIT. Commercial projects, open source, forks - all fine.",
+  },
+  {
+    question: "Can coding agents read the docs?",
+    answer:
+      "Yes. Full docs are plain text at /llms.txt and /llms-full.txt, and every docs page can copy itself as Markdown.",
   },
 ];
 
