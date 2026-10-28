@@ -89,7 +89,11 @@ export function HomeContractTabs({ tabs }: { tabs: ContractTab[] }) {
         aria-label={tabs[active]?.file}
         className="home-window overflow-hidden rounded-2xl lg:sticky lg:top-24 lg:self-start"
       >
-        <div className="home-window-bar flex h-11 items-center gap-1 overflow-x-auto px-3 font-mono text-xs">
+        <div
+          role="tablist"
+          aria-label="Contract files"
+          className="home-window-bar flex h-11 items-center gap-1 overflow-x-auto px-3 font-mono text-xs"
+        >
           <div aria-hidden className="home-traffic mr-3 pl-1">
             <span />
             <span />
@@ -99,6 +103,9 @@ export function HomeContractTabs({ tabs }: { tabs: ContractTab[] }) {
             <button
               key={tab.id}
               type="button"
+              role="tab"
+              aria-selected={index === active}
+              aria-controls={`contract-panel-${tab.id}`}
               data-active={index === active}
               onClick={() => choose(index)}
               className="home-file-tab home-ease shrink-0 rounded-md px-2.5 py-1 transition-[background-color,color]"
@@ -111,8 +118,10 @@ export function HomeContractTabs({ tabs }: { tabs: ContractTab[] }) {
           {tabs.map((tab, index) => (
             <div
               key={tab.id}
+              id={`contract-panel-${tab.id}`}
+              role="tabpanel"
               data-active={index === active}
-              aria-hidden={index !== active}
+              inert={index !== active}
               className="home-story-slide overflow-auto py-3 [grid-area:1/1]"
             >
               {tab.code}

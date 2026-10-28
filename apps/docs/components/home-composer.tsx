@@ -25,7 +25,7 @@ function Grow({
   children: ReactNode;
 }) {
   return (
-    <span data-on={on} data-fresh={fresh} className="home-grow">
+    <span data-on={on} data-fresh={fresh} inert={!on} className="home-grow">
       {children}
     </span>
   );
