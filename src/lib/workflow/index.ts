@@ -5,6 +5,7 @@ import {
   NotFoundError,
   WorkflowStoreError,
 } from "./errors.js";
+import { reviveFailure } from "./failure.js";
 import { parseHistory } from "./history.js";
 import { fromJson, toJson } from "./json.js";
 import { WorkflowStore } from "./store.js";
@@ -187,6 +188,7 @@ export const defineWorkflow = <TInput, TResult = void>(
       input: serializedInput,
       result: "",
       error: "",
+      errorName: "",
       createdAt: String(now),
       updatedAt: String(now),
       completedAt: "",
@@ -357,13 +359,17 @@ export const defineWorkflow = <TInput, TResult = void>(
       }
 
       if (meta.status === "failed") {
+        const message =
+          meta.originalError !== undefined
+            ? meta.originalError
+            : (meta.error ?? "workflow failed");
+        const name = meta.originalErrorName || meta.errorName || "Error";
+
         return {
           executionId,
           status: "failed",
           result: null,
-          error: new Error(
-            meta.originalError || meta.error || "workflow failed",
-          ),
+          error: reviveFailure({ message, name }),
         };
       }
 

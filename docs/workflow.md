@@ -238,7 +238,7 @@ Status is `compensating` while unwind runs. Each undo is an ordinary durable ste
 
 ### Fail without retrying
 
-Call `fail(error)` inside a step for a non-retryable failure. Pass an `Error` (or subclass) so `onError` can branch with `instanceof`.
+Call `fail(error)` inside a step for a non-retryable failure. History stores the message and constructor name (the durable failure type). Live `onError` still gets the thrown instance (`instanceof` works there). After a history round-trip, `startSync` revives a plain `Error` with that `.name` - branch on the name, not `instanceof` (same idea as Temporal's `ApplicationFailure.type`).
 
 ```typescript
 class CardDeclinedError extends Error {}
@@ -265,7 +265,15 @@ const payment = defineWorkflow<{ orderId: string }, { charged: true }>({
     return { charged: true };
   },
 });
+
+const result = await payment.startSync({ orderId: "o_1" });
+
+if (result.error?.name === "CardDeclinedError") {
+  // ...
+}
 ```
+
+`NonRetryableStepError` is the one platform class that revives as itself.
 
 ### Observe retries and completion
 
@@ -347,7 +355,7 @@ await onboard.stop();
 - `step(name, handler, options?)` - durable side effect; handler gets `{ input, signal, fail }`. `options.compensate` undoes a started step on failure or cancel; it gets `{ input, completed, result, signal, fail }` (`result` only when `completed`). Forward `signal` is aborted only by `stop()` or a lost lease. Compensate `signal` is never aborted, so cleanup can finish.
 - `sleep(ms)` - durable timer (survives replay and restarts). It counts as fired once a lease holder sees its fire time pass and records `TimerFired`; it stays fired after that, even if replica clocks disagree.
 
-`fail(error)` inside a step marks a non-retryable failure and passes that `Error` to `onError`. Same inside `compensate`. History and status still store the message string. `throw new NonRetryableStepError(...)` remains non-retryable without going through `fail`.
+`fail(error)` inside a step marks a non-retryable failure and passes that `Error` to `onError`. Same inside `compensate`. History and status store the message plus constructor name. `startSync` revives `Error` with that `.name` (`NonRetryableStepError` revives as itself). `throw new NonRetryableStepError(...)` remains non-retryable without going through `fail`.
 
 ### Options
 
@@ -366,7 +374,7 @@ await onboard.stop();
 
 `start(input, { executionId?, partitionKey? })` - `partitionKey` overrides `partitionBy`. Custom `executionId` must be non-empty and must not contain `:`. Empty `partitionKey` throws.
 
-`startSync(input, { executionId?, partitionKey?, timeoutMs?, cancelOnTimeout? })` - same start options, then wait for a terminal status (or `timeout`). Existing `executionId` attaches instead of throwing (prior input/partition win). `timeoutMs` must be a non-negative finite number. Failure returns an `Error` on `error`; does not throw.
+`startSync(input, { executionId?, partitionKey?, timeoutMs?, cancelOnTimeout? })` - same start options, then wait for a terminal status (or `timeout`). Existing `executionId` attaches instead of throwing (prior input/partition win). `timeoutMs` must be a non-negative finite number. Failure returns an `Error` on `error` with durable `.name`; does not throw.
 
 Without `partitionBy`, `partitionKey` is stored on meta but capacity stays on the global `*` pool. Empty keys throw. The resolved key is stored on execution meta so `resume` keeps the original partition.
 
@@ -380,7 +388,7 @@ Optional lifecycle callbacks. Errors in hooks never fail the workflow. Hooks fir
 
 - `onStart` - once when the execution first moves `pending` → `running`
 - `onRetry` - before each step retry backoff (`attempt`, `nextRetryDelayMs`, `retriesRemaining`, …), including undo steps (`stepName` is `undo:<name>`).
-- `onError` - a step's retries are exhausted or it called `fail()`, including undo steps (`undo:<name>`; may fire for both the forward step and an undo). `error` is the thrown/`fail()` `Error` instance (use `instanceof` for typed branches). `errorHistory` lists that step's failed attempts since the last resume (messages as strings).
+- `onError` - a step's retries are exhausted or it called `fail()`, including undo steps (`undo:<name>`; may fire for both the forward step and an undo). `error` is the live thrown/`fail()` `Error` instance (`instanceof` works). After a history round-trip, `startSync` exposes durable `.name` instead. `errorHistory` lists that step's failed attempts since the last resume (messages as strings).
 - `onComplete` - terminal success
 - `onCancel` - terminal cancel
 

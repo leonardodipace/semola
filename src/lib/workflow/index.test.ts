@@ -4987,8 +4987,44 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
 
       expect(result.status).toBe("failed");
       expect(result.result).toBeNull();
-      expect(result.error).toBeInstanceOf(Error);
+      expect(result.error).toBeInstanceOf(NonRetryableStepError);
       expect(result.error?.message).toBe("hard stop");
+
+      await wf.stop();
+    });
+
+    test("revives subclass as Error with durable name on startSync", async () => {
+      const redis = createRedis();
+
+      class CardDeclinedError extends Error {}
+
+      const wf = defineWorkflow({
+        name: `sync-typed-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("charge", async ({ fail }) => {
+            fail(new CardDeclinedError("card declined"));
+          });
+        },
+      });
+
+      const result = await awaitStartSync(wf.startSync({}));
+
+      expect(result.status).toBe("failed");
+      expect(result.error).toBeInstanceOf(Error);
+      expect(result.error).not.toBeInstanceOf(CardDeclinedError);
+      expect(result.error?.name).toBe("CardDeclinedError");
+      expect(result.error?.message).toBe("card declined");
+
+      const failed = (
+        await new WorkflowStore(redis, wf.name).loadHistory(result.executionId)
+      )
+        .map((raw) => JSON.parse(raw) as { type: string; errorName?: string })
+        .find((event) => event.type === "StepFailed");
+
+      expect(failed?.errorName).toBe("CardDeclinedError");
 
       await wf.stop();
     });
@@ -5017,7 +5053,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
       const result = await awaitStartSync(wf.startSync({}));
 
       expect(result.status).toBe("failed");
-      expect(result.error).toBeInstanceOf(Error);
+      expect(result.error).toBeInstanceOf(NonRetryableStepError);
       expect(result.error?.message).toBe("provision failed");
 
       const execution = await wf.get(result.executionId);

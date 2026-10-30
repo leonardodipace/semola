@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { mightThrow, mightThrowSync } from "../errors/index.js";
 import { NonRetryableStepError, Paused, WorkflowStoreError } from "./errors.js";
+import { toPersistedFailure } from "./failure.js";
 import {
   applyHistoryEvent,
   emptyHistoryView,
@@ -24,6 +25,7 @@ import type {
   HandleStepFailureInput,
   LeaseRun,
   NextStepTarget,
+  PersistedFailure,
   Replay,
   RetryPolicy,
   RunCommitInput,
@@ -116,10 +118,21 @@ const timerDelayMismatch = (
   );
 };
 
-const failDecision = (error: string, now: number): WorkflowDecision => ({
+const failDecision = (
+  failure: PersistedFailure,
+  now: number,
+): WorkflowDecision => ({
   type: "fail",
-  error,
-  events: [{ type: "WorkflowFailed", error, timestamp: now }],
+  error: failure.message,
+  errorName: failure.name,
+  events: [
+    {
+      type: "WorkflowFailed",
+      error: failure.message,
+      errorName: failure.name,
+      timestamp: now,
+    },
+  ],
 });
 
 // Next move for a step that has not completed: run it (first attempt, or the
@@ -140,7 +153,13 @@ const nextStep = (
 
   if (state?.status === "failed") {
     if (!state.retryable || state.attempt > retries) {
-      return failDecision(state.error, now);
+      return failDecision(
+        {
+          message: state.error,
+          name: state.errorName ?? "Error",
+        },
+        now,
+      );
     }
 
     const retryAt = state.failedAt + backoff(state.attempt);
@@ -308,7 +327,7 @@ const advance = async <TInput, TResult>(
 
   if (fatal) {
     return {
-      decision: failDecision(fatal.message, now),
+      decision: failDecision(toPersistedFailure(fatal), now),
       undo: [],
       fatal: fatal.message,
     };
@@ -332,7 +351,10 @@ const advance = async <TInput, TResult>(
   if (decision) return { decision, undo };
 
   if (handlerError) {
-    return { decision: failDecision(handlerError.message, now), undo };
+    return {
+      decision: failDecision(toPersistedFailure(handlerError), now),
+      undo,
+    };
   }
 
   const [serializeError, serialized] = mightThrowSync(() =>
@@ -340,7 +362,10 @@ const advance = async <TInput, TResult>(
   );
 
   if (serializeError) {
-    return { decision: failDecision(serializeError.message, now), undo };
+    return {
+      decision: failDecision(toPersistedFailure(serializeError), now),
+      undo,
+    };
   }
 
   return {
@@ -675,6 +700,7 @@ export class WorkflowEngine<TInput, TResult> {
           executionId,
           events: decision.events,
           error: decision.error,
+          errorName: decision.errorName,
           run,
         });
         return;
@@ -774,7 +800,7 @@ export class WorkflowEngine<TInput, TResult> {
 
   private async handleStepFailure(input: HandleStepFailureInput<TInput>) {
     const { executionId, stepId, stepName, attempt, stepError, run } = input;
-    const message = stepError.message;
+    const failure = toPersistedFailure(stepError);
     const retryable = !isNonRetryableStepError(stepError);
     const now = Date.now();
 
@@ -782,7 +808,7 @@ export class WorkflowEngine<TInput, TResult> {
       events: run.view.events,
       stepId,
       attempt,
-      error: message,
+      error: failure.message,
       timestamp: now,
     });
 
@@ -792,7 +818,8 @@ export class WorkflowEngine<TInput, TResult> {
           type: "StepFailed",
           stepId,
           stepName,
-          error: message,
+          error: failure.message,
+          errorName: failure.name,
           retryable,
           attempt,
           timestamp: now,
@@ -816,7 +843,7 @@ export class WorkflowEngine<TInput, TResult> {
           executionId,
           input: run.input,
           stepName,
-          error: message,
+          error: failure.message,
           attempt,
           nextRetryDelayMs: delay,
           retriesRemaining: this.retries - attempt + 1,
@@ -851,6 +878,7 @@ export class WorkflowEngine<TInput, TResult> {
     if (undo.length === 0) return false;
 
     const error = decision.type === "fail" ? decision.error : null;
+    const errorName = decision.type === "fail" ? decision.errorName : null;
     const now = Date.now();
     const fields: Partial<WorkflowMeta> = {
       status: "compensating",
@@ -862,7 +890,9 @@ export class WorkflowEngine<TInput, TResult> {
     // the forward failure from `originalError`.
     if (error) {
       fields.error = error;
+      fields.errorName = errorName ?? "";
       fields.originalError = error;
+      fields.originalErrorName = errorName ?? "";
     }
 
     return this.commitRun(executionId, run, {
@@ -871,6 +901,7 @@ export class WorkflowEngine<TInput, TResult> {
           type: "CompensationStarted",
           reason: decision.type === "fail" ? "failed" : "cancelled",
           error,
+          errorName,
           stepIds: undo.map((item) => item.stepId),
           timestamp: now,
         },
@@ -897,9 +928,11 @@ export class WorkflowEngine<TInput, TResult> {
       .filter((id) => view.undos.get(id)?.status !== "completed")
       .reverse();
     let error = replay.fatal;
+    let errorName: string | undefined;
 
     if (!error && pending.some((id) => !handlers.has(id))) {
       error = "compensation handlers missing after CompensationStarted";
+      errorName = "Error";
     }
 
     const item = handlers.get(pending[0] ?? "");
@@ -926,13 +959,17 @@ export class WorkflowEngine<TInput, TResult> {
         return this.executeStep({ executionId, run, ...next });
       }
 
-      if (next.type === "fail") error = next.error;
+      if (next.type === "fail") {
+        error = next.error;
+        errorName = next.errorName;
+      }
     }
 
     await this.finishCompensation({
       executionId,
       reason: error ? "failed" : phase.reason,
       error: error ?? phase.error,
+      errorName: error ? (errorName ?? "Error") : phase.errorName,
       run,
     });
 
@@ -940,7 +977,7 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private async finishCompensation(input: FinishCompensationInput<TInput>) {
-    const { executionId, reason, error, run } = input;
+    const { executionId, reason, error, errorName, run } = input;
 
     if (reason === "cancelled") {
       await this.cancelExecution({
@@ -952,6 +989,7 @@ export class WorkflowEngine<TInput, TResult> {
     }
 
     const message = error ?? "workflow failed";
+    const name = errorName ?? "Error";
 
     await this.failExecution({
       executionId,
@@ -959,10 +997,12 @@ export class WorkflowEngine<TInput, TResult> {
         {
           type: "WorkflowFailed",
           error: message,
+          errorName: name,
           timestamp: Date.now(),
         },
       ],
       error: message,
+      errorName: name,
       run,
     });
   }
@@ -1077,6 +1117,7 @@ export class WorkflowEngine<TInput, TResult> {
         result,
         completedAt: String(now),
         error: "",
+        errorName: "",
       },
       endedAt: now,
       run,
@@ -1096,7 +1137,7 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private async failExecution(input: FailExecutionInput) {
-    const { executionId, events, error, run } = input;
+    const { executionId, events, error, errorName, run } = input;
     const now = Date.now();
 
     const committed = await this.commitTerminal({
@@ -1105,6 +1146,7 @@ export class WorkflowEngine<TInput, TResult> {
       fields: {
         status: "failed",
         error,
+        errorName,
         failedAt: String(now),
       },
       endedAt: now,
@@ -1127,6 +1169,7 @@ export class WorkflowEngine<TInput, TResult> {
         status: "cancelled",
         cancelledAt: String(now),
         error: "",
+        errorName: "",
       },
       endedAt: now,
       run,
