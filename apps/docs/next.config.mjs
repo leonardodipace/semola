@@ -3,30 +3,43 @@ import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
 const withMDX = createMDX();
 
+const htmlCacheControl =
+  "public, max-age=0, s-maxage=86400, stale-while-revalidate=604800";
+const textCacheControl =
+  "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800";
+const ogCacheControl =
+  "public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400";
+
 /** @type {import('next').NextConfig} */
 const config = {
   reactStrictMode: true,
   // Worker/HTML responses — _headers does not apply here. Docs are SSG (redeploy to update).
+  // Later matching rules win for the same header key (Next.js headers override behavior).
   async headers() {
     return [
       {
-        source: "/api/:path*",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "private, no-store",
-          },
-        ],
+        source: "/:path*",
+        headers: [{ key: "Cache-Control", value: htmlCacheControl }],
       },
       {
-        source: "/:path*",
-        headers: [
-          {
-            key: "Cache-Control",
-            value:
-              "public, max-age=0, s-maxage=86400, stale-while-revalidate=604800",
-          },
-        ],
+        source: "/llms.txt",
+        headers: [{ key: "Cache-Control", value: textCacheControl }],
+      },
+      {
+        source: "/llms-full.txt",
+        headers: [{ key: "Cache-Control", value: textCacheControl }],
+      },
+      {
+        source: "/llms.mdx/:path*",
+        headers: [{ key: "Cache-Control", value: textCacheControl }],
+      },
+      {
+        source: "/og/:path*",
+        headers: [{ key: "Cache-Control", value: ogCacheControl }],
+      },
+      {
+        source: "/api/:path*",
+        headers: [{ key: "Cache-Control", value: "private, no-store" }],
       },
     ];
   },
