@@ -449,5 +449,241 @@ describe("workflow failure revive", () => {
 
       expect(warns).toHaveLength(0);
     });
+
+    test("toError wraps null undefined object and boolean", () => {
+      expect(toError(null)).toBeInstanceOf(Error);
+      expect(toError(null).message).toBe("non-Error value thrown");
+      expect(toError(undefined)).toBeInstanceOf(Error);
+      expect(toError(undefined).message).toBe("non-Error value thrown");
+      expect(toError({ code: 1 })).toBeInstanceOf(Error);
+      expect(toError({ code: 1 }).message).toBe("non-Error value thrown");
+      expect(toError(false).message).toBe("non-Error value thrown");
+    });
+
+    test("toError keeps AggregateError instance", () => {
+      const aggregate = new AggregateError([new Error("a")], "many");
+
+      expect(toError(aggregate)).toBe(aggregate);
+    });
+
+    test("toPersistedFailure after toError string uses Error name", () => {
+      expect(toPersistedFailure(toError("string boom"))).toEqual({
+        message: "string boom",
+        name: "Error",
+      });
+    });
+
+    test("toPersistedFailure records SerializationError and UnregisteredWorkflowError", () => {
+      expect(toPersistedFailure(new SerializationError("bad json"))).toEqual({
+        message: "bad json",
+        name: "SerializationError",
+      });
+      expect(
+        toPersistedFailure(new UnregisteredWorkflowError("missing")),
+      ).toEqual({
+        message: "missing",
+        name: "UnregisteredWorkflowError",
+      });
+    });
+
+    test("toPersistedFailure empty message stays empty", () => {
+      expect(toPersistedFailure(new Error(""))).toEqual({
+        message: "",
+        name: "Error",
+      });
+    });
+
+    test("reviveFailure rebuilds RangeError SyntaxError ReferenceError without listing", () => {
+      const registry = createErrorRegistry();
+
+      expect(
+        reviveFailure(
+          { message: "range", name: "RangeError" },
+          registry,
+          "error",
+          new Set(),
+        ),
+      ).toBeInstanceOf(RangeError);
+
+      expect(
+        reviveFailure(
+          { message: "syntax", name: "SyntaxError" },
+          registry,
+          "error",
+          new Set(),
+        ),
+      ).toBeInstanceOf(SyntaxError);
+
+      expect(
+        reviveFailure(
+          { message: "ref", name: "ReferenceError" },
+          registry,
+          "error",
+          new Set(),
+        ),
+      ).toBeInstanceOf(ReferenceError);
+    });
+
+    test("reviveFailure drops extra own properties of subclass", () => {
+      class RichError extends Error {
+        public code?: number;
+      }
+
+      const live = new RichError("rich");
+      live.code = 99;
+
+      const persisted = toPersistedFailure(live);
+      const revived = reviveFailure(
+        persisted,
+        createErrorRegistry([RichError]),
+        "warn",
+        new Set(),
+      );
+
+      expect(persisted).toEqual({ message: "rich", name: "RichError" });
+      expect(revived).toBeInstanceOf(RichError);
+      expect(revived.message).toBe("rich");
+      expect((revived as RichError).code).toBeUndefined();
+    });
+
+    test("reviveFailure of UnregisteredWorkflowError under error mode stays platform class", () => {
+      const revived = reviveFailure(
+        { message: "already unreg", name: "UnregisteredWorkflowError" },
+        createErrorRegistry(),
+        "error",
+        new Set(),
+      );
+
+      expect(revived).toBeInstanceOf(UnregisteredWorkflowError);
+      expect(revived.message).toBe("already unreg");
+    });
+
+    test("createErrorRegistry empty array still revives builtins and platform", () => {
+      const registry = createErrorRegistry([]);
+
+      expect(
+        reviveFailure(
+          { message: "t", name: "TypeError" },
+          registry,
+          "error",
+          new Set(),
+        ),
+      ).toBeInstanceOf(TypeError);
+
+      expect(
+        reviveFailure(
+          { message: "nr", name: "NonRetryableStepError" },
+          registry,
+          "error",
+          new Set(),
+        ),
+      ).toBeInstanceOf(NonRetryableStepError);
+    });
+
+    test("resolveUnregisteredError after toError string under error mode allows Error", () => {
+      captureWarn();
+      const resolved = resolveUnregisteredError(
+        toError("wrapped"),
+        createErrorRegistry(),
+        "error",
+        new Set(),
+      );
+
+      expect(resolved).toBeInstanceOf(Error);
+      expect(resolved).not.toBeInstanceOf(UnregisteredWorkflowError);
+      expect(resolved.message).toBe("wrapped");
+      expect(warns).toHaveLength(0);
+    });
+
+    test("resolveUnregisteredError allows UnregisteredWorkflowError without listing", () => {
+      captureWarn();
+      const resolved = resolveUnregisteredError(
+        new UnregisteredWorkflowError("x"),
+        createErrorRegistry(),
+        "error",
+        new Set(),
+      );
+
+      expect(resolved).toBeInstanceOf(UnregisteredWorkflowError);
+      expect(warns).toHaveLength(0);
+    });
+
+    test("resolveUnregisteredError allows RangeError without listing under error mode", () => {
+      captureWarn();
+      const resolved = resolveUnregisteredError(
+        new RangeError("oob"),
+        createErrorRegistry(),
+        "error",
+        new Set(),
+      );
+
+      expect(resolved).toBeInstanceOf(RangeError);
+      expect(warns).toHaveLength(0);
+    });
+
+    test("resolveUnregisteredError uses constructor.name when .name mutated", () => {
+      captureWarn();
+      const error = new CardDeclinedError("x");
+      error.name = "SurfaceOnly";
+
+      const resolved = resolveUnregisteredError(
+        error,
+        createErrorRegistry(),
+        "warn",
+        new Set(),
+      );
+
+      expect(resolved).toBe(error);
+      expect(warns).toHaveLength(1);
+      expect(warns[0]).toContain("CardDeclinedError");
+      expect(warns[0]).not.toContain("SurfaceOnly");
+    });
+
+    test("resolveUnregisteredError under error mode message includes constructor name not mutated name", () => {
+      const error = new CardDeclinedError("x");
+      error.name = "SurfaceOnly";
+
+      const resolved = resolveUnregisteredError(
+        error,
+        createErrorRegistry(),
+        "error",
+        new Set(),
+      );
+
+      expect(resolved).toBeInstanceOf(UnregisteredWorkflowError);
+      expect(resolved.message).toContain("CardDeclinedError");
+      expect(resolved.message).not.toContain("SurfaceOnly");
+    });
+
+    test("reviveFailure whitespace-only message preserved", () => {
+      const revived = reviveFailure(
+        { message: "   ", name: "CardDeclinedError" },
+        createErrorRegistry([CardDeclinedError]),
+        "warn",
+        new Set(),
+      );
+
+      expect(revived.message).toBe("   ");
+      expect(revived).toBeInstanceOf(CardDeclinedError);
+    });
+
+    test("reviveFailure URIError without listing under error mode", () => {
+      const revived = reviveFailure(
+        { message: "bad uri", name: "URIError" },
+        createErrorRegistry(),
+        "error",
+        new Set(),
+      );
+
+      expect(revived).toBeInstanceOf(URIError);
+      expect(revived.message).toBe("bad uri");
+    });
+
+    test("toPersistedFailure of toError(null) is plain Error name", () => {
+      expect(toPersistedFailure(toError(null))).toEqual({
+        message: "non-Error value thrown",
+        name: "Error",
+      });
+    });
   });
 });

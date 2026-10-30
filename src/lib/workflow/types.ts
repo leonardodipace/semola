@@ -434,7 +434,7 @@ export type HandleStepFailureInput<TInput = unknown> = {
   stepId: string;
   stepName: string;
   attempt: number;
-  stepError: Error;
+  stepError: unknown;
   run: LeaseRun<TInput>;
 };
 

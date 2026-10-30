@@ -1,6 +1,11 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { mightThrow, mightThrowSync } from "../errors/index.js";
-import { NonRetryableStepError, Paused, WorkflowStoreError } from "./errors.js";
+import {
+  NonRetryableStepError,
+  Paused,
+  SerializationError,
+  WorkflowStoreError,
+} from "./errors.js";
 import {
   createErrorRegistry,
   resolveUnregisteredError,
@@ -65,6 +70,7 @@ const failWith = (error: Error): never => {
 
 const isNonRetryableStepError = (error: Error) => {
   if (error instanceof NonRetryableStepError) return true;
+  if (error instanceof SerializationError) return true;
   if (nonRetryableViaFail.has(error)) return true;
   return false;
 };
@@ -204,8 +210,13 @@ const advance = async <TInput, TResult>(
     throw error;
   };
 
-  const [handlerError, result] = await mightThrow(
-    Promise.resolve().then(() =>
+  // mightThrow collapses throw null with success; track rejection explicitly.
+  let handlerFailed = false;
+  let handlerError: unknown;
+  let result: TResult | undefined;
+
+  try {
+    result = await Promise.resolve().then(() =>
       options.handler({
         input: workflowInput,
         executionId,
@@ -311,8 +322,11 @@ const advance = async <TInput, TResult>(
           throw new Paused();
         },
       }),
-    ),
-  );
+    );
+  } catch (error) {
+    handlerFailed = true;
+    handlerError = error;
+  }
 
   // Every recorded step and timer must be replayed; skipping one diverges.
   for (const stepId of view.steps.keys()) {
@@ -358,7 +372,7 @@ const advance = async <TInput, TResult>(
   // fail the run before that step or sleep happens.
   if (decision) return { decision, undo };
 
-  if (handlerError) {
+  if (handlerFailed) {
     const failure = toPersistedFailure(
       resolveUnregisteredError(
         toError(handlerError),
@@ -772,21 +786,27 @@ export class WorkflowEngine<TInput, TResult> {
     // A cancel reported by this write is honored before the handler runs.
     if (this.cancelPending(run)) return true;
 
-    const [handlerError, value] = await mightThrow(
-      Promise.resolve().then(() =>
+    // mightThrow collapses throw null with success; track rejection explicitly.
+    let stepFailed = false;
+    let stepError: unknown;
+    let value: unknown;
+
+    try {
+      value = await Promise.resolve().then(() =>
         handler({
           input: run.input,
           signal,
           fail: failWith,
         }),
-      ),
-    );
+      );
+    } catch (error) {
+      stepFailed = true;
+      stepError = error;
+    }
 
     if (run.lost) return false;
 
-    let stepError = handlerError;
-
-    if (!stepError) {
+    if (!stepFailed) {
       const [serializeError, serialized] = mightThrowSync(() =>
         toJson(value, `step ${stepName}`),
       );
@@ -806,7 +826,7 @@ export class WorkflowEngine<TInput, TResult> {
         });
       }
 
-      stepError = new NonRetryableStepError(serializeError.message);
+      stepError = serializeError;
     }
 
     // Cancel and stop() interrupt forward steps only; an undo step records
