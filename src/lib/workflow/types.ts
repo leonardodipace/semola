@@ -122,6 +122,10 @@ export type PersistedFailure = {
   name: string;
 };
 
+export type WorkflowErrorConstructor = new (message: string) => Error;
+
+export type UnregisteredErrorsMode = "warn" | "error";
+
 export type WorkflowOptions<TInput, TResult> = {
   name: string;
   redis: Bun.RedisClient;
@@ -130,6 +134,8 @@ export type WorkflowOptions<TInput, TResult> = {
   ) => TResult | Promise<TResult>;
   retries?: number;
   retryBackoff?: WorkflowRetryBackoff;
+  errors?: WorkflowErrorConstructor[];
+  unregisteredErrors?: UnregisteredErrorsMode;
   hooks?: WorkflowHooks<TInput, TResult>;
   lockTTL?: number;
   retentionTTL?: number;
@@ -410,6 +416,8 @@ export type AdvanceInput<TInput, TResult> = {
   retries: number;
   backoff: (attempt: number) => number;
   cancelRequested: boolean;
+  errorRegistry: Map<string, WorkflowErrorConstructor>;
+  unregisteredWarnings: Set<string>;
 };
 
 export type ExecuteStepInput<TInput = unknown> = {

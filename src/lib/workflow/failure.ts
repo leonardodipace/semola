@@ -1,21 +1,106 @@
-import { NonRetryableStepError } from "./errors.js";
-import type { PersistedFailure } from "./types.js";
+import { mightThrowSync } from "../errors/index.js";
+import {
+  NonRetryableStepError,
+  SerializationError,
+  UnregisteredWorkflowError,
+} from "./errors.js";
+import type {
+  PersistedFailure,
+  UnregisteredErrorsMode,
+  WorkflowErrorConstructor,
+} from "./types.js";
 
 export const toPersistedFailure = (error: Error): PersistedFailure => ({
   message: error.message,
   name: error.constructor.name || error.name || "Error",
 });
 
-// Temporal-style: durable identity is the type name string. Platform
-// NonRetryableStepError revives as itself; everything else is Error + .name.
-export const reviveFailure = (failure: PersistedFailure) => {
-  const { message, name } = failure;
+export const createErrorRegistry = (
+  errors: WorkflowErrorConstructor[] = [],
+) => {
+  const byName = new Map<string, WorkflowErrorConstructor>();
 
-  if (name === "NonRetryableStepError") {
-    return new NonRetryableStepError(message);
+  for (const Ctor of [
+    NonRetryableStepError,
+    SerializationError,
+    UnregisteredWorkflowError,
+    ...errors,
+  ]) {
+    if (!Ctor.name) continue;
+
+    byName.set(Ctor.name, Ctor);
   }
 
-  const error = new Error(message);
-  error.name = name;
+  return byName;
+};
+
+const isKnownFailureName = (
+  name: string,
+  registry: Map<string, WorkflowErrorConstructor>,
+) => name === "Error" || registry.has(name);
+
+const unregisteredMessage = (name: string) =>
+  `Workflow error class "${name}" is not listed in defineWorkflow({ errors })`;
+
+const warnUnregistered = (name: string, warned: Set<string>) => {
+  if (warned.has(name)) return;
+
+  warned.add(name);
+  console.warn(`[semola/workflow] ${unregisteredMessage(name)}`);
+};
+
+export const resolveUnregisteredError = (
+  error: Error,
+  registry: Map<string, WorkflowErrorConstructor>,
+  mode: UnregisteredErrorsMode,
+  warned: Set<string>,
+) => {
+  const name = error.constructor.name || error.name || "Error";
+
+  if (isKnownFailureName(name, registry)) return error;
+
+  if (mode === "error") {
+    return new UnregisteredWorkflowError(unregisteredMessage(name));
+  }
+
+  warnUnregistered(name, warned);
   return error;
+};
+
+export const reviveFailure = (
+  failure: PersistedFailure,
+  registry: Map<string, WorkflowErrorConstructor>,
+  mode: UnregisteredErrorsMode,
+  warned: Set<string>,
+) => {
+  const { message, name } = failure;
+  const Ctor = registry.get(name);
+
+  if (Ctor) {
+    const [error, revived] = mightThrowSync(() => new Ctor(message));
+
+    if (!error) {
+      if (revived instanceof Error) {
+        if (revived.name === "Error") {
+          if (name !== "Error") {
+            revived.name = name;
+          }
+        }
+
+        return revived;
+      }
+    }
+  }
+
+  if (!isKnownFailureName(name, registry)) {
+    if (mode === "error") {
+      throw new UnregisteredWorkflowError(unregisteredMessage(name));
+    }
+
+    warnUnregistered(name, warned);
+  }
+
+  const fallback = new Error(message);
+  fallback.name = name;
+  return fallback;
 };

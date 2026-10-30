@@ -19,7 +19,7 @@ import {
 } from "semola/workflow";
 ```
 
-Also exported: `DuplicateWorkflowError`, `NonRetryableStepError`, `SerializationError`, `WorkflowStoreError`, and the public workflow types (`Workflow`, `WorkflowOptions`, hooks/status/start/cancel shapes, `WorkflowListItem`, etc.).
+Also exported: `DuplicateWorkflowError`, `NonRetryableStepError`, `UnregisteredWorkflowError`, `SerializationError`, `WorkflowStoreError`, and the public workflow types (`Workflow`, `WorkflowOptions`, `WorkflowErrorConstructor`, hooks/status/start/cancel shapes, `WorkflowListItem`, etc.).
 
 ## Quick start
 
@@ -238,7 +238,7 @@ Status is `compensating` while unwind runs. Each undo is an ordinary durable ste
 
 ### Fail without retrying
 
-Call `fail(error)` inside a step for a non-retryable failure. History stores the message and constructor name (the durable failure type). Live `onError` still gets the thrown instance (`instanceof` works there). After a history round-trip, `startSync` revives a plain `Error` with that `.name` - branch on the name, not `instanceof` (same idea as Temporal's `ApplicationFailure.type`).
+Call `fail(error)` inside a step for a non-retryable failure. List custom subclasses on `errors` so `startSync` can rebuild them for `instanceof`. History stores the message and constructor name.
 
 ```typescript
 class CardDeclinedError extends Error {}
@@ -246,6 +246,7 @@ class CardDeclinedError extends Error {}
 const payment = defineWorkflow<{ orderId: string }, { charged: true }>({
   name: "charge-order",
   redis: redisClient,
+  errors: [CardDeclinedError],
   hooks: {
     onError: ({ error }) => {
       if (error instanceof CardDeclinedError) {
@@ -268,12 +269,12 @@ const payment = defineWorkflow<{ orderId: string }, { charged: true }>({
 
 const result = await payment.startSync({ orderId: "o_1" });
 
-if (result.error?.name === "CardDeclinedError") {
+if (result.error instanceof CardDeclinedError) {
   // ...
 }
 ```
 
-`NonRetryableStepError` is the one platform class that revives as itself.
+If a subclass is thrown or `fail()`'d without listing it on `errors`, Semola notices on the live failure path and again when `startSync` revives. Default `unregisteredErrors: "warn"` logs once per class name. Set `unregisteredErrors: "error"` to replace that step failure with `UnregisteredWorkflowError` (and to throw from `startSync` when reviving an unknown name). Plain `Error` and `NonRetryableStepError` do not need listing.
 
 ### Observe retries and completion
 
@@ -355,7 +356,7 @@ await onboard.stop();
 - `step(name, handler, options?)` - durable side effect; handler gets `{ input, signal, fail }`. `options.compensate` undoes a started step on failure or cancel; it gets `{ input, completed, result, signal, fail }` (`result` only when `completed`). Forward `signal` is aborted only by `stop()` or a lost lease. Compensate `signal` is never aborted, so cleanup can finish.
 - `sleep(ms)` - durable timer (survives replay and restarts). It counts as fired once a lease holder sees its fire time pass and records `TimerFired`; it stays fired after that, even if replica clocks disagree.
 
-`fail(error)` inside a step marks a non-retryable failure and passes that `Error` to `onError`. Same inside `compensate`. History and status store the message plus constructor name. `startSync` revives `Error` with that `.name` (`NonRetryableStepError` revives as itself). `throw new NonRetryableStepError(...)` remains non-retryable without going through `fail`.
+`fail(error)` inside a step marks a non-retryable failure and passes that `Error` to `onError`. Same inside `compensate`. History and status store the message plus constructor name. Register subclasses on `errors` so `startSync` keeps `instanceof`. `throw new NonRetryableStepError(...)` remains non-retryable without going through `fail`.
 
 ### Options
 
@@ -364,6 +365,8 @@ await onboard.stop();
 - **`handler`** (required)
 - **`retries`** - step retries before workflow fails (default: 3; `0` = fail on first error)
 - **`retryBackoff`** - `{ baseDelay, multiplier, maxDelay }` (defaults: 1000 / 2x / 30000)
+- **`errors`** - `Error` subclasses to revive from durable history for `instanceof` (matched by constructor name). Platform classes (`NonRetryableStepError`, `SerializationError`, `UnregisteredWorkflowError`) are always included.
+- **`unregisteredErrors`** - `"warn"` (default) or `"error"` when a thrown/`fail()` subclass is missing from `errors`, or when `startSync` revives an unknown name.
 - **`hooks`** - `onStart`, `onRetry`, `onError`, `onComplete`, `onCancel` (see [Hooks](#hooks))
 - **`lockTTL`** - execution lease TTL in ms (default: 300000); also how long a crashed replica's execution waits before another replica picks it up, and the grace period on capacity slots. The lease and the slot are renewed every 40% of `lockTTL` while a step runs. When a run stops to wait (`sleep`, retry backoff) the slot is kept until the wait ends plus `lockTTL`, with no process refreshing it; whoever runs the execution next renews it. If every replica is gone, the slot frees itself `lockTTL` after the execution was due. Terminal executions free their slot in the same write that records the final status.
 - **`retentionTTL`** - how long terminal executions (`completed` / `failed` / `cancelled`) stay in Redis, in ms (default: 86400000, 24h). `Infinity` keeps them forever. Any other value must be a non-negative number. `0` unlinks immediately after terminal. Pending, running, and compensating keys are never expired. Failed executions can be `resume`d only while they still exist. Retention is applied when the execution becomes terminal, using the replica's settings at that moment; changing `retentionTTL` later does not touch executions that are already terminal.
@@ -374,7 +377,7 @@ await onboard.stop();
 
 `start(input, { executionId?, partitionKey? })` - `partitionKey` overrides `partitionBy`. Custom `executionId` must be non-empty and must not contain `:`. Empty `partitionKey` throws.
 
-`startSync(input, { executionId?, partitionKey?, timeoutMs?, cancelOnTimeout? })` - same start options, then wait for a terminal status (or `timeout`). Existing `executionId` attaches instead of throwing (prior input/partition win). `timeoutMs` must be a non-negative finite number. Failure returns an `Error` on `error` with durable `.name`; does not throw.
+`startSync(input, { executionId?, partitionKey?, timeoutMs?, cancelOnTimeout? })` - same start options, then wait for a terminal status (or `timeout`). Existing `executionId` attaches instead of throwing (prior input/partition win). `timeoutMs` must be a non-negative finite number. Failure returns an `Error` on `error` (revived via `errors` when registered); does not throw. Unknown revived names warn or throw per `unregisteredErrors`.
 
 Without `partitionBy`, `partitionKey` is stored on meta but capacity stays on the global `*` pool. Empty keys throw. The resolved key is stored on execution meta so `resume` keeps the original partition.
 
@@ -388,7 +391,7 @@ Optional lifecycle callbacks. Errors in hooks never fail the workflow. Hooks fir
 
 - `onStart` - once when the execution first moves `pending` → `running`
 - `onRetry` - before each step retry backoff (`attempt`, `nextRetryDelayMs`, `retriesRemaining`, …), including undo steps (`stepName` is `undo:<name>`).
-- `onError` - a step's retries are exhausted or it called `fail()`, including undo steps (`undo:<name>`; may fire for both the forward step and an undo). `error` is the live thrown/`fail()` `Error` instance (`instanceof` works). After a history round-trip, `startSync` exposes durable `.name` instead. `errorHistory` lists that step's failed attempts since the last resume (messages as strings).
+- `onError` - a step's retries are exhausted or it called `fail()`, including undo steps (`undo:<name>`; may fire for both the forward step and an undo). Under default `unregisteredErrors: "warn"`, `error` is the live thrown/`fail()` instance (`instanceof` works). Under `"error"`, an unlisted subclass is replaced with `UnregisteredWorkflowError` before the hook. After a history round-trip, list classes on `errors` so `startSync` revives them. `errorHistory` lists that step's failed attempts since the last resume (messages as strings).
 - `onComplete` - terminal success
 - `onCancel` - terminal cancel
 

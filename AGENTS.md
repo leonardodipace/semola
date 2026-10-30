@@ -155,7 +155,8 @@ When a module supports multiple adapters (or dialects), keep an **adapter-driven
 ### Testing
 
 - Colocate tests with source (`*.test.ts`).
-- When a package is split into topical modules, give each implementation file its own `<name>.test.ts`. Use `index.test.ts` for cross-cutting package behavior. Extra suites (`adversarial.test.ts`) are fine on top of that.
+- When a package is split into topical modules, give each implementation file its own `<name>.test.ts`. Use `index.test.ts` for cross-cutting package behavior. Put adversarial cases in those existing files - do not create dedicated `*-adversarial.test.ts` files.
+- Modules that need Redis (workflow, and similar) use real Redis via `SEMOLA_REDIS_URL` (`describe.skipIf(!SEMOLA_REDIS_URL)`). CI provides Redis. Do not mock Redis for those integration tests.
 - Clear test names describing behavior.
 - Simple assertions without chains.
 

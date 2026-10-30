@@ -1,7 +1,11 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { mightThrow, mightThrowSync } from "../errors/index.js";
 import { NonRetryableStepError, Paused, WorkflowStoreError } from "./errors.js";
-import { toPersistedFailure } from "./failure.js";
+import {
+  createErrorRegistry,
+  resolveUnregisteredError,
+  toPersistedFailure,
+} from "./failure.js";
 import {
   applyHistoryEvent,
   emptyHistoryView,
@@ -34,6 +38,7 @@ import type {
   StepState,
   TerminalDecision,
   WorkflowDecision,
+  WorkflowErrorConstructor,
   WorkflowMeta,
   WorkflowOptions,
   WorkflowStepErrorRecord,
@@ -326,10 +331,12 @@ const advance = async <TInput, TResult>(
   }
 
   if (fatal) {
+    const failure = toPersistedFailure(fatal);
+
     return {
-      decision: failDecision(toPersistedFailure(fatal), now),
+      decision: failDecision(failure, now),
       undo: [],
-      fatal: fatal.message,
+      fatal: failure.message,
     };
   }
 
@@ -351,8 +358,17 @@ const advance = async <TInput, TResult>(
   if (decision) return { decision, undo };
 
   if (handlerError) {
+    const failure = toPersistedFailure(
+      resolveUnregisteredError(
+        handlerError,
+        input.errorRegistry,
+        input.options.unregisteredErrors ?? "warn",
+        input.unregisteredWarnings,
+      ),
+    );
+
     return {
-      decision: failDecision(toPersistedFailure(handlerError), now),
+      decision: failDecision(failure, now),
       undo,
     };
   }
@@ -362,8 +378,10 @@ const advance = async <TInput, TResult>(
   );
 
   if (serializeError) {
+    const failure = toPersistedFailure(serializeError);
+
     return {
-      decision: failDecision(toPersistedFailure(serializeError), now),
+      decision: failDecision(failure, now),
       undo,
     };
   }
@@ -398,12 +416,18 @@ export class WorkflowEngine<TInput, TResult> {
   private readonly retryBaseDelay: number;
   private readonly retryMultiplier: number;
   private readonly retryMaxDelay: number;
+  private readonly errorRegistry: Map<string, WorkflowErrorConstructor>;
+  private readonly unregisteredWarnings: Set<string>;
   // Controllers of the runs in flight in this process, aborted by stop().
   private readonly running = new Set<AbortController>();
 
   public constructor(
     options: WorkflowOptions<TInput, TResult>,
     store: WorkflowStore,
+    unregisteredWarnings: Set<string> = new Set(),
+    errorRegistry: Map<string, WorkflowErrorConstructor> = createErrorRegistry(
+      options.errors,
+    ),
   ) {
     this.options = options;
     this.store = store;
@@ -412,6 +436,8 @@ export class WorkflowEngine<TInput, TResult> {
     this.retentionTTL = options.retentionTTL ?? DEFAULT_RETENTION_TTL;
     this.retentionMax = options.retentionMax;
     this.concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
+    this.errorRegistry = errorRegistry;
+    this.unregisteredWarnings = unregisteredWarnings;
 
     if (!(this.retentionTTL >= 0)) {
       throw new WorkflowStoreError(
@@ -636,6 +662,8 @@ export class WorkflowEngine<TInput, TResult> {
         retries: this.retries,
         backoff: this.backoff,
         cancelRequested: this.cancelPending(run),
+        errorRegistry: this.errorRegistry,
+        unregisteredWarnings: this.unregisteredWarnings,
       });
 
       if (view.compensation) {
@@ -799,9 +827,16 @@ export class WorkflowEngine<TInput, TResult> {
   }
 
   private async handleStepFailure(input: HandleStepFailureInput<TInput>) {
-    const { executionId, stepId, stepName, attempt, stepError, run } = input;
+    const { executionId, stepId, stepName, attempt, run } = input;
+    // Before unregistered replace: WeakSet / instanceof would miss the copy.
+    const retryable = !isNonRetryableStepError(input.stepError);
+    const stepError = resolveUnregisteredError(
+      input.stepError,
+      this.errorRegistry,
+      this.options.unregisteredErrors ?? "warn",
+      this.unregisteredWarnings,
+    );
     const failure = toPersistedFailure(stepError);
-    const retryable = !isNonRetryableStepError(stepError);
     const now = Date.now();
 
     const errorHistory = this.collectErrorHistory({

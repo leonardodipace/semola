@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mightThrow } from "../errors/index.js";
 import { WorkflowEngine } from "./engine.js";
 import {
@@ -8,6 +8,7 @@ import {
   NonRetryableStepError,
   NotFoundError,
   SerializationError,
+  UnregisteredWorkflowError,
   type Workflow,
   type WorkflowHandlerContext,
   type WorkflowOptions,
@@ -4993,13 +4994,48 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
       await wf.stop();
     });
 
-    test("revives subclass as Error with durable name on startSync", async () => {
+    test("revives registered subclass with instanceof on startSync", async () => {
       const redis = createRedis();
 
       class CardDeclinedError extends Error {}
 
       const wf = defineWorkflow({
         name: `sync-typed-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        errors: [CardDeclinedError],
+        handler: async ({ step }) => {
+          await step("charge", async ({ fail }) => {
+            fail(new CardDeclinedError("card declined"));
+          });
+        },
+      });
+
+      const result = await awaitStartSync(wf.startSync({}));
+
+      expect(result.status).toBe("failed");
+      expect(result.error).toBeInstanceOf(CardDeclinedError);
+      expect(result.error?.message).toBe("card declined");
+
+      const failed = (
+        await new WorkflowStore(redis, wf.name).loadHistory(result.executionId)
+      )
+        .map((raw) => JSON.parse(raw) as { type: string; errorName?: string })
+        .find((event) => event.type === "StepFailed");
+
+      expect(failed?.errorName).toBe("CardDeclinedError");
+
+      await wf.stop();
+    });
+
+    test("unregistered subclass keeps durable name under warn mode", async () => {
+      const redis = createRedis();
+
+      class CardDeclinedError extends Error {}
+
+      const wf = defineWorkflow({
+        name: `sync-unreg-${crypto.randomUUID()}`,
         redis,
         ...fast,
         retries: 0,
@@ -5016,15 +5052,160 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
       expect(result.error).toBeInstanceOf(Error);
       expect(result.error).not.toBeInstanceOf(CardDeclinedError);
       expect(result.error?.name).toBe("CardDeclinedError");
-      expect(result.error?.message).toBe("card declined");
 
-      const failed = (
-        await new WorkflowStore(redis, wf.name).loadHistory(result.executionId)
-      )
-        .map((raw) => JSON.parse(raw) as { type: string; errorName?: string })
-        .find((event) => event.type === "StepFailed");
+      await wf.stop();
+    });
 
-      expect(failed?.errorName).toBe("CardDeclinedError");
+    test("unregisteredErrors error replaces with UnregisteredWorkflowError", async () => {
+      const redis = createRedis();
+
+      class CardDeclinedError extends Error {}
+
+      const wf = defineWorkflow({
+        name: `sync-unreg-err-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        unregisteredErrors: "error",
+        handler: async ({ step }) => {
+          await step("charge", async ({ fail }) => {
+            fail(new CardDeclinedError("card declined"));
+          });
+        },
+      });
+
+      const result = await awaitStartSync(wf.startSync({}));
+
+      expect(result.error).toBeInstanceOf(UnregisteredWorkflowError);
+      expect(result.error?.message).toContain("CardDeclinedError");
+
+      await wf.stop();
+    });
+
+    test("onError receives live registered instance and startSync revives it", async () => {
+      const redis = createRedis();
+
+      class CardDeclinedError extends Error {}
+      let hooked: Error | undefined;
+
+      const wf = defineWorkflow({
+        name: `sync-onerror-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        errors: [CardDeclinedError],
+        hooks: {
+          onError: ({ error }) => {
+            hooked = error;
+          },
+        },
+        handler: async ({ step }) => {
+          await step("charge", async ({ fail }) => {
+            fail(new CardDeclinedError("live"));
+          });
+        },
+      });
+
+      const result = await awaitStartSync(wf.startSync({}));
+
+      expect(hooked).toBeInstanceOf(CardDeclinedError);
+      expect(result.error).toBeInstanceOf(CardDeclinedError);
+
+      await wf.stop();
+    });
+
+    test("empty registered failure message survives startSync", async () => {
+      const redis = createRedis();
+
+      class CardDeclinedError extends Error {}
+
+      const wf = defineWorkflow({
+        name: `sync-empty-msg-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        errors: [CardDeclinedError],
+        handler: async ({ step }) => {
+          await step("charge", async ({ fail }) => {
+            fail(new CardDeclinedError(""));
+          });
+        },
+      });
+
+      const result = await awaitStartSync(wf.startSync({}));
+
+      expect(result.error?.message).toBe("");
+      expect(result.error).toBeInstanceOf(CardDeclinedError);
+
+      await wf.stop();
+    });
+
+    test("startSync after compensate keeps registered originalError", async () => {
+      const redis = createRedis();
+
+      class ProvisionError extends Error {}
+
+      const wf = defineWorkflow({
+        name: `sync-comp-orig-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        errors: [ProvisionError],
+        handler: async ({ step }) => {
+          await step("create", async () => "acct", {
+            compensate: async () => {},
+          });
+
+          await step("provision", async ({ fail }) => {
+            fail(new ProvisionError("provision failed"));
+          });
+        },
+      });
+
+      const result = await awaitStartSync(wf.startSync({}));
+
+      expect(result.error).toBeInstanceOf(ProvisionError);
+      expect(result.error?.message).toBe("provision failed");
+
+      await wf.stop();
+    });
+
+    test("resume then fail again keeps registered instanceof", async () => {
+      const redis = createRedis();
+
+      class FlakyError extends Error {}
+      let attempts = 0;
+
+      const wf = defineWorkflow({
+        name: `sync-resume-fail-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        retentionTTL: 60_000,
+        errors: [FlakyError],
+        handler: async ({ step }) => {
+          await step("once", async ({ fail }) => {
+            attempts++;
+
+            if (attempts === 1) {
+              fail(new FlakyError("first"));
+            }
+
+            fail(new FlakyError("second"));
+          });
+        },
+      });
+
+      const { executionId } = await wf.start({});
+      await waitStatus(wf, executionId, "failed");
+
+      await wf.resume(executionId);
+
+      const result = await awaitStartSync(wf.startSync({}, { executionId }));
+
+      expect(result.error).toBeInstanceOf(FlakyError);
+      expect(result.error?.message).toBe("second");
+      expect(attempts).toBe(2);
 
       await wf.stop();
     });
@@ -5247,6 +5428,376 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
       expect(reads).toBe(1);
 
       await wf.stop();
+    });
+  });
+
+  describe("durable error identity adversarial", () => {
+    test("fail() unregistered under error mode stays non-retryable with retries", async () => {
+      const redis = createRedis();
+      let attempts = 0;
+      let hooked: Error | undefined;
+
+      class UnlistedFailError extends Error {}
+
+      const wf = defineWorkflow({
+        name: `adv-fail-noretry-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 2,
+        unregisteredErrors: "error",
+        hooks: {
+          onError: ({ error }) => {
+            hooked = error;
+          },
+          onRetry: () => {
+            throw new Error("should not retry fail()");
+          },
+        },
+        handler: async ({ step }) => {
+          await step("boom", async ({ fail }) => {
+            attempts++;
+            fail(new UnlistedFailError("no retry"));
+          });
+        },
+      });
+
+      const result = await awaitStartSync(wf.startSync({}));
+
+      expect(attempts).toBe(1);
+      expect(hooked).toBeInstanceOf(UnregisteredWorkflowError);
+      expect(result.error).toBeInstanceOf(UnregisteredWorkflowError);
+
+      await wf.stop();
+    });
+
+    test("warn once for many failures of same unregistered class", async () => {
+      const redis = createRedis();
+      const warns: string[] = [];
+      const warnSpy = spyOn(console, "warn").mockImplementation(
+        (message: string) => {
+          warns.push(message);
+        },
+      );
+
+      class RepeatError extends Error {}
+
+      const wf = defineWorkflow({
+        name: `adv-warn-once-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("boom", async ({ fail }) => {
+            fail(new RepeatError("again"));
+          });
+        },
+      });
+
+      await awaitStartSync(wf.startSync({}));
+      await awaitStartSync(wf.startSync({}));
+      await awaitStartSync(wf.startSync({}));
+
+      const related = warns.filter((message) =>
+        message.includes("RepeatError"),
+      );
+
+      expect(related).toHaveLength(1);
+
+      warnSpy.mockRestore();
+      await wf.stop();
+    });
+
+    test("warn once isolation across separate workflow instances", async () => {
+      const redis = createRedis();
+      const warns: string[] = [];
+      const warnSpy = spyOn(console, "warn").mockImplementation(
+        (message: string) => {
+          warns.push(message);
+        },
+      );
+
+      class SharedNameError extends Error {}
+
+      const wfA = defineWorkflow({
+        name: `adv-warn-a-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("boom", async ({ fail }) => {
+            fail(new SharedNameError("a"));
+          });
+        },
+      });
+
+      const wfB = defineWorkflow({
+        name: `adv-warn-b-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        handler: async ({ step }) => {
+          await step("boom", async ({ fail }) => {
+            fail(new SharedNameError("b"));
+          });
+        },
+      });
+
+      await awaitStartSync(wfA.startSync({}));
+      await awaitStartSync(wfB.startSync({}));
+
+      const related = warns.filter((message) =>
+        message.includes("SharedNameError"),
+      );
+
+      expect(related).toHaveLength(2);
+
+      warnSpy.mockRestore();
+      await wfA.stop();
+      await wfB.stop();
+    });
+
+    test("get().error is string while startSync.error is Error instance", async () => {
+      const redis = createRedis();
+
+      class TypedFailError extends Error {}
+
+      const wf = defineWorkflow({
+        name: `adv-get-str-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        errors: [TypedFailError],
+        handler: async ({ step }) => {
+          await step("boom", async ({ fail }) => {
+            fail(new TypedFailError("typed boom"));
+          });
+        },
+      });
+
+      const result = await awaitStartSync(wf.startSync({}));
+      const execution = await wf.get(result.executionId);
+
+      expect(typeof execution.error).toBe("string");
+      expect(execution.error).toBe("typed boom");
+      expect(result.error).toBeInstanceOf(TypedFailError);
+      expect(result.error?.message).toBe("typed boom");
+
+      await wf.stop();
+    });
+
+    test("onError gets live unregistered instance before registry", async () => {
+      const redis = createRedis();
+
+      class LiveOnlyError extends Error {}
+      let hooked: Error | undefined;
+
+      const wf = defineWorkflow({
+        name: `adv-onerror-live-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        hooks: {
+          onError: ({ error }) => {
+            hooked = error;
+          },
+        },
+        handler: async ({ step }) => {
+          await step("boom", async ({ fail }) => {
+            fail(new LiveOnlyError("live"));
+          });
+        },
+      });
+
+      const result = await awaitStartSync(wf.startSync({}));
+
+      expect(hooked).toBeInstanceOf(LiveOnlyError);
+      expect(result.error).not.toBeInstanceOf(LiveOnlyError);
+      expect(result.error?.name).toBe("LiveOnlyError");
+
+      await wf.stop();
+    });
+
+    test("plain Error and NonRetryableStepError need no errors listing", async () => {
+      const redis = createRedis();
+
+      const plain = defineWorkflow({
+        name: `adv-plain-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        unregisteredErrors: "error",
+        handler: async ({ step }) => {
+          await step("boom", async () => {
+            throw new Error("plain");
+          });
+        },
+      });
+
+      const nonRetry = defineWorkflow({
+        name: `adv-nr-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        unregisteredErrors: "error",
+        handler: async ({ step }) => {
+          await step("boom", async () => {
+            throw new NonRetryableStepError("nr");
+          });
+        },
+      });
+
+      const plainResult = await awaitStartSync(plain.startSync({}));
+      const nrResult = await awaitStartSync(nonRetry.startSync({}));
+
+      expect(plainResult.error).toBeInstanceOf(Error);
+      expect(plainResult.error).not.toBeInstanceOf(UnregisteredWorkflowError);
+      expect(plainResult.error?.message).toBe("plain");
+      expect(nrResult.error).toBeInstanceOf(NonRetryableStepError);
+      expect(nrResult.error?.message).toBe("nr");
+
+      await plain.stop();
+      await nonRetry.stop();
+    });
+
+    test("error-mode startSync throws when reviving unknown name from history", async () => {
+      const redis = createRedis();
+      const name = `adv-revive-throw-${crypto.randomUUID()}`;
+
+      class GhostError extends Error {}
+
+      const writer = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retries: 0,
+        unregisteredErrors: "warn",
+        handler: async ({ step }) => {
+          await step("boom", async ({ fail }) => {
+            fail(new GhostError("ghost"));
+          });
+        },
+      });
+
+      const written = await awaitStartSync(
+        writer.startSync({}, { executionId: "ghost-1" }),
+      );
+
+      expect(written.status).toBe("failed");
+      await writer.stop();
+
+      const reader = defineWorkflow({
+        name,
+        redis,
+        ...fast,
+        retries: 0,
+        unregisteredErrors: "error",
+        handler: async ({ step }) => {
+          await step("boom", async ({ fail }) => {
+            fail(new GhostError("ghost"));
+          });
+        },
+      });
+
+      let thrown: unknown;
+
+      try {
+        await reader.startSync({}, { executionId: "ghost-1" });
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeInstanceOf(UnregisteredWorkflowError);
+      expect((thrown as Error).message).toContain("GhostError");
+
+      await reader.stop();
+    });
+
+    test("cancelled startSync does not revive a false Error", async () => {
+      const redis = createRedis();
+      const { state, handler } = blockingStep();
+
+      class NeverError extends Error {}
+
+      const wf = defineWorkflow({
+        name: `adv-cancel-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        errors: [NeverError],
+        handler,
+      });
+
+      const pending = wf.startSync({}, { executionId: "cancel-me" });
+
+      await waitFor(() => state.entered);
+      await wf.cancel("cancel-me");
+      state.released = true;
+
+      const result = await awaitStartSync(pending);
+
+      expect(result.status).toBe("cancelled");
+      expect(result.error).toBeNull();
+      expect(result.result).toBeNull();
+
+      await wf.stop();
+    });
+
+    test("fail() registered and throw registered produce same durable name", async () => {
+      const redis = createRedis();
+
+      class SameError extends Error {}
+
+      const viaFail = defineWorkflow({
+        name: `adv-same-fail-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        errors: [SameError],
+        handler: async ({ step }) => {
+          await step("boom", async ({ fail }) => {
+            fail(new SameError("via-fail"));
+          });
+        },
+      });
+
+      const viaThrow = defineWorkflow({
+        name: `adv-same-throw-${crypto.randomUUID()}`,
+        redis,
+        ...fast,
+        retries: 0,
+        errors: [SameError],
+        handler: async ({ step }) => {
+          await step("boom", async () => {
+            throw new SameError("via-throw");
+          });
+        },
+      });
+
+      const failResult = await awaitStartSync(viaFail.startSync({}));
+      const throwResult = await awaitStartSync(viaThrow.startSync({}));
+
+      const failEvent = (
+        await new WorkflowStore(redis, viaFail.name).loadHistory(
+          failResult.executionId,
+        )
+      )
+        .map((raw) => JSON.parse(raw) as { type: string; errorName?: string })
+        .find((event) => event.type === "StepFailed");
+
+      const throwEvent = (
+        await new WorkflowStore(redis, viaThrow.name).loadHistory(
+          throwResult.executionId,
+        )
+      )
+        .map((raw) => JSON.parse(raw) as { type: string; errorName?: string })
+        .find((event) => event.type === "StepFailed");
+
+      expect(failEvent?.errorName).toBe("SameError");
+      expect(throwEvent?.errorName).toBe("SameError");
+      expect(failResult.error).toBeInstanceOf(SameError);
+      expect(throwResult.error).toBeInstanceOf(SameError);
+
+      await viaFail.stop();
+      await viaThrow.stop();
     });
   });
 });
