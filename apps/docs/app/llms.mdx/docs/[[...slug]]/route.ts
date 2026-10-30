@@ -10,7 +10,9 @@ export async function GET(_req: Request, { params }: RouteContext<'/llms.mdx/doc
 
   return new Response(await getLLMText(page), {
     headers: {
-      'Content-Type': 'text/markdown',
+      "Content-Type": "text/markdown",
+      "Cache-Control":
+        "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800",
     },
   });
 }
