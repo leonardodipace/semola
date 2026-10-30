@@ -13,8 +13,6 @@ const ogCacheControl =
 /** @type {import('next').NextConfig} */
 const config = {
   reactStrictMode: true,
-  // Worker/HTML responses — _headers does not apply here. Docs are SSG (redeploy to update).
-  // Later matching rules win for the same header key (Next.js headers override behavior).
   async headers() {
     return [
       {
