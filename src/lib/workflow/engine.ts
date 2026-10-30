@@ -4,6 +4,7 @@ import { NonRetryableStepError, Paused, WorkflowStoreError } from "./errors.js";
 import {
   createErrorRegistry,
   resolveUnregisteredError,
+  toError,
   toPersistedFailure,
 } from "./failure.js";
 import {
@@ -360,7 +361,7 @@ const advance = async <TInput, TResult>(
   if (handlerError) {
     const failure = toPersistedFailure(
       resolveUnregisteredError(
-        handlerError,
+        toError(handlerError),
         input.errorRegistry,
         input.options.unregisteredErrors ?? "warn",
         input.unregisteredWarnings,
@@ -828,10 +829,11 @@ export class WorkflowEngine<TInput, TResult> {
 
   private async handleStepFailure(input: HandleStepFailureInput<TInput>) {
     const { executionId, stepId, stepName, attempt, run } = input;
+    const liveError = toError(input.stepError);
     // Before unregistered replace: WeakSet / instanceof would miss the copy.
-    const retryable = !isNonRetryableStepError(input.stepError);
+    const retryable = !isNonRetryableStepError(liveError);
     const stepError = resolveUnregisteredError(
-      input.stepError,
+      liveError,
       this.errorRegistry,
       this.options.unregisteredErrors ?? "warn",
       this.unregisteredWarnings,

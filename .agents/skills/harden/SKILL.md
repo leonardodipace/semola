@@ -50,7 +50,7 @@ Launch one `Task` subagent (`generalPurpose`, `run_in_background: false`).
 - May read: issue/spec, docs for the feature, 2-3 existing test files for **style only**.
 - Write many adversarial tests (target ≥35 unless user gives another number).
 - Add cases to existing test files for the feature - do **not** create dedicated `*-adversarial.test.ts` files.
-- For Redis-backed modules, use real Redis (`SEMOLA_REDIS_URL` / CI service), not a mock client.
+- For Redis-backed modules, use real Redis (`SEMOLA_REDIS_URL` / CI service), not a mock client. Guard the suite with `describe.skipIf(!SEMOLA_REDIS_URL)`.
 - Do **not** fix implementation when tests fail.
 
 **Subagent prompt must include:**
@@ -79,7 +79,7 @@ Add tests in existing files only:
 Run: bun test [paths]
 
 Add at least N tests. Adversarial edge cases, migrations, error messages, ordering.
-Redis modules: real `SEMOLA_REDIS_URL`, no mock Redis.
+Redis modules: real `SEMOLA_REDIS_URL`, no mock Redis. Guard the suite with `describe.skipIf(!SEMOLA_REDIS_URL)`.
 
 Do NOT fix implementation. Report all failures.
 

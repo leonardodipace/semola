@@ -10,6 +10,14 @@ import type {
   WorkflowErrorConstructor,
 } from "./types.js";
 
+export const toError = (value: unknown) => {
+  if (value instanceof Error) return value;
+
+  if (typeof value === "string") return new Error(value);
+
+  return new Error("non-Error value thrown");
+};
+
 export const toPersistedFailure = (error: Error): PersistedFailure => ({
   message: error.message,
   name: error.constructor.name || error.name || "Error",

@@ -8,6 +8,7 @@ import {
   createErrorRegistry,
   resolveUnregisteredError,
   reviveFailure,
+  toError,
   toPersistedFailure,
 } from "./failure.js";
 
@@ -27,6 +28,15 @@ describe("workflow failure revive", () => {
       warns.push(message);
     });
   };
+
+  test("toError keeps Error instances and wraps strings", () => {
+    const error = new CardDeclinedError("declined");
+
+    expect(toError(error)).toBe(error);
+    expect(toError("boom")).toBeInstanceOf(Error);
+    expect(toError("boom").message).toBe("boom");
+    expect(toError(42).message).toBe("non-Error value thrown");
+  });
 
   test("toPersistedFailure uses constructor name", () => {
     expect(toPersistedFailure(new CardDeclinedError("declined"))).toEqual({
