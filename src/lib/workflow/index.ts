@@ -367,11 +367,13 @@ export const defineWorkflow = <TInput, TResult = void>(
       }
 
       if (meta.status === "failed") {
-        const message =
-          meta.originalError !== undefined
-            ? meta.originalError
-            : (meta.error ?? "workflow failed");
-        const name = meta.originalErrorName || meta.errorName || "Error";
+        let message = meta.error ?? "workflow failed";
+        let name = meta.errorName || "Error";
+
+        if (meta.originalError !== undefined) {
+          message = meta.originalError;
+          name = meta.originalErrorName || "Error";
+        }
 
         return {
           executionId,

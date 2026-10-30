@@ -149,15 +149,16 @@ describe("workflow failure revive", () => {
     expect(warns).toHaveLength(1);
   });
 
-  test("reviveFailure throws for unknown name when mode is error", () => {
-    expect(() =>
-      reviveFailure(
-        { message: "declined", name: "CardDeclinedError" },
-        createErrorRegistry(),
-        "error",
-        new Set(),
-      ),
-    ).toThrow(UnregisteredWorkflowError);
+  test("reviveFailure returns UnregisteredWorkflowError for unknown name when mode is error", () => {
+    const revived = reviveFailure(
+      { message: "declined", name: "CardDeclinedError" },
+      createErrorRegistry(),
+      "error",
+      new Set(),
+    );
+
+    expect(revived).toBeInstanceOf(UnregisteredWorkflowError);
+    expect(revived.message).toContain("CardDeclinedError");
   });
 
   describe("adversarial durable error identity", () => {
@@ -295,11 +296,11 @@ describe("workflow failure revive", () => {
       ).toBe(long);
     });
 
-    test("reviveFailure rebuilds registered TypeError", () => {
+    test("reviveFailure rebuilds built-in TypeError without listing", () => {
       const revived = reviveFailure(
         { message: "typed", name: "TypeError" },
-        createErrorRegistry([TypeError]),
-        "warn",
+        createErrorRegistry(),
+        "error",
         new Set(),
       );
 
@@ -307,12 +308,25 @@ describe("workflow failure revive", () => {
       expect(revived.message).toBe("typed");
     });
 
+    test("resolveUnregisteredError allows built-in TypeError without listing", () => {
+      captureWarn();
+      const resolved = resolveUnregisteredError(
+        new TypeError("bad type"),
+        createErrorRegistry(),
+        "error",
+        new Set(),
+      );
+
+      expect(resolved).toBeInstanceOf(TypeError);
+      expect(warns).toHaveLength(0);
+    });
+
     test("reviveFailure falls back for AggregateError name (not message-ctor shaped)", () => {
       captureWarn();
       const revived = reviveFailure(
         { message: "agg", name: "AggregateError" },
         createErrorRegistry(),
-        "warn",
+        "error",
         new Set(),
       );
 
@@ -320,7 +334,7 @@ describe("workflow failure revive", () => {
       expect(revived).not.toBeInstanceOf(AggregateError);
       expect(revived.message).toBe("agg");
       expect(revived.name).toBe("AggregateError");
-      expect(warns).toHaveLength(1);
+      expect(warns).toHaveLength(0);
     });
 
     test("reviveFailure warns once per unknown name with shared set", () => {

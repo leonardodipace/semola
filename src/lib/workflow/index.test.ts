@@ -5659,9 +5659,9 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
       await nonRetry.stop();
     });
 
-    test("error-mode startSync throws when reviving unknown name from history", async () => {
+    test("error-mode startSync returns UnregisteredWorkflowError for unknown revived name", async () => {
       const redis = createRedis();
-      const name = `adv-revive-throw-${crypto.randomUUID()}`;
+      const name = `adv-revive-unreg-${crypto.randomUUID()}`;
 
       class GhostError extends Error {}
 
@@ -5698,16 +5698,13 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
         },
       });
 
-      let thrown: unknown;
+      const result = await awaitStartSync(
+        reader.startSync({}, { executionId: "ghost-1" }),
+      );
 
-      try {
-        await reader.startSync({}, { executionId: "ghost-1" });
-      } catch (error) {
-        thrown = error;
-      }
-
-      expect(thrown).toBeInstanceOf(UnregisteredWorkflowError);
-      expect((thrown as Error).message).toContain("GhostError");
+      expect(result.status).toBe("failed");
+      expect(result.error).toBeInstanceOf(UnregisteredWorkflowError);
+      expect(result.error?.message).toContain("GhostError");
 
       await reader.stop();
     });

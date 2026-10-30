@@ -274,7 +274,7 @@ if (result.error instanceof CardDeclinedError) {
 }
 ```
 
-If a subclass is thrown or `fail()`'d without listing it on `errors`, Semola notices on the live failure path and again when `startSync` revives. Default `unregisteredErrors: "warn"` logs once per class name. Set `unregisteredErrors: "error"` to replace that step failure with `UnregisteredWorkflowError` (and to throw from `startSync` when reviving an unknown name). Plain `Error` and `NonRetryableStepError` do not need listing.
+If a subclass is thrown or `fail()`'d without listing it on `errors`, Semola notices on the live failure path and again when `startSync` revives. Default `unregisteredErrors: "warn"` logs once per class name. Set `unregisteredErrors: "error"` to replace that step failure (and unknown revived names on `startSync`) with `UnregisteredWorkflowError` on the result — `startSync` still does not throw. Plain `Error`, built-in subclasses (`TypeError`, …), and platform classes do not need listing.
 
 ### Observe retries and completion
 
@@ -365,8 +365,8 @@ await onboard.stop();
 - **`handler`** (required)
 - **`retries`** - step retries before workflow fails (default: 3; `0` = fail on first error)
 - **`retryBackoff`** - `{ baseDelay, multiplier, maxDelay }` (defaults: 1000 / 2x / 30000)
-- **`errors`** - `Error` subclasses to revive from durable history for `instanceof` (matched by constructor name). Platform classes (`NonRetryableStepError`, `SerializationError`, `UnregisteredWorkflowError`) are always included.
-- **`unregisteredErrors`** - `"warn"` (default) or `"error"` when a thrown/`fail()` subclass is missing from `errors`, or when `startSync` revives an unknown name.
+- **`errors`** - `Error` subclasses to revive from durable history for `instanceof` (matched by constructor name). Built-ins (`TypeError`, `RangeError`, …) and platform classes (`NonRetryableStepError`, `SerializationError`, `UnregisteredWorkflowError`) are always included.
+- **`unregisteredErrors`** - `"warn"` (default) or `"error"` when a thrown/`fail()` subclass is missing from `errors`, or when `startSync` revives an unknown name (replaced on the returned `error`, not thrown).
 - **`hooks`** - `onStart`, `onRetry`, `onError`, `onComplete`, `onCancel` (see [Hooks](#hooks))
 - **`lockTTL`** - execution lease TTL in ms (default: 300000); also how long a crashed replica's execution waits before another replica picks it up, and the grace period on capacity slots. The lease and the slot are renewed every 40% of `lockTTL` while a step runs. When a run stops to wait (`sleep`, retry backoff) the slot is kept until the wait ends plus `lockTTL`, with no process refreshing it; whoever runs the execution next renews it. If every replica is gone, the slot frees itself `lockTTL` after the execution was due. Terminal executions free their slot in the same write that records the final status.
 - **`retentionTTL`** - how long terminal executions (`completed` / `failed` / `cancelled`) stay in Redis, in ms (default: 86400000, 24h). `Infinity` keeps them forever. Any other value must be a non-negative number. `0` unlinks immediately after terminal. Pending, running, and compensating keys are never expired. Failed executions can be `resume`d only while they still exist. Retention is applied when the execution becomes terminal, using the replica's settings at that moment; changing `retentionTTL` later does not touch executions that are already terminal.
@@ -377,7 +377,7 @@ await onboard.stop();
 
 `start(input, { executionId?, partitionKey? })` - `partitionKey` overrides `partitionBy`. Custom `executionId` must be non-empty and must not contain `:`. Empty `partitionKey` throws.
 
-`startSync(input, { executionId?, partitionKey?, timeoutMs?, cancelOnTimeout? })` - same start options, then wait for a terminal status (or `timeout`). Existing `executionId` attaches instead of throwing (prior input/partition win). `timeoutMs` must be a non-negative finite number. Failure returns an `Error` on `error` (revived via `errors` when registered); does not throw. Unknown revived names warn or throw per `unregisteredErrors`.
+`startSync(input, { executionId?, partitionKey?, timeoutMs?, cancelOnTimeout? })` - same start options, then wait for a terminal status (or `timeout`). Existing `executionId` attaches instead of throwing (prior input/partition win). `timeoutMs` must be a non-negative finite number. Failure returns an `Error` on `error` (revived via `errors` when registered); does not throw. Unknown revived names warn or become `UnregisteredWorkflowError` on that field per `unregisteredErrors`.
 
 Without `partitionBy`, `partitionKey` is stored on meta but capacity stays on the global `*` pool. Empty keys throw. The resolved key is stored on execution meta so `resume` keeps the original partition.
 

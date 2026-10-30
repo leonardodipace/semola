@@ -23,12 +23,22 @@ export const toPersistedFailure = (error: Error): PersistedFailure => ({
   name: error.constructor.name || error.name || "Error",
 });
 
+const BUILTIN_ERROR_CTORS: WorkflowErrorConstructor[] = [
+  TypeError,
+  RangeError,
+  ReferenceError,
+  SyntaxError,
+  URIError,
+  EvalError,
+];
+
 export const createErrorRegistry = (
   errors: WorkflowErrorConstructor[] = [],
 ) => {
   const byName = new Map<string, WorkflowErrorConstructor>();
 
   for (const Ctor of [
+    ...BUILTIN_ERROR_CTORS,
     NonRetryableStepError,
     SerializationError,
     UnregisteredWorkflowError,
@@ -45,7 +55,13 @@ export const createErrorRegistry = (
 const isKnownFailureName = (
   name: string,
   registry: Map<string, WorkflowErrorConstructor>,
-) => name === "Error" || registry.has(name);
+) => {
+  if (name === "Error") return true;
+  if (name === "AggregateError") return true;
+  if (registry.has(name)) return true;
+
+  return false;
+};
 
 const unregisteredMessage = (name: string) =>
   `Workflow error class "${name}" is not listed in defineWorkflow({ errors })`;
@@ -102,7 +118,7 @@ export const reviveFailure = (
 
   if (!isKnownFailureName(name, registry)) {
     if (mode === "error") {
-      throw new UnregisteredWorkflowError(unregisteredMessage(name));
+      return new UnregisteredWorkflowError(unregisteredMessage(name));
     }
 
     warnUnregistered(name, warned);
