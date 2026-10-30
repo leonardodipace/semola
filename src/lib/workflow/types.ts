@@ -117,6 +117,15 @@ export type WorkflowRetryBackoff = {
   maxDelay?: number;
 };
 
+export type PersistedFailure = {
+  message: string;
+  name: string;
+};
+
+export type WorkflowErrorConstructor = new (message: string) => Error;
+
+export type UnregisteredErrorsMode = "warn" | "error";
+
 export type WorkflowOptions<TInput, TResult> = {
   name: string;
   redis: Bun.RedisClient;
@@ -125,6 +134,8 @@ export type WorkflowOptions<TInput, TResult> = {
   ) => TResult | Promise<TResult>;
   retries?: number;
   retryBackoff?: WorkflowRetryBackoff;
+  errors?: WorkflowErrorConstructor[];
+  unregisteredErrors?: UnregisteredErrorsMode;
   hooks?: WorkflowHooks<TInput, TResult>;
   lockTTL?: number;
   retentionTTL?: number;
@@ -192,6 +203,7 @@ export type WorkflowMeta = {
   input: string;
   result: string;
   error: string;
+  errorName?: string;
   createdAt: string;
   updatedAt: string;
   completedAt: string;
@@ -203,6 +215,7 @@ export type WorkflowMeta = {
   // The forward failure that started an unwind, kept when `error` is later
   // replaced by an undo's error. Absent when no failure started an unwind.
   originalError?: string;
+  originalErrorName?: string;
   // Set when an unwind starts; resume rejects the execution from then on.
   unwoundAt?: string;
 };
@@ -247,6 +260,7 @@ export type HistoryEvent =
       stepId: string;
       stepName: string;
       error: string;
+      errorName?: string;
       retryable: boolean;
       attempt: number;
       timestamp: number;
@@ -274,6 +288,7 @@ export type HistoryEvent =
   | {
       type: "WorkflowFailed";
       error: string;
+      errorName?: string;
       timestamp: number;
     }
   | {
@@ -284,6 +299,7 @@ export type HistoryEvent =
       type: "CompensationStarted";
       reason: "failed" | "cancelled";
       error: string | null;
+      errorName?: string | null;
       stepIds: string[];
       timestamp: number;
     };
@@ -305,6 +321,7 @@ export type StepState =
       status: "failed";
       stepName: string;
       error: string;
+      errorName?: string;
       retryable: boolean;
       attempt: number;
       failedAt: number;
@@ -317,6 +334,7 @@ export type TimerState =
 export type CompensationPhase = {
   reason: "failed" | "cancelled";
   error: string | null;
+  errorName?: string | null;
   stepIds: string[];
 };
 
@@ -349,7 +367,12 @@ export type WorkflowDecision =
   | { type: "record"; events: HistoryEvent[] }
   | { type: "waiting"; until: number }
   | { type: "complete"; result: string; events: HistoryEvent[] }
-  | { type: "fail"; error: string; events: HistoryEvent[] }
+  | {
+      type: "fail";
+      error: string;
+      errorName: string;
+      events: HistoryEvent[];
+    }
   | { type: "cancel"; events: HistoryEvent[] };
 
 export type TerminalDecision = Extract<
@@ -393,6 +416,8 @@ export type AdvanceInput<TInput, TResult> = {
   retries: number;
   backoff: (attempt: number) => number;
   cancelRequested: boolean;
+  errorRegistry: Map<string, WorkflowErrorConstructor>;
+  unregisteredWarnings: Set<string>;
 };
 
 export type ExecuteStepInput<TInput = unknown> = {
@@ -409,7 +434,7 @@ export type HandleStepFailureInput<TInput = unknown> = {
   stepId: string;
   stepName: string;
   attempt: number;
-  stepError: Error;
+  stepError: unknown;
   run: LeaseRun<TInput>;
 };
 
@@ -426,6 +451,7 @@ export type FinishCompensationInput<TInput = unknown> = {
   executionId: string;
   reason: "failed" | "cancelled";
   error: string | null;
+  errorName?: string | null;
   run: LeaseRun<TInput>;
 };
 
@@ -448,6 +474,7 @@ export type FailExecutionInput = {
   executionId: string;
   events: HistoryEvent[];
   error: string;
+  errorName: string;
   run: LeaseRun;
 };
 

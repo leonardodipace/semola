@@ -69,6 +69,7 @@ export const applyHistoryEvent = (view: HistoryView, event: HistoryEvent) => {
       status: "failed",
       stepName: event.stepName,
       error: event.error,
+      errorName: event.errorName,
       retryable: event.retryable,
       attempt: event.attempt,
       failedAt: event.timestamp,
@@ -114,6 +115,7 @@ export const applyHistoryEvent = (view: HistoryView, event: HistoryEvent) => {
     view.compensation = {
       reason: event.reason,
       error: event.error,
+      errorName: event.errorName,
       stepIds: event.stepIds,
     };
   }
