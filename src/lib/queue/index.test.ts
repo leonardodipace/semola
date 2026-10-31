@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Queue } from "./index.js";
 import { QueueStore } from "./store.js";
-import type { ErrorContext, ParseErrorContext, RetryContext } from "./types.js";
+import type {
+  ErrorContext,
+  ParseErrorContext,
+  RedisClient,
+  RetryContext,
+} from "./types.js";
 
 type ZMember = { score: number; member: string };
 
@@ -176,7 +181,7 @@ class MockRedisClient {
 }
 
 const createMockRedis = () => {
-  return new MockRedisClient() as MockRedisClient & Bun.RedisClient;
+  return new MockRedisClient() as MockRedisClient & RedisClient;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

@@ -30,6 +30,7 @@ import {
   TRIM_IF_MEMBER,
   WorkflowStore,
 } from "./store.js";
+import type { RedisClient } from "./types.js";
 
 const sleep = (ms: number) => Bun.sleep(ms);
 
@@ -119,7 +120,7 @@ const blockingStep = () => {
   return { state, handler };
 };
 
-const failOnce = (name: string, redis: Bun.RedisClient) => {
+const failOnce = (name: string, redis: RedisClient) => {
   let attempts = 0;
 
   return defineWorkflow({

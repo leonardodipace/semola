@@ -1,3 +1,14 @@
+export type RedisClient = {
+  send: (command: string, args: string[]) => Promise<unknown>;
+  lrange: (key: string, start: number, stop: number) => Promise<string[]>;
+  hgetall: (key: string) => Promise<Record<string, string> | null | undefined>;
+  scan: (
+    cursor: string | number,
+    ...args: (string | number)[]
+  ) => Promise<[string, string[]]>;
+  del: (key: string) => Promise<number>;
+};
+
 export type WorkflowStatus =
   | "pending"
   | "running"
@@ -119,7 +130,7 @@ export type WorkflowRetryBackoff = {
 
 export type WorkflowOptions<TInput, TResult> = {
   name: string;
-  redis: Bun.RedisClient;
+  redis: RedisClient;
   handler: (
     context: WorkflowHandlerContext<TInput>,
   ) => TResult | Promise<TResult>;

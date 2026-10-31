@@ -5,7 +5,7 @@ description: Semola typed Redis cache with TTL and optional key prefixes
 
 Store and load typed values in Redis. Values are JSON by default.
 
-Needs a `Bun.RedisClient`.
+Pass a Redis client.
 
 ## Import
 
@@ -117,7 +117,7 @@ const blobs = new Cache<Uint8Array>({
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `redis` | required | `Bun.RedisClient` |
+| `redis` | required | Redis client |
 | `ttl` | none | ms, or `(key, value) => number`; invalid values throw |
 | `enabled` | `true` | Soft on/off switch |
 | `prefix` | - | Key prefix (`prefix:key`) |

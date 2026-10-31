@@ -7,7 +7,7 @@ Run work in the background with Redis. Jobs are JSON-serialized, claimed into an
 
 Delivery is at-least-once after reclaim. Handlers should be idempotent.
 
-Needs a `Bun.RedisClient` that supports `EVAL`.
+Pass a Redis client.
 
 ## Import
 
@@ -173,7 +173,7 @@ process.on("SIGINT", async () => {
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `name` | required | Redis key namespace |
-| `redis` | required | `Bun.RedisClient` |
+| `redis` | required | Redis client |
 | `handler` | required | `(data, signal?) => void \| Promise<void>` |
 | `retries` | `3` | Max attempts after the first failure |
 | `retryBackoff` | `baseDelay` 1s, `multiplier` 2, `maxDelay` 60s | Exponential backoff |

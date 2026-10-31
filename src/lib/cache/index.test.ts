@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Cache } from "./index.js";
+import type { RedisClient } from "./types.js";
 
 // Mock Redis client for testing
 class MockRedisClient {
@@ -62,7 +63,7 @@ class MockRedisClient {
 
 // Helper to create a properly typed mock redis client for testing
 const createMockRedis = () => {
-  return new MockRedisClient() as MockRedisClient & Bun.RedisClient;
+  return new MockRedisClient() as MockRedisClient & RedisClient;
 };
 
 describe("Cache", () => {

@@ -7,6 +7,7 @@ import type {
   CommitResult,
   HistoryEvent,
   LeaseInput,
+  RedisClient,
   ReleaseLeaseInput,
   WorkflowMeta,
   WorkflowStatus,
@@ -272,7 +273,7 @@ const metaEntries = (fields: Partial<WorkflowMeta>) => {
 
 export class WorkflowStore {
   public constructor(
-    private redis: Bun.RedisClient,
+    private redis: RedisClient,
     private name: string,
   ) {}
 
@@ -582,7 +583,9 @@ export class WorkflowStore {
       throw new WorkflowStoreError("Unable to trim terminal executions");
     }
 
-    for (const executionId of oldest ?? []) {
+    if (!Array.isArray(oldest)) return;
+
+    for (const executionId of oldest) {
       const id = String(executionId);
 
       const [trimError] = await mightThrow(

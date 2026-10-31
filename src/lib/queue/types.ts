@@ -1,3 +1,8 @@
+export type RedisClient = {
+  send: (command: string, args: string[]) => Promise<unknown>;
+  lpush: (key: string, ...values: string[]) => Promise<number>;
+};
+
 export type Job<T> = {
   id: string;
   data: T;
@@ -49,7 +54,7 @@ export type QueueRetryBackoff = {
 
 export type QueueOptions<T> = {
   name: string;
-  redis: Bun.RedisClient;
+  redis: RedisClient;
   handler: (data: T, signal?: AbortSignal) => void | Promise<void>;
   onSuccess?: (job: Job<T>) => void | Promise<void>;
   onRetry?: (context: RetryContext<T>) => void | Promise<void>;

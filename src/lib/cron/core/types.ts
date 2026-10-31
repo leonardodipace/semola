@@ -15,8 +15,16 @@ export type CronOSOptions = CronBaseOptions & {
   path: string;
 };
 
+export type RedisClient = {
+  set: (
+    key: string,
+    value: string,
+    ...args: (string | number)[]
+  ) => Promise<"OK" | string | null | undefined>;
+};
+
 export type CronDistributedOptions = CronOptions & {
-  redis: Bun.RedisClient;
+  redis: RedisClient;
   lockTTL?: number;
   replicaId?: string;
 };
