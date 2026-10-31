@@ -25,7 +25,7 @@ function PrincipleCard({
 }) {
   return (
     <Reveal delayMs={delayMs} className={className}>
-      <article className="home-card flex h-full flex-col overflow-hidden rounded-3xl">
+      <article className="home-card flex h-full flex-col overflow-hidden rounded-2xl">
         <div
           aria-hidden
           className="relative flex h-76 items-center overflow-hidden px-7 sm:h-64 sm:px-9"

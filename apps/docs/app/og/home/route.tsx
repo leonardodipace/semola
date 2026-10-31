@@ -13,8 +13,8 @@ export function GET() {
         width: "100%",
         height: "100%",
         padding: "64px",
-        background: "#1a1610",
-        color: "#f5efe4",
+        background: "#0f1420",
+        color: "#f4f1ea",
         fontFamily: "system-ui, sans-serif",
       }}
     >
@@ -24,7 +24,8 @@ export function GET() {
           alignItems: "center",
           gap: "20px",
           fontSize: 36,
-          fontWeight: 600,
+          fontWeight: 700,
+          letterSpacing: "-0.04em",
         }}
       >
         <div
@@ -32,7 +33,7 @@ export function GET() {
             width: 56,
             height: 56,
             borderRadius: 14,
-            background: "#c4a574",
+            background: "#c26a1a",
           }}
         />
         {appName}
@@ -41,18 +42,19 @@ export function GET() {
         <div
           style={{
             fontSize: 64,
-            fontWeight: 650,
-            lineHeight: 1.1,
+            fontWeight: 700,
+            lineHeight: 1.05,
             maxWidth: 980,
+            letterSpacing: "-0.03em",
           }}
         >
           {appTagline}
         </div>
-        <div style={{ fontSize: 28, color: "#c9bba6", maxWidth: 860 }}>
+        <div style={{ fontSize: 28, color: "#a8b0c0", maxWidth: 860 }}>
           {appOgLine}
         </div>
       </div>
-      <div style={{ fontSize: 24, color: "#a8967e" }}>
+      <div style={{ fontSize: 24, color: "#e8a84a" }}>
         semo.la · bun add semola
       </div>
     </div>,

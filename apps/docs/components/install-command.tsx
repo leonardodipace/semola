@@ -29,7 +29,7 @@ export function InstallCommand() {
     <button
       type="button"
       onClick={onCopy}
-      className="home-press home-secondary-btn home-ease inline-flex h-11 items-center gap-3 rounded-full px-5 font-mono text-[13px] transition-[background-color,transform]"
+      className="home-press home-secondary-btn home-ease inline-flex h-11 items-center gap-3 rounded-xl px-5 font-mono text-[13px] transition-[background-color,transform]"
       aria-label="Copy install command"
     >
       <span className="select-none text-fd-muted-foreground">$</span>
