@@ -5,7 +5,7 @@ description: Semola typed Redis cache with TTL and optional key prefixes
 
 Store and load typed values in Redis. Values are JSON by default.
 
-Pass a Bun Redis or ioredis client. Semola picks the adapter.
+Pass a Bun Redis or ioredis client. Semola calls Redis commands on it directly.
 
 ## Import
 

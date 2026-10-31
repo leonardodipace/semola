@@ -20,7 +20,7 @@ import { PubSub } from "semola/pubsub";
 
 This subscribes one handler, publishes a typed JSON message, then removes that handler.
 
-Pass Bun Redis or ioredis clients. Semola picks the adapter.
+Pass Bun Redis or ioredis clients. Semola adapts ioredis subscribe; Bun is used as-is.
 
 ```typescript
 type UserEvent = {

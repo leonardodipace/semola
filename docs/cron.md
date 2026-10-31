@@ -351,7 +351,7 @@ Disposing a `Cron` with `Symbol.dispose` stops it.
 | `name` | Job name (part of the Redis lock key) |
 | `schedule` | Alias, cron string, or builder result |
 | `handler` | Async or sync function |
-| `redis` | Bun Redis or ioredis client (Semola picks the adapter) |
+| `redis` | Bun Redis or ioredis client (commands called directly) |
 | `replicaId?` | Value stored when this replica acquires the lock |
 | `lockTTL?` | Lock expiry in ms (default `300000`) |
 

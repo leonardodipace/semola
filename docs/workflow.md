@@ -6,7 +6,7 @@ description: Semola durable workflows - multi-step Redis jobs with resumable ste
 Durable workflows on Redis. Event history, deterministic replay, inline steps, multi-replica leases, and crashed or stalled runs that any replica picks up once `lockTTL` passes.
 Workflows run multi-step processes that survive restarts. Each named `step` caches its result in Redis, so replay and reclaim skip work that already succeeded.
 
-Pass a Bun Redis or ioredis client. Semola picks the adapter. Workflow names must be unique in the process. Execution IDs must be unique per workflow name (Redis keys are `workflow:{name}:…`).
+Pass a Bun Redis or ioredis client. Semola calls Redis commands on it directly. Workflow names must be unique in the process. Execution IDs must be unique per workflow name (Redis keys are `workflow:{name}:…`).
 
 ## Import
 

@@ -1,21 +1,15 @@
 import { IoredisRedisAdapter } from "./ioredis.js";
 import type { IoredisClient, RedisClient, RedisPubSubInput } from "./types.js";
 
-const isIoredisClient = (client: RedisPubSubInput): client is IoredisClient => {
-  if ("send" in client && typeof client.send === "function") return false;
-  if (!("on" in client)) return false;
-  if (typeof client.on !== "function") return false;
-
-  return true;
-};
-
-/** Pubsub: Bun as-is; ioredis → {@link IoredisRedisAdapter}. */
+/** Pubsub: Bun / Bun-style as-is; ioredis → {@link IoredisRedisAdapter}. */
 export const resolveRedis = (client: RedisPubSubInput): RedisClient => {
   if (client instanceof IoredisRedisAdapter) return client;
+  if (client instanceof Bun.RedisClient) return client;
 
-  if (isIoredisClient(client)) {
-    return new IoredisRedisAdapter(client);
+  // Bun-style `subscribe(channel, listener)` has two parameters; ioredis uses rest channels only.
+  if (client.subscribe.length >= 2) {
+    return client as RedisClient;
   }
 
-  return client as RedisClient;
+  return new IoredisRedisAdapter(client as IoredisClient);
 };
