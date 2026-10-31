@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { RedisClient } from "../redis/types.js";
 import { PubSub } from "./index.js";
 
 type Handler = (message: string, channel: string) => void | Promise<void>;
@@ -141,7 +142,7 @@ class MockRedisClient {
 }
 
 const createMockRedis = () => {
-  return new MockRedisClient() as MockRedisClient & Bun.RedisClient;
+  return new MockRedisClient() as MockRedisClient & RedisClient;
 };
 
 describe("PubSub", () => {

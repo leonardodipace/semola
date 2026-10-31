@@ -1,3 +1,5 @@
+import type { RedisInput } from "../redis/types.js";
+
 export type Job<T> = {
   id: string;
   data: T;
@@ -49,7 +51,7 @@ export type QueueRetryBackoff = {
 
 export type QueueOptions<T> = {
   name: string;
-  redis: Bun.RedisClient;
+  redis: RedisInput;
   handler: (data: T, signal?: AbortSignal) => void | Promise<void>;
   onSuccess?: (job: Job<T>) => void | Promise<void>;
   onRetry?: (context: RetryContext<T>) => void | Promise<void>;

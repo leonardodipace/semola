@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mightThrow } from "../errors/index.js";
+import type { RedisCommands } from "../redis/types.js";
 import { WorkflowEngine } from "./engine.js";
 import {
   DuplicateWorkflowError,
@@ -119,7 +120,7 @@ const blockingStep = () => {
   return { state, handler };
 };
 
-const failOnce = (name: string, redis: Bun.RedisClient) => {
+const failOnce = (name: string, redis: RedisCommands) => {
   let attempts = 0;
 
   return defineWorkflow({
@@ -2002,13 +2003,13 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
 
         // The run finishes (or starts unwinding) on another replica right
         // before the cancel script executes.
-        const send = redis.send.bind(redis);
-        redis.send = async (command: string, args: string[]) => {
-          if (command === "EVAL" && args[0] === CANCEL_EXECUTION) {
+        const evalFn = redis.eval.bind(redis);
+        redis.eval = async (script, numkeys, ...keysAndArgs) => {
+          if (script === CANCEL_EXECUTION) {
             await redis.hset(metaKey(executionId), "status", status);
           }
 
-          return send(command, args);
+          return evalFn(script, numkeys, ...keysAndArgs);
         };
 
         const result = await wf.cancel(executionId);
@@ -2135,9 +2136,9 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
 
       // Another replica completes the execution right before the resume
       // script runs.
-      const send = redis.send.bind(redis);
-      redis.send = async (command: string, args: string[]) => {
-        if (command === "EVAL" && args[0] === RESUME_EXECUTION) {
+      const evalFn = redis.eval.bind(redis);
+      redis.eval = async (script, numkeys, ...keysAndArgs) => {
+        if (script === RESUME_EXECUTION) {
           await redis.hset(
             `workflow:${name}:meta:${executionId}`,
             "status",
@@ -2153,7 +2154,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
           );
         }
 
-        return send(command, args);
+        return evalFn(script, numkeys, ...keysAndArgs);
       };
 
       await expect(live.resume(executionId)).rejects.toMatchObject({
@@ -4113,16 +4114,16 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
 
       // The resume lands after trim picked the execution and before the
       // script that unlinks it.
-      const send = redis.send.bind(redis);
+      const evalFn = redis.eval.bind(redis);
       let resumed = false;
 
-      redis.send = async (command: string, args: string[]) => {
-        if (!resumed && command === "EVAL" && args[0] === TRIM_IF_MEMBER) {
+      redis.eval = async (script, numkeys, ...keysAndArgs) => {
+        if (!resumed && script === TRIM_IF_MEMBER) {
           resumed = true;
           await wf.resume(executionId);
         }
 
-        return send(command, args);
+        return evalFn(script, numkeys, ...keysAndArgs);
       };
 
       await new WorkflowStore(redis, name).trimTerminal(0);

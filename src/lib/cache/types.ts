@@ -1,5 +1,7 @@
+import type { RedisInput } from "../redis/types.js";
+
 export type CacheOptions<T> = {
-  redis: Bun.RedisClient;
+  redis: RedisInput;
   ttl?: number | ((key: string, value: T) => number);
   enabled?: boolean;
   prefix?: string;

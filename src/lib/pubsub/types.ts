@@ -1,7 +1,14 @@
+import type { RedisPubSubInput } from "../redis/types.js";
+
+export type ChannelHandler = (
+  message: string,
+  channel: string,
+) => void | Promise<void>;
+
 export type RedisPubSubOptions = {
   transport?: "redis";
-  subscriber: Bun.RedisClient;
-  publisher: Bun.RedisClient;
+  subscriber: RedisPubSubInput;
+  publisher: RedisPubSubInput;
   channel: string;
 };
 
@@ -12,14 +19,12 @@ export type MemoryPubSubOptions = {
 
 export type PubSubOptions = RedisPubSubOptions | MemoryPubSubOptions;
 
-export type ChannelHandler = (
-  message: string,
-  channel: string,
-) => void | Promise<void>;
-
 export type ChannelTransport = {
   publish: (channel: string, message: string) => Promise<number>;
-  subscribe: (channel: string, handler: ChannelHandler) => Promise<number>;
+  subscribe: (
+    channel: string,
+    handler: ChannelHandler,
+  ) => Promise<number | undefined>;
   unsubscribe: (channel: string, handler: ChannelHandler) => Promise<void>;
 };
 

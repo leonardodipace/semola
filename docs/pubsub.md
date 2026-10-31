@@ -7,7 +7,7 @@ Publish and subscribe to JSON messages on a channel, with TypeScript checking th
 
 Two transports:
 
-- **redis** (default) - needs **two** `Bun.RedisClient` connections (publisher and subscriber). Sharing one client for both is a common Redis footgun; Semola makes both explicit.
+- **redis** (default) - pass **two** Redis clients (publisher and subscriber). Sharing one client for both is a common Redis footgun; Semola makes both explicit.
 - **memory** - process-local hub for single-process apps and tests. Same `publish` / `subscribe` / `listen` API; swap to Redis later by changing options.
 
 ## Import
@@ -20,6 +20,8 @@ import { PubSub } from "semola/pubsub";
 
 This subscribes one handler, publishes a typed JSON message, then removes that handler.
 
+Pass Bun Redis or ioredis clients. Semola adapts ioredis subscribe; Bun is used as-is.
+
 ```typescript
 type UserEvent = {
   userId: string;
@@ -27,8 +29,8 @@ type UserEvent = {
 };
 
 const events = new PubSub<UserEvent>({
-  subscriber: redisSubscriber,
-  publisher: redisPublisher,
+  subscriber,
+  publisher,
   channel: "user-events",
 });
 
@@ -163,8 +165,8 @@ Or iterate without a signal: `for await (const message of events) { ... }`.
 | Option | Meaning |
 | --- | --- |
 | `transport` | `"redis"` (default) or `"memory"` |
-| `subscriber` | `Bun.RedisClient` used for subscribe (redis only) |
-| `publisher` | `Bun.RedisClient` used for publish (redis only) |
+| `subscriber` | Redis client used for subscribe (redis only) |
+| `publisher` | Redis client used for publish (redis only) |
 | `channel` | Channel name |
 
 ### Methods

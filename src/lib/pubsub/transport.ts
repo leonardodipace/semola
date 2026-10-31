@@ -1,4 +1,5 @@
 import { mightThrow } from "../errors/index.js";
+import type { RedisClient } from "../redis/types.js";
 import type { ChannelHandler, ChannelTransport } from "./types.js";
 
 const memorySubscriptions = new Map<string, Set<ChannelHandler>>();
@@ -47,8 +48,8 @@ export const memoryTransport: ChannelTransport = {
 };
 
 export const createRedisTransport = (
-  publisher: Bun.RedisClient,
-  subscriber: Bun.RedisClient,
+  publisher: RedisClient,
+  subscriber: RedisClient,
 ): ChannelTransport => {
   return {
     publish: (channel, message) => publisher.publish(channel, message),

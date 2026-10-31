@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { RedisClient } from "../redis/types.js";
 import { createRedisTransport, memoryTransport } from "./transport.js";
 
 type Handler = (message: string, channel: string) => void | Promise<void>;
@@ -231,7 +232,7 @@ describe("createRedisTransport unsubscribe", () => {
       async unsubscribe(channel: string, handler?: Handler) {
         calls.push({ channel, handler });
       },
-    } as unknown as Bun.RedisClient;
+    } as unknown as RedisClient;
 
     const transport = createRedisTransport(redis, redis);
     const handler: Handler = () => {};
@@ -244,7 +245,7 @@ describe("createRedisTransport unsubscribe", () => {
 
 describe("createRedisTransport", () => {
   test("forwards publish subscribe unsubscribe to redis clients", async () => {
-    const redis = new MockRedisClient() as MockRedisClient & Bun.RedisClient;
+    const redis = new MockRedisClient() as MockRedisClient & RedisClient;
     const transport = createRedisTransport(redis, redis);
     const received: string[] = [];
 

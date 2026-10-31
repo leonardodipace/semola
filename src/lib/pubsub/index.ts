@@ -1,5 +1,6 @@
 import { EventEmitter, on } from "node:events";
 import { mightThrow, mightThrowSync } from "../errors/index.js";
+import { resolveRedis } from "../redis/resolve.js";
 import {
   PublishError,
   SerializationError,
@@ -20,7 +21,10 @@ const resolveTransport = (options: PubSubOptions): ChannelTransport => {
     return memoryTransport;
   }
 
-  return createRedisTransport(options.publisher, options.subscriber);
+  return createRedisTransport(
+    resolveRedis(options.publisher),
+    resolveRedis(options.subscriber),
+  );
 };
 
 export class PubSub<T extends Record<string, unknown>> {
@@ -34,7 +38,7 @@ export class PubSub<T extends Record<string, unknown>> {
     readonly [null, unknown] | readonly [unknown, null]
   > | null = null;
   private subscribeInFlight: Promise<
-    readonly [null, number] | readonly [unknown, null]
+    readonly [null, number | undefined] | readonly [unknown, null]
   > | null = null;
 
   public constructor(options: PubSubOptions) {
@@ -259,7 +263,7 @@ export class PubSub<T extends Record<string, unknown>> {
       throw new SubscribeError(`Unable to subscribe to ${this.channel}`);
     }
 
-    if (!count) {
+    if (count === 0) {
       this.handlers.delete(handlerId);
       this.transportHandler = null;
 
@@ -327,3 +331,18 @@ export class PubSub<T extends Record<string, unknown>> {
     return this.handlers.size > 0 && this.isSubscribed;
   }
 }
+
+export {
+  PublishError,
+  SerializationError,
+  SubscribeError,
+  UnsubscribeError,
+} from "./errors.js";
+export type {
+  ChannelHandler,
+  ListenOptions,
+  MemoryPubSubOptions,
+  MessageHandler,
+  PubSubOptions,
+  RedisPubSubOptions,
+} from "./types.js";

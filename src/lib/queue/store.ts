@@ -1,4 +1,5 @@
 import { mightThrow, mightThrowSync } from "../errors/index.js";
+import type { RedisInput } from "../redis/types.js";
 import type { JobState } from "./types.js";
 
 const CLAIM_FROM_JOBS =
@@ -21,7 +22,7 @@ const SCHEDULE_RETRY = `${FENCE}4]) then return 0 end redis.call('ZREM',KEYS[1],
 const RELEASE = `${FENCE}2]) then return 0 end redis.call('ZREM',KEYS[1],ARGV[1]) redis.call('LPUSH',KEYS[2],ARGV[1]) return 1`;
 export class QueueStore {
   public constructor(
-    private redis: Bun.RedisClient,
+    private redis: RedisInput,
     private name: string,
     private visibilityTimeoutMs: number,
   ) {}
@@ -38,9 +39,7 @@ export class QueueStore {
   }
 
   private eval(script: string, keys: string[], argv: string[]) {
-    return mightThrow(
-      this.redis.send("EVAL", [script, String(keys.length), ...keys, ...argv]),
-    );
+    return mightThrow(this.redis.eval(script, keys.length, ...keys, ...argv));
   }
 
   public async enqueue(serialized: string) {

@@ -1,4 +1,5 @@
 import { mightThrow } from "../errors/index.js";
+import type { RedisInput } from "../redis/types.js";
 import { WorkflowEngine } from "./engine.js";
 import {
   DuplicateWorkflowError,
@@ -38,7 +39,7 @@ const toFilter = <T extends string>(value: T | T[] | undefined) => {
 };
 
 export const listWorkflows = async (
-  redis: Bun.RedisClient,
+  redis: RedisInput,
   options?: WorkflowListOptions,
 ) => {
   const names = toFilter(options?.name);

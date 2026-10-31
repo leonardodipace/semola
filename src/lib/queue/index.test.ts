@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { RedisCommands } from "../redis/types.js";
 import { Queue } from "./index.js";
 import { QueueStore } from "./store.js";
 import type { ErrorContext, ParseErrorContext, RetryContext } from "./types.js";
@@ -56,19 +57,17 @@ class MockRedisClient {
     return list.pop();
   }
 
-  public async send(command: string, args: string[]) {
+  public async eval(
+    script: string,
+    numkeys: number,
+    ...keysAndArgs: (string | number)[]
+  ) {
     if (this.shouldFail) {
       throw new Error("Redis connection error");
     }
 
-    if (command !== "EVAL") {
-      throw new Error(`Unsupported command: ${command}`);
-    }
-
-    const script = args[0] ?? "";
-    const keyCount = Number(args[1] ?? "0");
-    const keys = args.slice(2, 2 + keyCount);
-    const argv = args.slice(2 + keyCount);
+    const keys = keysAndArgs.slice(0, numkeys).map(String);
+    const argv = keysAndArgs.slice(numkeys).map(String);
 
     if (script.includes("RPOP") && script.includes("ZADD")) {
       const payload = await this.rpop(keys[0] ?? "");
@@ -176,7 +175,7 @@ class MockRedisClient {
 }
 
 const createMockRedis = () => {
-  return new MockRedisClient() as MockRedisClient & Bun.RedisClient;
+  return new MockRedisClient() as MockRedisClient & RedisCommands;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

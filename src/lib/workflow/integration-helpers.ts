@@ -1,3 +1,4 @@
+import type { RedisInput } from "../redis/types.js";
 import { WorkflowStore } from "./store.js";
 import type { CommitInput, ReleaseLeaseInput } from "./types.js";
 
@@ -43,7 +44,7 @@ export const restorePatches = () => {
 };
 
 export const eventTypes = async (
-  redis: Bun.RedisClient,
+  redis: RedisInput,
   name: string,
   executionId: string,
 ) => {
@@ -73,10 +74,10 @@ export const closeRedis = () => {
   for (const redis of clients.splice(0)) redis.close();
 };
 
-type FailableCommand = "send" | "lrange" | "hgetall";
+type FailableCommand = "eval" | "lrange" | "hgetall";
 
 // Makes the next call to `command` on this client reject, then restores it.
-export const failNext = (redis: Bun.RedisClient, command: FailableCommand) => {
+export const failNext = (redis: RedisInput, command: FailableCommand) => {
   const target = redis as unknown as Record<string, unknown>;
 
   target[command] = async () => {
@@ -85,7 +86,7 @@ export const failNext = (redis: Bun.RedisClient, command: FailableCommand) => {
   };
 };
 
-export const leaseKeys = async (redis: Bun.RedisClient) => {
+export const leaseKeys = async (redis: RedisInput) => {
   const found: string[] = [];
   let cursor = "0";
 
@@ -100,6 +101,6 @@ export const leaseKeys = async (redis: Bun.RedisClient) => {
 };
 
 // Simulates a crashed worker whose lease has run out.
-export const expireLeases = async (redis: Bun.RedisClient) => {
+export const expireLeases = async (redis: RedisInput) => {
   for (const key of await leaseKeys(redis)) await redis.del(key);
 };
