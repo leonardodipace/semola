@@ -56,7 +56,13 @@ export type ModuleExample = {
   broken: CodeSample;
 };
 
-const signupRoute = (response: string) => `import { Api } from "semola/api";
+const signupRoute = ({
+  status = 201,
+  response = "queued",
+}: {
+  status?: number;
+  response?: string;
+} = {}) => `import { Api } from "semola/api";
 import { Queue } from "semola/queue";
 import { boolean, email, object } from "semola/schema";
 
@@ -75,73 +81,119 @@ export const signup = api.defineRoute({
   response: { 201: object({ queued: boolean() }) },
   handler: async (c) => {
     await emails.enqueue({ to: c.req.body.email });
-    return c.json(201, { ${response}: true });
+    return c.json(${status}, { ${response}: true });
   },
 });
 
 api.serve(3000);`;
 
 const heroHovers: CodeHover[] = [
-  { token: "emails", type: "const emails: Queue<{ to: string }>" },
-  { token: "job", type: "(parameter) job: { to: string }" },
+  {
+    token: "Queue",
+    within: "{ Queue }",
+    type: 'import { Queue }',
+    doc: "Typed jobs on Redis. The payload shape is the Queue generic - one place, not a second schema file.",
+  },
+  {
+    token: "emails",
+    type: "Queue<{ to: string }>",
+    doc: "Only jobs with { to: string } can be enqueued. Wrong fields fail in the editor.",
+  },
+  {
+    token: "job",
+    type: "job: { to: string }",
+    doc: "Handler input matches the Queue generic. No casting out of Redis.",
+  },
   {
     token: "Api",
     within: "new Api()",
-    type: "(alias) new Api<readonly [], undefined>(options?: ApiOptions<readonly [], undefined>): Api<readonly [], undefined>\nimport Api",
+    type: "new Api()",
+    doc: "One router. defineRoute feeds validation, handler types, OpenAPI, and the typed client.",
+  },
+  {
+    token: "defineRoute",
+    type: "api.defineRoute(route)",
+    doc: "Declare path, body, and responses once. Everything else is inferred from this object.",
   },
   {
     token: "email",
     within: "email()",
-    type: "(alias) email(message?: string): StringSchema\nimport email",
+    type: "email(): StringSchema",
+    doc: "Any Standard Schema works here - Zod, Valibot, ArkType, or semola/schema.",
   },
   {
     token: "enqueue",
-    type: "(method) Queue<{ to: string }>.enqueue(data: { to: string }): Promise<string>",
+    type: "enqueue(data: { to: string }): Promise<string>",
+    doc: "Payload checked against the Queue type. Returns the job id.",
   },
   {
     token: "email",
     within: "body.email",
-    type: "(property) email: string",
-    doc: "Validated against the request schema before the handler runs.",
+    type: "email: string",
+    doc: "Already validated against the request schema. The handler never sees a raw body.",
   },
   {
     token: "serve",
-    type: "(method) Api<readonly [], undefined>.serve(port: number, callback?: (server: Bun.Server<unknown>) => void): void",
+    type: "serve(port: number): void",
+    doc: "Bun HTTP server. Same Api instance you defined routes on.",
   },
 ];
 
+const heroJsonHover: CodeHover = {
+  token: "json",
+  within: "c.json",
+  type: "json(status, data): Response",
+  doc: "Status and body must match the response map. A typo or wrong code fails before you run it.",
+};
+
 export const heroSample: CodeSample = {
-  code: signupRoute("queued"),
+  code: signupRoute(),
   hovers: [
     ...heroHovers,
-    {
-      token: "json",
-      within: "c.json",
-      type: "(property) json: <201, { readonly queued: true }>(status: 201, data: { readonly queued: boolean }) => Response",
-    },
+    heroJsonHover,
     {
       token: "queued",
       within: "{ queued: true }",
-      type: "(property) queued: boolean",
+      type: "queued: boolean",
+      doc: "Matches response: { 201: object({ queued: boolean() }) }. Rename it and TypeScript complains.",
     },
   ],
 };
 
-export const heroBrokenSample: CodeSample = {
-  code: signupRoute("queud"),
+export const heroTypoSample: CodeSample = {
+  code: signupRoute({ response: "queud" }),
   hovers: [
     ...heroHovers,
-    {
-      token: "json",
-      within: "c.json",
-      type: "(property) json: <201, InferObjectOutput<{ queued: BooleanSchema }>>(status: 201, data: { queued: boolean }) => Response",
-    },
+    heroJsonHover,
     {
       token: "queud",
-      type: "(property) queud: boolean",
+      type: "queud: boolean",
       error:
         "Object literal may only specify known properties, but 'queud' does not exist in type '{ queued: boolean; }'. Did you mean to write 'queued'?",
       errorCode: 2561,
+      doc: "Response body is checked against the route schema - same definition the client will see.",
+    },
+  ],
+};
+
+export const heroStatusSample: CodeSample = {
+  code: signupRoute({ status: 200 }),
+  hovers: [
+    ...heroHovers,
+    {
+      token: "200",
+      within: "c.json(200",
+      type: "200",
+      error:
+        "Argument of type '200' is not assignable to parameter of type '201'.",
+      errorCode: 2345,
+      doc: "Only statuses listed in response are allowed. Add 200 to the map, or return 201.",
+    },
+    {
+      token: "queued",
+      within: "{ queued: true }",
+      type: "queued: boolean",
+      doc: "Body shape is fine - the status is the problem.",
     },
   ],
 };
@@ -170,28 +222,29 @@ export const signup = api.defineRoute({
   hovers: [
     {
       token: "signup",
-      type: "const signup: ClientRoute<{ body: ObjectSchema<{ email: StringSchema }> }, { 201: ObjectSchema<{ queued: BooleanSchema }> }>",
-      doc: "The route handle. The client imports it to type calls.",
+      type: "const signup: ClientRoute",
+      doc: "Export this handle. The client imports it and gets typed calls for free.",
     },
     {
       token: "summary",
-      type: "(property) summary?: string | undefined",
+      type: "summary?: string",
       doc: "Becomes the operation summary in the OpenAPI document.",
     },
     {
       token: "body",
-      type: "(property) body: ObjectSchema<{ email: StringSchema }>",
-      doc: "Validates the request body and types c.req.body.",
+      type: "body: object({ email })",
+      doc: "Validates the request and types c.req.body from the same schema.",
     },
     {
       token: "201",
-      type: "(property) 201: ObjectSchema<{ queued: BooleanSchema }>",
+      type: "201: object({ queued })",
       doc: "Checks c.json(201, ...) and types what the client receives.",
     },
     {
       token: "email",
       within: "body.email",
-      type: "(property) email: string",
+      type: "email: string",
+      doc: "Already validated. No casting out of the request.",
     },
   ],
 };
@@ -213,22 +266,29 @@ await client.auth.signup({
   body: { emial: "hi@semo.la" },
 });`,
   hovers: [
-    { token: "queued", type: "const queued: boolean" },
+    {
+      token: "queued",
+      type: "queued: boolean",
+      doc: "Destructured from the 201 response schema on the server route.",
+    },
     {
       token: "signup",
       within: "signup({",
-      type: "(property) signup: (input: { body: InferObjectOutput<{ email: StringSchema }> }) => Promise<InferObjectOutput<{ queued: BooleanSchema }>>",
+      type: "signup(input): Promise<{ queued: boolean }>",
+      doc: "Same defineRoute handle. No OpenAPI codegen step.",
     },
     {
       token: "body",
-      type: "(property) body: InferObjectOutput<{ email: StringSchema }>",
+      type: "body: { email: string }",
+      doc: "Request body typed from the route. Extra or missing fields fail here.",
     },
     {
       token: "emial",
-      type: "(property) emial: string",
+      type: "emial: string",
       error:
-        "Object literal may only specify known properties, but 'emial' does not exist in type 'InferObjectOutput<{ email: StringSchema; }>'. Did you mean to write 'email'?",
+        "Object literal may only specify known properties, but 'emial' does not exist in type '{ email: string }'. Did you mean to write 'email'?",
       errorCode: 2561,
+      doc: "A typo on the client is a type error - caught before you hit send.",
     },
   ],
 };
@@ -309,100 +369,16 @@ test("rejects an invalid email", async () => {
     {
       token: "fetch",
       within: "api.fetch",
-      type: "(property) Api<readonly [], undefined>.fetch: (req: Request) => Response | Promise<Response>",
-      doc: "Dispatches a Request through the same route pipeline without opening a network port.",
+      type: "fetch(req: Request): Promise<Response>",
+      doc: "Same middleware, validation, and handler - no open port, no network hop.",
     },
-    { token: "res", type: "const res: Response" },
+    {
+      token: "res",
+      type: "res: Response",
+      doc: "Status and JSON match what production would return for this Request.",
+    },
   ],
 };
-
-export const composerBase = {
-  import: `import { Api } from "semola/api";`,
-  start: `
-const api = new Api();`,
-  end: `
-api.serve(3000);`,
-};
-
-export const composerModules = [
-  {
-    id: "queue",
-    label: "Queue",
-    import: `import { Queue } from "semola/queue";`,
-    code: `
-const emails = new Queue<{ to: string }>({
-  name: "emails",
-  redis: redisClient,
-  handler: async (job) => sendWelcomeEmail(job.to),
-});`,
-    hovers: [{ token: "emails", type: "const emails: Queue<{ to: string }>" }],
-  },
-  {
-    id: "cron",
-    label: "Cron",
-    import: `import { Cron } from "semola/cron";`,
-    code: `
-const digest = new Cron({
-  name: "weekly-digest",
-  schedule: "@weekly",
-  handler: async () => sendDigest(),
-});`,
-    hovers: [{ token: "digest", type: "const digest: Cron" }],
-  },
-  {
-    id: "cache",
-    label: "Cache",
-    import: `import { Cache } from "semola/cache";`,
-    code: `
-const sessions = new Cache<{ userId: string }>({
-  redis: redisClient,
-  ttl: 60_000,
-});`,
-    hovers: [
-      { token: "sessions", type: "const sessions: Cache<{ userId: string }>" },
-    ],
-  },
-  {
-    id: "policy",
-    label: "Policy",
-    import: `import { eq, Policy } from "semola/policy";`,
-    code: `
-type Post = { status: "draft" | "published" };
-
-const posts = new Policy<Post>();
-
-posts.forbid({
-  action: "delete",
-  conditions: { status: eq("published") },
-});`,
-    hovers: [{ token: "posts", type: "const posts: Policy<Post>" }],
-  },
-  {
-    id: "i18n",
-    label: "i18n",
-    import: `import { I18n } from "semola/i18n";`,
-    code: `
-const i18n = new I18n({
-  defaultLocale: "en",
-  locales: { en: { welcome: "Welcome, {name:string}!" } },
-});`,
-    hovers: [
-      {
-        token: "i18n",
-        within: "const i18n",
-        type: 'const i18n: I18n<{ readonly en: { readonly welcome: "Welcome, {name:string}!" } }, "en">',
-      },
-    ],
-  },
-  {
-    id: "logging",
-    label: "Logging",
-    import: `import { ConsoleProvider, Logger } from "semola/logging";`,
-    code: `
-const log = new Logger("api", [new ConsoleProvider()]);`,
-    hovers: [{ token: "log", within: "const log", type: "const log: Logger" }],
-  },
-];
 
 const ormCode = (
   field: string,
@@ -584,51 +560,55 @@ const unread = i18n.translate("${key}", { count: 3 });`;
 const jobDataHover: CodeHover = {
   token: "data",
   within: "(data)",
-  type: "(parameter) data: EmailJob",
-  doc: "Typed from the queue, so enqueue and the handler agree on the payload.",
+  type: "data: EmailJob",
+  doc: "Typed from the Queue generic - enqueue and the handler share one payload shape.",
 };
 
 const sessionHover: CodeHover = {
   token: "session",
   within: "_key, session",
-  type: "(parameter) session: Session",
+  type: "session: Session",
+  doc: "TTL callback sees the typed value, so admin vs member can expire differently.",
 };
 
 const canResultHover: CodeHover = {
   token: "result",
   within: "const result",
-  type: "const result: CanResult",
-  doc: "Forbid rules are checked first. No matching rule means denied.",
+  type: "result: CanResult",
+  doc: "Forbid rules win first. No matching rule means denied - no accidental open door.",
 };
 
 const userEmailHover: CodeHover = {
   token: "email",
   within: "user?.email",
-  type: "(property) email: string | undefined",
+  type: "email: string | undefined",
   doc: "Inferred from the column definition. No codegen, no casts.",
 };
 
 const paymentHover: CodeHover = {
   token: "payment",
-  type: "const payment: { orderId: string; amount: number }",
+  type: "payment: { orderId: string; amount: number }",
   doc: "Saved after the step runs. A retry reads it back instead of charging twice.",
 };
 
 const messageHover: CodeHover = {
   token: "message",
-  type: "(parameter) message: UserEvent",
+  type: "message: UserEvent",
+  doc: "Publish and subscribe share this shape. Rename a field and both ends fail the build.",
 };
 
 const errorHover: CodeHover = {
   token: "error",
   within: "const [error",
-  type: "const error: Error | null",
+  type: "error: Error | null",
+  doc: "Handle the failure branch first. After that, data is narrowed.",
 };
 
 const argsHover = (tagType: string): CodeHover => ({
   token: "args",
   within: "(args",
-  type: `(parameter) args: Record<string, unknown> & Record<"tag", ${tagType}>`,
+  type: `args: { tag: ${tagType} }`,
+  doc: "Validated by the argument schema before your action runs.",
 });
 
 export const moduleExamples: ModuleExample[] = [
@@ -651,8 +631,9 @@ export const moduleExamples: ModuleExample[] = [
           token: "name",
           within: "user?.name",
           error:
-            "Property 'name' does not exist on type '{ readonly id: string; readonly email: string; }'.",
+            "Property 'name' does not exist on type '{ id: string; email: string }'.",
           errorCode: 2339,
+          doc: "Only columns from defineTable exist on the row. No silent undefined.",
         },
       ],
     },
@@ -669,7 +650,11 @@ export const moduleExamples: ModuleExample[] = [
       code: queueCode(`{ to: "hi@semo.la", subject: "Welcome" }`),
       hovers: [
         jobDataHover,
-        { token: "emails", type: "const emails: Queue<EmailJob>" },
+        {
+          token: "emails",
+          type: "Queue<EmailJob>",
+          doc: "Payload type is EmailJob from enqueue through the handler.",
+        },
       ],
     },
     broken: {
@@ -679,8 +664,9 @@ export const moduleExamples: ModuleExample[] = [
         {
           token: `{ to: "hi@semo.la" }`,
           error:
-            "Property 'subject' is missing in type '{ to: string; }' but required in type 'EmailJob'.",
+            "Property 'subject' is missing in type '{ to: string }' but required in type 'EmailJob'.",
           errorCode: 2741,
+          doc: "Incomplete payloads fail at enqueue time, not in the worker at 2am.",
         },
       ],
     },
@@ -697,7 +683,11 @@ export const moduleExamples: ModuleExample[] = [
       code: workflowCode(`"ord_123"`),
       hovers: [
         paymentHover,
-        { token: "input", type: "(parameter) input: { orderId: string }" },
+        {
+          token: "input",
+          type: "input: { orderId: string }",
+          doc: "Workflow input is the generic on defineWorkflow.",
+        },
       ],
     },
     broken: {
@@ -707,9 +697,10 @@ export const moduleExamples: ModuleExample[] = [
         {
           token: "orderId",
           within: "orderId: 123",
-          type: "(property) orderId: string",
+          type: "orderId: string",
           error: "Type 'number' is not assignable to type 'string'.",
           errorCode: 2322,
+          doc: "start() is checked against the workflow input type.",
         },
       ],
     },
@@ -729,7 +720,7 @@ export const moduleExamples: ModuleExample[] = [
         {
           token: "session",
           within: "const session =",
-          type: "const session: Session",
+          type: "session: Session",
           doc: "get() throws on a miss, so the value is never undefined.",
         },
       ],
@@ -741,9 +732,10 @@ export const moduleExamples: ModuleExample[] = [
         {
           token: "role",
           within: 'role: "owner"',
-          type: '(property) role: "admin" | "member"',
+          type: 'role: "admin" | "member"',
           error: `Type '"owner"' is not assignable to type '"admin" | "member"'.`,
           errorCode: 2322,
+          doc: "set() rejects values outside the Cache generic.",
         },
       ],
     },
@@ -767,10 +759,11 @@ export const moduleExamples: ModuleExample[] = [
         {
           token: "action",
           within: 'action: "signup"',
-          type: '(property) action: "login" | "logout"',
+          type: 'action: "login" | "logout"',
           error:
             'Type \'"signup"\' is not assignable to type \'"login" | "logout"\'.',
           errorCode: 2322,
+          doc: "Publish payload must match the PubSub generic.",
         },
       ],
     },
@@ -796,6 +789,7 @@ export const moduleExamples: ModuleExample[] = [
           error:
             "Object literal may only specify known properties, and 'state' does not exist in type 'Conditions<Post>'.",
           errorCode: 2353,
+          doc: "Condition keys must be fields on Post - no inventing columns.",
         },
       ],
     },
@@ -814,8 +808,8 @@ export const moduleExamples: ModuleExample[] = [
         {
           token: "count",
           within: "{ count: 3 }",
-          type: "(property) count: number",
-          doc: "Typed from {count:number} in the English message.",
+          type: "count: number",
+          doc: "Placeholder typed from {count:number} in the English message.",
         },
       ],
     },
@@ -826,6 +820,7 @@ export const moduleExamples: ModuleExample[] = [
           token: '"inbox.unred"',
           error: `Argument of type '"inbox.unred"' is not assignable to parameter of type '"inbox.unread" | "welcome"'.`,
           errorCode: 2345,
+          doc: "Keys are a union from the default locale. Typos fail the build.",
         },
       ],
     },
@@ -845,8 +840,8 @@ export const moduleExamples: ModuleExample[] = [
         {
           token: "response",
           within: "return response",
-          type: "const response: Response",
-          doc: "Narrowed after the error branch returns.",
+          type: "response: Response",
+          doc: "Narrowed after the error branch returns - safe to use.",
         },
       ],
     },
@@ -857,9 +852,10 @@ export const moduleExamples: ModuleExample[] = [
         {
           token: "response",
           within: "return response",
-          type: "const response: Response | null",
+          type: "response: Response | null",
           error: "'response' is possibly 'null'.",
           errorCode: 18047,
+          doc: "Skip the error return and TypeScript keeps response nullable.",
         },
       ],
     },
@@ -879,7 +875,8 @@ export const moduleExamples: ModuleExample[] = [
         {
           token: "options",
           within: ", options)",
-          type: '(parameter) options: Record<string, unknown> & Record<"dryRun", boolean>',
+          type: "options: { dryRun: boolean }",
+          doc: "Options are validated schemas too - aliases included.",
         },
       ],
     },
@@ -891,6 +888,7 @@ export const moduleExamples: ModuleExample[] = [
           token: "toUpperCase",
           error: "Property 'toUpperCase' does not exist on type 'number'.",
           errorCode: 2339,
+          doc: "Change the argument schema and the action types follow.",
         },
       ],
     },

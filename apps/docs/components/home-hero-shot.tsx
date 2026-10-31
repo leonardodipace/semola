@@ -6,7 +6,12 @@ import {
 } from "lucide-react";
 import { CodePre, HoverCode } from "@/components/hover-code";
 import { HomeHeroEditor } from "@/components/home-hero-editor";
-import { describeError, heroBrokenSample, heroSample } from "@/lib/home-code";
+import {
+  describeError,
+  heroSample,
+  heroStatusSample,
+  heroTypoSample,
+} from "@/lib/home-code";
 import { packageVersion } from "@/lib/shared";
 
 function ExplorerRow({
@@ -70,15 +75,11 @@ function Explorer() {
 }
 
 export function HomeHeroShot() {
-  const error = describeError(heroBrokenSample, "server.ts");
+  const typoError = describeError(heroTypoSample, "server.ts");
+  const statusError = describeError(heroStatusSample, "server.ts");
 
   return (
     <div className="relative">
-      <div
-        aria-hidden
-        className="home-sunrise pointer-events-none absolute -inset-x-16 top-[18%] -bottom-24 -z-10"
-      />
-
       <div className="home-tilt">
         <HomeHeroEditor
           code={
@@ -86,14 +87,19 @@ export function HomeHeroShot() {
               <HoverCode sample={heroSample} />
             </CodePre>
           }
-          brokenCode={
+          typoCode={
             <CodePre>
-              <HoverCode sample={heroBrokenSample} />
+              <HoverCode sample={heroTypoSample} />
+            </CodePre>
+          }
+          statusCode={
+            <CodePre>
+              <HoverCode sample={heroStatusSample} />
             </CodePre>
           }
           sidebar={<Explorer />}
-          errorMessage={error.message}
-          errorLocation={error.location}
+          typoError={typoError}
+          statusError={statusError}
         />
       </div>
     </div>

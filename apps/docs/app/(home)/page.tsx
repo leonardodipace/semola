@@ -55,13 +55,6 @@ export const metadata: Metadata = {
 
 const releasesUrl = `${githubUrl}/releases`;
 
-const heroFacts = [
-  "Zero dependencies",
-  "Per-module imports",
-  "Standard Schema",
-  "MIT licensed",
-];
-
 const footerLinks = [
   {
     title: "Product",
@@ -93,7 +86,7 @@ const footerLinks = [
 ];
 
 const primaryButtonClass =
-  "home-press home-primary-btn home-ease inline-flex h-11 items-center gap-2 rounded-full pr-5 pl-6 text-sm font-medium transition-[background-color,transform]";
+  "home-press home-primary-btn home-ease inline-flex h-11 items-center gap-2 rounded-xl pr-5 pl-6 text-sm font-medium transition-[background-color,transform]";
 
 const textLinkClass =
   "home-press home-ease mt-8 inline-flex items-center gap-1.5 text-sm font-medium text-wheat transition-transform";
@@ -124,32 +117,20 @@ function FooterLink({ href, label }: { href: string; label: string }) {
   );
 }
 
-function SectionLabel({ index, label }: { index: string; label: string }) {
-  return (
-    <p className="home-label">
-      <span className="text-wheat">{index}</span>
-      <span className="mx-2">/</span>
-      {label}
-    </p>
-  );
-}
-
 function SectionHeader({
-  index,
   label,
   title,
   children,
 }: {
-  index: string;
   label: string;
   title: ReactNode;
   children?: ReactNode;
 }) {
   return (
-    <Reveal className="mb-14 flex flex-col gap-6 sm:mb-20 lg:flex-row lg:items-end lg:justify-between lg:gap-16">
+    <Reveal className="mb-12 flex flex-col gap-5 sm:mb-16 lg:flex-row lg:items-end lg:justify-between lg:gap-16">
       <div>
-        <SectionLabel index={index} label={label} />
-        <h2 className="home-title mt-5 max-w-3xl text-4xl font-semibold text-balance sm:text-6xl">
+        <p className="home-label text-wheat">{label}</p>
+        <h2 className="home-title mt-4 max-w-3xl text-4xl font-semibold text-balance sm:text-5xl">
           {title}
         </h2>
       </div>
@@ -160,7 +141,7 @@ function SectionHeader({
 
 function SectionAside({ children }: { children: ReactNode }) {
   return (
-    <p className="max-w-sm shrink-0 text-lg leading-relaxed text-fd-muted-foreground">
+    <p className="max-w-sm shrink-0 text-base leading-relaxed text-fd-muted-foreground sm:text-lg">
       {children}
     </p>
   );
@@ -172,50 +153,25 @@ export default function HomePage() {
       <section className="relative overflow-hidden pt-14">
         <div
           aria-hidden
-          className="home-dots pointer-events-none absolute inset-x-0 top-0 h-[52rem]"
+          className="home-hero-field pointer-events-none absolute inset-x-0 top-0 h-[44rem]"
+        />
+        <div
+          aria-hidden
+          className="home-hero-grain pointer-events-none absolute inset-x-0 top-0 h-[44rem] opacity-[0.35]"
         />
 
-        <div className="relative mx-auto w-full max-w-7xl px-6 pt-16 sm:pt-24 lg:pt-28">
-          <a
-            href={releasesUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="home-enter home-badge home-press home-ease inline-flex h-8 items-center gap-2.5 rounded-full pr-3 pl-1 text-xs transition-[background-color,transform]"
-          >
-            <span className="rounded-full bg-fd-foreground px-2 py-0.5 font-mono text-[11px] text-fd-background">
-              v{packageVersion}
-            </span>
-            <span className="text-fd-muted-foreground">What's new</span>
-            <ArrowRightIcon className="home-arrow size-3 text-fd-muted-foreground" />
-          </a>
-
-          <p className="home-enter home-enter-1 home-label mt-8 text-wheat">
-            Semola
-          </p>
-
-          <h1 className="home-enter home-enter-1 home-display mt-4 text-[clamp(2.6rem,6.2vw,5.75rem)] font-semibold">
-            One package
-            <br />
-            for your backend,
-            <br />
-            <span className="home-serif">typed end to end.</span>
+        <div className="relative mx-auto w-full max-w-7xl px-6 pt-16 sm:pt-20 lg:pt-24">
+          <h1 className="home-enter home-display max-w-4xl text-[clamp(2.4rem,5.2vw,4.5rem)] font-semibold text-balance">
+            One package for your backend,{" "}
+            <span className="home-mark">typed end to end.</span>
           </h1>
 
-          <div className="mt-10 flex flex-col gap-8 lg:mt-12 lg:flex-row lg:items-end lg:justify-between">
-            <div className="home-enter home-enter-2 max-w-xl">
-              <p className="text-lg leading-relaxed text-fd-muted-foreground">
-                Most backends are a stack of libraries that almost agree on
-                types. Semola is one zero-dependency TypeScript package instead:
-                APIs, jobs, workflows, SQL, auth, and the rest - same patterns
-                throughout.
-              </p>
-              <ul className="home-label home-facts mt-6 flex flex-wrap items-center gap-y-1">
-                {heroFacts.map((fact) => (
-                  <li key={fact}>{fact}</li>
-                ))}
-              </ul>
-            </div>
-            <div className="home-enter home-enter-3 flex flex-wrap items-center gap-3">
+          <div className="mt-8 flex flex-col gap-8 lg:mt-10 lg:flex-row lg:items-end lg:justify-between">
+            <p className="home-enter home-enter-1 max-w-xl text-lg leading-relaxed text-fd-muted-foreground">
+              Zero-dependency TypeScript for APIs, jobs, workflows, SQL, and
+              auth - same patterns throughout. Import only what you use.
+            </p>
+            <div className="home-enter home-enter-2 flex flex-wrap items-center gap-3">
               <Link href="/docs/getting-started" className={primaryButtonClass}>
                 Open the docs
                 <ArrowRightIcon className="home-arrow size-4" />
@@ -225,25 +181,24 @@ export default function HomePage() {
           </div>
         </div>
 
-        <div className="home-enter home-enter-4 relative mx-auto mt-16 w-full max-w-7xl px-4 pb-24 sm:mt-20 sm:px-6 sm:pb-28">
+        <div className="home-enter home-enter-3 relative mx-auto mt-14 w-full max-w-7xl px-0 pb-20 sm:mt-16 sm:px-6 sm:pb-24">
           <HomeHeroShot />
         </div>
       </section>
 
-      <section className="mx-auto w-full max-w-7xl px-6 pt-8 pb-28 sm:pb-36">
+      <section className="mx-auto w-full max-w-7xl px-6 pt-8 pb-24 sm:pb-32">
         <SectionHeader
-          index="01"
           label="Composition"
           title={
             <>
               server.ts can grow.{" "}
-              <span className="home-serif">package.json should not.</span>
+              <span className="home-mark">package.json should not.</span>
             </>
           }
         >
           <SectionAside>
-            Flip on a queue, a cron, a cache - each one is another import from
-            Semola. Your lockfile still lists a single package.
+            Flip on a queue, a cache, a workflow - they plug into the same
+            defineRoute handler. Your lockfile still lists a single package.
           </SectionAside>
         </SectionHeader>
         <Reveal>
@@ -251,15 +206,14 @@ export default function HomePage() {
         </Reveal>
       </section>
 
-      <section className="border-y border-fd-border bg-fd-card/40">
-        <div className="mx-auto w-full max-w-7xl px-6 py-28 sm:py-36">
+      <section className="border-y border-fd-border bg-fd-card/50">
+        <div className="mx-auto w-full max-w-7xl px-6 py-24 sm:py-32">
           <SectionHeader
-            index="02"
             label="Contract"
             title={
               <>
                 Define the route once.{" "}
-                <span className="home-serif">Collect the rest for free.</span>
+                <span className="home-mark">Collect the rest for free.</span>
               </>
             }
           >
@@ -273,14 +227,13 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="mx-auto w-full max-w-7xl px-6 py-28 sm:py-36">
+      <section className="mx-auto w-full max-w-7xl px-6 py-24 sm:py-32">
         <SectionHeader
-          index="03"
-          label="Rules"
+          label="Principles"
           title={
             <>
               A few things we{" "}
-              <span className="home-serif">will not compromise on.</span>
+              <span className="home-mark">will not compromise on.</span>
             </>
           }
         />
@@ -289,15 +242,14 @@ export default function HomePage() {
 
       <section
         id="examples"
-        className="mx-auto w-full max-w-7xl scroll-mt-20 px-6 pb-28 sm:pb-36"
+        className="mx-auto w-full max-w-7xl scroll-mt-20 px-6 pb-24 sm:pb-32"
       >
         <SectionHeader
-          index="04"
           label="Elsewhere"
           title={
             <>
               Jobs, tables, workflows -{" "}
-              <span className="home-serif">same instincts.</span>
+              <span className="home-mark">same instincts.</span>
             </>
           }
         >
@@ -313,16 +265,15 @@ export default function HomePage() {
 
       <section
         id="modules"
-        className="scroll-mt-14 border-y border-fd-border bg-fd-card/40"
+        className="scroll-mt-14 border-y border-fd-border bg-fd-card/50"
       >
-        <div className="mx-auto w-full max-w-7xl px-6 py-28 sm:py-36">
+        <div className="mx-auto w-full max-w-7xl px-6 py-24 sm:py-32">
           <SectionHeader
-            index="05"
             label="Catalog"
             title={
               <>
                 Every module.{" "}
-                <span className="home-serif">Still one dependency.</span>
+                <span className="home-mark">Still one dependency.</span>
               </>
             }
           >
@@ -338,14 +289,14 @@ export default function HomePage() {
       </section>
 
       <section id="faq" className="scroll-mt-14">
-        <div className="mx-auto grid w-full max-w-7xl grid-cols-1 gap-12 px-6 py-28 sm:py-36 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-20">
+        <div className="mx-auto grid w-full max-w-7xl grid-cols-1 gap-12 px-6 py-24 sm:py-32 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-20">
           <Reveal className="lg:sticky lg:top-28 lg:self-start">
-            <SectionLabel index="06" label="FAQ" />
-            <h2 className="home-title mt-5 text-4xl font-semibold sm:text-6xl">
+            <p className="home-label text-wheat">FAQ</p>
+            <h2 className="home-title mt-4 text-4xl font-semibold sm:text-5xl">
               The questions{" "}
-              <span className="home-serif">before install.</span>
+              <span className="home-mark">before install.</span>
             </h2>
-            <p className="mt-6 max-w-sm text-lg leading-relaxed text-fd-muted-foreground">
+            <p className="mt-5 max-w-sm text-base leading-relaxed text-fd-muted-foreground sm:text-lg">
               Runtimes, Redis, databases, validators, tree-shaking, and what
               pre-1.0 actually means for you.
             </p>
@@ -368,22 +319,22 @@ export default function HomePage() {
       <section className="relative overflow-hidden border-t border-fd-border">
         <div
           aria-hidden
-          className="home-sunrise pointer-events-none absolute inset-x-0 top-1/3 mx-auto h-1/2 max-w-4xl opacity-60"
+          className="home-cta-glow pointer-events-none absolute inset-x-0 top-1/4 mx-auto h-1/2 max-w-3xl"
         />
-        <Reveal className="relative mx-auto flex max-w-3xl flex-col items-center px-6 py-32 text-center sm:py-44">
+        <Reveal className="relative mx-auto flex max-w-3xl flex-col items-center px-6 py-28 text-center sm:py-36">
           <img
             src="/logo.png"
             alt=""
-            width={64}
-            height={64}
-            className="mb-10 size-16 drop-shadow-[0_18px_30px_color-mix(in_oklab,var(--color-crust)_40%,transparent)]"
+            width={56}
+            height={56}
+            className="mb-8 size-14"
           />
-          <h2 className="home-display text-5xl font-semibold sm:text-7xl">
+          <h2 className="home-display text-4xl font-semibold sm:text-6xl">
             Install once.{" "}
-            <span className="home-serif">Import what you need.</span>
+            <span className="home-mark">Import what you need.</span>
           </h2>
           <HomeImportTicker />
-          <p className="mt-6 max-w-md text-lg text-balance text-fd-muted-foreground">
+          <p className="mt-6 max-w-md text-base text-balance text-fd-muted-foreground sm:text-lg">
             You do not have to adopt the whole toolkit. Start with the API, add
             a queue next week, leave the ORM until you need SQL.
           </p>
