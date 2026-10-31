@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import type { RedisClient } from "../redis/types.js";
 import { createRedisTransport, memoryTransport } from "./transport.js";
-import type { RedisClient } from "./types.js";
 
 type Handler = (message: string, channel: string) => void | Promise<void>;
 

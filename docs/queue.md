@@ -7,7 +7,7 @@ Run work in the background with Redis. Jobs are JSON-serialized, claimed into an
 
 Delivery is at-least-once after reclaim. Handlers should be idempotent.
 
-Pass a Redis client.
+Pass a Bun Redis or ioredis client. Semola picks the adapter.
 
 ## Import
 

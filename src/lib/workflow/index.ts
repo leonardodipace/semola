@@ -1,4 +1,5 @@
 import { mightThrow } from "../errors/index.js";
+import type { RedisInput } from "../redis/types.js";
 import { WorkflowEngine } from "./engine.js";
 import {
   DuplicateWorkflowError,
@@ -9,7 +10,6 @@ import { parseHistory } from "./history.js";
 import { fromJson, toJson } from "./json.js";
 import { WorkflowStore } from "./store.js";
 import type {
-  RedisClient,
   ResolvePartitionKeyInput,
   StepSnapshot,
   Workflow,
@@ -39,7 +39,7 @@ const toFilter = <T extends string>(value: T | T[] | undefined) => {
 };
 
 export const listWorkflows = async (
-  redis: RedisClient,
+  redis: RedisInput,
   options?: WorkflowListOptions,
 ) => {
   const names = toFilter(options?.name);

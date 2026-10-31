@@ -1,5 +1,6 @@
 import { EventEmitter, on } from "node:events";
 import { mightThrow, mightThrowSync } from "../errors/index.js";
+import { resolveRedis } from "../redis/resolve.js";
 import {
   PublishError,
   SerializationError,
@@ -20,7 +21,10 @@ const resolveTransport = (options: PubSubOptions): ChannelTransport => {
     return memoryTransport;
   }
 
-  return createRedisTransport(options.publisher, options.subscriber);
+  return createRedisTransport(
+    resolveRedis(options.publisher),
+    resolveRedis(options.subscriber),
+  );
 };
 
 export class PubSub<T extends Record<string, unknown>> {
@@ -334,14 +338,11 @@ export {
   SubscribeError,
   UnsubscribeError,
 } from "./errors.js";
-export { fromIoredis } from "./ioredis.js";
 export type {
   ChannelHandler,
-  IoredisLike,
   ListenOptions,
   MemoryPubSubOptions,
   MessageHandler,
   PubSubOptions,
-  RedisClient,
   RedisPubSubOptions,
 } from "./types.js";

@@ -1,4 +1,5 @@
 import { mightThrow } from "../errors/index.js";
+import type { RedisInput } from "../redis/types.js";
 import { WorkflowStoreError } from "./errors.js";
 import { toJson } from "./json.js";
 import type {
@@ -7,7 +8,6 @@ import type {
   CommitResult,
   HistoryEvent,
   LeaseInput,
-  RedisClient,
   ReleaseLeaseInput,
   WorkflowMeta,
   WorkflowStatus,
@@ -273,7 +273,7 @@ const metaEntries = (fields: Partial<WorkflowMeta>) => {
 
 export class WorkflowStore {
   public constructor(
-    private redis: RedisClient,
+    private redis: RedisInput,
     private name: string,
   ) {}
 

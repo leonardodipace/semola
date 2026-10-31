@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mightThrow } from "../errors/index.js";
+import type { RedisCommands } from "../redis/types.js";
 import { WorkflowEngine } from "./engine.js";
 import {
   DuplicateWorkflowError,
@@ -30,7 +31,6 @@ import {
   TRIM_IF_MEMBER,
   WorkflowStore,
 } from "./store.js";
-import type { RedisClient } from "./types.js";
 
 const sleep = (ms: number) => Bun.sleep(ms);
 
@@ -120,7 +120,7 @@ const blockingStep = () => {
   return { state, handler };
 };
 
-const failOnce = (name: string, redis: RedisClient) => {
+const failOnce = (name: string, redis: RedisCommands) => {
   let attempts = 0;
 
   return defineWorkflow({

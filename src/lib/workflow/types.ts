@@ -1,31 +1,4 @@
-export interface RedisClient {
-  eval(
-    script: string,
-    numkeys: number,
-    ...keysAndArgs: (string | number)[]
-  ): Promise<unknown>;
-  lrange(key: string, start: number, stop: number): Promise<string[]>;
-  hgetall(key: string): Promise<Record<string, string> | null | undefined>;
-  zcard(key: string): Promise<number>;
-  zrange(
-    key: string,
-    start: string | number,
-    stop: string | number,
-  ): Promise<unknown[]>;
-  scan(
-    cursor: string | number,
-    match: "MATCH",
-    pattern: string,
-  ): Promise<[string, string[]]>;
-  scan(
-    cursor: string | number,
-    match: "MATCH",
-    pattern: string,
-    count: "COUNT",
-    hint: number,
-  ): Promise<[string, string[]]>;
-  del(key: string): Promise<number>;
-}
+import type { RedisInput } from "../redis/types.js";
 
 export type WorkflowStatus =
   | "pending"
@@ -148,7 +121,7 @@ export type WorkflowRetryBackoff = {
 
 export type WorkflowOptions<TInput, TResult> = {
   name: string;
-  redis: RedisClient;
+  redis: RedisInput;
   handler: (
     context: WorkflowHandlerContext<TInput>,
   ) => TResult | Promise<TResult>;

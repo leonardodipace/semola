@@ -1,5 +1,6 @@
 import { mightThrow, mightThrowSync } from "../errors/index.js";
-import type { JobState, RedisClient } from "./types.js";
+import type { RedisInput } from "../redis/types.js";
+import type { JobState } from "./types.js";
 
 const CLAIM_FROM_JOBS =
   "local p=redis.call('RPOP',KEYS[1]) if not p then return false end redis.call('ZADD',KEYS[2],tonumber(ARGV[1]),p) return p";
@@ -21,7 +22,7 @@ const SCHEDULE_RETRY = `${FENCE}4]) then return 0 end redis.call('ZREM',KEYS[1],
 const RELEASE = `${FENCE}2]) then return 0 end redis.call('ZREM',KEYS[1],ARGV[1]) redis.call('LPUSH',KEYS[2],ARGV[1]) return 1`;
 export class QueueStore {
   public constructor(
-    private redis: RedisClient,
+    private redis: RedisInput,
     private name: string,
     private visibilityTimeoutMs: number,
   ) {}

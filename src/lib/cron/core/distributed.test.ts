@@ -7,8 +7,8 @@ import {
   test,
 } from "bun:test";
 import { mightThrow } from "../../errors/index.js";
+import type { RedisCommands } from "../../redis/types.js";
 import { CronDistributed } from "./index.js";
-import type { RedisClient } from "./types.js";
 
 type SetCall = {
   key: string;
@@ -104,7 +104,7 @@ class MockRedisClient {
 }
 
 const createMockRedis = () =>
-  new MockRedisClient() as MockRedisClient & RedisClient;
+  new MockRedisClient() as MockRedisClient & RedisCommands;
 
 const mockCronJob = {
   stop: () => {},
