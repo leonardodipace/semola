@@ -9,9 +9,7 @@ const isIoredisClient = (client: RedisPubSubInput): client is IoredisClient => {
   return true;
 };
 
-/**
- * Pubsub only: Bun passes through; ioredis gets {@link IoredisRedisAdapter}.
- */
+/** Pubsub: Bun as-is; ioredis → {@link IoredisRedisAdapter}. */
 export const resolveRedis = (client: RedisPubSubInput): RedisClient => {
   if (client instanceof IoredisRedisAdapter) return client;
 

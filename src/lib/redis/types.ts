@@ -53,9 +53,7 @@ export type RedisCommands = {
   };
 };
 
-/**
- * Bun-style pub/sub client. Produced by {@link resolveRedis} for pubsub.
- */
+/** Bun-style pub/sub client (from {@link resolveRedis}). */
 export type RedisClient = {
   publish: (channel: string, message: string) => Promise<number>;
   subscribe: (

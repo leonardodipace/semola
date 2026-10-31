@@ -4,9 +4,7 @@ import type {
   RedisSubscribeListener,
 } from "./types.js";
 
-/**
- * Adapts ioredis event subscribe to Bun-style `subscribe(channel, listener)`.
- */
+/** Bridges ioredis `message` events to Bun-style `subscribe(channel, listener)`. */
 export class IoredisRedisAdapter implements RedisClient {
   private bridges = new Map<
     RedisSubscribeListener,
