@@ -15,13 +15,15 @@ export type CronOSOptions = CronBaseOptions & {
   path: string;
 };
 
-export type RedisClient = {
-  set: (
+export interface RedisClient {
+  set(
     key: string,
     value: string,
-    ...args: (string | number)[]
-  ) => Promise<"OK" | string | null | undefined>;
-};
+    px: "PX",
+    ttl: number | string,
+    nx: "NX",
+  ): Promise<"OK" | string | null | undefined>;
+}
 
 export type CronDistributedOptions = CronOptions & {
   redis: RedisClient;

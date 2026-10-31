@@ -13,12 +13,19 @@ Two transports:
 ## Import
 
 ```typescript
-import { PubSub } from "semola/pubsub";
+import { fromIoredis, PubSub } from "semola/pubsub";
 ```
 
 ## Quick start
 
 This subscribes one handler, publishes a typed JSON message, then removes that handler.
+
+Bun.Redis clients pass through as-is. For ioredis (event-based subscribe), wrap with `fromIoredis`:
+
+```typescript
+const subscriber = fromIoredis(ioredisSubscriber);
+const publisher = fromIoredis(ioredisPublisher);
+```
 
 ```typescript
 type UserEvent = {
@@ -27,8 +34,8 @@ type UserEvent = {
 };
 
 const events = new PubSub<UserEvent>({
-  subscriber: redisSubscriber,
-  publisher: redisPublisher,
+  subscriber,
+  publisher,
   channel: "user-events",
 });
 

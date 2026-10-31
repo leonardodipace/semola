@@ -1,12 +1,14 @@
-export type RedisClient = {
-  get: (key: string) => Promise<string | null | undefined>;
-  set: (
+export interface RedisClient {
+  get(key: string): Promise<string | null | undefined>;
+  set(key: string, value: string): Promise<"OK" | string | null | undefined>;
+  set(
     key: string,
     value: string,
-    ...args: (string | number)[]
-  ) => Promise<"OK" | string | null | undefined>;
-  del: (key: string) => Promise<number>;
-};
+    px: "PX",
+    ttl: number,
+  ): Promise<"OK" | string | null | undefined>;
+  del(key: string): Promise<number>;
+}
 
 export type CacheOptions<T> = {
   redis: RedisClient;

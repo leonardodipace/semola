@@ -5,8 +5,26 @@ export type ChannelHandler = (
 
 export type RedisClient = {
   publish: (channel: string, message: string) => Promise<number>;
-  subscribe: (channel: string, listener: ChannelHandler) => Promise<number>;
+  subscribe: (
+    channel: string,
+    listener: ChannelHandler,
+  ) => Promise<number | undefined>;
   unsubscribe: (channel: string, listener?: ChannelHandler) => Promise<void>;
+};
+
+/** Minimal ioredis-shaped client for {@link fromIoredis}. */
+export type IoredisLike = {
+  publish: (channel: string, message: string) => Promise<number>;
+  subscribe: (...channels: string[]) => Promise<unknown>;
+  unsubscribe: (...channels: string[]) => Promise<unknown>;
+  on: (
+    event: "message",
+    listener: (channel: string, message: string) => void,
+  ) => unknown;
+  off: (
+    event: "message",
+    listener: (channel: string, message: string) => void,
+  ) => unknown;
 };
 
 export type RedisPubSubOptions = {
@@ -25,7 +43,10 @@ export type PubSubOptions = RedisPubSubOptions | MemoryPubSubOptions;
 
 export type ChannelTransport = {
   publish: (channel: string, message: string) => Promise<number>;
-  subscribe: (channel: string, handler: ChannelHandler) => Promise<number>;
+  subscribe: (
+    channel: string,
+    handler: ChannelHandler,
+  ) => Promise<number | undefined>;
   unsubscribe: (channel: string, handler: ChannelHandler) => Promise<void>;
 };
 

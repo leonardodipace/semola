@@ -38,9 +38,7 @@ export class QueueStore {
   }
 
   private eval(script: string, keys: string[], argv: string[]) {
-    return mightThrow(
-      this.redis.send("EVAL", [script, String(keys.length), ...keys, ...argv]),
-    );
+    return mightThrow(this.redis.eval(script, keys.length, ...keys, ...argv));
   }
 
   public async enqueue(serialized: string) {

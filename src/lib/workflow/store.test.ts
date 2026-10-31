@@ -93,7 +93,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     const name = "store-create-fail";
     const store = new WorkflowStore(redis, name);
 
-    failNext(redis, "send");
+    failNext(redis, "eval");
 
     await expect(
       store.createExecution("exec-1", baseMeta(name)),
@@ -245,11 +245,11 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
 
     expect(await slots()).toEqual(["e1"]);
 
-    const sends: string[] = [];
-    const send = redis.send.bind(redis);
-    redis.send = async (command: string, args: string[]) => {
-      sends.push(command);
-      return send(command, args);
+    let evalCalls = 0;
+    const evalFn = redis.eval.bind(redis);
+    redis.eval = async (script, numkeys, ...keysAndArgs) => {
+      evalCalls += 1;
+      return evalFn(script, numkeys, ...keysAndArgs);
     };
 
     await store.commit({
@@ -261,7 +261,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
       retention: {},
     });
 
-    expect(sends).toEqual(["EVAL"]);
+    expect(evalCalls).toBe(1);
     expect(await slots()).toEqual([]);
   });
 
@@ -761,20 +761,16 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
 
     // Resume lands between trim's ZRANGE (which picked "old") and the
     // script that unlinks it.
-    const send = redis.send.bind(redis);
-    // Assigned in the patched send, which narrowing does not see.
+    const evalFn = redis.eval.bind(redis);
+    // Assigned in the patched eval, which narrowing does not see.
     let resumed = null as string | null;
 
-    redis.send = async (command: string, args: string[]) => {
-      if (
-        resumed === null &&
-        command === "EVAL" &&
-        args[0] === TRIM_IF_MEMBER
-      ) {
+    redis.eval = async (script, numkeys, ...keysAndArgs) => {
+      if (resumed === null && script === TRIM_IF_MEMBER) {
         resumed = await store.resumeExecution("old");
       }
 
-      return send(command, args);
+      return evalFn(script, numkeys, ...keysAndArgs);
     };
 
     await store.trimTerminal(1);

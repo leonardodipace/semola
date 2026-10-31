@@ -309,9 +309,9 @@ export class WorkflowStore {
     }
 
     const [error, result] = await mightThrow(
-      this.redis.send("EVAL", [
+      this.redis.eval(
         COMMIT,
-        "6",
+        6,
         keys.lease(this.name, executionId),
         keys.history(this.name, executionId),
         keys.meta(this.name, executionId),
@@ -327,7 +327,7 @@ export class WorkflowStore {
         slotExpiry,
         ...payloads,
         ...metaEntries(fields),
-      ]),
+      ),
     );
 
     if (error) {
@@ -345,14 +345,14 @@ export class WorkflowStore {
     executionId: string,
   ): Promise<CancelRequestResult | null> {
     const [error, result] = await mightThrow(
-      this.redis.send("EVAL", [
+      this.redis.eval(
         CANCEL_EXECUTION,
-        "2",
+        2,
         keys.meta(this.name, executionId),
         keys.due(this.name),
         executionId,
         String(Date.now()),
-      ]),
+      ),
     );
 
     if (error) {
@@ -396,9 +396,9 @@ export class WorkflowStore {
     );
 
     const [error, result] = await mightThrow(
-      this.redis.send("EVAL", [
+      this.redis.eval(
         CREATE_EXECUTION,
-        "4",
+        4,
         keys.meta(this.name, executionId),
         keys.history(this.name, executionId),
         keys.due(this.name),
@@ -407,7 +407,7 @@ export class WorkflowStore {
         started,
         String(Date.now()),
         ...metaEntries(fields),
-      ]),
+      ),
     );
 
     if (error) {
@@ -435,16 +435,16 @@ export class WorkflowStore {
 
   public async claimDue(token: string, ttlMs: number) {
     const [error, executionId] = await mightThrow(
-      this.redis.send("EVAL", [
+      this.redis.eval(
         CLAIM_DUE,
-        "1",
+        1,
         keys.due(this.name),
         String(Date.now()),
         String(ttlMs),
         token,
         keys.lease(this.name, ""),
         keys.meta(this.name, ""),
-      ]),
+      ),
     );
 
     if (error) {
@@ -460,9 +460,9 @@ export class WorkflowStore {
     const { executionId, token, ttlMs, capacityKey = "*" } = input;
 
     const [error, result] = await mightThrow(
-      this.redis.send("EVAL", [
+      this.redis.eval(
         EXTEND_LEASE,
-        "3",
+        3,
         keys.lease(this.name, executionId),
         keys.due(this.name),
         keys.capacity(this.name, capacityKey),
@@ -470,7 +470,7 @@ export class WorkflowStore {
         String(ttlMs),
         executionId,
         String(Date.now() + ttlMs),
-      ]),
+      ),
     );
 
     if (error) {
@@ -485,9 +485,9 @@ export class WorkflowStore {
     const { executionId, token, ttlMs, capacityKey = "*", dueAt } = input;
 
     const [error] = await mightThrow(
-      this.redis.send("EVAL", [
+      this.redis.eval(
         RELEASE_LEASE,
-        "3",
+        3,
         keys.lease(this.name, executionId),
         keys.due(this.name),
         keys.capacity(this.name, capacityKey),
@@ -495,7 +495,7 @@ export class WorkflowStore {
         executionId,
         String(dueAt),
         String(dueAt + ttlMs),
-      ]),
+      ),
     );
 
     if (error) {
@@ -514,15 +514,15 @@ export class WorkflowStore {
     const now = Date.now();
 
     const [error, result] = await mightThrow(
-      this.redis.send("EVAL", [
+      this.redis.eval(
         ACQUIRE_CAPACITY,
-        "1",
+        1,
         keys.capacity(this.name, capacityKey),
         executionId,
         String(limit),
         String(now),
         String(now + ttlMs),
-      ]),
+      ),
     );
 
     if (error) {
@@ -541,9 +541,9 @@ export class WorkflowStore {
     );
 
     const [error, result] = await mightThrow(
-      this.redis.send("EVAL", [
+      this.redis.eval(
         RESUME_EXECUTION,
-        "4",
+        4,
         keys.meta(this.name, executionId),
         keys.history(this.name, executionId),
         keys.due(this.name),
@@ -551,7 +551,7 @@ export class WorkflowStore {
         executionId,
         String(now),
         resumed,
-      ]),
+      ),
     );
 
     if (error) {
@@ -563,9 +563,7 @@ export class WorkflowStore {
 
   public async trimTerminal(max: number) {
     const terminalKey = keys.terminal(this.name);
-    const [cardError, card] = await mightThrow(
-      this.redis.send("ZCARD", [terminalKey]),
-    );
+    const [cardError, card] = await mightThrow(this.redis.zcard(terminalKey));
 
     if (cardError) {
       throw new WorkflowStoreError("Unable to count terminal executions");
@@ -576,7 +574,7 @@ export class WorkflowStore {
     if (extra <= 0) return;
 
     const [rangeError, oldest] = await mightThrow(
-      this.redis.send("ZRANGE", [terminalKey, "0", String(extra - 1)]),
+      this.redis.zrange(terminalKey, 0, extra - 1),
     );
 
     if (rangeError) {
@@ -589,15 +587,15 @@ export class WorkflowStore {
       const id = String(executionId);
 
       const [trimError] = await mightThrow(
-        this.redis.send("EVAL", [
+        this.redis.eval(
           TRIM_IF_MEMBER,
-          "4",
+          4,
           terminalKey,
           keys.meta(this.name, id),
           keys.history(this.name, id),
           keys.lease(this.name, id),
           id,
-        ]),
+        ),
       );
 
       if (trimError) {

@@ -1,5 +1,9 @@
 export type RedisClient = {
-  send: (command: string, args: string[]) => Promise<unknown>;
+  eval: (
+    script: string,
+    numkeys: number,
+    ...keysAndArgs: (string | number)[]
+  ) => Promise<unknown>;
   lpush: (key: string, ...values: string[]) => Promise<number>;
 };
 

@@ -34,7 +34,7 @@ export class PubSub<T extends Record<string, unknown>> {
     readonly [null, unknown] | readonly [unknown, null]
   > | null = null;
   private subscribeInFlight: Promise<
-    readonly [null, number] | readonly [unknown, null]
+    readonly [null, number | undefined] | readonly [unknown, null]
   > | null = null;
 
   public constructor(options: PubSubOptions) {
@@ -259,7 +259,7 @@ export class PubSub<T extends Record<string, unknown>> {
       throw new SubscribeError(`Unable to subscribe to ${this.channel}`);
     }
 
-    if (!count) {
+    if (count === 0) {
       this.handlers.delete(handlerId);
       this.transportHandler = null;
 
@@ -327,3 +327,21 @@ export class PubSub<T extends Record<string, unknown>> {
     return this.handlers.size > 0 && this.isSubscribed;
   }
 }
+
+export {
+  PublishError,
+  SerializationError,
+  SubscribeError,
+  UnsubscribeError,
+} from "./errors.js";
+export { fromIoredis } from "./ioredis.js";
+export type {
+  ChannelHandler,
+  IoredisLike,
+  ListenOptions,
+  MemoryPubSubOptions,
+  MessageHandler,
+  PubSubOptions,
+  RedisClient,
+  RedisPubSubOptions,
+} from "./types.js";
