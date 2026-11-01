@@ -9,6 +9,7 @@ import {
   RotateCcwIcon,
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { composerRedisModuleIds } from "@/lib/home-composer-data";
 import { readModuleIcon } from "@/lib/module-icons";
 import { packageVersion } from "@/lib/shared";
 import { useInView } from "@/lib/use-in-view";
@@ -18,6 +19,7 @@ const TYPES_FILE = "types.ts";
 const PACKAGE_FILE = "package.json";
 const AUTOPLAY_IDS = ["schema", "queue", "cache"];
 const AUTOPLAY_STEP_MS = 750;
+const REDIS_MODULE_IDS: readonly string[] = composerRedisModuleIds;
 
 const Grow = ({
   on,
@@ -98,10 +100,16 @@ function ExplorerRow({
 
 export function HomeComposer({
   baseImport,
+  baseSchemaImport,
   baseStart,
+  baseRoute,
   baseHandler,
   baseEnd,
   baseLines,
+  baseSchemaLines,
+  redisFileName,
+  redisFileNode,
+  redisFileLines,
   modules,
   importNodes,
   typeFileNodes,
@@ -111,10 +119,16 @@ export function HomeComposer({
   stepNodes,
 }: {
   baseImport: ReactNode;
+  baseSchemaImport: ReactNode;
   baseStart: ReactNode;
+  baseRoute: ReactNode;
   baseHandler: ReactNode;
   baseEnd: ReactNode;
   baseLines: number;
+  baseSchemaLines: number;
+  redisFileName: string;
+  redisFileNode: ReactNode;
+  redisFileLines: number;
   modules: ComposerModule[];
   importNodes: Record<string, ReactNode>;
   typeFileNodes: Record<string, ReactNode>;
@@ -178,6 +192,10 @@ export function HomeComposer({
   };
 
   const activeModules = modules.filter((item) => enabled.includes(item.id));
+  const schemaOn = enabled.includes("schema");
+  const showRedis = activeModules.some((item) =>
+    REDIS_MODULE_IDS.includes(item.id),
+  );
   const typeNames = activeModules
     .map((item) => item.typeName)
     .filter(Boolean)
@@ -187,14 +205,18 @@ export function HomeComposer({
 
   useEffect(() => {
     const active = modules.filter((item) => enabled.includes(item.id));
+    const redisOpen = active.some((item) =>
+      REDIS_MODULE_IDS.includes(item.id),
+    );
     const open =
       activeFile === SERVER_FILE ||
       activeFile === PACKAGE_FILE ||
       (activeFile === TYPES_FILE && active.some((item) => item.typeName)) ||
+      (activeFile === redisFileName && redisOpen) ||
       active.some((item) => item.fileName === activeFile);
 
     if (!open) setActiveFile(SERVER_FILE);
-  }, [activeFile, enabled, modules]);
+  }, [activeFile, enabled, modules, redisFileName]);
 
   const activeModuleFile = activeModules.find(
     (item) => item.fileName === activeFile,
@@ -202,17 +224,23 @@ export function HomeComposer({
   const lastAddedFile = modules.find(
     (item) => item.id === lastAdded,
   )?.fileName;
+  const redisFresh =
+    Boolean(lastAdded) && REDIS_MODULE_IDS.includes(lastAdded);
 
   const serverLines = activeModules.reduce(
     (total, item) => total + item.lines,
-    baseLines,
+    baseLines + (schemaOn ? 0 : baseSchemaLines),
   );
+
+  const importCount = activeModules.length + (schemaOn ? 1 : 2);
 
   let lineCount = serverLines;
   if (activeFile === TYPES_FILE) {
     lineCount = typeFileLines[typeFileKey] ?? 0;
   } else if (activeFile === PACKAGE_FILE) {
     lineCount = 5;
+  } else if (activeFile === redisFileName) {
+    lineCount = redisFileLines;
   } else if (activeModuleFile) {
     lineCount = activeModuleFile.fileLines;
   }
@@ -272,6 +300,16 @@ export function HomeComposer({
                 onClick={() => setActiveFile(TYPES_FILE)}
               />
             ) : null}
+            {showRedis ? (
+              <ExplorerRow
+                icon={FileCodeIcon}
+                label={redisFileName}
+                active={activeFile === redisFileName}
+                fresh={redisFresh}
+                indent
+                onClick={() => setActiveFile(redisFileName)}
+              />
+            ) : null}
             {activeModules.map((item) => {
               if (!item.fileName) return null;
 
@@ -319,7 +357,7 @@ export function HomeComposer({
               {activeFile === SERVER_FILE ? (
                 <span className="max-sm:hidden">
                   {" "}
-                  - {activeModules.length + 1} imports
+                  - {importCount} imports
                 </span>
               ) : null}
             </span>
@@ -331,6 +369,9 @@ export function HomeComposer({
                 data-line-numbers
               >
                 {baseImport}
+                <Grow on={!schemaOn} fresh={false}>
+                  {baseSchemaImport}
+                </Grow>
                 {modules.map((item) => (
                   <Grow
                     key={`${item.id}-import`}
@@ -341,6 +382,9 @@ export function HomeComposer({
                   </Grow>
                 ))}
                 {baseStart}
+                <Grow on={!schemaOn} fresh={false}>
+                  {baseRoute}
+                </Grow>
                 {modules.map((item) => {
                   if (!item.hasRoute) return null;
 
@@ -381,6 +425,15 @@ export function HomeComposer({
                 data-line-numbers
               >
                 {typeFileNodes[typeFileKey]}
+              </pre>
+            ) : null}
+
+            {activeFile === redisFileName && showRedis ? (
+              <pre
+                className="shiki home-shiki home-composer-code"
+                data-line-numbers
+              >
+                {redisFileNode}
               </pre>
             ) : null}
 

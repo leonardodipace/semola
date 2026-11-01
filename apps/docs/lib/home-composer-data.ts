@@ -1,11 +1,18 @@
 export const composerBase = {
   import: `import { Api } from "semola/api";`,
+  schemaImport: `import { s } from "semola/schema";`,
   start: `
 const api = new Api();
 
 export const signup = api.defineRoute({
   path: "/signup",
   method: "POST",`,
+  route: `  request: {
+    body: s.object({ email: s.email(), name: s.string() }),
+  },
+  response: {
+    201: s.object({ ok: s.boolean(), message: s.string() }),
+  },`,
   handler: `  handler: async (c) => {
     const { email, name } = c.req.body;
     let message = \`Welcome, \${name}!\`;`,
@@ -16,6 +23,15 @@ export const signup = api.defineRoute({
 
 api.serve(3000);`,
 };
+
+export const composerRedis = {
+  name: "redis.ts",
+  code: `export const redisClient = new Bun.RedisClient(
+  "redis://127.0.0.1:6379",
+);`,
+};
+
+export const composerRedisModuleIds = ["queue", "cache", "workflow"] as const;
 
 export const composerModules = [
   {
@@ -59,6 +75,7 @@ export const signupCreated = s.object({
     file: {
       name: "emails.queue.ts",
       code: `import { Queue } from "semola/queue";
+import { redisClient } from "./redis.ts";
 import type { EmailJob } from "./types.ts";
 
 export const emails = new Queue<EmailJob>({
@@ -88,6 +105,7 @@ export const emails = new Queue<EmailJob>({
     file: {
       name: "profiles.cache.ts",
       code: `import { Cache } from "semola/cache";
+import { redisClient } from "./redis.ts";
 import type { Profile } from "./types.ts";
 
 export const profiles = new Cache<Profile>({
@@ -119,6 +137,7 @@ export const profiles = new Cache<Profile>({
     file: {
       name: "onboard.workflow.ts",
       code: `import { defineWorkflow } from "semola/workflow";
+import { redisClient } from "./redis.ts";
 import type { OnboardInput } from "./types.ts";
 
 export const onboard = defineWorkflow<OnboardInput>({
@@ -214,12 +233,12 @@ export const log = new Logger("api", [new ConsoleProvider()]);`,
     },
     import: `import { log } from "./logger.ts";`,
     route: "",
-    step: `    log.info("signup", { email, name, message });`,
+    step: `    log.info({ event: "signup", email, name, message });`,
     hovers: [
       {
         token: "info",
         within: "log.info",
-        type: "info(message: string, fields?: object)",
+        type: "info(msg: LogMessageType)",
         doc: "Logs the same message the client receives - works with or without i18n.",
       },
     ],

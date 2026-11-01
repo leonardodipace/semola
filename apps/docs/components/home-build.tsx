@@ -1,6 +1,10 @@
 import { HoverCode } from "@/components/hover-code";
 import { HomeComposer } from "@/components/home-composer";
-import { composerBase, composerModules } from "@/lib/home-composer-data";
+import {
+  composerBase,
+  composerModules,
+  composerRedis,
+} from "@/lib/home-composer-data";
 
 const plain = (code: string) => <HoverCode sample={{ code, hovers: [] }} />;
 
@@ -104,13 +108,22 @@ export function HomeBuild() {
     countLines(composerBase.handler) +
     countLines(composerBase.end);
 
+  const baseSchemaLines =
+    countLines(composerBase.schemaImport) + countLines(composerBase.route);
+
   return (
     <HomeComposer
       baseImport={plain(composerBase.import)}
+      baseSchemaImport={plain(composerBase.schemaImport)}
       baseStart={plain(composerBase.start)}
+      baseRoute={plain(composerBase.route)}
       baseHandler={plain(composerBase.handler)}
       baseEnd={plain(composerBase.end)}
       baseLines={baseLines}
+      baseSchemaLines={baseSchemaLines}
+      redisFileName={composerRedis.name}
+      redisFileNode={plain(composerRedis.code)}
+      redisFileLines={countLines(composerRedis.code)}
       modules={modules}
       importNodes={importNodes}
       typeFileNodes={typeFileNodes}
