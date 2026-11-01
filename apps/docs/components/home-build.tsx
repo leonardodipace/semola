@@ -105,22 +105,21 @@ export function HomeBuild() {
   const baseLines =
     countLines(composerBase.import) +
     countLines(composerBase.start) +
-    countLines(composerBase.handler) +
+    countLines(composerBase.handlerOpen) +
+    countLines(composerBase.bodyRaw) +
+    countLines(composerBase.handlerRest) +
     countLines(composerBase.end);
-
-  const baseSchemaLines =
-    countLines(composerBase.schemaImport) + countLines(composerBase.route);
 
   return (
     <HomeComposer
       baseImport={plain(composerBase.import)}
-      baseSchemaImport={plain(composerBase.schemaImport)}
       baseStart={plain(composerBase.start)}
-      baseRoute={plain(composerBase.route)}
-      baseHandler={plain(composerBase.handler)}
+      baseHandlerOpen={plain(composerBase.handlerOpen)}
+      baseBodyRaw={plain(composerBase.bodyRaw)}
+      baseBodySchema={plain(composerBase.bodySchema)}
+      baseHandlerRest={plain(composerBase.handlerRest)}
       baseEnd={plain(composerBase.end)}
       baseLines={baseLines}
-      baseSchemaLines={baseSchemaLines}
       redisFileName={composerRedis.name}
       redisFileNode={plain(composerRedis.code)}
       redisFileLines={countLines(composerRedis.code)}

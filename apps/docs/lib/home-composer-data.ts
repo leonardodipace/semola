@@ -1,21 +1,15 @@
 export const composerBase = {
   import: `import { Api } from "semola/api";`,
-  schemaImport: `import { s } from "semola/schema";`,
   start: `
 const api = new Api();
 
 export const signup = api.defineRoute({
   path: "/signup",
   method: "POST",`,
-  route: `  request: {
-    body: s.object({ email: s.email(), name: s.string() }),
-  },
-  response: {
-    201: s.object({ ok: s.boolean(), message: s.string() }),
-  },`,
-  handler: `  handler: async (c) => {
-    const { email, name } = c.req.body;
-    let message = \`Welcome, \${name}!\`;`,
+  handlerOpen: `  handler: async (c) => {`,
+  bodyRaw: `    const { email, name } = await c.raw.json();`,
+  bodySchema: `    const { email, name } = c.req.body;`,
+  handlerRest: `    let message = \`Welcome, \${name}!\`;`,
   end: `
     return c.json(201, { ok: true, message });
   },

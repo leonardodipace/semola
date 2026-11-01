@@ -100,13 +100,13 @@ function ExplorerRow({
 
 export function HomeComposer({
   baseImport,
-  baseSchemaImport,
   baseStart,
-  baseRoute,
-  baseHandler,
+  baseHandlerOpen,
+  baseBodyRaw,
+  baseBodySchema,
+  baseHandlerRest,
   baseEnd,
   baseLines,
-  baseSchemaLines,
   redisFileName,
   redisFileNode,
   redisFileLines,
@@ -119,13 +119,13 @@ export function HomeComposer({
   stepNodes,
 }: {
   baseImport: ReactNode;
-  baseSchemaImport: ReactNode;
   baseStart: ReactNode;
-  baseRoute: ReactNode;
-  baseHandler: ReactNode;
+  baseHandlerOpen: ReactNode;
+  baseBodyRaw: ReactNode;
+  baseBodySchema: ReactNode;
+  baseHandlerRest: ReactNode;
   baseEnd: ReactNode;
   baseLines: number;
-  baseSchemaLines: number;
   redisFileName: string;
   redisFileNode: ReactNode;
   redisFileLines: number;
@@ -229,10 +229,10 @@ export function HomeComposer({
 
   const serverLines = activeModules.reduce(
     (total, item) => total + item.lines,
-    baseLines + (schemaOn ? 0 : baseSchemaLines),
+    baseLines,
   );
 
-  const importCount = activeModules.length + (schemaOn ? 1 : 2);
+  const importCount = activeModules.length + 1;
 
   let lineCount = serverLines;
   if (activeFile === TYPES_FILE) {
@@ -369,9 +369,6 @@ export function HomeComposer({
                 data-line-numbers
               >
                 {baseImport}
-                <Grow on={!schemaOn} fresh={false}>
-                  {baseSchemaImport}
-                </Grow>
                 {modules.map((item) => (
                   <Grow
                     key={`${item.id}-import`}
@@ -382,9 +379,6 @@ export function HomeComposer({
                   </Grow>
                 ))}
                 {baseStart}
-                <Grow on={!schemaOn} fresh={false}>
-                  {baseRoute}
-                </Grow>
                 {modules.map((item) => {
                   if (!item.hasRoute) return null;
 
@@ -398,7 +392,14 @@ export function HomeComposer({
                     </Grow>
                   );
                 })}
-                {baseHandler}
+                {baseHandlerOpen}
+                <Grow on={!schemaOn} fresh={false}>
+                  {baseBodyRaw}
+                </Grow>
+                <Grow on={schemaOn} fresh={lastAdded === "schema"}>
+                  {baseBodySchema}
+                </Grow>
+                {baseHandlerRest}
                 {[...modules]
                   .filter((item) => item.hasStep)
                   .sort((left, right) => {
