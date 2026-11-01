@@ -449,8 +449,8 @@ export function HomeComposer({
 
             {activeFile === PACKAGE_FILE ? (
               <pre className="home-composer-code px-4 font-mono text-[13px] leading-6">
-                <span className="line">{"{"}</span>
-                <span className="line pl-4">
+                <span className="line block">{"{"}</span>
+                <span className="line block pl-4">
                   <span className="text-wheat">"dependencies"</span>: {"{"}
                 </span>
                 <span
@@ -460,8 +460,8 @@ export function HomeComposer({
                   <span className="text-wheat">"semola"</span>:{" "}
                   <span className="text-crust">"^{packageVersion}"</span>
                 </span>
-                <span className="line pl-4">{"}"}</span>
-                <span className="line">{"}"}</span>
+                <span className="line block pl-4">{"}"}</span>
+                <span className="line block">{"}"}</span>
               </pre>
             ) : null}
           </div>
