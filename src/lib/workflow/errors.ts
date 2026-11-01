@@ -33,6 +33,13 @@ export class NonRetryableStepError extends Error {
   }
 }
 
+export class UnregisteredWorkflowError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = "UnregisteredWorkflowError";
+  }
+}
+
 export class Paused extends Error {
   public constructor() {
     super("workflow paused");

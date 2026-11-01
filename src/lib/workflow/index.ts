@@ -5,6 +5,7 @@ import {
   NotFoundError,
   WorkflowStoreError,
 } from "./errors.js";
+import { createErrorRegistry, reviveFailure } from "./failure.js";
 import { parseHistory } from "./history.js";
 import { fromJson, toJson } from "./json.js";
 import { WorkflowStore } from "./store.js";
@@ -169,7 +170,15 @@ export const defineWorkflow = <TInput, TResult = void>(
   }
 
   const store = new WorkflowStore(options.redis, options.name);
-  const engine = new WorkflowEngine(options, store);
+  const errorRegistry = createErrorRegistry(options.errors);
+  const unregisteredErrors = options.unregisteredErrors ?? "warn";
+  const unregisteredWarnings = new Set<string>();
+  const engine = new WorkflowEngine(
+    options,
+    store,
+    unregisteredWarnings,
+    errorRegistry,
+  );
   engine.start();
 
   const createExecution = async (
@@ -187,6 +196,7 @@ export const defineWorkflow = <TInput, TResult = void>(
       input: serializedInput,
       result: "",
       error: "",
+      errorName: "",
       createdAt: String(now),
       updatedAt: String(now),
       completedAt: "",
@@ -357,12 +367,23 @@ export const defineWorkflow = <TInput, TResult = void>(
       }
 
       if (meta.status === "failed") {
+        let message = meta.error ?? "workflow failed";
+        let name = meta.errorName || "Error";
+
+        if (meta.originalError !== undefined) {
+          message = meta.originalError;
+          name = meta.originalErrorName || "Error";
+        }
+
         return {
           executionId,
           status: "failed",
           result: null,
-          error: new Error(
-            meta.originalError || meta.error || "workflow failed",
+          error: reviveFailure(
+            { message, name },
+            errorRegistry,
+            unregisteredErrors,
+            unregisteredWarnings,
           ),
         };
       }
@@ -417,6 +438,7 @@ export {
   NonRetryableStepError,
   NotFoundError,
   SerializationError,
+  UnregisteredWorkflowError,
   WorkflowStoreError,
 } from "./errors.js";
 
@@ -427,8 +449,10 @@ export type {
   StepHandler,
   StepOptions,
   StepSnapshot,
+  UnregisteredErrorsMode,
   Workflow,
   WorkflowCancelResult,
+  WorkflowErrorConstructor,
   WorkflowExecution,
   WorkflowHandlerContext,
   WorkflowHooks,

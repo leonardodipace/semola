@@ -201,7 +201,7 @@ redis.call('PERSIST', KEYS[1])
 redis.call('PERSIST', KEYS[2])
 redis.call('ZREM', KEYS[4], ARGV[1])
 redis.call('RPUSH', KEYS[2], ARGV[3])
-redis.call('HSET', KEYS[1], 'status', 'pending', 'error', '', 'failedAt', '', 'cancelRequestedAt', '', 'updatedAt', ARGV[2])
+redis.call('HSET', KEYS[1], 'status', 'pending', 'error', '', 'errorName', '', 'failedAt', '', 'cancelRequestedAt', '', 'updatedAt', ARGV[2])
 redis.call('ZADD', KEYS[3], ARGV[2], ARGV[1])
 
 return 'resumed'
