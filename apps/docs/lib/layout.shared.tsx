@@ -3,13 +3,13 @@ import { appName, gitConfig } from "./shared";
 
 function Logo() {
   return (
-    <span className="inline-flex items-center gap-2 font-medium">
+    <span className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-tight">
       <img
         src="/logo.png"
         alt="Semola"
         width={28}
         height={28}
-        className="size-7 rounded-md"
+        className="size-7"
       />
       <span>{appName}</span>
     </span>

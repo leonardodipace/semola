@@ -87,11 +87,11 @@ function StageTabs({
         role="tablist"
         aria-label="Semola modules"
         onKeyDown={onKeyDown}
-        className="home-tabs relative inline-flex items-center gap-0.5 rounded-full p-1"
+        className="home-tabs relative inline-flex items-center gap-0.5 rounded-xl p-1"
       >
         <span
           aria-hidden
-          className="home-tab-indicator absolute top-1 bottom-1 left-0 rounded-full"
+          className="home-tab-indicator absolute top-1 bottom-1 left-0 rounded-lg"
           style={indicator}
         />
         {stories.map((story, index) => {
@@ -113,7 +113,7 @@ function StageTabs({
               aria-controls={panelId}
               tabIndex={tabIndex}
               onClick={() => onSelect(index)}
-              className="home-tab relative inline-flex h-9 shrink-0 items-center gap-2 rounded-full px-4 text-[13px] font-medium"
+              className="home-tab relative inline-flex h-9 shrink-0 items-center gap-2 rounded-lg px-4 text-[13px] font-medium"
             >
               <Icon className="size-3.5" strokeWidth={1.75} />
               {story.label}
@@ -134,27 +134,48 @@ function BreakSwitch({
   broken: boolean;
   onToggle: () => void;
 }) {
+  const options = [
+    { id: "clean" as const, label: "All good", active: !broken },
+    { id: "break" as const, label: story.breakLabel, active: broken },
+  ];
+
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={broken}
-      onClick={onToggle}
-      className="home-break home-press home-ease flex w-full items-center gap-4 rounded-2xl p-4 text-left transition-[background-color,border-color,transform]"
-    >
-      <span aria-hidden className="home-switch">
-        <span className="home-switch-thumb" />
-      </span>
-      <span className="min-w-0">
-        <span className="block text-sm font-medium">Break it</span>
-        <span
-          key={story.pkg}
-          className="home-ticker-swap block truncate text-[13px] text-fd-muted-foreground"
-        >
-          {story.breakLabel}
-        </span>
-      </span>
-    </button>
+    <div>
+      <p className="home-label mb-3">Try it</p>
+      <div
+        role="group"
+        aria-label="Break the example"
+        className="home-tabs inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-xl p-1"
+      >
+        {options.map((option) => {
+          let className =
+            "home-tab relative inline-flex h-9 max-w-full items-center truncate rounded-lg px-3.5 text-[13px] font-medium";
+
+          if (option.active) {
+            className =
+              "home-tab relative inline-flex h-9 max-w-full items-center truncate rounded-lg bg-fd-background px-3.5 text-[13px] font-medium text-fd-foreground shadow-[inset_0_0_0_1px_var(--color-fd-border),0_1px_3px_oklch(0_0_0/18%)]";
+          }
+
+          return (
+            <button
+              key={option.id}
+              type="button"
+              aria-pressed={option.active}
+              onClick={() => {
+                if (option.active) return;
+
+                onToggle();
+              }}
+              className={className}
+            >
+              <span key={`${story.pkg}-${option.id}`} className="home-ticker-swap truncate">
+                {option.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

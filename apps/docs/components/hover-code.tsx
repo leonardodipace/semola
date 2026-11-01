@@ -49,8 +49,8 @@ async function HoverTip({ hover }: { hover: CodeHover }) {
   return (
     <>
       {error}
-      {type}
       {doc}
+      {type}
     </>
   );
 }
