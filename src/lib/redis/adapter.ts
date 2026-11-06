@@ -23,8 +23,8 @@ export const createRedisAdapter = <TClient extends object>(
     send: (command, args) => spec.send(client, command, args),
     subscribe: (channel, listener) => {
       if (!listening) {
-        listening = true;
         spec.listen?.(client, dispatch);
+        listening = true;
       }
 
       return subscriber.subscribe(channel, listener);
