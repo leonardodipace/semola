@@ -1,5 +1,6 @@
 import { mightThrow, mightThrowSync } from "../errors/index.js";
-import type { JobState, RedisClient } from "./types.js";
+import type { RedisClient } from "../redis/types.js";
+import type { JobState } from "./types.js";
 
 const CLAIM_FROM_JOBS =
   "local p=redis.call('RPOP',KEYS[1]) if not p then return false end redis.call('ZADD',KEYS[2],tonumber(ARGV[1]),p) return p";

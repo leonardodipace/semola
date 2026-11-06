@@ -1,4 +1,6 @@
 import { mightThrow } from "../errors/index.js";
+import { readHash } from "../redis/reply.js";
+import type { RedisClient } from "../redis/types.js";
 import { WorkflowEngine } from "./engine.js";
 import {
   DuplicateWorkflowError,
@@ -7,9 +9,8 @@ import {
 } from "./errors.js";
 import { parseHistory } from "./history.js";
 import { fromJson, toJson } from "./json.js";
-import { readHash, WorkflowStore } from "./store.js";
+import { WorkflowStore } from "./store.js";
 import type {
-  RedisClient,
   ResolvePartitionKeyInput,
   ScanReply,
   StepSnapshot,

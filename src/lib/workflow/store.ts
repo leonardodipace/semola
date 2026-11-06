@@ -1,4 +1,6 @@
 import { mightThrow } from "../errors/index.js";
+import { readHash } from "../redis/reply.js";
+import type { RedisClient } from "../redis/types.js";
 import { WorkflowStoreError } from "./errors.js";
 import { toJson } from "./json.js";
 import type {
@@ -7,7 +9,6 @@ import type {
   CommitResult,
   HistoryEvent,
   LeaseInput,
-  RedisClient,
   ReleaseLeaseInput,
   WorkflowMeta,
   WorkflowStatus,
@@ -246,28 +247,6 @@ redis.call('UNLINK', KEYS[2], KEYS[3], KEYS[4])
 
 return 1
 `;
-
-// HGETALL replies are a map under RESP3 (Bun) and a flat field/value list
-// under RESP2 (ioredis, node-redis).
-const toRecord = (reply: unknown) => {
-  if (!Array.isArray(reply)) {
-    return (reply ?? {}) as Record<string, string>;
-  }
-
-  const record: Record<string, string> = {};
-
-  for (let index = 0; index < reply.length; index += 2) {
-    record[String(reply[index])] = String(reply[index + 1]);
-  }
-
-  return record;
-};
-
-export const readHash = async (redis: RedisClient, key: string) => {
-  const reply = await redis.send("HGETALL", [key]);
-
-  return toRecord(reply);
-};
 
 export const keys = {
   history: (name: string, executionId: string) =>

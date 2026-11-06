@@ -1,3 +1,5 @@
+import type { RedisClient } from "../redis/types.js";
+
 export type Job<T> = {
   id: string;
   data: T;
@@ -45,11 +47,6 @@ export type QueueRetryBackoff = {
   baseDelay?: number;
   multiplier?: number;
   maxDelay?: number;
-};
-
-// Any Redis client that can send a raw command (Bun.RedisClient works as-is).
-export type RedisClient = {
-  send(command: string, args: string[]): Promise<unknown>;
 };
 
 export type QueueOptions<T> = {

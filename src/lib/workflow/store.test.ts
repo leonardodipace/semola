@@ -6,7 +6,7 @@ import {
   resetRedis,
   SEMOLA_REDIS_URL,
 } from "./integration-helpers.js";
-import { keys, readHash, TRIM_IF_MEMBER, WorkflowStore } from "./store.js";
+import { keys, TRIM_IF_MEMBER, WorkflowStore } from "./store.js";
 import type { CommitRetention, WorkflowMeta } from "./types.js";
 
 const baseMeta = (name: string) =>
@@ -65,29 +65,6 @@ const createFailed = async (
   await store.createExecution(executionId, baseMeta(name));
   await commitFailed(store, executionId, retention);
 };
-
-describe("readHash", () => {
-  test("reads a RESP3 map reply as a record", async () => {
-    const redis = { send: async () => ({ status: "pending" }) };
-
-    expect(await readHash(redis, "meta")).toEqual({ status: "pending" });
-  });
-
-  test("reads a RESP2 flat field/value reply as a record", async () => {
-    const redis = { send: async () => ["status", "pending", "name", "wf"] };
-
-    expect(await readHash(redis, "meta")).toEqual({
-      status: "pending",
-      name: "wf",
-    });
-  });
-
-  test("reads a missing hash as an empty record", async () => {
-    const redis = { send: async () => [] };
-
-    expect(await readHash(redis, "meta")).toEqual({});
-  });
-});
 
 describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
   beforeEach(resetRedis);

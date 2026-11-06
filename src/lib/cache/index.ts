@@ -34,12 +34,12 @@ export class Cache<T> {
       throw new CacheError(`Unable to get value for key ${key}`);
     }
 
-    if (typeof value !== "string") {
+    if (value === null || value === undefined) {
       throw new NotFoundError(`Key ${key} not found`);
     }
 
     const [deserializeErr, deserialized] = mightThrowSync<T>(() =>
-      this.deserialize(value),
+      this.deserialize(String(value)),
     );
 
     if (deserializeErr) {

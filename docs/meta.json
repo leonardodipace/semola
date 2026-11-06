@@ -10,6 +10,7 @@
     "pubsub",
     "cron",
     "workflow",
+    "redis",
     "---Data & Auth---",
     "orm",
     "cache",

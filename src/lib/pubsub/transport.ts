@@ -1,10 +1,6 @@
 import { mightThrow } from "../errors/index.js";
-import type {
-  ChannelHandler,
-  ChannelTransport,
-  RedisClient,
-  RedisSubscriber,
-} from "./types.js";
+import type { RedisClient, RedisSubscriber } from "../redis/types.js";
+import type { ChannelHandler, ChannelTransport } from "./types.js";
 
 const memorySubscriptions = new Map<string, Set<ChannelHandler>>();
 
@@ -62,8 +58,6 @@ export const createRedisTransport = (
       return Number(receivers);
     },
     subscribe: (channel, handler) => subscriber.subscribe(channel, handler),
-    unsubscribe: async (channel, handler) => {
-      await subscriber.unsubscribe(channel, handler);
-    },
+    unsubscribe: (channel, handler) => subscriber.unsubscribe(channel, handler),
   };
 };

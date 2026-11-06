@@ -1,3 +1,5 @@
+import type { RedisClient } from "../../redis/types.js";
+
 type MinutelyAlias = "@minutely";
 
 export type ScheduleType = Bun.CronWithAutocomplete | MinutelyAlias;
@@ -13,11 +15,6 @@ export type CronOptions = CronBaseOptions & {
 
 export type CronOSOptions = CronBaseOptions & {
   path: string;
-};
-
-// Any Redis client that can send a raw command (Bun.RedisClient works as-is).
-export type RedisClient = {
-  send(command: string, args: string[]): Promise<unknown>;
 };
 
 export type CronDistributedOptions = CronOptions & {

@@ -7,19 +7,7 @@ Run work in the background with Redis. Jobs are JSON-serialized, claimed into an
 
 Delivery is at-least-once after reclaim. Handlers should be idempotent.
 
-Needs a Redis client with `send(command, args)` and a server that supports `EVAL`. `Bun.RedisClient` works as-is. Wrap other clients in one line:
-
-```typescript
-import Redis from "ioredis";
-
-const ioredis = new Redis();
-
-const redisClient = {
-  send: (command: string, args: string[]) => ioredis.call(command, ...args),
-};
-```
-
-With node-redis, use `send: (command, args) => client.sendCommand([command, ...args])`.
+Needs a Redis client on a server that supports `EVAL`: `Bun.RedisClient` as-is, or ioredis, node-redis, or Valkey GLIDE through a [`semola/redis`](/docs/redis) adapter.
 
 ## Import
 
@@ -185,7 +173,7 @@ process.on("SIGINT", async () => {
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `name` | required | Redis key namespace |
-| `redis` | required | `{ send(command, args) }`, e.g. `Bun.RedisClient` |
+| `redis` | required | `Bun.RedisClient` or a [`semola/redis`](/docs/redis) adapter |
 | `handler` | required | `(data, signal?) => void \| Promise<void>` |
 | `retries` | `3` | Max attempts after the first failure |
 | `retryBackoff` | `baseDelay` 1s, `multiplier` 2, `maxDelay` 60s | Exponential backoff |
