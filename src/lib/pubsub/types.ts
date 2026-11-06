@@ -1,7 +1,18 @@
+// Any Redis client that can send a raw command (Bun.RedisClient works as-is).
+export type RedisClient = {
+  send(command: string, args: string[]): Promise<unknown>;
+};
+
+// Bun-style subscribe: the listener is passed per channel.
+export type RedisSubscriber = {
+  subscribe(channel: string, listener: ChannelHandler): Promise<number>;
+  unsubscribe(channel: string, listener: ChannelHandler): Promise<unknown>;
+};
+
 export type RedisPubSubOptions = {
   transport?: "redis";
-  subscriber: Bun.RedisClient;
-  publisher: Bun.RedisClient;
+  subscriber: RedisSubscriber;
+  publisher: RedisClient;
   channel: string;
 };
 

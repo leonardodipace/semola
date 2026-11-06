@@ -6,7 +6,7 @@ import {
   resetRedis,
   SEMOLA_REDIS_URL,
 } from "./integration-helpers.js";
-import { keys, TRIM_IF_MEMBER, WorkflowStore } from "./store.js";
+import { keys, readHash, TRIM_IF_MEMBER, WorkflowStore } from "./store.js";
 import type { CommitRetention, WorkflowMeta } from "./types.js";
 
 const baseMeta = (name: string) =>
@@ -66,6 +66,29 @@ const createFailed = async (
   await commitFailed(store, executionId, retention);
 };
 
+describe("readHash", () => {
+  test("reads a RESP3 map reply as a record", async () => {
+    const redis = { send: async () => ({ status: "pending" }) };
+
+    expect(await readHash(redis, "meta")).toEqual({ status: "pending" });
+  });
+
+  test("reads a RESP2 flat field/value reply as a record", async () => {
+    const redis = { send: async () => ["status", "pending", "name", "wf"] };
+
+    expect(await readHash(redis, "meta")).toEqual({
+      status: "pending",
+      name: "wf",
+    });
+  });
+
+  test("reads a missing hash as an empty record", async () => {
+    const redis = { send: async () => [] };
+
+    expect(await readHash(redis, "meta")).toEqual({});
+  });
+});
+
 describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
   beforeEach(resetRedis);
   afterEach(closeRedis);
@@ -93,7 +116,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     const name = "store-create-fail";
     const store = new WorkflowStore(redis, name);
 
-    failNext(redis, "send");
+    failNext(redis, "EVAL");
 
     await expect(
       store.createExecution("exec-1", baseMeta(name)),
@@ -655,7 +678,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     const redis = createRedis();
     const store = new WorkflowStore(redis, "store-meta-fail");
 
-    failNext(redis, "hgetall");
+    failNext(redis, "HGETALL");
 
     await expect(store.getMeta("exec-x")).rejects.toMatchObject({
       name: "WorkflowStoreError",
@@ -667,7 +690,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     const redis = createRedis();
     const store = new WorkflowStore(redis, "store-history-fail");
 
-    failNext(redis, "lrange");
+    failNext(redis, "LRANGE");
 
     await expect(store.loadHistory("exec-y")).rejects.toMatchObject({
       name: "WorkflowStoreError",

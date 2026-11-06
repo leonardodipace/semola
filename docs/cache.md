@@ -5,7 +5,19 @@ description: Semola typed Redis cache with TTL and optional key prefixes
 
 Store and load typed values in Redis. Values are JSON by default.
 
-Needs a `Bun.RedisClient`.
+Needs a Redis client with `send(command, args)`. `Bun.RedisClient` works as-is. Wrap other clients in one line:
+
+```typescript
+import Redis from "ioredis";
+
+const ioredis = new Redis();
+
+const redisClient = {
+  send: (command: string, args: string[]) => ioredis.call(command, ...args),
+};
+```
+
+With node-redis, use `send: (command, args) => client.sendCommand([command, ...args])`.
 
 ## Import
 
@@ -117,7 +129,7 @@ const blobs = new Cache<Uint8Array>({
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `redis` | required | `Bun.RedisClient` |
+| `redis` | required | `{ send(command, args) }`, e.g. `Bun.RedisClient` |
 | `ttl` | none | ms, or `(key, value) => number`; invalid values throw |
 | `enabled` | `true` | Soft on/off switch |
 | `prefix` | - | Key prefix (`prefix:key`) |

@@ -6,7 +6,21 @@ description: Semola durable workflows - multi-step Redis jobs with resumable ste
 Durable workflows on Redis. Event history, deterministic replay, inline steps, multi-replica leases, and crashed or stalled runs that any replica picks up once `lockTTL` passes.
 Workflows run multi-step processes that survive restarts. Each named `step` caches its result in Redis, so replay and reclaim skip work that already succeeded.
 
-Needs a `Bun.RedisClient`. Workflow names must be unique in the process. Execution IDs must be unique per workflow name (Redis keys are `workflow:{name}:…`).
+Needs a Redis client with `send(command, args)`. `Bun.RedisClient` works as-is. Wrap other clients in one line:
+
+```typescript
+import Redis from "ioredis";
+
+const ioredis = new Redis();
+
+const redisClient = {
+  send: (command: string, args: string[]) => ioredis.call(command, ...args),
+};
+```
+
+With node-redis, use `send: (command, args) => client.sendCommand([command, ...args])`.
+
+Workflow names must be unique in the process. Execution IDs must be unique per workflow name (Redis keys are `workflow:{name}:…`).
 
 ## Import
 
@@ -352,7 +366,7 @@ await onboard.stop();
 ### Options
 
 - **`name`** (required) - unique per process
-- **`redis`** (required) - `Bun.RedisClient`
+- **`redis`** (required) - `{ send(command, args) }`, e.g. `Bun.RedisClient`
 - **`handler`** (required)
 - **`retries`** - step retries before workflow fails (default: 3; `0` = fail on first error)
 - **`retryBackoff`** - `{ baseDelay, multiplier, maxDelay }` (defaults: 1000 / 2x / 30000)

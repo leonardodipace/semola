@@ -7,7 +7,7 @@ Publish and subscribe to JSON messages on a channel, with TypeScript checking th
 
 Two transports:
 
-- **redis** (default) - needs **two** `Bun.RedisClient` connections (publisher and subscriber). Sharing one client for both is a common Redis footgun; Semola makes both explicit.
+- **redis** (default) - needs **two** Redis connections (publisher and subscriber). Sharing one client for both is a common Redis footgun; Semola makes both explicit. `Bun.RedisClient` works as-is for both; see [Other Redis clients](#other-redis-clients).
 - **memory** - process-local hub for single-process apps and tests. Same `publish` / `subscribe` / `listen` API; swap to Redis later by changing options.
 
 ## Import
@@ -158,13 +158,57 @@ await consume;
 
 Or iterate without a signal: `for await (const message of events) { ... }`.
 
+## Other Redis clients
+
+The publisher needs `send(command, args)`. The subscriber needs Bun-style `subscribe(channel, listener)` and `unsubscribe(channel, listener)`, where `subscribe` resolves to the subscribed channel count. With ioredis:
+
+```typescript
+import Redis from "ioredis";
+
+type Listener = (message: string, channel: string) => void;
+
+const ioPublisher = new Redis();
+const ioSubscriber = new Redis();
+const listeners = new Map<string, Set<Listener>>();
+
+ioSubscriber.on("message", (channel: string, message: string) => {
+  for (const listener of listeners.get(channel) ?? []) {
+    listener(message, channel);
+  }
+});
+
+const redisPublisher = {
+  send: (command: string, args: string[]) =>
+    ioPublisher.call(command, ...args),
+};
+
+const redisSubscriber = {
+  subscribe: async (channel: string, listener: Listener) => {
+    const channelListeners = listeners.get(channel) ?? new Set();
+
+    channelListeners.add(listener);
+    listeners.set(channel, channelListeners);
+
+    return Number(await ioSubscriber.subscribe(channel));
+  },
+  unsubscribe: async (channel: string, listener: Listener) => {
+    listeners.get(channel)?.delete(listener);
+
+    if (listeners.get(channel)?.size) return;
+
+    listeners.delete(channel);
+    await ioSubscriber.unsubscribe(channel);
+  },
+};
+```
+
 ## Reference
 
 | Option | Meaning |
 | --- | --- |
 | `transport` | `"redis"` (default) or `"memory"` |
-| `subscriber` | `Bun.RedisClient` used for subscribe (redis only) |
-| `publisher` | `Bun.RedisClient` used for publish (redis only) |
+| `subscriber` | `{ subscribe(channel, listener), unsubscribe(channel, listener) }`, e.g. `Bun.RedisClient` (redis only) |
+| `publisher` | `{ send(command, args) }`, e.g. `Bun.RedisClient` (redis only) |
 | `channel` | Channel name |
 
 ### Methods

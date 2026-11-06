@@ -15,8 +15,13 @@ export type CronOSOptions = CronBaseOptions & {
   path: string;
 };
 
+// Any Redis client that can send a raw command (Bun.RedisClient works as-is).
+export type RedisClient = {
+  send(command: string, args: string[]): Promise<unknown>;
+};
+
 export type CronDistributedOptions = CronOptions & {
-  redis: Bun.RedisClient;
+  redis: RedisClient;
   lockTTL?: number;
   replicaId?: string;
 };

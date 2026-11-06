@@ -73,14 +73,17 @@ export const closeRedis = () => {
   for (const redis of clients.splice(0)) redis.close();
 };
 
-type FailableCommand = "send" | "lrange" | "hgetall";
+type FailableCommand = "EVAL" | "LRANGE" | "HGETALL";
 
-// Makes the next call to `command` on this client reject, then restores it.
+// Makes the next `command` sent by this client reject, then restores send.
 export const failNext = (redis: Bun.RedisClient, command: FailableCommand) => {
+  const send = redis.send.bind(redis);
   const target = redis as unknown as Record<string, unknown>;
 
-  target[command] = async () => {
-    delete target[command];
+  target.send = async (name: string, args: string[]) => {
+    if (name !== command) return send(name, args);
+
+    delete target.send;
     throw new Error(`redis ${command} failed`);
   };
 };

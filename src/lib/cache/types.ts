@@ -1,5 +1,10 @@
+// Any Redis client that can send a raw command (Bun.RedisClient works as-is).
+export type RedisClient = {
+  send(command: string, args: string[]): Promise<unknown>;
+};
+
 export type CacheOptions<T> = {
-  redis: Bun.RedisClient;
+  redis: RedisClient;
   ttl?: number | ((key: string, value: T) => number);
   enabled?: boolean;
   prefix?: string;

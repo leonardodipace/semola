@@ -47,6 +47,18 @@ class MockRedisClient {
     return 1;
   }
 
+  public async send(command: string, args: string[]) {
+    const [key = "", value = "", mode, ttl] = args;
+
+    if (command === "GET") return this.get(key);
+    if (command === "DEL") return this.del(key);
+    if (command !== "SET") throw new Error(`Unsupported command: ${command}`);
+
+    if (ttl === undefined) return this.set(key, value, mode);
+
+    return this.set(key, value, mode, Number(ttl));
+  }
+
   public clear() {
     this.store.clear();
   }
@@ -62,7 +74,7 @@ class MockRedisClient {
 
 // Helper to create a properly typed mock redis client for testing
 const createMockRedis = () => {
-  return new MockRedisClient() as MockRedisClient & Bun.RedisClient;
+  return new MockRedisClient();
 };
 
 describe("Cache", () => {

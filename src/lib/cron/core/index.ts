@@ -219,13 +219,13 @@ export class CronDistributed implements CronUtilitiesInterface {
     );
     const lockTTL = this.options.lockTTL ?? DEFAULT_LOCK_TTL;
 
-    const acquired = await this.options.redis.set(
+    const acquired = await this.options.redis.send("SET", [
       key,
       this.replicaId,
       "PX",
       String(lockTTL),
       "NX",
-    );
+    ]);
 
     if (acquired !== "OK") return;
 

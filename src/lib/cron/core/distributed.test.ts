@@ -87,6 +87,14 @@ class MockRedisClient {
     return "OK";
   }
 
+  public async send(command: string, args: string[]) {
+    if (command !== "SET") throw new Error(`Unsupported command: ${command}`);
+
+    const [key = "", value = "", mode, ttl, flag] = args;
+
+    return this.set(key, value, mode, ttl, flag);
+  }
+
   public getLock(key: string) {
     this.sweep(key);
 
@@ -102,8 +110,7 @@ class MockRedisClient {
   }
 }
 
-const createMockRedis = () =>
-  new MockRedisClient() as MockRedisClient & Bun.RedisClient;
+const createMockRedis = () => new MockRedisClient();
 
 const mockCronJob = {
   stop: () => {},

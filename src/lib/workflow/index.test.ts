@@ -1443,11 +1443,13 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
     let reads = 0;
     let target = "";
 
-    const lrange = redis.lrange.bind(redis);
-    redis.lrange = async (key: string, start: number, stop: number) => {
-      if (key === historyKey(target)) reads++;
+    const send = redis.send.bind(redis);
+    redis.send = async (command: string, args: string[]) => {
+      if (command === "LRANGE") {
+        if (args[0] === historyKey(target)) reads++;
+      }
 
-      return lrange(key, start, stop);
+      return send(command, args);
     };
 
     const wf = defineWorkflow({
@@ -1500,7 +1502,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
 
     // The first run's history read fails after the execution is claimed.
     // Let the engine hit it before get() (which also reads history) polls.
-    failNext(redis, "lrange");
+    failNext(redis, "LRANGE");
 
     const { executionId } = await wf.start({});
     await sleep(50);
@@ -1610,11 +1612,13 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
       return soon.length === 0 && all.length === 50;
     });
 
-    const lrange = redis.lrange.bind(redis);
-    redis.lrange = async (key: string, start: number, stop: number) => {
-      if (key.includes(":history:")) reads++;
+    const send = redis.send.bind(redis);
+    redis.send = async (command: string, args: string[]) => {
+      if (command === "LRANGE") {
+        if (args[0]?.includes(":history:")) reads++;
+      }
 
-      return lrange(key, start, stop);
+      return send(command, args);
     };
 
     await sleep(300);
@@ -5175,11 +5179,13 @@ describe.skipIf(!SEMOLA_REDIS_URL)("workflow", () => {
         release = resolve;
       });
 
-      const lrange = redis.lrange.bind(redis);
-      redis.lrange = async (key: string, start: number, stop: number) => {
-        if (key === historyKey) reads++;
+      const send = redis.send.bind(redis);
+      redis.send = async (command: string, args: string[]) => {
+        if (command === "LRANGE") {
+          if (args[0] === historyKey) reads++;
+        }
 
-        return lrange(key, start, stop);
+        return send(command, args);
       };
 
       const wf = defineWorkflow({

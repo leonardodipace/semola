@@ -117,9 +117,16 @@ export type WorkflowRetryBackoff = {
   maxDelay?: number;
 };
 
+// Any Redis client that can send a raw command (Bun.RedisClient works as-is).
+export type RedisClient = {
+  send(command: string, args: string[]): Promise<unknown>;
+};
+
+export type ScanReply = [cursor: string, keys: string[]];
+
 export type WorkflowOptions<TInput, TResult> = {
   name: string;
-  redis: Bun.RedisClient;
+  redis: RedisClient;
   handler: (
     context: WorkflowHandlerContext<TInput>,
   ) => TResult | Promise<TResult>;

@@ -47,9 +47,14 @@ export type QueueRetryBackoff = {
   maxDelay?: number;
 };
 
+// Any Redis client that can send a raw command (Bun.RedisClient works as-is).
+export type RedisClient = {
+  send(command: string, args: string[]): Promise<unknown>;
+};
+
 export type QueueOptions<T> = {
   name: string;
-  redis: Bun.RedisClient;
+  redis: RedisClient;
   handler: (data: T, signal?: AbortSignal) => void | Promise<void>;
   onSuccess?: (job: Job<T>) => void | Promise<void>;
   onRetry?: (context: RetryContext<T>) => void | Promise<void>;
