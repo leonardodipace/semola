@@ -9,7 +9,7 @@ import type {
 } from "./types.js";
 
 const SUBSCRIBE_TIMEOUT_MS = 5_000;
-const POLL_RETRY_DELAY_MS = 100;
+export const POLL_RETRY_DELAY_MS = 100;
 
 // Closed client, or messages go to a configured pubsub callback instead.
 const STOP_POLLING_ERRORS = new Set(["ClosingError", "ConfigurationError"]);

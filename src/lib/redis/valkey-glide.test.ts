@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { GlideClient } from "@valkey/valkey-glide";
 import type { ValkeyGlideMessage } from "./types.js";
-import { fromValkeyGlide } from "./valkey-glide.js";
+import { fromValkeyGlide, POLL_RETRY_DELAY_MS } from "./valkey-glide.js";
 
 // Type check only: a real GLIDE client must fit the adapter.
 export const adaptRealGlide = (client: GlideClient) => fromValkeyGlide(client);
@@ -19,6 +19,7 @@ const createFakeGlide = (reply: unknown = "OK") => {
   const subscriptions: string[][] = [];
   const queue: ValkeyGlideMessage[] = [];
   const failures: Error[] = [];
+  const pollWaiters: (() => void)[] = [];
   let polls = 0;
   let waiting: ((message: ValkeyGlideMessage) => void) | null = null;
 
@@ -36,6 +37,8 @@ const createFakeGlide = (reply: unknown = "OK") => {
     },
     getPubSubMessage: () => {
       polls += 1;
+
+      for (const resolve of pollWaiters.splice(0)) resolve();
 
       const failure = failures.shift();
 
@@ -70,7 +73,23 @@ const createFakeGlide = (reply: unknown = "OK") => {
 
   const pollCount = () => polls;
 
-  return { client, commands, subscriptions, publish, failNextPoll, pollCount };
+  const nextPoll = () => {
+    const { promise, resolve } = Promise.withResolvers<void>();
+
+    pollWaiters.push(resolve);
+
+    return promise;
+  };
+
+  return {
+    client,
+    commands,
+    subscriptions,
+    publish,
+    failNextPoll,
+    pollCount,
+    nextPoll,
+  };
 };
 
 describe("fromValkeyGlide", () => {
@@ -174,22 +193,25 @@ describe("fromValkeyGlide", () => {
 
     failNextPoll(namedError(name));
     await redis.subscribe("a", () => {});
-    await Bun.sleep(150);
+    await Bun.sleep(POLL_RETRY_DELAY_MS * 2);
 
     expect(pollCount()).toBe(1);
   });
 
   test("waits before retrying after a connection error", async () => {
-    const { client, failNextPoll, pollCount } = createFakeGlide();
+    const { client, failNextPoll, pollCount, nextPoll } = createFakeGlide();
     const redis = fromValkeyGlide(client);
 
     failNextPoll(namedError("ConnectionError"));
     await redis.subscribe("a", () => {});
+
+    const retried = nextPoll();
+
     await Bun.sleep(0);
 
     expect(pollCount()).toBe(1);
 
-    await Bun.sleep(150);
+    await retried;
 
     expect(pollCount()).toBe(2);
   });
