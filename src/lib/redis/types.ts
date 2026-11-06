@@ -36,7 +36,6 @@ export type RedisClientSpec<TClient> = {
   unsubscribe: (client: TClient, channel: string) => Promise<unknown>;
 };
 
-// ioredis and iovalkey.
 export type IoredisClient = {
   call(command: string, ...args: string[]): Promise<unknown>;
   subscribe(...channels: string[]): Promise<unknown>;
@@ -49,6 +48,11 @@ export type NodeRedisClient = {
   sendCommand(args: string[]): Promise<unknown>;
   subscribe(channel: string, listener: RedisListener): Promise<unknown>;
   unsubscribe(channel: string): Promise<unknown>;
+};
+
+export type ValkeyGlideRecordEntry = {
+  key: unknown;
+  value: unknown;
 };
 
 export type ValkeyGlideMessage = {

@@ -67,7 +67,7 @@ export const listWorkflows = async (
 
     const [next, keys] = scanned as ScanReply;
 
-    cursor = next;
+    cursor = String(next);
 
     for (const key of keys) {
       const marker = ":meta:";

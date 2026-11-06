@@ -82,6 +82,32 @@ describe.skipIf(!SEMOLA_REDIS_URL)("Semola modules on every client", () => {
         await events.unsubscribe();
       });
 
+      test("pubsub instances can share one subscriber connection", async () => {
+        const publisher = await connect();
+        const subscriber = await connect();
+        const channel = `semola:${crypto.randomUUID()}`;
+        const leaving = new PubSub<{ n: number }>({
+          publisher,
+          subscriber,
+          channel,
+        });
+        const staying = new PubSub<{ n: number }>({
+          publisher,
+          subscriber,
+          channel,
+        });
+        const received = Promise.withResolvers<{ n: number }>();
+
+        await leaving.subscribe(() => {});
+        await staying.subscribe(received.resolve);
+        await leaving.unsubscribe();
+        await staying.publish({ n: 1 });
+
+        expect(await received.promise).toEqual({ n: 1 });
+
+        await staying.unsubscribe();
+      });
+
       test("queue processes an enqueued job", async () => {
         const processed = Promise.withResolvers<{ id: number }>();
         const queue = new Queue<{ id: number }>({

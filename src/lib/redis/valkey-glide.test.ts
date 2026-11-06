@@ -95,11 +95,22 @@ describe("fromValkeyGlide", () => {
     });
   });
 
-  test("leaves plain array replies alone", async () => {
-    const { client } = createFakeGlide(["0", ["a", "b"]]);
+  test("keeps a map field named __proto__ as data", async () => {
+    const { client } = createFakeGlide([{ key: "__proto__", value: "x" }]);
+    const reply = await fromValkeyGlide(client).send("HGETALL", ["h"]);
+
+    expect(Object.hasOwn(Object(reply), "__proto__")).toBe(true);
+  });
+
+  test.each([
+    ["SCAN", ["0", ["a", "b"]]],
+    ["objects without a value field", [{ key: "a" }]],
+    ["an empty map", []],
+  ])("leaves %s replies alone", async (_label, reply) => {
+    const { client } = createFakeGlide(reply);
     const redis = fromValkeyGlide(client);
 
-    expect(await redis.send("SCAN", ["0"])).toEqual(["0", ["a", "b"]]);
+    expect(await redis.send("CMD", [])).toEqual(reply);
   });
 
   test("pulls messages and delivers them to the channel listener", async () => {
@@ -154,15 +165,33 @@ describe("fromValkeyGlide", () => {
     expect(pollCount()).toBe(1);
   });
 
-  test("stops polling once the client is closed", async () => {
+  test.each([
+    "ClosingError",
+    "ConfigurationError",
+  ])("stops polling for good on %s", async (name) => {
     const { client, failNextPoll, pollCount } = createFakeGlide();
     const redis = fromValkeyGlide(client);
 
-    failNextPoll(namedError("ClosingError"));
+    failNextPoll(namedError(name));
     await redis.subscribe("a", () => {});
-    await Bun.sleep(10);
+    await Bun.sleep(150);
 
     expect(pollCount()).toBe(1);
+  });
+
+  test("waits before retrying after a connection error", async () => {
+    const { client, failNextPoll, pollCount } = createFakeGlide();
+    const redis = fromValkeyGlide(client);
+
+    failNextPoll(namedError("ConnectionError"));
+    await redis.subscribe("a", () => {});
+    await Bun.sleep(0);
+
+    expect(pollCount()).toBe(1);
+
+    await Bun.sleep(150);
+
+    expect(pollCount()).toBe(2);
   });
 
   test("keeps polling after a temporary connection error", async () => {

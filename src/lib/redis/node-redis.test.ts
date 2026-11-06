@@ -41,11 +41,11 @@ describe("fromNodeRedis", () => {
     const { client, commands, publish } = createFakeNodeRedis();
     const redis = fromNodeRedis(client);
     const received: string[] = [];
-    const first = (message: string) => {
-      received.push(`first:${message}`);
+    const first = (message: string, channel: string) => {
+      received.push(`first:${channel}:${message}`);
     };
-    const second = (message: string) => {
-      received.push(`second:${message}`);
+    const second = (message: string, channel: string) => {
+      received.push(`second:${channel}:${message}`);
     };
 
     await redis.subscribe("a", first);
@@ -57,7 +57,7 @@ describe("fromNodeRedis", () => {
     await redis.unsubscribe("a", first);
     await redis.unsubscribe("a", second);
 
-    expect(received).toEqual(["first:hello", "second:hello"]);
+    expect(received).toEqual(["first:a:hello", "second:a:hello"]);
     expect(commands).toEqual([
       ["SUBSCRIBE", "a"],
       ["UNSUBSCRIBE", "a"],

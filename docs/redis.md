@@ -11,7 +11,7 @@ description: Semola Redis client contract, with adapters for ioredis, iovalkey, 
 | ioredis | `ioredis` | `fromIoredis(client)` |
 | iovalkey | `iovalkey` | `fromIoredis(client)` |
 | node-redis | `redis` | `fromNodeRedis(client)` |
-| Valkey GLIDE | `@valkey/valkey-glide` | `fromValkeyGlide(client)` |
+| Valkey GLIDE (standalone) | `@valkey/valkey-glide` | `fromValkeyGlide(client)` |
 
 Semola has no dependency on these packages. Adapters only rely on the client's shape.
 
@@ -88,3 +88,4 @@ const redis: RedisClient = {
 | `RedisClient` | `{ send(command, args) }` - what command modules need |
 | `RedisSubscriber` | `{ subscribe(channel, listener), unsubscribe(channel, listener) }` - what a PubSub subscriber needs |
 | `RedisAdapter` | `RedisClient & RedisSubscriber` - what every adapter returns |
+| `RedisListener` | `(message, channel) => void \| Promise<void>` - a subscriber listener |

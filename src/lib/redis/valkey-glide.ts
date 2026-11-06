@@ -5,6 +5,7 @@ import type {
   RedisClientSpec,
   RedisDispatch,
   ValkeyGlideClient,
+  ValkeyGlideRecordEntry,
 } from "./types.js";
 
 const SUBSCRIBE_TIMEOUT_MS = 5_000;
@@ -29,7 +30,7 @@ const fromGlideReply = (reply: unknown) => {
   if (!isGlideRecord(reply)) return reply;
 
   return Object.fromEntries(
-    reply.map(({ key, value }) => [String(key), value]),
+    reply.map(({ key, value }: ValkeyGlideRecordEntry) => [String(key), value]),
   );
 };
 
@@ -47,7 +48,7 @@ const pollMessages = async (
 
     if (STOP_POLLING_ERRORS.has(error.name)) return;
 
-    // Connection errors are temporary: GLIDE reconnects and resubscribes.
+    // ponytail: retries every 100ms until the client closes; GLIDE reconnects on its own.
     await delay(POLL_RETRY_DELAY_MS);
   }
 };

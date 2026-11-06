@@ -1,26 +1,32 @@
 import type { RedisClient } from "./types.js";
 
+const pairUp = (list: unknown[]) => {
+  const pairs: unknown[][] = [];
+
+  for (let index = 0; index < list.length; index += 2) {
+    pairs.push([list[index], list[index + 1]]);
+  }
+
+  return pairs;
+};
+
 // HGETALL comes back as an object, a Map, or a flat field/value list.
-const toRecord = (reply: unknown) => {
-  if (reply instanceof Map) {
-    return Object.fromEntries(reply) as Record<string, string>;
-  }
+const toEntries = (reply: unknown) => {
+  if (reply instanceof Map) return [...reply.entries()];
+  if (Array.isArray(reply)) return pairUp(reply);
+  if (typeof reply !== "object") return [];
+  if (reply === null) return [];
 
-  if (!Array.isArray(reply)) {
-    return (reply ?? {}) as Record<string, string>;
-  }
-
-  const record: Record<string, string> = {};
-
-  for (let index = 0; index < reply.length; index += 2) {
-    record[String(reply[index])] = String(reply[index + 1]);
-  }
-
-  return record;
+  return Object.entries(reply);
 };
 
 export const readHash = async (redis: RedisClient, key: string) => {
   const reply = await redis.send("HGETALL", [key]);
+  const fields = new Map<string, string>();
 
-  return toRecord(reply);
+  for (const [field, value] of toEntries(reply)) {
+    fields.set(String(field), String(value));
+  }
+
+  return Object.fromEntries(fields);
 };

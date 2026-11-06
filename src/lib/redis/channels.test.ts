@@ -89,8 +89,7 @@ describe("createChannelSubscriber", () => {
       received.push(message);
     });
 
-    expect(subscribing).rejects.toThrow("subscribe failed");
-    await subscribing.catch(() => {});
+    await expect(subscribing).rejects.toThrow("subscribe failed");
 
     dispatch("a", "lost");
     await Bun.sleep(0);
@@ -110,10 +109,9 @@ describe("createChannelSubscriber", () => {
 
     fail("unsubscribe");
 
-    expect(subscriber.unsubscribe("a", listener)).rejects.toThrow(
+    await expect(subscriber.unsubscribe("a", listener)).rejects.toThrow(
       "unsubscribe failed",
     );
-    await Bun.sleep(0);
 
     dispatch("a", "still here");
     await Bun.sleep(0);
