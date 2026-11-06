@@ -62,7 +62,7 @@ Per client:
 
 - **ioredis / iovalkey** - use a second `new Redis()`.
 - **node-redis** - use `client.duplicate()` and `connect()` it.
-- **Valkey GLIDE** - create a second client without a `pubsubSubscriptions` callback. The adapter pulls messages with `getPubSubMessage()`.
+- **Valkey GLIDE** - create a second client without a `pubsubSubscriptions` callback. The adapter pulls messages with `getPubSubMessage()`. On a client with a callback, `subscribe` rejects with GLIDE's `ConfigurationError`.
 
 Wrapping the same client again returns the same adapter, so several `PubSub` instances can share one subscriber connection.
 

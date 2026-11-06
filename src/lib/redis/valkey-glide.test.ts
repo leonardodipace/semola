@@ -30,6 +30,8 @@ const createFakeGlide = (reply: unknown = "OK") => {
       return reply;
     },
     subscribe: async (channels: Iterable<string>) => {
+      // A real subscribe waits on the server, so pending microtasks run first.
+      await Bun.sleep(0);
       subscriptions.push(["subscribe", ...channels]);
     },
     unsubscribe: async (channels: Iterable<string>) => {
@@ -184,18 +186,36 @@ describe("fromValkeyGlide", () => {
     expect(pollCount()).toBe(1);
   });
 
-  test.each([
-    "ClosingError",
-    "ConfigurationError",
-  ])("stops polling for good on %s", async (name) => {
+  test("stops polling for good once the client closes", async () => {
     const { client, failNextPoll, pollCount } = createFakeGlide();
     const redis = fromValkeyGlide(client);
 
-    failNextPoll(namedError(name));
+    failNextPoll(namedError("ClosingError"));
     await redis.subscribe("a", () => {});
     await Bun.sleep(POLL_RETRY_DELAY_MS * 2);
 
     expect(pollCount()).toBe(1);
+  });
+
+  test("rejects subscribe when the client has its own pubsub callback", async () => {
+    const { client, failNextPoll, pollCount, subscriptions } =
+      createFakeGlide();
+    const redis = fromValkeyGlide(client);
+    const failure = namedError("ConfigurationError");
+
+    failNextPoll(failure);
+
+    await expect(redis.subscribe("a", () => {})).rejects.toBe(failure);
+    await expect(redis.subscribe("b", () => {})).rejects.toBe(failure);
+    await Bun.sleep(POLL_RETRY_DELAY_MS * 2);
+
+    expect(pollCount()).toBe(1);
+    expect(subscriptions).toEqual([
+      ["subscribe", "a"],
+      ["unsubscribe", "a"],
+      ["subscribe", "b"],
+      ["unsubscribe", "b"],
+    ]);
   });
 
   test("waits before retrying after a connection error", async () => {

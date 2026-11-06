@@ -431,8 +431,6 @@ export class WorkflowStore {
       throw new WorkflowStoreError(`Unable to read meta for ${executionId}`);
     }
 
-    if (!data) return null;
-
     if (Object.keys(data).length === 0) return null;
 
     return data as unknown as WorkflowMeta;

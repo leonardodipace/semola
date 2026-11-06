@@ -78,25 +78,6 @@ describe("createChannelSubscriber", () => {
     expect(calls).toEqual(["subscribe:a", "unsubscribe:a"]);
   });
 
-  test("removes the listener when the server subscribe fails", async () => {
-    const { connection, fail } = createConnection();
-    const { subscriber, dispatch } = createChannelSubscriber(connection);
-    const received: string[] = [];
-
-    fail("subscribe");
-
-    const subscribing = subscriber.subscribe("a", (message) => {
-      received.push(message);
-    });
-
-    await expect(subscribing).rejects.toThrow("subscribe failed");
-
-    dispatch("a", "lost");
-    await Bun.sleep(0);
-
-    expect(received).toEqual([]);
-  });
-
   test("keeps the listener when the server unsubscribe fails", async () => {
     const { connection, fail } = createConnection();
     const { subscriber, dispatch } = createChannelSubscriber(connection);
@@ -183,16 +164,22 @@ describe("createChannelSubscriber", () => {
     expect(calls).toEqual(["subscribe:a"]);
   });
 
-  test("retries the server subscribe after a failed one", async () => {
+  test("drops the listener of a failed subscribe and retries on the next", async () => {
     const { connection, calls, fail } = createConnection();
     const { subscriber, dispatch } = createChannelSubscriber(connection);
     const received: string[] = [];
+    const listener = (message: string) => {
+      received.push(message);
+    };
 
     fail("subscribe");
-    await subscriber.subscribe("a", () => {}).catch(() => {});
-    await subscriber.subscribe("a", (message) => {
-      received.push(message);
-    });
+
+    await expect(
+      subscriber.subscribe("a", () => {
+        received.push("lost");
+      }),
+    ).rejects.toThrow("subscribe failed");
+    await subscriber.subscribe("a", listener);
 
     dispatch("a", "hello");
     await Bun.sleep(0);

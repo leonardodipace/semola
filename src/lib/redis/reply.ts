@@ -22,11 +22,10 @@ const toEntries = (reply: unknown) => {
 
 export const readHash = async (redis: RedisClient, key: string) => {
   const reply = await redis.send("HGETALL", [key]);
-  const fields = new Map<string, string>();
-
-  for (const [field, value] of toEntries(reply)) {
-    fields.set(String(field), String(value));
-  }
+  const fields = toEntries(reply).map(([field, value]) => [
+    String(field),
+    String(value),
+  ]);
 
   return Object.fromEntries(fields);
 };

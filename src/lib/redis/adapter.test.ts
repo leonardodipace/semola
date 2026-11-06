@@ -86,24 +86,4 @@ describe("createRedisAdapter", () => {
       createRedisAdapter(spec, client),
     );
   });
-
-  test("wrapping a client twice shares one subscription per channel", async () => {
-    const client = createClient();
-    const first = createRedisAdapter(spec, client);
-    const second = createRedisAdapter(spec, client);
-    const received: string[] = [];
-    const leaver = () => {};
-
-    await first.subscribe("a", leaver);
-    await second.subscribe("a", (message) => {
-      received.push(message);
-    });
-    await first.unsubscribe("a", leaver);
-
-    client.dispatch?.("a", "still subscribed");
-    await Bun.sleep(0);
-
-    expect(client.log).toEqual(["listen", "subscribe:a"]);
-    expect(received).toEqual(["still subscribed"]);
-  });
 });

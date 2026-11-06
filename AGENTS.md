@@ -77,6 +77,7 @@ Code should read like English. Prefer clarity over clever density.
 - Prefer a named regex constant (or a simple alphabet string) for hex/format/wire checks. Collapse split-and-validate parsers (`parts.length !== 4`) into one regex when the format is fixed. Do not invent char-code ranges, paired micro-helpers (`isX` / `isXChar`), or constant inflation that renames every literal (`HTTP_STATUS_OK_MIN`).
 - **Opaque numbers** - if a reader cannot tell what a numeric literal means from the surrounding name, name it or wrap it (`TRACE_FLAGS_HEX_WIDTH`, `formatTraceFlagsHex`). Protocol field widths, magic lengths, and flag encodings count. Leave obvious literals alone (`0`, `1`, empty checks).
 - Delete unused types, error classes, and fields. Do not keep pass-through wrappers that only forward one call.
+- A deslop/simplification pass should shrink the code. Check `git diff --stat` before reporting: excluding bug fixes, the pass should remove more lines than it adds (tests included). Do not add a helper, type, or test file to remove a single cast or line. Look for redundant tests too (one test whose assertions another already covers). Report bug-fix LoC separately from cleanup LoC.
 - No `any` type. Infer types, avoid explicit return types. Use generics extensively.
 - No type predicates (`value is Type` return annotations) - use inline guards for narrowing.
 - No em-dashes; use regular hyphens.

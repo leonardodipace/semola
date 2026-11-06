@@ -87,7 +87,6 @@ export const listWorkflows = async (
         );
       }
 
-      if (!meta) continue;
       if (Object.keys(meta).length === 0) continue;
       if (!meta.name) continue;
       if (!meta.status) continue;
