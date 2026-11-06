@@ -1,7 +1,10 @@
 import { createChannelSubscriber } from "./channels.js";
 import type { RedisAdapter, RedisClientSpec } from "./types.js";
 
-export const createRedisAdapter = <TClient>(
+// Subscriptions belong to the connection, so each client gets one adapter.
+const adapters = new WeakMap<object, RedisAdapter>();
+
+const buildAdapter = <TClient extends object>(
   spec: RedisClientSpec<TClient>,
   client: TClient,
 ) => {
@@ -28,6 +31,21 @@ export const createRedisAdapter = <TClient>(
     },
     unsubscribe: subscriber.unsubscribe,
   };
+
+  return adapter;
+};
+
+export const createRedisAdapter = <TClient extends object>(
+  spec: RedisClientSpec<TClient>,
+  client: TClient,
+) => {
+  const existing = adapters.get(client);
+
+  if (existing) return existing;
+
+  const adapter = buildAdapter(spec, client);
+
+  adapters.set(client, adapter);
 
   return adapter;
 };

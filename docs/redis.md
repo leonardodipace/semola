@@ -64,6 +64,8 @@ Per client:
 - **node-redis** - use `client.duplicate()` and `connect()` it.
 - **Valkey GLIDE** - create a second client without a `pubsubSubscriptions` callback. The adapter pulls messages with `getPubSubMessage()`.
 
+Wrapping the same client again returns the same adapter, so several `PubSub` instances can share one subscriber connection.
+
 ## Other clients
 
 Modules call `send(command, args)` for commands. A PubSub subscriber also needs `subscribe(channel, listener)` and `unsubscribe(channel, listener)`, where `subscribe` resolves to the number of subscribed channels. Any object with that shape works, as long as `send` returns decoded replies: strings, numbers, `null`, and arrays (`SCAN` as `[cursor, keys]`). `HGETALL` may be an object, a `Map`, or a flat field/value list.
