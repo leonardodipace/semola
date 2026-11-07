@@ -11,7 +11,7 @@ license: MIT
 
 # Rethink
 
-Design-level simplification loop. Not a lint pass: question the shape of the code (contracts, layers, state), not just its lines. Ponytail and caveman stay on.
+Design-level simplification loop. Not a lint pass: question the shape of the code (contracts, layers, state), not just its lines. Caveman stays on.
 
 ## When to use
 
@@ -51,7 +51,7 @@ Look for these, in order of payoff:
 | Over-strict contract | Does an interface demand a detail (a count, a shape) that forces every implementer to emulate it? | Relax the contract (`Promise<unknown>`), drop the caller check |
 | Framework for few variants | Spec objects, registries, hooks for 2-3 implementations? | One small shared helper plus a few lines per variant |
 | Normalizing many shapes | Parsing N reply formats at the edges? | Make the source return one canonical shape (example: Lua `EVAL` returns a flat list on every Redis client) |
-| Locks and serialization | Is ordering already guaranteed (one connection, idempotent command)? | Remove the lock, leave a `ponytail:` comment naming the guarantee |
+| Locks and serialization | Is ordering already guaranteed (one connection, idempotent command)? | Remove the lock, leave a comment naming the guarantee |
 | Global side tables | `WeakMap` or module state keyed by an object you already close over? | Closure variable |
 | Leftovers from earlier rounds | Fixture params, exports, tests that only served deleted code? | Delete |
 | Redundant tests | Is the assertion already covered by another suite? Did the test guard a mechanism that no longer exists? | Delete |

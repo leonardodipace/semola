@@ -21,15 +21,11 @@ Read each skill file and follow its instructions.
 
 | Skill | When | Path |
 |-------|------|------|
-| **ponytail** | Default for all implementation work | `.agents/skills/ponytail/SKILL.md` |
 | **caveman** | Default for communication (terse, accurate) | `.agents/skills/caveman/SKILL.md` |
-| **fallow** | Audits, cleanup, PR risk, code health | `.agents/skills/fallow/SKILL.md` |
 | **harden** | After a feature lands: blind test subagent, fix failures, deslop subagent, deslop | `.agents/skills/harden/SKILL.md` |
 | **rethink** | Assume the implementation is wrong: recommend a smaller design, apply, re-review in a loop until nothing is left to cut | `.agents/skills/rethink/SKILL.md` |
 
-Ponytail and caveman are always on. Fallow, harden, and rethink are task-triggered. Caveman affects prose only - never reduce code quality, test coverage, or correctness.
-
-Run fallow with `bunx fallow` (no install or dev dependency needed). Example: `bunx fallow audit --base main --format json --quiet 2>/dev/null || true`. See the fallow skill for commands and flags.
+Caveman is always on. Harden and rethink are task-triggered. Caveman affects prose only - never reduce code quality, test coverage, or correctness.
 
 ## Repo Constraints
 
@@ -68,7 +64,7 @@ Code should read like English. Prefer clarity over clever density.
 
 ### Simplicity
 
-- Write minimal code, no over-engineering (ponytail: fewest files, shortest *working* diff - not shortest unreadable line). Production-ready means correct wire/interop and lifecycle, not a full vendor SDK surface.
+- Write minimal code, no over-engineering (fewest files, shortest *working* diff - not shortest unreadable line). Production-ready means correct wire/interop and lifecycle, not a full vendor SDK surface.
 - Prefer Bun / Node / stdlib helpers when they exist. Do not hand-roll parsers or converters the platform already covers. When the platform has no fit (example: wall-clock Unix epoch nanos for OTLP; `Bun.nanoseconds` / `hrtime` are monotonic only), keep a small named helper - do not invent a fake "stdlib" wrapper.
 - Keep code breathing with blank lines between logical blocks.
 - Explicit `if` statements over ternaries. Do not use ternaries for control flow, assignments that branch, or nested conditions. Prefer early returns and plain `if` / `else`. Nullish coalescing (`??`) and optional chaining (`?.`) are fine.
@@ -172,7 +168,6 @@ bun run build                    # build package
 bun pm version <major|minor|patch>   # bump version for publishing
 bun pm version preminor --preid beta    # first beta of next minor (npm tag beta)
 bun pm version prerelease --preid beta  # later betas (npm tag beta)
-bunx fallow audit --base main --format json --quiet 2>/dev/null || true   # changed-code audit
 # Postgres integration (when SEMOLA_POSTGRES_URL is set):
 #   docker run -d --name semola-pg-test -e POSTGRES_USER=semola -e POSTGRES_PASSWORD=semola \
 #     -e POSTGRES_DB=semola -p 5432:5432 postgres:16-alpine

@@ -28,7 +28,7 @@ export const createRedisAdapter = <TClient extends object>(
 
   const connection = connect(dispatch);
 
-  // ponytail: no lock. A connection runs commands in order and SUBSCRIBE is
+  // No lock: a connection runs commands in order and SUBSCRIBE is
   // idempotent, so subscribing on every call keeps the server in sync.
   const subscribe = async (channel: string, listener: RedisListener) => {
     const listeners = channels.get(channel) ?? new Set();

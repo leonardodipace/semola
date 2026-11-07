@@ -30,7 +30,7 @@ export const fromValkeyGlide = (client: ValkeyGlideClient) =>
           return;
         }
 
-        // ponytail: retries every 100ms until the client closes; GLIDE reconnects on its own.
+        // Retries every 100ms until the client closes; GLIDE reconnects on its own.
         await delay(POLL_RETRY_DELAY_MS);
       }
     };
