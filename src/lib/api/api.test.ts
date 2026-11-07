@@ -858,6 +858,27 @@ describe("Api Core", () => {
     expect(res?.status).toBe(400);
   });
 
+  test("calls bare handlers on every request", async () => {
+    const api = new Api();
+    let calls = 0;
+
+    api.defineRoute({
+      path: "/count",
+      method: "GET",
+      handler: () => {
+        calls++;
+
+        return { calls };
+      },
+    });
+
+    const first = await api.fetch(new Request("http://localhost/count"));
+    const second = await api.fetch(new Request("http://localhost/count"));
+
+    expect(await first.json()).toEqual({ calls: 1 });
+    expect(await second.json()).toEqual({ calls: 2 });
+  });
+
   test("maps bare handler JSON primitives to responses", async () => {
     const api = new Api({ validation: false });
 
@@ -922,7 +943,7 @@ describe("Api Core", () => {
     expect(res?.status).toBe(400);
   });
 
-  test("returns cached Response for sync validated bare POST handler", async () => {
+  test("returns a Response for sync validated bare POST handler", async () => {
     const api = new Api();
 
     api.defineRoute({

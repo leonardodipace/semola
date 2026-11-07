@@ -178,11 +178,11 @@ describe("OpenAPI Generation", () => {
     const spec = await generateOpenApiSpec({
       title: "API",
       version: "1.0.0",
-      globalMiddlewares: [authMw],
       routes: [
         {
           path: "/me",
           method: "GET",
+          middlewares: [authMw],
           handler: () => {},
         },
       ],
@@ -211,23 +211,6 @@ describe("OpenAPI Generation", () => {
     });
 
     expect(spec.components?.securitySchemes).toEqual(securitySchemes);
-  });
-
-  test("should apply URL prefixing to paths", async () => {
-    const spec = await generateOpenApiSpec({
-      title: "API",
-      version: "1.0.0",
-      prefix: "/v1",
-      routes: [
-        {
-          path: "/health",
-          method: "GET",
-          handler: () => {},
-        },
-      ],
-    });
-
-    expect(spec.paths["/v1/health"]).toBeDefined();
   });
 
   test("should handle all HTTP methods", async () => {
@@ -471,7 +454,7 @@ describe("OpenAPI Generation", () => {
     expect(spec.info.title).toBe("API");
   });
 
-  test("should merge multiple global middlewares", async () => {
+  test("should merge multiple route middlewares", async () => {
     const authMw = new Middleware({
       request: { headers: z.object({ authorization: z.string() }) },
       handler: () => ({}),
@@ -485,11 +468,11 @@ describe("OpenAPI Generation", () => {
     const spec = await generateOpenApiSpec({
       title: "API",
       version: "1.0.0",
-      globalMiddlewares: [authMw, queryMw],
       routes: [
         {
           path: "/protected",
           method: "GET",
+          middlewares: [authMw, queryMw],
           handler: () => {},
         },
       ],
@@ -954,11 +937,11 @@ describe("OpenAPI Generation", () => {
     const spec = await generateOpenApiSpec({
       title: "API",
       version: "1.0.0",
-      globalMiddlewares: [authMw],
       routes: [
         {
           path: "/me",
           method: "GET",
+          middlewares: [authMw],
           response: { 200: UserSchema },
           handler: () => {},
         },

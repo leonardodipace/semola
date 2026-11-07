@@ -40,30 +40,6 @@ export const schemaFor = {
     return type({ id: "number" });
   },
 
-  nameString: (provider: Provider) => {
-    if (provider === "zod") {
-      return z.object({ name: z.string() });
-    }
-
-    if (provider === "valibot") {
-      return v.object({ name: v.string() });
-    }
-
-    return type({ name: "string" });
-  },
-
-  nameAndAge: (provider: Provider) => {
-    if (provider === "zod") {
-      return z.object({ name: z.string(), age: z.number() });
-    }
-
-    if (provider === "valibot") {
-      return v.object({ name: v.string(), age: v.number() });
-    }
-
-    return type({ name: "string", age: "number" });
-  },
-
   queryFilterTags: (provider: Provider) => {
     if (provider === "zod") {
       return z.object({

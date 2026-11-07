@@ -1,6 +1,7 @@
 import type { Middleware } from "./middleware.js";
 import { getFullPath } from "./runtime.js";
 import type {
+  AnyRouteConfig,
   ClientRoute,
   Context,
   GroupOptions,
@@ -14,13 +15,6 @@ import type {
 } from "./types.js";
 
 const emptyMiddlewares: readonly Middleware[] = [];
-
-type InternalRouteConfig = RouteConfig<
-  RequestSchema,
-  ResponseSchema,
-  readonly Middleware[],
-  readonly Middleware[]
->;
 
 const combineMiddlewares = (
   base: readonly Middleware[] | undefined,
@@ -105,7 +99,7 @@ const toSSEResponse = (
 
 export class Group<TMiddlewares extends readonly Middleware[] = readonly []> {
   protected options: GroupOptions<TMiddlewares>;
-  protected routes: InternalRouteConfig[] = [];
+  protected routes: AnyRouteConfig[] = [];
   protected groups: Group<readonly Middleware[]>[] = [];
   private parent?: Group<readonly Middleware[]>;
 
@@ -120,14 +114,7 @@ export class Group<TMiddlewares extends readonly Middleware[] = readonly []> {
   >(
     config: RouteConfig<TReq, TRes, TMiddlewares, TRouteMiddlewares>,
   ): ClientRoute<TReq, TRes> {
-    this.routes.push(
-      config as RouteConfig<
-        RequestSchema,
-        ResponseSchema,
-        readonly Middleware[],
-        readonly Middleware[]
-      >,
-    );
+    this.routes.push(config as AnyRouteConfig);
     this.onRoutesChanged();
     const localPath = config.path;
 
@@ -180,12 +167,12 @@ export class Group<TMiddlewares extends readonly Middleware[] = readonly []> {
   protected collectRoutes(
     prefix: string | undefined = this.options.prefix,
     inheritedMiddlewares: readonly Middleware[] = emptyMiddlewares,
-  ): InternalRouteConfig[] {
+  ): AnyRouteConfig[] {
     const localMiddlewares = combineMiddlewares(
       inheritedMiddlewares,
       this.options.middlewares,
     );
-    const collected: InternalRouteConfig[] = this.routes.map((route) => {
+    const collected: AnyRouteConfig[] = this.routes.map((route) => {
       return {
         ...route,
         path: getFullPath({ prefix, path: route.path }),

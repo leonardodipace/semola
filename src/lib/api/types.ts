@@ -269,6 +269,13 @@ export type RouteConfig<
   tags?: string[];
 };
 
+export type AnyRouteConfig = RouteConfig<
+  RequestSchema,
+  ResponseSchema,
+  readonly Middleware[],
+  readonly Middleware[]
+>;
+
 export type SSEEvent = {
   data?: unknown;
   comment?: string;
@@ -399,6 +406,7 @@ export type HandleRequestConfig = {
   routeResponse?: ResponseSchema;
   validateInput: boolean;
   validateOutput: boolean;
+  cacheBody: boolean;
   handler: AnyRouteHandler;
   onError?: OnErrorOptions;
 };
@@ -476,8 +484,6 @@ export type OpenApiResponse = {
   };
 };
 
-export type OpenApiComponents = NonNullable<OpenApiSpec["components"]>;
-
 export type RouteConfigInternal = {
   path: string;
   method: string;
@@ -495,13 +501,13 @@ export type OpenApiGeneratorOptions = {
   title: string;
   description?: string;
   version: string;
-  prefix?: string;
   servers?: Array<{ url: string; description?: string }>;
   securitySchemes?: Record<string, unknown>;
   routes: RouteConfigInternal[];
-  globalMiddlewares?: readonly Middleware[];
   errorResponses?: ResponseSchema;
 };
+
+export type SchemaIo = "input" | "output";
 
 export type JsonSchema = {
   type?: string;
