@@ -80,9 +80,9 @@ Say plainly when the design holds and only small cuts remain. Do not invent chan
 2. `bun test src/lib/<module>` and every module whose callers changed.
 3. `bun check`.
 4. Integration tests when the module talks to a server. Start a throwaway container, for example
-   `docker run -d --rm --name <tmp> -p 56379:6379 redis:8-alpine`, run with `SEMOLA_REDIS_URL=redis://localhost:56379`, then stop it.
+   `docker run -d --rm --name <tmp> -p 127.0.0.1:56379:6379 redis:8-alpine`, run with `SEMOLA_REDIS_URL=redis://127.0.0.1:56379`, then stop it.
 5. A test fails: compare against the unmodified branch before blaming or excusing your change (see Baseline). Report the flake rate on both.
-6. Measure: `git diff HEAD --shortstat`, split into source (`-- src ':!*.test.ts'`) and tests (`-- '*.test.ts'`). Plain `git diff --stat` hides staged deletions.
+6. Measure: `git diff HEAD --shortstat`, split into source (`-- src ':!*.test.ts'`) and tests (`-- '*.test.ts'`). Plain `git diff --stat` hides staged deletions. Add new untracked files: `git ls-files --others --exclude-standard -- src | xargs wc -l`.
 
 ## Step 5: Stop
 

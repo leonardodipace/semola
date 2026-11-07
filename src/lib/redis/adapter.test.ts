@@ -129,6 +129,27 @@ describe("createRedisAdapter", () => {
     expect(received).toEqual([]);
   });
 
+  test("keeps a registered listener when subscribing it again fails", async () => {
+    const { redis, fail, emit } = createFakeClient();
+    const received: string[] = [];
+    const listener = (message: string) => {
+      received.push(message);
+    };
+
+    await redis.subscribe("a", listener);
+
+    fail("subscribe");
+
+    await expect(redis.subscribe("a", listener)).rejects.toThrow(
+      "subscribe failed",
+    );
+
+    emit("a", "hello");
+    await Bun.sleep(0);
+
+    expect(received).toEqual(["hello"]);
+  });
+
   test("a failing listener does not stop its siblings or go unhandled", async () => {
     const { redis, emit } = createFakeClient();
     const received: string[] = [];

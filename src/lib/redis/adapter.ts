@@ -32,6 +32,7 @@ export const createRedisAdapter = <TClient extends object>(
   // idempotent, so subscribing on every call keeps the server in sync.
   const subscribe = async (channel: string, listener: RedisListener) => {
     const listeners = channels.get(channel) ?? new Set();
+    const wasRegistered = listeners.has(listener);
 
     listeners.add(listener);
     channels.set(channel, listeners);
@@ -39,6 +40,9 @@ export const createRedisAdapter = <TClient extends object>(
     const [error] = await mightThrow(connection.subscribe(channel));
 
     if (!error) return;
+
+    // A listener from an earlier successful subscribe stays registered.
+    if (wasRegistered) throw error;
 
     listeners.delete(listener);
 
