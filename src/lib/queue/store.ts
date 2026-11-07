@@ -1,4 +1,5 @@
 import { mightThrow, mightThrowSync } from "../errors/index.js";
+import type { RedisClient } from "../redis/types.js";
 import type { JobState } from "./types.js";
 
 const CLAIM_FROM_JOBS =
@@ -21,7 +22,7 @@ const SCHEDULE_RETRY = `${FENCE}4]) then return 0 end redis.call('ZREM',KEYS[1],
 const RELEASE = `${FENCE}2]) then return 0 end redis.call('ZREM',KEYS[1],ARGV[1]) redis.call('LPUSH',KEYS[2],ARGV[1]) return 1`;
 export class QueueStore {
   public constructor(
-    private redis: Bun.RedisClient,
+    private redis: RedisClient,
     private name: string,
     private visibilityTimeoutMs: number,
   ) {}
@@ -46,7 +47,7 @@ export class QueueStore {
   public async enqueue(serialized: string) {
     const { jobs } = this.keys();
 
-    return mightThrow(this.redis.lpush(jobs, serialized));
+    return mightThrow(this.redis.send("LPUSH", [jobs, serialized]));
   }
 
   public async claimNext<T>() {
@@ -162,14 +163,14 @@ export class QueueStore {
   public async pushDeadLetter(raw: string, parseError: string) {
     const { deadLetter } = this.keys();
     const [error] = await mightThrow(
-      this.redis.lpush(
+      this.redis.send("LPUSH", [
         deadLetter,
         JSON.stringify({
           jobData: raw,
           parseError,
           timestamp: Date.now(),
         }),
-      ),
+      ]),
     );
 
     return error;

@@ -143,7 +143,7 @@ Return structured report (slop items, keep as-is, test slop). Do NOT fix anythin
 
 ## Phase 4: Deslop
 
-Parent applies the report with minimal diffs (ponytail):
+Parent applies the report with minimal diffs:
 
 1. **High** — fix first (wrong tests, duplicate dialect pairs, dead types, unused parsers).
 2. **Medium** — merge redundant tests, collapse describes, remove pass-through assertions.
@@ -167,7 +167,7 @@ Do not re-run the blind test subagent unless the user asks.
 | Test command | `bun test src/lib/<module>` |
 | Full gate | `bun check` |
 | Subagent type | `generalPurpose` |
-| Skills during parent work | ponytail + caveman (see `AGENTS.md`) |
+| Skills during parent work | caveman (see `AGENTS.md`) |
 
 Adjust paths and forbidden directories per feature. For ORM table constraints, forbidden paths are typically the implementation package and migration renderers; allowed spec source is `docs/orm.md` and the Linear issue.
 

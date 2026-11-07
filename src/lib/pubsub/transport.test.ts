@@ -18,6 +18,12 @@ class MockRedisClient {
     return count;
   }
 
+  public async send(_command: string, args: string[]) {
+    const [channel = "", message = ""] = args;
+
+    return this.publish(channel, message);
+  }
+
   public async subscribe(channel: string, handler: Handler) {
     const handlers = this.subscriptions.get(channel) ?? [];
 
@@ -222,7 +228,7 @@ describe("createRedisTransport unsubscribe", () => {
     const calls: Array<{ channel: string; handler?: Handler }> = [];
 
     const redis = {
-      async publish() {
+      async send() {
         return 0;
       },
       async subscribe() {
@@ -231,7 +237,7 @@ describe("createRedisTransport unsubscribe", () => {
       async unsubscribe(channel: string, handler?: Handler) {
         calls.push({ channel, handler });
       },
-    } as unknown as Bun.RedisClient;
+    };
 
     const transport = createRedisTransport(redis, redis);
     const handler: Handler = () => {};
@@ -244,7 +250,7 @@ describe("createRedisTransport unsubscribe", () => {
 
 describe("createRedisTransport", () => {
   test("forwards publish subscribe unsubscribe to redis clients", async () => {
-    const redis = new MockRedisClient() as MockRedisClient & Bun.RedisClient;
+    const redis = new MockRedisClient();
     const transport = createRedisTransport(redis, redis);
     const received: string[] = [];
 

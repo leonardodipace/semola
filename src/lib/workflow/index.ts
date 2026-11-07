@@ -1,4 +1,6 @@
 import { mightThrow } from "../errors/index.js";
+import { readHash } from "../redis/reply.js";
+import type { RedisClient } from "../redis/types.js";
 import { WorkflowEngine } from "./engine.js";
 import {
   DuplicateWorkflowError,
@@ -10,6 +12,7 @@ import { fromJson, toJson } from "./json.js";
 import { WorkflowStore } from "./store.js";
 import type {
   ResolvePartitionKeyInput,
+  ScanReply,
   StepSnapshot,
   Workflow,
   WorkflowListItem,
@@ -38,7 +41,7 @@ const toFilter = <T extends string>(value: T | T[] | undefined) => {
 };
 
 export const listWorkflows = async (
-  redis: Bun.RedisClient,
+  redis: RedisClient,
   options?: WorkflowListOptions,
 ) => {
   const names = toFilter(options?.name);
@@ -55,16 +58,16 @@ export const listWorkflows = async (
 
   do {
     const [scanError, scanned] = await mightThrow(
-      redis.scan(cursor, "MATCH", match, "COUNT", 100),
+      redis.send("SCAN", [cursor, "MATCH", match, "COUNT", "100"]),
     );
 
     if (scanError) {
       throw new WorkflowStoreError("Unable to scan workflow executions");
     }
 
-    const [next, keys] = scanned;
+    const [next, keys] = scanned as ScanReply;
 
-    cursor = next;
+    cursor = String(next);
 
     for (const key of keys) {
       const marker = ":meta:";
@@ -76,7 +79,7 @@ export const listWorkflows = async (
 
       if (!id) continue;
 
-      const [readError, meta] = await mightThrow(redis.hgetall(key));
+      const [readError, meta] = await mightThrow(readHash(redis, key));
 
       if (readError) {
         throw new WorkflowStoreError(
@@ -84,7 +87,6 @@ export const listWorkflows = async (
         );
       }
 
-      if (!meta) continue;
       if (Object.keys(meta).length === 0) continue;
       if (!meta.name) continue;
       if (!meta.status) continue;

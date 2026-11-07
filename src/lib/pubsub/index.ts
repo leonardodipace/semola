@@ -34,7 +34,7 @@ export class PubSub<T extends Record<string, unknown>> {
     readonly [null, unknown] | readonly [unknown, null]
   > | null = null;
   private subscribeInFlight: Promise<
-    readonly [null, number] | readonly [unknown, null]
+    readonly [null, unknown] | readonly [unknown, null]
   > | null = null;
 
   public constructor(options: PubSubOptions) {
@@ -248,18 +248,11 @@ export class PubSub<T extends Record<string, unknown>> {
       throw new SubscribeError(`Unable to subscribe to ${this.channel}`);
     }
 
-    const [subscribeError, count] = await subscribeInFlight;
+    const [subscribeError] = await subscribeInFlight;
 
     this.subscribeInFlight = null;
 
     if (subscribeError) {
-      this.handlers.delete(handlerId);
-      this.transportHandler = null;
-
-      throw new SubscribeError(`Unable to subscribe to ${this.channel}`);
-    }
-
-    if (!count) {
       this.handlers.delete(handlerId);
       this.transportHandler = null;
 

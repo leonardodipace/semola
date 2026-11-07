@@ -1,4 +1,6 @@
 import { mightThrow } from "../errors/index.js";
+import { readHash } from "../redis/reply.js";
+import type { RedisClient } from "../redis/types.js";
 import { WorkflowStoreError } from "./errors.js";
 import { toJson } from "./json.js";
 import type {
@@ -272,7 +274,7 @@ const metaEntries = (fields: Partial<WorkflowMeta>) => {
 
 export class WorkflowStore {
   public constructor(
-    private redis: Bun.RedisClient,
+    private redis: RedisClient,
     private name: string,
   ) {}
 
@@ -375,14 +377,18 @@ export class WorkflowStore {
 
   public async loadHistory(executionId: string) {
     const [error, rows] = await mightThrow(
-      this.redis.lrange(keys.history(this.name, executionId), 0, -1),
+      this.redis.send("LRANGE", [
+        keys.history(this.name, executionId),
+        "0",
+        "-1",
+      ]),
     );
 
     if (error) {
       throw new WorkflowStoreError(`Unable to load history for ${executionId}`);
     }
 
-    return rows ?? [];
+    return (rows ?? []) as string[];
   }
 
   public async createExecution(executionId: string, fields: WorkflowMeta) {
@@ -418,14 +424,12 @@ export class WorkflowStore {
 
   public async getMeta(executionId: string) {
     const [error, data] = await mightThrow(
-      this.redis.hgetall(keys.meta(this.name, executionId)),
+      readHash(this.redis, keys.meta(this.name, executionId)),
     );
 
     if (error) {
       throw new WorkflowStoreError(`Unable to read meta for ${executionId}`);
     }
-
-    if (!data) return null;
 
     if (Object.keys(data).length === 0) return null;
 
@@ -582,7 +586,7 @@ export class WorkflowStore {
       throw new WorkflowStoreError("Unable to trim terminal executions");
     }
 
-    for (const executionId of oldest ?? []) {
+    for (const executionId of (oldest ?? []) as unknown[]) {
       const id = String(executionId);
 
       const [trimError] = await mightThrow(

@@ -93,7 +93,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     const name = "store-create-fail";
     const store = new WorkflowStore(redis, name);
 
-    failNext(redis, "send");
+    failNext(redis, "EVAL");
 
     await expect(
       store.createExecution("exec-1", baseMeta(name)),
@@ -655,7 +655,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     const redis = createRedis();
     const store = new WorkflowStore(redis, "store-meta-fail");
 
-    failNext(redis, "hgetall");
+    failNext(redis, "EVAL");
 
     await expect(store.getMeta("exec-x")).rejects.toMatchObject({
       name: "WorkflowStoreError",
@@ -667,7 +667,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     const redis = createRedis();
     const store = new WorkflowStore(redis, "store-history-fail");
 
-    failNext(redis, "lrange");
+    failNext(redis, "LRANGE");
 
     await expect(store.loadHistory("exec-y")).rejects.toMatchObject({
       name: "WorkflowStoreError",

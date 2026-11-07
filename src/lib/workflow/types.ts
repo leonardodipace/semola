@@ -1,3 +1,5 @@
+import type { RedisClient } from "../redis/types.js";
+
 export type WorkflowStatus =
   | "pending"
   | "running"
@@ -117,9 +119,11 @@ export type WorkflowRetryBackoff = {
   maxDelay?: number;
 };
 
+export type ScanReply = [cursor: string, keys: string[]];
+
 export type WorkflowOptions<TInput, TResult> = {
   name: string;
-  redis: Bun.RedisClient;
+  redis: RedisClient;
   handler: (
     context: WorkflowHandlerContext<TInput>,
   ) => TResult | Promise<TResult>;

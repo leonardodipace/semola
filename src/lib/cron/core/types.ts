@@ -1,3 +1,5 @@
+import type { RedisClient } from "../../redis/types.js";
+
 type MinutelyAlias = "@minutely";
 
 export type ScheduleType = Bun.CronWithAutocomplete | MinutelyAlias;
@@ -16,7 +18,7 @@ export type CronOSOptions = CronBaseOptions & {
 };
 
 export type CronDistributedOptions = CronOptions & {
-  redis: Bun.RedisClient;
+  redis: RedisClient;
   lockTTL?: number;
   replicaId?: string;
 };

@@ -27,7 +27,7 @@ export class Cache<T> {
     const resolvedKey = this.resolveKey(key);
 
     const [error, value] = await mightThrow(
-      this.options.redis.get(resolvedKey),
+      this.options.redis.send("GET", [resolvedKey]),
     );
 
     if (error) {
@@ -39,7 +39,7 @@ export class Cache<T> {
     }
 
     const [deserializeErr, deserialized] = mightThrowSync<T>(() =>
-      this.deserialize(value),
+      this.deserialize(String(value)),
     );
 
     if (deserializeErr) {
@@ -100,13 +100,15 @@ export class Cache<T> {
 
     const resolvedKey = this.resolveKey(key);
 
-    const [error, data] = await mightThrow(this.options.redis.del(resolvedKey));
+    const [error, data] = await mightThrow(
+      this.options.redis.send("DEL", [resolvedKey]),
+    );
 
     if (error) {
       throw new CacheError(`Unable to delete key ${key}`);
     }
 
-    return data;
+    return Number(data);
   }
 
   private get isEnabled() {
@@ -135,10 +137,10 @@ export class Cache<T> {
     ttl: number | undefined | null,
   ) {
     if (ttl === undefined || ttl === null) {
-      return this.options.redis.set(key, value);
+      return this.options.redis.send("SET", [key, value]);
     }
 
-    return this.options.redis.set(key, value, "PX", ttl);
+    return this.options.redis.send("SET", [key, value, "PX", String(ttl)]);
   }
 
   private isTTLValid(ttl: number | undefined | null) {

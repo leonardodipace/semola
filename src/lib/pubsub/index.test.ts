@@ -123,6 +123,16 @@ class MockRedisClient {
     this.subscriptions.set(channel, remaining);
   }
 
+  public async send(command: string, args: string[]) {
+    if (command !== "PUBLISH") {
+      throw new Error(`Unsupported command: ${command}`);
+    }
+
+    const [channel = "", message = ""] = args;
+
+    return this.publish(channel, message);
+  }
+
   public clear() {
     this.subscriptions.clear();
   }
@@ -141,7 +151,7 @@ class MockRedisClient {
 }
 
 const createMockRedis = () => {
-  return new MockRedisClient() as MockRedisClient & Bun.RedisClient;
+  return new MockRedisClient();
 };
 
 describe("PubSub", () => {

@@ -1,7 +1,9 @@
+import type { RedisClient, RedisSubscriber } from "../redis/types.js";
+
 export type RedisPubSubOptions = {
   transport?: "redis";
-  subscriber: Bun.RedisClient;
-  publisher: Bun.RedisClient;
+  subscriber: RedisSubscriber;
+  publisher: RedisClient;
   channel: string;
 };
 
@@ -19,8 +21,8 @@ export type ChannelHandler = (
 
 export type ChannelTransport = {
   publish: (channel: string, message: string) => Promise<number>;
-  subscribe: (channel: string, handler: ChannelHandler) => Promise<number>;
-  unsubscribe: (channel: string, handler: ChannelHandler) => Promise<void>;
+  subscribe: (channel: string, handler: ChannelHandler) => Promise<unknown>;
+  unsubscribe: (channel: string, handler: ChannelHandler) => Promise<unknown>;
 };
 
 export type MessageHandler<T> = (

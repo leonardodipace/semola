@@ -61,6 +61,12 @@ class MockRedisClient {
       throw new Error("Redis connection error");
     }
 
+    if (command === "LPUSH") {
+      const [key = "", value = ""] = args;
+
+      return this.lpush(key, value);
+    }
+
     if (command !== "EVAL") {
       throw new Error(`Unsupported command: ${command}`);
     }
@@ -176,7 +182,7 @@ class MockRedisClient {
 }
 
 const createMockRedis = () => {
-  return new MockRedisClient() as MockRedisClient & Bun.RedisClient;
+  return new MockRedisClient();
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

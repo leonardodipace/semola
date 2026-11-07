@@ -30,6 +30,7 @@ Most backends end up stitching a router, a queue, an ORM, and a validator - each
 | **ORM** | Tables, queries, migrations for SQLite and Postgres | `semola/orm` |
 | **Cache** | Typed Redis values with TTL | `semola/cache` |
 | **Cron** | In-process or OS-level schedules | `semola/cron` |
+| **Redis** | Use ioredis, node-redis, or Valkey GLIDE with the Redis modules | `semola/redis` |
 | **Policy** | Allow / forbid auth rules | `semola/policy` |
 | **i18n** | Translation keys the compiler can reject | `semola/i18n` |
 | **Schema** | Built-in Standard Schema + JSON Schema | `semola/schema` |
@@ -366,6 +367,7 @@ Run locally: `bun run docs:dev` (http://localhost:3000).
 - [PubSub](https://semo.la/docs/pubsub) - Type-safe Redis pub/sub
 - [Cron](https://semo.la/docs/cron) - In-memory and OS cron scheduler for periodic task execution
 - [Workflow](https://semo.la/docs/workflow) - Durable and resumable workflows with retries and hooks
+- [Redis](https://semo.la/docs/redis) - Adapters for ioredis, iovalkey, node-redis, and Valkey GLIDE
 - [Policy](https://semo.la/docs/policy) - Policy-based authorization
 - [i18n](https://semo.la/docs/i18n) - Type-safe internationalization
 - [Cache](https://semo.la/docs/cache) - Redis cache wrapper with TTL

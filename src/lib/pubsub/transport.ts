@@ -1,4 +1,5 @@
 import { mightThrow } from "../errors/index.js";
+import type { RedisClient, RedisSubscriber } from "../redis/types.js";
 import type { ChannelHandler, ChannelTransport } from "./types.js";
 
 const memorySubscriptions = new Map<string, Set<ChannelHandler>>();
@@ -47,11 +48,15 @@ export const memoryTransport: ChannelTransport = {
 };
 
 export const createRedisTransport = (
-  publisher: Bun.RedisClient,
-  subscriber: Bun.RedisClient,
+  publisher: RedisClient,
+  subscriber: RedisSubscriber,
 ): ChannelTransport => {
   return {
-    publish: (channel, message) => publisher.publish(channel, message),
+    publish: async (channel, message) => {
+      const receivers = await publisher.send("PUBLISH", [channel, message]);
+
+      return Number(receivers);
+    },
     subscribe: (channel, handler) => subscriber.subscribe(channel, handler),
     unsubscribe: (channel, handler) => subscriber.unsubscribe(channel, handler),
   };

@@ -11,6 +11,7 @@ export default defineConfig({
     "lib/api/index": "src/lib/api/index.ts",
     "lib/queue/index": "src/lib/queue/index.ts",
     "lib/pubsub/index": "src/lib/pubsub/index.ts",
+    "lib/redis/index": "src/lib/redis/index.ts",
     "lib/cron/index": "src/lib/cron/index.ts",
     "lib/logging/index": "src/lib/logging/index.ts",
     "lib/otel/index": "src/lib/otel/index.ts",
