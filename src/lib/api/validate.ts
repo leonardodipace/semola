@@ -66,11 +66,9 @@ export const validateSchema = <T>(
 
 export const validateBody = async (
   req: Request,
-  bodySchema?: StandardSchemaV1,
+  bodySchema: StandardSchemaV1,
   bodyCache?: BodyCache,
 ) => {
-  if (!bodySchema) return true;
-
   if (bodyCache?.parsed) return validateSchema(bodySchema, bodyCache.value);
 
   const contentType = req.headers.get("content-type") ?? "";
@@ -94,9 +92,7 @@ export const validateBody = async (
   return validateSchema(bodySchema, parsedBody);
 };
 
-export const validateQuery = (req: Request, querySchema?: StandardSchemaV1) => {
-  if (!querySchema) return true;
-
+export const validateQuery = (req: Request, querySchema: StandardSchemaV1) => {
   const queryStart = req.url.indexOf("?");
 
   if (queryStart === -1) return validateSchema(querySchema, {});
@@ -149,10 +145,8 @@ export const validateQuery = (req: Request, querySchema?: StandardSchemaV1) => {
 
 export const validateHeaders = (
   req: Request,
-  headersSchema?: StandardSchemaV1,
+  headersSchema: StandardSchemaV1,
 ) => {
-  if (!headersSchema) return true;
-
   const headers: Record<string, string> = {};
 
   for (const [key, value] of req.headers) {
@@ -164,10 +158,8 @@ export const validateHeaders = (
 
 export const validateCookies = (
   req: Request,
-  cookiesSchema?: StandardSchemaV1,
+  cookiesSchema: StandardSchemaV1,
 ) => {
-  if (!cookiesSchema) return true;
-
   const cookieHeader = req.headers.get("cookie") ?? "";
   const cookies: Record<string, string> = {};
   let partStart = 0;
@@ -204,10 +196,8 @@ export const validateCookies = (
 
 export const validateParams = (
   req: ApiRequest,
-  paramsSchema?: StandardSchemaV1,
+  paramsSchema: StandardSchemaV1,
 ) => {
-  if (!paramsSchema) return true;
-
   return validateSchema(paramsSchema, req.params ?? {});
 };
 

@@ -2,10 +2,8 @@ import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,
 } from "@standard-schema/spec";
-import type { Middleware } from "../middleware.js";
 import type {
   JsonSchema,
-  OpenApiComponents,
   OpenApiGeneratorOptions,
   OpenApiOperation,
   OpenApiParameter,
@@ -14,6 +12,7 @@ import type {
   RequestSchema,
   ResponseSchema,
   RouteConfigInternal,
+  SchemaIo,
 } from "../types.js";
 
 const instanceDataKeys = new Set([
@@ -124,31 +123,24 @@ const rewriteSchemaTree = (
   return { $ref: `#/components/schemas/${id}` };
 };
 
-const hoistDefsToComponents = (jsonSchema: JsonSchema) => {
-  const schemas: Record<string, JsonSchema> = {};
-  const schema = rewriteSchemaTree(jsonSchema, schemas, true) as JsonSchema;
-
-  if (Object.keys(schemas).length === 0) {
-    return { schema: jsonSchema, components: undefined };
-  }
-
-  return {
-    schema,
-    components: {
-      schemas,
-    } as OpenApiComponents,
-  };
-};
-
-const toOpenAPISchema = (
+const toJsonSchema = (
   schema: StandardSchemaV1,
-  io: "input" | "output" = "input",
+  schemas: Record<string, JsonSchema>,
+  io: SchemaIo = "input",
 ) => {
   const jsonSchema = (schema as unknown as StandardJSONSchemaV1)[
     "~standard"
-  ].jsonSchema[io]({ target: "draft-2020-12" }) as JsonSchema;
+  ].jsonSchema[io]({ target: "draft-2020-12" });
 
-  return hoistDefsToComponents(jsonSchema);
+  return rewriteSchemaTree(jsonSchema, schemas, true) as JsonSchema;
+};
+
+const withoutMeta = (jsonSchema: JsonSchema) => {
+  const clean = { ...jsonSchema };
+  delete clean.id;
+  delete clean.$schema;
+
+  return clean;
 };
 
 const getSchemaDescription = (schema: StandardSchemaV1) => {
@@ -187,6 +179,22 @@ const getSchemaId = (schema: StandardSchemaV1, jsonSchema: JsonSchema) => {
   return getDeclaredSchemaId(schema);
 };
 
+// Body and response schemas with an id become shared components.
+const toSchemaRef = (
+  schema: StandardSchemaV1,
+  schemas: Record<string, JsonSchema>,
+  io: SchemaIo = "input",
+) => {
+  const jsonSchema = toJsonSchema(schema, schemas, io);
+  const schemaId = getSchemaId(schema, jsonSchema);
+
+  if (!schemaId) return withoutMeta(jsonSchema);
+
+  schemas[schemaId] = withoutMeta(jsonSchema);
+
+  return { $ref: `#/components/schemas/${schemaId}` };
+};
+
 const requestFields = [
   "body",
   "query",
@@ -195,110 +203,39 @@ const requestFields = [
   "params",
 ] as const;
 
-const convertSchemaToOpenApi = (
-  schema: StandardSchemaV1,
-  io: "input" | "output" = "input",
-) => {
-  const result = toOpenAPISchema(schema, io);
-  const { schema: jsonSchema, components: existingComponents } = result as {
-    schema: JsonSchema;
-    components?: OpenApiComponents;
-  };
-
-  const schemaId = getSchemaId(schema, jsonSchema);
-
-  if (schemaId) {
-    const schemaWithoutId = { ...jsonSchema };
-    delete schemaWithoutId.id;
-    delete schemaWithoutId.$schema;
-
-    return {
-      schema: { $ref: `#/components/schemas/${schemaId}` },
-      components: {
-        ...existingComponents,
-        schemas: {
-          ...existingComponents?.schemas,
-          [schemaId]: schemaWithoutId,
-        },
-      } as OpenApiComponents,
-    };
-  }
-
-  if (jsonSchema.$schema) {
-    const schemaWithoutMeta = { ...jsonSchema };
-    delete schemaWithoutMeta.$schema;
-
-    return {
-      schema: schemaWithoutMeta,
-      components: existingComponents,
-    };
-  }
-
-  return result as {
-    schema: JsonSchema;
-    components?: OpenApiComponents;
-  };
-};
-
-const convertSchemaToInlineOpenApi = (
-  schema: StandardSchemaV1,
-  io: "input" | "output" = "input",
-) => {
-  const result = toOpenAPISchema(schema, io);
-  const { schema: jsonSchema, components } = result as {
-    schema: JsonSchema;
-    components?: OpenApiComponents;
-  };
-
-  const cleanSchema = { ...jsonSchema };
-  delete cleanSchema.$schema;
-  delete cleanSchema.id;
-
-  return {
-    schema: cleanSchema,
-    components,
-  };
-};
-
 const extractParametersFromSchema = (
   schema: StandardSchemaV1,
-  location: "query" | "header" | "cookie",
+  location: OpenApiParameter["in"],
+  schemas: Record<string, JsonSchema>,
 ) => {
-  const { schema: jsonSchema, components } =
-    convertSchemaToInlineOpenApi(schema);
-
-  if (jsonSchema.type !== "object") {
-    return { parameters: [], components };
-  }
-
-  if (!jsonSchema.properties) {
-    return { parameters: [], components };
-  }
-
+  const jsonSchema = withoutMeta(toJsonSchema(schema, schemas));
   const parameters: OpenApiParameter[] = [];
+
+  if (jsonSchema.type !== "object") return parameters;
+  if (!jsonSchema.properties) return parameters;
+
   const requiredFields = jsonSchema.required ?? [];
 
   for (const name in jsonSchema.properties) {
-    const propertySchema = jsonSchema.properties[name];
-    const isRequired = requiredFields.includes(name);
-
     parameters.push({
       name,
       in: location,
-      required: isRequired,
-      schema: propertySchema,
+      required: requiredFields.includes(name),
+      schema: jsonSchema.properties[name],
     });
   }
 
-  return { parameters, components };
+  return parameters;
 };
 
+const PATH_PARAM = /:([a-zA-Z_][a-zA-Z0-9_]*)/g;
+
 const normalizePathForOpenAPI = (path: string) => {
-  return path.replace(/:([a-zA-Z_][a-zA-Z0-9_]*)/g, "{$1}");
+  return path.replace(PATH_PARAM, "{$1}");
 };
 
 const extractPathParameters = (path: string) => {
-  const matches = path.match(/:([a-zA-Z_][a-zA-Z0-9_]*)/g);
+  const matches = path.match(PATH_PARAM);
 
   if (!matches) {
     return [];
@@ -313,81 +250,48 @@ const paramSources = [
   ["cookies", "cookie"],
 ] as const;
 
-const createParameters = (request: RequestSchema, path: string) => {
+const createParameters = (
+  request: RequestSchema,
+  path: string,
+  schemas: Record<string, JsonSchema>,
+) => {
   const parameters: OpenApiParameter[] = [];
-  const allComponents: OpenApiComponents[] = [];
 
   for (const [field, location] of paramSources) {
-    if (request[field]) {
-      const { parameters: params, components } = extractParametersFromSchema(
-        request[field],
-        location,
+    const schema = request[field];
+
+    if (schema) {
+      parameters.push(
+        ...extractParametersFromSchema(schema, location, schemas),
       );
-
-      parameters.push(...params);
-
-      if (components) {
-        allComponents.push(components);
-      }
     }
   }
 
   const pathParamNames = extractPathParameters(path);
 
-  if (pathParamNames.length > 0 && request.params) {
-    const { schema: jsonSchema, components } = convertSchemaToInlineOpenApi(
-      request.params,
-    );
+  if (pathParamNames.length === 0) return parameters;
+  if (!request.params) return parameters;
 
-    if (components) {
-      allComponents.push(components);
-    }
-
-    if (jsonSchema.type === "object" && jsonSchema.properties) {
-      for (const name of pathParamNames) {
-        const propertySchema = jsonSchema.properties[name];
-
-        if (propertySchema) {
-          parameters.push({
-            name,
-            in: "path",
-            required: true,
-            schema: propertySchema,
-          });
-        }
-      }
+  for (const parameter of extractParametersFromSchema(
+    request.params,
+    "path",
+    schemas,
+  )) {
+    if (pathParamNames.includes(parameter.name)) {
+      parameters.push({ ...parameter, required: true });
     }
   }
 
-  return { parameters, components: allComponents };
+  return parameters;
 };
 
-const createRequestBody = (bodySchema: StandardSchemaV1) => {
-  const { schema, components } = convertSchemaToOpenApi(bodySchema);
-
-  return {
-    components,
-    requestBody: {
-      required: true,
-      content: {
-        "application/json": {
-          schema,
-        },
-      },
-    },
-  };
-};
-
-const createResponses = (response?: ResponseSchema) => {
+const createResponses = (
+  schemas: Record<string, JsonSchema>,
+  response: ResponseSchema,
+) => {
   const responses: Record<string, OpenApiResponse> = {};
-  const components: OpenApiComponents[] = [];
-
-  if (!response) {
-    return { responses, components };
-  }
 
   for (const status in response) {
-    const statusCode = String(status);
     const schema = response[Number(status)];
 
     if (!schema) {
@@ -395,58 +299,32 @@ const createResponses = (response?: ResponseSchema) => {
     }
 
     const description = getSchemaDescription(schema);
-    const { schema: jsonSchema, components: responseComponents } =
-      convertSchemaToOpenApi(schema, "output");
 
-    if (responseComponents) {
-      components.push(responseComponents);
-    }
-
-    responses[statusCode] = {
-      description: description || `Response with status ${statusCode}`,
+    responses[status] = {
+      description: description || `Response with status ${status}`,
       content: {
         "application/json": {
-          schema: jsonSchema,
+          schema: toSchemaRef(schema, schemas, "output"),
         },
       },
     };
   }
 
-  return { responses, components };
+  return responses;
 };
 
 const createOperation = (
   route: RouteConfigInternal,
-  globalMiddlewares: readonly Middleware[],
-  prefix?: string,
+  schemas: Record<string, JsonSchema>,
   errorResponses?: ResponseSchema,
 ) => {
-  const { request, response } = createRouteSchemas(
-    route,
-    globalMiddlewares,
-    errorResponses,
-  );
-
-  let fullPath = route.path;
-
-  if (prefix) {
-    fullPath = prefix + route.path;
-  }
-
-  const { parameters, components: parameterComponents } = createParameters(
-    request,
-    fullPath,
-  );
-  const { responses, components: responseComponents } =
-    createResponses(response);
+  const { request, response } = createRouteSchemas(route, errorResponses);
 
   const operation: OpenApiOperation = {
-    responses,
+    responses: createResponses(schemas, response),
   };
 
-  const allComponents: OpenApiComponents[] = [];
-  allComponents.push(...responseComponents);
-  allComponents.push(...parameterComponents);
+  const parameters = createParameters(request, route.path, schemas);
 
   for (const field of ["summary", "description", "operationId"] as const) {
     if (route[field]) {
@@ -462,24 +340,22 @@ const createOperation = (
     operation.parameters = parameters;
   }
 
-  const bodySchema = request.body;
-
-  if (bodySchema) {
-    const { requestBody, components: bodyComponents } =
-      createRequestBody(bodySchema);
-    operation.requestBody = requestBody;
-
-    if (bodyComponents) {
-      allComponents.push(bodyComponents);
-    }
+  if (request.body) {
+    operation.requestBody = {
+      required: true,
+      content: {
+        "application/json": {
+          schema: toSchemaRef(request.body, schemas),
+        },
+      },
+    };
   }
 
-  return { operation, components: allComponents };
+  return operation;
 };
 
 const createRouteSchemas = (
   route: RouteConfigInternal,
-  globalMiddlewares: readonly Middleware[],
   errorResponses?: ResponseSchema,
 ) => {
   const request: RequestSchema = {};
@@ -487,10 +363,7 @@ const createRouteSchemas = (
 
   mergeIntoResponse(response, errorResponses);
 
-  for (const middleware of [
-    ...globalMiddlewares,
-    ...(route.middlewares ?? []),
-  ]) {
+  for (const middleware of route.middlewares ?? []) {
     mergeIntoRequest(request, middleware.options.request);
     mergeIntoResponse(response, middleware.options.response);
   }
@@ -498,16 +371,7 @@ const createRouteSchemas = (
   mergeIntoRequest(request, route.request);
   mergeIntoResponse(response, route.response);
 
-  let routeResponse: ResponseSchema | undefined;
-
-  if (Object.keys(response).length > 0) {
-    routeResponse = response;
-  }
-
-  return {
-    request,
-    response: routeResponse,
-  };
+  return { request, response };
 };
 
 const mergeIntoRequest = (
@@ -555,32 +419,18 @@ export const generateOpenApiSpec = (options: OpenApiGeneratorOptions) => {
     spec.servers = options.servers;
   }
 
-  const schemas: Record<string, unknown> = {};
+  const schemas: Record<string, JsonSchema> = {};
 
   for (const route of options.routes) {
-    let fullPath = route.path;
-
-    if (options.prefix) {
-      fullPath = options.prefix + route.path;
-    }
-
-    const openApiPath = normalizePathForOpenAPI(fullPath);
+    const openApiPath = normalizePathForOpenAPI(route.path);
     const method = route.method.toLowerCase();
 
     spec.paths[openApiPath] ??= {};
-
-    const { operation, components } = createOperation(
+    spec.paths[openApiPath][method] = createOperation(
       route,
-      options.globalMiddlewares ?? [],
-      options.prefix,
+      schemas,
       options.errorResponses,
     );
-
-    spec.paths[openApiPath][method] = operation;
-
-    components.forEach((component) => {
-      Object.assign(schemas, component.schemas ?? {});
-    });
   }
 
   const hasSchemas = Object.keys(schemas).length > 0;

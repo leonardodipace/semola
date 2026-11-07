@@ -1,3 +1,4 @@
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { ParseError, ValidationError } from "./errors.js";
 import type { Middleware } from "./middleware.js";
 import type {
@@ -63,19 +64,27 @@ export const mapValidationError = (error: Error) => {
   throw error;
 };
 
+export const checkOutput = (
+  schema: StandardSchemaV1,
+  data: unknown,
+  response: Response,
+) => {
+  try {
+    validateSchema(schema, data);
+  } catch (error) {
+    return mapValidationError(error as Error);
+  }
+
+  return response;
+};
+
 export const validatingJson = (responseSchema: ResponseSchema) => {
   return (status: number, data: unknown) => {
     const schema = responseSchema[status];
 
     if (!schema) return json(status, data);
 
-    try {
-      validateSchema(schema, data);
-    } catch (error) {
-      return mapValidationError(error as Error);
-    }
-
-    return json(status, data);
+    return checkOutput(schema, data, json(status, data));
   };
 };
 
@@ -109,7 +118,6 @@ export const createContext = (
   req: Bun.BunRequest,
   validated?: ValidatedRequest,
   get?: (key: string) => unknown,
-  jsonHandler?: (status: number, data: unknown) => Response,
 ): InternalContext => {
   const context = Object.create(sharedContext) as InternalContext;
   context.raw = req;
@@ -120,10 +128,6 @@ export const createContext = (
 
   if (get) {
     context.get = get;
-  }
-
-  if (jsonHandler) {
-    context.json = jsonHandler;
   }
 
   return context;

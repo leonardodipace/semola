@@ -6,6 +6,7 @@ import { generateOpenApiSpec } from "./openapi/index.js";
 import {
   applyHeaders,
   bodyHasMultipleReaders,
+  checkOutput,
   createContext,
   emptyValidated,
   mapValidationError,
@@ -13,6 +14,7 @@ import {
   validatingJson,
 } from "./runtime.js";
 import type {
+  AnyRouteConfig,
   AnyRouteHandler,
   ApiOptions,
   BareRouteHandler,
@@ -24,14 +26,9 @@ import type {
   RequestSchema,
   ResolvedValidation,
   ResponseSchema,
-  RouteConfig,
   RouteReturn,
 } from "./types.js";
-import {
-  buildRequestValidator,
-  validateParts,
-  validateSchema,
-} from "./validate.js";
+import { buildRequestValidator, validateParts } from "./validate.js";
 
 const emptyMiddlewares: readonly Middleware[] = [];
 
@@ -66,7 +63,7 @@ const catchWithOnError = async (
   }
 };
 
-const validateResponse = async (
+const prepareResponse = (
   value: RouteReturn,
   responseSchema?: ResponseSchema,
 ) => {
@@ -75,41 +72,14 @@ const validateResponse = async (
 
   if (!schema) return response;
 
-  let data: unknown = value;
-
   if (value instanceof Response) {
-    data = await response.clone().json();
+    return response
+      .clone()
+      .json()
+      .then((data) => checkOutput(schema, data, response));
   }
 
-  try {
-    validateSchema(schema, data);
-  } catch (error) {
-    return mapValidationError(error as Error);
-  }
-
-  return response;
-};
-
-const prepareResponse = (
-  value: RouteReturn,
-  responseSchema?: ResponseSchema,
-): Response | Promise<Response> => {
-  if (value instanceof Response) {
-    return validateResponse(value, responseSchema);
-  }
-
-  const response = toResponse(value);
-  const schema = responseSchema?.[response.status];
-
-  if (!schema) return response;
-
-  try {
-    validateSchema(schema, value);
-  } catch (error) {
-    return mapValidationError(error as Error);
-  }
-
-  return response;
+  return checkOutput(schema, value, response);
 };
 
 const buildBareRoute = (
@@ -125,52 +95,34 @@ const buildBareRoute = (
     ? buildRequestValidator(request)
     : undefined;
 
-  if (onError) {
-    return async (req) =>
-      catchWithOnError(req, onError, async () => {
-        if (validateRequest) {
-          const error = await validateRequest(req);
+  // Call the handler on every request: a Response body can only be sent once.
+  const respond = () => {
+    const value = handler();
 
-          if (error) return mapValidationError(error);
-        }
+    if (value instanceof Promise) {
+      return value.then((resolved) =>
+        prepareResponse(resolved, responseSchema),
+      );
+    }
 
-        const value = await handler();
+    return prepareResponse(value, responseSchema);
+  };
 
-        return validateResponse(value, responseSchema);
-      });
-  }
+  let run: BunRouteHandler = respond;
 
-  const probe = handler();
+  if (validateRequest) {
+    run = async (req) => {
+      const error = await validateRequest(req);
 
-  if (probe instanceof Promise) {
-    return async (req) => {
-      if (validateRequest) {
-        const error = await validateRequest(req);
+      if (error) return mapValidationError(error);
 
-        if (error) return mapValidationError(error);
-      }
-
-      const value = await handler();
-
-      return validateResponse(value, responseSchema);
+      return respond();
     };
   }
 
-  const cached = prepareResponse(probe, responseSchema);
+  if (!onError) return run;
 
-  if (!validateRequest) {
-    if (cached instanceof Promise) return async () => cached;
-
-    return () => cached;
-  }
-
-  return async (req) => {
-    const error = await validateRequest(req);
-
-    if (error) return mapValidationError(error);
-
-    return cached;
-  };
+  return (req) => catchWithOnError(req, onError, () => run(req));
 };
 
 const buildContextRoute = (
@@ -223,13 +175,7 @@ const handleRequest = async (
   let get: ((key: string) => unknown) | undefined;
   let bodyCache: BodyCache | undefined;
 
-  if (
-    config.validateInput &&
-    bodyHasMultipleReaders({
-      middlewares: config.middlewares,
-      request: config.routeRequest,
-    })
-  ) {
+  if (config.cacheBody) {
     bodyCache = { parsed: false, value: undefined };
   }
 
@@ -322,12 +268,7 @@ const handleRequest = async (
 };
 
 const buildHandler = (
-  route: RouteConfig<
-    RequestSchema,
-    ResponseSchema,
-    readonly Middleware[],
-    readonly Middleware[]
-  >,
+  route: AnyRouteConfig,
   validation: ResolvedValidation,
   onError?: OnErrorOptions,
 ): BunRouteHandler => {
@@ -369,6 +310,9 @@ const buildHandler = (
     routeResponse: route.response,
     validateInput,
     validateOutput,
+    cacheBody:
+      validateInput &&
+      bodyHasMultipleReaders({ middlewares, request: route.request }),
     handler: handler as AnyRouteHandler,
     onError,
   };
@@ -377,12 +321,7 @@ const buildHandler = (
 };
 
 const compileRoutes = (
-  routes: RouteConfig<
-    RequestSchema,
-    ResponseSchema,
-    readonly Middleware[],
-    readonly Middleware[]
-  >[],
+  routes: AnyRouteConfig[],
   validation: ResolvedValidation,
   onError?: OnErrorOptions,
 ): MethodRoutes => {

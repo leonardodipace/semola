@@ -39,20 +39,6 @@ describe("runtime", () => {
       expect(context.get("user")).toEqual({ id: 1 });
     });
 
-    test("create wraps json when output validation is enabled", async () => {
-      const req = new Request("http://localhost") as Bun.BunRequest;
-      const jsonHandler = validatingJson({
-        200: z.object({ name: z.string() }),
-      });
-      const context = createContext(req, undefined, undefined, jsonHandler);
-
-      const good = await context.json(200, { name: "Alice" });
-      expect(good.status).toBe(200);
-
-      const bad = await context.json(200, { name: 123 });
-      expect(bad.status).toBe(400);
-    });
-
     test("create uses default json without output validation", async () => {
       const req = new Request("http://localhost") as Bun.BunRequest;
       const context = createContext(req);

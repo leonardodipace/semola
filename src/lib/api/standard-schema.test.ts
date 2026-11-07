@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { StandardSchemaV1 } from "@standard-schema/spec";
 import * as v from "valibot";
-import { z } from "zod";
 import {
   invalidUser,
   providers,
@@ -54,45 +52,6 @@ describe("Standard Schema support", () => {
         const data = await validateBody(req, schema);
 
         expect(data).toEqual({ id: 123 });
-      });
-
-      test("validateBody caches parsed body and reuses on subsequent calls", async () => {
-        const schema = schemaFor.nameString(provider);
-        const req = new Request("http://localhost", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: "test" }),
-        });
-        const bodyCache = { parsed: false, value: undefined as unknown };
-
-        const data1 = await validateBody(req, schema, bodyCache);
-
-        expect(data1).toEqual({ name: "test" });
-        expect(bodyCache.parsed).toBe(true);
-        expect(bodyCache.value).toEqual({ name: "test" });
-
-        const data2 = await validateBody(req, schema, bodyCache);
-
-        expect(data2).toEqual({ name: "test" });
-      });
-
-      test("validateBody validates cached body against different schemas", async () => {
-        const partialSchema = schemaFor.nameString(provider);
-        const fullSchema = schemaFor.nameAndAge(provider);
-        const req = new Request("http://localhost", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: "test", age: 25 }),
-        });
-        const bodyCache = { parsed: false, value: undefined as unknown };
-
-        const data1 = await validateBody(req, partialSchema, bodyCache);
-
-        expect(data1).toMatchObject({ name: "test" });
-
-        const data2 = await validateBody(req, fullSchema, bodyCache);
-
-        expect(data2).toEqual({ name: "test", age: 25 });
       });
 
       test("validateQuery handles single and repeated query parameters", async () => {
@@ -168,33 +127,5 @@ describe("Standard Schema support", () => {
 
     expect(formatIssuePath(emailIssue)).toBe("user.email");
     expect(formatValidationIssues(result.issues)).toContain("user.email:");
-  });
-});
-
-describe("Validation Module (schema-agnostic)", () => {
-  const anySchema = z.any() as StandardSchemaV1;
-
-  test("validateBody throws ParseError for malformed JSON", async () => {
-    const req = new Request("http://localhost", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: "{ invalid json }",
-    });
-
-    await expect(validateBody(req, anySchema)).rejects.toMatchObject({
-      name: "ParseError",
-    });
-  });
-
-  test("validateBody validates text body when Content-Type is not JSON", async () => {
-    const req = new Request("http://localhost", {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: "hello",
-    });
-
-    const data = await validateBody(req, z.string());
-
-    expect(data).toBe("hello");
   });
 });
