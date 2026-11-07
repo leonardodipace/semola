@@ -24,7 +24,14 @@ export type RedisConnection = RedisClient & {
   unsubscribe(channel: string): Promise<unknown>;
 };
 
+export type IoredisOptions = {
+  keyPrefix?: string;
+};
+
+export type IoredisScanReply = [cursor: string, keys: string[]];
+
 export type IoredisClient = {
+  options?: IoredisOptions;
   call(command: string, ...args: string[]): Promise<unknown>;
   subscribe(...channels: string[]): Promise<unknown>;
   unsubscribe(...channels: string[]): Promise<unknown>;
@@ -48,5 +55,7 @@ export type ValkeyGlideClient = {
   customCommand(args: string[]): Promise<unknown>;
   subscribe(channels: Iterable<string>, timeoutMs: number): Promise<unknown>;
   unsubscribe(channels: Iterable<string>, timeoutMs: number): Promise<unknown>;
+  subscribeLazy(channels: Iterable<string>): Promise<unknown>;
+  unsubscribeLazy(channels: Iterable<string>): Promise<unknown>;
   getPubSubMessage(): Promise<ValkeyGlideMessage>;
 };

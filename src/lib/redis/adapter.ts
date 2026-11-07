@@ -28,42 +28,57 @@ export const createRedisAdapter = <TClient extends object>(
 
   const connection = connect(dispatch);
 
-  // No lock: a connection runs commands in order and SUBSCRIBE is
-  // idempotent, so subscribing on every call keeps the server in sync.
-  const subscribe = async (channel: string, listener: RedisListener) => {
-    const listeners = channels.get(channel) ?? new Set();
-    const wasRegistered = listeners.has(listener);
+  // One command per channel at a time, so a failure only undoes its own change.
+  const queues = new Map<string, Promise<unknown>>();
 
-    listeners.add(listener);
-    channels.set(channel, listeners);
+  const runInOrder = <T>(channel: string, command: () => Promise<T>) => {
+    const previous = queues.get(channel) ?? Promise.resolve();
+    const result = previous.then(command);
+    const settled = mightThrow(result).then(() => {
+      if (queues.get(channel) === settled) queues.delete(channel);
+    });
 
-    const [error] = await mightThrow(connection.subscribe(channel));
+    queues.set(channel, settled);
 
-    if (!error) return;
-
-    // A listener from an earlier successful subscribe stays registered.
-    if (wasRegistered) throw error;
-
-    listeners.delete(listener);
-
-    if (listeners.size === 0) channels.delete(channel);
-
-    throw error;
+    return result;
   };
 
-  const unsubscribe = async (channel: string, listener: RedisListener) => {
-    const listeners = channels.get(channel);
+  const subscribe = (channel: string, listener: RedisListener) =>
+    runInOrder(channel, async () => {
+      const listeners = channels.get(channel) ?? new Set();
+      const wasRegistered = listeners.has(listener);
 
-    if (!listeners) return;
-    if (!listeners.has(listener)) return;
+      listeners.add(listener);
+      channels.set(channel, listeners);
 
-    // The last listener leaves only after the server confirms, so a failed unsubscribe keeps delivering.
-    if (listeners.size === 1) await connection.unsubscribe(channel);
+      const [error] = await mightThrow(connection.subscribe(channel));
 
-    listeners.delete(listener);
+      if (!error) return;
 
-    if (listeners.size === 0) channels.delete(channel);
-  };
+      // A listener from an earlier successful subscribe stays registered.
+      if (wasRegistered) throw error;
+
+      listeners.delete(listener);
+
+      if (listeners.size === 0) channels.delete(channel);
+
+      throw error;
+    });
+
+  const unsubscribe = (channel: string, listener: RedisListener) =>
+    runInOrder(channel, async () => {
+      const listeners = channels.get(channel);
+
+      if (!listeners) return;
+      if (!listeners.has(listener)) return;
+
+      // The last listener leaves only after the server confirms, so a failed unsubscribe keeps delivering.
+      if (listeners.size === 1) await connection.unsubscribe(channel);
+
+      listeners.delete(listener);
+
+      if (listeners.size === 0) channels.delete(channel);
+    });
 
   const adapter: RedisAdapter = {
     send: connection.send,

@@ -15,7 +15,7 @@ import type {
 } from "./types.js";
 
 // KEYS: due
-// ARGV: now, lockTTL, token, lease key prefix, meta key prefix
+// ARGV: now, lockTTL, token
 // Claims the first due execution whose lease is free: takes the lease and
 // pushes its due score out by lockTTL (visibility timeout, so a dead worker's
 // execution comes due again). Busy members are pushed to when their lease
@@ -23,11 +23,13 @@ import type {
 export const CLAIM_DUE = `
 local now = tonumber(ARGV[1])
 local ttl = tonumber(ARGV[2])
+-- From KEYS, so a client key prefix (ioredis keyPrefix) applies.
+local base = string.match(KEYS[1], '^(.*)due$')
 
 for _, id in ipairs(redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', now, 'LIMIT', 0, 10)) do
-  local lease = ARGV[4] .. id
+  local lease = base .. 'lease:' .. id
 
-  if redis.call('EXISTS', ARGV[5] .. id) == 0 then
+  if redis.call('EXISTS', base .. 'meta:' .. id) == 0 then
     redis.call('ZREM', KEYS[1], id)
   elseif redis.call('SET', lease, ARGV[3], 'PX', ttl, 'NX') then
     redis.call('ZADD', KEYS[1], now + ttl, id)
@@ -445,8 +447,6 @@ export class WorkflowStore {
         String(Date.now()),
         String(ttlMs),
         token,
-        keys.lease(this.name, ""),
-        keys.meta(this.name, ""),
       ]),
     );
 

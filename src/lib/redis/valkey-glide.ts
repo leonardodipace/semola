@@ -4,7 +4,8 @@ import { createRedisAdapter } from "./adapter.js";
 import type { ValkeyGlideClient } from "./types.js";
 
 const SUBSCRIBE_TIMEOUT_MS = 5_000;
-export const POLL_RETRY_DELAY_MS = 100;
+
+const POLL_RETRY_DELAY_MS = 100;
 
 // Valkey GLIDE. Subscribe on a separate client created without a pubsub callback.
 export const fromValkeyGlide = (client: ValkeyGlideClient) =>
@@ -35,26 +36,52 @@ export const fromValkeyGlide = (client: ValkeyGlideClient) =>
       }
     };
 
+    // GLIDE still applies a timed-out call later, so failures are undone.
+    // Holds channels whose listeners rely on a confirmed subscribe.
+    const subscribed = new Set<string>();
+
     const subscribe = async (channel: string) => {
       if (!polling) {
         polling = true;
         void poll();
       }
 
-      await client.subscribe([channel], SUBSCRIBE_TIMEOUT_MS);
-
+      const [subscribeError] = await mightThrow(
+        client.subscribe([channel], SUBSCRIBE_TIMEOUT_MS),
+      );
       // The first poll fails before the server confirms the subscribe.
-      if (!pollFailure) return;
+      const error = subscribeError ?? pollFailure;
 
-      await client.unsubscribe([channel], SUBSCRIBE_TIMEOUT_MS);
+      if (!error) {
+        subscribed.add(channel);
 
-      throw pollFailure;
+        return;
+      }
+
+      if (!subscribed.has(channel)) {
+        await mightThrow(client.unsubscribeLazy([channel]));
+      }
+
+      throw error;
+    };
+
+    const unsubscribe = async (channel: string) => {
+      const [error] = await mightThrow(
+        client.unsubscribe([channel], SUBSCRIBE_TIMEOUT_MS),
+      );
+
+      if (error) {
+        await mightThrow(client.subscribeLazy([channel]));
+
+        throw error;
+      }
+
+      subscribed.delete(channel);
     };
 
     return {
       send: (command, args) => client.customCommand([command, ...args]),
       subscribe,
-      unsubscribe: (channel) =>
-        client.unsubscribe([channel], SUBSCRIBE_TIMEOUT_MS),
+      unsubscribe,
     };
   });

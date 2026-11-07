@@ -1,178 +1,144 @@
-import { describe, expect, test } from "bun:test";
-import { createRedisAdapter } from "./adapter.js";
-import type { RedisDispatch } from "./types.js";
+import { afterAll, describe, expect, test } from "bun:test";
+import { once } from "node:events";
+import type { Redis } from "ioredis";
+import {
+  closeClients,
+  createIoredis,
+  publishAndSettle,
+  SEMOLA_REDIS_URL,
+  uniqueName,
+} from "./integration-helpers.js";
+import { fromIoredis } from "./ioredis.js";
 
-const createFakeClient = () => {
-  const calls: string[] = [];
-  let failNext: "subscribe" | "unsubscribe" | null = null;
-  let dispatch: RedisDispatch = () => {};
+afterAll(closeClients);
 
-  const client = {};
+// Commands sent until `reconnect` reject at once, as the offline queue is
+// off. On reconnect, ioredis subscribes again to the channels it holds.
+const dropConnection = (client: Redis) => {
+  const ended = once(client, "end");
 
-  const redis = createRedisAdapter(client, (onMessage) => {
-    dispatch = onMessage;
+  client.disconnect();
 
-    return {
-      send: async () => "reply",
-      subscribe: async (channel) => {
-        calls.push(`subscribe:${channel}`);
-
-        if (failNext === "subscribe") {
-          failNext = null;
-          throw new Error("subscribe failed");
-        }
-      },
-      unsubscribe: async (channel) => {
-        calls.push(`unsubscribe:${channel}`);
-
-        if (failNext === "unsubscribe") {
-          failNext = null;
-          throw new Error("unsubscribe failed");
-        }
-      },
-    };
-  });
-
-  const fail = (operation: "subscribe" | "unsubscribe") => {
-    failNext = operation;
+  const reconnect = async () => {
+    await ended;
+    await client.connect();
   };
 
-  const emit = (channel: string, message: string) => dispatch(channel, message);
-
-  return { client, redis, calls, fail, emit };
+  return reconnect;
 };
 
-describe("createRedisAdapter", () => {
-  test("returns the same adapter for the same client", () => {
-    const { client, redis } = createFakeClient();
+const connect = async () => {
+  const client = await createIoredis({ enableOfflineQueue: false });
 
-    const connect = () => {
-      throw new Error("not called");
-    };
+  return { client, subscriber: fromIoredis(client) };
+};
 
-    expect(createRedisAdapter(client, connect)).toBe(redis);
-  });
+describe.skipIf(!SEMOLA_REDIS_URL)("createRedisAdapter", () => {
+  test("returns the same adapter for the same client", async () => {
+    const { client, subscriber } = await connect();
 
-  test("unsubscribes on the server when the last listener leaves", async () => {
-    const { redis, calls } = createFakeClient();
-    const first = () => {};
-    const second = () => {};
-
-    await redis.subscribe("a", first);
-    await redis.subscribe("a", second);
-    await redis.unsubscribe("a", first);
-
-    expect(calls).toEqual(["subscribe:a", "subscribe:a"]);
-
-    await redis.unsubscribe("a", second);
-    await redis.unsubscribe("a", second);
-
-    expect(calls).toEqual(["subscribe:a", "subscribe:a", "unsubscribe:a"]);
-  });
-
-  test("keeps delivering when the server unsubscribe fails", async () => {
-    const { redis, fail, emit } = createFakeClient();
-    const received: string[] = [];
-    const listener = (message: string) => {
-      received.push(message);
-    };
-
-    await redis.subscribe("a", listener);
-
-    fail("unsubscribe");
-
-    await expect(redis.unsubscribe("a", listener)).rejects.toThrow(
-      "unsubscribe failed",
-    );
-
-    emit("a", "still here");
-    await Bun.sleep(0);
-
-    expect(received).toEqual(["still here"]);
-  });
-
-  test("a subscribe during an in-flight unsubscribe stays subscribed", async () => {
-    const { redis, calls, emit } = createFakeClient();
-    const received: string[] = [];
-    const first = () => {};
-
-    await redis.subscribe("a", first);
-    await Promise.all([
-      redis.unsubscribe("a", first),
-      redis.subscribe("a", (message) => {
-        received.push(message);
-      }),
-    ]);
-
-    emit("a", "after");
-    await Bun.sleep(0);
-
-    expect(calls).toEqual(["subscribe:a", "unsubscribe:a", "subscribe:a"]);
-    expect(received).toEqual(["after"]);
+    expect(fromIoredis(client)).toBe(subscriber);
   });
 
   test("drops the listener of a failed subscribe", async () => {
-    const { redis, fail, emit } = createFakeClient();
+    const { client, subscriber } = await connect();
+    const channel = uniqueName();
     const received: string[] = [];
+    const reconnect = dropConnection(client);
 
-    fail("subscribe");
+    const failed = subscriber.subscribe(channel, () => {
+      received.push("lost");
+    });
 
-    await expect(
-      redis.subscribe("a", () => {
-        received.push("lost");
-      }),
-    ).rejects.toThrow("subscribe failed");
+    await expect(failed).rejects.toThrow();
+    await reconnect();
+    await subscriber.subscribe(channel, () => {
+      received.push("other");
+    });
+    await publishAndSettle(subscriber, channel, "hello");
 
-    emit("a", "hello");
-    await Bun.sleep(0);
-
-    expect(received).toEqual([]);
+    expect(received).toEqual(["other"]);
   });
 
   test("keeps a registered listener when subscribing it again fails", async () => {
-    const { redis, fail, emit } = createFakeClient();
+    const { client, subscriber } = await connect();
+    const channel = uniqueName();
     const received: string[] = [];
     const listener = (message: string) => {
       received.push(message);
     };
 
-    await redis.subscribe("a", listener);
+    await subscriber.subscribe(channel, listener);
 
-    fail("subscribe");
+    const reconnect = dropConnection(client);
 
-    await expect(redis.subscribe("a", listener)).rejects.toThrow(
-      "subscribe failed",
-    );
-
-    emit("a", "hello");
-    await Bun.sleep(0);
+    await expect(subscriber.subscribe(channel, listener)).rejects.toThrow();
+    await reconnect();
+    await publishAndSettle(subscriber, channel, "hello");
 
     expect(received).toEqual(["hello"]);
   });
 
-  test("a failing listener does not stop its siblings or go unhandled", async () => {
-    const { redis, emit } = createFakeClient();
+  test("keeps delivering when the unsubscribe fails", async () => {
+    const { client, subscriber } = await connect();
+    const channel = uniqueName();
     const received: string[] = [];
-    const unhandled: unknown[] = [];
-    const onUnhandled = (reason: unknown) => {
-      unhandled.push(reason);
+    const listener = (message: string) => {
+      received.push(message);
     };
 
-    process.on("unhandledRejection", onUnhandled);
+    await subscriber.subscribe(channel, listener);
 
-    await redis.subscribe("a", async () => {
-      throw new Error("listener rejected");
-    });
-    await redis.subscribe("a", (message) => {
-      received.push(message);
-    });
+    const reconnect = dropConnection(client);
 
-    emit("a", "hello");
-    await Bun.sleep(10);
-
-    process.off("unhandledRejection", onUnhandled);
+    await expect(subscriber.unsubscribe(channel, listener)).rejects.toThrow();
+    await reconnect();
+    await publishAndSettle(subscriber, channel, "hello");
 
     expect(received).toEqual(["hello"]);
-    expect(unhandled).toEqual([]);
+  });
+
+  test("a dropped connection does not keep a listener that left", async () => {
+    const { client, subscriber } = await connect();
+    const channel = uniqueName();
+    const received: string[] = [];
+    const leaving = () => {
+      received.push("leaving");
+    };
+    const reconnect = dropConnection(client);
+
+    await Promise.allSettled([
+      subscriber.subscribe(channel, leaving),
+      subscriber.unsubscribe(channel, leaving),
+    ]);
+    await reconnect();
+    await subscriber.subscribe(channel, () => {
+      received.push("other");
+    });
+    await publishAndSettle(subscriber, channel, "hello");
+
+    expect(received).toEqual(["other"]);
+  });
+
+  test("a dropped connection keeps a subscribed listener", async () => {
+    const { client, subscriber } = await connect();
+    const channel = uniqueName();
+    const received: string[] = [];
+    const listener = (message: string) => {
+      received.push(message);
+    };
+
+    await subscriber.subscribe(channel, listener);
+
+    const reconnect = dropConnection(client);
+
+    await Promise.allSettled([
+      subscriber.unsubscribe(channel, listener),
+      subscriber.subscribe(channel, listener),
+    ]);
+    await reconnect();
+    await publishAndSettle(subscriber, channel, "hello");
+
+    expect(received).toEqual(["hello"]);
   });
 });
