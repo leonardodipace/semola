@@ -122,12 +122,17 @@ const rewriteSchemaTree = (
   if (typeof next.id !== "string") return next;
 
   const id = next.id;
-  const definition = { ...next };
-  delete definition.id;
-  delete definition.$schema;
-  scope.schemas[id] = definition;
+  scope.schemas[id] = stripMeta(next);
 
   return createComponentRef(id, scope);
+};
+
+// Strips in place: the object may be a tracked $ref that gets renamed later.
+const stripMeta = (jsonSchema: JsonSchema) => {
+  delete jsonSchema.id;
+  delete jsonSchema.$schema;
+
+  return jsonSchema;
 };
 
 const toJsonSchema = (
@@ -140,14 +145,6 @@ const toJsonSchema = (
   ].jsonSchema[io]({ target: "draft-2020-12" });
 
   return rewriteSchemaTree(jsonSchema, registry[io], true) as JsonSchema;
-};
-
-const withoutMeta = (jsonSchema: JsonSchema) => {
-  const clean = { ...jsonSchema };
-  delete clean.id;
-  delete clean.$schema;
-
-  return clean;
 };
 
 const getSchemaDescription = (schema: StandardSchemaV1) => {
@@ -195,10 +192,10 @@ const toSchemaRef = (
   const jsonSchema = toJsonSchema(schema, registry, io);
   const schemaId = getSchemaId(schema, jsonSchema);
 
-  if (!schemaId) return withoutMeta(jsonSchema);
+  if (!schemaId) return stripMeta(jsonSchema);
 
   const scope = registry[io];
-  scope.schemas[schemaId] = withoutMeta(jsonSchema);
+  scope.schemas[schemaId] = stripMeta(jsonSchema);
 
   return createComponentRef(schemaId, scope);
 };
@@ -216,7 +213,7 @@ const extractParametersFromSchema = (
   location: OpenApiParameter["in"],
   registry: SchemaRegistry,
 ) => {
-  const jsonSchema = withoutMeta(toJsonSchema(schema, registry));
+  const jsonSchema = stripMeta(toJsonSchema(schema, registry));
   const parameters: OpenApiParameter[] = [];
 
   if (jsonSchema.type !== "object") return parameters;
@@ -466,23 +463,42 @@ const findDivergentNames = (registry: SchemaRegistry) => {
   return divergent;
 };
 
-const toOutputName = (name: string, divergent: Set<string>) => {
-  if (divergent.has(name)) return `${name}Output`;
+const pickOutputName = (name: string, taken: Set<string>) => {
+  let candidate = `${name}Output`;
+  let attempt = 1;
 
-  return name;
+  while (taken.has(candidate)) {
+    attempt += 1;
+    candidate = `${name}Output${attempt}`;
+  }
+
+  return candidate;
 };
 
 const mergeSchemaRegistry = (registry: SchemaRegistry) => {
   const divergent = findDivergentNames(registry);
   const schemas = { ...registry.input.schemas };
+  const outputNames = new Map<string, string>();
+  const taken = new Set([
+    ...Object.keys(registry.input.schemas),
+    ...Object.keys(registry.output.schemas),
+  ]);
 
   for (const [name, schema] of Object.entries(registry.output.schemas)) {
-    schemas[toOutputName(name, divergent)] = schema;
+    let outputName = name;
+
+    if (divergent.has(name)) {
+      outputName = pickOutputName(name, taken);
+      taken.add(outputName);
+    }
+
+    outputNames.set(name, outputName);
+    schemas[outputName] = schema;
   }
 
   for (const ref of registry.output.refs) {
-    const name = toOutputName(toComponentName(ref.$ref), divergent);
-    ref.$ref = `${COMPONENT_REF_PREFIX}${name}`;
+    const name = toComponentName(ref.$ref);
+    ref.$ref = `${COMPONENT_REF_PREFIX}${outputNames.get(name) ?? name}`;
   }
 
   return schemas;

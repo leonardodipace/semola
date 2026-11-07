@@ -83,6 +83,23 @@ const schemaWithRefSiblings = {
   },
 } as unknown as StandardSchemaV1;
 
+const nodeDefs = (required: string[]) => ({
+  node: { type: "object", properties: { n: { type: "number" } }, required },
+});
+
+// node is optional on input and required on output, so it diverges.
+const schemaWithNodeDefs = (root: Record<string, unknown>) =>
+  ({
+    "~standard": {
+      version: 1,
+      vendor: "test",
+      jsonSchema: {
+        input: () => ({ ...root, $defs: nodeDefs([]) }),
+        output: () => ({ ...root, $defs: nodeDefs(["n"]) }),
+      },
+    },
+  }) as unknown as StandardSchemaV1;
+
 describe("OpenAPI Generation", () => {
   test("should generate a valid base spec with info", async () => {
     const spec = await generateOpenApiSpec({
@@ -1025,5 +1042,89 @@ describe("OpenAPI Generation", () => {
       spec.paths["/o"]?.post?.responses["200"]?.content?.["application/json"]
         ?.schema,
     ).toEqual({ $ref: "#/components/schemas/OuterOutput" });
+  });
+
+  test("should point root and aliased $refs at divergent output components", async () => {
+    const RootRef = schemaWithNodeDefs({ $ref: "#/$defs/node" });
+    const AliasRef = schemaWithNodeDefs({
+      type: "object",
+      properties: { alias: { id: "Alias", $ref: "#/$defs/node" } },
+    });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/root",
+          method: "POST",
+          request: { body: RootRef },
+          response: { 200: RootRef },
+          handler: () => {},
+        },
+        {
+          path: "/alias",
+          method: "POST",
+          request: { body: AliasRef },
+          response: { 200: AliasRef },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(
+      spec.paths["/root"]?.post?.requestBody?.content["application/json"]
+        ?.schema,
+    ).toEqual({ $ref: "#/components/schemas/node" });
+    expect(
+      spec.paths["/root"]?.post?.responses["200"]?.content?.["application/json"]
+        ?.schema,
+    ).toEqual({ $ref: "#/components/schemas/nodeOutput" });
+    expect(spec.components?.schemas?.Alias).toEqual({
+      $ref: "#/components/schemas/node",
+    });
+    expect(spec.components?.schemas?.AliasOutput).toEqual({
+      $ref: "#/components/schemas/nodeOutput",
+    });
+  });
+
+  test("should not overwrite an existing component named like the output name", async () => {
+    const Thing = z.strictObject({ n: z.number().default(1) }).meta({
+      id: "Thing",
+    });
+    const ThingOutput = z.strictObject({ label: z.string() }).meta({
+      id: "ThingOutput",
+    });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/t",
+          method: "POST",
+          request: { body: Thing },
+          response: { 200: Thing },
+          handler: () => {},
+        },
+        {
+          path: "/labels",
+          method: "POST",
+          request: { body: ThingOutput },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas?.ThingOutput).toMatchObject({
+      properties: { label: { type: "string" } },
+    });
+    expect(spec.components?.schemas?.ThingOutput2).toMatchObject({
+      required: ["n"],
+    });
+    expect(
+      spec.paths["/t"]?.post?.responses["200"]?.content?.["application/json"]
+        ?.schema,
+    ).toEqual({ $ref: "#/components/schemas/ThingOutput2" });
   });
 });
