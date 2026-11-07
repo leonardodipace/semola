@@ -1,89 +1,157 @@
 import { describe, expect, test } from "bun:test";
 import { createRedisAdapter } from "./adapter.js";
-import type { RedisClientSpec, RedisDispatch } from "./types.js";
+import type { RedisDispatch } from "./types.js";
 
-type FakeClient = {
-  log: string[];
-  dispatch: RedisDispatch | null;
+const createFakeClient = () => {
+  const calls: string[] = [];
+  let failNext: "subscribe" | "unsubscribe" | null = null;
+  let dispatch: RedisDispatch = () => {};
+
+  const client = {};
+
+  const redis = createRedisAdapter(client, (onMessage) => {
+    dispatch = onMessage;
+
+    return {
+      send: async () => "reply",
+      subscribe: async (channel) => {
+        calls.push(`subscribe:${channel}`);
+
+        if (failNext === "subscribe") {
+          failNext = null;
+          throw new Error("subscribe failed");
+        }
+      },
+      unsubscribe: async (channel) => {
+        calls.push(`unsubscribe:${channel}`);
+
+        if (failNext === "unsubscribe") {
+          failNext = null;
+          throw new Error("unsubscribe failed");
+        }
+      },
+    };
+  });
+
+  const fail = (operation: "subscribe" | "unsubscribe") => {
+    failNext = operation;
+  };
+
+  const emit = (channel: string, message: string) => dispatch(channel, message);
+
+  return { client, redis, calls, fail, emit };
 };
-
-const spec: RedisClientSpec<FakeClient> = {
-  send: async (client, command, args) => {
-    client.log.push(`send:${command}:${args.join(",")}`);
-
-    return "reply";
-  },
-  listen: (client, dispatch) => {
-    client.log.push("listen");
-    client.dispatch = dispatch;
-  },
-  subscribe: async (client, channel) => {
-    client.log.push(`subscribe:${channel}`);
-  },
-  unsubscribe: async (client, channel) => {
-    client.log.push(`unsubscribe:${channel}`);
-  },
-};
-
-const createClient = (): FakeClient => ({ log: [], dispatch: null });
 
 describe("createRedisAdapter", () => {
-  test("sends commands through the spec", async () => {
-    const client = createClient();
-    const redis = createRedisAdapter(spec, client);
+  test("returns the same adapter for the same client", () => {
+    const { client, redis } = createFakeClient();
 
-    expect(await redis.send("GET", ["k"])).toBe("reply");
-    expect(client.log).toEqual(["send:GET:k"]);
+    const connect = () => {
+      throw new Error("not called");
+    };
+
+    expect(createRedisAdapter(client, connect)).toBe(redis);
   });
 
-  test("listens once, before the first subscribe", async () => {
-    const client = createClient();
-    const redis = createRedisAdapter(spec, client);
+  test("unsubscribes on the server when the last listener leaves", async () => {
+    const { redis, calls } = createFakeClient();
+    const first = () => {};
+    const second = () => {};
 
-    await redis.subscribe("a", () => {});
-    await redis.subscribe("b", () => {});
+    await redis.subscribe("a", first);
+    await redis.subscribe("a", second);
+    await redis.unsubscribe("a", first);
 
-    expect(client.log).toEqual(["listen", "subscribe:a", "subscribe:b"]);
+    expect(calls).toEqual(["subscribe:a", "subscribe:a"]);
+
+    await redis.unsubscribe("a", second);
+    await redis.unsubscribe("a", second);
+
+    expect(calls).toEqual(["subscribe:a", "subscribe:a", "unsubscribe:a"]);
   });
 
-  test("does not listen until something subscribes", async () => {
-    const client = createClient();
-    const redis = createRedisAdapter(spec, client);
-
-    await redis.send("PING", []);
-
-    expect(client.log).toEqual(["send:PING:"]);
-  });
-
-  test("routes dispatched messages to channel listeners", async () => {
-    const client = createClient();
-    const redis = createRedisAdapter(spec, client);
+  test("keeps delivering when the server unsubscribe fails", async () => {
+    const { redis, fail, emit } = createFakeClient();
     const received: string[] = [];
+    const listener = (message: string) => {
+      received.push(message);
+    };
 
-    await redis.subscribe("a", (message, channel) => {
-      received.push(`${channel}:${message}`);
-    });
+    await redis.subscribe("a", listener);
 
-    client.dispatch?.("a", "hello");
-    client.dispatch?.("b", "ignored");
+    fail("unsubscribe");
+
+    await expect(redis.unsubscribe("a", listener)).rejects.toThrow(
+      "unsubscribe failed",
+    );
+
+    emit("a", "still here");
     await Bun.sleep(0);
 
-    expect(received).toEqual(["a:hello"]);
+    expect(received).toEqual(["still here"]);
   });
 
-  test("works without a listen step", async () => {
-    const client = createClient();
-    const redis = createRedisAdapter({ ...spec, listen: undefined }, client);
+  test("a subscribe during an in-flight unsubscribe stays subscribed", async () => {
+    const { redis, calls, emit } = createFakeClient();
+    const received: string[] = [];
+    const first = () => {};
 
-    expect(await redis.subscribe("a", () => {})).toBe(1);
-    expect(client.log).toEqual(["subscribe:a"]);
+    await redis.subscribe("a", first);
+    await Promise.all([
+      redis.unsubscribe("a", first),
+      redis.subscribe("a", (message) => {
+        received.push(message);
+      }),
+    ]);
+
+    emit("a", "after");
+    await Bun.sleep(0);
+
+    expect(calls).toEqual(["subscribe:a", "unsubscribe:a", "subscribe:a"]);
+    expect(received).toEqual(["after"]);
   });
 
-  test("returns the same adapter for the same client", () => {
-    const client = createClient();
+  test("drops the listener of a failed subscribe", async () => {
+    const { redis, fail, emit } = createFakeClient();
+    const received: string[] = [];
 
-    expect(createRedisAdapter(spec, client)).toBe(
-      createRedisAdapter(spec, client),
-    );
+    fail("subscribe");
+
+    await expect(
+      redis.subscribe("a", () => {
+        received.push("lost");
+      }),
+    ).rejects.toThrow("subscribe failed");
+
+    emit("a", "hello");
+    await Bun.sleep(0);
+
+    expect(received).toEqual([]);
+  });
+
+  test("a failing listener does not stop its siblings or go unhandled", async () => {
+    const { redis, emit } = createFakeClient();
+    const received: string[] = [];
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+
+    process.on("unhandledRejection", onUnhandled);
+
+    await redis.subscribe("a", async () => {
+      throw new Error("listener rejected");
+    });
+    await redis.subscribe("a", (message) => {
+      received.push(message);
+    });
+
+    emit("a", "hello");
+    await Bun.sleep(10);
+
+    process.off("unhandledRejection", onUnhandled);
+
+    expect(received).toEqual(["hello"]);
+    expect(unhandled).toEqual([]);
   });
 });

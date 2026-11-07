@@ -8,32 +8,20 @@ export type RedisListener = (
   channel: string,
 ) => void | Promise<void>;
 
-// Bun-style: subscribe resolves to the number of subscribed channels.
+// Bun-style: one listener per call; the server subscription is shared per channel.
 export type RedisSubscriber = {
-  subscribe(channel: string, listener: RedisListener): Promise<number>;
-  unsubscribe(channel: string, listener: RedisListener): Promise<void>;
+  subscribe(channel: string, listener: RedisListener): Promise<unknown>;
+  unsubscribe(channel: string, listener: RedisListener): Promise<unknown>;
 };
 
 export type RedisAdapter = RedisClient & RedisSubscriber;
 
 export type RedisDispatch = (channel: string, message: string) => void;
 
-export type ChannelConnection = {
+// A client that subscribes per channel and pushes every message to one dispatch.
+export type RedisConnection = RedisClient & {
   subscribe(channel: string): Promise<unknown>;
   unsubscribe(channel: string): Promise<unknown>;
-};
-
-// What differs between clients; createRedisAdapter does the rest.
-export type RedisClientSpec<TClient> = {
-  send: (client: TClient, command: string, args: string[]) => Promise<unknown>;
-  // Wires pushed messages to dispatch; runs once, before the first subscribe.
-  listen?: (client: TClient, dispatch: RedisDispatch) => void;
-  subscribe: (
-    client: TClient,
-    channel: string,
-    dispatch: RedisDispatch,
-  ) => Promise<unknown>;
-  unsubscribe: (client: TClient, channel: string) => Promise<unknown>;
 };
 
 export type IoredisClient = {
@@ -47,12 +35,7 @@ export type IoredisClient = {
 export type NodeRedisClient = {
   sendCommand(args: string[]): Promise<unknown>;
   subscribe(channel: string, listener: RedisListener): Promise<unknown>;
-  unsubscribe(channel: string): Promise<unknown>;
-};
-
-export type ValkeyGlideRecordEntry = {
-  key: unknown;
-  value: unknown;
+  unsubscribe(channel: string, listener: RedisListener): Promise<unknown>;
 };
 
 export type ValkeyGlideMessage = {

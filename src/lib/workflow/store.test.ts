@@ -655,7 +655,7 @@ describe.skipIf(!SEMOLA_REDIS_URL)("WorkflowStore", () => {
     const redis = createRedis();
     const store = new WorkflowStore(redis, "store-meta-fail");
 
-    failNext(redis, "HGETALL");
+    failNext(redis, "EVAL");
 
     await expect(store.getMeta("exec-x")).rejects.toMatchObject({
       name: "WorkflowStoreError",

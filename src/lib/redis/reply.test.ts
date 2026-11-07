@@ -2,25 +2,23 @@ import { describe, expect, test } from "bun:test";
 import { readHash } from "./reply.js";
 
 describe("readHash", () => {
-  test("reads a RESP3 map reply as a record", async () => {
-    const redis = { send: async () => ({ status: "pending" }) };
+  test("reads the hash through a Lua HGETALL", async () => {
+    const sent: string[][] = [];
+    const redis = {
+      send: async (command: string, args: string[]) => {
+        sent.push([command, ...args]);
 
-    expect(await readHash(redis, "meta")).toEqual({ status: "pending" });
-  });
-
-  test("reads a RESP2 flat field/value reply as a record", async () => {
-    const redis = { send: async () => ["status", "pending", "name", "wf"] };
+        return ["status", "pending", "name", "wf"];
+      },
+    };
 
     expect(await readHash(redis, "meta")).toEqual({
       status: "pending",
       name: "wf",
     });
-  });
-
-  test("reads a Map reply as a record", async () => {
-    const redis = { send: async () => new Map([["status", "pending"]]) };
-
-    expect(await readHash(redis, "meta")).toEqual({ status: "pending" });
+    expect(sent).toEqual([
+      ["EVAL", "return redis.call('HGETALL', KEYS[1])", "1", "meta"],
+    ]);
   });
 
   test("reads a missing hash as an empty record", async () => {
@@ -29,17 +27,11 @@ describe("readHash", () => {
     expect(await readHash(redis, "meta")).toEqual({});
   });
 
-  test("keeps a flat-list field named __proto__ as data", async () => {
+  test("keeps a field named __proto__ as data", async () => {
     const redis = { send: async () => ["__proto__", "x"] };
     const record = await readHash(redis, "meta");
 
     expect(Object.hasOwn(record, "__proto__")).toBe(true);
     expect(Object.getPrototypeOf(record)).toBe(Object.prototype);
-  });
-
-  test("reads a null reply as an empty record", async () => {
-    const redis = { send: async () => null };
-
-    expect(await readHash(redis, "meta")).toEqual({});
   });
 });

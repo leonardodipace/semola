@@ -1,13 +1,13 @@
-import { createRedisAdapter } from "./adapter.js";
-import type { NodeRedisClient, RedisClientSpec } from "./types.js";
+import type { NodeRedisClient, RedisAdapter } from "./types.js";
 
-const NODE_REDIS_SPEC: RedisClientSpec<NodeRedisClient> = {
-  send: (client, command, args) => client.sendCommand([command, ...args]),
-  subscribe: (client, channel, dispatch) =>
-    client.subscribe(channel, (message) => dispatch(channel, message)),
-  unsubscribe: (client, channel) => client.unsubscribe(channel),
+// node-redis. Subscribe on a `client.duplicate()` connection; it shares a
+// channel between listeners on its own.
+export const fromNodeRedis = (client: NodeRedisClient) => {
+  const adapter: RedisAdapter = {
+    send: (command, args) => client.sendCommand([command, ...args]),
+    subscribe: (channel, listener) => client.subscribe(channel, listener),
+    unsubscribe: (channel, listener) => client.unsubscribe(channel, listener),
+  };
+
+  return adapter;
 };
-
-// node-redis. Subscribe on a `client.duplicate()` connection.
-export const fromNodeRedis = (client: NodeRedisClient) =>
-  createRedisAdapter(NODE_REDIS_SPEC, client);

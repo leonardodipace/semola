@@ -25,8 +25,9 @@ Read each skill file and follow its instructions.
 | **caveman** | Default for communication (terse, accurate) | `.agents/skills/caveman/SKILL.md` |
 | **fallow** | Audits, cleanup, PR risk, code health | `.agents/skills/fallow/SKILL.md` |
 | **harden** | After a feature lands: blind test subagent, fix failures, deslop subagent, deslop | `.agents/skills/harden/SKILL.md` |
+| **rethink** | Assume the implementation is wrong: recommend a smaller design, apply, re-review in a loop until nothing is left to cut | `.agents/skills/rethink/SKILL.md` |
 
-Ponytail and caveman are always on. Fallow and harden are task-triggered. Caveman affects prose only - never reduce code quality, test coverage, or correctness.
+Ponytail and caveman are always on. Fallow, harden, and rethink are task-triggered. Caveman affects prose only - never reduce code quality, test coverage, or correctness.
 
 Run fallow with `bunx fallow` (no install or dev dependency needed). Example: `bunx fallow audit --base main --format json --quiet 2>/dev/null || true`. See the fallow skill for commands and flags.
 

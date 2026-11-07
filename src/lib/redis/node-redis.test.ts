@@ -3,64 +3,45 @@ import { fromNodeRedis } from "./node-redis.js";
 import type { RedisListener } from "./types.js";
 
 const createFakeNodeRedis = () => {
-  const commands: string[][] = [];
-  const listeners = new Map<string, RedisListener>();
+  const calls: unknown[][] = [];
 
   const client = {
     sendCommand: async (args: string[]) => {
-      commands.push(args);
+      calls.push(args);
 
       return "OK";
     },
     subscribe: async (channel: string, listener: RedisListener) => {
-      commands.push(["SUBSCRIBE", channel]);
-      listeners.set(channel, listener);
+      calls.push(["SUBSCRIBE", channel, listener]);
     },
-    unsubscribe: async (channel: string) => {
-      commands.push(["UNSUBSCRIBE", channel]);
-      listeners.delete(channel);
+    unsubscribe: async (channel: string, listener: RedisListener) => {
+      calls.push(["UNSUBSCRIBE", channel, listener]);
     },
   };
 
-  const publish = (channel: string, message: string) =>
-    listeners.get(channel)?.(message, channel);
-
-  return { client, commands, publish };
+  return { client, calls };
 };
 
 describe("fromNodeRedis", () => {
   test("sends commands through sendCommand", async () => {
-    const { client, commands } = createFakeNodeRedis();
+    const { client, calls } = createFakeNodeRedis();
     const redis = fromNodeRedis(client);
 
     expect(await redis.send("GET", ["k"])).toBe("OK");
-    expect(commands).toEqual([["GET", "k"]]);
+    expect(calls).toEqual([["GET", "k"]]);
   });
 
-  test("delivers messages to every listener on the channel", async () => {
-    const { client, commands, publish } = createFakeNodeRedis();
+  test("passes listeners straight to the client", async () => {
+    const { client, calls } = createFakeNodeRedis();
     const redis = fromNodeRedis(client);
-    const received: string[] = [];
-    const first = (message: string, channel: string) => {
-      received.push(`first:${channel}:${message}`);
-    };
-    const second = (message: string, channel: string) => {
-      received.push(`second:${channel}:${message}`);
-    };
+    const listener = () => {};
 
-    await redis.subscribe("a", first);
-    await redis.subscribe("a", second);
+    await redis.subscribe("a", listener);
+    await redis.unsubscribe("a", listener);
 
-    publish("a", "hello");
-    await Bun.sleep(0);
-
-    await redis.unsubscribe("a", first);
-    await redis.unsubscribe("a", second);
-
-    expect(received).toEqual(["first:a:hello", "second:a:hello"]);
-    expect(commands).toEqual([
-      ["SUBSCRIBE", "a"],
-      ["UNSUBSCRIBE", "a"],
+    expect(calls).toEqual([
+      ["SUBSCRIBE", "a", listener],
+      ["UNSUBSCRIBE", "a", listener],
     ]);
   });
 });

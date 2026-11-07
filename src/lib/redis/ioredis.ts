@@ -1,15 +1,14 @@
 import { createRedisAdapter } from "./adapter.js";
-import type { IoredisClient, RedisClientSpec } from "./types.js";
-
-const IOREDIS_SPEC: RedisClientSpec<IoredisClient> = {
-  send: (client, command, args) => client.call(command, ...args),
-  listen: (client, dispatch) => {
-    client.on("message", dispatch);
-  },
-  subscribe: (client, channel) => client.subscribe(channel),
-  unsubscribe: (client, channel) => client.unsubscribe(channel),
-};
+import type { IoredisClient } from "./types.js";
 
 // ioredis and iovalkey. Subscribe on a separate connection.
 export const fromIoredis = (client: IoredisClient) =>
-  createRedisAdapter(IOREDIS_SPEC, client);
+  createRedisAdapter(client, (dispatch) => {
+    client.on("message", dispatch);
+
+    return {
+      send: (command, args) => client.call(command, ...args),
+      subscribe: (channel) => client.subscribe(channel),
+      unsubscribe: (channel) => client.unsubscribe(channel),
+    };
+  });

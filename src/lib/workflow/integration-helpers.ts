@@ -73,7 +73,7 @@ export const closeRedis = () => {
   for (const redis of clients.splice(0)) redis.close();
 };
 
-type FailableCommand = "EVAL" | "LRANGE" | "HGETALL";
+type FailableCommand = "EVAL" | "LRANGE";
 
 // Makes the next `command` sent by this client reject, then restores send.
 export const failNext = (redis: Bun.RedisClient, command: FailableCommand) => {

@@ -1,31 +1,16 @@
 import type { RedisClient } from "./types.js";
 
-const pairUp = (list: unknown[]) => {
-  const pairs: unknown[][] = [];
-
-  for (let index = 0; index < list.length; index += 2) {
-    pairs.push([list[index], list[index + 1]]);
-  }
-
-  return pairs;
-};
-
-// HGETALL comes back as an object, a Map, or a flat field/value list.
-const toEntries = (reply: unknown) => {
-  if (reply instanceof Map) return [...reply.entries()];
-  if (Array.isArray(reply)) return pairUp(reply);
-  if (typeof reply !== "object") return [];
-  if (reply === null) return [];
-
-  return Object.entries(reply);
-};
+// Lua returns HGETALL as a flat field/value list on every client and protocol.
+const READ_HASH = "return redis.call('HGETALL', KEYS[1])";
 
 export const readHash = async (redis: RedisClient, key: string) => {
-  const reply = await redis.send("HGETALL", [key]);
-  const fields = toEntries(reply).map(([field, value]) => [
-    String(field),
-    String(value),
-  ]);
+  const reply = await redis.send("EVAL", [READ_HASH, "1", key]);
+  const list = reply as unknown[];
+  const fields: string[][] = [];
+
+  for (let index = 0; index < list.length; index += 2) {
+    fields.push([String(list[index]), String(list[index + 1])]);
+  }
 
   return Object.fromEntries(fields);
 };

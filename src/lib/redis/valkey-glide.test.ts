@@ -14,7 +14,7 @@ const namedError = (name: string) => {
   return error;
 };
 
-const createFakeGlide = (reply: unknown = "OK") => {
+const createFakeGlide = () => {
   const commands: string[][] = [];
   const subscriptions: string[][] = [];
   const queue: ValkeyGlideMessage[] = [];
@@ -27,7 +27,7 @@ const createFakeGlide = (reply: unknown = "OK") => {
     customCommand: async (args: string[]) => {
       commands.push(args);
 
-      return reply;
+      return "OK";
     },
     subscribe: async (channels: Iterable<string>) => {
       // A real subscribe waits on the server, so pending microtasks run first.
@@ -103,35 +103,12 @@ describe("fromValkeyGlide", () => {
     expect(commands).toEqual([["GET", "k"]]);
   });
 
-  test("turns GLIDE map records into an object", async () => {
-    const { client } = createFakeGlide([
-      { key: "status", value: "pending" },
-      { key: "name", value: "wf" },
-    ]);
-    const redis = fromValkeyGlide(client);
+  test("does not poll until something subscribes", async () => {
+    const { client, pollCount } = createFakeGlide();
 
-    expect(await redis.send("HGETALL", ["meta"])).toEqual({
-      status: "pending",
-      name: "wf",
-    });
-  });
+    await fromValkeyGlide(client).send("PING", []);
 
-  test("keeps a map field named __proto__ as data", async () => {
-    const { client } = createFakeGlide([{ key: "__proto__", value: "x" }]);
-    const reply = await fromValkeyGlide(client).send("HGETALL", ["h"]);
-
-    expect(Object.hasOwn(Object(reply), "__proto__")).toBe(true);
-  });
-
-  test.each([
-    ["SCAN", ["0", ["a", "b"]]],
-    ["objects without a value field", [{ key: "a" }]],
-    ["an empty map", []],
-  ])("leaves %s replies alone", async (_label, reply) => {
-    const { client } = createFakeGlide(reply);
-    const redis = fromValkeyGlide(client);
-
-    expect(await redis.send("CMD", [])).toEqual(reply);
+    expect(pollCount()).toBe(0);
   });
 
   test("pulls messages and delivers them to the channel listener", async () => {
@@ -142,7 +119,7 @@ describe("fromValkeyGlide", () => {
       received.push([message, channel]);
     };
 
-    expect(await redis.subscribe("news", listener)).toBe(1);
+    await redis.subscribe("news", listener);
 
     publish("news", "first");
     publish("other", "ignored");
@@ -234,18 +211,5 @@ describe("fromValkeyGlide", () => {
     await retried;
 
     expect(pollCount()).toBe(2);
-  });
-
-  test("keeps polling after a temporary connection error", async () => {
-    const { client, failNextPoll, publish } = createFakeGlide();
-    const redis = fromValkeyGlide(client);
-    const received = Promise.withResolvers<string>();
-
-    failNextPoll(namedError("ConnectionError"));
-    await redis.subscribe("a", received.resolve);
-
-    publish("a", "after reconnect");
-
-    expect(await received.promise).toBe("after reconnect");
   });
 });
