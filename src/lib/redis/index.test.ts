@@ -1,53 +1,29 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { Redis } from "ioredis";
-import { createClient } from "redis";
 import { Cache } from "../cache/index.js";
 import { PubSub } from "../pubsub/index.js";
 import { Queue } from "../queue/index.js";
 import { defineWorkflow, listWorkflows } from "../workflow/index.js";
-import { fromIoredis, fromNodeRedis } from "./index.js";
-import type { RedisAdapter } from "./types.js";
+import {
+  type Connect,
+  closeClients,
+  connectBun,
+  connectIoredis,
+  connectNodeRedis,
+  connectValkeyGlide,
+  GLIDE_UNAVAILABLE,
+  SEMOLA_REDIS_URL,
+} from "./integration-helpers.js";
 
-const SEMOLA_REDIS_URL = process.env.SEMOLA_REDIS_URL;
+afterAll(closeClients);
 
-type Connect = () => Promise<RedisAdapter>;
-
-const closers: (() => unknown)[] = [];
-
-const connectIoredis: Connect = async () => {
-  const client = new Redis(SEMOLA_REDIS_URL ?? "");
-
-  closers.push(() => client.disconnect());
-
-  return fromIoredis(client);
-};
-
-const connectNodeRedis: Connect = async () => {
-  const client = createClient({ url: SEMOLA_REDIS_URL });
-
-  closers.push(() => client.destroy());
-  await client.connect();
-
-  return fromNodeRedis(client);
-};
-
-const connectBun: Connect = async () => {
-  const client = new Bun.RedisClient(SEMOLA_REDIS_URL);
-
-  closers.push(() => client.close());
-
-  return client;
-};
-
-afterAll(() => {
-  for (const close of closers.splice(0)) close();
-});
-
-const clients = [
+const clients: [string, Connect][] = [
   ["Bun.RedisClient", connectBun],
-  ["ioredis", connectIoredis],
+  ["ioredis", connectIoredis()],
+  ["ioredis with keyPrefix", connectIoredis({ keyPrefix: "app:" })],
   ["node-redis", connectNodeRedis],
-] as const;
+];
+
+if (!GLIDE_UNAVAILABLE) clients.push(["Valkey GLIDE", connectValkeyGlide]);
 
 describe.skipIf(!SEMOLA_REDIS_URL)("Semola modules on every client", () => {
   for (const [name, connect] of clients) {
