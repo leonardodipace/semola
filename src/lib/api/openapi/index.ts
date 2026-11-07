@@ -13,7 +13,12 @@ import type {
   ResponseSchema,
   RouteConfigInternal,
   SchemaIo,
+  SchemaRegistry,
+  SchemaScope,
 } from "../types.js";
+
+const COMPONENT_REF_PREFIX = "#/components/schemas/";
+const DEFS_REF_PREFIX = "#/$defs/";
 
 const instanceDataKeys = new Set([
   "default",
@@ -30,10 +35,14 @@ const schemaMapKeys = new Set([
   "dependentSchemas",
 ]);
 
-const rewriteSchemaMap = (
-  value: unknown,
-  schemas: Record<string, JsonSchema>,
-) => {
+const createComponentRef = (name: string, scope: SchemaScope) => {
+  const ref: JsonSchema = { $ref: `${COMPONENT_REF_PREFIX}${name}` };
+  scope.refs.push(ref);
+
+  return ref;
+};
+
+const rewriteSchemaMap = (value: unknown, scope: SchemaScope) => {
   if (typeof value !== "object") return value;
   if (value === null) return value;
 
@@ -41,25 +50,22 @@ const rewriteSchemaMap = (
   const next: Record<string, unknown> = {};
 
   for (const name in record) {
-    next[name] = rewriteSchemaTree(record[name], schemas);
+    next[name] = rewriteSchemaTree(record[name], scope);
   }
 
   return next;
 };
 
-const hoistDefsIntoSchemas = (
-  defs: unknown,
-  schemas: Record<string, JsonSchema>,
-) => {
+const hoistDefsIntoSchemas = (defs: unknown, scope: SchemaScope) => {
   if (typeof defs !== "object") return;
   if (defs === null) return;
 
   const defsRecord = defs as Record<string, unknown>;
 
   for (const name in defsRecord) {
-    schemas[name] = rewriteSchemaTree(
+    scope.schemas[name] = rewriteSchemaTree(
       defsRecord[name],
-      schemas,
+      scope,
       true,
     ) as JsonSchema;
   }
@@ -67,30 +73,31 @@ const hoistDefsIntoSchemas = (
 
 const rewriteSchemaTree = (
   value: unknown,
-  schemas: Record<string, JsonSchema>,
+  scope: SchemaScope,
   isRoot = false,
 ): unknown => {
   if (Array.isArray(value)) {
-    return value.map((item) => rewriteSchemaTree(item, schemas));
+    return value.map((item) => rewriteSchemaTree(item, scope));
   }
 
   if (typeof value !== "object") return value;
   if (value === null) return value;
 
   const record = value as Record<string, unknown>;
-  const next: Record<string, unknown> = {};
+  const next: JsonSchema = {};
 
   for (const key in record) {
     if (key === "$defs") {
-      hoistDefsIntoSchemas(record.$defs, schemas);
+      hoistDefsIntoSchemas(record.$defs, scope);
       continue;
     }
 
     if (key === "$ref") {
       const ref = record.$ref;
 
-      if (typeof ref === "string" && ref.startsWith("#/$defs/")) {
-        next.$ref = `#/components/schemas/${ref.slice("#/$defs/".length)}`;
+      if (typeof ref === "string" && ref.startsWith(DEFS_REF_PREFIX)) {
+        next.$ref = `${COMPONENT_REF_PREFIX}${ref.slice(DEFS_REF_PREFIX.length)}`;
+        scope.refs.push(next);
         continue;
       }
 
@@ -99,7 +106,7 @@ const rewriteSchemaTree = (
     }
 
     if (schemaMapKeys.has(key)) {
-      next[key] = rewriteSchemaMap(record[key], schemas);
+      next[key] = rewriteSchemaMap(record[key], scope);
       continue;
     }
 
@@ -108,7 +115,7 @@ const rewriteSchemaTree = (
       continue;
     }
 
-    next[key] = rewriteSchemaTree(record[key], schemas);
+    next[key] = rewriteSchemaTree(record[key], scope);
   }
 
   if (isRoot) return next;
@@ -118,21 +125,21 @@ const rewriteSchemaTree = (
   const definition = { ...next };
   delete definition.id;
   delete definition.$schema;
-  schemas[id] = definition as JsonSchema;
+  scope.schemas[id] = definition;
 
-  return { $ref: `#/components/schemas/${id}` };
+  return createComponentRef(id, scope);
 };
 
 const toJsonSchema = (
   schema: StandardSchemaV1,
-  schemas: Record<string, JsonSchema>,
+  registry: SchemaRegistry,
   io: SchemaIo = "input",
 ) => {
   const jsonSchema = (schema as unknown as StandardJSONSchemaV1)[
     "~standard"
   ].jsonSchema[io]({ target: "draft-2020-12" });
 
-  return rewriteSchemaTree(jsonSchema, schemas, true) as JsonSchema;
+  return rewriteSchemaTree(jsonSchema, registry[io], true) as JsonSchema;
 };
 
 const withoutMeta = (jsonSchema: JsonSchema) => {
@@ -182,17 +189,18 @@ const getSchemaId = (schema: StandardSchemaV1, jsonSchema: JsonSchema) => {
 // Body and response schemas with an id become shared components.
 const toSchemaRef = (
   schema: StandardSchemaV1,
-  schemas: Record<string, JsonSchema>,
+  registry: SchemaRegistry,
   io: SchemaIo = "input",
 ) => {
-  const jsonSchema = toJsonSchema(schema, schemas, io);
+  const jsonSchema = toJsonSchema(schema, registry, io);
   const schemaId = getSchemaId(schema, jsonSchema);
 
   if (!schemaId) return withoutMeta(jsonSchema);
 
-  schemas[schemaId] = withoutMeta(jsonSchema);
+  const scope = registry[io];
+  scope.schemas[schemaId] = withoutMeta(jsonSchema);
 
-  return { $ref: `#/components/schemas/${schemaId}` };
+  return createComponentRef(schemaId, scope);
 };
 
 const requestFields = [
@@ -206,9 +214,9 @@ const requestFields = [
 const extractParametersFromSchema = (
   schema: StandardSchemaV1,
   location: OpenApiParameter["in"],
-  schemas: Record<string, JsonSchema>,
+  registry: SchemaRegistry,
 ) => {
-  const jsonSchema = withoutMeta(toJsonSchema(schema, schemas));
+  const jsonSchema = withoutMeta(toJsonSchema(schema, registry));
   const parameters: OpenApiParameter[] = [];
 
   if (jsonSchema.type !== "object") return parameters;
@@ -253,7 +261,7 @@ const paramSources = [
 const createParameters = (
   request: RequestSchema,
   path: string,
-  schemas: Record<string, JsonSchema>,
+  registry: SchemaRegistry,
 ) => {
   const parameters: OpenApiParameter[] = [];
 
@@ -262,7 +270,7 @@ const createParameters = (
 
     if (schema) {
       parameters.push(
-        ...extractParametersFromSchema(schema, location, schemas),
+        ...extractParametersFromSchema(schema, location, registry),
       );
     }
   }
@@ -275,7 +283,7 @@ const createParameters = (
   for (const parameter of extractParametersFromSchema(
     request.params,
     "path",
-    schemas,
+    registry,
   )) {
     if (pathParamNames.includes(parameter.name)) {
       parameters.push({ ...parameter, required: true });
@@ -286,7 +294,7 @@ const createParameters = (
 };
 
 const createResponses = (
-  schemas: Record<string, JsonSchema>,
+  registry: SchemaRegistry,
   response: ResponseSchema,
 ) => {
   const responses: Record<string, OpenApiResponse> = {};
@@ -304,7 +312,7 @@ const createResponses = (
       description: description || `Response with status ${status}`,
       content: {
         "application/json": {
-          schema: toSchemaRef(schema, schemas, "output"),
+          schema: toSchemaRef(schema, registry, "output"),
         },
       },
     };
@@ -315,16 +323,16 @@ const createResponses = (
 
 const createOperation = (
   route: RouteConfigInternal,
-  schemas: Record<string, JsonSchema>,
+  registry: SchemaRegistry,
   errorResponses?: ResponseSchema,
 ) => {
   const { request, response } = createRouteSchemas(route, errorResponses);
 
   const operation: OpenApiOperation = {
-    responses: createResponses(schemas, response),
+    responses: createResponses(registry, response),
   };
 
-  const parameters = createParameters(request, route.path, schemas);
+  const parameters = createParameters(request, route.path, registry);
 
   for (const field of ["summary", "description", "operationId"] as const) {
     if (route[field]) {
@@ -345,7 +353,7 @@ const createOperation = (
       required: true,
       content: {
         "application/json": {
-          schema: toSchemaRef(request.body, schemas),
+          schema: toSchemaRef(request.body, registry),
         },
       },
     };
@@ -404,6 +412,84 @@ const mergeIntoResponse = (target: ResponseSchema, schema?: ResponseSchema) => {
   }
 };
 
+const toComponentName = (ref: unknown) => {
+  return String(ref).slice(COMPONENT_REF_PREFIX.length);
+};
+
+const referencesAnyName = (value: unknown, names: Set<string>) => {
+  if (typeof value !== "object") return false;
+  if (value === null) return false;
+
+  const record = value as Record<string, unknown>;
+
+  for (const key in record) {
+    if (key === "$ref") {
+      if (names.has(toComponentName(record.$ref))) return true;
+
+      continue;
+    }
+
+    if (referencesAnyName(record[key], names)) return true;
+  }
+
+  return false;
+};
+
+// A name used in both directions diverges when its output shape differs from
+// its input shape, directly or through a component it references.
+const findDivergentNames = (registry: SchemaRegistry) => {
+  const inputSchemas = registry.input.schemas;
+  const outputSchemas = registry.output.schemas;
+  const divergent = new Set<string>();
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    for (const name in outputSchemas) {
+      if (divergent.has(name)) continue;
+
+      const inputSchema = inputSchemas[name];
+      const outputSchema = outputSchemas[name];
+
+      if (!inputSchema) continue;
+
+      if (Bun.deepEquals(inputSchema, outputSchema)) {
+        if (!referencesAnyName(outputSchema, divergent)) continue;
+      }
+
+      divergent.add(name);
+      changed = true;
+    }
+  }
+
+  return divergent;
+};
+
+const toOutputName = (name: string, divergent: Set<string>) => {
+  if (divergent.has(name)) return `${name}Output`;
+
+  return name;
+};
+
+// Input components keep their names. Divergent output components get a
+// suffixed name, and every output $ref is pointed at it.
+const mergeSchemaRegistry = (registry: SchemaRegistry) => {
+  const divergent = findDivergentNames(registry);
+  const schemas = { ...registry.input.schemas };
+
+  for (const [name, schema] of Object.entries(registry.output.schemas)) {
+    schemas[toOutputName(name, divergent)] = schema;
+  }
+
+  for (const ref of registry.output.refs) {
+    const name = toOutputName(toComponentName(ref.$ref), divergent);
+    ref.$ref = `${COMPONENT_REF_PREFIX}${name}`;
+  }
+
+  return schemas;
+};
+
 export const generateOpenApiSpec = (options: OpenApiGeneratorOptions) => {
   const spec: OpenApiSpec = {
     openapi: "3.1.0",
@@ -419,7 +505,10 @@ export const generateOpenApiSpec = (options: OpenApiGeneratorOptions) => {
     spec.servers = options.servers;
   }
 
-  const schemas: Record<string, JsonSchema> = {};
+  const registry: SchemaRegistry = {
+    input: { schemas: {}, refs: [] },
+    output: { schemas: {}, refs: [] },
+  };
 
   for (const route of options.routes) {
     const openApiPath = normalizePathForOpenAPI(route.path);
@@ -428,11 +517,12 @@ export const generateOpenApiSpec = (options: OpenApiGeneratorOptions) => {
     spec.paths[openApiPath] ??= {};
     spec.paths[openApiPath][method] = createOperation(
       route,
-      schemas,
+      registry,
       options.errorResponses,
     );
   }
 
+  const schemas = mergeSchemaRegistry(registry);
   const hasSchemas = Object.keys(schemas).length > 0;
 
   if (options.securitySchemes || hasSchemas) {

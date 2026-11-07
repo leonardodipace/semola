@@ -516,6 +516,14 @@ export type JsonSchema = {
   [key: string]: unknown;
 };
 
+// Components and the $ref objects pointing at them, collected for one direction.
+export type SchemaScope = {
+  schemas: Record<string, JsonSchema>;
+  refs: JsonSchema[];
+};
+
+export type SchemaRegistry = Record<SchemaIo, SchemaScope>;
+
 export type ClientRoute<
   TReq extends RequestSchema | undefined = RequestSchema | undefined,
   TRes extends ResponseSchema | undefined = ResponseSchema | undefined,

@@ -489,7 +489,7 @@ describe("OpenAPI Generation", () => {
 
   test("should extract schemas with id to components and use $ref", async () => {
     const UserSchema = z
-      .object({
+      .strictObject({
         id: z.string(),
         name: z.string(),
       })
@@ -701,7 +701,7 @@ describe("OpenAPI Generation", () => {
 
   test("should reuse the same schema across multiple operations", async () => {
     const UserSchema = z
-      .object({
+      .strictObject({
         id: z.string(),
         name: z.string(),
       })
@@ -958,5 +958,72 @@ describe("OpenAPI Generation", () => {
       spec.paths["/me"]?.get?.responses["200"]?.content?.["application/json"]
         ?.schema,
     ).toEqual({ $ref: "#/components/schemas/User" });
+  });
+
+  test("should register an output component when input and output shapes differ", async () => {
+    const Thing = z.strictObject({ n: z.number().default(1) }).meta({
+      id: "Thing",
+    });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/t",
+          method: "POST",
+          request: { body: Thing },
+          response: { 200: Thing },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas?.Thing).not.toHaveProperty("required");
+    expect(spec.components?.schemas?.ThingOutput).toMatchObject({
+      required: ["n"],
+    });
+    expect(
+      spec.paths["/t"]?.post?.requestBody?.content["application/json"]?.schema,
+    ).toEqual({ $ref: "#/components/schemas/Thing" });
+    expect(
+      spec.paths["/t"]?.post?.responses["200"]?.content?.["application/json"]
+        ?.schema,
+    ).toEqual({ $ref: "#/components/schemas/ThingOutput" });
+  });
+
+  test("should rename output components that reference a divergent nested component", async () => {
+    const Inner = z.strictObject({ n: z.number().default(1) }).meta({
+      id: "Inner",
+    });
+    const Outer = z.strictObject({ inner: Inner }).meta({ id: "Outer" });
+
+    const spec = await generateOpenApiSpec({
+      title: "API",
+      version: "1.0.0",
+      routes: [
+        {
+          path: "/o",
+          method: "POST",
+          request: { body: Outer },
+          response: { 200: Outer },
+          handler: () => {},
+        },
+      ],
+    });
+
+    expect(spec.components?.schemas?.Outer).toMatchObject({
+      properties: { inner: { $ref: "#/components/schemas/Inner" } },
+    });
+    expect(spec.components?.schemas?.OuterOutput).toMatchObject({
+      properties: { inner: { $ref: "#/components/schemas/InnerOutput" } },
+    });
+    expect(spec.components?.schemas?.InnerOutput).toMatchObject({
+      required: ["n"],
+    });
+    expect(
+      spec.paths["/o"]?.post?.responses["200"]?.content?.["application/json"]
+        ?.schema,
+    ).toEqual({ $ref: "#/components/schemas/OuterOutput" });
   });
 });
