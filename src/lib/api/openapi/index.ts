@@ -472,8 +472,6 @@ const toOutputName = (name: string, divergent: Set<string>) => {
   return name;
 };
 
-// Input components keep their names. Divergent output components get a
-// suffixed name, and every output $ref is pointed at it.
 const mergeSchemaRegistry = (registry: SchemaRegistry) => {
   const divergent = findDivergentNames(registry);
   const schemas = { ...registry.input.schemas };
