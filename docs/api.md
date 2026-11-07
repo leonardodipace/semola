@@ -359,6 +359,8 @@ const spec = api.getOpenApiSpec();
 expect(spec.info.title).toBe("Users");
 ```
 
+Schemas with an `id` (for example Zod `.meta({ id: "User" })`) become shared entries in `components.schemas`. Request schemas use the input shape and responses use the output shape. When a schema is used in both directions and the shapes differ (defaults, transforms, Zod object `additionalProperties: false` on output), the response gets a separate `UserOutput` component (`UserOutput2` if that name is already taken). Schemas that reference a component with a separate output shape also get one.
+
 ### Disable output validation
 
 This keeps request validation enabled while returning handler output without checking response schemas.
