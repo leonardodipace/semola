@@ -123,7 +123,7 @@ api.defineRoute({
 });
 ```
 
-Invalid input becomes a 400. Path params arrive percent-decoded (`/users/John%20Doe` gives `"John Doe"`); a `*` wildcard capture stays encoded. When several routes match a path, the most specific wins: per segment, a literal beats `:param`, which beats `*`. Query and header values are always strings; use schema coercion such as Zod's `z.stringbool()` when you want a boolean (`?draft=true` → `true`). Toggle validation with `new Api({ validation: false })` or `{ validation: { input: true, output: false } }`.
+Invalid input becomes a 400. Path params arrive percent-decoded (`/users/John%20Doe` gives `"John Doe"`); `*` wildcard captures stay encoded, under keys `"0"`, `"1"`, and so on (`params: z.object({ "0": z.string() })`). When several routes match a path, the most specific wins: per segment, a literal beats `:param`, which beats `*`. Query and header values are always strings; use schema coercion such as Zod's `z.stringbool()` when you want a boolean (`?draft=true` → `true`). Toggle validation with `new Api({ validation: false })` or `{ validation: { input: true, output: false } }`.
 
 ### Strict `c.json` typing
 
