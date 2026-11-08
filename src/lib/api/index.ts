@@ -7,6 +7,7 @@ export type {
   ApiClientFetch,
   ApiClientOptions,
   ApiOptions,
+  ApiServer,
   ClientCallInput,
   ClientRoute,
   Context,

@@ -21,7 +21,7 @@ Design-level simplification loop. Not a lint pass: question the shape of the cod
 
 ## When not to use
 
-- Bug hunts (use code review). Style-only cleanup with no design question (deslop in `harden`).
+- Bug hunts (use code review). Style-only cleanup with no design question.
 - Code outside the task scope. Rethink the branch diff, not the whole repo.
 
 ## The loop

@@ -15,7 +15,7 @@ export const signup = api.defineRoute({
   },
 });
 
-api.serve(3000);`,
+await api.serve(3000);`,
 };
 
 export const composerRedis = {

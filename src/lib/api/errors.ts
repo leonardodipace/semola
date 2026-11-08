@@ -37,3 +37,19 @@ export class ApiClientError extends Error {
     this.body = body;
   }
 }
+
+export class PayloadTooLargeError extends Error {
+  public constructor(limit: number) {
+    super(`Request body exceeds ${limit} bytes`);
+    this.name = "PayloadTooLargeError";
+  }
+}
+
+export class UnsupportedRuntimeError extends Error {
+  public constructor() {
+    super(
+      "api.serve() needs Bun or Node 22.3+. On other runtimes, pass api.fetch to the runtime's server.",
+    );
+    this.name = "UnsupportedRuntimeError";
+  }
+}

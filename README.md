@@ -73,7 +73,7 @@ api.defineRoute({
   },
 });
 
-api.serve(3000);
+await api.serve(3000);
 console.log("Server running on http://localhost:3000");
 ```
 
@@ -346,7 +346,7 @@ _Higher is better for req/sec, lower is better for latency._
 
 ### What Makes Semola Different
 
-- 🎯 **Bun-first**: Engineered specifically for Bun's performance. No Node.js baggage.
+- 🎯 **Bun-first**: Engineered for Bun's performance. The API module also runs on Node, Deno, and Cloudflare Workers.
 - 🧩 **Modular by design**: Import only what you need. Your bundle stays lean.
 - 🔒 **Type safety that actually works**: From request validation to response serialization, TypeScript catches errors before they hit production.
 - 📄 **Documentation writes itself**: Auto-generated OpenAPI specs from your code. No more stale docs.

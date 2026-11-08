@@ -21,7 +21,7 @@ const faqs = [
   {
     question: "Does it run on Node.js?",
     answer:
-      "Some modules currently use Bun APIs for HTTP, Redis, and SQL, so those need Bun today. Schema, errors, policy, and i18n are plain TypeScript and do not call Bun. Check each module page for what it needs.",
+      "The API module runs on Node, Deno, and Cloudflare Workers, and Redis-backed modules accept ioredis, node-redis, or Valkey GLIDE through semola/redis. The ORM uses Bun's SQL client, so it needs Bun. Schema, errors, policy, and i18n are plain TypeScript. Check each module page for what it needs.",
   },
   {
     question: "Do I need Redis or a database on day one?",

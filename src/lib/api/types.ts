@@ -1,13 +1,14 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type { Middleware } from "./middleware.js";
 
-export type HTTPMethod = Bun.Serve.HTTPMethod;
-
-type BunHandler = Bun.Serve.Handler<
-  Bun.BunRequest,
-  Bun.Server<unknown>,
-  Response
->;
+export type HTTPMethod =
+  | "GET"
+  | "POST"
+  | "PUT"
+  | "DELETE"
+  | "PATCH"
+  | "HEAD"
+  | "OPTIONS";
 
 export type ResponseSchema = {
   [status: number]: StandardSchemaV1;
@@ -239,10 +240,7 @@ export type ValidatedRequest = {
   params?: unknown;
 };
 
-export type MethodRoutes = Record<
-  string,
-  Partial<Record<HTTPMethod, BunHandler>>
->;
+export type MethodRoutes = Record<string, RouteMethods>;
 
 export type RouteConfig<
   TReq extends RequestSchema | undefined = undefined,
@@ -251,7 +249,7 @@ export type RouteConfig<
   TRouteMiddlewares extends readonly Middleware[] = readonly [],
 > = {
   path: string;
-  method: Bun.Serve.HTTPMethod;
+  method: HTTPMethod;
   request?: TReq;
   response?: TRes;
   middlewares?: TRouteMiddlewares;
@@ -370,18 +368,18 @@ export type BodyCache = {
 };
 
 export type RequestValidator = (
-  req: Bun.BunRequest,
+  req: ApiRequest,
   bodyCache?: BodyCache,
 ) => Promise<Error | undefined>;
 
 export type ValidateRequestInput = {
-  req: Bun.BunRequest;
+  req: ApiRequest;
   schema?: RequestSchema;
   bodyCache?: BodyCache;
 };
 
 export type InternalContext = {
-  raw: Bun.BunRequest;
+  raw: ApiRequest;
   req: ValidatedRequest;
   get: (key: string) => unknown;
   json: (status: number, data: unknown) => Response;
@@ -392,9 +390,13 @@ export type InternalContext = {
   responseHeaders?: Headers;
 };
 
-export type BunRouteHandler = (
-  req: Bun.BunRequest,
-) => Response | Promise<Response>;
+export type RequestHandler = (req: ApiRequest) => Response | Promise<Response>;
+
+export type ApiServer = {
+  port: number;
+  url: URL;
+  stop: (force?: boolean) => Promise<void>;
+};
 
 export type AnyRouteHandler = (
   context: InternalContext,
@@ -411,7 +413,7 @@ export type HandleRequestConfig = {
   onError?: OnErrorOptions;
 };
 
-export type RouteMethods = Partial<Record<HTTPMethod, BunRouteHandler>>;
+export type RouteMethods = Partial<Record<HTTPMethod, RequestHandler>>;
 
 export type CompiledSegment = {
   value: string;
@@ -419,6 +421,7 @@ export type CompiledSegment = {
 };
 
 export type DynamicRoute = {
+  kind: "dynamic";
   segments: CompiledSegment[];
   methods: RouteMethods;
   paramStarts: number[];
@@ -426,8 +429,22 @@ export type DynamicRoute = {
 };
 
 export type PatternRoute = {
-  pattern: URLPattern;
+  kind: "pattern";
+  regex: RegExp;
+  paramNames: string[];
   methods: RouteMethods;
+};
+
+export type ParamRoute = DynamicRoute | PatternRoute;
+
+export type FullPathInput = {
+  prefix?: string;
+  path: string;
+};
+
+export type CompiledApi = {
+  routes: MethodRoutes;
+  fetch: RequestHandler;
 };
 
 export type OpenApiSpec = {

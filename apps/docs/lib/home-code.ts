@@ -85,7 +85,7 @@ export const signup = api.defineRoute({
   },
 });
 
-api.serve(3000);`;
+await api.serve(3000);`;
 
 const heroHovers: CodeHover[] = [
   {
@@ -134,8 +134,8 @@ const heroHovers: CodeHover[] = [
   },
   {
     token: "serve",
-    type: "serve(port: number): void",
-    doc: "Bun HTTP server. Same Api instance you defined routes on.",
+    type: "serve(port: number): Promise<ApiServer>",
+    doc: "HTTP server on Bun or Node. Same Api instance you defined routes on.",
   },
 ];
 

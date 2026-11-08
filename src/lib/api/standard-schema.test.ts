@@ -7,6 +7,7 @@ import {
   validUser,
 } from "./standard-schema.fixtures.js";
 import { formatIssuePath, formatValidationIssues } from "./standard-schema.js";
+import type { ApiRequest } from "./types.js";
 import {
   validateBody,
   validateCookies,
@@ -98,7 +99,7 @@ describe("Standard Schema support", () => {
 
       test("validateParams validates path parameters", () => {
         const schema = schemaFor.idNumber(provider);
-        const req = { params: { id: "123" } } as unknown as Bun.BunRequest;
+        const req = { params: { id: "123" } } as unknown as ApiRequest;
 
         expect(() => validateParams(req, schema)).toThrow(
           expect.objectContaining({

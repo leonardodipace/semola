@@ -13,16 +13,20 @@ import {
   resolveValidation,
   validatingJson,
 } from "./runtime.js";
+import { serveWithBun, serveWithNode } from "./serve.js";
 import type {
   AnyRouteConfig,
   AnyRouteHandler,
   ApiOptions,
+  ApiRequest,
+  ApiServer,
   BareRouteHandler,
   BodyCache,
-  BunRouteHandler,
+  CompiledApi,
   HandleRequestConfig,
   MethodRoutes,
   OnErrorOptions,
+  RequestHandler,
   RequestSchema,
   ResolvedValidation,
   ResponseSchema,
@@ -41,7 +45,7 @@ const toResponse = (value: RouteReturn): Response => {
 };
 
 const catchWithOnError = async (
-  req: Bun.BunRequest,
+  req: ApiRequest,
   onError: OnErrorOptions | undefined,
   run: () => Response | Promise<Response>,
   context?: ReturnType<typeof createContext>,
@@ -89,7 +93,7 @@ const buildBareRoute = (
   validateInput = false,
   validateOutput = false,
   onError?: OnErrorOptions,
-): BunRouteHandler => {
+): RequestHandler => {
   const responseSchema = validateOutput ? response : undefined;
   const validateRequest = validateInput
     ? buildRequestValidator(request)
@@ -108,7 +112,7 @@ const buildBareRoute = (
     return prepareResponse(value, responseSchema);
   };
 
-  let run: BunRouteHandler = respond;
+  let run: RequestHandler = respond;
 
   if (validateRequest) {
     run = async (req) => {
@@ -128,7 +132,7 @@ const buildBareRoute = (
 const buildContextRoute = (
   handler: AnyRouteHandler,
   onError?: OnErrorOptions,
-): BunRouteHandler => {
+): RequestHandler => {
   return (req) => {
     const context = createContext(req);
 
@@ -167,10 +171,7 @@ const routeValidatesInput = (
   return false;
 };
 
-const handleRequest = async (
-  req: Bun.BunRequest,
-  config: HandleRequestConfig,
-) => {
+const handleRequest = async (req: ApiRequest, config: HandleRequestConfig) => {
   let extensions: Record<string, unknown> | undefined;
   let get: ((key: string) => unknown) | undefined;
   let bodyCache: BodyCache | undefined;
@@ -271,7 +272,7 @@ const buildHandler = (
   route: AnyRouteConfig,
   validation: ResolvedValidation,
   onError?: OnErrorOptions,
-): BunRouteHandler => {
+): RequestHandler => {
   const middlewares = route.middlewares ?? emptyMiddlewares;
   const handler = route.handler;
 
@@ -325,14 +326,14 @@ const compileRoutes = (
   validation: ResolvedValidation,
   onError?: OnErrorOptions,
 ): MethodRoutes => {
-  const bunRoutes: MethodRoutes = {};
+  const methodRoutes: MethodRoutes = {};
 
   for (const route of routes) {
-    let methods = bunRoutes[route.path];
+    let methods = methodRoutes[route.path];
 
     if (!methods) {
       methods = {};
-      bunRoutes[route.path] = methods;
+      methodRoutes[route.path] = methods;
     }
 
     if (methods[route.method]) {
@@ -342,7 +343,7 @@ const compileRoutes = (
     methods[route.method] = buildHandler(route, validation, onError);
   }
 
-  return bunRoutes;
+  return methodRoutes;
 };
 
 export class Api<
@@ -350,10 +351,7 @@ export class Api<
   TErrorRes extends ResponseSchema | undefined = undefined,
 > extends Group<TMiddlewares> {
   protected override options: ApiOptions<TMiddlewares, TErrorRes>;
-  private compiled?: {
-    routes: MethodRoutes;
-    fetch: (req: Request) => Response | Promise<Response>;
-  };
+  private compiled?: CompiledApi;
   private needsRecompile = true;
 
   public constructor(options: ApiOptions<TMiddlewares, TErrorRes> = {}) {
@@ -386,16 +384,24 @@ export class Api<
     });
   }
 
-  public serve(port: number, callback?: (server: Bun.Server<unknown>) => void) {
-    const server = Bun.serve({
-      port,
-      routes: this.getRouteHandlers(),
-      fetch: () => new Response("Not found", { status: 404 }),
-    });
+  // Async so startup errors reject on every runtime. On Bun nothing is
+  // awaited before the callback, so it still runs synchronously.
+  public async serve(port: number, callback?: (server: ApiServer) => void) {
+    // Compile now so route config errors (duplicate routes) fail startup
+    // instead of every request.
+    this.ensureCompiled();
 
-    if (callback) {
-      callback(server);
+    let server: ApiServer;
+
+    if (typeof Bun === "undefined") {
+      server = await serveWithNode(port, this.fetch);
+    } else {
+      server = serveWithBun(port, this.fetch);
     }
+
+    callback?.(server);
+
+    return server;
   }
 
   private ensureCompiled() {
