@@ -148,7 +148,7 @@ const compilePatternRoute = (path: string, methods: RouteMethods) => {
 
 // Bun's router prefers the most specific route. Per segment, a literal beats
 // ":param", which beats "*". When one path's ranks are a prefix of the other's,
-// the shorter goes first. Equal ranks keep registration order (stable sort).
+// see compareRanks. Equal ranks keep registration order (stable sort).
 const LITERAL_RANK = 0;
 const PARAM_RANK = 1;
 const WILDCARD_RANK = 2;
@@ -172,7 +172,22 @@ const compareRanks = (a: number[], b: number[]) => {
     if (aRank !== bRank) return aRank - bRank;
   }
 
-  return a.length - b.length;
+  // Equal up to the shorter path. If that path ends in "*", it would swallow
+  // the longer path's extra segments ("/files/*" vs "/files/*/raw"), so the
+  // longer one goes first. Otherwise the two never match the same request.
+  if (a.length < b.length) {
+    if (a.at(-1) === WILDCARD_RANK) return 1;
+
+    return -1;
+  }
+
+  if (b.length < a.length) {
+    if (b.at(-1) === WILDCARD_RANK) return -1;
+
+    return 1;
+  }
+
+  return 0;
 };
 
 // Request pathnames arrive percent-encoded, so encode route paths ("/café",

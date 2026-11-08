@@ -23,9 +23,10 @@ Read each skill file and follow its instructions.
 |-------|------|------|
 | **caveman** | Default for communication (terse, accurate) | `.agents/skills/caveman/SKILL.md` |
 | **semola-review** | After a feature lands: code review, fix, rethink, repeat until a review round finds nothing new | `.agents/skills/semola-review/SKILL.md` |
+| **semola-pr-review** | Before merge: one fresh subagent reviews the whole PR cold, verifies findings by running them, reports only | `.agents/skills/semola-pr-review/SKILL.md` |
 | **rethink** | Assume the implementation is wrong: recommend a smaller design, apply, re-review in a loop until nothing is left to cut | `.agents/skills/rethink/SKILL.md` |
 
-Caveman is always on. Semola-review and rethink are task-triggered. Caveman affects prose only - never reduce code quality, test coverage, or correctness.
+Caveman is always on. Semola-review, semola-pr-review, and rethink are task-triggered. Caveman affects prose only - never reduce code quality, test coverage, or correctness.
 
 ## Repo Constraints
 

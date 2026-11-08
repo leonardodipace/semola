@@ -40,8 +40,10 @@ Stop only when a review round has no new actionable finding **and** the rethink 
 
 ## Step 1: Review
 
-- Use the `code-review` skill at `high` effort when available. Otherwise launch one review subagent over the diff (`git diff`, plus untracked files) and ask for findings with file, line, summary, and a concrete failure scenario.
+- Use the `code-review` skill at `high` effort when available. Otherwise launch one review subagent over the whole change (`git diff main...HEAD` for commits, `git diff HEAD` for staged and unstaged edits, plus untracked files) and ask for findings with file, line, summary, and a concrete failure scenario.
+- Review every changed file: docs, skills, and config too, not only the module. Files written late (a skill or doc added after the code settled) still get at least one round.
 - From round 2 on, pass a **decided list**: every finding already rejected or intentionally accepted, one line each with the reason. Ask the reviewer not to re-report them. The list only grows.
+- Each decided item names the exact behavior accepted, never a whole area of code. "Route sorting costs a little at compile time" is an item; "the route sort" tells later reviewers to skip it and hides bugs in it.
 - After the first few rounds, add a severity focus to the prompt: "bugs a real user would plausibly hit (crashes, hangs, wrong routing, data loss, security); skip exotic edge cases and style."
 
 ## Step 2: Triage
@@ -65,6 +67,7 @@ Rules:
 - Minimal diff, repo style (`AGENTS.md`).
 - Every fix gets a test that fails without it. When behavior depends on a runtime or platform, test it there (example: a Node adapter tested under real `node`, not only Bun's `node:http` emulation; spawn `node` on a `Bun.build` bundle and `skipIf` node is missing).
 - A test that encoded the old wrong behavior gets rewritten, not deleted silently.
+- A change made for speed or size is still a behavior change. Write down the reasoning that makes it safe ("routes of different lengths never match the same path") and test the cases that reasoning rules out. If one of them breaks, so does the reasoning.
 
 ## Step 4: Verify
 
@@ -87,18 +90,23 @@ On top of the usual smells, ask each round:
 
 Go back to step 1 with the updated decided list. Keep a one-line log per round (what was fixed, what was rejected).
 
+Once the loop stops, get one review from a different reviewer before merge: the `semola-pr-review` skill, or CodeRabbit on the PR. Rounds by the same reviewer share blind spots, and the decided list narrows what it looks at.
+
 ---
 
 ## Baseline
 
-Never use bare `git stash` (shared across worktrees). For regressions and benchmarks, use a detached worktree with a linked `node_modules`:
+Never use bare `git stash` (shared across worktrees). For regressions and benchmarks, use a detached worktree at the code from before the change, with a linked `node_modules`. The merge base with `main` is that code whether the change is committed or not; a unique path means cleanup can only remove the worktree this run created:
 
 ```powershell
-git worktree add -q --detach ..\<repo>-baseline HEAD
-New-Item -ItemType Junction -Path ..\<repo>-baseline\node_modules -Target (Resolve-Path .\node_modules)
+$base = git merge-base main HEAD
+$baseline = "..\<repo>-baseline-$(Get-Date -Format yyyyMMddHHmmss)"
+git worktree add -q --detach $baseline $base
+if ($LASTEXITCODE -ne 0) { throw "Baseline worktree was not created" }
+New-Item -ItemType Junction -Path "$baseline\node_modules" -Target (Resolve-Path .\node_modules)
 # run the same script in both trees, alternate runs, compare medians
-(Get-Item ..\<repo>-baseline\node_modules).Delete()
-git worktree remove --force ..\<repo>-baseline
+(Get-Item "$baseline\node_modules").Delete()
+git worktree remove --force $baseline
 ```
 
 Load tests run from a single-threaded client (autocannon) are usually client-bound on a dev machine; prefer in-process micro-benchmarks or server CPU per request, and say when numbers are within noise.

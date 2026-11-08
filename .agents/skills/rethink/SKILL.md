@@ -97,14 +97,17 @@ Stop when a full round finds no cut that removes lines without losing behavior. 
 
 ## Baseline comparison
 
-Never use bare `git stash` (shared across worktrees). Use a detached worktree and link dependencies instead of copying them:
+Never use bare `git stash` (shared across worktrees). Use a detached worktree at the code from before the change (the merge base with `main`, committed or not) and link dependencies instead of copying them. A unique path means cleanup can only remove the worktree this run created:
 
 ```powershell
-git worktree add -q --detach ..\<repo>-baseline HEAD
-New-Item -ItemType Junction -Path ..\<repo>-baseline\node_modules -Target (Resolve-Path .\node_modules)
+$base = git merge-base main HEAD
+$baseline = "..\<repo>-baseline-$(Get-Date -Format yyyyMMddHHmmss)"
+git worktree add -q --detach $baseline $base
+if ($LASTEXITCODE -ne 0) { throw "Baseline worktree was not created" }
+New-Item -ItemType Junction -Path "$baseline\node_modules" -Target (Resolve-Path .\node_modules)
 # run the failing test several times in both trees, compare pass rates
-(Get-Item ..\<repo>-baseline\node_modules).Delete()   # remove the junction first
-git worktree remove --force ..\<repo>-baseline
+(Get-Item "$baseline\node_modules").Delete()   # remove the junction first
+git worktree remove --force $baseline
 ```
 
 Copying `node_modules` on Windows is very slow and leaves paths too long to delete.

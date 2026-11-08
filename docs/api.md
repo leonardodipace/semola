@@ -410,17 +410,21 @@ await server.stop();
 
 ### Other runtimes
 
-`api.fetch` is a web-standard `(request: Request) => Response` handler. Pass it to any server that takes one:
+Bun, Cloudflare Workers, and `deno serve` start a server for a module whose default export has a `fetch` method. `Api` has one, so export it instead of calling `serve()`:
 
 ```typescript
-// Bun
+// server.ts
+export default api;
+```
+
+Run it with `bun server.ts` (port from `PORT`, default 3000), deploy it as a Worker, or run `deno serve server.ts`.
+
+`api.fetch` is a web-standard `(request: Request) => Response` handler, so it also works with any server that takes one:
+
+```typescript
 Bun.serve({ port: 3000, fetch: api.fetch });
 
-// Deno
 Deno.serve({ port: 3000 }, api.fetch);
-
-// Cloudflare Workers
-export default { fetch: api.fetch };
 ```
 
 Node needs 22.3 or newer for `serve()`. On Node, `serve()` reads the whole request body before calling the handler and answers 413 past 128MB, the default limit of `Bun.serve`. Node's default `requestTimeout` (300 seconds to receive a whole request) also applies.

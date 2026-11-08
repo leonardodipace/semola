@@ -354,6 +354,32 @@ describe("dispatch", () => {
     expect(await res.text()).toBe("ok");
   });
 
+  test("lets a longer wildcard route beat the wildcard it extends", async () => {
+    const routes: MethodRoutes = {
+      "/files/*": {
+        [GET]: () => new Response("file"),
+      },
+      "/files/*/raw": {
+        [GET]: () => new Response("raw"),
+      },
+      "/docs/*": {
+        [GET]: () => new Response("doc"),
+      },
+      "/docs/*/:name": {
+        [GET]: (req) => Response.json(req.params),
+      },
+    };
+
+    const dispatch = buildFetchDispatcher(routes);
+    const raw = await dispatch(new Request("http://localhost/files/x/raw"));
+    const file = await dispatch(new Request("http://localhost/files/x"));
+    const named = await dispatch(new Request("http://localhost/docs/a/b/c"));
+
+    expect(await raw.text()).toBe("raw");
+    expect(await file.text()).toBe("file");
+    expect(await named.json()).toEqual({ "0": "a/b", name: "c" });
+  });
+
   test("normalizes trailing slashes", async () => {
     const routes: MethodRoutes = {
       "/hello": {
