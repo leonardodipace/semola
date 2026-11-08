@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { mightThrow, mightThrowSync } from "../errors/index.js";
 import { ExportError } from "./errors.js";
 import type {
@@ -355,7 +356,7 @@ export const otlpPost = async (options: OtlpPostOptions) => {
     }
 
     if (delayMs > 0) {
-      await Bun.sleep(delayMs);
+      await delay(delayMs);
 
       if (options.signal?.aborted) {
         throw lastError ?? new ExportError("OTLP export aborted", false);
