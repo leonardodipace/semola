@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { mightThrow } from "../errors/index.js";
 import { readHash } from "../redis/reply.js";
 import type { RedisClient } from "../redis/types.js";
@@ -388,11 +389,11 @@ export const defineWorkflow = <TInput, TResult = void>(
           };
         }
 
-        await Bun.sleep(Math.min(pollInterval, deadline - Date.now()));
+        await delay(Math.min(pollInterval, deadline - Date.now()));
         continue;
       }
 
-      await Bun.sleep(pollInterval);
+      await delay(pollInterval);
     }
   };
 
