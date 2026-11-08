@@ -97,10 +97,14 @@ Stop when a full round finds no cut that removes lines without losing behavior. 
 
 ## Baseline comparison
 
-Never use bare `git stash` (shared across worktrees). Use a detached worktree at the code from before the change (the merge base with `main`, committed or not) and link dependencies instead of copying them. A unique path means cleanup can only remove the worktree this run created:
+Never use bare `git stash` (shared across worktrees). Use a detached worktree at the code from before the rethink and link dependencies instead of copying them. Before the first cut, record that state: `git stash create` snapshots tracked edits as a commit without touching the stash stack (untracked files are not included). A unique path means cleanup can only remove the worktree this run created:
 
 ```powershell
-$base = git merge-base main HEAD
+# before round 1
+$base = git stash create
+if (-not $base) { $base = git rev-parse HEAD }
+
+# when a test fails
 $baseline = "..\<repo>-baseline-$(Get-Date -Format yyyyMMddHHmmss)"
 git worktree add -q --detach $baseline $base
 if ($LASTEXITCODE -ne 0) { throw "Baseline worktree was not created" }

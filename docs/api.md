@@ -419,7 +419,7 @@ export default api;
 
 Run it with `bun server.ts` (port from `PORT`, default 3000), deploy it as a Worker, or run `deno serve server.ts`.
 
-`api.fetch` is a web-standard `(request: Request) => Response` handler, so it also works with any server that takes one:
+`api.fetch` is a web-standard `(request: Request) => Response | Promise<Response>` handler, so it also works with any server that takes one:
 
 ```typescript
 Bun.serve({ port: 3000, fetch: api.fetch });

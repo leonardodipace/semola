@@ -26,7 +26,8 @@ A second reviewer with different blind spots. `semola-review` loops with the sam
 ## Step 1: Scope
 
 ```bash
-base=$(git merge-base main HEAD)
+target=$(gh pr view --json baseRefName -q .baseRefName 2>/dev/null || echo main)
+base=$(git merge-base "$target" HEAD)
 git diff --stat "$base"            # commits plus staged and unstaged edits
 git ls-files --others --exclude-standard
 ```
