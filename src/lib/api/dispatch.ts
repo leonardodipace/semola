@@ -1,12 +1,15 @@
+import { stripTrailingSlash } from "./runtime.js";
 import type {
   ApiRequest,
   CompiledSegment,
   DynamicRoute,
   HTTPMethod,
   MethodRoutes,
+  ParamRoute,
   PatternRoute,
   RouteMethods,
 } from "./types.js";
+import { decodePart } from "./validate.js";
 
 const notFoundInit = { status: 404 };
 
@@ -17,7 +20,7 @@ const compileDynamicRoute = (path: string, methods: RouteMethods) => {
 
   for (const segment of rawSegments) {
     if (segment.startsWith(":")) {
-      segments.push({ value: "", paramName: segment.slice(1) });
+      segments.push({ value: "", paramName: decodePart(segment.slice(1)) });
       paramCount++;
       continue;
     }
@@ -25,12 +28,15 @@ const compileDynamicRoute = (path: string, methods: RouteMethods) => {
     segments.push({ value: segment });
   }
 
-  return {
+  const route: DynamicRoute = {
+    kind: "dynamic",
     segments,
     methods,
     paramStarts: new Array<number>(paramCount),
     paramEnds: new Array<number>(paramCount),
   };
+
+  return route;
 };
 
 const matchDynamicRoute = (route: DynamicRoute, pathname: string) => {
@@ -80,9 +86,12 @@ const assignParams = (route: DynamicRoute, pathname: string) => {
       continue;
     }
 
-    params[segment.paramName] = pathname.slice(
-      route.paramStarts[paramIndex],
-      route.paramEnds[paramIndex],
+    // Decode like Bun's native router, so params match getRouteHandlers().
+    params[segment.paramName] = decodePart(
+      pathname.slice(
+        route.paramStarts[paramIndex],
+        route.paramEnds[paramIndex],
+      ),
     );
     paramIndex++;
   }
@@ -90,96 +99,226 @@ const assignParams = (route: DynamicRoute, pathname: string) => {
   return params;
 };
 
+// ":name" captures one segment and "*" captures the rest. As in dynamic routes,
+// a param starts a segment and its name runs to the segment's end, so
+// "/things:batch" stays literal. Replaces URLPattern, which Node only ships
+// from version 24.
+const PATTERN_TOKEN = /(?<=\/):([^/*]+)|\*/g;
+const REGEX_SPECIAL = /[.+?^${}()|[\]\\]/g;
+
+const escapeRegex = (literal: string) => {
+  return literal.replace(REGEX_SPECIAL, "\\$&");
+};
+
+const compilePatternRoute = (path: string, methods: RouteMethods) => {
+  const paramNames: string[] = [];
+  const wildcardNames = new Set<string>();
+  let source = "";
+  let literalStart = 0;
+  let wildcardCount = 0;
+
+  for (const match of path.matchAll(PATTERN_TOKEN)) {
+    const [token, name] = match;
+
+    source += escapeRegex(path.slice(literalStart, match.index));
+    literalStart = match.index + token.length;
+
+    if (name) {
+      paramNames.push(decodePart(name));
+      source += "([^/]+)";
+      continue;
+    }
+
+    // Unnamed wildcards are numbered from 0, as URLPattern groups were.
+    const wildcardName = String(wildcardCount);
+
+    paramNames.push(wildcardName);
+    wildcardNames.add(wildcardName);
+    wildcardCount++;
+    source += "(.*)";
+  }
+
+  source += escapeRegex(path.slice(literalStart));
+
+  const route: PatternRoute = {
+    kind: "pattern",
+    regex: new RegExp(`^${source}$`),
+    paramNames,
+    wildcardNames,
+    methods,
+  };
+
+  return route;
+};
+
+// Bun's router prefers the most specific route. Per segment, a literal beats
+// ":param", which beats "*". When one path's ranks are a prefix of the other's,
+// see compareRanks. Equal ranks keep registration order (stable sort).
+const LITERAL_RANK = 0;
+const PARAM_RANK = 1;
+const WILDCARD_RANK = 2;
+
+const rankSegment = (segment: string) => {
+  if (segment.includes("*")) return WILDCARD_RANK;
+  if (segment.startsWith(":")) return PARAM_RANK;
+
+  return LITERAL_RANK;
+};
+
+const rankPath = (path: string) => {
+  return path.split("/").map(rankSegment);
+};
+
+const compareRanks = (a: number[], b: number[]) => {
+  for (const [index, aRank] of a.entries()) {
+    const bRank = b[index];
+
+    if (bRank === undefined) break;
+    if (aRank !== bRank) return aRank - bRank;
+  }
+
+  // Equal up to the shorter path. If that path ends in "*", it would swallow
+  // the longer path's extra segments ("/files/*" vs "/files/*/raw"), so the
+  // longer one goes first. Otherwise the two never match the same request.
+  if (a.length < b.length) {
+    if (a.at(-1) === WILDCARD_RANK) return 1;
+
+    return -1;
+  }
+
+  if (b.length < a.length) {
+    if (b.at(-1) === WILDCARD_RANK) return -1;
+
+    return 1;
+  }
+
+  return 0;
+};
+
+// Request pathnames arrive percent-encoded, so encode route paths ("/café",
+// "/a b") the same way a URL does. Prefix instead of resolving, so "//a" stays
+// a path and not a host.
+const encodeRoutePath = (routePath: string) => {
+  return new URL(`http://localhost${routePath}`).pathname;
+};
+
+const readPatternParams = (route: PatternRoute, match: RegExpExecArray) => {
+  const params: Record<string, string> = {};
+
+  for (const [index, name] of route.paramNames.entries()) {
+    const value = match[index + 1] ?? "";
+
+    if (route.wildcardNames.has(name)) {
+      params[name] = value;
+      continue;
+    }
+
+    params[name] = decodePart(value);
+  }
+
+  return params;
+};
+
+// Wildcards match the raw pathname, so "/files/*" matches "/files/" but not
+// "/files", like Bun's router (unless a static "/files" route claims the
+// slash-stripped path first). Dynamic routes ignore a trailing slash.
+const matchParamRoute = (
+  route: ParamRoute,
+  pathname: string,
+  rawPathname: string,
+) => {
+  if (route.kind === "dynamic") {
+    if (!matchDynamicRoute(route, pathname)) return;
+
+    return assignParams(route, pathname);
+  }
+
+  const match = route.regex.exec(rawPathname);
+
+  if (!match) return;
+
+  return readPatternParams(route, match);
+};
+
+const PATH_END = /[?#]/;
+
 const pathnameFromRequestUrl = (url: string) => {
   const schemeEnd = url.indexOf("://");
   const pathStart = url.indexOf("/", schemeEnd + 3);
 
   if (pathStart === -1) return "/";
 
-  const query = url.indexOf("?", pathStart);
+  // The path ends at the query or, in a Request built with one, the fragment.
+  const pathEnd = url.search(PATH_END);
 
-  let pathname: string;
+  if (pathEnd === -1) return url.slice(pathStart);
 
-  if (query === -1) {
-    pathname = url.slice(pathStart);
-  } else {
-    pathname = url.slice(pathStart, query);
-  }
-
-  if (pathname.length > 1 && pathname.endsWith("/"))
-    return pathname.slice(0, -1);
-
-  return pathname;
+  return url.slice(pathStart, pathEnd);
 };
 
-export const buildFetchDispatcher = (bunRoutes: MethodRoutes) => {
+export const buildFetchDispatcher = (routes: MethodRoutes) => {
   const staticRoutes: Record<string, RouteMethods> = Object.create(null);
-  const dynamicRoutes: DynamicRoute[] = [];
-  const patternRoutes: PatternRoute[] = [];
+  const rankedRoutes: [ParamRoute, number[]][] = [];
 
-  for (const [path, methods] of Object.entries(bunRoutes)) {
-    const handlers = methods as RouteMethods;
+  for (const [routePath, routeMethods] of Object.entries(routes)) {
+    const path = encodeRoutePath(routePath);
+
+    // Like Bun's router: match the path first, then answer HEAD with that
+    // route's GET unless it defines HEAD. Servers drop the body.
+    // No prototype, so a request method like "constructor" finds nothing.
+    const methods: RouteMethods = Object.assign(
+      Object.create(null),
+      routeMethods,
+    );
+    methods.HEAD ??= routeMethods.GET;
 
     if (path.includes("*")) {
-      patternRoutes.push({
-        pattern: new URLPattern({ pathname: path }),
-        methods: handlers,
-      });
+      rankedRoutes.push([compilePatternRoute(path, methods), rankPath(path)]);
 
       continue;
     }
 
     if (path.includes(":")) {
-      dynamicRoutes.push(compileDynamicRoute(path, handlers));
+      rankedRoutes.push([compileDynamicRoute(path, methods), rankPath(path)]);
 
       continue;
     }
 
-    staticRoutes[path] = handlers;
+    staticRoutes[path] = methods;
   }
 
-  return (req: Request): Response | Promise<Response> => {
-    const pathname = pathnameFromRequestUrl(req.url);
+  // One list in specificity order, so a literal wildcard route can beat a
+  // ":param" route that would also match. Static routes are looked up by path.
+  rankedRoutes.sort(([, a], [, b]) => compareRanks(a, b));
+
+  const paramRoutes = rankedRoutes.map(([route]) => route);
+
+  return (req: ApiRequest) => {
+    const rawPathname = pathnameFromRequestUrl(req.url);
+    const pathname = stripTrailingSlash(rawPathname);
     const method = req.method as HTTPMethod;
     const staticHandler = staticRoutes[pathname]?.[method];
 
-    if (staticHandler) return staticHandler(req as Bun.BunRequest);
+    if (staticHandler) return staticHandler(req);
 
-    for (const route of dynamicRoutes) {
-      if (!matchDynamicRoute(route, pathname)) {
-        continue;
-      }
-
+    for (const route of paramRoutes) {
+      // Method first: skipping a route that lacks it gives the same result as
+      // matching its path, and costs no match or params.
       const handler = route.methods[method];
 
       if (!handler) {
         continue;
       }
 
-      (req as ApiRequest).params = assignParams(route, pathname);
+      const params = matchParamRoute(route, pathname, rawPathname);
 
-      return handler(req as Bun.BunRequest);
-    }
-
-    for (const route of patternRoutes) {
-      const match = route.pattern.exec({ pathname });
-
-      if (!match) {
+      if (!params) {
         continue;
       }
 
-      const handler = route.methods[method];
+      req.params = params;
 
-      if (!handler) {
-        continue;
-      }
-
-      (req as ApiRequest).params = match.pathname.groups as Record<
-        string,
-        string
-      >;
-
-      return handler(req as Bun.BunRequest);
+      return handler(req);
     }
 
     return new Response("Not found", notFoundInit);

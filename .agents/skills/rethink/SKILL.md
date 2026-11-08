@@ -21,7 +21,7 @@ Design-level simplification loop. Not a lint pass: question the shape of the cod
 
 ## When not to use
 
-- Bug hunts (use code review). Style-only cleanup with no design question (deslop in `harden`).
+- Bug hunts (use code review). Style-only cleanup with no design question.
 - Code outside the task scope. Rethink the branch diff, not the whole repo.
 
 ## The loop
@@ -38,7 +38,7 @@ Round 1 is recommend-only because it may trade features for lines; the user pick
 
 ## Step 1: Scope
 
-- Default scope: the branch diff. `git log --oneline main..HEAD`, `git diff --stat main...HEAD`.
+- Default scope: the branch diff. `git fetch origin main` first (local `main` may be behind), then `git log --oneline origin/main..HEAD`, `git diff --stat origin/main...HEAD`.
 - Read every implementation file in scope, its tests, and every caller of its public types (grep imports). Callers often already do the work the module repeats.
 
 ## Step 2: Assume it is wrong
@@ -97,14 +97,19 @@ Stop when a full round finds no cut that removes lines without losing behavior. 
 
 ## Baseline comparison
 
-Never use bare `git stash` (shared across worktrees). Use a detached worktree and link dependencies instead of copying them:
+Never use bare `git stash` (shared across worktrees). Use a detached worktree at the code from before the rethink and link dependencies instead of copying them. Before the first cut, record that state: `git stash create` snapshots tracked edits as a commit without touching the stash stack (untracked files are not included). A unique path means cleanup can only remove the worktree this run created:
 
 ```powershell
-git worktree add -q --detach ..\<repo>-baseline HEAD
-New-Item -ItemType Junction -Path ..\<repo>-baseline\node_modules -Target (Resolve-Path .\node_modules)
+$base = git stash create
+if (-not $base) { $base = git rev-parse HEAD }
+
+$baseline = "..\<repo>-baseline-$(Get-Date -Format yyyyMMddHHmmss)"
+git worktree add -q --detach $baseline $base
+if ($LASTEXITCODE -ne 0) { throw "Baseline worktree was not created" }
+New-Item -ItemType Junction -Path "$baseline\node_modules" -Target (Resolve-Path .\node_modules)
 # run the failing test several times in both trees, compare pass rates
-(Get-Item ..\<repo>-baseline\node_modules).Delete()   # remove the junction first
-git worktree remove --force ..\<repo>-baseline
+(Get-Item "$baseline\node_modules").Delete()   # remove the junction first
+git worktree remove --force $baseline
 ```
 
 Copying `node_modules` on Windows is very slow and leaves paths too long to delete.

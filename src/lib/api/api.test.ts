@@ -2,12 +2,13 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { Api } from "./api.js";
 import { Middleware } from "./middleware.js";
+import type { ApiServer } from "./types.js";
 
 // Global server reference for cleanup
-let server: ReturnType<typeof Bun.serve> | undefined;
+let server: ApiServer | undefined;
 
-afterEach(() => {
-  server?.stop(true);
+afterEach(async () => {
+  await server?.stop(true);
   server = undefined;
 });
 
@@ -38,9 +39,7 @@ describe("Api Core", () => {
       handler: (c) => c.json(200, { message: "world" }),
     });
 
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     const res = await fetch(`http://localhost:${server?.port}/hello`);
     const body = await res.json();
@@ -145,9 +144,7 @@ describe("Api Core", () => {
       handler: (c) => c.json(200, { message: "world" }),
     });
 
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     const res = await fetch(`http://localhost:${server?.port}/api/hello`);
     const body = await res.json();
@@ -167,9 +164,7 @@ describe("Api Core", () => {
       handler: (c) => c.json(200, c.req.body),
     });
 
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     // Invalid request
     const badRes = await fetch(`http://localhost:${server?.port}/user`, {
@@ -200,9 +195,7 @@ describe("Api Core", () => {
       handler: (c) => c.text(200, c.req.body),
     });
 
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     const res = await fetch(`http://localhost:${server?.port}/message`, {
       method: "POST",
@@ -224,9 +217,7 @@ describe("Api Core", () => {
       handler: (c) => c.json(200, { userId: c.req.params.id }),
     });
 
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     const res = await fetch(`http://localhost:${server?.port}/users/abc`);
     const body = await res.json();
@@ -251,9 +242,7 @@ describe("Api Core", () => {
       },
     });
 
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     const res = await fetch(`http://localhost:${server?.port}/me`);
     const body = await res.json();
@@ -276,9 +265,7 @@ describe("Api Core", () => {
       handler: () => new Response("Should not be reached"),
     });
 
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     const res = await fetch(`http://localhost:${server?.port}/secret`);
     expect(res.status).toBe(403);
@@ -294,9 +281,7 @@ describe("Api Core", () => {
       handler: (c) => c.text(200, "ok"),
     });
 
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     const res = await fetch(`http://localhost:${server?.port}/api/v1/status`);
     expect(res.status).toBe(200);
@@ -305,9 +290,7 @@ describe("Api Core", () => {
 
   test("should return 404 for non-existent routes", async () => {
     const api = new Api();
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     const res = await fetch(`http://localhost:${server?.port}/nowhere`);
     expect(res.status).toBe(404);
@@ -337,9 +320,7 @@ describe("Api Core", () => {
       },
     });
 
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     const res = await fetch(`http://localhost:${server?.port}/user`, {
       method: "POST",
@@ -380,9 +361,7 @@ describe("Api Core", () => {
       },
     });
 
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     const res = await fetch(`http://localhost:${server?.port}/multi`, {
       method: "POST",
@@ -406,9 +385,7 @@ describe("Api Core", () => {
       handler: (c) => c.json(200, { ok: true }),
     });
 
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     // Invalid body should still pass since validation is disabled
     const res = await fetch(`http://localhost:${server?.port}/user`, {
@@ -431,9 +408,7 @@ describe("Api Core", () => {
       handler: (c) => c.json(200, { ok: true }),
     });
 
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     // Invalid body should still pass since input validation is disabled
     const res = await fetch(`http://localhost:${server?.port}/user`, {
@@ -457,9 +432,7 @@ describe("Api Core", () => {
       handler: (c) => c.json(200, { name: 123 } as unknown as { name: string }),
     });
 
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     const res = await fetch(`http://localhost:${server?.port}/user`);
     expect(res.status).toBe(400);
@@ -478,9 +451,7 @@ describe("Api Core", () => {
       handler: (c) => c.json(200, { name: "Alice" }),
     });
 
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     const res = await fetch(`http://localhost:${server?.port}/user`);
     expect(res.status).toBe(200);
@@ -627,9 +598,7 @@ describe("Api Core", () => {
       handler: (c) => c.json(200, { name: 123 } as unknown as { name: string }),
     });
 
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     // Output validation is disabled, so the invalid response should pass through
     const res = await fetch(`http://localhost:${server?.port}/user`);
@@ -647,9 +616,7 @@ describe("Api Core", () => {
       handler: (c) => c.json(200, { name: 123 } as unknown as { name: string }),
     });
 
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     const res = await fetch(`http://localhost:${server?.port}/user`);
     expect(res.status).toBe(200);
@@ -851,9 +818,9 @@ describe("Api Core", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: 123 }),
-    }) as Bun.BunRequest;
+    });
 
-    const res = await handler?.(req, {} as Bun.Server<unknown>);
+    const res = await handler?.(req);
 
     expect(res?.status).toBe(400);
   });
@@ -887,19 +854,15 @@ describe("Api Core", () => {
     api.defineRoute({ path: "/empty", method: "GET", handler: () => null });
 
     const routes = api.getRouteHandlers();
-    const server = {} as Bun.Server<unknown>;
 
     const flagRes = await routes["/flag"]?.GET?.(
-      new Request("http://localhost/flag") as Bun.BunRequest,
-      server,
+      new Request("http://localhost/flag"),
     );
     const countRes = await routes["/count"]?.GET?.(
-      new Request("http://localhost/count") as Bun.BunRequest,
-      server,
+      new Request("http://localhost/count"),
     );
     const emptyRes = await routes["/empty"]?.GET?.(
-      new Request("http://localhost/empty") as Bun.BunRequest,
-      server,
+      new Request("http://localhost/empty"),
     );
 
     expect(await flagRes?.json()).toBe(false);
@@ -918,8 +881,8 @@ describe("Api Core", () => {
     });
 
     const handler = api.getRouteHandlers()["/user"]?.GET;
-    const req = new Request("http://localhost/user") as Bun.BunRequest;
-    const res = await handler?.(req, {} as Bun.Server<unknown>);
+    const req = new Request("http://localhost/user");
+    const res = await handler?.(req);
 
     expect(res?.status).toBe(400);
   });
@@ -937,8 +900,8 @@ describe("Api Core", () => {
     const handler = api.getRouteHandlers()["/item"]?.POST;
     const req = new Request("http://localhost/item", {
       method: "POST",
-    }) as Bun.BunRequest;
-    const res = await handler?.(req, {} as Bun.Server<unknown>);
+    });
+    const res = await handler?.(req);
 
     expect(res?.status).toBe(400);
   });
@@ -959,9 +922,9 @@ describe("Api Core", () => {
       method: "POST",
       headers: { "content-type": "text/plain" },
       body: "Hello World",
-    }) as Bun.BunRequest;
+    });
 
-    const res = await handler?.(req, {} as Bun.Server<unknown>);
+    const res = await handler?.(req);
 
     expect(res).toBeInstanceOf(Response);
     expect(res?.status).toBe(200);
@@ -1177,9 +1140,7 @@ describe("Api SSE", () => {
       },
     });
 
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     const res = await fetch(`http://localhost:${server?.port}/live`);
     const reader = res.body?.getReader();
@@ -1226,9 +1187,7 @@ describe("Api SSE", () => {
       },
     });
 
-    api.serve(0, (s) => {
-      server = s;
-    });
+    server = await api.serve(0);
 
     const ctrl = new AbortController();
     const res = await fetch(`http://localhost:${server?.port}/events`, {

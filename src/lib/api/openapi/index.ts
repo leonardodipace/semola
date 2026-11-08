@@ -451,7 +451,7 @@ const findDivergentNames = (registry: SchemaRegistry) => {
 
       if (!inputSchema) continue;
 
-      if (Bun.deepEquals(inputSchema, outputSchema)) {
+      if (JSON.stringify(inputSchema) === JSON.stringify(outputSchema)) {
         if (!referencesAnyName(outputSchema, divergent)) continue;
       }
 

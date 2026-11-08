@@ -1,11 +1,11 @@
 ---
 title: API
-description: Build typed HTTP APIs on Bun with Semola - routes, middleware, groups, and OpenAPI
+description: Build typed HTTP APIs on Bun, Node, Deno, and Cloudflare Workers with Semola - routes, middleware, groups, and OpenAPI
 ---
 
 Build HTTP APIs with validated requests and responses. Schemas use any [Standard Schema](https://standardschema.dev/) library ([`semola/schema`](/docs/schema), Zod, Valibot, ArkType, …). OpenAPI comes from the same route definitions.
 
-Needs Bun's HTTP server (`Bun.serve` under the hood via `api.serve`).
+Runs on Bun, Node, Deno, and Cloudflare Workers. `api.fetch` is a web-standard handler; `api.serve` starts a server on Bun and Node.
 
 ## Import
 
@@ -15,7 +15,7 @@ import { Api, ApiClient, Group, Middleware } from "semola/api";
 
 ## Quick start
 
-This registers a validated `GET /users/:id` route, then starts Bun's HTTP server on port 3000.
+This registers a validated `GET /users/:id` route, then starts an HTTP server on port 3000.
 
 ```typescript
 import { Api } from "semola/api";
@@ -40,7 +40,7 @@ api.defineRoute({
   },
 });
 
-api.serve(3000);
+await api.serve(3000);
 ```
 
 For tests or embedding, call `api.fetch(request)` instead of serving.
@@ -123,7 +123,7 @@ api.defineRoute({
 });
 ```
 
-Invalid input becomes a 400. Query and header values are always strings; use schema coercion such as Zod's `z.stringbool()` when you want a boolean (`?draft=true` → `true`). Toggle validation with `new Api({ validation: false })` or `{ validation: { input: true, output: false } }`.
+Invalid input becomes a 400. Path params arrive percent-decoded (`/users/John%20Doe` gives `"John Doe"`); `*` wildcard captures stay encoded, under keys `"0"`, `"1"`, and so on (`params: z.object({ "0": z.string() })`). When several routes match a path, the most specific wins: per segment, a literal beats `:param`, which beats `*`. Query and header values are always strings; use schema coercion such as Zod's `z.stringbool()` when you want a boolean (`?draft=true` → `true`). Toggle validation with `new Api({ validation: false })` or `{ validation: { input: true, output: false } }`.
 
 ### Strict `c.json` typing
 
@@ -396,26 +396,48 @@ api.defineRoute({
 
 Headers from middleware and the route are copied onto the returned `Response`.
 
-### Get Bun route handlers
-
-`getRouteHandlers()` compiles registered routes into the map expected by `Bun.serve`.
-
-```typescript
-const routes = api.getRouteHandlers();
-
-const server = Bun.serve({
-  routes,
-  fetch: () => new Response("Not found", { status: 404 }),
-});
-```
-
 ### Start a server
 
-`serve()` starts `Bun.serve` and passes the server instance to the optional callback.
+`serve()` starts an HTTP server and resolves to `{ port, url, stop }`. The optional callback receives the same object. `stop()` lets in-flight requests finish; `stop(true)` closes every connection at once. On Bun it uses `Bun.serve`, on Node `node:http`. Both route through `api.fetch`, so matching and params behave the same on every runtime.
 
 ```typescript
-api.serve(3000, (server) => {
-  console.log(`Listening on ${server.url}`);
+const server = await api.serve(3000);
+
+console.log(`Listening on ${server.url}`);
+
+await server.stop();
+```
+
+### Other runtimes
+
+Bun, Cloudflare Workers, and `deno serve` start a server for a module whose default export has a `fetch` method. `Api` has one, so export it instead of calling `serve()`:
+
+```typescript
+// server.ts
+export default api;
+```
+
+Run it with `bun server.ts` (port from `PORT`, default 3000), deploy it as a Worker, or run `deno serve server.ts`.
+
+`api.fetch` is a web-standard `(request: Request) => Response | Promise<Response>` handler, so it also works with any server that takes one:
+
+```typescript
+Bun.serve({ port: 3000, fetch: api.fetch });
+
+Deno.serve({ port: 3000 }, api.fetch);
+```
+
+Node needs 22.3 or newer for `serve()`. On Node, `serve()` reads the whole request body before calling the handler and answers 413 past 128MB, the default limit of `Bun.serve`. Node's default `requestTimeout` (300 seconds to receive a whole request) also applies.
+
+### Get Bun route handlers
+
+`getRouteHandlers()` compiles registered routes into the `routes` map expected by `Bun.serve`, to use Bun's native router instead of `api.fetch`. Bun's router does not match trailing slashes (`/hello/` is a 404) and only sees routes registered before the call.
+
+```typescript
+const server = Bun.serve({
+  port: 3000,
+  routes: api.getRouteHandlers(),
+  fetch: () => new Response("Not found", { status: 404 }),
 });
 ```
 
@@ -439,8 +461,8 @@ api.serve(3000, (server) => {
 | `defineSSERoute(config)` | Register a GET SSE route |
 | `mount(group)` | Mount a `Group` |
 | `fetch(request)` | Handle a request without listening |
-| `getRouteHandlers()` | Build Bun's route handler map |
+| `getRouteHandlers()` | Build the `routes` map for `Bun.serve` |
 | `getOpenApiSpec()` | Build the OpenAPI document |
-| `serve(port, callback?)` | Start `Bun.serve` |
+| `serve(port, callback?)` | Start a server on Bun (`Bun.serve`) or Node (`node:http`) |
 
 There is no `listen` method.

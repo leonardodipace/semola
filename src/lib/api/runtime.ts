@@ -2,6 +2,8 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { ParseError, ValidationError } from "./errors.js";
 import type { Middleware } from "./middleware.js";
 import type {
+  ApiRequest,
+  FullPathInput,
   InternalContext,
   RequestSchema,
   ResolvedValidation,
@@ -115,7 +117,7 @@ const sharedContext = {
 };
 
 export const createContext = (
-  req: Bun.BunRequest,
+  req: ApiRequest,
   validated?: ValidatedRequest,
   get?: (key: string) => unknown,
 ): InternalContext => {
@@ -133,18 +135,28 @@ export const createContext = (
   return context;
 };
 
-const stripTrailingSlash = (path: string) => {
+export const stripTrailingSlash = (path: string) => {
   if (path !== "/" && path.endsWith("/")) return path.slice(0, -1);
 
   return path;
 };
 
-export const getFullPath = (input: { prefix?: string; path: string }) => {
-  const normalizedPath = stripTrailingSlash(input.path) || "/";
+// Route paths and prefixes always start with "/", so "users" and "*" mean
+// "/users" and "/*" for dispatch, getRouteHandlers(), and OpenAPI alike.
+const withLeadingSlash = (path: string) => {
+  if (path.startsWith("/")) return path;
+
+  return `/${path}`;
+};
+
+export const getFullPath = (input: FullPathInput) => {
+  const normalizedPath = withLeadingSlash(
+    stripTrailingSlash(input.path) || "/",
+  );
 
   if (!input.prefix) return normalizedPath;
 
-  const normalizedPrefix = stripTrailingSlash(input.prefix);
+  const normalizedPrefix = withLeadingSlash(stripTrailingSlash(input.prefix));
 
   if (normalizedPrefix === "/") return normalizedPath;
   if (normalizedPath === "/") return normalizedPrefix;

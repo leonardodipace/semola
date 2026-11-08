@@ -22,7 +22,7 @@ import {
 describe("runtime", () => {
   describe("context", () => {
     test("create sets raw request", () => {
-      const req = new Request("http://localhost/hello") as Bun.BunRequest;
+      const req = new Request("http://localhost/hello");
       const context = createContext(req);
 
       expect(context.raw).toBe(req);
@@ -30,7 +30,7 @@ describe("runtime", () => {
     });
 
     test("create wires extensions via get", () => {
-      const req = new Request("http://localhost") as Bun.BunRequest;
+      const req = new Request("http://localhost");
       const extensions = { user: { id: 1 } };
       const context = createContext(req, undefined, (key) => {
         return extensions[key as keyof typeof extensions];
@@ -40,7 +40,7 @@ describe("runtime", () => {
     });
 
     test("create uses default json without output validation", async () => {
-      const req = new Request("http://localhost") as Bun.BunRequest;
+      const req = new Request("http://localhost");
       const context = createContext(req);
 
       const res = await context.json(200, { ok: true });
@@ -49,7 +49,7 @@ describe("runtime", () => {
     });
 
     test("header copies onto the returned response", async () => {
-      const req = new Request("http://localhost") as Bun.BunRequest;
+      const req = new Request("http://localhost");
       const context = createContext(req);
 
       context.header("Authorization", "Bearer test");
@@ -61,7 +61,7 @@ describe("runtime", () => {
     });
 
     test("header copies onto redirect responses", () => {
-      const req = new Request("http://localhost") as Bun.BunRequest;
+      const req = new Request("http://localhost");
       const context = createContext(req);
 
       context.header("Authorization", "Bearer test");
@@ -180,6 +180,11 @@ describe("runtime", () => {
 
     test("returns path when prefix is root", () => {
       expect(getFullPath({ prefix: "/", path: "/hello" })).toBe("/hello");
+    });
+
+    test("adds a missing leading slash to paths and prefixes", () => {
+      expect(getFullPath({ path: "*" })).toBe("/*");
+      expect(getFullPath({ prefix: "api", path: "users" })).toBe("/api/users");
     });
   });
 

@@ -1,4 +1,5 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import { mightThrowSync } from "../errors/index.js";
 import { ParseError, SchemaConfigError, ValidationError } from "./errors.js";
 import { formatValidationIssues } from "./standard-schema.js";
 import type {
@@ -17,18 +18,21 @@ const readValidationResult = <T>(result: StandardSchemaValidationResult) => {
   throw new ValidationError(formatValidationIssues(result.issues));
 };
 
-const decodePart = (value: string, plusAsSpace = false) => {
+export const decodePart = (value: string, plusAsSpace = false) => {
   let normalized = value;
 
   if (plusAsSpace && value.includes("+")) {
     normalized = value.replaceAll("+", " ");
   }
 
-  try {
-    return decodeURIComponent(normalized);
-  } catch {
-    return normalized;
-  }
+  if (!normalized.includes("%")) return normalized;
+
+  // Malformed escapes stay as sent.
+  const [error, decoded] = mightThrowSync(() => decodeURIComponent(normalized));
+
+  if (error) return normalized;
+
+  return decoded;
 };
 
 const assignQueryValue = (
