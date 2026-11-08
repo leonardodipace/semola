@@ -1,15 +1,14 @@
 ---
-name: semola-review
+name: review-loop
 description: >-
   Alternate code review and rethink on the current change until a review round
   finds nothing new worth fixing and the rethink after it finds nothing to cut.
-  Use after a feature lands, before merge, or when the user says semola review,
-  review loop, code review + rethink, run the loop, keep going until clean, or
-  harden.
+  Use after a feature lands, before merge, or when the user says review loop,
+  code review + rethink, run the loop, keep going until clean, or harden.
 license: MIT
 ---
 
-# Semola review
+# Review loop
 
 Review finds bugs, rethink removes complexity, and each fix can create new bugs. Run both in turns until a full round comes back clean. Caveman stays on for prose.
 
@@ -40,7 +39,7 @@ Stop only when a review round has no new actionable finding **and** the rethink 
 
 ## Step 1: Review
 
-- Use the `code-review` skill at `high` effort when available. Otherwise launch one review subagent over the whole change (`git diff main...HEAD` for commits, `git diff HEAD` for staged and unstaged edits, plus untracked files) and ask for findings with file, line, summary, and a concrete failure scenario.
+- Use the `code-review` skill at `high` effort when available. Otherwise launch one review subagent over the whole change (`git fetch origin main`, then `git diff origin/main...HEAD` for commits, `git diff HEAD` for staged and unstaged edits, plus untracked files) and ask for findings with file, line, summary, and a concrete failure scenario.
 - Review every changed file: docs, skills, and config too, not only the module. Files written late (a skill or doc added after the code settled) still get at least one round.
 - From round 2 on, pass a **decided list**: every finding already rejected or intentionally accepted, one line each with the reason. Ask the reviewer not to re-report them. The list only grows.
 - Each decided item names the exact behavior accepted, never a whole area of code. "Route sorting costs a little at compile time" is an item; "the route sort" tells later reviewers to skip it and hides bugs in it.
@@ -90,16 +89,17 @@ On top of the usual smells, ask each round:
 
 Go back to step 1 with the updated decided list. Keep a one-line log per round (what was fixed, what was rejected).
 
-Once the loop stops, get one review from a different reviewer before merge: the `semola-pr-review` skill, or CodeRabbit on the PR. Rounds by the same reviewer share blind spots, and the decided list narrows what it looks at.
+Once the loop stops, get one review from a different reviewer before merge: the `pr-review` skill, or CodeRabbit on the PR. Rounds by the same reviewer share blind spots, and the decided list narrows what it looks at.
 
 ---
 
 ## Baseline
 
-Never use bare `git stash` (shared across worktrees). For regressions and benchmarks, use a detached worktree at the code from before the change, with a linked `node_modules`. The merge base with `main` is that code whether the change is committed or not; a unique path means cleanup can only remove the worktree this run created:
+Never use bare `git stash` (shared across worktrees). For regressions and benchmarks, use a detached worktree at the code from before the change, with a linked `node_modules`. The merge base with `origin/main` is that code whether the change is committed or not; a unique path means cleanup can only remove the worktree this run created:
 
 ```powershell
-$base = git merge-base main HEAD
+git fetch -q origin main
+$base = git merge-base origin/main HEAD
 $baseline = "..\<repo>-baseline-$(Get-Date -Format yyyyMMddHHmmss)"
 git worktree add -q --detach $baseline $base
 if ($LASTEXITCODE -ne 0) { throw "Baseline worktree was not created" }

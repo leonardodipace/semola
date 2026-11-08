@@ -112,6 +112,7 @@ const escapeRegex = (literal: string) => {
 
 const compilePatternRoute = (path: string, methods: RouteMethods) => {
   const paramNames: string[] = [];
+  const wildcardNames = new Set<string>();
   let source = "";
   let literalStart = 0;
   let wildcardCount = 0;
@@ -129,7 +130,10 @@ const compilePatternRoute = (path: string, methods: RouteMethods) => {
     }
 
     // Unnamed wildcards are numbered from 0, as URLPattern groups were.
-    paramNames.push(String(wildcardCount));
+    const wildcardName = String(wildcardCount);
+
+    paramNames.push(wildcardName);
+    wildcardNames.add(wildcardName);
     wildcardCount++;
     source += "(.*)";
   }
@@ -140,6 +144,7 @@ const compilePatternRoute = (path: string, methods: RouteMethods) => {
     kind: "pattern",
     regex: new RegExp(`^${source}$`),
     paramNames,
+    wildcardNames,
     methods,
   };
 
@@ -201,7 +206,14 @@ const readPatternParams = (route: PatternRoute, match: RegExpExecArray) => {
   const params: Record<string, string> = {};
 
   for (const [index, name] of route.paramNames.entries()) {
-    params[name] = decodePart(match[index + 1] ?? "");
+    const value = match[index + 1] ?? "";
+
+    if (route.wildcardNames.has(name)) {
+      params[name] = value;
+      continue;
+    }
+
+    params[name] = decodePart(value);
   }
 
   return params;

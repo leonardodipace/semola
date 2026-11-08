@@ -432,6 +432,7 @@ export type PatternRoute = {
   kind: "pattern";
   regex: RegExp;
   paramNames: string[];
+  wildcardNames: Set<string>;
   methods: RouteMethods;
 };
 

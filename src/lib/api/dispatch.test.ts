@@ -72,7 +72,7 @@ describe("dispatch", () => {
     expect(pathRes.status).toBe(404);
   });
 
-  test("keeps URLPattern fallback for wildcard routes", async () => {
+  test("matches wildcard routes across segments", async () => {
     const routes: MethodRoutes = {
       "/files/*": {
         [GET]: () => new Response("wild"),
@@ -97,6 +97,21 @@ describe("dispatch", () => {
     const res = await dispatch(new Request("http://localhost/files/a%20b/x"));
 
     expect(await res.json()).toEqual({ owner: "a b" });
+  });
+
+  test("keeps wildcard captures percent-encoded", async () => {
+    const routes: MethodRoutes = {
+      "/files/*": {
+        [GET]: (req) => Response.json(req.params),
+      },
+    };
+
+    const dispatch = buildFetchDispatcher(routes);
+    const res = await dispatch(
+      new Request("http://localhost/files/..%2F..%2Fetc%2Fpasswd"),
+    );
+
+    expect(await res.json()).toEqual({ "0": "..%2F..%2Fetc%2Fpasswd" });
   });
 
   test("answers HEAD with the GET handler", async () => {

@@ -1,18 +1,18 @@
 ---
-name: semola-pr-review
+name: pr-review
 description: >-
   One fresh, whole-PR review in the style of CodeRabbit: a subagent with no
   session context reads every file changed against the merge base, hunts for
   claims the code relies on, verifies findings by running them, and reports
-  ranked findings without editing. Use before merge, after semola-review stops,
+  ranked findings without editing. Use before merge, after review-loop stops,
   or when the user says PR review, fresh review, second opinion, or "our own
   coderabbit".
 license: MIT
 ---
 
-# Semola PR review
+# PR review
 
-A second reviewer with different blind spots. `semola-review` loops with the same reviewer and a decided list that narrows what it looks at; this skill runs once, from scratch, over the whole PR. Caveman stays on for prose.
+A second reviewer with different blind spots. `review-loop` loops with the same reviewer and a decided list that narrows what it looks at; this skill runs once, from scratch, over the whole PR. Caveman stays on for prose.
 
 ## Why it finds different bugs
 
@@ -27,7 +27,8 @@ A second reviewer with different blind spots. `semola-review` loops with the sam
 
 ```bash
 target=$(gh pr view --json baseRefName -q .baseRefName 2>/dev/null || echo main)
-base=$(git merge-base "$target" HEAD)
+git fetch -q origin "$target"
+base=$(git merge-base "origin/$target" HEAD)
 git diff --stat "$base"            # commits plus staged and unstaged edits
 git ls-files --others --exclude-standard
 ```
@@ -44,7 +45,8 @@ Review this pull request in [REPO_PATH] as a senior reviewer who has never seen 
 Scope: every file changed between [BASE_SHA] and the working tree, including
 untracked files: [FILE LIST]. Read AGENTS.md first for repo conventions.
 Do not edit any repo file. Put scratch scripts in a new temp directory outside
-the repo.
+the repo. Do not run `bun check` (it writes files); use `bunx biome check .`
+and `bunx tsc --noEmit`.
 
 For each file:
 1. Read the full new version, not only the hunks, plus the callers of anything
@@ -73,11 +75,11 @@ If nothing survives verification, return [] and say what you checked.
 
 ## Step 3: Triage
 
-Triage the findings with the rules from `semola-review` (verify, fix or reject with a reason, ask the user about feature trades). Then:
+Triage the findings with the rules from `review-loop` (verify, fix or reject with a reason, ask the user about feature trades). Then:
 
 - Every fix gets a test that fails without it.
 - `bun test` for touched modules and `bun check`.
-- Do not run this skill again on the fixes. If they are large, run one `semola-review` round on them instead.
+- Do not run this skill again on the fixes. If they are large, run one `review-loop` round on them instead.
 
 ## Report
 
