@@ -1,9 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { Sql, SqlClient } from "../types.js";
 import type { DialectSpec, DialectTransactionFn } from "./types.js";
 
-const sqliteForeignKeysOn = new WeakMap<Bun.SQL, Promise<unknown>>();
+const sqliteForeignKeysOn = new WeakMap<Sql, Promise<unknown>>();
 
-const enableSqliteForeignKeys = (sql: Bun.SQL) => {
+const enableSqliteForeignKeys = (sql: Sql) => {
   const pending = sqliteForeignKeysOn.get(sql);
 
   if (pending) return pending;
@@ -14,11 +15,11 @@ const enableSqliteForeignKeys = (sql: Bun.SQL) => {
   return next;
 };
 
-const sqliteBeginTail = new WeakMap<Bun.SQL, Promise<unknown>>();
-const sqliteActiveToken = new WeakMap<Bun.SQL, object>();
-const sqliteBeginContext = new AsyncLocalStorage<Map<Bun.SQL, object>>();
+const sqliteBeginTail = new WeakMap<SqlClient, Promise<unknown>>();
+const sqliteActiveToken = new WeakMap<SqlClient, object>();
+const sqliteBeginContext = new AsyncLocalStorage<Map<SqlClient, object>>();
 
-const isNestedInActiveBegin = (sql: Bun.SQL) => {
+const isNestedInActiveBegin = (sql: SqlClient) => {
   const store = sqliteBeginContext.getStore();
 
   if (!store) return false;
@@ -31,11 +32,11 @@ const isNestedInActiveBegin = (sql: Bun.SQL) => {
 };
 
 export const beginSqlite = <TResult>(
-  sql: Bun.SQL,
+  sql: SqlClient,
   run: DialectTransactionFn<TResult>,
 ) => {
   if (isNestedInActiveBegin(sql)) {
-    // Bun.SQL nested begin hangs instead of rejecting; fail here.
+    // Bun.SQL nested begin hangs instead of rejecting; fail here for every driver.
     return Promise.reject(
       new Error("cannot start a transaction within a transaction"),
     );

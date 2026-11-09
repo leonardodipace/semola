@@ -11,6 +11,7 @@ import {
 } from "../integration-helpers.js";
 import { defineTable } from "../table/index.js";
 import type { Table } from "../table/types.js";
+import type { Sql } from "../types.js";
 import { createOrm, many, one } from "./index.js";
 import { getOrmConnectionUrl } from "./orm.js";
 
@@ -74,7 +75,7 @@ const schemaSql = {
 } as const;
 
 for (const live of integrationAdapters()) {
-  describe(`${live.adapter} orm integration`, () => {
+  describe(`${live.name} orm integration`, () => {
     const ddl = schemaSql[live.adapter];
     const id = live.adapter === "postgres" ? PG_ID : "u1";
     const id2 = live.adapter === "postgres" ? PG_ID_2 : "u2";
@@ -85,7 +86,7 @@ for (const live of integrationAdapters()) {
 
       const orm = createOrm({
         adapter: live.adapter,
-        url: live.url,
+        ...live.connection(),
         tables: {
           users: usersTable,
           posts: postsTable,
@@ -184,6 +185,32 @@ for (const live of integrationAdapters()) {
 
       expect(error?.message).toContain("notes");
       expect(await orm.users.findMany()).toHaveLength(0);
+
+      await orm.$raw.close();
+    });
+
+    test("failed connect inside $transaction rolls back only that write", async () => {
+      const orm = await open();
+      await createAda(orm);
+
+      await orm.$transaction(async (tx) => {
+        await tx.notes.create({
+          data: { id: postId, user: { connect: { id } } },
+        });
+
+        const [error] = await mightThrow(
+          tx.notes.create({
+            data: {
+              id: id2,
+              user: { connect: { id: "00000000-0000-0000-0000-000000000000" } },
+            },
+          }),
+        );
+
+        expect(error).toBeDefined();
+      });
+
+      expect(await orm.notes.findMany()).toHaveLength(1);
 
       await orm.$raw.close();
     });
@@ -311,7 +338,7 @@ for (const live of integrationAdapters()) {
       const sqlType = live.adapter === "postgres" ? "JSON" : "TEXT";
       const orm = createOrm({
         adapter: live.adapter,
-        url: live.url,
+        ...live.connection(),
         tables: { items },
       });
 
@@ -462,13 +489,13 @@ describe("sqlite orm integration", () => {
       },
     });
 
-  const createUsersSchema = async (sql: Bun.SQL) => {
+  const createUsersSchema = async (sql: Sql) => {
     await sql.unsafe(
       "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)",
     );
   };
 
-  const seedSingleUser = async (sql: Bun.SQL) => {
+  const seedSingleUser = async (sql: Sql) => {
     await sql.unsafe("INSERT INTO users VALUES (?, ?, ?)", [
       "u1",
       "Alice",
@@ -476,7 +503,7 @@ describe("sqlite orm integration", () => {
     ]);
   };
 
-  const seedTwoUsers = async (sql: Bun.SQL) => {
+  const seedTwoUsers = async (sql: Sql) => {
     await sql.unsafe("INSERT INTO users VALUES (?, ?, ?), (?, ?, ?)", [
       "u1",
       "Alice",
@@ -544,10 +571,10 @@ describe("sqlite orm integration", () => {
       });
 
       expect(orm.$config.pool).toEqual(pool);
-      expect(orm.$raw.options.max).toBe(4);
-      expect(orm.$raw.options.idleTimeout).toBe(30_000);
-      expect(orm.$raw.options.maxLifetime).toBe(3_600_000);
-      expect(orm.$raw.options.connectionTimeout).toBe(10_000);
+      expect((orm.$raw as Bun.SQL).options.max).toBe(4);
+      expect((orm.$raw as Bun.SQL).options.idleTimeout).toBe(30_000);
+      expect((orm.$raw as Bun.SQL).options.maxLifetime).toBe(3_600_000);
+      expect((orm.$raw as Bun.SQL).options.connectionTimeout).toBe(10_000);
 
       await orm.$raw.close();
     });
@@ -605,13 +632,13 @@ describe("sqlite orm integration", () => {
         tables: { authors, posts },
       });
 
-      await orm.$raw`
+      await orm.$raw.unsafe(`
       CREATE TABLE authors (id TEXT PRIMARY KEY NOT NULL);
       CREATE TABLE posts (
         id TEXT PRIMARY KEY NOT NULL,
         author_id TEXT NOT NULL REFERENCES authors(id)
       );
-    `;
+    `);
 
       const [error] = await mightThrow(
         orm.$transaction(async (tx) => {
@@ -949,7 +976,7 @@ describe("sqlite orm integration", () => {
         },
       });
 
-    const seedRelationFilterData = async (sql: Bun.SQL) => {
+    const seedRelationFilterData = async (sql: Sql) => {
       await sql.unsafe(
         "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE)",
       );
@@ -1131,7 +1158,7 @@ describe("sqlite orm integration", () => {
       });
 
     const createNestedIncludeSchemaAndRows = async (
-      sql: Bun.SQL,
+      sql: Sql,
       postsSqlName: string,
     ) => {
       await sql.unsafe(
@@ -1274,7 +1301,7 @@ describe("sqlite orm integration", () => {
         },
       });
 
-      await orm.$raw`
+      await orm.$raw.unsafe(`
       CREATE TABLE users (
         id TEXT PRIMARY KEY NOT NULL,
         first_name TEXT NOT NULL,
@@ -1287,7 +1314,7 @@ describe("sqlite orm integration", () => {
         content TEXT NOT NULL,
         author_id TEXT NOT NULL REFERENCES users(id)
       );
-    `;
+    `);
 
       const leo = await orm.users.create({
         data: {
@@ -1418,7 +1445,7 @@ describe("sqlite orm integration", () => {
         },
       });
 
-      await orm.$raw`
+      await orm.$raw.unsafe(`
         CREATE TABLE students (
             id TEXT PRIMARY KEY NOT NULL,
             created_at TEXT NOT NULL,
@@ -1439,7 +1466,7 @@ describe("sqlite orm integration", () => {
           exam_id TEXT NOT NULL REFERENCES exams(id),
           PRIMARY KEY (student_id, exam_id)
         );
-    `;
+    `);
 
       await orm.exams.createMany({
         data: [
@@ -1553,7 +1580,7 @@ describe("sqlite orm integration", () => {
         },
       });
 
-      await orm.$raw`
+      await orm.$raw.unsafe(`
       CREATE TABLE students (id TEXT PRIMARY KEY NOT NULL, first_name TEXT NOT NULL);
       CREATE TABLE exams (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL);
       CREATE TABLE students_to_exams (
@@ -1561,7 +1588,7 @@ describe("sqlite orm integration", () => {
         exam_id TEXT NOT NULL REFERENCES exams(id),
         PRIMARY KEY (student_id, exam_id)
       );
-    `;
+    `);
 
       await orm.students.createMany({
         data: [{ id: "S1", firstName: "John" }],
@@ -1899,7 +1926,7 @@ if (SEMOLA_POSTGRES_URL) {
         pool: { max: 1 },
       });
 
-      expect(orm.$raw.options.max).toBe(1);
+      expect((orm.$raw as Bun.SQL).options.max).toBe(1);
 
       await Promise.all([orm.$ping(), orm.$ping(), orm.$ping()]);
 

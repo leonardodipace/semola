@@ -1,9 +1,9 @@
 ---
 title: ORM
-description: Semola ORM - typed tables, queries, and migrations for Bun SQL (SQLite or Postgres)
+description: Semola ORM - typed tables, queries, and migrations for SQLite or Postgres on Bun, Node, and Deno
 ---
 
-Define tables once, then use typed create, find, update, and delete helpers. Semola uses Bun's SQL client and supports SQLite and Postgres.
+Define tables once, then use typed create, find, update, and delete helpers. Semola uses Bun's SQL client by default and supports SQLite and Postgres. Node and Deno use a driver you supply (see Runtimes and drivers).
 
 ## Quick start
 
@@ -342,7 +342,50 @@ await db.$transaction(async (tx) => {
 await db.$raw.unsafe(`SELECT 1`);
 ```
 
-`$raw` is the underlying `Bun.SQL` instance. Prefer migrations for schema changes.
+`$raw` is the underlying SQL client (`Bun.SQL` when created from `url`). Prefer migrations for schema changes.
+
+## Runtimes and drivers
+
+`url` opens a Bun SQL connection, so it needs Bun. On Node and Deno, pass `client` instead.
+
+| Runtime | Database | Pass as |
+| --- | --- | --- |
+| Bun | SQLite, Postgres | `url` (built in), or `client: new Bun.SQL(url)` |
+| Node, Deno | SQLite | `client: fromNodeSqlite(db)` (`node:sqlite`) |
+| Node, Deno, Bun | Postgres | `client` from the `postgres` package (postgres.js) |
+
+Semola has no dependency on `postgres`. `Bun.SQL` is modeled on it, and postgres.js 4 already has the shape the ORM calls: `unsafe(statement, params)`, `begin([mode,] fn)` (the callback gets `unsafe` and `savepoint`), and `close()`. That shape is the `SqlClient` type; any other driver that provides it works too.
+
+```typescript
+import { DatabaseSync } from "node:sqlite";
+import { createOrm, fromNodeSqlite } from "semola/orm";
+
+const db = createOrm({
+  adapter: "sqlite",
+  client: fromNodeSqlite(new DatabaseSync("./dev.db")),
+  tables: { users },
+});
+```
+
+postgres.js 4 passes as it is:
+
+```typescript
+import postgres from "postgres";
+import { createOrm } from "semola/orm";
+
+const sql = postgres(process.env.DATABASE_URL!);
+
+const db = createOrm({
+  adapter: "postgres",
+  client: sql,
+  tables: { users },
+});
+```
+
+- `fromNodeSqlite(db)` takes a `DatabaseSync` from `node:sqlite` (Node 22.5+, Deno 2.2+). It uses one connection; queries issued while a transaction is open join that transaction, as with Bun SQLite. A string with several statements runs them all and returns the last result.
+- `$raw` is typed as `SqlClient` (`unsafe`, `begin`, `close`). Cast to `Bun.SQL` when you need tagged templates on Bun.
+- With `client`, you own the connection: `pool` is not available, `$config.url` is `undefined`, and `db.$raw.close()` closes your client.
+- The `semola` CLI runs on Bun and needs `createOrm({ url })`. With a `client`, call `applyMigrations({ migrationsDir, orm: { adapter, tables, client } })` from your own script.
 
 ## Connection pooling
 
@@ -448,7 +491,7 @@ await applyMigrations({
 });
 ```
 
-Apply opens its own connection and closes it when finished. Prefer a file URL over `:memory:` so the schema is visible to later clients.
+Apply opens its own connection from `url` and closes it when finished. Prefer a file URL over `:memory:` so the schema is visible to later clients. Instead of `url`, `orm.client` runs migrations on a client you own and leaves it open. Migrations turn SQLite foreign keys off on that connection while they run and back on afterwards; prefer a dedicated client.
 
 - Apply pending migrations before creating another one.
 - `create` fails when nothing changed.
@@ -518,7 +561,8 @@ On SQLite, overlapping `$transaction` calls (and nested relation writes that ope
 | Option | Meaning |
 | --- | --- |
 | `adapter` | `"sqlite"` or `"postgres"` |
-| `url` | Connection URL (e.g. `"file:./dev.db"`) |
+| `url` | Connection URL (e.g. `"file:./dev.db"`); opens a Bun SQL connection |
+| `client` | Your own `SqlClient` instead of `url` (`fromNodeSqlite`, postgres.js, `Bun.SQL`) |
 | `tables` | Map of `defineTable` results |
 | `relations` | Optional `one` / `many` map |
 | `hooks` | Global and per-table lifecycle hooks |
@@ -529,9 +573,9 @@ On SQLite, overlapping `$transaction` calls (and nested relation writes that ope
 | Member | Meaning |
 | --- | --- |
 | `db.<table>` | Typed table client |
-| `db.$raw` | Underlying `Bun.SQL` |
+| `db.$raw` | Underlying `SqlClient` |
 | `db.$transaction(cb)` | Run work in a transaction |
-| `db.$config` | Adapter, redacted URL, tables, and pool |
+| `db.$config` | Adapter, redacted URL (absent with `client`), tables, and pool |
 | `db.$ping()` | Health check (`SELECT 1`) |
 
 ### Migrations API
@@ -541,4 +585,5 @@ On SQLite, overlapping `$transaction` calls (and nested relation writes that ope
 | `loadConfig(cwd?)` | Load `semola.config.ts` and schema into a `LoadedConfig` |
 | `applyMigrations(config)` | Apply pending migrations (history, lock, checksum) |
 | `MigrationError` | Thrown on migration failures |
-| `LoadedConfig` | `{ migrationsDir, orm: { adapter, url, tables } }` |
+| `LoadedConfig` | `{ migrationsDir, orm: { adapter, tables, url } }` or `orm: { adapter, tables, client }` |
+| `fromNodeSqlite(db)` | Wrap a `node:sqlite` database as a `SqlClient` |

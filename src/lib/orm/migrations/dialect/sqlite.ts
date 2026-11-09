@@ -1,5 +1,6 @@
 import { SQLITE_SPEC } from "../../dialect/sqlite.js";
 import { MigrationError } from "../../errors.js";
+import type { Sql } from "../../types.js";
 import type {
   ColumnSnapshot,
   MigrationDialectSpec,
@@ -164,12 +165,17 @@ const foldOpsByTable = (
   return folded;
 };
 
-const prepareConnection = async (sql: Bun.SQL) => {
+const prepareConnection = async (sql: Sql) => {
   await sql.unsafe("PRAGMA foreign_keys = OFF");
   await sql.unsafe("PRAGMA busy_timeout = 250");
 };
 
-const assertForeignKeys = async (sql: Bun.SQL) => {
+// Undo prepareConnection on a client the caller keeps using.
+const restoreConnection = async (sql: Sql) => {
+  await sql.unsafe("PRAGMA foreign_keys = ON");
+};
+
+const assertForeignKeys = async (sql: Sql) => {
   const violations = [...(await sql.unsafe("PRAGMA foreign_key_check"))];
 
   if (violations.length === 0) return;
@@ -189,6 +195,7 @@ export const SQLITE_MIGRATION_SPEC: MigrationDialectSpec = {
   sqlTypeFor,
   normalizeOps: foldOpsByTable,
   prepareConnection,
+  restoreConnection,
   assertForeignKeys,
   beginMigration: (sql, fn) => sql.begin("IMMEDIATE", fn),
 };

@@ -22,6 +22,7 @@ import type {
   UpdateResult,
 } from "../orm/types.js";
 import type { Table } from "../table/types.js";
+import type { Sql, SqlClient, SqlTransaction } from "../types.js";
 
 export type Adapter = "sqlite" | "postgres";
 
@@ -35,11 +36,11 @@ export type DistinctClause = {
 };
 
 export type DialectTransactionFn<TResult> = (
-  tx: Bun.TransactionSQL,
+  tx: SqlTransaction,
 ) => Promise<TResult>;
 
 export type DialectBegin = <TResult>(
-  sql: Bun.SQL,
+  sql: SqlClient,
   run: DialectTransactionFn<TResult>,
 ) => Promise<TResult>;
 
@@ -61,7 +62,7 @@ export type DialectSpec = {
   emptyJsonArrayLiteral: string;
   // Postgres: DISTINCT ON (columns). SQLite: GROUP BY columns.
   formatDistinct: (quotedColumns: string[]) => DistinctClause;
-  prepareConnection?: (sql: Bun.SQL) => Promise<unknown>;
+  prepareConnection?: (sql: Sql) => Promise<unknown>;
   begin: DialectBegin;
 };
 
@@ -263,47 +264,47 @@ export type Dialect<
 > = {
   name: Adapter;
   findMany<const TOptions extends FindManyOptions<T, TRelations>>(
-    sql: Bun.SQL,
+    sql: Sql,
     options?: TOptions,
   ): Promise<Array<FindManyResult<T, TRelations, TOptions>>>;
 
   findFirst<const TOptions extends FindFirstOptions<T, TRelations>>(
-    sql: Bun.SQL,
+    sql: Sql,
     options?: TOptions,
   ): Promise<FindFirstResult<T, TRelations, TOptions>>;
 
   findUnique<const TOptions extends FindUniqueOptions<T, TRelations>>(
-    sql: Bun.SQL,
+    sql: Sql,
     options: TOptions,
   ): Promise<FindUniqueResult<T, TRelations, TOptions>>;
 
   create<const TOptions extends CreateOptions<T, TRelations>>(
-    sql: Bun.SQL,
+    sql: Sql,
     options: TOptions,
   ): Promise<CreateResult<T, TRelations, TOptions>>;
 
   createMany(
-    sql: Bun.SQL,
+    sql: Sql,
     options: CreateManyOptions<T>,
   ): Promise<Array<TableRow<T>>>;
 
   update<const TOptions extends UpdateOptions<T, TRelations>>(
-    sql: Bun.SQL,
+    sql: Sql,
     options: TOptions,
   ): Promise<UpdateResult<T, TRelations, TOptions>>;
 
   updateMany(
-    sql: Bun.SQL,
+    sql: Sql,
     options: UpdateManyOptions<T, TRelations>,
   ): Promise<Array<TableRow<T>>>;
 
   delete<const TOptions extends DeleteOptions<T, TRelations>>(
-    sql: Bun.SQL,
+    sql: Sql,
     options: TOptions,
   ): Promise<DeleteResult<T, TRelations, TOptions>>;
 
   deleteMany(
-    sql: Bun.SQL,
+    sql: Sql,
     options: DeleteManyOptions<T, TRelations>,
   ): Promise<Array<TableRow<T>>>;
 };

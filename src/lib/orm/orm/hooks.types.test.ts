@@ -79,7 +79,7 @@ describe("hooks types", () => {
       },
     });
 
-    await orm.$raw`
+    await orm.$raw.unsafe(`
       CREATE TABLE students (id TEXT PRIMARY KEY NOT NULL, first_name TEXT NOT NULL);
       CREATE TABLE exams (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL);
       CREATE TABLE students_to_exams (
@@ -87,7 +87,7 @@ describe("hooks types", () => {
         exam_id TEXT NOT NULL REFERENCES exams(id),
         PRIMARY KEY (student_id, exam_id)
       );
-    `;
+    `);
 
     await orm.students.createMany({ data: [{ id: "S1", firstName: "John" }] });
     await orm.exams.createMany({ data: [{ id: "E1", name: "Math" }] });

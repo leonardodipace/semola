@@ -12,7 +12,9 @@ import { pathToFileURL } from "node:url";
 import type { SemolaConfig } from "../../config.js";
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
 import { MigrationError } from "../errors.js";
-import { getOrmConnectionUrl } from "../orm/orm.js";
+import { getOrmConnectionUrl, openBunSql } from "../orm/orm.js";
+import type { OrmClient } from "../orm/types.js";
+import type { Sql, SqlClient } from "../types.js";
 import type { MigrationDialect } from "./dialect/index.js";
 import { getMigrationDialect } from "./dialect/index.js";
 import { hasDestructiveOps } from "./dialect/warnings.js";
@@ -55,7 +57,7 @@ const resolveOrmFromModule = (mod: Record<string, unknown>) => {
   for (const value of candidates) {
     if (!isOrmClient(value)) continue;
 
-    return value as { $config: OrmConfig; $raw: Bun.SQL };
+    return value as OrmClient;
   }
 
   throw new MigrationError(
@@ -85,7 +87,7 @@ const importModule = async (filePath: string, label: string) => {
   return mod;
 };
 
-const ensureHistoryTable = async (sql: Bun.SQL) => {
+const ensureHistoryTable = async (sql: Sql) => {
   await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS ${HISTORY_TABLE} (
       name TEXT PRIMARY KEY NOT NULL,
@@ -111,12 +113,18 @@ const ensureHistoryTable = async (sql: Bun.SQL) => {
   );
 };
 
+const openConnection = (orm: OrmConfig) => {
+  if (orm.client) return orm.client;
+
+  return openBunSql(orm.adapter, orm.url);
+};
+
 const withConnection = async <T>(
   config: LoadedConfig,
-  fn: (sql: Bun.SQL, dialect: MigrationDialect) => Promise<T>,
+  fn: (sql: SqlClient, dialect: MigrationDialect) => Promise<T>,
 ) => {
   const dialect = getMigrationDialect(config.orm.adapter);
-  const sql = new Bun.SQL(config.orm.url, { adapter: config.orm.adapter });
+  const sql = openConnection(config.orm);
 
   try {
     await dialect.prepareConnection(sql);
@@ -125,7 +133,13 @@ const withConnection = async <T>(
 
     return await fn(sql, dialect);
   } finally {
-    await sql.close();
+    if (config.orm.client) {
+      // Owned by the caller, who keeps using it.
+      // Best effort: a failure here must not replace the migration error.
+      await mightThrow(dialect.restoreConnection(sql));
+    } else {
+      await sql.close();
+    }
   }
 };
 
@@ -146,6 +160,12 @@ export const loadConfig = async (cwd = process.cwd()) => {
   const url = getOrmConnectionUrl(client) ?? client.$config.url;
 
   await client.$raw.close();
+
+  if (url === undefined) {
+    throw new MigrationError(
+      "loadConfig needs createOrm({ url }). With a client, pass { migrationsDir, orm: { adapter, tables, client } } to applyMigrations",
+    );
+  }
 
   return {
     migrationsDir: resolve(cwd, config.orm.migrationsDir ?? "migrations"),
@@ -214,7 +234,7 @@ const readSqlFile = async (filePath: string, label: string) => {
   return text;
 };
 
-const readApplied = async (sql: Bun.SQL) => {
+const readApplied = async (sql: Sql) => {
   const rows = (await sql.unsafe(
     `SELECT name, schema, up_checksum AS "upChecksum" FROM ${HISTORY_TABLE} ORDER BY name ASC`,
   )) as HistoryRow[];
@@ -291,7 +311,7 @@ const validateHistory = async (
   await assertUpChecksums(migrationsDir, applied);
 };
 
-const loadHistory = async (sql: Bun.SQL, migrationsDir: string) => {
+const loadHistory = async (sql: Sql, migrationsDir: string) => {
   const applied = await readApplied(sql);
   const dirs = await listMigrationDirs(migrationsDir);
 
@@ -301,7 +321,7 @@ const loadHistory = async (sql: Bun.SQL, migrationsDir: string) => {
 };
 
 const withMigrationLock = async <T>(
-  tx: Bun.SQL,
+  tx: Sql,
   dialect: MigrationDialect,
   fn: () => Promise<T>,
 ) => {
@@ -338,7 +358,7 @@ const assertCreateBaselineUnchanged = (
   }
 };
 
-const runSqlText = async (sql: Bun.SQL, text: string, label: string) => {
+const runSqlText = async (sql: Sql, text: string, label: string) => {
   const statements = splitStatements(text);
 
   if (statements.length === 0) {
@@ -502,7 +522,7 @@ export const createMigration = async (input: {
   });
 };
 
-const runSqlFile = async (sql: Bun.SQL, filePath: string, label: string) => {
+const runSqlFile = async (sql: Sql, filePath: string, label: string) => {
   await runSqlText(sql, await readSqlFile(filePath, label), label);
 };
 

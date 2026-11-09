@@ -1,6 +1,7 @@
 import type { BaseColumn, Column } from "../column/types.js";
 import type { Adapter } from "../dialect/index.js";
 import type { Table } from "../table/types.js";
+import type { Sql, SqlClient, SqlTransaction } from "../types.js";
 
 export type HasMany<T extends Table> = {
   _type: "hasMany";
@@ -50,7 +51,6 @@ type CreateOrmOptionsBase<
   T extends Record<string, Table>,
   R extends RelationsFor<T>,
 > = {
-  url: string;
   tables: T;
   relations?: R;
   hooks?: OrmHooksConfig<T, R>;
@@ -62,11 +62,21 @@ export type CreateOrmOptions<
 > =
   | (CreateOrmOptionsBase<T, R> & {
       adapter: "sqlite" | "postgres";
+      url: string;
+      client?: never;
       pool?: never;
     })
   | (CreateOrmOptionsBase<T, R> & {
       adapter: "postgres";
+      url: string;
+      client?: never;
       pool?: OrmPoolOptions;
+    })
+  | (CreateOrmOptionsBase<T, R> & {
+      adapter: "sqlite" | "postgres";
+      client: SqlClient;
+      url?: never;
+      pool?: never;
     });
 
 // Look up the raw relations for a table by matching its structural type against all tables.
@@ -108,10 +118,10 @@ export type OrmClient<
     R
   >;
 } & {
-  $raw: Bun.SQL;
+  $raw: SqlClient;
   $config: {
     adapter: Adapter;
-    url: string;
+    url?: string;
     tables: T;
     pool?: OrmPoolOptions;
   };
@@ -132,7 +142,7 @@ export type TransactionClient<
     R
   >;
 } & {
-  $raw: Bun.SQL;
+  $raw: SqlTransaction;
 };
 
 export type StringKeyOf<T extends object> = Extract<keyof T, string>;
@@ -954,7 +964,7 @@ export type CreateTableClientInput<
   T extends Table = Table,
   TRelations extends TableRelations = TableRelations,
 > = {
-  sql: Bun.SQL;
+  sql: Sql;
   tableName: string;
   table: T;
   adapter: Adapter;

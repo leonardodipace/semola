@@ -1,4 +1,8 @@
+import { DatabaseSync } from "node:sqlite";
+import postgres from "postgres";
 import type { Adapter } from "./dialect/types.js";
+import { fromNodeSqlite } from "./node-sqlite.js";
+import type { SqlClient } from "./types.js";
 
 export const SEMOLA_POSTGRES_URL = process.env.SEMOLA_POSTGRES_URL;
 
@@ -15,29 +19,53 @@ export const resetPostgres = async (url: string) => {
 };
 
 export type IntegrationAdapter = {
+  name: string;
   adapter: Adapter;
-  url: string;
-  createSql: () => Bun.SQL;
+  createSql: () => SqlClient;
+  // createOrm options that reach the database: a url for Bun.SQL, or a client.
+  connection: () => { url: string } | { client: SqlClient };
   beforeEach?: () => Promise<void>;
 };
 
 export const integrationAdapters = (): IntegrationAdapter[] => {
+  const createNodeSqlite = () => fromNodeSqlite(new DatabaseSync(":memory:"));
+
   const adapters: IntegrationAdapter[] = [
     {
+      name: "sqlite",
       adapter: "sqlite",
-      url: ":memory:",
       createSql: () => new Bun.SQL(":memory:"),
+      connection: () => ({ url: ":memory:" }),
+    },
+    {
+      name: "sqlite via node:sqlite",
+      adapter: "sqlite",
+      createSql: createNodeSqlite,
+      connection: () => ({ client: createNodeSqlite() }),
     },
   ];
 
   if (!SEMOLA_POSTGRES_URL) return adapters;
 
-  adapters.push({
-    adapter: "postgres",
-    url: SEMOLA_POSTGRES_URL,
-    createSql: () => new Bun.SQL(SEMOLA_POSTGRES_URL, { adapter: "postgres" }),
-    beforeEach: () => resetPostgres(SEMOLA_POSTGRES_URL),
-  });
+  const url = SEMOLA_POSTGRES_URL;
+  const createPg = () => postgres(url, { max: 5 });
+
+  adapters.push(
+    {
+      name: "postgres",
+      adapter: "postgres",
+      createSql: () => new Bun.SQL(url, { adapter: "postgres" }),
+      connection: () => ({ url }),
+      beforeEach: () => resetPostgres(url),
+    },
+    {
+      name: "postgres via postgres.js",
+      adapter: "postgres",
+      createSql: createPg,
+      connection: () => ({ client: createPg() }),
+      beforeEach: () => resetPostgres(url),
+    },
+  );
 
   return adapters;
 };

@@ -3,6 +3,7 @@ import { json, jsonb, uuid } from "../column/index.js";
 import { integrationAdapters } from "../integration-helpers.js";
 import { many, one } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
+import type { Sql } from "../types.js";
 import { getDialect } from "./index.js";
 import { postsTable, usersTable } from "./test-fixtures.js";
 
@@ -39,26 +40,26 @@ const schemaSql = {
 } as const;
 
 for (const live of integrationAdapters()) {
-  describe(`${live.adapter} dialect integration`, () => {
+  describe(`${live.name} dialect integration`, () => {
     const ddl = schemaSql[live.adapter];
 
-    const setupUsers = async (sql: Bun.SQL) => {
+    const setupUsers = async (sql: Sql) => {
       await live.beforeEach?.();
       await sql.unsafe(ddl.users);
     };
 
-    const setupUsersAndPosts = async (sql: Bun.SQL) => {
+    const setupUsersAndPosts = async (sql: Sql) => {
       await setupUsers(sql);
       await sql.unsafe(ddl.posts);
     };
 
-    const setupMeta = async (sql: Bun.SQL) => {
+    const setupMeta = async (sql: Sql) => {
       await live.beforeEach?.();
       await sql.unsafe(ddl.meta);
     };
 
     const insertUser = async (
-      sql: Bun.SQL,
+      sql: Sql,
       id: string,
       firstName: string,
       createdAt: string,
@@ -68,7 +69,7 @@ for (const live of integrationAdapters()) {
     };
 
     const insertPost = async (
-      sql: Bun.SQL,
+      sql: Sql,
       id: string,
       title: string,
       authorId: string,

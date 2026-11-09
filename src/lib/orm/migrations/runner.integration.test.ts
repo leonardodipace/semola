@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { string, uuid } from "../column/index.js";
 import { MigrationError } from "../errors.js";
 import {
@@ -10,6 +11,7 @@ import {
   resetPostgres,
   SEMOLA_POSTGRES_URL,
 } from "../integration-helpers.js";
+import { fromNodeSqlite } from "../node-sqlite.js";
 import { createOrm } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
 import {
@@ -3118,3 +3120,95 @@ if (SEMOLA_POSTGRES_URL) {
     });
   });
 }
+
+describe("migrations with a user-supplied client", () => {
+  const dirs: string[] = [];
+
+  afterEach(async () => {
+    for (const dir of dirs.splice(0)) {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  const writeClientProject = async () => {
+    const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+    dirs.push(root);
+
+    await writeFile(
+      join(root, "db.ts"),
+      `
+import { DatabaseSync } from "node:sqlite";
+import { createOrm, defineTable, fromNodeSqlite, string, uuid } from ${JSON.stringify(join(import.meta.dir, "../index.ts"))};
+
+const users = defineTable({
+  sqlName: "users",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    name: string("name").notNull(),
+  },
+});
+
+export const db = createOrm({
+  adapter: "sqlite",
+  client: fromNodeSqlite(new DatabaseSync(":memory:")),
+  tables: { users },
+});
+`,
+    );
+    await writeFile(
+      join(root, "semola.config.ts"),
+      `
+import { defineConfig } from ${JSON.stringify(join(import.meta.dir, "../../config.ts"))};
+
+export default defineConfig({
+  orm: { schema: "./db.ts" },
+});
+`,
+    );
+
+    return root;
+  };
+
+  test("loadConfig rejects a schema that uses a client", async () => {
+    const root = await writeClientProject();
+
+    expect(loadConfig(root)).rejects.toThrow("needs createOrm({ url })");
+  });
+
+  test("create, apply, and rollback run on a client in config", async () => {
+    const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+    dirs.push(root);
+
+    const client = fromNodeSqlite(new DatabaseSync(":memory:"));
+    const users = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+      },
+    });
+    const config = {
+      migrationsDir: join(root, "migrations"),
+      orm: { adapter: "sqlite" as const, tables: { users }, client },
+    };
+
+    const folder = await createMigration({ name: "init", config });
+
+    expect(await applyMigrations(config)).toEqual([folder]);
+
+    const [pragma] = await client.unsafe("PRAGMA foreign_keys");
+
+    expect(Object.values(pragma ?? {})).toEqual([1]);
+
+    await client.unsafe("INSERT INTO users (id, name) VALUES ('u1', 'Ada')");
+    await client.unsafe("DELETE FROM users");
+
+    expect(await rollbackMigration(config)).toBe(folder);
+
+    const tables = await client.unsafe(
+      "SELECT name FROM sqlite_master WHERE name = 'users'",
+    );
+
+    expect([...tables]).toEqual([]);
+  });
+});

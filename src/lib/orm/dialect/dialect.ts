@@ -13,6 +13,7 @@ import type {
   UpdateOptions,
 } from "../orm/types.js";
 import type { Table } from "../table/types.js";
+import type { Sql, SqlTransaction } from "../types.js";
 import { foreignKeyResolver } from "./foreign-key.js";
 import { DialectQueryBuilder } from "./query-builder.js";
 import { RowParser } from "./row-parser.js";
@@ -26,6 +27,9 @@ import type {
   Row,
 } from "./types.js";
 
+// Nested savepoints may reuse one name: ROLLBACK TO and RELEASE take the latest.
+const RELATION_WRITE_SAVEPOINT = "semola_relation_write";
+
 export class SqlDialect<T extends Table, R extends TableRelations> {
   public readonly name;
   private builder: DialectQueryBuilder<T, R>;
@@ -37,7 +41,7 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
   }
 
   public async findMany<const TOptions extends FindManyOptions<T, R>>(
-    sql: Bun.SQL,
+    sql: Sql,
     options?: TOptions,
   ) {
     const query = this.builder.buildFindMany(options);
@@ -53,7 +57,7 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
   }
 
   public async findFirst<const TOptions extends FindFirstOptions<T, R>>(
-    sql: Bun.SQL,
+    sql: Sql,
     options?: TOptions,
   ) {
     const query = this.builder.buildFindFirst(options);
@@ -63,7 +67,7 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
   }
 
   public async findUnique<const TOptions extends FindUniqueOptions<T, R>>(
-    sql: Bun.SQL,
+    sql: Sql,
     options: TOptions,
   ) {
     const query = this.builder.buildFindUnique(options);
@@ -73,7 +77,7 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
   }
 
   public async create<const TOptions extends CreateOptions<T, R>>(
-    sql: Bun.SQL,
+    sql: Sql,
     options: TOptions,
   ) {
     if (this.hasRelationWrites(options.data)) {
@@ -89,7 +93,7 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
     return this.executeOne(sql, query, "insert");
   }
 
-  public async createMany(sql: Bun.SQL, options: CreateManyOptions<T>) {
+  public async createMany(sql: Sql, options: CreateManyOptions<T>) {
     if (!options.data.length) {
       return [];
     }
@@ -100,7 +104,7 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
   }
 
   public async update<const TOptions extends UpdateOptions<T, R>>(
-    sql: Bun.SQL,
+    sql: Sql,
     options: TOptions,
   ) {
     if (this.hasRelationWrites(options.data)) {
@@ -123,14 +127,14 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
     return this.executeOne(sql, query, "update");
   }
 
-  public async updateMany(sql: Bun.SQL, options: UpdateManyOptions<T, R>) {
+  public async updateMany(sql: Sql, options: UpdateManyOptions<T, R>) {
     const query = this.builder.buildUpdateMany(options);
 
     return this.executeQuery(sql, query);
   }
 
   public async delete<const TOptions extends DeleteOptions<T, R>>(
-    sql: Bun.SQL,
+    sql: Sql,
     options: TOptions,
   ) {
     const query = this.builder.buildDelete(options);
@@ -138,7 +142,7 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
     return this.executeOne(sql, query, "delete");
   }
 
-  public async deleteMany(sql: Bun.SQL, options: DeleteManyOptions<T, R>) {
+  public async deleteMany(sql: Sql, options: DeleteManyOptions<T, R>) {
     const query = this.builder.buildDeleteMany(options);
 
     return this.executeQuery(sql, query);
@@ -149,11 +153,11 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
   }
 
   private async withRelationWrites(
-    sql: Bun.SQL,
+    sql: Sql,
     options: RelationWriteOptions<T, R>,
-    write: (tx: Bun.SQL, data: Row) => Promise<Row>,
+    write: (tx: SqlTransaction, data: Row) => Promise<Row>,
   ) {
-    const run = async (tx: Bun.SQL) => {
+    const run = async (tx: SqlTransaction) => {
       const data: Row = {};
       const hasManyWrites: Array<[HasMany<Table>, HasManyWriteInput]> = [];
 
@@ -196,14 +200,17 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
     };
 
     if ("savepoint" in sql) {
-      return (sql as Bun.TransactionSQL).savepoint(run);
+      // Bun nested savepoint clients are transactions at runtime.
+      return sql.savepoint(RELATION_WRITE_SAVEPOINT, (tx) => {
+        return run(tx as SqlTransaction);
+      });
     }
 
     return this.builder.spec.begin(sql, run);
   }
 
   private async applyHasOneWrite(
-    tx: Bun.SQL,
+    tx: SqlTransaction,
     relation: HasOne<Table>,
     input: HasOneWriteInput,
     data: Row,
@@ -228,7 +235,7 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
   }
 
   private async applyHasManyWrite(
-    tx: Bun.SQL,
+    tx: SqlTransaction,
     relation: HasMany<Table>,
     input: HasManyWriteInput,
     row: Row,
@@ -259,7 +266,7 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
   }
 
   private async findExisting(
-    sql: Bun.SQL,
+    sql: Sql,
     where: Row,
     options?: Omit<RelationWriteOptions<T, R>, "data">,
   ) {
@@ -277,17 +284,13 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
     return row;
   }
 
-  private async executeQuery(sql: Bun.SQL, query: ReturningQuery) {
+  private async executeQuery(sql: Sql, query: ReturningQuery) {
     await this.builder.spec.prepareConnection?.(sql);
 
     return this.parser.executeQuery(sql, this.builder.table, query);
   }
 
-  private async executeOne(
-    sql: Bun.SQL,
-    query: ReturningQuery,
-    operation: string,
-  ) {
+  private async executeOne(sql: Sql, query: ReturningQuery, operation: string) {
     const [row] = await this.executeQuery(sql, query);
 
     if (!row) {

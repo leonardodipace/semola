@@ -3,6 +3,7 @@ import type { Column } from "../column/types.js";
 import type { Adapter } from "../dialect/types.js";
 import type { IndexSnapshot } from "../indexes/types.js";
 import type { Table } from "../table/types.js";
+import type { Sql, SqlClient, SqlTransaction } from "../types.js";
 
 export type ColumnSnapshot = {
   name: string;
@@ -85,11 +86,15 @@ export type RenameHandler = (
   question: RenameQuestion,
 ) => string | undefined | Promise<string | undefined>;
 
-export type OrmConfig = {
+type OrmConfigBase = {
   adapter: Adapter;
-  url: string;
   tables: Record<string, Table>;
 };
+
+// Pass url to let migrations open their own Bun connection, or a client you own.
+export type OrmConfig =
+  | (OrmConfigBase & { url: string; client?: never })
+  | (OrmConfigBase & { client: SqlClient; url?: never });
 
 export type LoadedConfig = {
   migrationsDir: string;
@@ -127,11 +132,12 @@ export type MigrationDialectSpec = {
   renderRenameColumn?: (
     op: Extract<MigrationOp, { kind: "renameColumn" }>,
   ) => string;
-  prepareConnection?: (sql: Bun.SQL) => Promise<void>;
-  assertForeignKeys?: (sql: Bun.SQL) => Promise<void>;
-  lockMigrations?: (sql: Bun.SQL) => Promise<void>;
+  prepareConnection?: (sql: Sql) => Promise<void>;
+  assertForeignKeys?: (sql: Sql) => Promise<void>;
+  lockMigrations?: (sql: Sql) => Promise<void>;
+  restoreConnection?: (sql: Sql) => Promise<void>;
   beginMigration?: <T>(
-    sql: Bun.SQL,
-    fn: (tx: Bun.SQL) => Promise<T>,
+    sql: SqlClient,
+    fn: (tx: SqlTransaction) => Promise<T>,
   ) => Promise<T>;
 };

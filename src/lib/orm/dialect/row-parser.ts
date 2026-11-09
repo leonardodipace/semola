@@ -1,5 +1,6 @@
 import { mightThrowSync } from "../../errors/index.js";
 import type { Table } from "../table/types.js";
+import type { Sql } from "../types.js";
 import type {
   CoerceRelationItemsInput,
   CoerceRowInput,
@@ -25,7 +26,7 @@ export class RowParser {
     }
   }
 
-  public async executeQuery(sql: Bun.SQL, table: Table, query: ReturningQuery) {
+  public async executeQuery(sql: Sql, table: Table, query: ReturningQuery) {
     const rows = [...(await sql.unsafe(query.statement, query.params))];
 
     this.parseRows({ table, rows, descriptors: query.includeDescriptors });

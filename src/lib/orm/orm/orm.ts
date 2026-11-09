@@ -1,6 +1,9 @@
 import { mightThrowSync } from "../../errors/index.js";
 import { getDialectSpec } from "../dialect/index.js";
+import type { Adapter } from "../dialect/types.js";
+import { OrmError } from "../errors.js";
 import type { Table } from "../table/types.js";
+import type { Sql, SqlClient, SqlTransaction } from "../types.js";
 import { pickGlobalHooks } from "./hook-runner.js";
 import { TableClientImpl } from "./table-client.js";
 import type {
@@ -16,9 +19,10 @@ import type {
   TransactionClient,
 } from "./types.js";
 
-const connectionUrls = new WeakMap<object, string>();
+const connectionUrls = new WeakMap<object, string | undefined>();
 
-const redactDatabaseUrl = (url: string) => {
+const redactDatabaseUrl = (url?: string) => {
+  if (url === undefined) return url;
   if (!url.includes("://")) return url;
 
   const [error, parsed] = mightThrowSync(() => new URL(url));
@@ -34,32 +38,42 @@ const redactDatabaseUrl = (url: string) => {
   return parsed.href;
 };
 
+export const openBunSql = (
+  adapter: Adapter,
+  url: string,
+  pool?: OrmPoolOptions,
+) => {
+  if (typeof Bun === "undefined") {
+    throw new OrmError(
+      "createOrm({ url }) needs Bun. Pass { client } instead, e.g. fromNodeSqlite(db)",
+    );
+  }
+
+  if (adapter === "postgres") {
+    return new Bun.SQL(url, { adapter, ...pool });
+  }
+
+  return new Bun.SQL(url, { adapter });
+};
+
 export const getOrmConnectionUrl = (client: object) => {
   return connectionUrls.get(client);
 };
 
 export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
-  public readonly $raw: Bun.SQL;
+  public readonly $raw: SqlClient;
   private options: CreateOrmOptions<T, R>;
   private tableRelationsMap = new Map<Table, TableRelations>();
 
   public constructor(options: CreateOrmOptions<T, R>) {
     this.options = options;
 
-    let sqlOptions: Bun.SQL.Options = {
-      adapter: options.adapter,
-    };
-
-    if (options.adapter === "postgres") {
-      if (options.pool) {
-        sqlOptions = {
-          adapter: options.adapter,
-          ...options.pool,
-        };
-      }
+    if (options.client) {
+      this.$raw = options.client;
+      return;
     }
 
-    this.$raw = new Bun.SQL(options.url, sqlOptions);
+    this.$raw = openBunSql(options.adapter, options.url, options.pool);
   }
 
   public buildClient(): OrmClient<T, R> {
@@ -90,7 +104,7 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
     return client;
   }
 
-  private buildTableClients(sql: Bun.SQL): OrmTableClients<T, R> {
+  private buildTableClients(sql: Sql): OrmTableClients<T, R> {
     const clients = Object.create(null);
 
     for (const entry of this.toObjectEntries(this.options.tables)) {
@@ -102,7 +116,7 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
 
   private setTableClient<K extends StringKeyOf<T>>(
     clients: OrmTableClients<T, R>,
-    sql: Bun.SQL,
+    sql: Sql,
     tableName: K,
     table: T[K],
   ) {
@@ -131,7 +145,7 @@ export class Orm<T extends Record<string, Table>, R extends RelationsFor<T>> {
     return async <TResult>(
       callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
     ): Promise<TResult> => {
-      const run = async (txSql: Bun.TransactionSQL) => {
+      const run = async (txSql: SqlTransaction) => {
         const txTableClients = this.buildTableClients(txSql);
         const txClient: TransactionClient<T, R> = {
           ...txTableClients,

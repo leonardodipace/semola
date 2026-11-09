@@ -43,7 +43,7 @@ const schemaSql = {
 } as const;
 
 for (const live of integrationAdapters()) {
-  describe(`${live.adapter} $transaction integration`, () => {
+  describe(`${live.name} $transaction integration`, () => {
     const ddl = schemaSql[live.adapter];
     const userId = live.adapter === "postgres" ? PG_ID : "u1";
     const userId2 = live.adapter === "postgres" ? PG_ID_2 : "u2";
@@ -55,7 +55,7 @@ for (const live of integrationAdapters()) {
 
       const orm = createOrm({
         adapter: live.adapter,
-        url: live.url,
+        ...live.connection(),
         tables: { users: usersTable, accounts: accountsTable },
       });
 
