@@ -11,3 +11,10 @@ export class EmptyListError extends Error {
     this.name = "EmptyListError";
   }
 }
+
+export class UnsupportedRuntimeError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = "UnsupportedRuntimeError";
+  }
+}

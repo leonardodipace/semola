@@ -7,7 +7,7 @@ import {
   test,
 } from "bun:test";
 import { mightThrow } from "../../errors/index.js";
-import { CronDistributed } from "./index.js";
+import { Cron, CronDistributed } from "./index.js";
 
 type SetCall = {
   key: string;
@@ -112,27 +112,16 @@ class MockRedisClient {
 
 const createMockRedis = () => new MockRedisClient();
 
-const mockCronJob = {
-  stop: () => {},
-  ref: () => {},
-  unref: () => {},
-} as Bun.CronJob;
-
+// Replaces the scheduler so a test can fire a tick by calling the handler itself.
 const mockInProcessCron = (handlers: Array<() => Promise<void>>) => {
-  const parse = Bun.cron.parse;
-  const remove = Bun.cron.remove;
-  const cronSpy = spyOn(Bun, "cron").mockImplementation(((
-    _schedule,
-    handler,
-  ) => {
-    handlers.push(handler as () => Promise<void>);
+  return spyOn(Cron.prototype, "run").mockImplementation(function (this: Cron) {
+    // biome-ignore lint/complexity/useLiteralKeys: options is private
+    const { handler } = this["options"];
 
-    return mockCronJob;
-  }) as typeof Bun.cron);
-
-  Object.assign(Bun.cron, { parse, remove });
-
-  return cronSpy;
+    handlers.push(async () => {
+      await handler();
+    });
+  });
 };
 
 const runTick = async (handler: (() => Promise<void>) | undefined) => {

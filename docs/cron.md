@@ -1,9 +1,9 @@
 ---
 title: Cron
-description: In-process and OS-level cron schedules on Bun
+description: In-process cron schedules on Node, Bun, and Deno, plus OS-level cron on Bun
 ---
 
-Schedule work either in-process or through the operating system. `Cron` runs a handler inside the current Bun process. `CronOS` registers a script with Bun's OS-level cron helper so it runs independently of the current process. `CronDistributed` runs an in-process handler like `Cron`, but uses Redis so only one replica executes each scheduled tick.
+Schedule work either in-process or through the operating system. `Cron` runs a handler inside the current process on Node, Bun, and Deno. `CronOS` registers a script with Bun's OS-level cron helper so it runs independently of the current process, and only works on Bun. `CronDistributed` runs an in-process handler like `Cron`, but uses Redis so only one replica executes each scheduled tick.
 
 ## Import
 
@@ -35,6 +35,16 @@ daily.stop();
 ### Aliases
 
 `@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`, `@midnight`, `@hourly`, `@minutely`. You can also pass a standard cron expression string.
+
+### Expressions
+
+Five fields: `minute hour day month weekday`. Each field takes `*`, numbers, ranges (`1-5`), steps (`*/5`, `1-30/2`, `5/15`), and comma lists (`1,5,10`). Month and weekday also take names (`JAN`, `January`, `MON`, `Monday`, case-insensitive). Weekday `0` and `7` both mean Sunday. Seconds are not supported.
+
+When both day and weekday are restricted (neither is `*`), the job runs when either matches, as in POSIX cron.
+
+Schedules run in the process's local time zone. A fixed time of day (`30 2 * * *`) runs once a day through DST changes: inside the hour clocks skip it runs shifted forward, and inside a repeated hour it runs on the first pass. Schedules that fire many times a day (`* * * * *`, `0 * * * *`) pause for the repeated hour when clocks go back, and several matches inside a skipped hour all run shifted forward. Zones whose clocks shift by 30 minutes (Lord Howe) are not covered.
+
+An invalid expression throws a `TypeError` from `run()` and `next()`. An expression that never matches (`0 0 31 2 *`) throws from `run()`, and `next()` returns `null`.
 
 ### Builder
 
@@ -85,11 +95,11 @@ const schedule = cronJobBuilder((b) =>
 
 ### Lifecycle
 
-`next()` returns the next fire time, or `null` if there is no match. `ref()` / `unref()` control whether the timer keeps the process alive. `getStatus()`, `getExpression()`, and `getJobName()` inspect the job. Disposing the instance (`Symbol.dispose`) calls `stop`.
+`next()` returns the next fire time, or `null` if there is no match. `ref()` / `unref()` control whether the timer keeps the process alive. A handler that is still running when the next boundary passes is not started again: the next run is the first boundary after it finishes. If the handler throws or rejects, the error surfaces as an unhandled rejection, as with `Bun.cron`. Node, Deno, and Bun exit on an unhandled rejection by default, so catch errors inside the handler or listen for `unhandledRejection`; with the process still alive the job keeps running. `getStatus()`, `getExpression()`, and `getJobName()` inspect the job. Disposing the instance (`Symbol.dispose`) calls `stop`.
 
 ## OS crontab
 
-`CronOS` registers a job with Bun's OS cron helper. It needs a script `path`, plus `name` and `schedule` (no in-process handler):
+`CronOS` registers a job with Bun's OS cron helper. It needs a script `path`, plus `name` and `schedule` (no in-process handler). It is the only part of this module that calls Bun APIs: on Node or Deno, `run()` and `stop()` reject with `UnsupportedRuntimeError`.
 
 This registers `backup.ts` at OS level, then removes that registration.
 
@@ -173,7 +183,7 @@ cleanup.stop();
 
 ### Read the next run with `next()`
 
-`next()` parses the schedule and returns its next matching `Date`, or `null` if there is no match (for example an impossible date). Pass a date or timestamp to calculate from another starting point.
+`next()` returns its next matching `Date`, or `null` if there is no match (for example an impossible date). Pass a date or timestamp to calculate from another starting point.
 
 ```typescript
 const everyFiveMinutes = new Cron({
@@ -204,7 +214,7 @@ const mondayMorning = new Cron({
 
 ### Release the process with `unref()`
 
-`unref()` lets Bun exit even while the cron timer remains scheduled.
+`unref()` lets the process exit even while the cron timer remains scheduled.
 
 ```typescript
 const heartbeat = new Cron({
@@ -361,4 +371,4 @@ Same as `Cron`: `run()`, `stop()`, `next(from?)`, `ref()` / `unref()`, `getStatu
 
 ### Errors
 
-`EmptyListError`, `OutOfBoundError` (exported from `semola/cron`).
+`EmptyListError`, `OutOfBoundError`, `UnsupportedRuntimeError` (exported from `semola/cron`). Invalid schedules throw a plain `TypeError`.
