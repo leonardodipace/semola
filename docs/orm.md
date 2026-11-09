@@ -1,9 +1,9 @@
 ---
 title: ORM
-description: Semola ORM - typed tables, queries, and migrations for SQLite or Postgres on Bun, Node, and Deno
+description: Semola ORM - typed tables, queries, and migrations for SQLite or Postgres on Bun and Node
 ---
 
-Define tables once, then use typed create, find, update, and delete helpers. Semola uses Bun's SQL client by default and supports SQLite and Postgres. Node and Deno use a driver you supply (see Runtimes and drivers).
+Define tables once, then use typed create, find, update, and delete helpers. Semola uses Bun's SQL client by default and supports SQLite and Postgres. Node uses a driver you supply (see Runtimes and drivers).
 
 ## Quick start
 
@@ -346,13 +346,13 @@ await db.$raw.unsafe(`SELECT 1`);
 
 ## Runtimes and drivers
 
-`url` opens a Bun SQL connection, so it needs Bun. On Node and Deno, pass `client` instead.
+`url` opens a Bun SQL connection, so it needs Bun. On Node, pass `client` instead.
 
 | Runtime | Database | Pass as |
 | --- | --- | --- |
 | Bun | SQLite, Postgres | `url` (built in), or `client: new Bun.SQL(url)` |
-| Node, Deno | SQLite | `client: fromNodeSqlite(db)` (`node:sqlite`) |
-| Node, Deno, Bun | Postgres | `client` from the `postgres` package (postgres.js) |
+| Node | SQLite | `client: fromNodeSqlite(db)` (`node:sqlite`) |
+| Node, Bun | Postgres | `client` from the `postgres` package (postgres.js) |
 
 Semola has no dependency on `postgres`. `Bun.SQL` is modeled on it, and postgres.js 4 already has the shape the ORM calls: `unsafe(statement, params)`, `begin([mode,] fn)` (the callback gets `unsafe` and `savepoint`), and `close()`. That shape is the `SqlClient` type; any other driver that provides it works too.
 
@@ -382,7 +382,7 @@ const db = createOrm({
 });
 ```
 
-- `fromNodeSqlite(db)` takes a `DatabaseSync` from `node:sqlite` (Node 22.5+, Deno 2.2+). It uses one connection; queries issued while a transaction is open join that transaction, as with Bun SQLite. A string with several statements runs them all and returns the last result.
+- `fromNodeSqlite(db)` takes a `DatabaseSync` from `node:sqlite` (Node 22.5+). It uses one connection; queries issued while a transaction is open join that transaction, as with Bun SQLite. A string with several statements runs them all and returns the last result.
 - `$raw` is typed as `SqlClient` (`unsafe`, `begin`, `close`). Cast to `Bun.SQL` when you need tagged templates on Bun.
 - With `client`, you own the connection: `pool` is not available, `$config.url` is `undefined`, and `db.$raw.close()` closes your client.
 - The `semola` CLI runs on Bun and needs `createOrm({ url })`. With a `client`, call `applyMigrations({ migrationsDir, orm: { adapter, tables, client } })` from your own script.
