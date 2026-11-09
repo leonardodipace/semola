@@ -268,18 +268,27 @@ describe("Cron", () => {
       cron.stop();
     });
 
-    test("should keep one timer when restarted while the handler runs", async () => {
+    test("should not overlap a handler still running across a restart", async () => {
       const gate = createDeferred();
+      let calls = 0;
       const cron = new Cron({
         name: "restart-in-flight",
         schedule: "* * * * *",
-        handler: () => gate.promise,
+        handler: () => {
+          calls++;
+
+          return gate.promise;
+        },
       });
 
       cron.run();
       jest.advanceTimersByTime(30_000);
       cron.stop();
       cron.run();
+
+      jest.advanceTimersByTime(60_000);
+      await flushPromises();
+      expect(calls).toBe(1);
 
       gate.resolve();
       await flushPromises();
@@ -306,6 +315,50 @@ describe("Cron", () => {
       jest.advanceTimersByTime(1_000);
       await flushPromises();
 
+      expect(calls).toBe(1);
+
+      cron.stop();
+    });
+
+    test("should pass the scheduled boundary to the handler", async () => {
+      const scheduled: Date[] = [];
+      const cron = new Cron({
+        name: "scheduled-at",
+        schedule: "* * * * *",
+        handler: (scheduledAt) => {
+          scheduled.push(scheduledAt);
+        },
+      });
+
+      cron.run();
+      jest.advanceTimersByTime(30_500);
+      await flushPromises();
+
+      expect(scheduled).toEqual([new Date(2026, 10, 8, 12, 1, 0)]);
+
+      cron.stop();
+    });
+
+    test("should not repeat a boundary when the clock steps back during the handler", async () => {
+      let calls = 0;
+      const cron = new Cron({
+        name: "clock-back",
+        schedule: "* * * * *",
+        handler: () => {
+          calls++;
+
+          // NTP moves the clock back 2s while the 12:01:00 run is handled.
+          jest.setSystemTime(new Date(2026, 10, 8, 12, 0, 59));
+        },
+      });
+
+      cron.run();
+      jest.advanceTimersByTime(30_000);
+      await flushPromises();
+      expect(calls).toBe(1);
+
+      jest.advanceTimersByTime(2_000);
+      await flushPromises();
       expect(calls).toBe(1);
 
       cron.stop();

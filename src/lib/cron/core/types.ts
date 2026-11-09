@@ -6,7 +6,7 @@ export type CronBaseOptions = {
 };
 
 export type CronOptions = CronBaseOptions & {
-  handler: () => unknown;
+  handler: (scheduledAt: Date) => unknown;
 };
 
 export type CronOSOptions = CronBaseOptions & {
