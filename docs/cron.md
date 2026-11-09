@@ -137,7 +137,7 @@ const report = new CronDistributed({
 report.run();
 ```
 
-Use `replicaId` to identify the lock owner in Redis (defaults to a random UUID per instance). `lockTTL` (default five minutes) bounds how long the deduplication lock is held. The lock is acquired before `handler()` runs and is not renewed while the handler executes, so deduplication is at-most-once only while that Redis key remains valid. If a replica is delayed past `lockTTL`, another replica can acquire the same tick key and run the handler again. Lock keys use the resolved cron expression and the scheduled boundary, so replicas coordinate on the same key however late they fire. Handlers should be idempotent.
+Use `replicaId` to identify the lock owner in Redis (defaults to a random UUID per instance). `lockTTL` (default five minutes) bounds how long the deduplication lock is held. The lock is acquired before `handler()` runs and is not renewed while the handler executes, so deduplication is at-most-once only while that Redis key remains valid. If a replica is delayed past `lockTTL`, another replica can acquire the same tick key and run the handler again. Lock keys use the resolved cron expression and the scheduled boundary, so replicas that fire late still coordinate on the same key while it is held. A replica paused longer than `lockTTL` (sleep, VM pause) runs the boundary it missed when it resumes. Handlers should be idempotent.
 
 Use a unique `name` per job.
 

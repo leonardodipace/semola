@@ -86,17 +86,20 @@ export class Cron implements CronUtilitiesInterface {
       if (!target) return;
       if (Date.now() < target.getTime()) return;
 
-      const scheduledAt = target;
+      // The handler gets a copy, so changing its Date cannot move the schedule.
+      const scheduledAtMs = target.getTime();
       this.isHandling = true;
 
       const [handlerError] = await mightThrow(
-        Promise.resolve().then(() => this.options.handler(scheduledAt)),
+        Promise.resolve().then(() =>
+          this.options.handler(new Date(scheduledAtMs)),
+        ),
       );
 
       // Counting from the settle time skips boundaries a slow handler overran.
       // Never counting from before the fired boundary keeps a clock stepped
       // back during the handler from firing it twice.
-      target = nextRun(fields, Math.max(Date.now(), scheduledAt.getTime()));
+      target = nextRun(fields, Math.max(Date.now(), scheduledAtMs));
       this.isHandling = false;
 
       if (handlerError) throw handlerError;

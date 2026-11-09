@@ -339,6 +339,29 @@ describe("Cron", () => {
       cron.stop();
     });
 
+    test("should keep the schedule when the handler changes its date", async () => {
+      let calls = 0;
+      const cron = new Cron({
+        name: "mutating-handler",
+        schedule: "* * * * *",
+        handler: (scheduledAt) => {
+          calls++;
+          scheduledAt.setHours(scheduledAt.getHours() + 1);
+        },
+      });
+
+      cron.run();
+      jest.advanceTimersByTime(30_000);
+      await flushPromises();
+      expect(calls).toBe(1);
+
+      jest.advanceTimersByTime(60_000);
+      await flushPromises();
+      expect(calls).toBe(2);
+
+      cron.stop();
+    });
+
     test("should not repeat a boundary when the clock steps back during the handler", async () => {
       let calls = 0;
       const cron = new Cron({
