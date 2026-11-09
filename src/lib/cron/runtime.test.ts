@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Runs the built module under real Node and Deno, not Bun's emulation of them.
+// Runs the built module under real Node, not Bun's emulation of it.
 const CHECK_SCRIPT = `
 import { Cron, CronOS } from "./index.js";
 
@@ -45,10 +45,7 @@ if (mode === "unref") {
 }
 `;
 
-const runtimes = [
-  { name: "node", binary: Bun.which("node"), args: [] as string[] },
-  { name: "deno", binary: Bun.which("deno"), args: ["run", "-A"] },
-];
+const node = Bun.which("node");
 
 let dir = "";
 
@@ -68,42 +65,40 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-for (const { name, binary, args } of runtimes) {
-  describe.skipIf(!binary)(`on ${name}`, () => {
-    const run = async (mode: string) => {
-      const proc = Bun.spawn([binary ?? "", ...args, "check.mjs", mode], {
-        cwd: dir,
-        stdout: "pipe",
-        stderr: "pipe",
-        timeout: 10_000,
-      });
-      const [stdout, stderr, code] = await Promise.all([
-        proc.stdout.text(),
-        proc.stderr.text(),
-        proc.exited,
-      ]);
+describe.skipIf(!node)("on node", () => {
+  const run = async (mode: string) => {
+    const proc = Bun.spawn([node ?? "", "check.mjs", mode], {
+      cwd: dir,
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: 10_000,
+    });
+    const [stdout, stderr, code] = await Promise.all([
+      proc.stdout.text(),
+      proc.stderr.text(),
+      proc.exited,
+    ]);
 
-      return { stdout, stderr, code };
-    };
+    return { stdout, stderr, code };
+  };
 
-    test("should fire an in-process job and reject CronOS", async () => {
-      const { stdout, stderr, code } = await run("fire");
+  test("should fire an in-process job and reject CronOS", async () => {
+    const { stdout, stderr, code } = await run("fire");
 
-      expect(stderr).toBe("");
-      expect(code).toBe(0);
+    expect(stderr).toBe("");
+    expect(code).toBe(0);
 
-      const result = JSON.parse(stdout);
+    const result = JSON.parse(stdout);
 
-      expect(result.fired).toBe(true);
-      expect(result.osError).toBe("UnsupportedRuntimeError");
-      expect(typeof result.next).toBe("string");
-    }, 20_000);
+    expect(result.fired).toBe(true);
+    expect(result.osError).toBe("UnsupportedRuntimeError");
+    expect(typeof result.next).toBe("string");
+  }, 20_000);
 
-    test("should let the process exit after unref", async () => {
-      const { stdout, code } = await run("unref");
+  test("should let the process exit after unref", async () => {
+    const { stdout, code } = await run("unref");
 
-      expect(code).toBe(0);
-      expect(JSON.parse(stdout).unref).toBe(true);
-    }, 20_000);
-  });
-}
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout).unref).toBe(true);
+  }, 20_000);
+});

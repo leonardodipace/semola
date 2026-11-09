@@ -1,9 +1,9 @@
 ---
 title: Cron
-description: In-process cron schedules on Node, Bun, and Deno, plus OS-level cron on Bun
+description: In-process cron schedules on Node and Bun, plus OS-level cron on Bun
 ---
 
-Schedule work either in-process or through the operating system. `Cron` runs a handler inside the current process on Node, Bun, and Deno. `CronOS` registers a script with Bun's OS-level cron helper so it runs independently of the current process, and only works on Bun. `CronDistributed` runs an in-process handler like `Cron`, but uses Redis so only one replica executes each scheduled tick.
+Schedule work either in-process or through the operating system. `Cron` runs a handler inside the current process on Node and Bun. `CronOS` registers a script with Bun's OS-level cron helper so it runs independently of the current process, and only works on Bun. `CronDistributed` runs an in-process handler like `Cron`, but uses Redis so only one replica executes each scheduled tick.
 
 ## Import
 
@@ -95,11 +95,11 @@ const schedule = cronJobBuilder((b) =>
 
 ### Lifecycle
 
-`next()` returns the next fire time, or `null` if there is no match. `ref()` / `unref()` control whether the timer keeps the process alive. A handler that is still running when the next boundary passes is not started again: the next run is the first boundary after it finishes. If the handler throws or rejects, the error surfaces as an unhandled rejection, as with `Bun.cron`. Node, Deno, and Bun exit on an unhandled rejection by default, so catch errors inside the handler or listen for `unhandledRejection`; with the process still alive the job keeps running. `getStatus()`, `getExpression()`, and `getJobName()` inspect the job. Disposing the instance (`Symbol.dispose`) calls `stop`.
+`next()` returns the next fire time, or `null` if there is no match. `ref()` / `unref()` control whether the timer keeps the process alive. A handler that is still running when the next boundary passes is not started again: the next run is the first boundary after it finishes. If the handler throws or rejects, the error surfaces as an unhandled rejection, as with `Bun.cron`. Node and Bun exit on an unhandled rejection by default, so catch errors inside the handler or listen for `unhandledRejection`; with the process still alive the job keeps running. `getStatus()`, `getExpression()`, and `getJobName()` inspect the job. Disposing the instance (`Symbol.dispose`) calls `stop`.
 
 ## OS crontab
 
-`CronOS` registers a job with Bun's OS cron helper. It needs a script `path`, plus `name` and `schedule` (no in-process handler). It is the only part of this module that calls Bun APIs: on Node or Deno, `run()` and `stop()` reject with `UnsupportedRuntimeError`.
+`CronOS` registers a job with Bun's OS cron helper. It needs a script `path`, plus `name` and `schedule` (no in-process handler). It is the only part of this module that calls Bun APIs: on Node, `run()` and `stop()` reject with `UnsupportedRuntimeError`.
 
 This registers `backup.ts` at OS level, then removes that registration.
 
