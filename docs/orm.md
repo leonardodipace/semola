@@ -388,7 +388,8 @@ const db = createOrm({
 });
 ```
 
-- `fromNodeSqlite(db)` takes a `DatabaseSync` from `node:sqlite` (Node 22.13+). It uses one connection; queries issued while a transaction is open join that transaction, as with Bun SQLite. A string with several statements runs them all and returns the last result.
+- `fromNodeSqlite(db)` takes a `DatabaseSync` from `node:sqlite` (Node 22.13+). It uses one connection; queries issued while a transaction is open join that transaction, as with Bun SQLite. A string with several statements runs them all through `exec` and returns no rows.
+- postgres.js `close()` closes idle connections but keeps the pool usable; call `sql.end()` to shut it down.
 - The `semola` CLI runs on Bun. It loads the schema module, migrates through its client, and closes it.
 
 ## Connection pooling

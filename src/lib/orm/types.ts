@@ -24,5 +24,6 @@ type NodeSqliteStatement = { all(...params: unknown[]): SqlRow[] };
 
 export type NodeSqliteDatabase = {
   prepare(statement: string): NodeSqliteStatement;
+  exec(statement: string): void;
   close(): void;
 };

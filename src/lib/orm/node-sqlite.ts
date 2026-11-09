@@ -4,7 +4,6 @@ import { splitStatements } from "./migrations/sql.js";
 import type {
   NodeSqliteDatabase,
   SqlClient,
-  SqlRow,
   SqlRunTransaction,
   SqlTransaction,
 } from "./types.js";
@@ -16,64 +15,84 @@ const toSqliteParam = (value: unknown) => {
   return value;
 };
 
+const NO_NAMED_PARAMS = {};
+
+const hasSeveralStatements = (statement: string) => {
+  if (!statement.includes(";")) return false;
+
+  return splitStatements(statement).length > 1;
+};
+
 // One connection: queries issued while a transaction is open join that transaction.
 export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
   // node:sqlite rows have a null prototype; Bun.SQL rows are plain objects.
   const all = (statement: string, params: unknown[]) => {
-    const rows = db.prepare(statement).all(...params.map(toSqliteParam));
+    // A leading object would be read as named params and shift the rest.
+    const rows = db
+      .prepare(statement)
+      .all(NO_NAMED_PARAMS, ...params.map(toSqliteParam));
 
     return rows.map((row) => ({ ...row }));
   };
 
   const unsafe: SqlTransaction["unsafe"] = async (statement, params = []) => {
     // prepare() silently drops everything after the first statement.
-    let parts = [statement];
-
-    if (statement.includes(";")) {
-      parts = splitStatements(statement);
-    }
+    if (!hasSeveralStatements(statement)) return all(statement, params);
 
     if (params.length > 0) {
-      if (parts.length > 1) {
-        throw new OrmError("Several statements cannot share params");
-      }
-
-      return all(statement, params);
+      throw new OrmError("Several statements cannot share params");
     }
 
-    let rows: SqlRow[] = [];
+    // exec() keeps trigger bodies whole, which splitting on ";" would break.
+    db.exec(statement);
 
-    for (const part of parts) {
-      rows = all(part, []);
-    }
-
-    return rows;
+    return [];
   };
 
-  // Unique names, like Bun.SQL: overlapping siblings must not release each other.
+  // Unique names, like Bun.SQL: a nested savepoint must not reuse its parent's name.
   let savepointCount = 0;
 
-  const tx: SqlTransaction = {
-    unsafe,
-    savepoint: async (baseName, run) => {
-      savepointCount += 1;
+  // SQLite savepoints form one stack, so overlapping siblings would release or
+  // roll back each other. Siblings queue on their parent, as in postgres.js;
+  // each savepoint gets its own queue, so nesting does not wait on the parent.
+  const createTransaction = () => {
+    let tail = Promise.resolve();
 
-      const name = `${baseName}_${savepointCount}`;
+    const tx: SqlTransaction = {
+      unsafe,
+      savepoint: (baseName, run) => {
+        const runSavepoint = async () => {
+          savepointCount += 1;
 
-      await unsafe(`SAVEPOINT ${name}`);
+          const name = `${baseName}_${savepointCount}`;
 
-      const [error, result] = await mightThrow(run(tx));
+          await unsafe(`SAVEPOINT ${name}`);
 
-      if (error) {
-        await mightThrow(unsafe(`ROLLBACK TO ${name}`));
-        await mightThrow(unsafe(`RELEASE ${name}`));
-        throw error;
-      }
+          const [error, result] = await mightThrow(run(createTransaction()));
 
-      await unsafe(`RELEASE ${name}`);
+          if (error) {
+            await mightThrow(unsafe(`ROLLBACK TO ${name}`));
+            await mightThrow(unsafe(`RELEASE ${name}`));
+            throw error;
+          }
 
-      return result;
-    },
+          await unsafe(`RELEASE ${name}`);
+
+          return result;
+        };
+
+        const next = tail.then(runSavepoint);
+
+        tail = next.then(
+          () => undefined,
+          () => undefined,
+        );
+
+        return next;
+      },
+    };
+
+    return tx;
   };
 
   const runTransaction = async <T>(
@@ -83,7 +102,7 @@ export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
     await unsafe(begin);
 
     const runAndCommit = async () => {
-      const result = await run(tx);
+      const result = await run(createTransaction());
 
       // COMMIT can fail and leave the transaction open (deferred foreign keys).
       await unsafe("COMMIT");

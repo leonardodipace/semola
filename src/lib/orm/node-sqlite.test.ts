@@ -4,7 +4,7 @@ import { string, uuid } from "./column/index.js";
 import { fromNodeSqlite } from "./node-sqlite.js";
 import { createOrm } from "./orm/index.js";
 import { defineTable } from "./table/index.js";
-import type { SqlRow } from "./types.js";
+import type { SqlRow, SqlTransaction } from "./types.js";
 
 const rowsOf = async (query: Promise<Iterable<SqlRow>>) => [...(await query)];
 
@@ -27,6 +27,14 @@ describe("fromNodeSqlite", () => {
       { id: 1, flag: 1 },
       { id: 2, flag: null },
     ]);
+  });
+
+  test("rejects a leading Date instead of shifting the other params", async () => {
+    const sql = await open();
+
+    const query = sql.unsafe("SELECT ? AS a, ? AS b", [new Date(0), 5]);
+
+    await expect(query).rejects.toThrow("cannot be bound");
   });
 
   test("returns plain objects like Bun.SQL", async () => {
@@ -119,35 +127,103 @@ describe("fromNodeSqlite", () => {
     ]);
   });
 
-  test("a failing savepoint keeps an overlapping sibling's committed write", async () => {
+  test("overlapping sibling savepoints keep only the successful write", async () => {
     const sql = await open();
+    let releaseFirst = () => {};
+    const firstMayFinish = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
 
-    await sql.begin(async (tx) => {
+    const results = await sql.begin(async (tx) => {
       const succeeds = tx.savepoint("sp", async (nested) => {
         await nested.unsafe("INSERT INTO t (id) VALUES (1)");
+        await firstMayFinish;
       });
       const fails = tx.savepoint("sp", async (nested) => {
         await nested.unsafe("INSERT INTO t (id) VALUES (2)");
-        await succeeds;
         throw new Error("sibling");
       });
 
-      await Promise.allSettled([succeeds, fails]);
+      releaseFirst();
+
+      return Promise.allSettled([succeeds, fails]);
     });
 
+    const statuses = results.map((result) => result.status);
     const rows = await rowsOf(sql.unsafe("SELECT id FROM t"));
 
-    expect(rows).toContainEqual({ id: 1 });
+    expect(statuses).toEqual(["fulfilled", "rejected"]);
+    expect(rows).toEqual([{ id: 1 }]);
+  });
+
+  test("overlapping valid sibling savepoints both succeed", async () => {
+    const sql = await open();
+
+    await sql.begin(async (tx) => {
+      await Promise.all([
+        tx.savepoint("sp", async (nested) => {
+          await nested.unsafe("INSERT INTO t (id) VALUES (1)");
+        }),
+        tx.savepoint("sp", async (nested) => {
+          await nested.unsafe("INSERT INTO t (id) VALUES (2)");
+        }),
+      ]);
+    });
+
+    const rows = await rowsOf(sql.unsafe("SELECT id FROM t ORDER BY id"));
+
+    expect(rows).toEqual([{ id: 1 }, { id: 2 }]);
+  });
+
+  test("a nested savepoint runs inside its parent without waiting on it", async () => {
+    const sql = await open();
+
+    await sql.begin(async (tx) => {
+      await tx.savepoint("outer", async (outer) => {
+        await outer.unsafe("INSERT INTO t (id) VALUES (1)");
+
+        // The runtime client is a transaction; the shared type only says queryable.
+        const inner = (outer as SqlTransaction).savepoint(
+          "inner",
+          async (nested) => {
+            await nested.unsafe("INSERT INTO t (id) VALUES (2)");
+          },
+        );
+
+        await inner;
+      });
+    });
+
+    const rows = await rowsOf(sql.unsafe("SELECT id FROM t ORDER BY id"));
+
+    expect(rows).toEqual([{ id: 1 }, { id: 2 }]);
   });
 
   test("unsafe runs every statement of a multi-statement string", async () => {
     const sql = await open();
 
-    const rows = await rowsOf(
-      sql.unsafe("INSERT INTO t (id) VALUES (1); SELECT id FROM t"),
+    await sql.unsafe(
+      "INSERT INTO t (id) VALUES (1); INSERT INTO t (id) VALUES (2)",
     );
 
-    expect(rows).toEqual([{ id: 1 }]);
+    const rows = await rowsOf(sql.unsafe("SELECT id FROM t ORDER BY id"));
+
+    expect(rows).toEqual([{ id: 1 }, { id: 2 }]);
+  });
+
+  test("unsafe runs a trigger body as one statement", async () => {
+    const sql = await open();
+
+    await sql.unsafe(`
+      CREATE TRIGGER t_flag AFTER INSERT ON t BEGIN
+        UPDATE t SET flag = 1 WHERE id = NEW.id;
+      END;
+      INSERT INTO t (id) VALUES (1);
+    `);
+
+    const rows = await rowsOf(sql.unsafe("SELECT * FROM t"));
+
+    expect(rows).toEqual([{ id: 1, flag: 1 }]);
   });
 
   test("unsafe rejects several statements that share params", async () => {
