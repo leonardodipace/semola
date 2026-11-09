@@ -94,14 +94,15 @@ export const parseExpression = (expression: string) => {
   }
 
   const [minute = "", hour = "", day = "", month = "", weekday = ""] = parts;
-  const weekdays = parseField(weekday, WEEKDAY_SPEC);
 
   const fields: CronFields = {
     minutes: parseField(minute, MINUTE_SPEC),
     hours: parseField(hour, HOUR_SPEC),
-    days: new Set(parseField(day, DAY_SPEC)),
-    months: new Set(parseField(month, MONTH_SPEC)),
-    weekdays: new Set(weekdays.map((value) => value % WEEKDAYS_PER_WEEK)),
+    days: parseField(day, DAY_SPEC),
+    months: parseField(month, MONTH_SPEC),
+    weekdays: parseField(weekday, WEEKDAY_SPEC).map(
+      (value) => value % WEEKDAYS_PER_WEEK,
+    ),
     matchEitherDay: day !== "*" && weekday !== "*",
   };
 
@@ -109,10 +110,10 @@ export const parseExpression = (expression: string) => {
 };
 
 const matchesDate = (fields: CronFields, date: Date) => {
-  if (!fields.months.has(date.getMonth() + 1)) return false;
+  if (!fields.months.includes(date.getMonth() + 1)) return false;
 
-  const dayMatches = fields.days.has(date.getDate());
-  const weekdayMatches = fields.weekdays.has(date.getDay());
+  const dayMatches = fields.days.includes(date.getDate());
+  const weekdayMatches = fields.weekdays.includes(date.getDay());
 
   if (fields.matchEitherDay) return dayMatches || weekdayMatches;
 

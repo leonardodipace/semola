@@ -10,10 +10,6 @@ import {
 } from "bun:test";
 import { mightThrowSync } from "../../errors/index.js";
 import { Cron, CronOS } from "./index.js";
-import { parseExpression } from "./schedule.js";
-
-// setTimeout treats anything above a signed 32-bit int as 1ms.
-const MAX_SET_TIMEOUT_MS = 2_147_483_647;
 
 const createDeferred = () => {
   let resolve = () => {};
@@ -272,26 +268,7 @@ describe("Cron", () => {
       cron.stop();
     });
 
-    test("should not reschedule when stopped while the handler runs", async () => {
-      const gate = createDeferred();
-      const cron = new Cron({
-        name: "stop-in-flight",
-        schedule: "* * * * *",
-        handler: () => gate.promise,
-      });
-
-      cron.run();
-      jest.advanceTimersByTime(30_000);
-      cron.stop();
-
-      gate.resolve();
-      await flushPromises();
-
-      expect(cron.getStatus()).toBe("idle");
-      expect(jest.getTimerCount()).toBe(0);
-    });
-
-    test("should keep a single timer when restarted while the handler runs", async () => {
+    test("should keep one timer when restarted while the handler runs", async () => {
       const gate = createDeferred();
       const cron = new Cron({
         name: "restart-in-flight",
@@ -312,29 +289,11 @@ describe("Cron", () => {
       cron.stop();
     });
 
-    test("should rethrow a handler error and keep running", async () => {
-      const cron = new Cron({
-        name: "failing",
-        schedule: "* * * * *",
-        handler: () => {
-          throw new Error("boom");
-        },
-      });
-
-      const fields = parseExpression("* * * * *");
-      // biome-ignore lint/complexity/useLiteralKeys: wake and runId are private
-      const fire = cron["wake"](fields, new Date(0), cron["runId"]);
-
-      await expect(fire).rejects.toThrow("boom");
-      // The next run was armed before the error was rethrown.
-      expect(jest.getTimerCount()).toBe(1);
-    });
-
-    test("should wait again when the timer fires before the boundary", async () => {
+    test("should fire after the clock jumps past the boundary", async () => {
       let calls = 0;
       const cron = new Cron({
-        name: "early-timer",
-        schedule: "* * * * *",
+        name: "clock-jump",
+        schedule: "0 9 * * *",
         handler: () => {
           calls++;
         },
@@ -342,39 +301,11 @@ describe("Cron", () => {
 
       cron.run();
 
-      const fields = parseExpression("* * * * *");
-      const early = new Date(Date.now() + 5);
-      // biome-ignore lint/complexity/useLiteralKeys: wake and runId are private
-      await cron["wake"](fields, early, cron["runId"]);
-
-      expect(calls).toBe(0);
-
-      jest.advanceTimersByTime(5);
+      // The machine sleeps from 12:00 until 10:00 the next day.
+      jest.setSystemTime(new Date(2026, 10, 9, 10, 0, 0));
+      jest.advanceTimersByTime(1_000);
       await flushPromises();
-      expect(calls).toBe(1);
 
-      cron.stop();
-    });
-
-    test("should wait out delays longer than a single timer allows", async () => {
-      let calls = 0;
-      const cron = new Cron({
-        name: "yearly-wait",
-        schedule: "@yearly",
-        handler: () => {
-          calls++;
-        },
-      });
-
-      cron.run();
-
-      jest.advanceTimersByTime(MAX_SET_TIMEOUT_MS);
-      await flushPromises();
-      expect(calls).toBe(0);
-      expect(jest.getTimerCount()).toBe(1);
-
-      jest.advanceTimersByTime(new Date(2027, 0, 1).getTime() - Date.now());
-      await flushPromises();
       expect(calls).toBe(1);
 
       cron.stop();

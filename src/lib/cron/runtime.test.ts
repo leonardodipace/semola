@@ -1,48 +1,39 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // Runs the built module under real Node, not Bun's emulation of it.
 const CHECK_SCRIPT = `
-import { Cron, CronOS } from "./index.js";
+import { Cron } from "./index.js";
 
-const mode = process.argv.at(-1);
+// Run the clock fast so minute boundaries pass within a second of real time.
+const realNow = Date.now.bind(Date);
+const start = realNow();
+Date.now = () => start + (realNow() - start) * 200;
 
-if (mode === "fire") {
-  // Move the clock so the next minute boundary is 500ms away.
-  const realNow = Date.now.bind(Date);
-  const boundary = Math.ceil(realNow() / 60_000) * 60_000;
-  const offset = boundary - 500 - realNow();
-  Date.now = () => realNow() + offset;
+const errors = [];
+process.on("unhandledRejection", (error) => errors.push(error.message));
 
-  const osError = await new CronOS({
-    name: "os",
-    schedule: "@daily",
-    path: "./job.ts",
-  })
-    .run()
-    .catch((error) => error.name);
+// An unref'd job must not keep the process alive once the first job stops.
+const idle = new Cron({ name: "idle", schedule: "@yearly", handler: () => {} });
+idle.run();
+idle.unref();
 
-  const job = new Cron({
-    name: "fire",
-    schedule: "* * * * *",
-    handler: () => {
-      job.stop();
-      console.log(JSON.stringify({ fired: true, osError, next: job.next() }));
-    },
-  });
+let calls = 0;
+const job = new Cron({
+  name: "fire",
+  schedule: "* * * * *",
+  handler: () => {
+    calls++;
+    if (calls === 1) throw new Error("boom");
 
-  job.run();
-}
+    job.stop();
+    console.log(JSON.stringify({ calls, errors }));
+  },
+});
 
-if (mode === "unref") {
-  const job = new Cron({ name: "unref", schedule: "@yearly", handler: () => {} });
-
-  job.run();
-  job.unref();
-  console.log(JSON.stringify({ unref: true }));
-}
+job.run();
 `;
 
 const node = Bun.which("node");
@@ -65,9 +56,10 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe.skipIf(!node)("on node", () => {
-  const run = async (mode: string) => {
-    const proc = Bun.spawn([node ?? "", "check.mjs", mode], {
+test.skipIf(!node)(
+  "should fire, survive a handler error and let Node exit after unref",
+  async () => {
+    const proc = Bun.spawn([node ?? "", "check.mjs"], {
       cwd: dir,
       stdout: "pipe",
       stderr: "pipe",
@@ -79,26 +71,9 @@ describe.skipIf(!node)("on node", () => {
       proc.exited,
     ]);
 
-    return { stdout, stderr, code };
-  };
-
-  test("should fire an in-process job and reject CronOS", async () => {
-    const { stdout, stderr, code } = await run("fire");
-
     expect(stderr).toBe("");
     expect(code).toBe(0);
-
-    const result = JSON.parse(stdout);
-
-    expect(result.fired).toBe(true);
-    expect(result.osError).toBe("UnsupportedRuntimeError");
-    expect(typeof result.next).toBe("string");
-  }, 20_000);
-
-  test("should let the process exit after unref", async () => {
-    const { stdout, code } = await run("unref");
-
-    expect(code).toBe(0);
-    expect(JSON.parse(stdout).unref).toBe(true);
-  }, 20_000);
-});
+    expect(JSON.parse(stdout)).toEqual({ calls: 2, errors: ["boom"] });
+  },
+  20_000,
+);

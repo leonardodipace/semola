@@ -42,7 +42,7 @@ Five fields: `minute hour day month weekday`. Each field takes `*`, numbers, ran
 
 When both day and weekday are restricted (neither is `*`), the job runs when either matches, as in POSIX cron.
 
-Schedules run in the process's local time zone. A fixed time of day (`30 2 * * *`) runs once a day through DST changes: inside the hour clocks skip it runs shifted forward, and inside a repeated hour it runs on the first pass. Schedules that fire many times a day (`* * * * *`, `0 * * * *`) pause for the repeated hour when clocks go back, and several matches inside a skipped hour all run shifted forward. Zones whose clocks shift by 30 minutes (Lord Howe) are not covered.
+Schedules run in the process's local time zone. Through DST changes a fixed time of day (`30 2 * * *`) runs once: shifted forward when clocks skip it, on the first pass when clocks repeat it. A schedule that fires many times a day (`0 * * * *`) pauses for the repeated hour, and several matches inside a skipped hour all run shifted forward. Zones with 30-minute DST shifts (Lord Howe) are not covered.
 
 An invalid expression throws a `TypeError` from `run()` and `next()`. An expression that never matches (`0 0 31 2 *`) throws from `run()`, and `next()` returns `null`.
 
@@ -95,11 +95,11 @@ const schedule = cronJobBuilder((b) =>
 
 ### Lifecycle
 
-`next()` returns the next fire time, or `null` if there is no match. `ref()` / `unref()` control whether the timer keeps the process alive. A handler that is still running when the next boundary passes is not started again: the next run is the first boundary after it finishes. If the handler throws or rejects, the error surfaces as an unhandled rejection, as with `Bun.cron`. Node and Bun exit on an unhandled rejection by default, so catch errors inside the handler or listen for `unhandledRejection`; with the process still alive the job keeps running. `getStatus()`, `getExpression()`, and `getJobName()` inspect the job. Disposing the instance (`Symbol.dispose`) calls `stop`.
+`next()` returns the next fire time, or `null` if there is no match. A running job checks the clock every second, so it fires within a second after its boundary, including after the machine sleeps. `ref()` / `unref()` control whether the timer keeps the process alive. A handler that is still running when the next boundary passes is not started again: the next run is the first boundary after it finishes. If the handler throws or rejects, the error surfaces as an unhandled rejection, as with `Bun.cron`. Node and Bun exit on an unhandled rejection by default, so catch errors inside the handler or listen for `unhandledRejection`; with the process still alive the job keeps running. `getStatus()`, `getExpression()`, and `getJobName()` inspect the job. Disposing the instance (`Symbol.dispose`) calls `stop`.
 
 ## OS crontab
 
-`CronOS` registers a job with Bun's OS cron helper. It needs a script `path`, plus `name` and `schedule` (no in-process handler). It is the only part of this module that calls Bun APIs: on Node, `run()` and `stop()` reject with `UnsupportedRuntimeError`.
+`CronOS` registers a job with Bun's OS cron helper. It needs a script `path`, plus `name` and `schedule` (no in-process handler). It needs Bun; the rest of this module runs on Node and Bun.
 
 This registers `backup.ts` at OS level, then removes that registration.
 
@@ -371,4 +371,4 @@ Same as `Cron`: `run()`, `stop()`, `next(from?)`, `ref()` / `unref()`, `getStatu
 
 ### Errors
 
-`EmptyListError`, `OutOfBoundError`, `UnsupportedRuntimeError` (exported from `semola/cron`). Invalid schedules throw a plain `TypeError`.
+`EmptyListError`, `OutOfBoundError` (exported from `semola/cron`). Invalid schedules throw a plain `TypeError`.

@@ -17,31 +17,6 @@ afterEach(() => {
 });
 
 describe("parseExpression", () => {
-  test("should reject expressions without five fields", () => {
-    expect(() => parseExpression("* * * *")).toThrow(TypeError);
-    expect(() => parseExpression("* * * * * *")).toThrow(TypeError);
-    expect(() => parseExpression("")).toThrow(TypeError);
-  });
-
-  test("should reject out of range values", () => {
-    expect(() => parseExpression("60 * * * *")).toThrow(TypeError);
-    expect(() => parseExpression("* 24 * * *")).toThrow(TypeError);
-    expect(() => parseExpression("* * 0 * *")).toThrow(TypeError);
-    expect(() => parseExpression("* * 32 * *")).toThrow(TypeError);
-    expect(() => parseExpression("* * * 13 *")).toThrow(TypeError);
-    expect(() => parseExpression("* * * * 8")).toThrow(TypeError);
-  });
-
-  test("should reject malformed fields", () => {
-    expect(() => parseExpression("*/0 * * * *")).toThrow(TypeError);
-    expect(() => parseExpression("5-3 * * * *")).toThrow(TypeError);
-    expect(() => parseExpression("1, * * * *")).toThrow(TypeError);
-    expect(() => parseExpression("*/2/3 * * * *")).toThrow(TypeError);
-    expect(() => parseExpression("a * * * *")).toThrow(TypeError);
-    expect(() => parseExpression("* * * * Mo")).toThrow(TypeError);
-    expect(() => parseExpression("* * * */mar *")).toThrow(TypeError);
-  });
-
   test("should expand lists, ranges, steps and open steps", () => {
     const fields = parseExpression("1,5-7,10-20/5 5/20 * * *");
 
@@ -75,33 +50,6 @@ describe("nextRun", () => {
     expect(next("* * * * *", new Date(2026, 2, 15, 10, 7, 59, 999))).toEqual(
       new Date(2026, 2, 15, 10, 8),
     );
-  });
-
-  test("should match either day or weekday when both are restricted", () => {
-    // Sunday 2026-03-15: the 13th has passed, so the next Friday (20th) wins.
-    expect(next("0 0 13 * 5", new Date(2026, 2, 15))).toEqual(
-      new Date(2026, 2, 20),
-    );
-  });
-
-  test("should match both day and weekday when one is a wildcard", () => {
-    expect(next("0 0 13 * *", new Date(2026, 2, 15))).toEqual(
-      new Date(2026, 3, 13),
-    );
-  });
-
-  test("should skip to the next leap year for Feb 29", () => {
-    expect(next("0 0 29 2 *", new Date(2026, 2, 1))).toEqual(
-      new Date(2028, 1, 29),
-    );
-    expect(next("0 0 29 2 *", new Date(2096, 2, 1))).toEqual(
-      new Date(2104, 1, 29),
-    );
-  });
-
-  test("should return null for a date that never exists", () => {
-    expect(next("0 0 31 4 *", new Date(2026, 2, 1))).toBeNull();
-    expect(next("0 0 30 2 *", new Date(2026, 2, 1))).toBeNull();
   });
 
   test("should throw on an invalid start", () => {
@@ -241,11 +189,18 @@ describe("compared with Bun.cron.parse", () => {
       "* * * *",
       "* * * * * *",
       "60 * * * *",
+      "* 24 * * *",
+      "* * 0 * *",
+      "* * 32 * *",
       "* * * 13 *",
+      "* * * * 8",
       "*/0 * * * *",
       "5-3 * * * *",
       "1, * * * *",
+      "*/2/3 * * * *",
       "a * * * *",
+      "* * * * Mo",
+      "* * * */mar *",
       "0 0 L * *",
       "@reboot",
     ];

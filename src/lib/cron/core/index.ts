@@ -1,25 +1,20 @@
 import { mightThrow } from "../../errors/index.js";
-import { UnsupportedRuntimeError } from "../errors.js";
 import { nextRun, parseExpression } from "./schedule.js";
 import type {
   CronBaseOptions,
   CronDistributedOptions,
-  CronFields,
   CronOptions,
   CronOSOptions,
   CronStatus,
-  CronTimer,
   CronUtilitiesInterface,
-  ScheduleType,
 } from "./types.js";
 
 // Short lookbacks for replicas that fire seconds after the scheduled boundary.
 const TICK_LOOKBACK_MS = [5_000, 60_000] as const;
 const DEFAULT_LOCK_TTL = 300_000;
-// Timers count monotonic time, which stops while the machine sleeps. Waiting in
-// short steps and re-checking the wall clock keeps a job from firing hours late
-// after a resume, and stays under setTimeout's 32-bit limit.
-const MAX_TIMER_DELAY_MS = 60_000;
+// How often a running job checks the wall clock. A job fires within this long
+// after its boundary, also after the machine slept through it.
+const CHECK_INTERVAL_MS = 1_000;
 
 const lockKey = (name: string, expr: string, tickMs: number) =>
   `cron:${name}:${expr}:${tickMs}`;
@@ -35,15 +30,8 @@ const ALIASES = new Map([
   ["@minutely", "* * * * *"],
 ]);
 
-// OS-level scheduling (crontab, launchd, Task Scheduler) only exists in Bun.
-const requireBun = () => {
-  if (typeof Bun !== "undefined") return;
-
-  throw new UnsupportedRuntimeError("CronOS requires Bun (uses Bun.cron)");
-};
-
 class CommonCronUtilities {
-  public getExpression(schedule: ScheduleType) {
+  public getExpression(schedule: string) {
     return ALIASES.get(schedule.trim().toLowerCase()) ?? schedule;
   }
 
@@ -61,11 +49,7 @@ class CommonCronUtilities {
 export class Cron implements CronUtilitiesInterface {
   private options: CronOptions;
   private status: CronStatus;
-  private timer: CronTimer | null = null;
-  private isUnref = false;
-  // Bumped on every run() and stop() so a handler that settles after a stop
-  // cannot schedule a stale timer.
-  private runId = 0;
+  private timer: ReturnType<typeof setInterval> | null = null;
   private common: CommonCronUtilities;
 
   public constructor(options: CronOptions) {
@@ -87,39 +71,53 @@ export class Cron implements CronUtilitiesInterface {
 
     const expression = this.common.getExpression(this.options.schedule);
     const fields = parseExpression(expression);
-    const first = nextRun(fields, Date.now());
+    let target = nextRun(fields, Date.now());
 
-    if (!first) {
+    if (!target) {
       throw new TypeError(`Cron expression "${expression}" never matches`);
     }
 
+    // Per-run state lives in this closure, so a handler that settles after a
+    // stop() or restart only touches the run it belongs to.
+    let isHandling = false;
+
+    // A handler error is rethrown after the next run is set, so it surfaces as
+    // an unhandled rejection like Bun.cron does. Handle it (or catch inside the
+    // handler) to keep the process alive; the job keeps running either way.
+    this.timer = setInterval(async () => {
+      if (isHandling) return;
+      if (!target) return;
+      if (Date.now() < target.getTime()) return;
+
+      isHandling = true;
+
+      const [handlerError] = await mightThrow(
+        Promise.resolve().then(() => this.options.handler()),
+      );
+
+      // Counting from the settle time skips boundaries a slow handler overran.
+      target = nextRun(fields, Date.now());
+      isHandling = false;
+
+      if (handlerError) throw handlerError;
+    }, CHECK_INTERVAL_MS);
+
     this.status = "running";
-    this.isUnref = false;
-    this.runId += 1;
-    this.arm(fields, first, this.runId);
   }
 
   public stop() {
     if (this.status !== "running") return;
 
-    if (this.timer) clearTimeout(this.timer);
-
+    clearInterval(this.timer ?? undefined);
     this.timer = null;
-    this.runId += 1;
     this.status = "idle";
   }
 
   public ref() {
-    if (this.status !== "running") return;
-
-    this.isUnref = false;
     this.timer?.ref();
   }
 
   public unref() {
-    if (this.status !== "running") return;
-
-    this.isUnref = true;
     this.timer?.unref();
   }
 
@@ -133,42 +131,6 @@ export class Cron implements CronUtilitiesInterface {
 
   public next(from?: Date | number) {
     return this.common.next(this.options, from);
-  }
-
-  private arm(fields: CronFields, target: Date, runId: number) {
-    const remaining = Math.max(target.getTime() - Date.now(), 0);
-    const delay = Math.min(remaining, MAX_TIMER_DELAY_MS);
-
-    this.timer = setTimeout(() => this.wake(fields, target, runId), delay);
-
-    if (this.isUnref) this.timer.unref();
-  }
-
-  // A handler error is rethrown after rescheduling, so it surfaces as an
-  // unhandled rejection like Bun.cron does. Handle it (or catch inside the
-  // handler) to keep the process alive; the job keeps running either way.
-  private async wake(fields: CronFields, target: Date, runId: number) {
-    // Timers can fire a millisecond early, and waits arrive in steps.
-    if (Date.now() < target.getTime()) {
-      this.arm(fields, target, runId);
-
-      return;
-    }
-
-    const [handlerError] = await mightThrow(
-      Promise.resolve().then(() => this.options.handler()),
-    );
-
-    // Counting from the settle time skips boundaries a slow handler overran, so
-    // runs never overlap or pile up. A stop() or restart meanwhile ends this run.
-    if (runId === this.runId) {
-      const following = nextRun(fields, Math.max(Date.now(), target.getTime()));
-
-      if (following) this.arm(fields, following, runId);
-      if (!following) this.stop();
-    }
-
-    if (handlerError) throw handlerError;
   }
 }
 
@@ -283,8 +245,6 @@ export class CronOS implements CronUtilitiesInterface {
   }
 
   public async run() {
-    requireBun();
-
     const { path, schedule, name } = this.options;
     const expr = this.common.getExpression(schedule);
 
@@ -292,8 +252,6 @@ export class CronOS implements CronUtilitiesInterface {
   }
 
   public async stop() {
-    requireBun();
-
     await Bun.cron.remove(this.options.name);
   }
 
