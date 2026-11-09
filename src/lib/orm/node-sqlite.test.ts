@@ -122,7 +122,7 @@ describe("fromNodeSqlite", () => {
   test("unsafe rejects several statements that share params", async () => {
     const sql = await open();
 
-    expect(
+    await expect(
       sql.unsafe(
         "INSERT INTO t (id) VALUES (?); INSERT INTO t (id) VALUES (?)",
         [1, 2],

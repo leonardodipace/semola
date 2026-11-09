@@ -3172,7 +3172,7 @@ export default defineConfig({
   test("loadConfig rejects a schema that uses a client", async () => {
     const root = await writeClientProject();
 
-    expect(loadConfig(root)).rejects.toThrow("needs createOrm({ url })");
+    await expect(loadConfig(root)).rejects.toThrow("needs createOrm({ url })");
   });
 
   test("create, apply, and rollback run on a client in config", async () => {
