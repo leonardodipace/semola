@@ -36,7 +36,7 @@ export const beginSqlite = <TResult>(
   run: DialectTransactionFn<TResult>,
 ) => {
   if (isNestedInActiveBegin(sql)) {
-    // Bun.SQL nested begin hangs instead of rejecting; fail here for every driver.
+    // Bun.SQL nested begin hangs instead of rejecting; fail here.
     return Promise.reject(
       new Error("cannot start a transaction within a transaction"),
     );

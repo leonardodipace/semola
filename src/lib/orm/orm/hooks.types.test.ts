@@ -36,7 +36,7 @@ describe("hooks types", () => {
   test("partial relations keep hooks usable for tables without relations", async () => {
     const orm = createOrm({
       adapter: "sqlite",
-      url: ":memory:",
+      client: new Bun.SQL(":memory:"),
       tables: {
         students: studentsTable,
         exams: examsTable,

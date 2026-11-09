@@ -27,7 +27,7 @@ import type {
   Row,
 } from "./types.js";
 
-// Nested savepoints may reuse one name: ROLLBACK TO and RELEASE take the latest.
+// Clients add a unique suffix per savepoint, so one base name serves every write.
 const RELATION_WRITE_SAVEPOINT = "semola_relation_write";
 
 export class SqlDialect<T extends Table, R extends TableRelations> {

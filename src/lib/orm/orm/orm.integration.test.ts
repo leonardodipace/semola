@@ -7,13 +7,11 @@ import {
   PG_ID,
   PG_ID_2,
   PG_ID_3,
-  SEMOLA_POSTGRES_URL,
 } from "../integration-helpers.js";
 import { defineTable } from "../table/index.js";
 import type { Table } from "../table/types.js";
 import type { Sql } from "../types.js";
 import { createOrm, many, one } from "./index.js";
-import { getOrmConnectionUrl } from "./orm.js";
 
 const usersTable = defineTable({
   sqlName: "users",
@@ -86,7 +84,7 @@ for (const live of integrationAdapters()) {
 
       const orm = createOrm({
         adapter: live.adapter,
-        ...live.connection(),
+        client: live.createSql(),
         tables: {
           users: usersTable,
           posts: postsTable,
@@ -338,7 +336,7 @@ for (const live of integrationAdapters()) {
       const sqlType = live.adapter === "postgres" ? "JSON" : "TEXT";
       const orm = createOrm({
         adapter: live.adapter,
-        ...live.connection(),
+        client: live.createSql(),
         tables: { items },
       });
 
@@ -468,14 +466,14 @@ describe("sqlite orm integration", () => {
   const createUsersOrm = () =>
     createOrm({
       adapter: "sqlite",
-      url: ":memory:",
+      client: new Bun.SQL(":memory:"),
       tables: { users: usersTable },
     });
 
   const createUsersOrmWithModifyingBeforeCreate = () =>
     createOrm({
       adapter: "sqlite",
-      url: ":memory:",
+      client: new Bun.SQL(":memory:"),
       tables: { users: usersTable },
       hooks: {
         beforeCreate(ctx) {
@@ -538,7 +536,7 @@ describe("sqlite orm integration", () => {
     test("createOrm() wires table clients and exposes raw SQL client", async () => {
       const orm = createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: {
           users: usersTable,
         },
@@ -549,32 +547,7 @@ describe("sqlite orm integration", () => {
       expect(typeof orm.users.findUnique).toBe("function");
       expect(orm.$raw).toBeDefined();
       expect(orm.$config.adapter).toBe("sqlite");
-      expect(orm.$config.url).toBe(":memory:");
       expect(orm.$config.tables.users).toBe(usersTable);
-      expect(orm.$config.pool).toBeUndefined();
-
-      await orm.$raw.close();
-    });
-
-    test("applies pool options to Bun.SQL and echoes them on $config", async () => {
-      const pool = {
-        max: 4,
-        idleTimeout: 30,
-        maxLifetime: 3600,
-        connectionTimeout: 10,
-      };
-      const orm = createOrm({
-        adapter: "postgres",
-        url: "postgres://user:secret@localhost:5432/app",
-        tables: { users: usersTable },
-        pool,
-      });
-
-      expect(orm.$config.pool).toEqual(pool);
-      expect((orm.$raw as Bun.SQL).options.max).toBe(4);
-      expect((orm.$raw as Bun.SQL).options.idleTimeout).toBe(30_000);
-      expect((orm.$raw as Bun.SQL).options.maxLifetime).toBe(3_600_000);
-      expect((orm.$raw as Bun.SQL).options.connectionTimeout).toBe(10_000);
 
       await orm.$raw.close();
     });
@@ -582,30 +555,11 @@ describe("sqlite orm integration", () => {
     test("$ping() resolves against sqlite", async () => {
       const orm = createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: { users: usersTable },
       });
 
       await orm.$ping();
-
-      await orm.$raw.close();
-    });
-
-    test("redacts credentials from the public $config url", async () => {
-      const orm = createOrm({
-        adapter: "postgres",
-        url: "postgres://user:secret@localhost:5432/app",
-        tables: {
-          users: usersTable,
-        },
-      });
-
-      expect(orm.$config.url).not.toContain("secret");
-      expect(orm.$config.url).not.toContain("user");
-      expect(orm.$config.url).toContain("localhost");
-      expect(getOrmConnectionUrl(orm)).toBe(
-        "postgres://user:secret@localhost:5432/app",
-      );
 
       await orm.$raw.close();
     });
@@ -628,7 +582,7 @@ describe("sqlite orm integration", () => {
       });
       const orm = createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: { authors, posts },
       });
 
@@ -656,7 +610,7 @@ describe("sqlite orm integration", () => {
     test("table client findMany, findFirst, and findUnique execute through the dialect", async () => {
       const orm = createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: {
           users: usersTable,
         },
@@ -737,7 +691,7 @@ describe("sqlite orm integration", () => {
       });
       const orm = createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: { items: table },
       });
 
@@ -781,7 +735,7 @@ describe("sqlite orm integration", () => {
 
       const orm = createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: {
           users: table,
         },
@@ -832,7 +786,7 @@ describe("sqlite orm integration", () => {
 
       const orm = createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: {
           users: table,
         },
@@ -969,7 +923,7 @@ describe("sqlite orm integration", () => {
     const createOrmWithPosts = () =>
       createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: { users: usersTable, posts: postsTable },
         relations: {
           users: { posts: many(() => postsTable) },
@@ -1110,7 +1064,7 @@ describe("sqlite orm integration", () => {
     const createOrmWithPosts = () =>
       createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: { users: usersTable, posts: authoredPostsTable },
         relations: {
           users: { posts: many(() => authoredPostsTable) },
@@ -1149,7 +1103,7 @@ describe("sqlite orm integration", () => {
     ) =>
       createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: { users: usersTable, posts: postsTable },
         relations: {
           users: { posts: many(() => postsTable) },
@@ -1286,7 +1240,7 @@ describe("sqlite orm integration", () => {
 
       const orm = createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: {
           users: exampleUsersTable,
           posts: examplePostsTable,
@@ -1424,7 +1378,7 @@ describe("sqlite orm integration", () => {
 
       const orm = createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: {
           students: studentTable,
           exams: examsTable,
@@ -1567,7 +1521,7 @@ describe("sqlite orm integration", () => {
 
       const orm = createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: {
           students: studentTable,
           exams: examsTable,
@@ -1629,7 +1583,7 @@ describe("sqlite orm integration", () => {
 
       const orm = createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: { users: usersTable },
         hooks: {
           afterCreate(ctx) {
@@ -1656,7 +1610,7 @@ describe("sqlite orm integration", () => {
 
       const orm = createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: { users: usersTable },
         hooks: {
           beforeFindMany(ctx) {
@@ -1684,7 +1638,7 @@ describe("sqlite orm integration", () => {
     test("throwing from a hook aborts the operation", async () => {
       const orm = createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: { users: usersTable },
         hooks: {
           beforeCreate() {
@@ -1712,7 +1666,7 @@ describe("sqlite orm integration", () => {
 
       const orm = createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: { users: usersTable },
         hooks: {
           beforeCreate() {
@@ -1739,7 +1693,7 @@ describe("sqlite orm integration", () => {
     test("throwing from a hook inside $transaction rolls back", async () => {
       const orm = createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: { users: usersTable },
         hooks: {
           afterCreate() {
@@ -1800,7 +1754,7 @@ describe("sqlite orm integration", () => {
 
       const orm = createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: { users: usersTable, posts: postsTable },
         hooks: {
           tables: {
@@ -1846,7 +1800,7 @@ describe("sqlite orm integration", () => {
 
       const orm = createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: { users: usersTable },
         hooks: {
           beforeCreate(ctx) {
@@ -1888,7 +1842,7 @@ describe("sqlite orm integration", () => {
 
       const orm = createOrm({
         adapter: "sqlite",
-        url: ":memory:",
+        client: new Bun.SQL(":memory:"),
         tables: { users: usersTable },
         hooks: {
           beforeCreate() {
@@ -1913,24 +1867,3 @@ describe("sqlite orm integration", () => {
     });
   });
 });
-
-if (SEMOLA_POSTGRES_URL) {
-  const postgresUrl = SEMOLA_POSTGRES_URL;
-
-  describe("postgres connection pool", () => {
-    test("honors max pool size against a live database", async () => {
-      const orm = createOrm({
-        adapter: "postgres",
-        url: postgresUrl,
-        tables: { users: usersTable },
-        pool: { max: 1 },
-      });
-
-      expect((orm.$raw as Bun.SQL).options.max).toBe(1);
-
-      await Promise.all([orm.$ping(), orm.$ping(), orm.$ping()]);
-
-      await orm.$raw.close();
-    });
-  });
-}

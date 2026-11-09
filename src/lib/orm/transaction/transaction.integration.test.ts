@@ -55,7 +55,7 @@ for (const live of integrationAdapters()) {
 
       const orm = createOrm({
         adapter: live.adapter,
-        ...live.connection(),
+        client: live.createSql(),
         tables: { users: usersTable, accounts: accountsTable },
       });
 

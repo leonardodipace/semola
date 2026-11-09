@@ -29,6 +29,16 @@ describe("fromNodeSqlite", () => {
     ]);
   });
 
+  test("returns plain objects like Bun.SQL", async () => {
+    const sql = await open();
+
+    await sql.unsafe("INSERT INTO t (id) VALUES (1)");
+
+    const [row] = await rowsOf(sql.unsafe("SELECT id FROM t"));
+
+    expect(Object.getPrototypeOf(row)).toBe(Object.prototype);
+  });
+
   test("begin commits and returns the callback result", async () => {
     const sql = await open();
 
@@ -109,6 +119,27 @@ describe("fromNodeSqlite", () => {
     ]);
   });
 
+  test("a failing savepoint keeps an overlapping sibling's committed write", async () => {
+    const sql = await open();
+
+    await sql.begin(async (tx) => {
+      const succeeds = tx.savepoint("sp", async (nested) => {
+        await nested.unsafe("INSERT INTO t (id) VALUES (1)");
+      });
+      const fails = tx.savepoint("sp", async (nested) => {
+        await nested.unsafe("INSERT INTO t (id) VALUES (2)");
+        await succeeds;
+        throw new Error("sibling");
+      });
+
+      await Promise.allSettled([succeeds, fails]);
+    });
+
+    const rows = await rowsOf(sql.unsafe("SELECT id FROM t"));
+
+    expect(rows).toContainEqual({ id: 1 });
+  });
+
   test("unsafe runs every statement of a multi-statement string", async () => {
     const sql = await open();
 
@@ -148,12 +179,11 @@ describe("createOrm client option", () => {
     },
   });
 
-  test("uses the supplied client as $raw and omits the url from $config", async () => {
+  test("uses the supplied client as $raw", async () => {
     const client = fromNodeSqlite(new DatabaseSync(":memory:"));
     const db = createOrm({ adapter: "sqlite", client, tables: { users } });
 
     expect(db.$raw).toBe(client);
-    expect(db.$config.url).toBeUndefined();
 
     await db.$raw.close();
   });

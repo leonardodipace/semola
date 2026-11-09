@@ -47,7 +47,7 @@ describe("relation helpers", () => {
 
     const ormA = createOrm({
       adapter: "sqlite",
-      url: ":memory:",
+      client: new Bun.SQL(":memory:"),
       tables: { users: usersTable, profiles: profilesTable },
       relations: {
         profiles: {
@@ -58,7 +58,7 @@ describe("relation helpers", () => {
 
     const ormB = createOrm({
       adapter: "sqlite",
-      url: ":memory:",
+      client: new Bun.SQL(":memory:"),
       tables: { users: usersTable, profiles: profilesTable },
       relations: {
         profiles: {
@@ -75,7 +75,7 @@ describe("relation helpers", () => {
   test("findUnique types only accept a single unique key", async () => {
     const orm = createOrm({
       adapter: "sqlite",
-      url: ":memory:",
+      client: new Bun.SQL(":memory:"),
       tables: {
         users: usersTable,
       },
@@ -153,7 +153,7 @@ describe("relation helpers", () => {
   test("findFirst types accept regular filters and reject take", async () => {
     const orm = createOrm({
       adapter: "sqlite",
-      url: ":memory:",
+      client: new Bun.SQL(":memory:"),
       tables: {
         users: usersTable,
       },
@@ -190,7 +190,7 @@ describe("relation helpers", () => {
   test("findMany cursor accepts unique keys and rejects non-unique", async () => {
     const orm = createOrm({
       adapter: "sqlite",
-      url: ":memory:",
+      client: new Bun.SQL(":memory:"),
       tables: {
         users: usersTable,
       },
@@ -251,7 +251,7 @@ describe("relation helpers", () => {
 
     const orm = createOrm({
       adapter: "sqlite",
-      url: ":memory:",
+      client: new Bun.SQL(":memory:"),
       tables: {
         users: table,
       },
@@ -352,7 +352,7 @@ describe("relation helpers", () => {
 
     const orm = createOrm({
       adapter: "sqlite",
-      url: ":memory:",
+      client: new Bun.SQL(":memory:"),
       tables: {
         users: table,
       },
@@ -410,7 +410,7 @@ describe("relation where filters", () => {
   const createOrmWithPosts = () =>
     createOrm({
       adapter: "sqlite",
-      url: ":memory:",
+      client: new Bun.SQL(":memory:"),
       tables: { users: usersTable, posts: postsTable },
       relations: {
         users: { posts: many(() => postsTable) },
@@ -490,7 +490,7 @@ describe("nested include options", () => {
   const createOrmWithPosts = () =>
     createOrm({
       adapter: "sqlite",
-      url: ":memory:",
+      client: new Bun.SQL(":memory:"),
       tables: { users: usersTable, posts: authoredPostsTable },
       relations: {
         users: { posts: many(() => authoredPostsTable) },
@@ -529,7 +529,7 @@ describe("nested include options", () => {
   ) =>
     createOrm({
       adapter: "sqlite",
-      url: ":memory:",
+      client: new Bun.SQL(":memory:"),
       tables: { users: usersTable, posts: postsTable },
       relations: {
         users: { posts: many(() => postsTable) },

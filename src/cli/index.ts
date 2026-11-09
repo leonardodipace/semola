@@ -9,7 +9,10 @@ import {
   loadConfig,
   rollbackMigration,
 } from "../lib/orm/migrations/runner.js";
-import type { RenameQuestion } from "../lib/orm/migrations/types.js";
+import type {
+  LoadedConfig,
+  RenameQuestion,
+} from "../lib/orm/migrations/types.js";
 import { PromptEnvironmentError } from "../lib/prompts/errors.js";
 import type { SelectChoice } from "../lib/prompts/index.js";
 import { confirm, select } from "../lib/prompts/index.js";
@@ -101,6 +104,18 @@ const promptDestructive = async () => {
   });
 };
 
+// The schema module opens the client; close it once the command is done.
+const withConfig = async <T>(fn: (config: LoadedConfig) => Promise<T>) => {
+  const config = await loadConfig();
+
+  try {
+    return await fn(config);
+  } finally {
+    // Best effort: a failure here must not replace the migration error.
+    await mightThrow(config.orm.client.close());
+  }
+};
+
 const run = async () => {
   const program = new CLI({
     name: "semola",
@@ -116,13 +131,14 @@ const run = async () => {
     })
     .argument("name", { schema: stringArg })
     .action(async (args) => {
-      const config = await loadConfig();
-      const folder = await createMigration({
-        name: args.name,
-        config,
-        onRename: promptRename,
-        onDestructive: promptDestructive,
-      });
+      const folder = await withConfig((config) =>
+        createMigration({
+          name: args.name,
+          config,
+          onRename: promptRename,
+          onDestructive: promptDestructive,
+        }),
+      );
 
       console.log(`Created migration ${folder}`);
     });
@@ -130,8 +146,7 @@ const run = async () => {
   migrations
     .command("apply", { description: "Apply pending migrations" })
     .action(async () => {
-      const config = await loadConfig();
-      const applied = await applyMigrations(config);
+      const applied = await withConfig(applyMigrations);
 
       if (applied.length === 0) {
         console.log("No pending migrations");
@@ -148,8 +163,7 @@ const run = async () => {
       description: "Rollback the last applied migration",
     })
     .action(async () => {
-      const config = await loadConfig();
-      const name = await rollbackMigration(config);
+      const name = await withConfig(rollbackMigration);
 
       console.log(`Rolled back ${name}`);
     });

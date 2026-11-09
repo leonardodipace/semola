@@ -86,15 +86,12 @@ export type RenameHandler = (
   question: RenameQuestion,
 ) => string | undefined | Promise<string | undefined>;
 
-type OrmConfigBase = {
+export type OrmConfig = {
   adapter: Adapter;
   tables: Record<string, Table>;
+  // Migrations run on this client and leave it open.
+  client: SqlClient;
 };
-
-// Pass url to let migrations open their own Bun connection, or a client you own.
-export type OrmConfig =
-  | (OrmConfigBase & { url: string; client?: never })
-  | (OrmConfigBase & { client: SqlClient; url?: never });
 
 export type LoadedConfig = {
   migrationsDir: string;

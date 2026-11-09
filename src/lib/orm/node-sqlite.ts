@@ -18,6 +18,13 @@ const toSqliteParam = (value: unknown) => {
 
 // One connection: queries issued while a transaction is open join that transaction.
 export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
+  // node:sqlite rows have a null prototype; Bun.SQL rows are plain objects.
+  const all = (statement: string, params: unknown[]) => {
+    const rows = db.prepare(statement).all(...params.map(toSqliteParam));
+
+    return rows.map((row) => ({ ...row }));
+  };
+
   const unsafe: SqlTransaction["unsafe"] = async (statement, params = []) => {
     // prepare() silently drops everything after the first statement.
     let parts = [statement];
@@ -31,21 +38,28 @@ export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
         throw new OrmError("Several statements cannot share params");
       }
 
-      return db.prepare(statement).all(...params.map(toSqliteParam));
+      return all(statement, params);
     }
 
     let rows: SqlRow[] = [];
 
     for (const part of parts) {
-      rows = db.prepare(part).all();
+      rows = all(part, []);
     }
 
     return rows;
   };
 
+  // Unique names, like Bun.SQL: overlapping siblings must not release each other.
+  let savepointCount = 0;
+
   const tx: SqlTransaction = {
     unsafe,
-    savepoint: async (name, run) => {
+    savepoint: async (baseName, run) => {
+      savepointCount += 1;
+
+      const name = `${baseName}_${savepointCount}`;
+
       await unsafe(`SAVEPOINT ${name}`);
 
       const [error, result] = await mightThrow(run(tx));

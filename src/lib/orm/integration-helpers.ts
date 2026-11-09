@@ -22,47 +22,43 @@ export type IntegrationAdapter = {
   name: string;
   adapter: Adapter;
   createSql: () => SqlClient;
-  // createOrm options that reach the database: a url for Bun.SQL, or a client.
-  connection: () => { url: string } | { client: SqlClient };
   beforeEach?: () => Promise<void>;
 };
 
 export const integrationAdapters = (): IntegrationAdapter[] => {
-  const createNodeSqlite = () => fromNodeSqlite(new DatabaseSync(":memory:"));
-
   const adapters: IntegrationAdapter[] = [
     {
       name: "sqlite",
       adapter: "sqlite",
       createSql: () => new Bun.SQL(":memory:"),
-      connection: () => ({ url: ":memory:" }),
     },
     {
       name: "sqlite via node:sqlite",
       adapter: "sqlite",
-      createSql: createNodeSqlite,
-      connection: () => ({ client: createNodeSqlite() }),
+      createSql: () => fromNodeSqlite(new DatabaseSync(":memory:")),
     },
   ];
 
   if (!SEMOLA_POSTGRES_URL) return adapters;
 
   const url = SEMOLA_POSTGRES_URL;
-  const createPg = () => postgres(url, { max: 5 });
 
   adapters.push(
     {
       name: "postgres",
       adapter: "postgres",
       createSql: () => new Bun.SQL(url, { adapter: "postgres" }),
-      connection: () => ({ url }),
       beforeEach: () => resetPostgres(url),
     },
     {
       name: "postgres via postgres.js",
       adapter: "postgres",
-      createSql: createPg,
-      connection: () => ({ client: createPg() }),
+      createSql: () =>
+        postgres(url, {
+          max: 5,
+          transform: { undefined: null },
+          onnotice: () => {},
+        }),
       beforeEach: () => resetPostgres(url),
     },
   );

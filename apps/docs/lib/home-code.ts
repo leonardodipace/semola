@@ -382,7 +382,8 @@ test("rejects an invalid email", async () => {
 
 const ormCode = (
   field: string,
-) => `import { createOrm, defineTable, string, uuid } from "semola/orm";
+) => `import { SQL } from "bun";
+import { createOrm, defineTable, string, uuid } from "semola/orm";
 
 const users = defineTable({
   sqlName: "users",
@@ -394,7 +395,7 @@ const users = defineTable({
 
 const db = createOrm({
   adapter: "sqlite",
-  url: ":memory:",
+  client: new SQL(":memory:"),
   tables: { users },
 });
 

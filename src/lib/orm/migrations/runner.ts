@@ -12,7 +12,6 @@ import { pathToFileURL } from "node:url";
 import type { SemolaConfig } from "../../config.js";
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
 import { MigrationError } from "../errors.js";
-import { getOrmConnectionUrl, openBunSql } from "../orm/orm.js";
 import type { OrmClient } from "../orm/types.js";
 import type { Sql, SqlClient } from "../types.js";
 import type { MigrationDialect } from "./dialect/index.js";
@@ -25,7 +24,6 @@ import { assertSchemaSnapshot, splitStatements } from "./sql.js";
 import type {
   LoadedConfig,
   MigrationOp,
-  OrmConfig,
   RenameHandler,
   SchemaSnapshot,
 } from "./types.js";
@@ -113,18 +111,12 @@ const ensureHistoryTable = async (sql: Sql) => {
   );
 };
 
-const openConnection = (orm: OrmConfig) => {
-  if (orm.client) return orm.client;
-
-  return openBunSql(orm.adapter, orm.url);
-};
-
 const withConnection = async <T>(
   config: LoadedConfig,
   fn: (sql: SqlClient, dialect: MigrationDialect) => Promise<T>,
 ) => {
   const dialect = getMigrationDialect(config.orm.adapter);
-  const sql = openConnection(config.orm);
+  const sql = config.orm.client;
 
   try {
     await dialect.prepareConnection(sql);
@@ -133,13 +125,8 @@ const withConnection = async <T>(
 
     return await fn(sql, dialect);
   } finally {
-    if (config.orm.client) {
-      // Owned by the caller, who keeps using it.
-      // Best effort: a failure here must not replace the migration error.
-      await mightThrow(dialect.restoreConnection(sql));
-    } else {
-      await sql.close();
-    }
+    // Best effort: a failure here must not replace the migration error.
+    await mightThrow(dialect.restoreConnection(sql));
   }
 };
 
@@ -156,23 +143,14 @@ export const loadConfig = async (cwd = process.cwd()) => {
 
   const schemaPath = resolve(cwd, config.orm.schema);
   const schemaMod = await importModule(schemaPath, "schema module");
-  const client = resolveOrmFromModule(schemaMod as Record<string, unknown>);
-  const url = getOrmConnectionUrl(client) ?? client.$config.url;
-
-  await client.$raw.close();
-
-  if (url === undefined) {
-    throw new MigrationError(
-      "loadConfig needs createOrm({ url }). With a client, pass { migrationsDir, orm: { adapter, tables, client } } to applyMigrations",
-    );
-  }
+  const orm = resolveOrmFromModule(schemaMod as Record<string, unknown>);
 
   return {
     migrationsDir: resolve(cwd, config.orm.migrationsDir ?? "migrations"),
     orm: {
-      adapter: client.$config.adapter,
-      url,
-      tables: client.$config.tables,
+      adapter: orm.$config.adapter,
+      tables: orm.$config.tables,
+      client: orm.$raw,
     },
   };
 };

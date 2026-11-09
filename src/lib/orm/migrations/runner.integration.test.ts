@@ -14,18 +14,37 @@ import {
 import { fromNodeSqlite } from "../node-sqlite.js";
 import { createOrm } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
+import type { SqlClient } from "../types.js";
 import {
   applyMigrations,
   createMigration,
-  loadConfig,
+  loadConfig as loadRunnerConfig,
   rollbackMigration,
 } from "./runner.js";
 import { createMigrationProject } from "./test-project.js";
+
+// loadConfig leaves the schema client open; close it before deleting the files.
+const openClients: SqlClient[] = [];
+
+const loadConfig = async (cwd: string) => {
+  const config = await loadRunnerConfig(cwd);
+  openClients.push(config.orm.client);
+
+  return config;
+};
+
+const closeOpenClients = async () => {
+  for (const client of openClients.splice(0)) {
+    await client.close();
+  }
+};
 
 describe("sqlite migrations integration", () => {
   const dirs: string[] = [];
 
   afterEach(async () => {
+    await closeOpenClients();
+
     for (const dir of dirs.splice(0)) {
       await rm(dir, { recursive: true, force: true });
     }
@@ -64,7 +83,7 @@ describe("sqlite migrations integration", () => {
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
 
@@ -89,12 +108,13 @@ describe("sqlite migrations integration", () => {
     await db.$raw.close();
   });
 
-  test("loadConfig uses the real database url, not the redacted $config url", async () => {
+  test("loadConfig returns the schema client and adapter", async () => {
     const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
     const project = await setupProject(dbFile);
     const config = await loadConfig(project.root);
+    const [row] = await config.orm.client.unsafe("SELECT 1 AS one");
 
-    expect(config.orm.url).toBe(dbFile);
+    expect(row?.one).toBe(1);
     expect(config.orm.adapter).toBe("sqlite");
   });
 
@@ -133,7 +153,7 @@ describe("sqlite migrations integration", () => {
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
 
@@ -193,7 +213,7 @@ describe("sqlite migrations integration", () => {
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const tables = [
@@ -255,7 +275,7 @@ describe("sqlite migrations integration", () => {
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: nextUsers },
     });
 
@@ -311,7 +331,7 @@ describe("sqlite migrations integration", () => {
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: nextUsers },
     });
 
@@ -524,7 +544,7 @@ const posts = defineTable({
 
 export const db = createOrm({
   adapter: "sqlite",
-  url: ${JSON.stringify(dbFile)},
+  client: new Bun.SQL(${JSON.stringify(dbFile)}, { adapter: "sqlite" }),
   tables: { authors, posts },
 });
 `,
@@ -537,7 +557,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { authors, posts },
     });
 
@@ -561,7 +581,7 @@ export const db = createOrm({
 
     const check = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { authors, posts },
     });
     const author = await check.authors.findFirst({ where: { id: "a1" } });
@@ -654,7 +674,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const rows = [
@@ -680,7 +700,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
 
@@ -749,7 +769,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const cols = [...(await db.$raw.unsafe(`PRAGMA table_info("users")`))].map(
@@ -792,7 +812,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: nextUsers },
     });
 
@@ -835,7 +855,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const history = [
@@ -940,7 +960,7 @@ const users = defineTable({
 
 export default createOrm({
   adapter: "sqlite",
-  url: ${JSON.stringify(dbFile)},
+  client: new Bun.SQL(${JSON.stringify(dbFile)}, { adapter: "sqlite" }),
   tables: { users },
 });
 `,
@@ -959,7 +979,7 @@ export default defineConfig({
 
     const config = await loadConfig(root);
 
-    expect(config.orm.url).toBe(dbFile);
+    expect(config.orm.adapter).toBe("sqlite");
     expect(config.migrationsDir).toBe(join(root, "migrations"));
   });
 
@@ -983,7 +1003,7 @@ const users = defineTable({
 
 export const db = createOrm({
   adapter: "sqlite",
-  url: ${JSON.stringify(dbFile)},
+  client: new Bun.SQL(${JSON.stringify(dbFile)}, { adapter: "sqlite" }),
   tables: { users },
 });
 `,
@@ -1040,7 +1060,7 @@ export default defineConfig({});
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
 
@@ -1075,7 +1095,7 @@ export default defineConfig({});
 
     const check = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const cols = [
@@ -1119,7 +1139,7 @@ export default defineConfig({});
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: withoutName },
     });
 
@@ -1171,7 +1191,7 @@ const posts = defineTable({
 
 export const db = createOrm({
   adapter: "sqlite",
-  url: ${JSON.stringify(dbFile)},
+  client: new Bun.SQL(${JSON.stringify(dbFile)}, { adapter: "sqlite" }),
   tables: { authors, posts },
 });
 `,
@@ -1184,7 +1204,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { authors, posts },
     });
 
@@ -1250,7 +1270,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const tables = [
@@ -1277,7 +1297,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const rows = [
@@ -1322,7 +1342,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const history = [
@@ -1362,7 +1382,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const history = [
@@ -1406,7 +1426,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const history = [
@@ -1436,7 +1456,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
 
@@ -1467,7 +1487,7 @@ export const db = createOrm({
 
     const check = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: nextUsers },
     });
     const user = await check.users.findFirst({ where: { id: "1" } });
@@ -1507,7 +1527,7 @@ export const db = createOrm({
 
     const check = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: nextUsers },
     });
     const cols = [
@@ -1530,7 +1550,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const history = [
@@ -1553,7 +1573,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     await db.$raw.unsafe(
@@ -1597,7 +1617,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: withoutName },
     });
 
@@ -1610,7 +1630,7 @@ export const db = createOrm({
 
     const check = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: withoutName },
     });
     const history = [
@@ -1698,7 +1718,7 @@ const users = defineTable({
 
 export const db = createOrm({
   adapter: "sqlite",
-  url: ${JSON.stringify(dbFile)},
+  client: new Bun.SQL(${JSON.stringify(dbFile)}, { adapter: "sqlite" }),
   tables: { users },
 });
 `,
@@ -1731,7 +1751,7 @@ export default defineConfig({
     });
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: before },
     });
 
@@ -1810,7 +1830,7 @@ export default defineConfig({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const tables = [
@@ -1868,7 +1888,7 @@ export default defineConfig({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: nextUsers },
     });
     const history = [
@@ -1918,7 +1938,7 @@ export default defineConfig({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: nextUsers },
     });
     const rows = [
@@ -1982,7 +2002,7 @@ const users = defineTable({
 
 export const db = createOrm({
   adapter: "sqlite",
-  url: ${JSON.stringify(dbFile)},
+  client: new Bun.SQL(${JSON.stringify(dbFile)}, { adapter: "sqlite" }),
   tables: { users },
 });
 `,
@@ -2037,7 +2057,7 @@ export default defineConfig({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const rows = [
@@ -2078,7 +2098,7 @@ const users = defineTable({
 
 export const db = createOrm({
   adapter: "sqlite",
-  url: ${JSON.stringify(dbFile)},
+  client: new Bun.SQL(${JSON.stringify(dbFile)}, { adapter: "sqlite" }),
   tables: { users },
 });
 `,
@@ -2135,7 +2155,7 @@ export default defineConfig({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: withBio },
     });
 
@@ -2154,7 +2174,7 @@ export default defineConfig({
 
     const check = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const user = await check.users.findFirst({ where: { id: "1" } });
@@ -2179,7 +2199,7 @@ export default defineConfig({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const history = [
@@ -2231,7 +2251,7 @@ export default defineConfig({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const rows = [
@@ -2319,7 +2339,7 @@ export default defineConfig({
 
     const seed = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
 
@@ -2363,7 +2383,7 @@ export default defineConfig({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { people },
     });
     const row = await db.people.findFirst({ where: { id: "1" } });
@@ -2375,7 +2395,7 @@ export default defineConfig({
 
     const restored = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
 
@@ -2396,7 +2416,7 @@ export default defineConfig({
 
     const seed = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
 
@@ -2437,7 +2457,7 @@ export default defineConfig({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: nextUsers },
     });
 
@@ -2544,6 +2564,8 @@ if (SEMOLA_POSTGRES_URL) {
     const id2 = PG_ID_2;
 
     afterEach(async () => {
+      await closeOpenClients();
+
       for (const dir of dirs.splice(0)) {
         await rm(dir, { recursive: true, force: true });
       }
@@ -2558,7 +2580,7 @@ if (SEMOLA_POSTGRES_URL) {
     ) =>
       createOrm({
         adapter: "postgres",
-        url,
+        client: new Bun.SQL(url, { adapter: "postgres" }),
         tables,
       });
 
@@ -3125,6 +3147,8 @@ describe("migrations with a user-supplied client", () => {
   const dirs: string[] = [];
 
   afterEach(async () => {
+    await closeOpenClients();
+
     for (const dir of dirs.splice(0)) {
       await rm(dir, { recursive: true, force: true });
     }
@@ -3169,10 +3193,12 @@ export default defineConfig({
     return root;
   };
 
-  test("loadConfig rejects a schema that uses a client", async () => {
+  test("loadConfig runs migrations on a node:sqlite schema client", async () => {
     const root = await writeClientProject();
+    const config = await loadConfig(root);
+    const folder = await createMigration({ name: "init", config });
 
-    await expect(loadConfig(root)).rejects.toThrow("needs createOrm({ url })");
+    expect(await applyMigrations(config)).toEqual([folder]);
   });
 
   test("create, apply, and rollback run on a client in config", async () => {

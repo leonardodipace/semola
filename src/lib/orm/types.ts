@@ -19,8 +19,10 @@ export type SqlClient = SqlQueryable & {
 
 export type Sql = SqlClient | SqlTransaction;
 
-// Structural subset of `DatabaseSync` from `node:sqlite`.
+// Structural subsets of `DatabaseSync` and `StatementSync` from `node:sqlite`.
+type NodeSqliteStatement = { all(...params: unknown[]): SqlRow[] };
+
 export type NodeSqliteDatabase = {
-  prepare(statement: string): { all(...params: unknown[]): SqlRow[] };
+  prepare(statement: string): NodeSqliteStatement;
   close(): void;
 };
