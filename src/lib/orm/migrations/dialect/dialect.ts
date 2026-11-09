@@ -33,15 +33,13 @@ export class MigrationDialect {
   }
 
   public async prepareConnection(sql: Sql) {
-    await this.spec.prepareConnection?.(sql);
+    const restore = await this.spec.prepareConnection?.(sql);
+
+    return restore ?? (async () => {});
   }
 
   public async assertForeignKeys(sql: Sql) {
     await this.spec.assertForeignKeys?.(sql);
-  }
-
-  public async restoreConnection(sql: Sql) {
-    await this.spec.restoreConnection?.(sql);
   }
 
   public async lockMigrations(sql: Sql) {

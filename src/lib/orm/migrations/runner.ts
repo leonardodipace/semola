@@ -117,16 +117,16 @@ const withConnection = async <T>(
 ) => {
   const dialect = getMigrationDialect(config.orm.adapter);
   const sql = config.orm.client;
+  const restoreConnection = await dialect.prepareConnection(sql);
 
   try {
-    await dialect.prepareConnection(sql);
     // Outside tx: failed ALTER aborts Postgres transactions.
     await ensureHistoryTable(sql);
 
     return await fn(sql, dialect);
   } finally {
     // Best effort: a failure here must not replace the migration error.
-    await mightThrow(dialect.restoreConnection(sql));
+    await mightThrow(restoreConnection());
   }
 };
 

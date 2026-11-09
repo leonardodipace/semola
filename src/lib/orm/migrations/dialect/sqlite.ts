@@ -166,13 +166,16 @@ const foldOpsByTable = (
 };
 
 const prepareConnection = async (sql: Sql) => {
+  const [busyTimeout] = await sql.unsafe("PRAGMA busy_timeout");
+
   await sql.unsafe("PRAGMA foreign_keys = OFF");
   await sql.unsafe("PRAGMA busy_timeout = 250");
-};
 
-// Undo prepareConnection on a client the caller keeps using.
-const restoreConnection = async (sql: Sql) => {
-  await sql.unsafe("PRAGMA foreign_keys = ON");
+  // Undo the changes on a client the caller keeps using.
+  return async () => {
+    await sql.unsafe("PRAGMA foreign_keys = ON");
+    await sql.unsafe(`PRAGMA busy_timeout = ${busyTimeout?.timeout}`);
+  };
 };
 
 const assertForeignKeys = async (sql: Sql) => {
@@ -195,7 +198,6 @@ export const SQLITE_MIGRATION_SPEC: MigrationDialectSpec = {
   sqlTypeFor,
   normalizeOps: foldOpsByTable,
   prepareConnection,
-  restoreConnection,
   assertForeignKeys,
   beginMigration: (sql, fn) => sql.begin("IMMEDIATE", fn),
 };

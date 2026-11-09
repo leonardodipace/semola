@@ -129,10 +129,10 @@ export type MigrationDialectSpec = {
   renderRenameColumn?: (
     op: Extract<MigrationOp, { kind: "renameColumn" }>,
   ) => string;
-  prepareConnection?: (sql: Sql) => Promise<void>;
+  // Returns a function that undoes the changes.
+  prepareConnection?: (sql: Sql) => Promise<() => Promise<void>>;
   assertForeignKeys?: (sql: Sql) => Promise<void>;
   lockMigrations?: (sql: Sql) => Promise<void>;
-  restoreConnection?: (sql: Sql) => Promise<void>;
   beginMigration?: <T>(
     sql: SqlClient,
     fn: (tx: SqlTransaction) => Promise<T>,

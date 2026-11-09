@@ -3205,7 +3205,9 @@ export default defineConfig({
     const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
     dirs.push(root);
 
-    const client = fromNodeSqlite(new DatabaseSync(":memory:"));
+    const client = fromNodeSqlite(
+      new DatabaseSync(":memory:", { timeout: 5000 }),
+    );
     const users = defineTable({
       sqlName: "users",
       columns: {
@@ -3225,6 +3227,10 @@ export default defineConfig({
     const [pragma] = await client.unsafe("PRAGMA foreign_keys");
 
     expect(Object.values(pragma ?? {})).toEqual([1]);
+
+    const [busyTimeout] = await client.unsafe("PRAGMA busy_timeout");
+
+    expect(busyTimeout?.timeout).toBe(5000);
 
     await client.unsafe("INSERT INTO users (id, name) VALUES ('u1', 'Ada')");
     await client.unsafe("DELETE FROM users");
