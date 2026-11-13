@@ -64,7 +64,11 @@ export type DialectSpec = {
   formatDistinct: (quotedColumns: string[]) => DistinctClause;
   prepareConnection?: (sql: Sql) => Promise<unknown>;
   begin: DialectBegin;
+  // Renders a `dbDefault` SQL expression inlined into INSERT.
+  formatDbDefault?: FormatDbDefault;
 };
+
+export type FormatDbDefault = (value: string) => string;
 
 export type SqlFragment = {
   sql: string;

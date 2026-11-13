@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { mightThrow } from "../errors/index.js";
 import { OrmError } from "./errors.js";
 import { splitStatements } from "./migrations/sql.js";
@@ -16,6 +17,16 @@ const toSqliteParam = (value: unknown) => {
 };
 
 const NO_NAMED_PARAMS = {};
+
+// The savepoints the current async call chain runs inside.
+const savepointScope = new AsyncLocalStorage<Set<SqlTransaction>>();
+
+// The transactions the current async call chain was started inside.
+const transactionScope = new AsyncLocalStorage<Set<object>>();
+
+const quoteSavepoint = (name: string) => {
+  return `"${name.replaceAll('"', '""')}"`;
+};
 
 const hasSeveralStatements = (statement: string) => {
   if (!statement.includes(";")) return false;
@@ -53,22 +64,70 @@ export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
   let savepointCount = 0;
 
   // SQLite savepoints form one stack, so overlapping siblings would release or
-  // roll back each other. Siblings queue on their parent, as in postgres.js;
-  // each savepoint gets its own queue, so nesting does not wait on the parent.
-  const createTransaction = () => {
+  // roll back each other. Siblings queue on their parent. A savepoint opened
+  // through a parent from inside its running savepoint is handed to that one.
+  const createTransaction = (isParentOpen = () => true) => {
     let tail = Promise.resolve();
+    let running: SqlTransaction | undefined;
+    let ended = false;
+
+    // A savepoint closes with its parent: its queries would otherwise run
+    // after the parent's COMMIT or ROLLBACK, outside any transaction.
+    const isOpen = () => {
+      if (ended) return false;
+
+      return isParentOpen();
+    };
+
+    // Like Bun.SQL: a forgotten await must not write outside the transaction.
+    const assertOpen = () => {
+      if (isOpen()) return;
+
+      throw new OrmError(
+        "Cannot run a query after its transaction or savepoint ended",
+      );
+    };
+
+    // The running savepoint, when the caller is inside it.
+    const enclosingSavepoint = () => {
+      if (!running) return;
+      if (!savepointScope.getStore()?.has(running)) return;
+
+      return running;
+    };
 
     const tx: SqlTransaction = {
-      unsafe,
+      queuesSavepoints: true,
+      unsafe: async (statement, params) => {
+        assertOpen();
+
+        return unsafe(statement, params);
+      },
       savepoint: (baseName, run) => {
         const runSavepoint = async () => {
+          // A queued sibling may start after the transaction ended.
+          assertOpen();
+
           savepointCount += 1;
 
-          const name = `${baseName}_${savepointCount}`;
+          const name = quoteSavepoint(`${baseName}_${savepointCount}`);
 
           await unsafe(`SAVEPOINT ${name}`);
 
-          const [error, result] = await mightThrow(run(createTransaction()));
+          const child = createTransaction(isOpen);
+          const scope = new Set(savepointScope.getStore());
+          const outer = running;
+
+          scope.add(child.tx);
+          running = child.tx;
+
+          const [error, result] = await mightThrow(
+            // async: a callback that throws synchronously still rolls back.
+            savepointScope.run(scope, async () => run(child.tx)),
+          );
+
+          child.end();
+          running = outer;
 
           if (error) {
             await mightThrow(unsafe(`ROLLBACK TO ${name}`));
@@ -81,6 +140,11 @@ export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
           return result;
         };
 
+        // It nests there, queued behind its own siblings.
+        const enclosing = enclosingSavepoint();
+
+        if (enclosing) return enclosing.savepoint(baseName, run);
+
         const next = tail.then(runSavepoint);
 
         tail = next.then(
@@ -92,7 +156,11 @@ export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
       },
     };
 
-    return tx;
+    const end = () => {
+      ended = true;
+    };
+
+    return { tx, end };
   };
 
   const runTransaction = async <T>(
@@ -101,8 +169,17 @@ export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
   ) => {
     await unsafe(begin);
 
+    const transaction = createTransaction();
+
+    // async: a callback that throws synchronously still ends the transaction.
+    const runCallback = async () => run(transaction.tx);
+
     const runAndCommit = async () => {
-      const result = await run(createTransaction());
+      const [runError, result] = await mightThrow(runCallback());
+
+      transaction.end();
+
+      if (runError) throw runError;
 
       // COMMIT can fail and leave the transaction open (deferred foreign keys).
       await unsafe("COMMIT");
@@ -120,16 +197,66 @@ export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
     return result;
   };
 
+  // One connection holds one transaction, so later ones wait, as in Bun.SQL.
+  // A transaction started from inside another would wait forever; reject it.
+  let beginTail = Promise.resolve();
+  let activeTransaction: object | undefined;
+
+  // Timers created inside a transaction keep its scope after it ends, so
+  // only the transaction still running counts.
+  const isInsideActiveTransaction = () => {
+    if (!activeTransaction) return false;
+
+    return transactionScope.getStore()?.has(activeTransaction) ?? false;
+  };
+
+  const queueTransaction = async <T>(
+    begin: string,
+    run: SqlRunTransaction<T>,
+  ) => {
+    if (isInsideActiveTransaction()) {
+      throw new OrmError("cannot start a transaction within a transaction");
+    }
+
+    const start = async () => {
+      const token = {};
+      const scope = new Set(transactionScope.getStore());
+
+      scope.add(token);
+      activeTransaction = token;
+
+      const [error, result] = await mightThrow(
+        transactionScope.run(scope, () => runTransaction(begin, run)),
+      );
+
+      activeTransaction = undefined;
+
+      if (error) throw error;
+
+      return result;
+    };
+
+    const next = beginTail.then(start);
+
+    beginTail = next.then(
+      () => undefined,
+      () => undefined,
+    );
+
+    return next;
+  };
+
   return {
+    queuesTransactions: true,
     unsafe,
     begin: async <T>(
       first: string | SqlRunTransaction<T>,
       second?: SqlRunTransaction<T>,
     ) => {
-      if (typeof first !== "string") return runTransaction("BEGIN", first);
+      if (typeof first !== "string") return queueTransaction("BEGIN", first);
       if (!second) throw new OrmError("Missing transaction callback");
 
-      return runTransaction(`BEGIN ${first}`, second);
+      return queueTransaction(`BEGIN ${first}`, second);
     },
     close: async () => db.close(),
   };

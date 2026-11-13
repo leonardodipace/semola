@@ -30,6 +30,26 @@ import type {
 // Clients add a unique suffix per savepoint, so one base name serves every write.
 const RELATION_WRITE_SAVEPOINT = "semola_relation_write";
 
+// Savepoints form one stack per transaction, so overlapping relation writes
+// would release or roll back each other. Writes on one transaction queue;
+// nested writes use the savepoint's own handle, so they never wait on it.
+const relationWriteTail = new WeakMap<SqlTransaction, Promise<unknown>>();
+
+const queueRelationWrite = <T>(tx: SqlTransaction, write: () => Promise<T>) => {
+  const previous = relationWriteTail.get(tx) ?? Promise.resolve();
+  const next = previous.then(write);
+
+  relationWriteTail.set(
+    tx,
+    next.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+
+  return next;
+};
+
 export class SqlDialect<T extends Table, R extends TableRelations> {
   public readonly name;
   private builder: DialectQueryBuilder<T, R>;
@@ -200,10 +220,16 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
     };
 
     if ("savepoint" in sql) {
-      // Bun nested savepoint clients are transactions at runtime.
-      return sql.savepoint(RELATION_WRITE_SAVEPOINT, (tx) => {
-        return run(tx as SqlTransaction);
-      });
+      const write = () => {
+        // Bun nested savepoint clients are transactions at runtime.
+        return sql.savepoint(RELATION_WRITE_SAVEPOINT, (tx) => {
+          return run(tx as SqlTransaction);
+        });
+      };
+
+      if (sql.queuesSavepoints) return write();
+
+      return queueRelationWrite(sql, write);
     }
 
     return this.builder.spec.begin(sql, run);

@@ -122,7 +122,7 @@ const users = defineTable({
 | Who fills it | App, on `create()` | Database |
 | Omitted insert | Runs `fn` | Uses the SQL default (not `null`) |
 
-Use `.dbDefault()` when adding a `NOT NULL` column. `{ as: "sql" }` is for SQL expressions such as functions and `CURRENT_TIMESTAMP` (a single expression only).
+Use `.dbDefault()` when adding a `NOT NULL` column. `{ as: "sql" }` is for SQL expressions such as functions and `CURRENT_TIMESTAMP` (a single expression only). On SQLite, `CURRENT_TIMESTAMP` is written as an ISO timestamp so it compares correctly with the `Date` values the ORM binds. `CURRENT_DATE` becomes ISO midnight UTC, and function calls are wrapped in parentheses. A table created with a plain `DEFAULT CURRENT_TIMESTAMP` still writes `YYYY-MM-DD HH:MM:SS` for rows inserted outside the ORM until it is recreated.
 
 ### Relations
 
@@ -312,25 +312,7 @@ await db.users.update({
 | `one()` | One unique where | `true` (sets the FK to `null`) |
 | `many()` | Array of unique wheres | Array of unique wheres (sets their FK to `null`) |
 
-The whole write runs in one transaction (a savepoint inside `$transaction`). A missing record throws and rolls everything back.
-
-### Connect and disconnect
-
-`create` and `update` accept relation keys in `data` to link existing records by a unique key.
-
-```typescript
-await db.posts.create({
-  data: { id: "p1", title: "Hello", author: { connect: { id: "u1" } } },
-});
-
-await db.users.update({
-  where: { id: "u1" },
-  data: { posts: { connect: [{ id: "p2" }], disconnect: [{ id: "p3" }] } },
-  include: { posts: true },
-});
-```
-
-`one()` relations take `connect: { ... }` or `disconnect: true`. `many()` relations take arrays. The whole write runs in a transaction (a savepoint inside `$transaction`), so a missing record throws and nothing is saved.
+The whole write runs in one transaction (a savepoint inside `$transaction`). A missing record throws and rolls everything back. Relation writes running at the same time inside one `$transaction` (for example under `Promise.all`) run one after another, so a failed one never undoes another.
 
 ## Transactions and raw SQL
 
@@ -388,7 +370,7 @@ const db = createOrm({
 });
 ```
 
-- `fromNodeSqlite(db)` takes a `DatabaseSync` from `node:sqlite` (Node 22.13+). It uses one connection; queries issued while a transaction is open join that transaction, as with Bun SQLite. A string with several statements runs them all through `exec` and returns no rows.
+- `fromNodeSqlite(db)` takes a `DatabaseSync` from `node:sqlite` (Node 22.13+). It uses one connection; transactions run one at a time, and queries issued while one is open join it, as with Bun SQLite. A string with several statements runs them all through `exec` and returns no rows.
 - postgres.js `close()` closes idle connections but keeps the pool usable; call `sql.end()` to shut it down.
 - The `semola` CLI runs on Bun. It loads the schema module, migrates through its client, and closes it.
 
@@ -475,9 +457,12 @@ import { applyMigrations, loadConfig } from "semola/orm";
 
 // migrate.ts, run as its own process
 const config = await loadConfig();
-const applied = await applyMigrations(config);
 
-await config.orm.client.close();
+try {
+  await applyMigrations(config);
+} finally {
+  await config.orm.client.close();
+}
 ```
 
 `loadConfig(cwd?)` reads `semola.config.ts` and the schema module (same as the CLI). Importing `.ts` files needs Bun or Node 22.18+. Pass a `LoadedConfig` yourself when you already have a client:
@@ -488,14 +473,17 @@ import { applyMigrations } from "semola/orm";
 
 const sql = new SQL("file:./dev.db");
 
-await applyMigrations({
-  migrationsDir: "./migrations",
-  orm: { adapter: "sqlite", client: sql, tables: {} },
-});
-await sql.close();
+try {
+  await applyMigrations({
+    migrationsDir: "./migrations",
+    orm: { adapter: "sqlite", client: sql, tables: {} },
+  });
+} finally {
+  await sql.close();
+}
 ```
 
-Migrations run on `orm.client` and leave it open; close it when the process is done. `loadConfig` returns the schema module's client, the same one your app imports, so do not close it when migrating inside the app. On SQLite, migrations turn foreign keys off on that connection while they run and back on afterwards, so run them before serving queries on the same client.
+Migrations run on `orm.client` and leave it open; close it when the process is done. `loadConfig` returns the schema module's client, the same one your app imports, so do not close it when migrating inside the app. On SQLite, migrations turn foreign keys off on that connection while they run and restore the previous setting afterwards, so run them before serving queries on the same client.
 
 - Apply pending migrations before creating another one.
 - `create` fails when nothing changed.

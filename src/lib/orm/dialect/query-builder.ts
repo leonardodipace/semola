@@ -162,7 +162,13 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
     for (const [jsKey, column] of Object.entries(this.table.columns)) {
       sqlNames.push(quoteIdentifier(column.sqlName));
       valuePlaceholders.push(
-        bindCreateValue(column, provided.get(jsKey), nextPlaceholder, params),
+        bindCreateValue(
+          column,
+          provided.get(jsKey),
+          nextPlaceholder,
+          params,
+          this.spec.formatDbDefault,
+        ),
       );
     }
 
@@ -260,7 +266,13 @@ export class DialectQueryBuilder<T extends Table, R extends TableRelations> {
 
       for (const [jsKey, column] of columnEntries) {
         placeholdersForRow.push(
-          bindCreateValue(column, rowRecord[jsKey], nextPlaceholder, params),
+          bindCreateValue(
+            column,
+            rowRecord[jsKey],
+            nextPlaceholder,
+            params,
+            this.spec.formatDbDefault,
+          ),
         );
       }
 

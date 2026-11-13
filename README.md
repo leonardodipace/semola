@@ -192,7 +192,8 @@ const users = defineTable({
 
 const db = createOrm({
   adapter: "sqlite",
-  client: new SQL(":memory:"),
+  // Tables come from `bunx semola orm migrations apply`.
+  client: new SQL("file:./dev.db"),
   tables: { users },
 });
 

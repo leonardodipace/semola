@@ -120,6 +120,66 @@ for (const live of integrationAdapters()) {
       });
     };
 
+    test("date columns come back as Date, also inside includes", async () => {
+      const orm = await open();
+      await createAda(orm);
+      await orm.posts.create({
+        data: { id: postId, title: "First", authorId: id },
+      });
+
+      const user = await orm.users.findUnique({ where: { id } });
+      const post = await orm.posts.findUnique({
+        where: { id: postId },
+        include: { author: true },
+      });
+
+      expect(user?.createdAt).toEqual(new Date("2025-01-01T00:00:00.000Z"));
+      expect(post?.author?.createdAt).toEqual(
+        new Date("2025-01-01T00:00:00.000Z"),
+      );
+
+      await orm.$raw.close();
+    });
+
+    test("concurrent relation writes in $transaction keep only the good ones", async () => {
+      const orm = await open();
+      await createAda(orm);
+      await orm.notes.createMany({ data: [{ id: postId }, { id: id2 }] });
+
+      const results = await orm.$transaction((tx) => {
+        return Promise.allSettled([
+          tx.users.update({
+            where: { id },
+            data: { notes: { connect: [{ id: postId }] } },
+          }),
+          tx.posts.create({
+            data: {
+              id: id2,
+              title: "Orphan",
+              author: { connect: { email: "missing@example.com" } },
+            },
+          }),
+          tx.users.update({
+            where: { id },
+            data: { name: "Augusta", notes: { connect: [{ id: id2 }] } },
+          }),
+        ]);
+      });
+
+      const user = await orm.users.findUnique({
+        where: { id },
+        include: { notes: true },
+      });
+      const statuses = results.map((result) => result.status);
+
+      expect(statuses).toEqual(["fulfilled", "rejected", "fulfilled"]);
+      expect(user?.name).toBe("Augusta");
+      expect(user?.notes).toHaveLength(2);
+      expect(await orm.posts.findMany()).toHaveLength(0);
+
+      await orm.$raw.close();
+    });
+
     test("connect and disconnect one() relations", async () => {
       const orm = await open();
       await createAda(orm);

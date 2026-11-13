@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { string, uuid } from "../column/index.js";
+import { date, string, uuid } from "../column/index.js";
 import { MigrationError } from "../errors.js";
 import {
   PG_ID,
@@ -1421,7 +1421,9 @@ export const db = createOrm({
     for (const result of rejected) {
       if (result.status !== "rejected") continue;
 
-      expect(String(result.reason)).toMatch(/locked|BUSY|already rolled back/i);
+      expect(String(result.reason)).toMatch(
+        /locked|BUSY|already rolled back|No migrations to rollback/i,
+      );
     }
 
     const db = createOrm({
@@ -3242,5 +3244,139 @@ export default defineConfig({
     );
 
     expect([...tables]).toEqual([]);
+  });
+
+  test("apply runs a hand-written SQLite trigger from up.sql", async () => {
+    const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+    dirs.push(root);
+
+    const client = fromNodeSqlite(new DatabaseSync(":memory:"));
+    const users = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+      },
+    });
+    const config = {
+      migrationsDir: join(root, "migrations"),
+      orm: { adapter: "sqlite" as const, tables: { users }, client },
+    };
+
+    const folder = await createMigration({ name: "init", config });
+    const upPath = join(config.migrationsDir, folder, "up.sql");
+    const up = await Bun.file(upPath).text();
+
+    await writeFile(
+      upPath,
+      `${up}
+CREATE TRIGGER users_upper AFTER INSERT ON users BEGIN
+  UPDATE users SET name = upper(NEW.name) WHERE id = NEW.id;
+END;
+`,
+    );
+    await applyMigrations(config);
+    await client.unsafe("INSERT INTO users (id, name) VALUES ('u1', 'ada')");
+
+    const [row] = await client.unsafe("SELECT name FROM users");
+
+    expect(row?.name).toBe("ADA");
+  });
+
+  test("a CURRENT_TIMESTAMP default matches where filters on the Date it returns", async () => {
+    const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+    dirs.push(root);
+
+    const client = fromNodeSqlite(new DatabaseSync(":memory:"));
+    const events = defineTable({
+      sqlName: "events",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        createdAt: date("created_at")
+          .notNull()
+          .dbDefault("CURRENT_TIMESTAMP", { as: "sql" }),
+      },
+    });
+    const config = {
+      migrationsDir: join(root, "migrations"),
+      orm: { adapter: "sqlite" as const, tables: { events }, client },
+    };
+
+    await createMigration({ name: "init", config });
+    await applyMigrations(config);
+
+    const orm = createOrm({ adapter: "sqlite", client, tables: { events } });
+    const created = await orm.events.create({ data: { id: "e1" } });
+    const sameTime = await orm.events.findMany({
+      where: { createdAt: { equals: created.createdAt } },
+    });
+    const anHourAgo = new Date(created.createdAt.getTime() - 60 * 60 * 1000);
+    const recent = await orm.events.findMany({
+      where: { createdAt: { gt: anHourAgo } },
+    });
+
+    expect(created.createdAt).toBeInstanceOf(Date);
+    expect(sameTime).toHaveLength(1);
+    expect(recent).toHaveLength(1);
+  });
+
+  test("overlapping applies on one client restore foreign keys", async () => {
+    const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+    dirs.push(root);
+
+    const client = new Bun.SQL(":memory:");
+    const users = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+      },
+    });
+    const config = {
+      migrationsDir: join(root, "migrations"),
+      orm: { adapter: "sqlite" as const, tables: { users }, client },
+    };
+
+    await client.unsafe("PRAGMA foreign_keys = ON");
+    await createMigration({ name: "init", config });
+
+    const first = applyMigrations(config);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const second = applyMigrations(config);
+
+    await Promise.all([first, second]);
+
+    const [pragma] = await client.unsafe("PRAGMA foreign_keys");
+
+    expect(pragma?.foreign_keys).toBe(1);
+
+    await client.close();
+  });
+
+  test("apply leaves foreign keys off on a client that had them off", async () => {
+    const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+    dirs.push(root);
+
+    const client = fromNodeSqlite(
+      new DatabaseSync(":memory:", { enableForeignKeyConstraints: false }),
+    );
+    const users = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+      },
+    });
+    const config = {
+      migrationsDir: join(root, "migrations"),
+      orm: { adapter: "sqlite" as const, tables: { users }, client },
+    };
+
+    await createMigration({ name: "init", config });
+    await applyMigrations(config);
+
+    const [pragma] = await client.unsafe("PRAGMA foreign_keys");
+
+    expect(pragma?.foreign_keys).toBe(0);
   });
 });

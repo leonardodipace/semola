@@ -111,23 +111,43 @@ const ensureHistoryTable = async (sql: Sql) => {
   );
 };
 
+// Runs on one client queue: an overlapping run would save the connection
+// settings the first run changed and restore those instead of the caller's.
+const connectionTail = new WeakMap<SqlClient, Promise<unknown>>();
+
 const withConnection = async <T>(
   config: LoadedConfig,
   fn: (sql: SqlClient, dialect: MigrationDialect) => Promise<T>,
 ) => {
   const dialect = getMigrationDialect(config.orm.adapter);
   const sql = config.orm.client;
-  const restoreConnection = await dialect.prepareConnection(sql);
 
-  try {
-    // Outside tx: failed ALTER aborts Postgres transactions.
-    await ensureHistoryTable(sql);
+  const run = async () => {
+    const restoreConnection = await dialect.prepareConnection(sql);
 
-    return await fn(sql, dialect);
-  } finally {
-    // Best effort: a failure here must not replace the migration error.
-    await mightThrow(restoreConnection());
-  }
+    try {
+      // Outside tx: failed ALTER aborts Postgres transactions.
+      await ensureHistoryTable(sql);
+
+      return await fn(sql, dialect);
+    } finally {
+      // Best effort: a failure here must not replace the migration error.
+      await mightThrow(restoreConnection());
+    }
+  };
+
+  const previous = connectionTail.get(sql) ?? Promise.resolve();
+  const next = previous.then(run);
+
+  connectionTail.set(
+    sql,
+    next.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+
+  return next;
 };
 
 export const loadConfig = async (cwd = process.cwd()) => {

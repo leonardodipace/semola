@@ -4,6 +4,10 @@ import type { IndexSnapshot } from "../indexes/types.js";
 import type { ColumnSnapshot, SchemaSnapshot, TableSnapshot } from "./types.js";
 
 const DOLLAR_TAG = /^(\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)/;
+const BLOCK_COMMENT = /\/\*[\s\S]*?\*\//g;
+const WORD = /[A-Za-z_][A-Za-z0-9_]*/y;
+const WORD_CHAR = /[A-Za-z0-9_$]/;
+const TEMP_KEYWORDS = new Set(["TEMP", "TEMPORARY"]);
 
 const COLUMN_TYPES = new Set([
   "string",
@@ -416,7 +420,9 @@ const skipQuoted = (source: string, start: number, quote: string) => {
 };
 
 const isSqlStatement = (text: string) => {
-  return text.split("\n").some((line) => {
+  const withoutBlockComments = text.replace(BLOCK_COMMENT, "");
+
+  return withoutBlockComments.split("\n").some((line) => {
     const trimmed = line.trim();
 
     if (!trimmed) return false;
@@ -426,13 +432,46 @@ const isSqlStatement = (text: string) => {
   });
 };
 
+// The whole word starting at index, or undefined mid-word.
+const readWord = (source: string, index: number) => {
+  if (WORD_CHAR.test(source[index - 1] ?? "")) return;
+
+  WORD.lastIndex = index;
+
+  return WORD.exec(source)?.[0];
+};
+
+// Leading words of a statement, uppercased: CREATE [TEMP] TRIGGER.
+const isCreateTrigger = (words: string[]) => {
+  const [first, second, third] = words;
+
+  if (first !== "CREATE") return false;
+  if (second === "TRIGGER") return true;
+  if (!TEMP_KEYWORDS.has(second ?? "")) return false;
+
+  return third === "TRIGGER";
+};
+
+// SQLite trigger bodies hold ";" between BEGIN and END; CASE also ends in END.
+const triggerDepthChange = (word: string) => {
+  if (word === "BEGIN") return 1;
+  if (word === "CASE") return 1;
+  if (word === "END") return -1;
+
+  return 0;
+};
+
 export const splitStatements = (sqlText: string) => {
   const statements: string[] = [];
   let current = "";
+  let triggerDepth = 0;
+  // Comments and quoted text are skipped whole, so these are real keywords.
+  let leadingWords: string[] = [];
 
   const flush = () => {
     const trimmed = current.trim();
     current = "";
+    leadingWords = [];
 
     if (!trimmed) return;
     if (!isSqlStatement(trimmed)) return;
@@ -493,7 +532,28 @@ export const splitStatements = (sqlText: string) => {
       }
     }
 
+    const word = readWord(sqlText, index);
+
+    if (word) {
+      const keyword = word.toUpperCase();
+
+      if (leadingWords.length < 3) leadingWords.push(keyword);
+
+      if (isCreateTrigger(leadingWords)) {
+        triggerDepth += triggerDepthChange(keyword);
+      }
+
+      current += word;
+      index += word.length - 1;
+      continue;
+    }
+
     if (char === ";") {
+      if (triggerDepth > 0) {
+        current += char;
+        continue;
+      }
+
       flush();
       continue;
     }

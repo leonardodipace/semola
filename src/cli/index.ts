@@ -108,12 +108,14 @@ const promptDestructive = async () => {
 const withConfig = async <T>(fn: (config: LoadedConfig) => Promise<T>) => {
   const config = await loadConfig();
 
-  try {
-    return await fn(config);
-  } finally {
-    // Best effort: a failure here must not replace the migration error.
-    await mightThrow(config.orm.client.close());
-  }
+  const [error, result] = await mightThrow(fn(config));
+  const [closeError] = await mightThrow(config.orm.client.close());
+
+  // A migration error wins; a close error still fails an otherwise good run.
+  if (error) throw error;
+  if (closeError) throw closeError;
+
+  return result;
 };
 
 const run = async () => {
