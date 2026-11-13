@@ -1,5 +1,6 @@
 import { mightThrowSync } from "../../errors/index.js";
 import type { Table } from "../table/types.js";
+import type { Sql } from "../types.js";
 import type {
   CoerceRelationItemsInput,
   CoerceRowInput,
@@ -11,7 +12,12 @@ import type {
 type ColumnKeysByType = {
   boolKeys: Set<string>;
   jsonKeys: Set<string>;
+  dateKeys: Set<string>;
 };
+
+// SQLite CURRENT_TIMESTAMP writes "YYYY-MM-DD HH:MM:SS"; ISO needs a "T".
+const SQL_DATETIME_SEPARATOR = /^(\d{4}-\d{2}-\d{2}) /;
+const TIMEZONE_SUFFIX = /(Z|[+-]\d{2}(:?\d{2})?)$/i;
 
 type ColumnKeyCache = Map<Table, ColumnKeysByType>;
 
@@ -25,7 +31,7 @@ export class RowParser {
     }
   }
 
-  public async executeQuery(sql: Bun.SQL, table: Table, query: ReturningQuery) {
+  public async executeQuery(sql: Sql, table: Table, query: ReturningQuery) {
     const rows = [...(await sql.unsafe(query.statement, query.params))];
 
     this.parseRows({ table, rows, descriptors: query.includeDescriptors });
@@ -49,7 +55,7 @@ export class RowParser {
     table: Table,
     columnKeyCache: ColumnKeyCache,
   ) {
-    const { boolKeys, jsonKeys } = this.getCachedColumnKeysByType(
+    const { boolKeys, jsonKeys, dateKeys } = this.getCachedColumnKeysByType(
       table,
       columnKeyCache,
     );
@@ -62,6 +68,12 @@ export class RowParser {
       if (!(key in row)) continue;
 
       row[key] = this.coerceJsonValue(row[key]);
+    }
+
+    for (const key of dateKeys) {
+      if (!(key in row)) continue;
+
+      row[key] = this.coerceDateValue(row[key]);
     }
   }
 
@@ -175,16 +187,36 @@ export class RowParser {
     return parsed;
   }
 
+  // SQLite stores dates as text, and JSON includes carry them as strings.
+  // A value without a zone is UTC, as the drivers read TIMESTAMP columns.
+  private coerceDateValue(val: unknown) {
+    if (typeof val !== "string") return val;
+
+    let iso = val.replace(SQL_DATETIME_SEPARATOR, "$1T");
+
+    if (iso.includes("T")) {
+      if (!TIMEZONE_SUFFIX.test(iso)) iso = `${iso}Z`;
+    }
+
+    const date = new Date(iso);
+
+    if (Number.isNaN(date.getTime())) return val;
+
+    return date;
+  }
+
   private getColumnKeysByType(table: Table): ColumnKeysByType {
     const boolKeys = new Set<string>();
     const jsonKeys = new Set<string>();
+    const dateKeys = new Set<string>();
 
     for (const [key, col] of Object.entries(table.columns)) {
       if (col.type === "boolean") boolKeys.add(key);
       if (col.type === "json") jsonKeys.add(key);
       if (col.type === "jsonb") jsonKeys.add(key);
+      if (col.type === "date") dateKeys.add(key);
     }
 
-    return { boolKeys, jsonKeys };
+    return { boolKeys, jsonKeys, dateKeys };
   }
 }

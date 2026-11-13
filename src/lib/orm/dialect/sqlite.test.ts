@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { SQL } from "bun";
+import { mightThrow } from "../../errors/index.js";
+import { string, uuid } from "../column/index.js";
+import { createOrm } from "../orm/index.js";
+import { defineTable } from "../table/index.js";
 import { getDialect } from "./index.js";
-import { beginSqlite } from "./sqlite.js";
+import { beginSqlite, formatSqliteDbDefault } from "./sqlite.js";
 import { usersTable } from "./test-fixtures.js";
 
 describe("sqlite dialect", () => {
@@ -120,5 +125,74 @@ describe("sqlite dialect", () => {
     expect(await Promise.all([hold, detached])).toEqual(["hold", "detached"]);
 
     await sql.close();
+  });
+});
+
+describe("formatSqliteDbDefault", () => {
+  test("writes CURRENT_TIMESTAMP in any spelling as an ISO timestamp", () => {
+    const iso = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
+
+    expect(formatSqliteDbDefault("CURRENT_TIMESTAMP")).toBe(iso);
+    expect(formatSqliteDbDefault("current_timestamp")).toBe(iso);
+    expect(formatSqliteDbDefault("(CURRENT_TIMESTAMP)")).toBe(iso);
+  });
+
+  test("writes CURRENT_DATE as an ISO midnight", () => {
+    expect(formatSqliteDbDefault("CURRENT_DATE")).toBe(
+      "(strftime('%Y-%m-%dT00:00:00.000Z', 'now'))",
+    );
+  });
+
+  test("wraps function call defaults in parentheses", () => {
+    expect(formatSqliteDbDefault("datetime('now')")).toBe("(datetime('now'))");
+    expect(formatSqliteDbDefault("(random())")).toBe("(random())");
+    expect(formatSqliteDbDefault("'member'")).toBe("'member'");
+    expect(formatSqliteDbDefault("42")).toBe("42");
+  });
+});
+
+describe("sqlite foreign keys", () => {
+  const owners = defineTable({
+    sqlName: "owners",
+    columns: { id: uuid("id").primaryKey().notNull() },
+  });
+  const pets = defineTable({
+    sqlName: "pets",
+    columns: {
+      id: uuid("id").primaryKey().notNull(),
+      ownerId: string("owner_id").references(() => owners.columns.id),
+    },
+  });
+
+  test("turn on after a first query that ran during an open transaction", async () => {
+    const client = new SQL(":memory:");
+
+    await client.unsafe("CREATE TABLE owners (id TEXT PRIMARY KEY)");
+    await client.unsafe(
+      "CREATE TABLE pets (id TEXT PRIMARY KEY, owner_id TEXT REFERENCES owners(id))",
+    );
+
+    const orm = createOrm({
+      adapter: "sqlite",
+      client,
+      tables: { owners, pets },
+    });
+
+    const raw = client.begin(async (tx) => {
+      await tx.unsafe("INSERT INTO owners (id) VALUES ('a')");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await orm.owners.findMany();
+    await raw;
+
+    const [error] = await mightThrow(
+      orm.pets.create({ data: { id: "p1", ownerId: "missing" } }),
+    );
+
+    expect(error?.message).toContain("FOREIGN KEY");
+
+    await client.close();
   });
 });

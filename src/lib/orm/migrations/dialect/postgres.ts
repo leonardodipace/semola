@@ -1,4 +1,5 @@
 import { POSTGRES_SPEC } from "../../dialect/postgres.js";
+import type { Sql } from "../../types.js";
 import { quoteIdentifier } from "../../utils.js";
 import type {
   ColumnSnapshot,
@@ -65,7 +66,7 @@ const formatDefault = (value: string) => {
   return value;
 };
 
-const lockMigrations = async (sql: Bun.SQL) => {
+const lockMigrations = async (sql: Sql) => {
   // Fixed key pair reserved for Semola migrations (avoids hashtext collisions).
   await sql.unsafe("SELECT pg_advisory_xact_lock(872314055, 1)");
 };

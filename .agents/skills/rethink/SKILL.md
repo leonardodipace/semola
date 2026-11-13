@@ -5,7 +5,8 @@ description: >-
   lines and less complexity, apply it, then re-review your own result in a
   loop until a round finds nothing left to cut. Use when the user says
   rethink, assume it's wrong, fewer lines, less complexity, simplify the
-  design, shrink this, or asks to repeat the review on your own work.
+  design, shrink this, find things that don't make sense, why do we have
+  both, smaller API, or asks to repeat the review on your own work.
 license: MIT
 ---
 
@@ -40,6 +41,7 @@ Round 1 is recommend-only because it may trade features for lines; the user pick
 
 - Default scope: the branch diff. `git fetch origin main` first (local `main` may be behind), then `git log --oneline origin/main..HEAD`, `git diff --stat origin/main...HEAD`.
 - Read every implementation file in scope, its tests, and every caller of its public types (grep imports). Callers often already do the work the module repeats.
+- Inventory the surface the change adds or touches: public options, exports, types, fields on returned objects, error messages that reject an input combination, internal maps and copied fields, test fixtures and helpers, docs caveats ("X is not available with Y"). Ask of each one: why does this exist?
 
 ## Step 2: Assume it is wrong
 
@@ -55,6 +57,16 @@ Look for these, in order of payoff:
 | Global side tables | `WeakMap` or module state keyed by an object you already close over? | Closure variable |
 | Leftovers from earlier rounds | Fixture params, exports, tests that only served deleted code? | Delete |
 | Redundant tests | Is the assertion already covered by another suite? Did the test guard a mechanism that no longer exists? | Delete |
+| Two ways to do one thing | Is one path a subset of the other, or tied to one runtime or vendor? | Keep the general path, delete the special one |
+| Split ownership | Does the library sometimes own a resource (opens, closes, configures it) and sometimes not? | Pick one owner, usually the caller; open/close/restore branches disappear |
+| Pass-through config | Is an option only forwarded to something the caller could configure directly? | Delete; the caller configures the owner |
+| Recovering what you threw away | A side table or getter that re-derives data an earlier step discarded or redacted? | Stop discarding it, or stop needing it |
+| Copied state | A field that mirrors an option or another field? | Read the source directly |
+| Guard for an asymmetry | An error like "A needs B" or a doc caveat "C is unavailable with D"? | Remove the asymmetry; the guard, its test, and its doc line go too |
+| Twin fixtures | Two test hooks or helpers that produce the same thing in different shapes? | Keep one |
+| Single-use names | A local helper or constant used once, adding no meaning? | Inline |
+
+Trace what depends on each candidate (grep callers, tests, docs). A good find removes a chain, not a line: the root choice, then every guard, type, test, and caveat that existed only because of it.
 
 For each candidate, also check correctness: concurrency (overlapping calls, in-flight operations), failure rollback, double wrapping, and resource lifecycle (polling or listeners started too early).
 
@@ -81,8 +93,9 @@ Say plainly when the design holds and only small cuts remain. Do not invent chan
 3. `bun check`.
 4. Integration tests when the module talks to a server. Start a throwaway container, for example
    `docker run -d --rm --name <tmp> -p 127.0.0.1:56379:6379 redis:8-alpine`, run with `SEMOLA_REDIS_URL=redis://127.0.0.1:56379`, then stop it.
-5. A test fails: compare against the unmodified branch before blaming or excusing your change (see Baseline). Report the flake rate on both.
-6. Measure: `git diff HEAD --shortstat`, split into source (`-- src ':!*.test.ts'`) and tests (`-- '*.test.ts'`). Plain `git diff --stat` hides staged deletions. Add new untracked files: `git ls-files --others --exclude-standard -- src | xargs wc -l`.
+5. Exercise any entrypoint whose lifecycle changed (CLI, server) for real, not only through tests. Ownership changes often leave a process hanging on an unclosed resource.
+6. A test fails: compare against the unmodified branch before blaming or excusing your change (see Baseline). Report the flake rate on both.
+7. Measure: `git diff HEAD --shortstat`, split into source (`-- src ':!*.test.ts'`) and tests (`-- '*.test.ts'`). Plain `git diff --stat` hides staged deletions. Add new untracked files: `git ls-files --others --exclude-standard -- src | xargs wc -l`.
 
 ## Step 5: Stop
 

@@ -1,7 +1,7 @@
 import type { Column } from "../column/types.js";
 import type { Table } from "../table/types.js";
 import { quoteIdentifier } from "../utils.js";
-import type { BuildSetClausesInput } from "./types.js";
+import type { BuildSetClausesInput, FormatDbDefault } from "./types.js";
 
 export const serializeParam = (value: unknown) => {
   if (value instanceof Date) return value.toISOString();
@@ -31,6 +31,7 @@ export const bindCreateValue = (
   provided: unknown,
   nextPlaceholder: () => string,
   params: unknown[],
+  formatDbDefault: FormatDbDefault = (value) => value,
 ) => {
   if (provided !== undefined) {
     params.push(serializeColumnValue(column, provided));
@@ -42,8 +43,9 @@ export const bindCreateValue = (
     return nextPlaceholder();
   }
 
+  // Inlined because SQLite has no VALUES (DEFAULT); render it like the DDL.
   if (column._meta.dbDefault !== undefined) {
-    return column._meta.dbDefault;
+    return formatDbDefault(column._meta.dbDefault);
   }
 
   params.push(serializeColumnValue(column, null));

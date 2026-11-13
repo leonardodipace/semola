@@ -177,6 +177,7 @@ cleanup.run();
 ### Query a Database
 
 ```typescript
+import { SQL } from "bun";
 import { createOrm, defineTable, json, string, uuid } from "semola/orm";
 
 const users = defineTable({
@@ -191,7 +192,8 @@ const users = defineTable({
 
 const db = createOrm({
   adapter: "sqlite",
-  url: ":memory:",
+  // Tables come from `bunx semola orm migrations apply`.
+  client: new SQL("file:./dev.db"),
   tables: { users },
 });
 

@@ -1,6 +1,7 @@
 import type { CheckSnapshot } from "../../checks/types.js";
 import { MigrationError } from "../../errors.js";
 import type { IndexSnapshot } from "../../indexes/types.js";
+import type { Sql, SqlClient, SqlTransaction } from "../../types.js";
 import { quoteIdentifier } from "../../utils.js";
 import type {
   ColumnSnapshot,
@@ -31,19 +32,24 @@ export class MigrationDialect {
     this.name = spec.name;
   }
 
-  public async prepareConnection(sql: Bun.SQL) {
-    await this.spec.prepareConnection?.(sql);
+  public async prepareConnection(sql: Sql) {
+    const restore = await this.spec.prepareConnection?.(sql);
+
+    return restore ?? (async () => {});
   }
 
-  public async assertForeignKeys(sql: Bun.SQL) {
+  public async assertForeignKeys(sql: Sql) {
     await this.spec.assertForeignKeys?.(sql);
   }
 
-  public async lockMigrations(sql: Bun.SQL) {
+  public async lockMigrations(sql: Sql) {
     await this.spec.lockMigrations?.(sql);
   }
 
-  public beginMigration<T>(sql: Bun.SQL, fn: (tx: Bun.SQL) => Promise<T>) {
+  public beginMigration<T>(
+    sql: SqlClient,
+    fn: (tx: SqlTransaction) => Promise<T>,
+  ) {
     if (this.spec.beginMigration) {
       return this.spec.beginMigration(sql, fn);
     }

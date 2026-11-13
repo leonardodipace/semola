@@ -1,5 +1,6 @@
-import { SQLITE_SPEC } from "../../dialect/sqlite.js";
+import { formatSqliteDbDefault, SQLITE_SPEC } from "../../dialect/sqlite.js";
 import { MigrationError } from "../../errors.js";
+import type { Sql } from "../../types.js";
 import type {
   ColumnSnapshot,
   MigrationDialectSpec,
@@ -23,7 +24,7 @@ const formatDefault = (value: string) => {
   if (value === "TRUE") return "1";
   if (value === "FALSE") return "0";
 
-  return value;
+  return formatSqliteDbDefault(value);
 };
 
 const sqlTypeFor = (column: ColumnSnapshot) => {
@@ -164,12 +165,21 @@ const foldOpsByTable = (
   return folded;
 };
 
-const prepareConnection = async (sql: Bun.SQL) => {
+const prepareConnection = async (sql: Sql) => {
+  const [foreignKeys] = await sql.unsafe("PRAGMA foreign_keys");
+  const [busyTimeout] = await sql.unsafe("PRAGMA busy_timeout");
+
   await sql.unsafe("PRAGMA foreign_keys = OFF");
   await sql.unsafe("PRAGMA busy_timeout = 250");
+
+  // Restore the caller's settings on a client they keep using.
+  return async () => {
+    await sql.unsafe(`PRAGMA foreign_keys = ${foreignKeys?.foreign_keys}`);
+    await sql.unsafe(`PRAGMA busy_timeout = ${busyTimeout?.timeout}`);
+  };
 };
 
-const assertForeignKeys = async (sql: Bun.SQL) => {
+const assertForeignKeys = async (sql: Sql) => {
   const violations = [...(await sql.unsafe("PRAGMA foreign_key_check"))];
 
   if (violations.length === 0) return;
