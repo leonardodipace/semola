@@ -1,4 +1,3 @@
-import { mightThrow } from "../../errors/index.js";
 import { nextRun, parseExpression } from "./schedule.js";
 import type {
   CronBaseOptions,
@@ -14,8 +13,16 @@ const DEFAULT_LOCK_TTL = 300_000;
 // after its boundary, also after the machine slept through it.
 const CHECK_INTERVAL_MS = 1_000;
 
+const WHITESPACE_PATTERN = /\s+/g;
+
 const lockKey = (name: string, expr: string, tickMs: number) =>
   `cron:${name}:${expr}:${tickMs}`;
+
+const invalidLockTTL = (lockTTL: number) => {
+  return new TypeError(
+    `Invalid lockTTL ${lockTTL}: expected a positive integer of milliseconds`,
+  );
+};
 
 const ALIASES = new Map([
   ["@yearly", "0 0 1 1 *"],
@@ -29,8 +36,12 @@ const ALIASES = new Map([
 ]);
 
 class CommonCronUtilities {
+  // Spacing is normalized, so replicas whose schedules differ only in
+  // whitespace share one CronDistributed lock key.
   public getExpression(schedule: string) {
-    return ALIASES.get(schedule.trim().toLowerCase()) ?? schedule;
+    const normalized = schedule.trim().replace(WHITESPACE_PATTERN, " ");
+
+    return ALIASES.get(normalized.toLowerCase()) ?? normalized;
   }
 
   public getJobName(options: CronBaseOptions) {
@@ -51,6 +62,7 @@ export class Cron implements CronUtilitiesInterface {
   // On the instance, so a handler still running from before a stop() and
   // run() also holds back the new run.
   private isHandling = false;
+  private keepsProcessAlive = true;
   private common: CommonCronUtilities;
 
   public constructor(options: CronOptions) {
@@ -78,9 +90,10 @@ export class Cron implements CronUtilitiesInterface {
       throw new TypeError(`Cron expression "${expression}" never matches`);
     }
 
-    // A handler error is rethrown after the next run is set, so it surfaces as
-    // an unhandled rejection like Bun.cron does. Handle it (or catch inside the
-    // handler) to keep the process alive; the job keeps running either way.
+    // The next run is set before a handler error propagates, so the error
+    // surfaces as an unhandled rejection like Bun.cron does, whatever value was
+    // thrown. Handle it (or catch inside the handler) to keep the process
+    // alive; the job keeps running either way.
     this.timer = setInterval(async () => {
       if (this.isHandling) return;
       if (!target) return;
@@ -90,20 +103,18 @@ export class Cron implements CronUtilitiesInterface {
       const scheduledAtMs = target.getTime();
       this.isHandling = true;
 
-      const [handlerError] = await mightThrow(
-        Promise.resolve().then(() =>
-          this.options.handler(new Date(scheduledAtMs)),
-        ),
-      );
-
-      // Counting from the settle time skips boundaries a slow handler overran.
-      // Never counting from before the fired boundary keeps a clock stepped
-      // back during the handler from firing it twice.
-      target = nextRun(fields, Math.max(Date.now(), scheduledAtMs));
-      this.isHandling = false;
-
-      if (handlerError) throw handlerError;
+      await Promise.resolve()
+        .then(() => this.options.handler(new Date(scheduledAtMs)))
+        .finally(() => {
+          // Counting from the settle time skips boundaries a slow handler
+          // overran. Never counting from before the fired boundary keeps a
+          // clock stepped back during the handler from firing it twice.
+          target = nextRun(fields, Math.max(Date.now(), scheduledAtMs));
+          this.isHandling = false;
+        });
     }, CHECK_INTERVAL_MS);
+
+    if (!this.keepsProcessAlive) this.timer.unref();
 
     this.status = "running";
   }
@@ -116,11 +127,14 @@ export class Cron implements CronUtilitiesInterface {
     this.status = "idle";
   }
 
+  // The setting is remembered, so it also applies to a later run().
   public ref() {
+    this.keepsProcessAlive = true;
     this.timer?.ref();
   }
 
   public unref() {
+    this.keepsProcessAlive = false;
     this.timer?.unref();
   }
 
@@ -141,9 +155,18 @@ export class CronDistributed implements CronUtilitiesInterface {
   private cron: Cron;
   private options: CronDistributedOptions;
   private replicaId: string;
+  private lockTTL: number;
 
   public constructor(options: CronDistributedOptions) {
+    const lockTTL = options.lockTTL ?? DEFAULT_LOCK_TTL;
+
+    // Redis rejects zero, negative and fractional PX values, which would fail
+    // on every fire.
+    if (!Number.isSafeInteger(lockTTL)) throw invalidLockTTL(lockTTL);
+    if (lockTTL <= 0) throw invalidLockTTL(lockTTL);
+
     this.options = options;
+    this.lockTTL = lockTTL;
     this.replicaId = options.replicaId ?? crypto.randomUUID();
     this.cron = new Cron({
       name: options.name,
@@ -194,13 +217,11 @@ export class CronDistributed implements CronUtilitiesInterface {
       this.cron.getExpression(),
       scheduledAt.getTime(),
     );
-    const lockTTL = this.options.lockTTL ?? DEFAULT_LOCK_TTL;
-
     const acquired = await this.options.redis.send("SET", [
       key,
       this.replicaId,
       "PX",
-      String(lockTTL),
+      String(this.lockTTL),
       "NX",
     ]);
 

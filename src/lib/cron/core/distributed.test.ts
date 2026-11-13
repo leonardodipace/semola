@@ -352,6 +352,21 @@ describe("CronDistributed", () => {
   });
 
   describe("lock TTL", () => {
+    test("should reject a lockTTL Redis would refuse", () => {
+      for (const lockTTL of [Number.NaN, 0, -5, 1500.5, Infinity]) {
+        const create = () =>
+          new CronDistributed({
+            name: "bad-ttl",
+            schedule: "@minutely",
+            lockTTL,
+            handler: () => {},
+            redis: createMockRedis(),
+          });
+
+        expect(create).toThrow(TypeError);
+      }
+    });
+
     test("should allow re-acquisition after lock TTL expires", async () => {
       setSystemTime(new Date(2027, 4, 8, 12, 20, 0));
 

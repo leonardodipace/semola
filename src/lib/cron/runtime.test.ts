@@ -13,12 +13,15 @@ const start = realNow();
 Date.now = () => start + (realNow() - start) * 200;
 
 const errors = [];
-process.on("unhandledRejection", (error) => errors.push(error.message));
+process.on("unhandledRejection", (error) => errors.push(String(error)));
 
-// An unref'd job must not keep the process alive once the first job stops.
+// An unref'd job must not keep the process alive once the first job stops,
+// also when unref() comes before run() and survives a restart.
 const idle = new Cron({ name: "idle", schedule: "@yearly", handler: () => {} });
-idle.run();
 idle.unref();
+idle.run();
+idle.stop();
+idle.run();
 
 let calls = 0;
 const job = new Cron({
@@ -27,6 +30,7 @@ const job = new Cron({
   handler: () => {
     calls++;
     if (calls === 1) throw new Error("boom");
+    if (calls === 2) return Promise.reject();
 
     job.stop();
     console.log(JSON.stringify({ calls, errors }));
@@ -57,7 +61,7 @@ afterAll(() => {
 });
 
 test.skipIf(!node)(
-  "should fire, survive a handler error and let Node exit after unref",
+  "should fire, surface any handler rejection and let Node exit after unref",
   async () => {
     const proc = Bun.spawn([node ?? "", "check.mjs"], {
       cwd: dir,
@@ -73,7 +77,10 @@ test.skipIf(!node)(
 
     expect(stderr).toBe("");
     expect(code).toBe(0);
-    expect(JSON.parse(stdout)).toEqual({ calls: 2, errors: ["boom"] });
+    expect(JSON.parse(stdout)).toEqual({
+      calls: 3,
+      errors: ["Error: boom", "undefined"],
+    });
   },
   20_000,
 );

@@ -95,7 +95,7 @@ const schedule = cronJobBuilder((b) =>
 
 ### Lifecycle
 
-`next()` returns the next fire time, or `null` if there is no match. A running job checks the clock every second, so it fires within a second after its boundary, including after the machine sleeps. `ref()` / `unref()` control whether the timer keeps the process alive. The handler receives the scheduled boundary as a `Date`. A handler that is still running when the next boundary passes is not started again, even across `stop()` and `run()`. Within one run, the next run is the first boundary after the handler finishes. If the handler throws or rejects, the error surfaces as an unhandled rejection, as with `Bun.cron`. Node and Bun exit on an unhandled rejection by default, so catch errors inside the handler or listen for `unhandledRejection`; with the process still alive the job keeps running. `getStatus()`, `getExpression()`, and `getJobName()` inspect the job. Disposing the instance (`Symbol.dispose`) calls `stop`.
+`next()` returns the next fire time, or `null` if there is no match. A running job checks the clock every second, so it fires within a second after its boundary, including after the machine sleeps. `ref()` / `unref()` control whether the timer keeps the process alive; the setting can be made before `run()` and survives `stop()` and `run()`. The handler receives the scheduled boundary as a `Date`. A handler that is still running when the next boundary passes is not started again, even across `stop()` and `run()`. Within one run, the next run is the first boundary after the handler finishes. If the handler throws or rejects, the error surfaces as an unhandled rejection, as with `Bun.cron`. Node and Bun exit on an unhandled rejection by default, so catch errors inside the handler or listen for `unhandledRejection`; with the process still alive the job keeps running. `getStatus()`, `getExpression()`, and `getJobName()` inspect the job. Disposing the instance (`Symbol.dispose`) calls `stop`.
 
 ## OS crontab
 
@@ -137,7 +137,7 @@ const report = new CronDistributed({
 report.run();
 ```
 
-Use `replicaId` to identify the lock owner in Redis (defaults to a random UUID per instance). `lockTTL` (default five minutes) bounds how long the deduplication lock is held. The lock is acquired before `handler()` runs and is not renewed while the handler executes, so deduplication is at-most-once only while that Redis key remains valid. If a replica is delayed past `lockTTL`, another replica can acquire the same tick key and run the handler again. Lock keys use the resolved cron expression and the scheduled boundary, so replicas that fire late still coordinate on the same key while it is held. A replica paused longer than `lockTTL` (sleep, VM pause) runs the boundary it missed when it resumes. Handlers should be idempotent.
+Use `replicaId` to identify the lock owner in Redis (defaults to a random UUID per instance). `lockTTL` (default five minutes) bounds how long the deduplication lock is held; it must be a positive integer of milliseconds, or the constructor throws a `TypeError`. The lock is acquired before `handler()` runs and is not renewed while the handler executes, so deduplication is at-most-once only while that Redis key remains valid. If a replica is delayed past `lockTTL`, another replica can acquire the same tick key and run the handler again. Lock keys use the resolved cron expression and the scheduled boundary, so replicas that fire late still coordinate on the same key while it is held. A replica paused longer than `lockTTL` (sleep, VM pause) runs the boundary it missed when it resumes. Handlers should be idempotent.
 
 Use a unique `name` per job.
 
@@ -247,7 +247,7 @@ heartbeat.getStatus(); // "idle"
 
 ### Expand an alias with `getExpression()`
 
-`getExpression()` returns the normalized five-field expression for aliases and returns explicit expressions unchanged.
+`getExpression()` returns the five-field expression for aliases. Explicit expressions come back with surrounding whitespace trimmed and inner runs of whitespace collapsed to one space, so `CronDistributed` replicas whose schedules differ only in spacing share a lock.
 
 ```typescript
 const daily = new Cron({
@@ -363,7 +363,7 @@ Disposing a `Cron` with `Symbol.dispose` stops it.
 | `handler` | Async or sync function, called with the scheduled boundary (`Date`) |
 | `redis` | Redis client used for tick locks: `Bun.RedisClient` or a [`semola/redis`](/docs/redis) adapter |
 | `replicaId?` | Value stored when this replica acquires the lock |
-| `lockTTL?` | Lock expiry in ms (default `300000`) |
+| `lockTTL?` | Lock expiry in ms, a positive integer (default `300000`) |
 
 ### `CronDistributed` methods
 
@@ -371,4 +371,4 @@ Same as `Cron`: `run()`, `stop()`, `next(from?)`, `ref()` / `unref()`, `getStatu
 
 ### Errors
 
-`EmptyListError`, `OutOfBoundError` (exported from `semola/cron`). Invalid schedules throw a plain `TypeError`.
+`EmptyListError`, `OutOfBoundError` (exported from `semola/cron`). Invalid schedules and an invalid `lockTTL` throw a plain `TypeError`.

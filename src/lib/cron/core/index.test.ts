@@ -473,6 +473,16 @@ describe("Cron", () => {
       hourly.stop();
     });
 
+    test("should normalize whitespace in raw expressions", () => {
+      const cron = new Cron({
+        name: "spaced",
+        schedule: "  0\t9  * * 1-5\n",
+        handler: () => {},
+      });
+
+      expect(cron.getExpression()).toBe("0 9 * * 1-5");
+    });
+
     test("should read aliases regardless of case and padding", () => {
       const cron = new Cron({
         name: "padded",
