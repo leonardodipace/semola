@@ -2622,6 +2622,67 @@ if (SEMOLA_POSTGRES_URL) {
       await db.$raw.close();
     });
 
+    test("apply ignores a byte order mark at the start of up.sql", async () => {
+      await resetDb();
+
+      const project = await setupProject();
+      const config = await loadConfig(project.root);
+      const folder = await createMigration({ name: "init", config });
+      const upPath = join(config.migrationsDir, folder, "up.sql");
+      const up = await Bun.file(upPath).text();
+
+      await writeFile(upPath, `\uFEFF${up}`);
+
+      expect(await applyMigrations(config)).toEqual([folder]);
+    });
+
+    test("clients applying the first migration at once all succeed", async () => {
+      await resetDb();
+
+      const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+      dirs.push(root);
+
+      const users = defineTable({
+        sqlName: "users",
+        columns: { id: uuid("id").primaryKey().notNull() },
+      });
+      const configFor = (client: SqlClient) => ({
+        migrationsDir: join(root, "migrations"),
+        orm: { adapter: "postgres" as const, tables: { users }, client },
+      });
+      const clients = Array.from({ length: 2 }, () => {
+        return new Bun.SQL(url, { adapter: "postgres" });
+      });
+      const [first] = clients;
+
+      if (!first) throw new Error("No client");
+
+      const folder = await createMigration({
+        name: "init",
+        config: configFor(first),
+      });
+
+      // Every apply must find no history table yet.
+      await resetDb();
+
+      // Open every connection first, so the applies start together.
+      await Promise.all(clients.map((client) => client.unsafe("SELECT 1")));
+
+      const results = await Promise.allSettled(
+        clients.map((client) => applyMigrations(configFor(client))),
+      );
+
+      await Promise.all(clients.map((client) => client.close()));
+
+      const applied = results.flatMap((result) => {
+        if (result.status === "rejected") return [result.reason];
+
+        return result.value;
+      });
+
+      expect(applied).toEqual([folder]);
+    });
+
     test("renames a table without dropping rows", async () => {
       await resetDb();
 
@@ -3296,6 +3357,44 @@ CREATE INDEX users_name ON users (name);
 
       expect(row).toEqual({ name: "ADA", end: "open" });
       expect(index?.name).toBe("users_name");
+
+      await client.close();
+    });
+
+    test(`apply runs statements between line comments that hold /* and */ on ${label}`, async () => {
+      const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+      dirs.push(root);
+
+      const client = createClient();
+      const users = defineTable({
+        sqlName: "users",
+        columns: { id: uuid("id").primaryKey().notNull() },
+      });
+      const config = {
+        migrationsDir: join(root, "migrations"),
+        orm: { adapter: "sqlite" as const, tables: { users }, client },
+      };
+
+      const folder = await createMigration({ name: "init", config });
+      const upPath = join(config.migrationsDir, folder, "up.sql");
+      const up = await Bun.file(upPath).text();
+
+      await writeFile(
+        upPath,
+        `${up}
+-- /*
+CREATE TABLE extra (id INTEGER);
+-- */
+`,
+      );
+
+      const applied = await applyMigrations(config);
+      const tables = await client.unsafe(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('users', 'extra') ORDER BY name",
+      );
+
+      expect(applied).toEqual([folder]);
+      expect([...tables]).toEqual([{ name: "extra" }, { name: "users" }]);
 
       await client.close();
     });

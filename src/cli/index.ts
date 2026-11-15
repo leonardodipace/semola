@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 import packageJson from "../../package.json" with { type: "json" };
 import { CLI } from "../lib/cli/index.js";
-import { mightThrow } from "../lib/errors/index.js";
 import { MigrationError } from "../lib/orm/errors.js";
 import {
   applyMigrations,
@@ -108,14 +107,16 @@ const promptDestructive = async () => {
 const withConfig = async <T>(fn: (config: LoadedConfig) => Promise<T>) => {
   const config = await loadConfig();
 
-  const [error, result] = await mightThrow(fn(config));
-  const [closeError] = await mightThrow(config.orm.client.close());
+  // allSettled, not mightThrow: the client is the user's and may reject with
+  // a falsy value.
+  const [outcome] = await Promise.allSettled([fn(config)]);
+  const [closed] = await Promise.allSettled([config.orm.client.close()]);
 
   // A migration error wins; a close error still fails an otherwise good run.
-  if (error) throw error;
-  if (closeError) throw closeError;
+  if (outcome.status === "rejected") throw outcome.reason;
+  if (closed.status === "rejected") throw closed.reason;
 
-  return result;
+  return outcome.value;
 };
 
 const run = async () => {
@@ -170,9 +171,12 @@ const run = async () => {
       console.log(`Rolled back ${name}`);
     });
 
-  const [error] = await mightThrow(program.parse());
+  // allSettled, not mightThrow: a falsy rejection must not exit 0.
+  const [outcome] = await Promise.allSettled([program.parse()]);
 
-  if (!error) return;
+  if (outcome.status === "fulfilled") return;
+
+  const error = outcome.reason;
 
   if (error instanceof MigrationError) {
     console.error(error.message);

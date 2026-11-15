@@ -29,6 +29,7 @@ import type {
 } from "./types.js";
 
 const HISTORY_TABLE = "_semola_migrations";
+const BYTE_ORDER_MARK = "\uFEFF";
 const SCHEMA_FILE = "schema.json";
 
 type HistoryRow = {
@@ -86,14 +87,30 @@ const importModule = async (filePath: string, label: string) => {
 };
 
 const ensureHistoryTable = async (sql: Sql) => {
-  await sql.unsafe(`
-    CREATE TABLE IF NOT EXISTS ${HISTORY_TABLE} (
-      name TEXT PRIMARY KEY NOT NULL,
-      applied_at TEXT NOT NULL,
-      schema TEXT NOT NULL,
-      up_checksum TEXT
-    )
-  `);
+  const createHistoryTable = () => {
+    return sql.unsafe(`
+      CREATE TABLE IF NOT EXISTS ${HISTORY_TABLE} (
+        name TEXT PRIMARY KEY NOT NULL,
+        applied_at TEXT NOT NULL,
+        schema TEXT NOT NULL,
+        up_checksum TEXT
+      )
+    `);
+  };
+
+  const [createError] = await mightThrow(createHistoryTable());
+
+  if (createError) {
+    // Postgres: two processes creating it at once both pass IF NOT EXISTS and
+    // the loser fails on a duplicate type; the table exists by then.
+    if (!createError.message.includes("duplicate key")) {
+      throw new MigrationError(
+        `Could not create ${HISTORY_TABLE}: ${createError.message}`,
+      );
+    }
+
+    await createHistoryTable();
+  }
 
   const [error] = await mightThrow(
     sql.unsafe(`ALTER TABLE ${HISTORY_TABLE} ADD COLUMN up_checksum TEXT`),
@@ -361,6 +378,12 @@ const assertCreateBaselineUnchanged = (
 const runSqlText = async (sql: Sql, text: string, label: string) => {
   if (!hasSqlStatement(text)) {
     throw new MigrationError(`${label} has no SQL statements to apply`);
+  }
+
+  // Editors may save a byte order mark, which Postgres reads as SQL.
+  if (text.startsWith(BYTE_ORDER_MARK)) {
+    await sql.unsafe(text.slice(BYTE_ORDER_MARK.length));
+    return;
   }
 
   await sql.unsafe(text);

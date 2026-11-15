@@ -86,6 +86,7 @@ export const beginSqlite = <TResult>(
 
 // CURRENT_TIMESTAMP writes "YYYY-MM-DD HH:MM:SS", but the ORM binds dates as
 // ISO strings; SQLite compares them as text, so where filters would miss rows.
+// Only these two keywords become ISO; other expressions keep their own format.
 const ISO_CURRENT_TIMESTAMP = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
 const ISO_CURRENT_DATE = "(strftime('%Y-%m-%dT00:00:00.000Z', 'now'))";
 const CURRENT_TIMESTAMP = /^\(?\s*CURRENT_TIMESTAMP\s*\)?$/i;

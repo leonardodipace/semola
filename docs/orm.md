@@ -122,7 +122,7 @@ const users = defineTable({
 | Who fills it | App, on `create()` | Database |
 | Omitted insert | Runs `fn` | Uses the SQL default (not `null`) |
 
-Use `.dbDefault()` when adding a `NOT NULL` column. `{ as: "sql" }` is for SQL expressions such as functions and `CURRENT_TIMESTAMP` (a single expression only). On SQLite, `CURRENT_TIMESTAMP` is written as an ISO timestamp so it compares correctly with the `Date` values the ORM binds. `CURRENT_DATE` becomes ISO midnight UTC, and function calls are wrapped in parentheses. A table created with a plain `DEFAULT CURRENT_TIMESTAMP` still writes `YYYY-MM-DD HH:MM:SS` for rows inserted outside the ORM until it is recreated.
+Use `.dbDefault()` when adding a `NOT NULL` column. `{ as: "sql" }` is for SQL expressions such as functions and `CURRENT_TIMESTAMP` (a single expression only). On SQLite, `CURRENT_TIMESTAMP` is written as an ISO timestamp so it compares correctly with the `Date` values the ORM binds. `CURRENT_DATE` becomes ISO midnight UTC, and function calls are wrapped in parentheses. Other expressions such as `datetime('now')` keep SQLite's `YYYY-MM-DD HH:MM:SS` text, which where filters on a `Date` do not reliably match. A table created with a plain `DEFAULT CURRENT_TIMESTAMP` still writes `YYYY-MM-DD HH:MM:SS` for rows inserted outside the ORM until it is recreated.
 
 ### Relations
 
@@ -370,7 +370,7 @@ const db = createOrm({
 });
 ```
 
-- `fromNodeSqlite(db)` takes a `DatabaseSync` from `node:sqlite` (Node 22.13+). It uses one connection; transactions run one at a time, and queries issued while one is open join it, as with Bun SQLite. A string with several statements runs them all through `exec` and returns no rows.
+- `fromNodeSqlite(db)` takes a `DatabaseSync` from `node:sqlite` (Node 22.13+). It uses one connection; transactions run one at a time, and queries issued while one is open join it, as with Bun SQLite. Such a query is rolled back with that transaction if it fails, even though the query already resolved. Relation writes outside `$transaction` open a transaction too, so concurrent writers on SQLite should run inside `$transaction`. A write after SQLite rolled a transaction back on its own (`INSERT OR ROLLBACK`, `RAISE(ROLLBACK)`) is rejected on Node 22.16+ and 24+. A string with several statements runs them all through `exec` and returns no rows.
 - postgres.js `close()` closes idle connections but keeps the pool usable; call `sql.end()` to shut it down.
 - The `semola` CLI runs on Bun. It loads the schema module, migrates through its client, and closes it.
 

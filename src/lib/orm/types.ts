@@ -35,4 +35,5 @@ export type NodeSqliteDatabase = {
   prepare(statement: string): NodeSqliteStatement;
   exec(statement: string): void;
   close(): void;
+  readonly isTransaction?: boolean;
 };

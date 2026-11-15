@@ -3,6 +3,8 @@ import { MigrationError } from "../errors.js";
 import type { IndexSnapshot } from "../indexes/types.js";
 import type { ColumnSnapshot, SchemaSnapshot, TableSnapshot } from "./types.js";
 
+const EMPTY_STATEMENT_CHAR = /[\s;]/;
+
 const COLUMN_TYPES = new Set([
   "string",
   "enum",
@@ -399,37 +401,36 @@ export const assertSchemaSnapshot = (value: unknown, label: string) => {
   return { tables } satisfies SchemaSnapshot;
 };
 
-// indexOf instead of a lazy regex: an unclosed "/*" made that quadratic.
-const stripBlockComments = (text: string) => {
-  let result = "";
+// Whether text holds anything besides whitespace, comments and empty ";"
+// statements. Scans from the start, so a "/*" inside a "--" comment is text.
+export const hasSqlStatement = (text: string) => {
   let index = 0;
 
   while (index < text.length) {
-    const start = text.indexOf("/*", index);
+    if (EMPTY_STATEMENT_CHAR.test(text.charAt(index))) {
+      index += 1;
+      continue;
+    }
 
-    if (start === -1) break;
+    const pair = text.slice(index, index + 2);
 
-    const end = text.indexOf("*/", start + 2);
+    if (pair === "--") {
+      const newline = text.indexOf("\n", index);
 
-    if (end === -1) break;
+      if (newline === -1) return false;
 
-    result += text.slice(index, start);
-    index = end + 2;
+      index = newline + 1;
+      continue;
+    }
+
+    if (pair !== "/*") return true;
+
+    const close = text.indexOf("*/", index + 2);
+
+    if (close === -1) return false;
+
+    index = close + 2;
   }
 
-  return result + text.slice(index);
-};
-
-// Whether text holds anything besides whitespace and comments.
-export const hasSqlStatement = (text: string) => {
-  const withoutBlockComments = stripBlockComments(text);
-
-  return withoutBlockComments.split("\n").some((line) => {
-    const trimmed = line.trim();
-
-    if (!trimmed) return false;
-    if (trimmed.startsWith("--")) return false;
-
-    return true;
-  });
+  return false;
 };

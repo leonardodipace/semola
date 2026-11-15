@@ -73,12 +73,18 @@ export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
     };
 
     // Like Bun.SQL: a forgotten await must not write outside the transaction.
+    // SQLite also ends it on its own (INSERT OR ROLLBACK, RAISE(ROLLBACK));
+    // isTransaction exists from Node 22.16 and 24.
     const assertOpen = () => {
-      if (isOpen()) return;
+      if (!isOpen()) {
+        throw new OrmError(
+          "Cannot run a query after its transaction or savepoint ended",
+        );
+      }
 
-      throw new OrmError(
-        "Cannot run a query after its transaction or savepoint ended",
-      );
+      if (db.isTransaction === false) {
+        throw new OrmError("SQLite rolled back the transaction");
+      }
     };
 
     // The running savepoint, when the caller is inside it.
@@ -89,19 +95,17 @@ export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
       return running;
     };
 
-    // A query issued beside a savepoint would land inside it and be undone
-    // with it, so it waits; one issued from inside the savepoint joins it.
-    const mustWaitForSavepoints = () => {
-      if (queuedSavepoints === 0) return false;
-      if (enclosingSavepoint()) return false;
-
-      return true;
-    };
-
     const tx: SqlTransaction = {
       queuesSavepoints: true,
       unsafe: async (statement, params) => {
-        if (mustWaitForSavepoints()) await tail;
+        // From inside a running savepoint, it runs through that one, which
+        // waits for its own nested savepoints.
+        const enclosing = enclosingSavepoint();
+
+        if (enclosing) return enclosing.unsafe(statement, params);
+
+        // Beside a savepoint, it would land inside it and be undone with it.
+        if (queuedSavepoints > 0) await tail;
 
         assertOpen();
 
@@ -125,23 +129,24 @@ export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
           scope.add(child.tx);
           running = child.tx;
 
-          const [error, result] = await mightThrow(
-            // async: a callback that throws synchronously still rolls back.
+          // allSettled, not mightThrow: a callback may reject with a falsy
+          // value. async: a callback that throws synchronously still rolls back.
+          const [outcome] = await Promise.allSettled([
             savepointScope.run(scope, async () => run(child.tx)),
-          );
+          ]);
 
-          child.end();
+          await child.finish();
           running = outer;
 
-          if (error) {
+          if (outcome.status === "rejected") {
             await mightThrow(unsafe(`ROLLBACK TO ${name}`));
             await mightThrow(unsafe(`RELEASE ${name}`));
-            throw error;
+            throw outcome.reason;
           }
 
           await unsafe(`RELEASE ${name}`);
 
-          return result;
+          return outcome.value;
         };
 
         // It nests there, queued behind its own siblings.
@@ -162,11 +167,15 @@ export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
       },
     };
 
-    const end = () => {
+    // Savepoints the callback did not await must settle before RELEASE or
+    // COMMIT; once this ends they can no longer write and roll back.
+    const finish = async () => {
       ended = true;
+
+      await tail;
     };
 
-    return { tx, end };
+    return { tx, finish };
   };
 
   const runTransaction = async <T>(
@@ -177,30 +186,28 @@ export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
 
     const transaction = createTransaction();
 
+    // allSettled, not mightThrow: a callback may reject with a falsy value.
     // async: a callback that throws synchronously still ends the transaction.
-    const runCallback = async () => run(transaction.tx);
+    const [outcome] = await Promise.allSettled([
+      (async () => run(transaction.tx))(),
+    ]);
 
-    const runAndCommit = async () => {
-      const [runError, result] = await mightThrow(runCallback());
+    await transaction.finish();
 
-      transaction.end();
-
-      if (runError) throw runError;
-
-      // COMMIT can fail and leave the transaction open (deferred foreign keys).
-      await unsafe("COMMIT");
-
-      return result;
-    };
-
-    const [error, result] = await mightThrow(runAndCommit());
-
-    if (error) {
+    if (outcome.status === "rejected") {
       await mightThrow(unsafe("ROLLBACK"));
-      throw error;
+      throw outcome.reason;
     }
 
-    return result;
+    // COMMIT can fail and leave the transaction open (deferred foreign keys).
+    const [commitError] = await mightThrow(unsafe("COMMIT"));
+
+    if (commitError) {
+      await mightThrow(unsafe("ROLLBACK"));
+      throw commitError;
+    }
+
+    return outcome.value;
   };
 
   // One connection holds one transaction, so later ones wait, as in Bun.SQL.
@@ -231,15 +238,11 @@ export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
       scope.add(token);
       activeTransaction = token;
 
-      const [error, result] = await mightThrow(
-        transactionScope.run(scope, () => runTransaction(begin, run)),
-      );
-
-      activeTransaction = undefined;
-
-      if (error) throw error;
-
-      return result;
+      return transactionScope
+        .run(scope, () => runTransaction(begin, run))
+        .finally(() => {
+          activeTransaction = undefined;
+        });
     };
 
     const next = beginTail.then(start);

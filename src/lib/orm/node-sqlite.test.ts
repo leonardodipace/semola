@@ -191,6 +191,118 @@ describe("fromNodeSqlite", () => {
     expect(rows).toEqual([{ id: 2 }]);
   });
 
+  test("an outer query from inside a savepoint is not rolled back with its nested one", async () => {
+    const sql = await open();
+    let markStarted = () => {};
+    const nestedStarted = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let releaseNested = () => {};
+    const nestedMayFail = new Promise<void>((resolve) => {
+      releaseNested = resolve;
+    });
+
+    const results = await sql.begin((tx) => {
+      return tx.savepoint("outer", async (outer) => {
+        const fails = (outer as SqlTransaction).savepoint(
+          "inner",
+          async (inner) => {
+            await inner.unsafe("INSERT INTO t (id) VALUES (1)");
+            markStarted();
+            await nestedMayFail;
+            throw new Error("nested");
+          },
+        );
+
+        await nestedStarted;
+
+        const beside = tx.unsafe("INSERT INTO t (id) VALUES (2)");
+
+        releaseNested();
+
+        return Promise.allSettled([fails, beside]);
+      });
+    });
+
+    const statuses = results.map((result) => result.status);
+    const rows = await rowsOf(sql.unsafe("SELECT id FROM t"));
+
+    expect(statuses).toEqual(["rejected", "fulfilled"]);
+    expect(rows).toEqual([{ id: 2 }]);
+  });
+
+  test("a transaction or savepoint rejected with no reason still rolls back", async () => {
+    const sql = await open();
+
+    const failingSavepoint = sql.begin((tx) => {
+      return tx.savepoint("sp", async (nested) => {
+        await nested.unsafe("INSERT INTO t (id) VALUES (1)");
+        return Promise.reject();
+      });
+    });
+
+    expect(await Promise.allSettled([failingSavepoint])).toEqual([
+      { status: "rejected", reason: undefined },
+    ]);
+
+    const failingTransaction = sql.begin(async (tx) => {
+      await tx.unsafe("INSERT INTO t (id) VALUES (2)");
+      return Promise.reject();
+    });
+
+    expect(await Promise.allSettled([failingTransaction])).toEqual([
+      { status: "rejected", reason: undefined },
+    ]);
+    expect(await rowsOf(sql.unsafe("SELECT id FROM t"))).toEqual([]);
+  });
+
+  test("a write after SQLite rolls the transaction back on its own is rejected", async () => {
+    const sql = fromNodeSqlite(new DatabaseSync(":memory:"));
+    await sql.unsafe("CREATE TABLE u (id INTEGER UNIQUE)");
+
+    const failing = sql.begin(async (tx) => {
+      await tx.unsafe("INSERT INTO u (id) VALUES (1)");
+      await tx
+        .unsafe("INSERT OR ROLLBACK INTO u (id) VALUES (1)")
+        .catch(() => {});
+      await tx.unsafe("INSERT INTO u (id) VALUES (2)");
+    });
+
+    await expect(failing).rejects.toThrow("SQLite rolled back the transaction");
+    expect(await rowsOf(sql.unsafe("SELECT id FROM u"))).toEqual([]);
+  });
+
+  test("a failing savepoint the callback did not await still rolls back", async () => {
+    const sql = await open();
+    let failing: Promise<unknown> = Promise.resolve();
+    let nestedFailing: Promise<unknown> = Promise.resolve();
+
+    await sql.begin(async (tx) => {
+      failing = tx.savepoint("sp", async (nested) => {
+        await nested.unsafe("INSERT INTO t (id) VALUES (1)");
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        throw new Error("late");
+      });
+
+      await tx.savepoint("outer", async (outer) => {
+        nestedFailing = (outer as SqlTransaction).savepoint(
+          "inner",
+          async (inner) => {
+            await inner.unsafe("INSERT INTO t (id) VALUES (2)");
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            throw new Error("late");
+          },
+        );
+      });
+    });
+
+    const results = await Promise.allSettled([failing, nestedFailing]);
+    const statuses = results.map((result) => result.status);
+
+    expect(statuses).toEqual(["rejected", "rejected"]);
+    expect(await rowsOf(sql.unsafe("SELECT id FROM t"))).toEqual([]);
+  });
+
   test("overlapping valid sibling savepoints both succeed", async () => {
     const sql = await open();
 
@@ -457,6 +569,14 @@ describe("fromNodeSqlite", () => {
     const rows = await rowsOf(sql.unsafe("SELECT id FROM t ORDER BY id"));
 
     expect(rows).toEqual([{ id: 1 }, { id: 2 }]);
+  });
+
+  test("unsafe returns rows when only empty statements follow", async () => {
+    const sql = await open();
+
+    expect(await rowsOf(sql.unsafe("SELECT ? AS a;; -- done", [1]))).toEqual([
+      { a: 1 },
+    ]);
   });
 
   test("unsafe runs a trigger body as one statement", async () => {
