@@ -156,6 +156,41 @@ describe("fromNodeSqlite", () => {
     expect(rows).toEqual([{ id: 1 }]);
   });
 
+  test("a query beside a failing savepoint is not rolled back with it", async () => {
+    const sql = await open();
+    let markStarted = () => {};
+    const savepointStarted = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let releaseSavepoint = () => {};
+    const savepointMayFail = new Promise<void>((resolve) => {
+      releaseSavepoint = resolve;
+    });
+
+    const results = await sql.begin(async (tx) => {
+      const fails = tx.savepoint("sp", async (nested) => {
+        await nested.unsafe("INSERT INTO t (id) VALUES (1)");
+        markStarted();
+        await savepointMayFail;
+        throw new Error("savepoint");
+      });
+
+      await savepointStarted;
+
+      const beside = tx.unsafe("INSERT INTO t (id) VALUES (2)");
+
+      releaseSavepoint();
+
+      return Promise.allSettled([fails, beside]);
+    });
+
+    const statuses = results.map((result) => result.status);
+    const rows = await rowsOf(sql.unsafe("SELECT id FROM t"));
+
+    expect(statuses).toEqual(["rejected", "fulfilled"]);
+    expect(rows).toEqual([{ id: 2 }]);
+  });
+
   test("overlapping valid sibling savepoints both succeed", async () => {
     const sql = await open();
 

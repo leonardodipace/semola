@@ -68,6 +68,7 @@ export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
   // through a parent from inside its running savepoint is handed to that one.
   const createTransaction = (isParentOpen = () => true) => {
     let tail = Promise.resolve();
+    let queuedSavepoints = 0;
     let running: SqlTransaction | undefined;
     let ended = false;
 
@@ -96,9 +97,20 @@ export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
       return running;
     };
 
+    // A query issued beside a savepoint would land inside it and be undone
+    // with it, so it waits; one issued from inside the savepoint joins it.
+    const mustWaitForSavepoints = () => {
+      if (queuedSavepoints === 0) return false;
+      if (enclosingSavepoint()) return false;
+
+      return true;
+    };
+
     const tx: SqlTransaction = {
       queuesSavepoints: true,
       unsafe: async (statement, params) => {
+        if (mustWaitForSavepoints()) await tail;
+
         assertOpen();
 
         return unsafe(statement, params);
@@ -147,10 +159,12 @@ export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
 
         const next = tail.then(runSavepoint);
 
-        tail = next.then(
-          () => undefined,
-          () => undefined,
-        );
+        const settle = () => {
+          queuedSavepoints -= 1;
+        };
+
+        queuedSavepoints += 1;
+        tail = next.then(settle, settle);
 
         return next;
       },

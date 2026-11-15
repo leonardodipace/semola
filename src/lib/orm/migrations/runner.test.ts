@@ -72,6 +72,15 @@ INSERT INTO t VALUES ('begin;');
     expect(splitStatements("SELECT 1; /* note */")).toEqual(["SELECT 1"]);
   });
 
+  test("splitStatements stays linear on many unclosed block comments", () => {
+    const source = `/*${"a/*".repeat(200_000)}`;
+    const started = performance.now();
+
+    splitStatements(source);
+
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
   test("splitStatements keeps empty statements out of the result", () => {
     expect(splitStatements("SELECT 1;;;\nSELECT 2;\n")).toEqual([
       "SELECT 1",

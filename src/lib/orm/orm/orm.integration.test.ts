@@ -180,6 +180,35 @@ for (const live of integrationAdapters()) {
       await orm.$raw.close();
     });
 
+    test("a failed relation write in $transaction keeps concurrent plain writes", async () => {
+      const orm = await open();
+      await createAda(orm);
+
+      const results = await orm.$transaction((tx) => {
+        return Promise.allSettled([
+          tx.posts.create({
+            data: {
+              id: postId,
+              title: "Orphan",
+              author: { connect: { email: "missing@example.com" } },
+            },
+          }),
+          tx.notes.create({ data: { id: id2 } }),
+          tx.users.update({ where: { id }, data: { name: "Augusta" } }),
+        ]);
+      });
+
+      const statuses = results.map((result) => result.status);
+      const user = await orm.users.findUnique({ where: { id } });
+
+      expect(statuses).toEqual(["rejected", "fulfilled", "fulfilled"]);
+      expect(await orm.notes.findMany()).toHaveLength(1);
+      expect(user?.name).toBe("Augusta");
+      expect(await orm.posts.findMany()).toHaveLength(0);
+
+      await orm.$raw.close();
+    });
+
     test("connect and disconnect one() relations", async () => {
       const orm = await open();
       await createAda(orm);

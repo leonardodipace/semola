@@ -145,7 +145,8 @@ describe("formatSqliteDbDefault", () => {
 
   test("wraps function call defaults in parentheses", () => {
     expect(formatSqliteDbDefault("datetime('now')")).toBe("(datetime('now'))");
-    expect(formatSqliteDbDefault("(random())")).toBe("(random())");
+    expect(formatSqliteDbDefault("(random())")).toBe("((random()))");
+    expect(formatSqliteDbDefault("(1) * 1000")).toBe("((1) * 1000)");
     expect(formatSqliteDbDefault("'member'")).toBe("'member'");
     expect(formatSqliteDbDefault("42")).toBe("42");
   });

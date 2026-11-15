@@ -4,7 +4,6 @@ import type { IndexSnapshot } from "../indexes/types.js";
 import type { ColumnSnapshot, SchemaSnapshot, TableSnapshot } from "./types.js";
 
 const DOLLAR_TAG = /^(\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)/;
-const BLOCK_COMMENT = /\/\*[\s\S]*?\*\//g;
 const WORD = /[A-Za-z_][A-Za-z0-9_]*/y;
 const WORD_CHAR = /[A-Za-z0-9_$]/;
 const TEMP_KEYWORDS = new Set(["TEMP", "TEMPORARY"]);
@@ -419,8 +418,29 @@ const skipQuoted = (source: string, start: number, quote: string) => {
   return source.length - 1;
 };
 
+// indexOf instead of a lazy regex: an unclosed "/*" made that quadratic.
+const stripBlockComments = (text: string) => {
+  let result = "";
+  let index = 0;
+
+  while (index < text.length) {
+    const start = text.indexOf("/*", index);
+
+    if (start === -1) break;
+
+    const end = text.indexOf("*/", start + 2);
+
+    if (end === -1) break;
+
+    result += text.slice(index, start);
+    index = end + 2;
+  }
+
+  return result + text.slice(index);
+};
+
 const isSqlStatement = (text: string) => {
-  const withoutBlockComments = text.replace(BLOCK_COMMENT, "");
+  const withoutBlockComments = stripBlockComments(text);
 
   return withoutBlockComments.split("\n").some((line) => {
     const trimmed = line.trim();

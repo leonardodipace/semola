@@ -49,6 +49,10 @@ describe("row-parser", () => {
   });
 
   test("coerces date strings to Date, reading zoneless values as UTC", () => {
+    // bun test runs in UTC, where a local-time bug would not show.
+    const previousTimeZone = process.env.TZ;
+    process.env.TZ = "America/New_York";
+
     const rows: Array<Record<string, unknown>> = [
       { id: "1", at: "2025-01-01T10:00:00.000Z" },
       { id: "2", at: "2025-01-01 10:00:00" },
@@ -61,6 +65,12 @@ describe("row-parser", () => {
 
     for (const row of rows) {
       expect(row.at).toEqual(new Date("2025-01-01T10:00:00.000Z"));
+    }
+
+    if (previousTimeZone === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = previousTimeZone;
     }
   });
 

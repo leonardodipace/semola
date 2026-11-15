@@ -95,8 +95,8 @@ export const formatSqliteDbDefault = (value: string) => {
   if (CURRENT_TIMESTAMP.test(value)) return ISO_CURRENT_TIMESTAMP;
   if (CURRENT_DATE.test(value)) return ISO_CURRENT_DATE;
 
-  // SQLite DDL only takes a function call default inside parentheses.
-  if (value.startsWith("(")) return value;
+  // SQLite DDL only takes a function call default inside parentheses. A value
+  // that starts with "(" may still continue past it ("(a) * b"), so wrap it too.
   if (!value.includes("(")) return value;
 
   return `(${value})`;

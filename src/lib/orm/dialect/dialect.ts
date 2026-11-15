@@ -31,9 +31,12 @@ import type {
 const RELATION_WRITE_SAVEPOINT = "semola_relation_write";
 
 // Savepoints form one stack per transaction, so overlapping relation writes
-// would release or roll back each other. Writes on one transaction queue;
-// nested writes use the savepoint's own handle, so they never wait on it.
-const relationWriteTail = new WeakMap<SqlTransaction, Promise<unknown>>();
+// would release or roll back each other, and a plain query issued meanwhile
+// would land inside the savepoint and be undone with it. Relation writes on
+// one transaction queue and other queries wait for them; queries inside a
+// write use the savepoint's own handle, so they never wait on it. Clients that
+// set queuesSavepoints do both themselves.
+const relationWriteTail = new WeakMap<Sql, Promise<unknown>>();
 
 const queueRelationWrite = <T>(tx: SqlTransaction, write: () => Promise<T>) => {
   const previous = relationWriteTail.get(tx) ?? Promise.resolve();
@@ -41,10 +44,12 @@ const queueRelationWrite = <T>(tx: SqlTransaction, write: () => Promise<T>) => {
 
   relationWriteTail.set(
     tx,
-    next.then(
-      () => undefined,
-      () => undefined,
-    ),
+    previous
+      .then(() => next)
+      .then(
+        () => undefined,
+        () => undefined,
+      ),
   );
 
   return next;
@@ -312,6 +317,12 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
 
   private async executeQuery(sql: Sql, query: ReturningQuery) {
     await this.builder.spec.prepareConnection?.(sql);
+
+    // Read last: a write queued after this point waits on the same promise
+    // and starts after this query is sent.
+    const relationWrites = relationWriteTail.get(sql);
+
+    if (relationWrites) await relationWrites;
 
     return this.parser.executeQuery(sql, this.builder.table, query);
   }

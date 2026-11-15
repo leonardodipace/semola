@@ -312,7 +312,7 @@ await db.users.update({
 | `one()` | One unique where | `true` (sets the FK to `null`) |
 | `many()` | Array of unique wheres | Array of unique wheres (sets their FK to `null`) |
 
-The whole write runs in one transaction (a savepoint inside `$transaction`). A missing record throws and rolls everything back. Relation writes running at the same time inside one `$transaction` (for example under `Promise.all`) run one after another, so a failed one never undoes another.
+The whole write runs in one transaction (a savepoint inside `$transaction`). A missing record throws and rolls everything back. Relation writes running at the same time inside one `$transaction` (for example under `Promise.all`) run one after another, and other ORM queries on that transaction wait for them, so a failed one never undoes another ORM write. Raw `tx.$raw` queries do not wait on Bun.SQL or postgres.js; await relation writes before running them.
 
 ## Transactions and raw SQL
 
