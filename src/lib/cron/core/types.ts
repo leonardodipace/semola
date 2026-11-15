@@ -1,16 +1,12 @@
 import type { RedisClient } from "../../redis/types.js";
 
-type MinutelyAlias = "@minutely";
-
-export type ScheduleType = Bun.CronWithAutocomplete | MinutelyAlias;
-
 export type CronBaseOptions = {
   name: string;
-  schedule: ScheduleType;
+  schedule: string;
 };
 
 export type CronOptions = CronBaseOptions & {
-  handler: () => unknown;
+  handler: (scheduledAt: Date) => unknown;
 };
 
 export type CronOSOptions = CronBaseOptions & {
@@ -24,6 +20,22 @@ export type CronDistributedOptions = CronOptions & {
 };
 
 export type CronStatus = "idle" | "running";
+
+export type CronFieldSpec = {
+  min: number;
+  max: number;
+  names?: readonly string[];
+};
+
+export type CronFields = {
+  minutes: number[];
+  hours: number[];
+  days: number[];
+  months: number[];
+  weekdays: number[];
+  // POSIX: when both day-of-month and weekday are restricted, either one matches.
+  matchEitherDay: boolean;
+};
 
 export interface CronUtilitiesInterface {
   getExpression(): string;

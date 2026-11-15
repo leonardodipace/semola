@@ -346,7 +346,7 @@ _Higher is better for req/sec, lower is better for latency._
 
 ### What Makes Semola Different
 
-- 🎯 **Bun-first**: Engineered for Bun's performance. The API module also runs on Node, Deno, and Cloudflare Workers.
+- 🎯 **Bun-first**: Engineered for Bun's performance. The API module also runs on Node, Deno, and Cloudflare Workers; Cron and CronDistributed run on Node too.
 - 🧩 **Modular by design**: Import only what you need. Your bundle stays lean.
 - 🔒 **Type safety that actually works**: From request validation to response serialization, TypeScript catches errors before they hit production.
 - 📄 **Documentation writes itself**: Auto-generated OpenAPI specs from your code. No more stale docs.

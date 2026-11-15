@@ -1,6 +1,30 @@
-import { describe, expect, setSystemTime, spyOn, test } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  jest,
+  setSystemTime,
+  spyOn,
+  test,
+} from "bun:test";
 import { mightThrowSync } from "../../errors/index.js";
 import { Cron, CronOS } from "./index.js";
+
+const createDeferred = () => {
+  let resolve = () => {};
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+
+  return { promise, resolve };
+};
+
+const flushPromises = async () => {
+  for (let i = 0; i < 5; i++) {
+    await Promise.resolve();
+  }
+};
 
 describe("Cron", () => {
   describe("constructor", () => {
@@ -152,6 +176,229 @@ describe("Cron", () => {
     });
   });
 
+  describe("scheduling", () => {
+    beforeEach(() => {
+      jest.useFakeTimers({ now: new Date(2026, 10, 8, 12, 0, 30) });
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    test("should fire the handler at every matching minute", async () => {
+      let calls = 0;
+      const cron = new Cron({
+        name: "every-minute",
+        schedule: "* * * * *",
+        handler: () => {
+          calls++;
+        },
+      });
+
+      cron.run();
+
+      jest.advanceTimersByTime(29_999);
+      await flushPromises();
+      expect(calls).toBe(0);
+
+      jest.advanceTimersByTime(1);
+      await flushPromises();
+      expect(calls).toBe(1);
+
+      jest.advanceTimersByTime(60_000);
+      await flushPromises();
+      expect(calls).toBe(2);
+
+      cron.stop();
+    });
+
+    test("should not fire again after stop", async () => {
+      let calls = 0;
+      const cron = new Cron({
+        name: "stopped",
+        schedule: "* * * * *",
+        handler: () => {
+          calls++;
+        },
+      });
+
+      cron.run();
+      cron.stop();
+
+      jest.advanceTimersByTime(180_000);
+      await flushPromises();
+
+      expect(calls).toBe(0);
+      expect(jest.getTimerCount()).toBe(0);
+    });
+
+    test("should not start the next run until a slow handler settles", async () => {
+      const gate = createDeferred();
+      let calls = 0;
+      const cron = new Cron({
+        name: "slow",
+        schedule: "* * * * *",
+        handler: () => {
+          calls++;
+
+          return gate.promise;
+        },
+      });
+
+      cron.run();
+
+      // Handler starts at 12:01:00 and is still running at 12:03:30.
+      jest.advanceTimersByTime(30_000);
+      jest.advanceTimersByTime(150_000);
+      await flushPromises();
+      expect(calls).toBe(1);
+
+      gate.resolve();
+      await flushPromises();
+
+      // Overrun boundaries are skipped: the next run is 12:04:00.
+      jest.advanceTimersByTime(29_999);
+      await flushPromises();
+      expect(calls).toBe(1);
+
+      jest.advanceTimersByTime(1);
+      await flushPromises();
+      expect(calls).toBe(2);
+
+      cron.stop();
+    });
+
+    test("should not overlap a handler still running across a restart", async () => {
+      const gate = createDeferred();
+      let calls = 0;
+      const cron = new Cron({
+        name: "restart-in-flight",
+        schedule: "* * * * *",
+        handler: () => {
+          calls++;
+
+          return gate.promise;
+        },
+      });
+
+      cron.run();
+      jest.advanceTimersByTime(30_000);
+      cron.stop();
+      cron.run();
+
+      jest.advanceTimersByTime(60_000);
+      await flushPromises();
+      expect(calls).toBe(1);
+
+      gate.resolve();
+      await flushPromises();
+
+      expect(jest.getTimerCount()).toBe(1);
+
+      cron.stop();
+    });
+
+    test("should fire after the clock jumps past the boundary", async () => {
+      let calls = 0;
+      const cron = new Cron({
+        name: "clock-jump",
+        schedule: "0 9 * * *",
+        handler: () => {
+          calls++;
+        },
+      });
+
+      cron.run();
+
+      // The machine sleeps from 12:00 until 10:00 the next day.
+      jest.setSystemTime(new Date(2026, 10, 9, 10, 0, 0));
+      jest.advanceTimersByTime(1_000);
+      await flushPromises();
+
+      expect(calls).toBe(1);
+
+      cron.stop();
+    });
+
+    test("should pass the scheduled boundary to the handler", async () => {
+      const scheduled: Date[] = [];
+      const cron = new Cron({
+        name: "scheduled-at",
+        schedule: "* * * * *",
+        handler: (scheduledAt) => {
+          scheduled.push(scheduledAt);
+        },
+      });
+
+      cron.run();
+      jest.advanceTimersByTime(30_500);
+      await flushPromises();
+
+      expect(scheduled).toEqual([new Date(2026, 10, 8, 12, 1, 0)]);
+
+      cron.stop();
+    });
+
+    test("should keep the schedule when the handler changes its date", async () => {
+      let calls = 0;
+      const cron = new Cron({
+        name: "mutating-handler",
+        schedule: "* * * * *",
+        handler: (scheduledAt) => {
+          calls++;
+          scheduledAt.setHours(scheduledAt.getHours() + 1);
+        },
+      });
+
+      cron.run();
+      jest.advanceTimersByTime(30_000);
+      await flushPromises();
+      expect(calls).toBe(1);
+
+      jest.advanceTimersByTime(60_000);
+      await flushPromises();
+      expect(calls).toBe(2);
+
+      cron.stop();
+    });
+
+    test("should not repeat a boundary when the clock steps back during the handler", async () => {
+      let calls = 0;
+      const cron = new Cron({
+        name: "clock-back",
+        schedule: "* * * * *",
+        handler: () => {
+          calls++;
+
+          // NTP moves the clock back 2s while the 12:01:00 run is handled.
+          jest.setSystemTime(new Date(2026, 10, 8, 12, 0, 59));
+        },
+      });
+
+      cron.run();
+      jest.advanceTimersByTime(30_000);
+      await flushPromises();
+      expect(calls).toBe(1);
+
+      jest.advanceTimersByTime(2_000);
+      await flushPromises();
+      expect(calls).toBe(1);
+
+      cron.stop();
+    });
+
+    test("should throw on run when the schedule never matches", () => {
+      const cron = new Cron({
+        name: "never",
+        schedule: "0 0 31 2 *",
+        handler: () => {},
+      });
+
+      expect(() => cron.run()).toThrow(TypeError);
+      expect(cron.getStatus()).toBe("idle");
+    });
+  });
+
   describe("aliases", () => {
     test("should support @yearly and @annually alias", () => {
       const yearly = new Cron({
@@ -224,6 +471,29 @@ describe("Cron", () => {
 
       expect(() => hourly.run()).not.toThrow();
       hourly.stop();
+    });
+
+    test("should normalize whitespace in raw expressions", () => {
+      const cron = new Cron({
+        name: "spaced",
+        schedule: "  0\t9  * * 1-5\n",
+        handler: () => {},
+      });
+
+      expect(cron.getExpression()).toBe("0 9 * * 1-5");
+    });
+
+    test("should read aliases regardless of case and padding", () => {
+      const cron = new Cron({
+        name: "padded",
+        schedule: " @Daily ",
+        handler: () => Promise.resolve(),
+      });
+
+      expect(cron.getExpression()).toBe("0 0 * * *");
+      expect(() => cron.run()).not.toThrow();
+
+      cron.stop();
     });
 
     test("should support @minutely alias", () => {

@@ -2,12 +2,13 @@ import {
   afterEach,
   describe,
   expect,
+  jest,
   setSystemTime,
   spyOn,
   test,
 } from "bun:test";
 import { mightThrow } from "../../errors/index.js";
-import { CronDistributed } from "./index.js";
+import { Cron, CronDistributed } from "./index.js";
 
 type SetCall = {
   key: string;
@@ -112,27 +113,22 @@ class MockRedisClient {
 
 const createMockRedis = () => new MockRedisClient();
 
-const mockCronJob = {
-  stop: () => {},
-  ref: () => {},
-  unref: () => {},
-} as Bun.CronJob;
+const MINUTE_MS = 60_000;
 
+// Replaces the scheduler so a test can fire a tick by calling the handler
+// itself. The scheduled boundary is the start of the current minute, which is
+// what Cron passes for the minute-aligned times these tests use.
 const mockInProcessCron = (handlers: Array<() => Promise<void>>) => {
-  const parse = Bun.cron.parse;
-  const remove = Bun.cron.remove;
-  const cronSpy = spyOn(Bun, "cron").mockImplementation(((
-    _schedule,
-    handler,
-  ) => {
-    handlers.push(handler as () => Promise<void>);
+  return spyOn(Cron.prototype, "run").mockImplementation(function (this: Cron) {
+    // biome-ignore lint/complexity/useLiteralKeys: options is private
+    const { handler } = this["options"];
 
-    return mockCronJob;
-  }) as typeof Bun.cron);
+    handlers.push(async () => {
+      const minuteStart = Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS;
 
-  Object.assign(Bun.cron, { parse, remove });
-
-  return cronSpy;
+      await handler(new Date(minuteStart));
+    });
+  });
 };
 
 const runTick = async (handler: (() => Promise<void>) | undefined) => {
@@ -192,57 +188,6 @@ describe("CronDistributed", () => {
       await Promise.all(handlers.map((handler) => handler()));
 
       expect(runs).toBe(1);
-
-      cronSpy.mockRestore();
-    });
-
-    test("should deduplicate replicas that fire after the one-second lookback window", async () => {
-      setSystemTime(new Date(2027, 4, 8, 12, 35, 0));
-
-      const redis = createMockRedis();
-      let runs = 0;
-      const handlers: Array<() => Promise<void>> = [];
-      const cronSpy = mockInProcessCron(handlers);
-
-      const onTime = new CronDistributed({
-        name: "delayed-dedup",
-        schedule: "@minutely",
-        handler: () => {
-          runs++;
-          return Promise.resolve();
-        },
-        redis,
-        replicaId: "on-time",
-      });
-
-      const delayed = new CronDistributed({
-        name: "delayed-dedup",
-        schedule: "@minutely",
-        handler: () => {
-          runs++;
-          return Promise.resolve();
-        },
-        redis,
-        replicaId: "delayed",
-      });
-
-      onTime.run();
-      delayed.run();
-
-      await runTick(handlers[0]);
-      setSystemTime(new Date(2027, 4, 8, 12, 35, 2));
-      await runTick(handlers[1]);
-
-      expect(runs).toBe(1);
-
-      const firstKey = redis.setCalls[0]?.key;
-      const secondKey = redis.setCalls[1]?.key;
-
-      if (!firstKey || !secondKey) {
-        throw new Error("Expected lock keys for both replicas");
-      }
-
-      expect(firstKey).toBe(secondKey);
 
       cronSpy.mockRestore();
     });
@@ -407,6 +352,21 @@ describe("CronDistributed", () => {
   });
 
   describe("lock TTL", () => {
+    test("should reject a lockTTL Redis would refuse", () => {
+      for (const lockTTL of [Number.NaN, 0, -5, 1500.5, Infinity]) {
+        const create = () =>
+          new CronDistributed({
+            name: "bad-ttl",
+            schedule: "@minutely",
+            lockTTL,
+            handler: () => {},
+            redis: createMockRedis(),
+          });
+
+        expect(create).toThrow(TypeError);
+      }
+    });
+
     test("should allow re-acquisition after lock TTL expires", async () => {
       setSystemTime(new Date(2027, 4, 8, 12, 20, 0));
 
@@ -548,6 +508,48 @@ describe("CronDistributed", () => {
       expect(error.message).toBe("Redis connection error");
 
       cronSpy.mockRestore();
+    });
+  });
+
+  describe("scheduler integration", () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    test("should lock the missed boundary when the machine wakes late", async () => {
+      jest.useFakeTimers({ now: new Date(2027, 4, 8, 12, 0, 30) });
+
+      const redis = createMockRedis();
+      const boundary = new Date(2027, 4, 8, 13, 0, 0);
+      const scheduled: Date[] = [];
+      const job = new CronDistributed({
+        name: "wake-late",
+        schedule: "@hourly",
+        handler: (scheduledAt) => {
+          scheduled.push(scheduledAt);
+        },
+        redis,
+        replicaId: "replica-a",
+      });
+
+      job.run();
+
+      // The machine sleeps from 12:00 until 13:40.
+      jest.setSystemTime(new Date(2027, 4, 8, 13, 40, 0));
+      jest.advanceTimersByTime(1_000);
+
+      for (let i = 0; i < 10; i++) {
+        await Promise.resolve();
+      }
+
+      job.stop();
+
+      expect(scheduled).toEqual([boundary]);
+
+      const call = redis.getLastSetCall();
+      if (!call) throw new Error("Expected redis SET call");
+
+      expect(lockKeyTickMs(call.key)).toBe(boundary.getTime());
     });
   });
 
@@ -695,49 +697,6 @@ describe("CronDistributed", () => {
   });
 
   describe("long-interval schedules", () => {
-    test("should deduplicate @monthly replicas when slack fallback resolves the tick", async () => {
-      setSystemTime(new Date(2027, 4, 1, 0, 0, 2));
-
-      const redis = createMockRedis();
-      let runs = 0;
-      const handlers: Array<() => Promise<void>> = [];
-      const cronSpy = mockInProcessCron(handlers);
-
-      const replicas = ["replica-a", "replica-b"].map(
-        (replicaId) =>
-          new CronDistributed({
-            name: "monthly-slack",
-            schedule: "@monthly",
-            handler: () => {
-              runs++;
-              return Promise.resolve();
-            },
-            redis,
-            replicaId,
-          }),
-      );
-
-      for (const replica of replicas) {
-        replica.run();
-      }
-
-      await Promise.all(handlers.map((handler) => handler()));
-
-      expect(runs).toBe(1);
-
-      const firstKey = redis.setCalls[0]?.key;
-      const secondKey = redis.setCalls[1]?.key;
-
-      if (!firstKey || !secondKey) {
-        throw new Error("Expected lock keys for both replicas");
-      }
-
-      expect(firstKey).toBe(secondKey);
-      expect(firstKey.startsWith("cron:monthly-slack:0 0 1 * *:")).toBe(true);
-
-      cronSpy.mockRestore();
-    });
-
     test("should use different lock keys for @yearly ticks in different years", async () => {
       const redis = createMockRedis();
       const handlers: Array<() => Promise<void>> = [];
