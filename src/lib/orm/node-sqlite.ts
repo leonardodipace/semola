@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { mightThrow } from "../errors/index.js";
 import { OrmError } from "./errors.js";
-import { splitStatements } from "./migrations/sql.js";
+import { hasSqlStatement } from "./migrations/sql.js";
 import type {
   NodeSqliteDatabase,
   SqlClient,
@@ -28,33 +28,25 @@ const quoteSavepoint = (name: string) => {
   return `"${name.replaceAll('"', '""')}"`;
 };
 
-const hasSeveralStatements = (statement: string) => {
-  if (!statement.includes(";")) return false;
-
-  return splitStatements(statement).length > 1;
-};
-
 // One connection: queries issued while a transaction is open join that transaction.
 export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
-  // node:sqlite rows have a null prototype; Bun.SQL rows are plain objects.
-  const all = (statement: string, params: unknown[]) => {
-    // A leading object would be read as named params and shift the rest.
-    const rows = db
-      .prepare(statement)
-      .all(NO_NAMED_PARAMS, ...params.map(toSqliteParam));
-
-    return rows.map((row) => ({ ...row }));
-  };
-
   const unsafe: SqlTransaction["unsafe"] = async (statement, params = []) => {
-    // prepare() silently drops everything after the first statement.
-    if (!hasSeveralStatements(statement)) return all(statement, params);
+    // prepare() compiles only the first statement; sourceSQL is its text.
+    const prepared = db.prepare(statement);
+    const rest = statement.slice(prepared.sourceSQL.length);
+
+    if (!hasSqlStatement(rest)) {
+      // A leading object would be read as named params and shift the rest.
+      const rows = prepared.all(NO_NAMED_PARAMS, ...params.map(toSqliteParam));
+
+      // node:sqlite rows have a null prototype; Bun.SQL rows are plain objects.
+      return rows.map((row) => ({ ...row }));
+    }
 
     if (params.length > 0) {
       throw new OrmError("Several statements cannot share params");
     }
 
-    // exec() keeps trigger bodies whole, which splitting on ";" would break.
     db.exec(statement);
 
     return [];

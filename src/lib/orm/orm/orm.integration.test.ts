@@ -180,6 +180,41 @@ for (const live of integrationAdapters()) {
       await orm.$raw.close();
     });
 
+    test("a plain write waiting on one relation write survives a later failed one", async () => {
+      const orm = await open();
+      await createAda(orm);
+      await orm.notes.create({ data: { id: postId } });
+
+      const results = await orm.$transaction(async (tx) => {
+        const first = tx.users.update({
+          where: { id },
+          data: { notes: { connect: [{ id: postId }] } },
+        });
+        const plain = tx.notes.create({ data: { id: id2 } });
+
+        // The plain write is now waiting on the first relation write.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        const failing = tx.posts.create({
+          data: {
+            id: postId,
+            title: "Orphan",
+            author: { connect: { email: "missing@example.com" } },
+          },
+        });
+
+        return Promise.allSettled([first, plain, failing]);
+      });
+
+      const statuses = results.map((result) => result.status);
+
+      expect(statuses).toEqual(["fulfilled", "fulfilled", "rejected"]);
+      expect(await orm.notes.findMany()).toHaveLength(2);
+      expect(await orm.posts.findMany()).toHaveLength(0);
+
+      await orm.$raw.close();
+    });
+
     test("a failed relation write in $transaction keeps concurrent plain writes", async () => {
       const orm = await open();
       await createAda(orm);

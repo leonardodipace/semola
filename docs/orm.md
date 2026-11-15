@@ -337,7 +337,7 @@ await db.$raw.unsafe(`SELECT 1`);
 | Node | SQLite | `fromNodeSqlite(db)` (`node:sqlite`) |
 | Node, Bun | Postgres | `postgres(url)` from the `postgres` package (postgres.js) |
 
-Semola has no dependency on `postgres`. `Bun.SQL` is modeled on it, and postgres.js 4 already has the shape the ORM calls: `unsafe(statement, params)`, `begin([mode,] fn)` (the callback gets `unsafe` and `savepoint`), and `close()`. That shape is the `SqlClient` type; any other driver that provides it works too.
+Semola has no dependency on `postgres`. `Bun.SQL` is modeled on it, and postgres.js 4 already has the shape the ORM calls: `unsafe(statement, params)`, `begin([mode,] fn)` (the callback gets `unsafe` and `savepoint`), and `close()`. That shape is the `SqlClient` type; any other driver that provides it works too. Migrations send each `up.sql` and `down.sql` to `unsafe` whole, so `unsafe` must run a string with several statements when it gets no params.
 
 ```typescript
 import { DatabaseSync } from "node:sqlite";

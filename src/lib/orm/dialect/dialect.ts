@@ -25,32 +25,57 @@ import type {
   RelationWriteOptions,
   ReturningQuery,
   Row,
+  TransactionQueue,
 } from "./types.js";
 
 // Clients add a unique suffix per savepoint, so one base name serves every write.
 const RELATION_WRITE_SAVEPOINT = "semola_relation_write";
 
 // Savepoints form one stack per transaction, so overlapping relation writes
-// would release or roll back each other, and a plain query issued meanwhile
-// would land inside the savepoint and be undone with it. Relation writes on
-// one transaction queue and other queries wait for them; queries inside a
-// write use the savepoint's own handle, so they never wait on it. Clients that
-// set queuesSavepoints do both themselves.
-const relationWriteTail = new WeakMap<Sql, Promise<unknown>>();
+// would release or roll back each other, and a plain query sent meanwhile
+// would land inside the savepoint and be undone with it. Ordering by
+// completion, not by call order: drivers may send a query a tick after it is
+// created (postgres.js queries are lazy). Queries inside a write use the
+// savepoint's own handle, so they never wait on it. Clients that set
+// queuesSavepoints do this themselves.
+const transactionQueues = new WeakMap<Sql, TransactionQueue>();
 
-const queueRelationWrite = <T>(tx: SqlTransaction, write: () => Promise<T>) => {
-  const previous = relationWriteTail.get(tx) ?? Promise.resolve();
-  const next = previous.then(write);
-
-  relationWriteTail.set(
-    tx,
-    previous
-      .then(() => next)
-      .then(
-        () => undefined,
-        () => undefined,
-      ),
+const settled = (promise: Promise<unknown>) => {
+  return promise.then(
+    () => undefined,
+    () => undefined,
   );
+};
+
+const queueOf = (tx: SqlTransaction) => {
+  const existing = transactionQueues.get(tx);
+
+  if (existing) return existing;
+
+  const queue = { writes: Promise.resolve(), queries: Promise.resolve() };
+  transactionQueues.set(tx, queue);
+
+  return queue;
+};
+
+// A relation write starts once every earlier query on the transaction is done.
+const queueRelationWrite = <T>(tx: SqlTransaction, write: () => Promise<T>) => {
+  const queue = queueOf(tx);
+  const next = queue.queries.then(write);
+
+  queue.writes = settled(next);
+  queue.queries = settled(next);
+
+  return next;
+};
+
+// A plain query waits for earlier relation writes only; plain queries still
+// run side by side, and later relation writes wait for this one.
+const queuePlainQuery = <T>(tx: SqlTransaction, run: () => Promise<T>) => {
+  const queue = queueOf(tx);
+  const next = queue.writes.then(run);
+
+  queue.queries = settled(Promise.allSettled([queue.queries, next]));
 
   return next;
 };
@@ -318,13 +343,14 @@ export class SqlDialect<T extends Table, R extends TableRelations> {
   private async executeQuery(sql: Sql, query: ReturningQuery) {
     await this.builder.spec.prepareConnection?.(sql);
 
-    // Read last: a write queued after this point waits on the same promise
-    // and starts after this query is sent.
-    const relationWrites = relationWriteTail.get(sql);
+    const run = () => {
+      return this.parser.executeQuery(sql, this.builder.table, query);
+    };
 
-    if (relationWrites) await relationWrites;
+    if (!("savepoint" in sql)) return run();
+    if (sql.queuesSavepoints) return run();
 
-    return this.parser.executeQuery(sql, this.builder.table, query);
+    return queuePlainQuery(sql, run);
   }
 
   private async executeOne(sql: Sql, query: ReturningQuery, operation: string) {

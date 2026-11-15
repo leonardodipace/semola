@@ -135,6 +135,12 @@ export type ReturningQuery = {
 
 export type Row = Record<string, unknown>;
 
+// Settle when every queued relation write, or every query, on one transaction has.
+export type TransactionQueue = {
+  writes: Promise<unknown>;
+  queries: Promise<unknown>;
+};
+
 export type HasOneWriteInput = { connect?: Row; disconnect?: true };
 
 export type HasManyWriteInput = { connect?: Row[]; disconnect?: Row[] };

@@ -20,7 +20,7 @@ import { hasDestructiveOps } from "./dialect/warnings.js";
 import { diffSchemas } from "./diff.js";
 import { resolveRenames, reverseRenameOps } from "./renames.js";
 import { emptySchema, snapshotSchema } from "./snapshot.js";
-import { assertSchemaSnapshot, splitStatements } from "./sql.js";
+import { assertSchemaSnapshot, hasSqlStatement } from "./sql.js";
 import type {
   LoadedConfig,
   MigrationOp,
@@ -356,16 +356,14 @@ const assertCreateBaselineUnchanged = (
   }
 };
 
+// Every supported driver runs a multi-statement string, and the database's
+// own parser handles triggers, dollar quotes and comments.
 const runSqlText = async (sql: Sql, text: string, label: string) => {
-  const statements = splitStatements(text);
-
-  if (statements.length === 0) {
+  if (!hasSqlStatement(text)) {
     throw new MigrationError(`${label} has no SQL statements to apply`);
   }
 
-  for (const statement of statements) {
-    await sql.unsafe(statement);
-  }
+  await sql.unsafe(text);
 };
 
 const assertDestructiveAllowed = async (input: {
@@ -480,13 +478,13 @@ export const createMigration = async (input: {
   const folderPath = join(config.migrationsDir, folderName);
   const upSql = dialect.render(ops);
 
-  if (splitStatements(upSql).length === 0) {
+  if (!hasSqlStatement(upSql)) {
     throw new MigrationError("No schema changes to migrate");
   }
 
   const downSql = renderDownSql(dialect, renamed.from, to, renamed.ops);
 
-  if (splitStatements(downSql).length === 0) {
+  if (!hasSqlStatement(downSql)) {
     throw new MigrationError("Generated down.sql has no SQL statements");
   }
 

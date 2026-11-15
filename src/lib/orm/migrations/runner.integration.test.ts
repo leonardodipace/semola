@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { SQL } from "bun";
 import { date, string, uuid } from "../column/index.js";
 import { MigrationError } from "../errors.js";
 import {
@@ -3246,42 +3247,59 @@ export default defineConfig({
     expect([...tables]).toEqual([]);
   });
 
-  test("apply runs a hand-written SQLite trigger from up.sql", async () => {
-    const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
-    dirs.push(root);
+  const triggerClients = [
+    ["Bun.SQL", () => new SQL(":memory:")],
+    ["node:sqlite", () => fromNodeSqlite(new DatabaseSync(":memory:"))],
+  ] as const;
 
-    const client = fromNodeSqlite(new DatabaseSync(":memory:"));
-    const users = defineTable({
-      sqlName: "users",
-      columns: {
-        id: uuid("id").primaryKey().notNull(),
-        name: string("name").notNull(),
-      },
-    });
-    const config = {
-      migrationsDir: join(root, "migrations"),
-      orm: { adapter: "sqlite" as const, tables: { users }, client },
-    };
+  for (const [label, createClient] of triggerClients) {
+    test(`apply runs a hand-written SQLite trigger from up.sql on ${label}`, async () => {
+      const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+      dirs.push(root);
 
-    const folder = await createMigration({ name: "init", config });
-    const upPath = join(config.migrationsDir, folder, "up.sql");
-    const up = await Bun.file(upPath).text();
+      const client = createClient();
+      const users = defineTable({
+        sqlName: "users",
+        columns: {
+          id: uuid("id").primaryKey().notNull(),
+          name: string("name").notNull(),
+          end: string("end"),
+        },
+      });
+      const config = {
+        migrationsDir: join(root, "migrations"),
+        orm: { adapter: "sqlite" as const, tables: { users }, client },
+      };
 
-    await writeFile(
-      upPath,
-      `${up}
+      const folder = await createMigration({ name: "init", config });
+      const upPath = join(config.migrationsDir, folder, "up.sql");
+      const up = await Bun.file(upPath).text();
+
+      // An "end" column, a CASE and a comment before ";" must not end the body.
+      await writeFile(
+        upPath,
+        `${up}
 CREATE TRIGGER users_upper AFTER INSERT ON users BEGIN
-  UPDATE users SET name = upper(NEW.name) WHERE id = NEW.id;
-END;
+  UPDATE users SET name = upper(NEW.name), end = NEW.[end] WHERE id = NEW.id;
+  UPDATE users SET end = CASE WHEN NEW.end IS NULL THEN 'open' ELSE NEW.end END WHERE id = NEW.id;
+END /* done; */;
+CREATE INDEX users_name ON users (name);
 `,
-    );
-    await applyMigrations(config);
-    await client.unsafe("INSERT INTO users (id, name) VALUES ('u1', 'ada')");
+      );
+      await applyMigrations(config);
+      await client.unsafe("INSERT INTO users (id, name) VALUES ('u1', 'ada')");
 
-    const [row] = await client.unsafe("SELECT name FROM users");
+      const [row] = await client.unsafe('SELECT name, "end" FROM users');
+      const [index] = await client.unsafe(
+        "SELECT name FROM sqlite_master WHERE name = 'users_name'",
+      );
 
-    expect(row?.name).toBe("ADA");
-  });
+      expect(row).toEqual({ name: "ADA", end: "open" });
+      expect(index?.name).toBe("users_name");
+
+      await client.close();
+    });
+  }
 
   test("a CURRENT_TIMESTAMP default matches where filters on the Date it returns", async () => {
     const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
