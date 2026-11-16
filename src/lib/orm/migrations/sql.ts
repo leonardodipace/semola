@@ -1,9 +1,15 @@
 import type { CheckSnapshot } from "../checks/types.js";
 import { MigrationError } from "../errors.js";
 import type { IndexSnapshot } from "../indexes/types.js";
-import type { ColumnSnapshot, SchemaSnapshot, TableSnapshot } from "./types.js";
+import type {
+  ColumnSnapshot,
+  SchemaSnapshot,
+  SqlCommentRules,
+  TableSnapshot,
+} from "./types.js";
 
-const EMPTY_STATEMENT_CHAR = /[\s;]/;
+// Whitespace both lexers accept (no Unicode spaces, no \v), plus ";".
+const EMPTY_STATEMENT_CHAR = /[ \t\n\r\f;]/;
 
 const COLUMN_TYPES = new Set([
   "string",
@@ -401,9 +407,78 @@ export const assertSchemaSnapshot = (value: unknown, label: string) => {
   return { tables } satisfies SchemaSnapshot;
 };
 
+export const SQLITE_COMMENT_RULES: SqlCommentRules = {
+  nestsBlockComments: false,
+  endsLineCommentAtCarriageReturn: false,
+  unclosedBlockCommentIsError: false,
+};
+
+export const POSTGRES_COMMENT_RULES: SqlCommentRules = {
+  nestsBlockComments: true,
+  endsLineCommentAtCarriageReturn: true,
+  unclosedBlockCommentIsError: true,
+};
+
+// The index just past the "--" comment starting at start; the end of the text
+// when no line break follows.
+const lineCommentEnd = (
+  text: string,
+  start: number,
+  rules: SqlCommentRules,
+) => {
+  for (let index = start + 2; index < text.length; index++) {
+    const char = text.charAt(index);
+
+    if (char === "\n") return index + 1;
+
+    if (char === "\r") {
+      if (rules.endsLineCommentAtCarriageReturn) return index + 1;
+    }
+  }
+
+  return text.length;
+};
+
+// The index just past the block comment opening at start, or -1 if it never
+// closes.
+const blockCommentEnd = (
+  text: string,
+  start: number,
+  rules: SqlCommentRules,
+) => {
+  let depth = 1;
+  let index = start + 2;
+
+  while (index < text.length) {
+    const pair = text.slice(index, index + 2);
+
+    if (pair === "*/") {
+      depth -= 1;
+      index += 2;
+
+      if (depth === 0) return index;
+
+      continue;
+    }
+
+    if (pair === "/*") {
+      if (rules.nestsBlockComments) {
+        depth += 1;
+        index += 2;
+        continue;
+      }
+    }
+
+    index += 1;
+  }
+
+  return -1;
+};
+
 // Whether text holds anything besides whitespace, comments and empty ";"
-// statements. Scans from the start, so a "/*" inside a "--" comment is text.
-export const hasSqlStatement = (text: string) => {
+// statements, read with the dialect's comment rules. Scans from the start,
+// so a "/*" inside a "--" comment is comment text.
+export const hasSqlStatement = (text: string, rules: SqlCommentRules) => {
   let index = 0;
 
   while (index < text.length) {
@@ -415,21 +490,18 @@ export const hasSqlStatement = (text: string) => {
     const pair = text.slice(index, index + 2);
 
     if (pair === "--") {
-      const newline = text.indexOf("\n", index);
-
-      if (newline === -1) return false;
-
-      index = newline + 1;
+      index = lineCommentEnd(text, index, rules);
       continue;
     }
 
     if (pair !== "/*") return true;
 
-    const close = text.indexOf("*/", index + 2);
+    const end = blockCommentEnd(text, index, rules);
 
-    if (close === -1) return false;
+    // Postgres rejects an unclosed comment; SQLite reads it to the end.
+    if (end === -1) return rules.unclosedBlockCommentIsError;
 
-    index = close + 2;
+    index = end;
   }
 
   return false;

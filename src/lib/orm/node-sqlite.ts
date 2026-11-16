@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { mightThrow } from "../errors/index.js";
 import { OrmError } from "./errors.js";
-import { hasSqlStatement } from "./migrations/sql.js";
+import { hasSqlStatement, SQLITE_COMMENT_RULES } from "./migrations/sql.js";
 import type {
   NodeSqliteDatabase,
   SqlClient,
@@ -35,21 +35,22 @@ export const fromNodeSqlite = (db: NodeSqliteDatabase): SqlClient => {
     const prepared = db.prepare(statement);
     const rest = statement.slice(prepared.sourceSQL.length);
 
-    if (!hasSqlStatement(rest)) {
-      // A leading object would be read as named params and shift the rest.
-      const rows = prepared.all(NO_NAMED_PARAMS, ...params.map(toSqliteParam));
-
-      // node:sqlite rows have a null prototype; Bun.SQL rows are plain objects.
-      return rows.map((row) => ({ ...row }));
-    }
-
+    // exec() below would run later statements with their placeholders unbound.
     if (params.length > 0) {
-      throw new OrmError("Several statements cannot share params");
+      if (hasSqlStatement(rest, SQLITE_COMMENT_RULES)) {
+        throw new OrmError("Several statements cannot share params");
+      }
     }
 
-    db.exec(statement);
+    // A leading object would be read as named params and shift the rest.
+    const rows = prepared.all(NO_NAMED_PARAMS, ...params.map(toSqliteParam));
 
-    return [];
+    // SQLite reads the rest itself: statements run, comments and whitespace
+    // do nothing, anything else is a syntax error as in Bun.SQL.
+    if (rest !== "") db.exec(rest);
+
+    // node:sqlite rows have a null prototype; Bun.SQL rows are plain objects.
+    return rows.map((row) => ({ ...row }));
   };
 
   // Unique names, like Bun.SQL: a nested savepoint must not reuse its parent's name.

@@ -3,6 +3,7 @@ import { MigrationError } from "../../errors.js";
 import type { IndexSnapshot } from "../../indexes/types.js";
 import type { Sql, SqlClient, SqlTransaction } from "../../types.js";
 import { quoteIdentifier } from "../../utils.js";
+import { hasSqlStatement } from "../sql.js";
 import type {
   ColumnSnapshot,
   MigrationDialectSpec,
@@ -30,6 +31,10 @@ export class MigrationDialect {
   public constructor(spec: MigrationDialectSpec) {
     this.spec = spec;
     this.name = spec.name;
+  }
+
+  public hasSqlStatement(text: string) {
+    return hasSqlStatement(text, this.spec.commentRules);
   }
 
   public async prepareConnection(sql: Sql) {

@@ -20,7 +20,7 @@ import { hasDestructiveOps } from "./dialect/warnings.js";
 import { diffSchemas } from "./diff.js";
 import { resolveRenames, reverseRenameOps } from "./renames.js";
 import { emptySchema, snapshotSchema } from "./snapshot.js";
-import { assertSchemaSnapshot, hasSqlStatement } from "./sql.js";
+import { assertSchemaSnapshot } from "./sql.js";
 import type {
   LoadedConfig,
   MigrationOp,
@@ -375,18 +375,24 @@ const assertCreateBaselineUnchanged = (
 
 // Every supported driver runs a multi-statement string, and the database's
 // own parser handles triggers, dollar quotes and comments.
-const runSqlText = async (sql: Sql, text: string, label: string) => {
-  if (!hasSqlStatement(text)) {
+const runSqlText = async (
+  sql: Sql,
+  dialect: MigrationDialect,
+  text: string,
+  label: string,
+) => {
+  let statements = text;
+
+  // Editors may save a byte order mark, which Postgres reads as SQL.
+  if (statements.startsWith(BYTE_ORDER_MARK)) {
+    statements = statements.slice(BYTE_ORDER_MARK.length);
+  }
+
+  if (!dialect.hasSqlStatement(statements)) {
     throw new MigrationError(`${label} has no SQL statements to apply`);
   }
 
-  // Editors may save a byte order mark, which Postgres reads as SQL.
-  if (text.startsWith(BYTE_ORDER_MARK)) {
-    await sql.unsafe(text.slice(BYTE_ORDER_MARK.length));
-    return;
-  }
-
-  await sql.unsafe(text);
+  await sql.unsafe(statements);
 };
 
 const assertDestructiveAllowed = async (input: {
@@ -501,13 +507,13 @@ export const createMigration = async (input: {
   const folderPath = join(config.migrationsDir, folderName);
   const upSql = dialect.render(ops);
 
-  if (!hasSqlStatement(upSql)) {
+  if (!dialect.hasSqlStatement(upSql)) {
     throw new MigrationError("No schema changes to migrate");
   }
 
   const downSql = renderDownSql(dialect, renamed.from, to, renamed.ops);
 
-  if (!hasSqlStatement(downSql)) {
+  if (!dialect.hasSqlStatement(downSql)) {
     throw new MigrationError("Generated down.sql has no SQL statements");
   }
 
@@ -541,8 +547,13 @@ export const createMigration = async (input: {
   });
 };
 
-const runSqlFile = async (sql: Sql, filePath: string, label: string) => {
-  await runSqlText(sql, await readSqlFile(filePath, label), label);
+const runSqlFile = async (
+  sql: Sql,
+  dialect: MigrationDialect,
+  filePath: string,
+  label: string,
+) => {
+  await runSqlText(sql, dialect, await readSqlFile(filePath, label), label);
 };
 
 const readMigrationSchema = async (folderPath: string, name: string) => {
@@ -593,7 +604,7 @@ export const applyMigrations = async (config: LoadedConfig) => {
         const upSql = await readSqlFile(upPath, `Migration ${name}`);
         const checksum = hashUpSql(upSql);
 
-        await runSqlText(tx, upSql, `Migration ${name}`);
+        await runSqlText(tx, dialect, upSql, `Migration ${name}`);
         await dialect.assertForeignKeys(tx);
 
         await tx.unsafe(
@@ -646,7 +657,12 @@ export const rollbackMigration = async (config: LoadedConfig) => {
 
       const downPath = join(config.migrationsDir, last.name, "down.sql");
 
-      await runSqlFile(tx, downPath, `Migration ${last.name} down.sql`);
+      await runSqlFile(
+        tx,
+        dialect,
+        downPath,
+        `Migration ${last.name} down.sql`,
+      );
       await dialect.assertForeignKeys(tx);
       await tx.unsafe(`DELETE FROM ${HISTORY_TABLE} WHERE name = ${deletePh}`, [
         last.name,

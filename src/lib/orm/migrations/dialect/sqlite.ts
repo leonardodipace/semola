@@ -1,6 +1,7 @@
 import { formatSqliteDbDefault, SQLITE_SPEC } from "../../dialect/sqlite.js";
 import { MigrationError } from "../../errors.js";
 import type { Sql } from "../../types.js";
+import { SQLITE_COMMENT_RULES } from "../sql.js";
 import type {
   ColumnSnapshot,
   MigrationDialectSpec,
@@ -196,6 +197,7 @@ export const SQLITE_MIGRATION_SPEC: MigrationDialectSpec = {
   formatPlaceholder: SQLITE_SPEC.formatPlaceholder,
   formatDefault,
   deferCircularForeignKeys: false,
+  commentRules: SQLITE_COMMENT_RULES,
   sqlTypeFor,
   normalizeOps: foldOpsByTable,
   prepareConnection,

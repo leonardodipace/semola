@@ -1,6 +1,7 @@
 import { POSTGRES_SPEC } from "../../dialect/postgres.js";
 import type { Sql } from "../../types.js";
 import { quoteIdentifier } from "../../utils.js";
+import { POSTGRES_COMMENT_RULES } from "../sql.js";
 import type {
   ColumnSnapshot,
   MigrationDialectSpec,
@@ -418,6 +419,7 @@ export const POSTGRES_MIGRATION_SPEC: MigrationDialectSpec = {
   formatPlaceholder: POSTGRES_SPEC.formatPlaceholder,
   formatDefault,
   deferCircularForeignKeys: true,
+  commentRules: POSTGRES_COMMENT_RULES,
   normalizeOps,
   renderAlterColumn,
   renderRenameTable,

@@ -577,6 +577,20 @@ describe("fromNodeSqlite", () => {
     expect(await rowsOf(sql.unsafe("SELECT ? AS a;; -- done", [1]))).toEqual([
       { a: 1 },
     ]);
+    expect(await rowsOf(sql.unsafe("SELECT ? AS a; /* open", [1]))).toEqual([
+      { a: 1 },
+    ]);
+  });
+
+  test("unsafe returns the first statement's rows and runs the rest", async () => {
+    const sql = await open();
+
+    const rows = await rowsOf(
+      sql.unsafe("SELECT 1 AS a; INSERT INTO t (id) VALUES (3); /* done */"),
+    );
+
+    expect(rows).toEqual([{ a: 1 }]);
+    expect(await rowsOf(sql.unsafe("SELECT id FROM t"))).toEqual([{ id: 3 }]);
   });
 
   test("unsafe runs a trigger body as one statement", async () => {

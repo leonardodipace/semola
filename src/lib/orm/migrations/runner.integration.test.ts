@@ -2636,6 +2636,30 @@ if (SEMOLA_POSTGRES_URL) {
       expect(await applyMigrations(config)).toEqual([folder]);
     });
 
+    test("apply accepts SQL after a nested block comment", async () => {
+      await resetDb();
+
+      const project = await setupProject();
+      const config = await loadConfig(project.root);
+      const folder = await createMigration({ name: "init", config });
+      const upPath = join(config.migrationsDir, folder, "up.sql");
+
+      // Its only statement follows a comment that nests on Postgres.
+      await writeFile(
+        upPath,
+        "/* outer /* inner */ -- */ CREATE TABLE extra (id INTEGER);\n",
+      );
+
+      const applied = await applyMigrations(config);
+      const db = new Bun.SQL(url, { adapter: "postgres" });
+      const [table] = await db.unsafe("SELECT to_regclass('extra') AS name");
+
+      await db.close();
+
+      expect(applied).toEqual([folder]);
+      expect(table?.name).toBe("extra");
+    });
+
     test("clients applying the first migration at once all succeed", async () => {
       await resetDb();
 

@@ -104,6 +104,15 @@ export type MigrationRenderHelpers = {
   enumCheckSql: (column: ColumnSnapshot) => string | undefined;
 };
 
+// How a dialect's lexer reads comments. Postgres nests /* */ comments, ends a
+// -- comment at a carriage return too, and rejects an unclosed /*; SQLite
+// does none of these.
+export type SqlCommentRules = {
+  nestsBlockComments: boolean;
+  endsLineCommentAtCarriageReturn: boolean;
+  unclosedBlockCommentIsError: boolean;
+};
+
 export type MigrationDialectSpec = {
   name: Adapter;
   sqlTypes: Record<ColumnSnapshot["type"], string>;
@@ -111,6 +120,7 @@ export type MigrationDialectSpec = {
   formatPlaceholder: (index: number) => string;
   formatDefault: (value: string) => string;
   deferCircularForeignKeys: boolean;
+  commentRules: SqlCommentRules;
   sqlTypeFor?: (column: ColumnSnapshot) => string | undefined;
   normalizeOps?: (
     from: SchemaSnapshot,

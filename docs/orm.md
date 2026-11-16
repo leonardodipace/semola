@@ -370,7 +370,7 @@ const db = createOrm({
 });
 ```
 
-- `fromNodeSqlite(db)` takes a `DatabaseSync` from `node:sqlite` (Node 22.13+). It uses one connection; transactions run one at a time, and queries issued while one is open join it, as with Bun SQLite. Such a query is rolled back with that transaction if it fails, even though the query already resolved. Relation writes outside `$transaction` open a transaction too, so concurrent writers on SQLite should run inside `$transaction`. A write after SQLite rolled a transaction back on its own (`INSERT OR ROLLBACK`, `RAISE(ROLLBACK)`) is rejected on Node 22.16+ and 24+. A string with several statements runs them all through `exec` and returns no rows.
+- `fromNodeSqlite(db)` takes a `DatabaseSync` from `node:sqlite` (Node 22.13+). It uses one connection; transactions run one at a time, and queries issued while one is open join it, as with Bun SQLite. Such a query is rolled back with that transaction if it fails, even though the query already resolved. Relation writes outside `$transaction` open a transaction too, so concurrent writers on SQLite should run inside `$transaction`. A write after SQLite rolled a transaction back on its own (`INSERT OR ROLLBACK`, `RAISE(ROLLBACK)`) is rejected on Node 22.16+ and 24+. A string with several statements runs them all and returns the first statement's rows; it cannot take params.
 - postgres.js `close()` closes idle connections but keeps the pool usable; call `sql.end()` to shut it down.
 - The `semola` CLI runs on Bun. It loads the schema module, migrates through its client, and closes it.
 
