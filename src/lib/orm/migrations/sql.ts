@@ -1,9 +1,15 @@
 import type { CheckSnapshot } from "../checks/types.js";
 import { MigrationError } from "../errors.js";
 import type { IndexSnapshot } from "../indexes/types.js";
-import type { ColumnSnapshot, SchemaSnapshot, TableSnapshot } from "./types.js";
+import type {
+  ColumnSnapshot,
+  SchemaSnapshot,
+  SqlCommentRules,
+  TableSnapshot,
+} from "./types.js";
 
-const DOLLAR_TAG = /^(\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)/;
+// Whitespace both lexers accept (no Unicode spaces, no \v), plus ";".
+const EMPTY_STATEMENT_CHAR = /[ \t\n\r\f;]/;
 
 const COLUMN_TYPES = new Set([
   "string",
@@ -401,107 +407,102 @@ export const assertSchemaSnapshot = (value: unknown, label: string) => {
   return { tables } satisfies SchemaSnapshot;
 };
 
-const skipQuoted = (source: string, start: number, quote: string) => {
-  for (let index = start + 1; index < source.length; index++) {
-    if (source[index] !== quote) continue;
-    if (source[index + 1] === quote) {
-      index += 1;
-      continue;
-    }
+export const SQLITE_COMMENT_RULES: SqlCommentRules = {
+  nestsBlockComments: false,
+  endsLineCommentAtCarriageReturn: false,
+  unclosedBlockCommentIsError: false,
+};
 
-    return index;
+export const POSTGRES_COMMENT_RULES: SqlCommentRules = {
+  nestsBlockComments: true,
+  endsLineCommentAtCarriageReturn: true,
+  unclosedBlockCommentIsError: true,
+};
+
+// The index just past the "--" comment starting at start; the end of the text
+// when no line break follows.
+const lineCommentEnd = (
+  text: string,
+  start: number,
+  rules: SqlCommentRules,
+) => {
+  for (let index = start + 2; index < text.length; index++) {
+    const char = text.charAt(index);
+
+    if (char === "\n") return index + 1;
+
+    if (char === "\r") {
+      if (rules.endsLineCommentAtCarriageReturn) return index + 1;
+    }
   }
 
-  return source.length - 1;
+  return text.length;
 };
 
-const isSqlStatement = (text: string) => {
-  return text.split("\n").some((line) => {
-    const trimmed = line.trim();
+// The index just past the block comment opening at start, or -1 if it never
+// closes.
+const blockCommentEnd = (
+  text: string,
+  start: number,
+  rules: SqlCommentRules,
+) => {
+  let depth = 1;
+  let index = start + 2;
 
-    if (!trimmed) return false;
-    if (trimmed.startsWith("--")) return false;
+  while (index < text.length) {
+    const pair = text.slice(index, index + 2);
 
-    return true;
-  });
-};
+    if (pair === "*/") {
+      depth -= 1;
+      index += 2;
 
-export const splitStatements = (sqlText: string) => {
-  const statements: string[] = [];
-  let current = "";
-
-  const flush = () => {
-    const trimmed = current.trim();
-    current = "";
-
-    if (!trimmed) return;
-    if (!isSqlStatement(trimmed)) return;
-
-    statements.push(trimmed);
-  };
-
-  for (let index = 0; index < sqlText.length; index++) {
-    const char = sqlText[index] ?? "";
-    const next = sqlText[index + 1] ?? "";
-
-    if (char === "'" || char === '"') {
-      const end = skipQuoted(sqlText, index, char);
-      current += sqlText.slice(index, end + 1);
-      index = end;
-      continue;
-    }
-
-    if (char === "-" && next === "-") {
-      const newline = sqlText.indexOf("\n", index);
-
-      if (newline === -1) {
-        index = sqlText.length - 1;
-      } else {
-        index = newline - 1;
-      }
+      if (depth === 0) return index;
 
       continue;
     }
 
-    if (char === "/" && next === "*") {
-      const close = sqlText.indexOf("*/", index + 2);
-      let end = close + 1;
-
-      if (close === -1) {
-        end = sqlText.length - 1;
-      }
-
-      current += sqlText.slice(index, end + 1);
-      index = end;
-      continue;
-    }
-
-    if (char === "$") {
-      const tag = sqlText.slice(index).match(DOLLAR_TAG)?.[1];
-
-      if (tag) {
-        const close = sqlText.indexOf(tag, index + tag.length);
-        let end = close + tag.length - 1;
-
-        if (close === -1) {
-          end = sqlText.length - 1;
-        }
-
-        current += sqlText.slice(index, end + 1);
-        index = end;
+    if (pair === "/*") {
+      if (rules.nestsBlockComments) {
+        depth += 1;
+        index += 2;
         continue;
       }
     }
 
-    if (char === ";") {
-      flush();
+    index += 1;
+  }
+
+  return -1;
+};
+
+// Whether text holds anything besides whitespace, comments and empty ";"
+// statements, read with the dialect's comment rules. Scans from the start,
+// so a "/*" inside a "--" comment is comment text.
+export const hasSqlStatement = (text: string, rules: SqlCommentRules) => {
+  let index = 0;
+
+  while (index < text.length) {
+    if (EMPTY_STATEMENT_CHAR.test(text.charAt(index))) {
+      index += 1;
       continue;
     }
 
-    current += char;
+    const pair = text.slice(index, index + 2);
+
+    if (pair === "--") {
+      index = lineCommentEnd(text, index, rules);
+      continue;
+    }
+
+    if (pair !== "/*") return true;
+
+    const end = blockCommentEnd(text, index, rules);
+
+    // Postgres rejects an unclosed comment; SQLite reads it to the end.
+    if (end === -1) return rules.unclosedBlockCommentIsError;
+
+    index = end;
   }
 
-  flush();
-
-  return statements;
+  return false;
 };

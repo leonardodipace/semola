@@ -2,7 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { string, uuid } from "../column/index.js";
+import { DatabaseSync } from "node:sqlite";
+import { SQL } from "bun";
+import { date, string, uuid } from "../column/index.js";
 import { MigrationError } from "../errors.js";
 import {
   PG_ID,
@@ -10,20 +12,40 @@ import {
   resetPostgres,
   SEMOLA_POSTGRES_URL,
 } from "../integration-helpers.js";
+import { fromNodeSqlite } from "../node-sqlite.js";
 import { createOrm } from "../orm/index.js";
 import { defineTable } from "../table/index.js";
+import type { SqlClient } from "../types.js";
 import {
   applyMigrations,
   createMigration,
-  loadConfig,
+  loadConfig as loadRunnerConfig,
   rollbackMigration,
 } from "./runner.js";
 import { createMigrationProject } from "./test-project.js";
+
+// loadConfig leaves the schema client open; close it before deleting the files.
+const openClients: SqlClient[] = [];
+
+const loadConfig = async (cwd: string) => {
+  const config = await loadRunnerConfig(cwd);
+  openClients.push(config.orm.client);
+
+  return config;
+};
+
+const closeOpenClients = async () => {
+  for (const client of openClients.splice(0)) {
+    await client.close();
+  }
+};
 
 describe("sqlite migrations integration", () => {
   const dirs: string[] = [];
 
   afterEach(async () => {
+    await closeOpenClients();
+
     for (const dir of dirs.splice(0)) {
       await rm(dir, { recursive: true, force: true });
     }
@@ -62,7 +84,7 @@ describe("sqlite migrations integration", () => {
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
 
@@ -87,12 +109,13 @@ describe("sqlite migrations integration", () => {
     await db.$raw.close();
   });
 
-  test("loadConfig uses the real database url, not the redacted $config url", async () => {
+  test("loadConfig returns the schema client and adapter", async () => {
     const dbFile = join(await mkdtemp(join(tmpdir(), "semola-db-")), "test.db");
     const project = await setupProject(dbFile);
     const config = await loadConfig(project.root);
+    const [row] = await config.orm.client.unsafe("SELECT 1 AS one");
 
-    expect(config.orm.url).toBe(dbFile);
+    expect(row?.one).toBe(1);
     expect(config.orm.adapter).toBe("sqlite");
   });
 
@@ -131,7 +154,7 @@ describe("sqlite migrations integration", () => {
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
 
@@ -191,7 +214,7 @@ describe("sqlite migrations integration", () => {
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const tables = [
@@ -253,7 +276,7 @@ describe("sqlite migrations integration", () => {
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: nextUsers },
     });
 
@@ -309,7 +332,7 @@ describe("sqlite migrations integration", () => {
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: nextUsers },
     });
 
@@ -522,7 +545,7 @@ const posts = defineTable({
 
 export const db = createOrm({
   adapter: "sqlite",
-  url: ${JSON.stringify(dbFile)},
+  client: new Bun.SQL(${JSON.stringify(dbFile)}, { adapter: "sqlite" }),
   tables: { authors, posts },
 });
 `,
@@ -535,7 +558,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { authors, posts },
     });
 
@@ -559,7 +582,7 @@ export const db = createOrm({
 
     const check = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { authors, posts },
     });
     const author = await check.authors.findFirst({ where: { id: "a1" } });
@@ -652,7 +675,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const rows = [
@@ -678,7 +701,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
 
@@ -747,7 +770,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const cols = [...(await db.$raw.unsafe(`PRAGMA table_info("users")`))].map(
@@ -790,7 +813,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: nextUsers },
     });
 
@@ -833,7 +856,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const history = [
@@ -938,7 +961,7 @@ const users = defineTable({
 
 export default createOrm({
   adapter: "sqlite",
-  url: ${JSON.stringify(dbFile)},
+  client: new Bun.SQL(${JSON.stringify(dbFile)}, { adapter: "sqlite" }),
   tables: { users },
 });
 `,
@@ -957,7 +980,7 @@ export default defineConfig({
 
     const config = await loadConfig(root);
 
-    expect(config.orm.url).toBe(dbFile);
+    expect(config.orm.adapter).toBe("sqlite");
     expect(config.migrationsDir).toBe(join(root, "migrations"));
   });
 
@@ -981,7 +1004,7 @@ const users = defineTable({
 
 export const db = createOrm({
   adapter: "sqlite",
-  url: ${JSON.stringify(dbFile)},
+  client: new Bun.SQL(${JSON.stringify(dbFile)}, { adapter: "sqlite" }),
   tables: { users },
 });
 `,
@@ -1038,7 +1061,7 @@ export default defineConfig({});
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
 
@@ -1073,7 +1096,7 @@ export default defineConfig({});
 
     const check = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const cols = [
@@ -1117,7 +1140,7 @@ export default defineConfig({});
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: withoutName },
     });
 
@@ -1169,7 +1192,7 @@ const posts = defineTable({
 
 export const db = createOrm({
   adapter: "sqlite",
-  url: ${JSON.stringify(dbFile)},
+  client: new Bun.SQL(${JSON.stringify(dbFile)}, { adapter: "sqlite" }),
   tables: { authors, posts },
 });
 `,
@@ -1182,7 +1205,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { authors, posts },
     });
 
@@ -1248,7 +1271,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const tables = [
@@ -1275,7 +1298,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const rows = [
@@ -1320,7 +1343,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const history = [
@@ -1360,7 +1383,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const history = [
@@ -1399,12 +1422,14 @@ export const db = createOrm({
     for (const result of rejected) {
       if (result.status !== "rejected") continue;
 
-      expect(String(result.reason)).toMatch(/locked|BUSY|already rolled back/i);
+      expect(String(result.reason)).toMatch(
+        /locked|BUSY|already rolled back|No migrations to rollback/i,
+      );
     }
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const history = [
@@ -1434,7 +1459,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
 
@@ -1465,7 +1490,7 @@ export const db = createOrm({
 
     const check = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: nextUsers },
     });
     const user = await check.users.findFirst({ where: { id: "1" } });
@@ -1505,7 +1530,7 @@ export const db = createOrm({
 
     const check = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: nextUsers },
     });
     const cols = [
@@ -1528,7 +1553,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const history = [
@@ -1551,7 +1576,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     await db.$raw.unsafe(
@@ -1595,7 +1620,7 @@ export const db = createOrm({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: withoutName },
     });
 
@@ -1608,7 +1633,7 @@ export const db = createOrm({
 
     const check = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: withoutName },
     });
     const history = [
@@ -1696,7 +1721,7 @@ const users = defineTable({
 
 export const db = createOrm({
   adapter: "sqlite",
-  url: ${JSON.stringify(dbFile)},
+  client: new Bun.SQL(${JSON.stringify(dbFile)}, { adapter: "sqlite" }),
   tables: { users },
 });
 `,
@@ -1729,7 +1754,7 @@ export default defineConfig({
     });
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: before },
     });
 
@@ -1808,7 +1833,7 @@ export default defineConfig({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const tables = [
@@ -1866,7 +1891,7 @@ export default defineConfig({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: nextUsers },
     });
     const history = [
@@ -1916,7 +1941,7 @@ export default defineConfig({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: nextUsers },
     });
     const rows = [
@@ -1980,7 +2005,7 @@ const users = defineTable({
 
 export const db = createOrm({
   adapter: "sqlite",
-  url: ${JSON.stringify(dbFile)},
+  client: new Bun.SQL(${JSON.stringify(dbFile)}, { adapter: "sqlite" }),
   tables: { users },
 });
 `,
@@ -2035,7 +2060,7 @@ export default defineConfig({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const rows = [
@@ -2076,7 +2101,7 @@ const users = defineTable({
 
 export const db = createOrm({
   adapter: "sqlite",
-  url: ${JSON.stringify(dbFile)},
+  client: new Bun.SQL(${JSON.stringify(dbFile)}, { adapter: "sqlite" }),
   tables: { users },
 });
 `,
@@ -2133,7 +2158,7 @@ export default defineConfig({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: withBio },
     });
 
@@ -2152,7 +2177,7 @@ export default defineConfig({
 
     const check = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const user = await check.users.findFirst({ where: { id: "1" } });
@@ -2177,7 +2202,7 @@ export default defineConfig({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const history = [
@@ -2229,7 +2254,7 @@ export default defineConfig({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
     const rows = [
@@ -2317,7 +2342,7 @@ export default defineConfig({
 
     const seed = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
 
@@ -2361,7 +2386,7 @@ export default defineConfig({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { people },
     });
     const row = await db.people.findFirst({ where: { id: "1" } });
@@ -2373,7 +2398,7 @@ export default defineConfig({
 
     const restored = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
 
@@ -2394,7 +2419,7 @@ export default defineConfig({
 
     const seed = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: project.users },
     });
 
@@ -2435,7 +2460,7 @@ export default defineConfig({
 
     const db = createOrm({
       adapter: "sqlite",
-      url: dbFile,
+      client: new Bun.SQL(dbFile, { adapter: "sqlite" }),
       tables: { users: nextUsers },
     });
 
@@ -2542,6 +2567,8 @@ if (SEMOLA_POSTGRES_URL) {
     const id2 = PG_ID_2;
 
     afterEach(async () => {
+      await closeOpenClients();
+
       for (const dir of dirs.splice(0)) {
         await rm(dir, { recursive: true, force: true });
       }
@@ -2556,7 +2583,7 @@ if (SEMOLA_POSTGRES_URL) {
     ) =>
       createOrm({
         adapter: "postgres",
-        url,
+        client: new Bun.SQL(url, { adapter: "postgres" }),
         tables,
       });
 
@@ -2593,6 +2620,91 @@ if (SEMOLA_POSTGRES_URL) {
       ).rejects.toThrow();
 
       await db.$raw.close();
+    });
+
+    test("apply ignores a byte order mark at the start of up.sql", async () => {
+      await resetDb();
+
+      const project = await setupProject();
+      const config = await loadConfig(project.root);
+      const folder = await createMigration({ name: "init", config });
+      const upPath = join(config.migrationsDir, folder, "up.sql");
+      const up = await Bun.file(upPath).text();
+
+      await writeFile(upPath, `\uFEFF${up}`);
+
+      expect(await applyMigrations(config)).toEqual([folder]);
+    });
+
+    test("apply accepts SQL after a nested block comment", async () => {
+      await resetDb();
+
+      const project = await setupProject();
+      const config = await loadConfig(project.root);
+      const folder = await createMigration({ name: "init", config });
+      const upPath = join(config.migrationsDir, folder, "up.sql");
+
+      // Its only statement follows a comment that nests on Postgres.
+      await writeFile(
+        upPath,
+        "/* outer /* inner */ -- */ CREATE TABLE extra (id INTEGER);\n",
+      );
+
+      const applied = await applyMigrations(config);
+      const db = new Bun.SQL(url, { adapter: "postgres" });
+      const [table] = await db.unsafe("SELECT to_regclass('extra') AS name");
+
+      await db.close();
+
+      expect(applied).toEqual([folder]);
+      expect(table?.name).toBe("extra");
+    });
+
+    test("clients applying the first migration at once all succeed", async () => {
+      await resetDb();
+
+      const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+      dirs.push(root);
+
+      const users = defineTable({
+        sqlName: "users",
+        columns: { id: uuid("id").primaryKey().notNull() },
+      });
+      const configFor = (client: SqlClient) => ({
+        migrationsDir: join(root, "migrations"),
+        orm: { adapter: "postgres" as const, tables: { users }, client },
+      });
+      const clients = Array.from({ length: 2 }, () => {
+        return new Bun.SQL(url, { adapter: "postgres" });
+      });
+      const [first] = clients;
+
+      if (!first) throw new Error("No client");
+
+      const folder = await createMigration({
+        name: "init",
+        config: configFor(first),
+      });
+
+      // Every apply must find no history table yet.
+      await resetDb();
+
+      // Open every connection first, so the applies start together.
+      await Promise.all(clients.map((client) => client.unsafe("SELECT 1")));
+
+      const results = await Promise.allSettled(
+        clients.map((client) => applyMigrations(configFor(client))),
+      );
+
+      await Promise.all(clients.map((client) => client.close()));
+
+      const applied = results.flatMap((result) => {
+        if (result.status === "rejected") return [result.reason];
+
+        return result.value;
+      });
+
+      expect(applied).toEqual([folder]);
     });
 
     test("renames a table without dropping rows", async () => {
@@ -3118,3 +3230,294 @@ if (SEMOLA_POSTGRES_URL) {
     });
   });
 }
+
+describe("migrations with a user-supplied client", () => {
+  const dirs: string[] = [];
+
+  afterEach(async () => {
+    await closeOpenClients();
+
+    for (const dir of dirs.splice(0)) {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  const writeClientProject = async () => {
+    const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+    dirs.push(root);
+
+    await writeFile(
+      join(root, "db.ts"),
+      `
+import { DatabaseSync } from "node:sqlite";
+import { createOrm, defineTable, fromNodeSqlite, string, uuid } from ${JSON.stringify(join(import.meta.dir, "../index.ts"))};
+
+const users = defineTable({
+  sqlName: "users",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    name: string("name").notNull(),
+  },
+});
+
+export const db = createOrm({
+  adapter: "sqlite",
+  client: fromNodeSqlite(new DatabaseSync(":memory:")),
+  tables: { users },
+});
+`,
+    );
+    await writeFile(
+      join(root, "semola.config.ts"),
+      `
+import { defineConfig } from ${JSON.stringify(join(import.meta.dir, "../../config.ts"))};
+
+export default defineConfig({
+  orm: { schema: "./db.ts" },
+});
+`,
+    );
+
+    return root;
+  };
+
+  test("loadConfig runs migrations on a node:sqlite schema client", async () => {
+    const root = await writeClientProject();
+    const config = await loadConfig(root);
+    const folder = await createMigration({ name: "init", config });
+
+    expect(await applyMigrations(config)).toEqual([folder]);
+  });
+
+  test("create, apply, and rollback run on a client in config", async () => {
+    const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+    dirs.push(root);
+
+    const client = fromNodeSqlite(
+      new DatabaseSync(":memory:", { timeout: 5000 }),
+    );
+    const users = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        name: string("name").notNull(),
+      },
+    });
+    const config = {
+      migrationsDir: join(root, "migrations"),
+      orm: { adapter: "sqlite" as const, tables: { users }, client },
+    };
+
+    const folder = await createMigration({ name: "init", config });
+
+    expect(await applyMigrations(config)).toEqual([folder]);
+
+    const [pragma] = await client.unsafe("PRAGMA foreign_keys");
+
+    expect(Object.values(pragma ?? {})).toEqual([1]);
+
+    const [busyTimeout] = await client.unsafe("PRAGMA busy_timeout");
+
+    expect(busyTimeout?.timeout).toBe(5000);
+
+    await client.unsafe("INSERT INTO users (id, name) VALUES ('u1', 'Ada')");
+    await client.unsafe("DELETE FROM users");
+
+    expect(await rollbackMigration(config)).toBe(folder);
+
+    const tables = await client.unsafe(
+      "SELECT name FROM sqlite_master WHERE name = 'users'",
+    );
+
+    expect([...tables]).toEqual([]);
+  });
+
+  const triggerClients = [
+    ["Bun.SQL", () => new SQL(":memory:")],
+    ["node:sqlite", () => fromNodeSqlite(new DatabaseSync(":memory:"))],
+  ] as const;
+
+  for (const [label, createClient] of triggerClients) {
+    test(`apply runs a hand-written SQLite trigger from up.sql on ${label}`, async () => {
+      const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+      dirs.push(root);
+
+      const client = createClient();
+      const users = defineTable({
+        sqlName: "users",
+        columns: {
+          id: uuid("id").primaryKey().notNull(),
+          name: string("name").notNull(),
+          end: string("end"),
+        },
+      });
+      const config = {
+        migrationsDir: join(root, "migrations"),
+        orm: { adapter: "sqlite" as const, tables: { users }, client },
+      };
+
+      const folder = await createMigration({ name: "init", config });
+      const upPath = join(config.migrationsDir, folder, "up.sql");
+      const up = await Bun.file(upPath).text();
+
+      // An "end" column, a CASE and a comment before ";" must not end the body.
+      await writeFile(
+        upPath,
+        `${up}
+CREATE TRIGGER users_upper AFTER INSERT ON users BEGIN
+  UPDATE users SET name = upper(NEW.name), end = NEW.[end] WHERE id = NEW.id;
+  UPDATE users SET end = CASE WHEN NEW.end IS NULL THEN 'open' ELSE NEW.end END WHERE id = NEW.id;
+END /* done; */;
+CREATE INDEX users_name ON users (name);
+`,
+      );
+      await applyMigrations(config);
+      await client.unsafe("INSERT INTO users (id, name) VALUES ('u1', 'ada')");
+
+      const [row] = await client.unsafe('SELECT name, "end" FROM users');
+      const [index] = await client.unsafe(
+        "SELECT name FROM sqlite_master WHERE name = 'users_name'",
+      );
+
+      expect(row).toEqual({ name: "ADA", end: "open" });
+      expect(index?.name).toBe("users_name");
+
+      await client.close();
+    });
+
+    test(`apply runs statements between line comments that hold /* and */ on ${label}`, async () => {
+      const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+      dirs.push(root);
+
+      const client = createClient();
+      const users = defineTable({
+        sqlName: "users",
+        columns: { id: uuid("id").primaryKey().notNull() },
+      });
+      const config = {
+        migrationsDir: join(root, "migrations"),
+        orm: { adapter: "sqlite" as const, tables: { users }, client },
+      };
+
+      const folder = await createMigration({ name: "init", config });
+      const upPath = join(config.migrationsDir, folder, "up.sql");
+      const up = await Bun.file(upPath).text();
+
+      await writeFile(
+        upPath,
+        `${up}
+-- /*
+CREATE TABLE extra (id INTEGER);
+-- */
+`,
+      );
+
+      const applied = await applyMigrations(config);
+      const tables = await client.unsafe(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('users', 'extra') ORDER BY name",
+      );
+
+      expect(applied).toEqual([folder]);
+      expect([...tables]).toEqual([{ name: "extra" }, { name: "users" }]);
+
+      await client.close();
+    });
+  }
+
+  test("a CURRENT_TIMESTAMP default matches where filters on the Date it returns", async () => {
+    const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+    dirs.push(root);
+
+    const client = fromNodeSqlite(new DatabaseSync(":memory:"));
+    const events = defineTable({
+      sqlName: "events",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+        createdAt: date("created_at")
+          .notNull()
+          .dbDefault("CURRENT_TIMESTAMP", { as: "sql" }),
+      },
+    });
+    const config = {
+      migrationsDir: join(root, "migrations"),
+      orm: { adapter: "sqlite" as const, tables: { events }, client },
+    };
+
+    await createMigration({ name: "init", config });
+    await applyMigrations(config);
+
+    const orm = createOrm({ adapter: "sqlite", client, tables: { events } });
+    const created = await orm.events.create({ data: { id: "e1" } });
+    const sameTime = await orm.events.findMany({
+      where: { createdAt: { equals: created.createdAt } },
+    });
+    const anHourAgo = new Date(created.createdAt.getTime() - 60 * 60 * 1000);
+    const recent = await orm.events.findMany({
+      where: { createdAt: { gt: anHourAgo } },
+    });
+
+    expect(created.createdAt).toBeInstanceOf(Date);
+    expect(sameTime).toHaveLength(1);
+    expect(recent).toHaveLength(1);
+  });
+
+  test("overlapping applies on one client restore foreign keys", async () => {
+    const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+    dirs.push(root);
+
+    const client = new Bun.SQL(":memory:");
+    const users = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+      },
+    });
+    const config = {
+      migrationsDir: join(root, "migrations"),
+      orm: { adapter: "sqlite" as const, tables: { users }, client },
+    };
+
+    await client.unsafe("PRAGMA foreign_keys = ON");
+    await createMigration({ name: "init", config });
+
+    const first = applyMigrations(config);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const second = applyMigrations(config);
+
+    await Promise.all([first, second]);
+
+    const [pragma] = await client.unsafe("PRAGMA foreign_keys");
+
+    expect(pragma?.foreign_keys).toBe(1);
+
+    await client.close();
+  });
+
+  test("apply leaves foreign keys off on a client that had them off", async () => {
+    const root = await mkdtemp(join(tmpdir(), "semola-mig-"));
+    dirs.push(root);
+
+    const client = fromNodeSqlite(
+      new DatabaseSync(":memory:", { enableForeignKeyConstraints: false }),
+    );
+    const users = defineTable({
+      sqlName: "users",
+      columns: {
+        id: uuid("id").primaryKey().notNull(),
+      },
+    });
+    const config = {
+      migrationsDir: join(root, "migrations"),
+      orm: { adapter: "sqlite" as const, tables: { users }, client },
+    };
+
+    await createMigration({ name: "init", config });
+    await applyMigrations(config);
+
+    const [pragma] = await client.unsafe("PRAGMA foreign_keys");
+
+    expect(pragma?.foreign_keys).toBe(0);
+  });
+});

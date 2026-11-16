@@ -1,6 +1,7 @@
 import type { BaseColumn, Column } from "../column/types.js";
 import type { Adapter } from "../dialect/index.js";
 import type { Table } from "../table/types.js";
+import type { Sql, SqlClient, SqlTransaction } from "../types.js";
 
 export type HasMany<T extends Table> = {
   _type: "hasMany";
@@ -39,35 +40,17 @@ export type OrmQueryOptions = {
   $skipHooks?: boolean;
 };
 
-export type OrmPoolOptions = {
-  max?: number;
-  idleTimeout?: number;
-  maxLifetime?: number;
-  connectionTimeout?: number;
-};
-
-type CreateOrmOptionsBase<
-  T extends Record<string, Table>,
-  R extends RelationsFor<T>,
+export type CreateOrmOptions<
+  T extends Record<string, Table> = Record<string, Table>,
+  R extends RelationsFor<T> = RelationsFor<T>,
 > = {
-  url: string;
+  adapter: Adapter;
+  // The caller owns the client and closes it.
+  client: SqlClient;
   tables: T;
   relations?: R;
   hooks?: OrmHooksConfig<T, R>;
 };
-
-export type CreateOrmOptions<
-  T extends Record<string, Table> = Record<string, Table>,
-  R extends RelationsFor<T> = RelationsFor<T>,
-> =
-  | (CreateOrmOptionsBase<T, R> & {
-      adapter: "sqlite" | "postgres";
-      pool?: never;
-    })
-  | (CreateOrmOptionsBase<T, R> & {
-      adapter: "postgres";
-      pool?: OrmPoolOptions;
-    });
 
 // Look up the raw relations for a table by matching its structural type against all tables.
 // Uses bidirectional extends check to require exact structural match.
@@ -108,12 +91,10 @@ export type OrmClient<
     R
   >;
 } & {
-  $raw: Bun.SQL;
+  $raw: SqlClient;
   $config: {
     adapter: Adapter;
-    url: string;
     tables: T;
-    pool?: OrmPoolOptions;
   };
   $transaction: <TResult>(
     callback: (tx: TransactionClient<T, R>) => Promise<TResult>,
@@ -132,7 +113,7 @@ export type TransactionClient<
     R
   >;
 } & {
-  $raw: Bun.SQL;
+  $raw: SqlTransaction;
 };
 
 export type StringKeyOf<T extends object> = Extract<keyof T, string>;
@@ -954,7 +935,7 @@ export type CreateTableClientInput<
   T extends Table = Table,
   TRelations extends TableRelations = TableRelations,
 > = {
-  sql: Bun.SQL;
+  sql: Sql;
   tableName: string;
   table: T;
   adapter: Adapter;

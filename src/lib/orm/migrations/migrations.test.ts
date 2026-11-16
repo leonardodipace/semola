@@ -1545,7 +1545,7 @@ describe("orm migrations snapshot/diff/sql", () => {
     const sql = getMigrationDialect("sqlite").render(ops);
 
     expect(ops[0]?.kind).toBe("recreateTable");
-    expect(sql).toContain("CURRENT_TIMESTAMP");
+    expect(sql).toContain("DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))");
     expect(sql).toContain("users__semola_tmp");
     expect(sql).not.toContain("ADD COLUMN");
   });

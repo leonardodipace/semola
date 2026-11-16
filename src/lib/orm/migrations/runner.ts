@@ -12,23 +12,24 @@ import { pathToFileURL } from "node:url";
 import type { SemolaConfig } from "../../config.js";
 import { mightThrow, mightThrowSync } from "../../errors/index.js";
 import { MigrationError } from "../errors.js";
-import { getOrmConnectionUrl } from "../orm/orm.js";
+import type { OrmClient } from "../orm/types.js";
+import type { Sql, SqlClient } from "../types.js";
 import type { MigrationDialect } from "./dialect/index.js";
 import { getMigrationDialect } from "./dialect/index.js";
 import { hasDestructiveOps } from "./dialect/warnings.js";
 import { diffSchemas } from "./diff.js";
 import { resolveRenames, reverseRenameOps } from "./renames.js";
 import { emptySchema, snapshotSchema } from "./snapshot.js";
-import { assertSchemaSnapshot, splitStatements } from "./sql.js";
+import { assertSchemaSnapshot } from "./sql.js";
 import type {
   LoadedConfig,
   MigrationOp,
-  OrmConfig,
   RenameHandler,
   SchemaSnapshot,
 } from "./types.js";
 
 const HISTORY_TABLE = "_semola_migrations";
+const BYTE_ORDER_MARK = "\uFEFF";
 const SCHEMA_FILE = "schema.json";
 
 type HistoryRow = {
@@ -55,7 +56,7 @@ const resolveOrmFromModule = (mod: Record<string, unknown>) => {
   for (const value of candidates) {
     if (!isOrmClient(value)) continue;
 
-    return value as { $config: OrmConfig; $raw: Bun.SQL };
+    return value as OrmClient;
   }
 
   throw new MigrationError(
@@ -85,15 +86,31 @@ const importModule = async (filePath: string, label: string) => {
   return mod;
 };
 
-const ensureHistoryTable = async (sql: Bun.SQL) => {
-  await sql.unsafe(`
-    CREATE TABLE IF NOT EXISTS ${HISTORY_TABLE} (
-      name TEXT PRIMARY KEY NOT NULL,
-      applied_at TEXT NOT NULL,
-      schema TEXT NOT NULL,
-      up_checksum TEXT
-    )
-  `);
+const ensureHistoryTable = async (sql: Sql) => {
+  const createHistoryTable = () => {
+    return sql.unsafe(`
+      CREATE TABLE IF NOT EXISTS ${HISTORY_TABLE} (
+        name TEXT PRIMARY KEY NOT NULL,
+        applied_at TEXT NOT NULL,
+        schema TEXT NOT NULL,
+        up_checksum TEXT
+      )
+    `);
+  };
+
+  const [createError] = await mightThrow(createHistoryTable());
+
+  if (createError) {
+    // Postgres: two processes creating it at once both pass IF NOT EXISTS and
+    // the loser fails on a duplicate type; the table exists by then.
+    if (!createError.message.includes("duplicate key")) {
+      throw new MigrationError(
+        `Could not create ${HISTORY_TABLE}: ${createError.message}`,
+      );
+    }
+
+    await createHistoryTable();
+  }
 
   const [error] = await mightThrow(
     sql.unsafe(`ALTER TABLE ${HISTORY_TABLE} ADD COLUMN up_checksum TEXT`),
@@ -111,22 +128,43 @@ const ensureHistoryTable = async (sql: Bun.SQL) => {
   );
 };
 
+// Runs on one client queue: an overlapping run would save the connection
+// settings the first run changed and restore those instead of the caller's.
+const connectionTail = new WeakMap<SqlClient, Promise<unknown>>();
+
 const withConnection = async <T>(
   config: LoadedConfig,
-  fn: (sql: Bun.SQL, dialect: MigrationDialect) => Promise<T>,
+  fn: (sql: SqlClient, dialect: MigrationDialect) => Promise<T>,
 ) => {
   const dialect = getMigrationDialect(config.orm.adapter);
-  const sql = new Bun.SQL(config.orm.url, { adapter: config.orm.adapter });
+  const sql = config.orm.client;
 
-  try {
-    await dialect.prepareConnection(sql);
-    // Outside tx: failed ALTER aborts Postgres transactions.
-    await ensureHistoryTable(sql);
+  const run = async () => {
+    const restoreConnection = await dialect.prepareConnection(sql);
 
-    return await fn(sql, dialect);
-  } finally {
-    await sql.close();
-  }
+    try {
+      // Outside tx: failed ALTER aborts Postgres transactions.
+      await ensureHistoryTable(sql);
+
+      return await fn(sql, dialect);
+    } finally {
+      // Best effort: a failure here must not replace the migration error.
+      await mightThrow(restoreConnection());
+    }
+  };
+
+  const previous = connectionTail.get(sql) ?? Promise.resolve();
+  const next = previous.then(run);
+
+  connectionTail.set(
+    sql,
+    next.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+
+  return next;
 };
 
 export const loadConfig = async (cwd = process.cwd()) => {
@@ -142,17 +180,14 @@ export const loadConfig = async (cwd = process.cwd()) => {
 
   const schemaPath = resolve(cwd, config.orm.schema);
   const schemaMod = await importModule(schemaPath, "schema module");
-  const client = resolveOrmFromModule(schemaMod as Record<string, unknown>);
-  const url = getOrmConnectionUrl(client) ?? client.$config.url;
-
-  await client.$raw.close();
+  const orm = resolveOrmFromModule(schemaMod as Record<string, unknown>);
 
   return {
     migrationsDir: resolve(cwd, config.orm.migrationsDir ?? "migrations"),
     orm: {
-      adapter: client.$config.adapter,
-      url,
-      tables: client.$config.tables,
+      adapter: orm.$config.adapter,
+      tables: orm.$config.tables,
+      client: orm.$raw,
     },
   };
 };
@@ -214,7 +249,7 @@ const readSqlFile = async (filePath: string, label: string) => {
   return text;
 };
 
-const readApplied = async (sql: Bun.SQL) => {
+const readApplied = async (sql: Sql) => {
   const rows = (await sql.unsafe(
     `SELECT name, schema, up_checksum AS "upChecksum" FROM ${HISTORY_TABLE} ORDER BY name ASC`,
   )) as HistoryRow[];
@@ -291,7 +326,7 @@ const validateHistory = async (
   await assertUpChecksums(migrationsDir, applied);
 };
 
-const loadHistory = async (sql: Bun.SQL, migrationsDir: string) => {
+const loadHistory = async (sql: Sql, migrationsDir: string) => {
   const applied = await readApplied(sql);
   const dirs = await listMigrationDirs(migrationsDir);
 
@@ -301,7 +336,7 @@ const loadHistory = async (sql: Bun.SQL, migrationsDir: string) => {
 };
 
 const withMigrationLock = async <T>(
-  tx: Bun.SQL,
+  tx: Sql,
   dialect: MigrationDialect,
   fn: () => Promise<T>,
 ) => {
@@ -338,16 +373,26 @@ const assertCreateBaselineUnchanged = (
   }
 };
 
-const runSqlText = async (sql: Bun.SQL, text: string, label: string) => {
-  const statements = splitStatements(text);
+// Every supported driver runs a multi-statement string, and the database's
+// own parser handles triggers, dollar quotes and comments.
+const runSqlText = async (
+  sql: Sql,
+  dialect: MigrationDialect,
+  text: string,
+  label: string,
+) => {
+  let statements = text;
 
-  if (statements.length === 0) {
+  // Editors may save a byte order mark, which Postgres reads as SQL.
+  if (statements.startsWith(BYTE_ORDER_MARK)) {
+    statements = statements.slice(BYTE_ORDER_MARK.length);
+  }
+
+  if (!dialect.hasSqlStatement(statements)) {
     throw new MigrationError(`${label} has no SQL statements to apply`);
   }
 
-  for (const statement of statements) {
-    await sql.unsafe(statement);
-  }
+  await sql.unsafe(statements);
 };
 
 const assertDestructiveAllowed = async (input: {
@@ -462,13 +507,13 @@ export const createMigration = async (input: {
   const folderPath = join(config.migrationsDir, folderName);
   const upSql = dialect.render(ops);
 
-  if (splitStatements(upSql).length === 0) {
+  if (!dialect.hasSqlStatement(upSql)) {
     throw new MigrationError("No schema changes to migrate");
   }
 
   const downSql = renderDownSql(dialect, renamed.from, to, renamed.ops);
 
-  if (splitStatements(downSql).length === 0) {
+  if (!dialect.hasSqlStatement(downSql)) {
     throw new MigrationError("Generated down.sql has no SQL statements");
   }
 
@@ -502,8 +547,13 @@ export const createMigration = async (input: {
   });
 };
 
-const runSqlFile = async (sql: Bun.SQL, filePath: string, label: string) => {
-  await runSqlText(sql, await readSqlFile(filePath, label), label);
+const runSqlFile = async (
+  sql: Sql,
+  dialect: MigrationDialect,
+  filePath: string,
+  label: string,
+) => {
+  await runSqlText(sql, dialect, await readSqlFile(filePath, label), label);
 };
 
 const readMigrationSchema = async (folderPath: string, name: string) => {
@@ -554,7 +604,7 @@ export const applyMigrations = async (config: LoadedConfig) => {
         const upSql = await readSqlFile(upPath, `Migration ${name}`);
         const checksum = hashUpSql(upSql);
 
-        await runSqlText(tx, upSql, `Migration ${name}`);
+        await runSqlText(tx, dialect, upSql, `Migration ${name}`);
         await dialect.assertForeignKeys(tx);
 
         await tx.unsafe(
@@ -607,7 +657,12 @@ export const rollbackMigration = async (config: LoadedConfig) => {
 
       const downPath = join(config.migrationsDir, last.name, "down.sql");
 
-      await runSqlFile(tx, downPath, `Migration ${last.name} down.sql`);
+      await runSqlFile(
+        tx,
+        dialect,
+        downPath,
+        `Migration ${last.name} down.sql`,
+      );
       await dialect.assertForeignKeys(tx);
       await tx.unsafe(`DELETE FROM ${HISTORY_TABLE} WHERE name = ${deletePh}`, [
         last.name,

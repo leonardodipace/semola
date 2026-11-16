@@ -45,7 +45,7 @@ const users = defineTable({
 
 export const db = createOrm({
   adapter: ${JSON.stringify(adapter)},
-  url: ${JSON.stringify(dbUrl)},
+  client: new Bun.SQL(${JSON.stringify(dbUrl)}, { adapter: ${JSON.stringify(adapter)} }),
   tables: { users },
 });
 `,

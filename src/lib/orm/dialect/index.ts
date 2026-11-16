@@ -24,12 +24,15 @@ export const getDialectSpec = (adapter: Adapter): DialectSpec => {
 export const getDialect = <T extends Table, R extends TableRelations>(
   input: GetDialectInput<T, R>,
 ): Dialect<T, R> => {
-  return new SqlDialect({
+  const dialect = new SqlDialect({
     spec: getDialectSpec(input.adapter),
     table: input.table,
     relations: input.relations,
     tableRelationsMap: input.tableRelationsMap ?? new Map(),
   });
+
+  // SqlDialect returns untyped rows; the Dialect type adds the result shapes.
+  return dialect as unknown as Dialect<T, R>;
 };
 
 export type { Adapter, Dialect };

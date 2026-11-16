@@ -1,6 +1,7 @@
 import { getDialect } from "../dialect/index.js";
 import type { Dialect } from "../dialect/types.js";
 import type { Table } from "../table/types.js";
+import type { Sql } from "../types.js";
 import { HookRunner } from "./hook-runner.js";
 import type {
   CreateManyOptions,
@@ -23,7 +24,7 @@ export class TableClientImpl<
   T extends Table,
   TRelations extends TableRelations,
 > {
-  private sql: Bun.SQL;
+  private sql: Sql;
   private dialect: Dialect<T, TRelations>;
   private hooks: HookRunner<T>;
   private tableName: string;

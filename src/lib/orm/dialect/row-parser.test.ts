@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { boolean, json, jsonb, uuid } from "../column/index.js";
+import { boolean, date, json, jsonb, uuid } from "../column/index.js";
 import { defineTable } from "../table/index.js";
 import { RowParser } from "./row-parser.js";
 import { postsTable, usersTable } from "./test-fixtures.js";
@@ -12,6 +12,14 @@ const eventsTable = defineTable({
     payload: json("payload").notNull(),
     meta: jsonb("meta").notNull(),
     published: boolean("published").notNull(),
+  },
+});
+
+const datesTable = defineTable({
+  sqlName: "dates",
+  columns: {
+    id: uuid("id").primaryKey().notNull(),
+    at: date("at"),
   },
 });
 
@@ -37,6 +45,46 @@ describe("row-parser", () => {
         meta: { source: "test" },
         published: true,
       },
+    ]);
+  });
+
+  test("coerces date strings to Date, reading zoneless values as UTC", () => {
+    // bun test runs in UTC, where a local-time bug would not show.
+    const previousTimeZone = process.env.TZ;
+    process.env.TZ = "America/New_York";
+
+    const rows: Array<Record<string, unknown>> = [
+      { id: "1", at: "2025-01-01T10:00:00.000Z" },
+      { id: "2", at: "2025-01-01 10:00:00" },
+      { id: "3", at: "2025-01-01T10:00:00" },
+      { id: "4", at: "2025-01-01T12:00:00+02:00" },
+      { id: "5", at: new Date("2025-01-01T10:00:00.000Z") },
+    ];
+
+    rowParser.parseRows({ table: datesTable, rows, descriptors: [] });
+
+    for (const row of rows) {
+      expect(row.at).toEqual(new Date("2025-01-01T10:00:00.000Z"));
+    }
+
+    if (previousTimeZone === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = previousTimeZone;
+    }
+  });
+
+  test("leaves null and unparseable dates unchanged", () => {
+    const rows: Array<Record<string, unknown>> = [
+      { id: "1", at: null },
+      { id: "2", at: "not a date" },
+    ];
+
+    rowParser.parseRows({ table: datesTable, rows, descriptors: [] });
+
+    expect(rows).toEqual([
+      { id: "1", at: null },
+      { id: "2", at: "not a date" },
     ]);
   });
 

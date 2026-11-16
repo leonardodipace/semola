@@ -3,6 +3,7 @@ import type { Column } from "../column/types.js";
 import type { Adapter } from "../dialect/types.js";
 import type { IndexSnapshot } from "../indexes/types.js";
 import type { Table } from "../table/types.js";
+import type { Sql, SqlClient, SqlTransaction } from "../types.js";
 
 export type ColumnSnapshot = {
   name: string;
@@ -87,8 +88,9 @@ export type RenameHandler = (
 
 export type OrmConfig = {
   adapter: Adapter;
-  url: string;
   tables: Record<string, Table>;
+  // Migrations run on this client and leave it open.
+  client: SqlClient;
 };
 
 export type LoadedConfig = {
@@ -102,6 +104,15 @@ export type MigrationRenderHelpers = {
   enumCheckSql: (column: ColumnSnapshot) => string | undefined;
 };
 
+// How a dialect's lexer reads comments. Postgres nests /* */ comments, ends a
+// -- comment at a carriage return too, and rejects an unclosed /*; SQLite
+// does none of these.
+export type SqlCommentRules = {
+  nestsBlockComments: boolean;
+  endsLineCommentAtCarriageReturn: boolean;
+  unclosedBlockCommentIsError: boolean;
+};
+
 export type MigrationDialectSpec = {
   name: Adapter;
   sqlTypes: Record<ColumnSnapshot["type"], string>;
@@ -109,6 +120,7 @@ export type MigrationDialectSpec = {
   formatPlaceholder: (index: number) => string;
   formatDefault: (value: string) => string;
   deferCircularForeignKeys: boolean;
+  commentRules: SqlCommentRules;
   sqlTypeFor?: (column: ColumnSnapshot) => string | undefined;
   normalizeOps?: (
     from: SchemaSnapshot,
@@ -127,11 +139,12 @@ export type MigrationDialectSpec = {
   renderRenameColumn?: (
     op: Extract<MigrationOp, { kind: "renameColumn" }>,
   ) => string;
-  prepareConnection?: (sql: Bun.SQL) => Promise<void>;
-  assertForeignKeys?: (sql: Bun.SQL) => Promise<void>;
-  lockMigrations?: (sql: Bun.SQL) => Promise<void>;
+  // Returns a function that undoes the changes.
+  prepareConnection?: (sql: Sql) => Promise<() => Promise<void>>;
+  assertForeignKeys?: (sql: Sql) => Promise<void>;
+  lockMigrations?: (sql: Sql) => Promise<void>;
   beginMigration?: <T>(
-    sql: Bun.SQL,
-    fn: (tx: Bun.SQL) => Promise<T>,
+    sql: SqlClient,
+    fn: (tx: SqlTransaction) => Promise<T>,
   ) => Promise<T>;
 };
