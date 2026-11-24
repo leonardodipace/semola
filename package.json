@@ -1,6 +1,6 @@
 {
   "name": "semola",
-  "version": "0.6.9",
+  "version": "0.6.10",
   "description": "Type-safe TypeScript backend toolkit with zero dependencies. REST APIs and OpenAPI, Redis queues, durable workflows, SQL, auth, cache, and more - one package, per-module imports.",
   "homepage": "https://semo.la",
   "bugs": {
